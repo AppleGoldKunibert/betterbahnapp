@@ -1,0 +1,10 @@
+{"departures":[
+ {"tripId":"2|#VN#1#ST#1757#PI#0#ZI#1","stop":{"type":"stop","id":"8000207","name":"Köln Hbf","location":{"latitude":50.943029,"longitude":6.958729}},
+  "when":"2026-09-16T19:23:00+02:00","plannedWhen":"2026-09-16T19:18:00+02:00","delay":300,"platform":"5","plannedPlatform":"4",
+  "direction":"Berlin Hbf","provenance":null,"line":{"type":"line","name":"ICE 423","fahrtNr":"423","productName":"ICE","product":"nationalExpress","mode":"train","operator":{"id":"db-fernverkehr-ag","name":"DB Fernverkehr AG"}},
+  "remarks":[{"type":"warning","summary":"Bauarbeiten","text":"Umleitung"}],"origin":null,"destination":{"type":"stop","id":"8011160","name":"Berlin Hbf","location":{"latitude":52.524925,"longitude":13.369629}}},
+ {"tripId":"2|#VN#1#ST#1757#PI#0#ZI#2","stop":{"type":"stop","id":"8000207","name":"Köln Hbf"},
+  "when":null,"plannedWhen":"2026-09-16T19:30:00+02:00","platform":null,"plannedPlatform":"9",
+  "direction":"Hamburg Hbf","line":{"type":"line","name":"FLX 1245","fahrtNr":"1245","product":"national","operator":{"id":"flixtrain","name":"FlixTrain"}},
+  "cancelled":true,"remarks":[]}
+]}

@@ -1,0 +1,15 @@
+{"earlierRef":"E1","laterRef":"L1","journeys":[{"type":"journey","legs":[
+ {"origin":{"type":"stop","id":"8000207","name":"Köln Hbf","location":{"latitude":50.943029,"longitude":6.958729}},
+  "destination":{"type":"stop","id":"8000085","name":"Düsseldorf Hbf","location":{"latitude":51.219960,"longitude":6.794315}},
+  "departure":"2026-09-16T19:23:00+02:00","plannedDeparture":"2026-09-16T19:18:00+02:00","departureDelay":300,
+  "arrival":"2026-09-16T19:45:00+02:00","plannedArrival":"2026-09-16T19:40:00+02:00",
+  "departurePlatform":"5","plannedDeparturePlatform":"4","arrivalPlatform":"16","plannedArrivalPlatform":"16",
+  "tripId":"trip-1","direction":"Berlin Hbf","line":{"name":"ICE 423","fahrtNr":"423","product":"nationalExpress","operator":{"name":"DB Fernverkehr AG"}},
+  "stopovers":[{"stop":{"type":"stop","id":"8000207","name":"Köln Hbf"},"plannedDeparture":"2026-09-16T19:18:00+02:00","departure":"2026-09-16T19:23:00+02:00"},
+               {"stop":{"type":"stop","id":"8000085","name":"Düsseldorf Hbf"},"plannedArrival":"2026-09-16T19:40:00+02:00","arrival":"2026-09-16T19:45:00+02:00"}]},
+ {"origin":{"type":"stop","id":"8000085","name":"Düsseldorf Hbf"},"destination":{"type":"stop","id":"8000085","name":"Düsseldorf Hbf"},
+  "departure":"2026-09-16T19:45:00+02:00","plannedDeparture":"2026-09-16T19:45:00+02:00","arrival":"2026-09-16T19:50:00+02:00","plannedArrival":"2026-09-16T19:50:00+02:00","walking":true,"distance":null},
+ {"origin":{"type":"stop","id":"8000085","name":"Düsseldorf Hbf"},"destination":{"type":"stop","id":"8000142","name":"Hamm (Westf) Hbf"},
+  "departure":"2026-09-16T19:55:00+02:00","plannedDeparture":"2026-09-16T19:55:00+02:00","arrival":"2026-09-16T20:50:00+02:00","plannedArrival":"2026-09-16T20:50:00+02:00",
+  "tripId":"trip-2","line":{"name":"RE 6","product":"regionalExpress","operator":{"name":"National Express"}}}
+]}]}

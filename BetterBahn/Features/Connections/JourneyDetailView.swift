@@ -1,0 +1,596 @@
+import BetterBahnKit
+import SwiftUI
+
+struct JourneyDetailView: View {
+    @State var journey: Journey
+    let finalDestination: Station
+    /// Old plans are shown without actions.
+    var readOnly = false
+    var title = "Reiseplan"
+
+    @Environment(AppModel.self) private var model
+    @State private var legToReplace: LegSelection?
+    @State private var checkinLeg: Leg?
+    @State private var showAlternatives = false
+
+    struct LegSelection: Identifiable {
+        let index: Int
+        let leg: Leg
+        var id: String { leg.id }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                summaryCard
+                if !readOnly { issuesCard }
+                ForEach(Array(journey.legs.enumerated()), id: \.element.id) { index, leg in
+                    if leg.isWalking {
+                        WalkRow(leg: leg)
+                    } else {
+                        LegCard(
+                            leg: leg,
+                            transferBroken: journey.brokenTransferIndices.contains(journey.transitLegs.firstIndex(of: leg) ?? -1),
+                            onReplace: readOnly ? nil : { legToReplace = LegSelection(index: index, leg: leg) },
+                            onCheckin: readOnly ? nil : { checkinLeg = leg }
+                        )
+                    }
+                }
+                if !readOnly { historySection }
+            }
+            .padding(.horizontal)
+            .padding(.bottom, 32)
+        }
+        .tabBarSafePadding()
+        .background { AppBackground() }
+        .toolbar(.hidden, for: .tabBar)
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $legToReplace) { selection in
+            AlternativeTrainsSheet(leg: selection.leg) { newLeg in
+                let updated = try await model.trainPicker.replacing(
+                    legAt: selection.index, in: journey, with: newLeg, finalDestination: finalDestination)
+                withAnimation {
+                    if let entry = model.savedEntry(for: journey) {
+                        model.replaceSaved(id: entry.id, with: updated, reason: "Anderer Zug gewählt")
+                    }
+                    journey = updated
+                }
+            }
+        }
+        .sheet(item: $checkinLeg) { CheckinSheet(leg: $0) }
+        .sheet(isPresented: $showAlternatives) {
+            if let entry = model.savedEntry(for: journey) {
+                AlternativeJourneySheet(entry: entry) { newJourney in
+                    withAnimation { journey = newJourney }
+                }
+            }
+        }
+        .onChange(of: model.savedEntry(for: journey)?.journey) { _, refreshed in
+            // Pick up realtime refreshes of this saved journey.
+            if let refreshed, refreshed != journey { journey = refreshed }
+        }
+    }
+
+    @ViewBuilder
+    private var issuesCard: some View {
+        let issues = journey.connectionIssues()
+        if !issues.isEmpty {
+            Card {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(issues) { issue in
+                        HStack(alignment: .top, spacing: 12) {
+                            IconTile(systemImage: issue.isBlocking ? "exclamationmark.triangle.fill" : "clock.badge.exclamationmark.fill",
+                                     color: issue.isBlocking ? .heavyDelay : .slightDelay, size: 34)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(issue.title).font(.headline)
+                                Text(issue.message).font(.subheadline).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    if issues.contains(where: \.isBlocking) {
+                        Button {
+                            if !model.isSaved(journey) { model.save(journey) }
+                            showAlternatives = true
+                        } label: {
+                            Label("Alternative suchen", systemImage: "arrow.triangle.branch")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.glassProminent)
+                        .tint(.brand)
+                        .controlSize(.large)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var historySection: some View {
+        if let versions = model.savedEntry(for: journey)?.previousVersions, !versions.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionHeader(title: "Frühere Reisepläne", systemImage: "clock.arrow.circlepath")
+                ForEach(versions) { version in
+                    NavigationLink {
+                        JourneyDetailView(journey: version.journey, finalDestination: finalDestination, readOnly: true,
+                                          title: "Früherer Reiseplan")
+                    } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label("Ersetzt \(version.replacedAt.formatted(date: .abbreviated, time: .shortened)) · \(version.reason)",
+                                  systemImage: "arrow.uturn.backward")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                                .padding(.horizontal, 6)
+                            JourneyCard(journey: version.journey).opacity(0.75)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.top, 8)
+        }
+    }
+
+    private var summaryCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .top) {
+                    if let departure = journey.departure, let first = journey.legs.first {
+                        VStack(alignment: .leading, spacing: 4) {
+                            TimeStack(time: departure, font: .largeTitle.weight(.bold))
+                            Text(first.origin.name).font(.subheadline.weight(.semibold)).lineLimit(2)
+                        }
+                    }
+                    Spacer(minLength: 12)
+                    if let arrival = journey.arrival, let last = journey.legs.last {
+                        VStack(alignment: .trailing, spacing: 4) {
+                            TimeStack(time: arrival, alignment: .trailing, font: .largeTitle.weight(.bold))
+                            Text(last.destination.name).font(.subheadline.weight(.semibold)).lineLimit(2)
+                                .multilineTextAlignment(.trailing)
+                        }
+                    }
+                }
+
+                JourneySegmentBar(journey: journey)
+
+                HStack(spacing: 8) {
+                    if let duration = journey.duration {
+                        InfoChip(text: duration.durationString, systemImage: "clock.fill")
+                    }
+                    InfoChip(text: journey.transfers == 0 ? "Direkt" : "\(journey.transfers) Umstieg\(journey.transfers == 1 ? "" : "e")",
+                             systemImage: "arrow.triangle.swap")
+                    if model.bc100Rules.isValid(journey) {
+                        InfoChip(text: "BC100", systemImage: "creditcard.fill", tint: .punctual)
+                    }
+                }
+
+                if !readOnly {
+                    liveActivityButton
+                } else {
+                    Label("Früherer Plan – nicht mehr aktiv", systemImage: "archivebox.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+        }
+    }
+
+    private var liveActivityButton: some View {
+        VStack(spacing: 8) {
+            SaveJourneyButton(journey: journey)
+            if model.isSaved(journey) {
+                Label(model.liveActivities.isActive(journey)
+                      ? "Wird als Live Activity angezeigt"
+                      : "Erscheint als Live Activity, sobald es die nächste Reise ist",
+                      systemImage: "bolt.badge.clock.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+struct WalkRow: View {
+    let leg: Leg
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "figure.walk")
+                .font(.subheadline.weight(.semibold))
+                .frame(width: 30, height: 30)
+                .background(Color.secondary.opacity(0.12), in: .circle)
+            Text("Umstieg · \(leg.arrival.best.timeIntervalSince(leg.departure.best).durationString) Fußweg")
+                .font(.subheadline)
+            Spacer()
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 20)
+    }
+}
+
+struct LegCard: View {
+    let leg: Leg
+    var transferBroken = false
+    var onReplace: (() -> Void)?
+    var onCheckin: (() -> Void)?
+
+    @State private var showStops = false
+
+    private var color: Color { leg.line?.product.color ?? .gray }
+    private var intermediate: [Stopover] { Array(leg.stopovers.dropFirst().dropLast()) }
+
+    var body: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 10) {
+                    IconTile(systemImage: leg.line?.product.symbolName ?? "tram.fill", color: color, size: 38)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(leg.line?.name ?? "Zug").font(.headline)
+                        if let direction = leg.direction {
+                            Text("Richtung \(direction)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
+                    Spacer()
+                    if leg.cancelled {
+                        InfoChip(text: "Fällt aus", systemImage: "xmark.octagon.fill", tint: .heavyDelay)
+                    } else {
+                        DelayPill(minutes: leg.departure.delayMinutes)
+                    }
+                }
+
+                VStack(spacing: 0) {
+                    TimelineNode(kind: .major, color: color, lineBelow: color) {
+                        stationRow(time: leg.departure, name: leg.origin.name, platform: leg.departurePlatform)
+                    }
+
+                    if !intermediate.isEmpty {
+                        TimelineNode(kind: .minor, color: color, lineAbove: color, lineBelow: color) {
+                            Button {
+                                withAnimation(.snappy) { showStops.toggle() }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text("\(intermediate.count) Zwischenhalt\(intermediate.count == 1 ? "" : "e")")
+                                    Text("· \(leg.arrival.best.timeIntervalSince(leg.departure.best).durationString)")
+                                    Image(systemName: "chevron.down")
+                                        .rotationEffect(.degrees(showStops ? 180 : 0))
+                                }
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        if showStops {
+                            ForEach(intermediate) { stop in
+                                TimelineNode(kind: .minor, color: color, lineAbove: color, lineBelow: color) {
+                                    HStack {
+                                        Text(stop.station.name).font(.caption).lineLimit(1)
+                                        Spacer()
+                                        if let time = stop.departure ?? stop.arrival {
+                                            Text(time.best.timeString)
+                                                .font(.caption.monospacedDigit())
+                                                .foregroundStyle(delayColor(time.delayMinutes))
+                                        }
+                                    }
+                                    .strikethrough(stop.cancelled)
+                                }
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                            }
+                        }
+                    }
+
+                    TimelineNode(kind: .major, color: color, lineAbove: color) {
+                        stationRow(time: leg.arrival, name: leg.destination.name, platform: leg.arrivalPlatform)
+                    }
+                }
+
+                if let operatorName = leg.line?.operatorName {
+                    Label(operatorName, systemImage: "building.2.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if transferBroken {
+                    RemarkRow(text: "Dieser Anschluss ist wegen Verspätung nicht mehr erreichbar.")
+                }
+                ForEach(leg.remarks, id: \.self) { RemarkRow(text: $0) }
+
+                if onReplace != nil || onCheckin != nil {
+                    HStack(spacing: 10) {
+                        if let onReplace {
+                            ActionTileButton(title: "Anderer Zug", systemImage: "arrow.left.arrow.right", tint: .primary, action: onReplace)
+                        }
+                        if let onCheckin {
+                            ActionTileButton(title: "Träwelling", systemImage: "checkmark.seal.fill", tint: .brand, action: onCheckin)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func stationRow(time: TimeInfo, name: String, platform: PlatformInfo?) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            TimeStack(time: time, cancelled: leg.cancelled, font: .headline)
+                .frame(width: 54, alignment: .leading)
+            Text(name)
+                .font(.headline)
+                .lineLimit(2)
+            Spacer()
+            PlatformBadge(platform: platform)
+        }
+    }
+}
+
+struct AlternativeTrainsSheet: View {
+    let leg: Leg
+    let onSelect: (Leg) async throws -> Void
+
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    @State private var alternatives: [Leg] = []
+    @State private var isLoading = true
+    @State private var applyingID: String?
+    @State private var onlyBC100 = false
+    @State private var error: Error?
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Card {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack(spacing: 10) {
+                                IconTile(systemImage: "arrow.left.arrow.right", color: .brand, size: 34)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("\(leg.origin.name) → \(leg.destination.name)")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(2)
+                                    Text("Aktuell: \(leg.line?.name ?? "Zug") um \(leg.departure.planned.timeString)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            Divider()
+                            Toggle(isOn: $onlyBC100) {
+                                Label("Nur BahnCard 100", systemImage: "creditcard.fill")
+                                    .font(.subheadline.weight(.medium))
+                            }
+                            .tint(.brand)
+                        }
+                    }
+
+                    if let error {
+                        ErrorBanner(error: error)
+                    }
+
+                    if !alternatives.isEmpty {
+                        SectionHeader(title: "Züge auf dieser Strecke", systemImage: "tram.fill",
+                                      trailing: "30 Min. vorher bis 3 Std. nachher")
+                            .padding(.top, 6)
+                    }
+
+                    ForEach(alternatives) { alternative in
+                        Button {
+                            apply(alternative)
+                        } label: {
+                            AlternativeRow(leg: alternative, current: leg, isApplying: applyingID == alternative.id)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(applyingID != nil)
+                    }
+                }
+                .padding()
+            }
+            .background { AppBackground() }
+            .overlay {
+                if isLoading {
+                    ProgressView("Suche Züge …")
+                } else if alternatives.isEmpty, error == nil {
+                    ContentUnavailableView("Keine anderen Züge", systemImage: "tram.fill",
+                                           description: Text("Kein anderer Zug fährt in diesem Zeitraum direkt von \(leg.origin.name) nach \(leg.destination.name)."))
+                }
+            }
+            .navigationTitle("Anderen Zug wählen")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen", systemImage: "xmark", role: .cancel) { dismiss() }
+                }
+            }
+            .task(id: onlyBC100) { await load() }
+            .onAppear { onlyBC100 = model.settings.onlyBC100ByDefault }
+        }
+    }
+
+    private func load() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            alternatives = try await model.trainPicker.alternatives(
+                for: leg, bc100Rules: onlyBC100 ? model.bc100Rules : nil)
+            error = nil
+        } catch is CancellationError {
+        } catch {
+            self.error = error
+        }
+    }
+
+    private func apply(_ alternative: Leg) {
+        applyingID = alternative.id
+        Task {
+            defer { applyingID = nil }
+            do {
+                try await onSelect(alternative)
+                dismiss()
+            } catch {
+                self.error = error
+            }
+        }
+    }
+}
+
+struct AlternativeRow: View {
+    let leg: Leg
+    let current: Leg
+    var isApplying = false
+
+    var body: some View {
+        let duration = leg.arrival.best.timeIntervalSince(leg.departure.best)
+        let difference = Int((duration - current.arrival.best.timeIntervalSince(current.departure.best)) / 60)
+        Card(padding: 14) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
+                    LineBadge(line: leg.line)
+                    HStack(spacing: 8) {
+                        TimeStack(time: leg.departure, font: .headline)
+                        Image(systemName: "arrow.right").font(.caption.weight(.bold)).foregroundStyle(.tertiary)
+                        TimeStack(time: leg.arrival, font: .headline)
+                    }
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 6) {
+                    Text(duration.compactDuration).font(.subheadline.weight(.semibold))
+                    if difference != 0 {
+                        Text(difference > 0 ? "+\(difference) min" : "\(difference) min")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(difference > 0 ? Color.slightDelay : Color.punctual)
+                    }
+                }
+                if isApplying {
+                    ProgressView()
+                } else {
+                    Image(systemName: "chevron.right").font(.caption.weight(.bold)).foregroundStyle(.tertiary)
+                }
+            }
+        }
+    }
+}
+
+#Preview("Reiseplan-Teilstrecke") {
+    ScrollView {
+        VStack(spacing: 16) {
+            LegCard(leg: PreviewData.firstLeg, onReplace: {}, onCheckin: {})
+            WalkRow(leg: PreviewData.walk)
+            LegCard(leg: PreviewData.secondLeg, onReplace: {}, onCheckin: {})
+            AlternativeRow(leg: PreviewData.secondLeg, current: PreviewData.firstLeg)
+        }
+        .padding()
+    }
+    .background { AppBackground() }
+}
+
+/// Finds a new way to the destination after a missed transfer or cancellation.
+struct AlternativeJourneySheet: View {
+    let entry: SavedJourney
+    let onApply: (Journey) -> Void
+
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    @State private var alternatives: [Journey] = []
+    @State private var isLoading = true
+    @State private var error: Error?
+
+    /// Legs that still work, and where/when to continue from.
+    private var restart: (keep: [Leg], from: Station, date: Date, reason: String)? {
+        let legs = entry.journey.legs
+        let transit = entry.journey.transitLegs
+        guard let destination = legs.last?.destination else { return nil }
+        _ = destination
+        for issue in entry.journey.connectionIssues() where issue.isBlocking {
+            switch issue {
+            case .transferMissed(let at, let arrivingLine, _, _):
+                guard let arriving = transit.first(where: { $0.line?.name == arrivingLine && $0.destination.name == at }),
+                      let index = legs.firstIndex(of: arriving) else { continue }
+                return (Array(legs[...index]), arriving.destination, arriving.arrival.best, issue.title)
+            case .legCancelled(let line, let from, _):
+                guard let cancelled = transit.first(where: { $0.line?.name == line && $0.origin.name == from }),
+                      let index = legs.firstIndex(of: cancelled) else { continue }
+                return (Array(legs[..<index]), cancelled.origin, cancelled.departure.planned, issue.title)
+            case .transferAtRisk:
+                continue
+            }
+        }
+        return nil
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if let restart, let destination = entry.journey.legs.last?.destination {
+                        Card {
+                            HStack(spacing: 12) {
+                                IconTile(systemImage: "arrow.triangle.branch", color: .brand, size: 38)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Ab \(restart.from.name)").font(.headline)
+                                    Text("nach \(destination.name), frühestens \(restart.date.timeString)")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                    if let error { ErrorBanner(error: error) }
+                    ForEach(alternatives) { alternative in
+                        Button {
+                            apply(alternative)
+                        } label: {
+                            JourneyCard(journey: alternative)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Text("Der bisherige Reiseplan bleibt unter „Frühere Reisepläne“ erhalten.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 4)
+                }
+                .padding()
+            }
+            .background { AppBackground() }
+            .overlay {
+                if isLoading {
+                    ProgressView("Suche Alternativen …")
+                } else if alternatives.isEmpty, error == nil {
+                    ContentUnavailableView("Keine Alternativen gefunden", systemImage: "tram.fill")
+                }
+            }
+            .navigationTitle("Alternative")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen", systemImage: "xmark", role: .cancel) { dismiss() }
+                }
+            }
+            .task { await load() }
+        }
+    }
+
+    private func load() async {
+        defer { isLoading = false }
+        guard let restart, let destination = entry.journey.legs.last?.destination else {
+            error = TransitError.notFound("Problemstelle")
+            return
+        }
+        do {
+            let page = try await model.provider.journeys(JourneyQuery(
+                from: restart.from, to: destination, date: restart.date.addingTimeInterval(2 * 60)))
+            var results = page.journeys.filter { !$0.connectionIssues().contains(where: \.isBlocking) }
+            if model.settings.onlyBC100ByDefault { results = results.filter(model.bc100Rules.isValid) }
+            alternatives = results
+        } catch {
+            self.error = error
+        }
+    }
+
+    private func apply(_ alternative: Journey) {
+        guard let restart else { return }
+        let combined = Journey(legs: restart.keep + alternative.legs, source: entry.journey.source)
+        model.replaceSaved(id: entry.id, with: combined, reason: restart.reason)
+        onApply(combined)
+        dismiss()
+    }
+}

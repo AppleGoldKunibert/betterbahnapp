@@ -1,0 +1,7 @@
+{"data":[{"id":101,"createdAt":"2026-09-10T08:00:00+00:00","checkin":{"trip":5,"category":"nationalExpress","lineName":"ICE 645","journeyNumber":645,"distance":290000,"duration":160,"manualDeparture":null,"manualArrival":null,
+ "origin":{"name":"Köln Hbf","station":{"id":1,"name":"Köln Hbf","latitude":50.943,"longitude":6.958},"departurePlanned":"2026-09-10T08:12:00+00:00","departureReal":"2026-09-10T08:16:00+00:00"},
+ "destination":{"name":"Hannover Hbf","station":{"id":2,"name":"Hannover Hbf","latitude":52.376,"longitude":9.741},"arrivalPlanned":"2026-09-10T10:54:00+00:00","arrivalReal":null}}},
+ {"id":100,"createdAt":"2026-09-09T08:00:00+00:00","checkin":{"trip":6,"category":"suburban","lineName":"S 11","distance":20000,"duration":25,
+ "origin":{"name":"Köln Hbf","station":{"id":1,"name":"Köln Hbf","latitude":50.943,"longitude":6.958},"departurePlanned":"2026-09-09T07:00:00+00:00"},
+ "destination":{"name":"Düsseldorf Hbf","station":{"id":3,"name":"Düsseldorf Hbf","latitude":51.219,"longitude":6.794},"arrivalPlanned":"2026-09-09T07:25:00+00:00"}}}],
+ "links":{"first":"x","last":null,"prev":null,"next":"https://traewelling.de/api/v1/user/me/statuses?page=2"},"meta":{"current_page":1}}
