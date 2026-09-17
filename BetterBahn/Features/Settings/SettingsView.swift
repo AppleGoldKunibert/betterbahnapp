@@ -6,7 +6,6 @@ struct SettingsView: View {
     @State private var user: TraewellingUser?
     @State private var isLoggedIn = false
     @State private var clientID = ""
-    @State private var dbRestURL = ""
 
     var body: some View {
         @Bindable var settings = model.settings
@@ -90,7 +89,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Träwelling")
                 } footer: {
-                    Text("Lege unter traewelling.de/settings/applications eine Anwendung mit der Weiterleitungs-URL betterbahn://oauth an und trage die Client-ID ein.")
+                    Text("Lege unter traewelling.de/settings/applications eine öffentliche Anwendung an („confidential“ deaktivieren). Verwende https://betterbahn.kunibert88.workers.dev/oauth/traewelling/callback als Weiterleitungs-URL und trage hier nur die Client-ID ein. Ein Client Secret wird nicht benötigt.")
                 }
 
                 Section {
@@ -108,32 +107,14 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    LabeledContent {
-                        TextField("URL", text: $dbRestURL)
-                            .multilineTextAlignment(.trailing)
-                            .keyboardType(.URL)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .onSubmit(applyDBRestURL)
-                    } label: {
-                        IconLabel(title: "db-rest", systemImage: "server.rack", color: .blue)
-                    }
-                    HStack {
-                        IconLabel(title: "Fallback", systemImage: "point.3.connected.trianglepath.dotted", color: .teal)
-                        Spacer()
-                        Text("Transitous").foregroundStyle(.secondary)
-                    }
-                    Button {
-                        dbRestURL = DBRestProvider.defaultBaseURL.absoluteString
-                        applyDBRestURL()
-                    } label: {
-                        IconLabel(title: "Standard wiederherstellen", systemImage: "arrow.counterclockwise", color: .gray)
-                    }
-                    .foregroundStyle(.primary)
+                    LabeledContent("Hauptdatenquelle", value: "Transitous")
+                    LabeledContent("Stationssuche bei Ausfall", value: "bahn.de")
+                    Link("Transitous-Datenquellen", destination: URL(string: "https://transitous.org/sources/")!)
+                    Link("© OpenStreetMap-Mitwirkende", destination: URL(string: "https://www.openstreetmap.org/copyright")!)
                 } header: {
                     Text("Datenquellen")
                 } footer: {
-                    Text("Primär db-rest. Ist der Dienst nicht erreichbar, wechselt die App automatisch zu Transitous.")
+                    Text("Verbindungen, Bahnhofstafeln und Fahrtverläufe kommen von Transitous. Echtzeitdaten hängen von den jeweiligen Verkehrsunternehmen ab.")
                 }
 
                 Section {
@@ -164,12 +145,10 @@ struct SettingsView: View {
             .navigationTitle("Einstellungen")
             .task {
                 clientID = model.settings.traewellingClientID
-                dbRestURL = model.settings.dbRestBaseURL
                 await refreshLogin()
             }
             .onDisappear {
                 applyClientID()
-                applyDBRestURL()
             }
         }
     }
@@ -178,13 +157,6 @@ struct SettingsView: View {
         let trimmed = clientID.trimmingCharacters(in: .whitespaces)
         guard trimmed != model.settings.traewellingClientID else { return }
         model.settings.traewellingClientID = trimmed
-        model.applySettings()
-    }
-
-    private func applyDBRestURL() {
-        let trimmed = dbRestURL.trimmingCharacters(in: .whitespaces)
-        guard trimmed != model.settings.dbRestBaseURL, URL(string: trimmed)?.scheme?.hasPrefix("http") == true else { return }
-        model.settings.dbRestBaseURL = trimmed
         model.applySettings()
     }
 

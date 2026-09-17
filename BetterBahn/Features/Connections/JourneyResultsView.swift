@@ -105,10 +105,10 @@ struct JourneyResultsView: View {
     private var header: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(search.from.name).font(.headline).lineLimit(1)
+                Text(search.from.displayName).font(.headline).lineLimit(1)
                 HStack(spacing: 4) {
                     Image(systemName: "arrow.turn.down.right")
-                    Text(search.to.name).lineLimit(1)
+                    Text(search.to.displayName).lineLimit(1)
                 }
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -306,7 +306,7 @@ struct TrainNumberSheet: View {
                                 IconTile(systemImage: "number", color: .brand, size: 38)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text("Zugnummer").font(.headline)
-                                    Text("\(search.from.name) → \(search.to.name)")
+                                    Text("\(search.from.displayName) → \(search.to.displayName)")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)

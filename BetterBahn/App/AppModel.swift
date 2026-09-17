@@ -29,7 +29,7 @@ final class AppModel {
     }
 
     init() {
-        provider = Self.makeProvider(settings: settings)
+        provider = CombinedProvider()
         traewelling = TraewellingClient(config: TraewellingConfig(clientID: settings.traewellingClientID))
         favoriteStations = Storage.load(key: "favoriteStations") ?? []
         recentSearches = Storage.load(key: "recentSearches") ?? []
@@ -47,15 +47,10 @@ final class AppModel {
 
     var bc100Rules: BC100Rules { settings.bc100Rules }
 
-    /// Rebuilds clients after settings like the db-rest URL or client ID changed.
+    /// Rebuilds clients after the client ID changed.
     func applySettings() {
-        provider = Self.makeProvider(settings: settings)
+        provider = CombinedProvider()
         traewelling = TraewellingClient(config: TraewellingConfig(clientID: settings.traewellingClientID))
-    }
-
-    private static func makeProvider(settings: AppSettings) -> CombinedProvider {
-        let url = URL(string: settings.dbRestBaseURL) ?? DBRestProvider.defaultBaseURL
-        return CombinedProvider(primary: DBRestProvider(baseURL: url))
     }
 
     func toggleFavorite(_ station: Station) {
@@ -306,9 +301,6 @@ enum Storage {
 
 @Observable
 final class AppSettings {
-    var dbRestBaseURL: String {
-        didSet { UserDefaults.standard.set(dbRestBaseURL, forKey: "dbRestBaseURL") }
-    }
     var onlyBC100ByDefault: Bool {
         didSet { UserDefaults.standard.set(onlyBC100ByDefault, forKey: "onlyBC100ByDefault") }
     }
@@ -333,7 +325,6 @@ final class AppSettings {
 
     init() {
         let defaults = UserDefaults.standard
-        dbRestBaseURL = defaults.string(forKey: "dbRestBaseURL") ?? DBRestProvider.defaultBaseURL.absoluteString
         onlyBC100ByDefault = defaults.bool(forKey: "onlyBC100ByDefault")
         traewellingClientID = defaults.string(forKey: "traewellingClientID") ?? ""
         traewellingVisibility = TraewellingVisibility(rawValue: defaults.integer(forKey: "traewellingVisibility")) ?? .publicVisible

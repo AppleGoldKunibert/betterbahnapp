@@ -229,29 +229,74 @@ public actor TraewellingClient {
         ], as: DataWrapper<TraewellingTrip>.self).data
     }
 
-    /// Finds the matching Träwelling trip for a leg from our data sources and checks in.
+    /// Finds the matching Träwelling trip for a leg from our data sources and checks in. If Träwelling's
+    /// own timetable doesn't know the train at all (common for trains the DB app shows but that are
+    /// missing from Träwelling's HAFAS import), a manual trip is created and checked into instead.
     public func checkin(_ draft: CheckinDraft) async throws -> CheckinResult {
         let leg = draft.leg
-        guard let line = leg.line else { throw TraewellingError.tripNotFound("Fußweg") }
+        guard leg.line != nil else { throw TraewellingError.tripNotFound("Fußweg") }
 
-        let start = try await matchStation(leg.origin)
-        let departures = try await departures(stationID: start.id, when: leg.departure.planned.addingTimeInterval(-5 * 60))
-        guard let departure = Self.bestMatch(departures, for: leg) else {
-            throw TraewellingError.tripNotFound(line.name)
+        if let match = try await findDeparture(for: leg) {
+            return try await checkin(draft, start: match.station, departure: match.departure)
         }
+        return try await checkinManualTrip(draft)
+    }
+
+    private func checkin(_ draft: CheckinDraft, start: TraewellingStation, departure: TraewellingDeparture) async throws -> CheckinResult {
+        let leg = draft.leg
+        guard let line = leg.line else { throw TraewellingError.tripNotFound("Fußweg") }
         let lineName = departure.line.name ?? line.name
         let trip = try await trip(tripID: departure.tripId, lineName: lineName)
         guard let destination = Self.matchStop(trip.stopovers, station: leg.destination, arrival: leg.arrival.planned) else {
             throw TraewellingError.stationNotFound(leg.destination.name)
         }
+        return try await sendCheckin(draft, tripId: departure.tripId, lineName: lineName,
+                                     startID: start.id, destinationID: destination.stationID,
+                                     departure: departure.plannedWhen ?? leg.departure.planned,
+                                     arrival: destination.arrivalPlanned ?? leg.arrival.planned)
+    }
+
+    /// Creates a Träwelling trip for a train its own timetable data doesn't have, then checks into it.
+    private func checkinManualTrip(_ draft: CheckinDraft) async throws -> CheckinResult {
+        let leg = draft.leg
+        guard let line = leg.line else { throw TraewellingError.tripNotFound("Fußweg") }
+        let origin = try await matchStation(leg.origin)
+        let destination = try await matchStation(leg.destination)
 
         var body: [String: Any] = [
-            "tripId": departure.tripId,
+            "category": Self.hafasCategory(for: line.product),
+            "lineName": line.name,
+            "originId": origin.id,
+            "originDeparturePlanned": JSONDecoding.isoString(leg.departure.planned),
+            "destinationId": destination.id,
+            "destinationArrivalPlanned": JSONDecoding.isoString(leg.arrival.planned),
+        ]
+        if let number = line.number, let journeyNumber = Int(number) { body["journeyNumber"] = journeyNumber }
+
+        struct ManualTrip: Decodable, Sendable {
+            struct StationRef: Decodable, Sendable { var id: Int }
+            var tripId: String
+            var lineName: String
+            var origin: StationRef
+            var destination: StationRef
+        }
+        let data = try JSONSerialization.data(withJSONObject: body)
+        let trip = try await api("trips", method: "POST", body: data, as: DataWrapper<ManualTrip>.self).data
+
+        return try await sendCheckin(draft, tripId: trip.tripId, lineName: trip.lineName,
+                                     startID: trip.origin.id, destinationID: trip.destination.id,
+                                     departure: leg.departure.planned, arrival: leg.arrival.planned)
+    }
+
+    private func sendCheckin(_ draft: CheckinDraft, tripId: String, lineName: String, startID: Int, destinationID: Int,
+                              departure: Date, arrival: Date) async throws -> CheckinResult {
+        var body: [String: Any] = [
+            "tripId": tripId,
             "lineName": lineName,
-            "start": start.id,
-            "destination": destination.stationID,
-            "departure": JSONDecoding.isoString(departure.plannedWhen ?? leg.departure.planned),
-            "arrival": JSONDecoding.isoString(destination.arrivalPlanned ?? leg.arrival.planned),
+            "start": startID,
+            "destination": destinationID,
+            "departure": JSONDecoding.isoString(departure),
+            "arrival": JSONDecoding.isoString(arrival),
             "visibility": draft.visibility.rawValue,
             "business": draft.business.rawValue,
             "toot": draft.toot,
@@ -271,27 +316,65 @@ public actor TraewellingClient {
                              alsoOnThisConnection: response.alsoOnThisConnection?.count ?? 0)
     }
 
-    private func matchStation(_ station: Station) async throws -> TraewellingStation {
-        let results = try await stations(matching: station.name)
-        if let coordinate = station.coordinate {
-            let nearest = results
-                .compactMap { s -> (TraewellingStation, Double)? in
-                    guard let lat = s.latitude, let lon = s.longitude else { return nil }
-                    return (s, Coordinate(latitude: lat, longitude: lon).distance(to: coordinate))
-                }
-                .min { $0.1 < $1.1 }
-            if let nearest, nearest.1 < 1_500 { return nearest.0 }
+    /// Träwelling's manual-trip `category` field (`HafasTravelType`); there's no dedicated value for
+    /// a long-distance coach or unclassified products, so those fall back to the closest rail category.
+    static func hafasCategory(for product: Product) -> String {
+        switch product {
+        case .highSpeed: "nationalExpress"
+        case .longDistance: "national"
+        case .regionalExpress: "regionalExp"
+        case .regional, .other: "regional"
+        case .suburban: "suburban"
+        case .subway: "subway"
+        case .tram: "tram"
+        case .bus, .coach: "bus"
+        case .ferry: "ferry"
         }
-        guard let first = results.first else { throw TraewellingError.stationNotFound(station.name) }
-        return first
     }
 
-    static func bestMatch(_ departures: [TraewellingDeparture], for leg: Leg) -> TraewellingDeparture? {
+    /// Candidate Träwelling stations for `station`, nearest first (or API order if we have no coordinate).
+    private func candidateStations(for station: Station) async throws -> [(TraewellingStation, Double)] {
+        let results = try await stations(matching: station.name)
+        guard let coordinate = station.coordinate else { return results.map { ($0, .infinity) } }
+        return results
+            .compactMap { s -> (TraewellingStation, Double)? in
+                guard let lat = s.latitude, let lon = s.longitude else { return nil }
+                return (s, Coordinate(latitude: lat, longitude: lon).distance(to: coordinate))
+            }
+            .sorted { $0.1 < $1.1 }
+    }
+
+    private func matchStation(_ station: Station) async throws -> TraewellingStation {
+        let candidates = try await candidateStations(for: station)
+        if let nearest = candidates.first, nearest.1 < 1_500 { return nearest.0 }
+        guard let first = candidates.first else { throw TraewellingError.stationNotFound(station.name) }
+        return first.0
+    }
+
+    /// Matches a departure to a HAFAS trip Träwelling knows about. Beyond the nearest station and a
+    /// tight time window, this widens to nearby stations and a looser tolerance before giving up —
+    /// Träwelling's own timetable data sometimes only has the train under a neighbouring stop or a
+    /// fahrtNr/time that drifted a bit from our plan.
+    private func findDeparture(for leg: Leg) async throws -> (station: TraewellingStation, departure: TraewellingDeparture)? {
+        guard leg.line != nil else { return nil }
+        let candidates = try await candidateStations(for: leg.origin)
+        for (maxDistance, tolerance) in [(1_500.0, 2.0 * 60), (8_000.0, 15.0 * 60)] {
+            for (station, distance) in candidates where distance <= maxDistance {
+                let departures = try await departures(stationID: station.id, when: leg.departure.planned.addingTimeInterval(-tolerance))
+                if let departure = Self.bestMatch(departures, for: leg, tolerance: tolerance) {
+                    return (station, departure)
+                }
+            }
+        }
+        return nil
+    }
+
+    static func bestMatch(_ departures: [TraewellingDeparture], for leg: Leg, tolerance: TimeInterval) -> TraewellingDeparture? {
         guard let line = leg.line else { return nil }
         let wantedName = Line.normalize(line.name)
         let candidates = departures.filter { dep in
             guard let planned = dep.plannedWhen,
-                  abs(planned.timeIntervalSince(leg.departure.planned)) <= 2 * 60 else { return false }
+                  abs(planned.timeIntervalSince(leg.departure.planned)) <= tolerance else { return false }
             if let name = dep.line.name, Line.normalize(name) == wantedName { return true }
             if let number = line.number, let fahrtNr = dep.line.fahrtNr, number == fahrtNr { return true }
             return false

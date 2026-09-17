@@ -74,6 +74,24 @@ struct MLineInfo {
         default: return ProductGuess.fromLinePrefix(prefix) ?? .other
         }
     }
+
+    /// Raw MOTIS modes that can classify as `product` (inverse of `product(mode:prefix:)`), so the
+    /// stoptimes request can ask the server for just those modes instead of relying on `n` to catch them.
+    static func motisModes(for product: Product) -> [String] {
+        switch product {
+        case .highSpeed: return ["HIGHSPEED_RAIL"]
+        case .longDistance: return ["LONG_DISTANCE", "NIGHT_RAIL"]
+        case .regionalExpress: return ["REGIONAL_FAST_RAIL", "REGIONAL_RAIL"]
+        case .regional: return ["REGIONAL_RAIL"]
+        case .suburban: return ["SUBURBAN"]
+        case .subway: return ["SUBWAY", "METRO"]
+        case .tram: return ["TRAM", "CABLE_CAR", "FUNICULAR"]
+        case .bus: return ["BUS"]
+        case .coach: return ["COACH"]
+        case .ferry: return ["FERRY"]
+        case .other: return []
+        }
+    }
 }
 
 struct MLeg: Decodable {
@@ -202,5 +220,26 @@ struct MGeocodeMatch: Decodable {
 
     func toStation() -> Station {
         Station(id: id, name: name, coordinate: Coordinate(latitude: lat, longitude: lon), evaNumber: nil, source: .transitous)
+    }
+}
+
+private func timeInfo(planned: Date?, actual: Date?) -> TimeInfo? {
+    guard let planned = planned ?? actual else { return nil }
+    return TimeInfo(planned: planned, actual: actual)
+}
+
+private enum ProductGuess {
+    static func fromLinePrefix(_ prefix: String) -> Product? {
+        switch prefix {
+        case "ICE", "TGV", "RJ", "RJX", "ECE", "EST", "THA": .highSpeed
+        case "IC", "EC", "EN", "NJ", "FLX", "ES", "D", "IRE": .longDistance
+        case "RE", "RS", "MEX": .regionalExpress
+        case "RB", "ERB", "NWB", "HLB", "BRB", "WFB": .regional
+        case "S": .suburban
+        case "U": .subway
+        case "STR", "TRAM": .tram
+        case "BUS": .bus
+        default: nil
+        }
     }
 }

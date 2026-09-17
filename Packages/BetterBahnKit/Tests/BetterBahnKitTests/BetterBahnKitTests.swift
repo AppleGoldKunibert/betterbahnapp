@@ -7,54 +7,9 @@ func fixture<T: Decodable>(_ name: String, as type: T.Type) throws -> T {
     return try JSONDecoding.decoder.decode(T.self, from: Data(contentsOf: url))
 }
 
-func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? = nil, source: DataSource = .dbRest) -> Station {
+func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? = nil, source: DataSource = .bahnDe) -> Station {
     Station(id: id, name: name, coordinate: lat.flatMap { lat in lon.map { Coordinate(latitude: lat, longitude: $0) } },
-            evaNumber: source == .dbRest ? id : nil, source: source)
-}
-
-// MARK: - db-rest mapping
-
-@Suite struct DBRestMappingTests {
-    @Test func departures() throws {
-        let response = try fixture("dbrest-departures", as: DBBoardResponse.self)
-        let fallback = station("8000207", "Köln Hbf")
-        let entries = response.items.compactMap { $0.toEntry(kind: .departures, fallbackStation: fallback) }
-        #expect(entries.count == 2)
-        let ice = entries[0]
-        #expect(ice.line.name == "ICE 423")
-        #expect(ice.line.product == .highSpeed)
-        #expect(ice.time.delayMinutes == 5)
-        #expect(ice.platform.hasChanged)
-        #expect(ice.otherEnd == "Berlin Hbf")
-        #expect(ice.terminatesOrOriginatesHere == false)
-        #expect(ice.remarks == ["Bauarbeiten"])
-        #expect(entries[1].cancelled)
-        #expect(entries[1].time.actual == nil)
-    }
-
-    @Test func journeys() throws {
-        let response = try fixture("dbrest-journeys", as: DBJourneysResponse.self)
-        let legs = try #require(response.journeys.first).legs.compactMap { $0.toLeg() }
-        let journey = Journey(legs: legs, source: .dbRest)
-        #expect(legs.count == 3)
-        #expect(legs[1].isWalking)
-        #expect(journey.transfers == 1)
-        #expect(journey.transitLegs.map { $0.line?.name } == ["ICE 423", "RE 6"])
-        #expect(legs[0].stopovers.count == 2)
-        #expect(journey.brokenTransferIndices.isEmpty)
-    }
-
-    @Test func tripLegSlicing() throws {
-        let response = try fixture("dbrest-trip", as: DBTripResponse.self)
-        let trip = Trip(id: response.trip.id, line: response.trip.line?.toLine(), direction: response.trip.direction,
-                        stopovers: (response.trip.stopovers ?? []).compactMap { $0.toStopover() },
-                        cancelled: false, remarks: [], source: .dbRest)
-        let leg = try #require(trip.leg(from: station("8000085", "Düsseldorf Hbf"), to: station("8011160", "Berlin Hbf")))
-        #expect(leg.stopovers.count == 3)
-        #expect(leg.line?.name == "ICE 423")
-        // Wrong direction is not a valid leg.
-        #expect(trip.leg(from: station("8011160", "Berlin Hbf"), to: station("8000207", "Köln Hbf")) == nil)
-    }
+            evaNumber: source == .bahnDe ? id : nil, source: source)
 }
 
 // MARK: - Transitous mapping
@@ -114,7 +69,7 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         BoardEntry(kind: kind, tripId: UUID().uuidString, station: station("8000207", "Köln Hbf"), line: line,
                    otherEnd: otherEnd, time: TimeInfo(planned: .now, actual: nil),
                    platform: PlatformInfo(planned: "1", actual: nil), cancelled: false,
-                   terminatesOrOriginatesHere: terminal, remarks: [], source: .dbRest)
+                   terminatesOrOriginatesHere: terminal, remarks: [], source: .bahnDe)
     }
 
     @Test func boardKeepsPassingTrainsAndDropsTerminating() {
@@ -151,6 +106,7 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
     var trips: [String: Trip] = [:]
     var journeyPages: [JourneyPage] = []
     var calls: [String] = []
+    var receivedCursors: [String?] = []
     private let lock = NSLock()
 
     init(source: DataSource) { self.source = source }
@@ -167,10 +123,11 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
 
     func journeys(_ query: JourneyQuery) async throws -> JourneyPage {
         try record("journeys")
+        lock.withLock { receivedCursors.append(query.cursor) }
         return journeyPages.first ?? JourneyPage(journeys: [], earlierCursor: nil, laterCursor: nil, source: source)
     }
 
-    func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int) async throws -> [BoardEntry] {
+    func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int, products: Set<Product>) async throws -> [BoardEntry] {
         try record("board")
         return boards
     }
@@ -184,7 +141,7 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
 
 @Suite struct CombinedProviderTests {
     @Test func fallsBackAndCoolsDown() async throws {
-        let primary = MockProvider(source: .dbRest)
+        let primary = MockProvider(source: .bahnDe)
         primary.failing = true
         let fallback = MockProvider(source: .transitous)
         let combined = CombinedProvider(primary: primary, fallback: fallback, bahnDe: nil, cooldown: 60)
@@ -198,11 +155,11 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
     }
 
     @Test func usesPrimaryWhenHealthy() async throws {
-        let primary = MockProvider(source: .dbRest)
+        let primary = MockProvider(source: .bahnDe)
         let fallback = MockProvider(source: .transitous)
         let combined = CombinedProvider(primary: primary, fallback: fallback, bahnDe: nil)
         let result = try await combined.searchStations("Köln")
-        #expect(result.first?.source == .dbRest)
+        #expect(result.first?.source == .bahnDe)
         #expect(fallback.calls.isEmpty)
     }
 
@@ -227,21 +184,21 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
 
     func trip(_ id: String, _ name: String, _ stops: [Stopover]) -> Trip {
         Trip(id: id, line: Line(name: name, number: String(name.split(separator: " ").last!), product: .highSpeed, operatorName: "DB Fernverkehr AG"),
-             direction: "Berlin Hbf", stopovers: stops, cancelled: false, remarks: [], source: .dbRest)
+             direction: "Berlin Hbf", stopovers: stops, cancelled: false, remarks: [], source: .bahnDe)
     }
 
     func boardEntry(_ trip: Trip, minutes: Double) -> BoardEntry {
         BoardEntry(kind: .departures, tripId: trip.id, station: koeln, line: trip.line!, otherEnd: "Berlin Hbf",
                    time: TimeInfo(planned: base.addingTimeInterval(minutes * 60), actual: nil),
                    platform: PlatformInfo(planned: nil, actual: nil), cancelled: false,
-                   terminatesOrOriginatesHere: false, remarks: [], source: .dbRest)
+                   terminatesOrOriginatesHere: false, remarks: [], source: .bahnDe)
     }
 
     func makePicker() -> (TrainPicker, Trip, Trip) {
         let fast = trip("ice1", "ICE 1", [stop(koeln, arr: nil, dep: 0), stop(berlin, arr: 240, dep: nil)])
         let slow = trip("ice423", "ICE 423", [stop(koeln, arr: nil, dep: 10), stop(duesseldorf, arr: 30, dep: 32), stop(berlin, arr: 290, dep: nil)])
         let other = trip("ice999", "ICE 999", [stop(koeln, arr: nil, dep: 20), stop(duesseldorf, arr: 40, dep: nil)])
-        let primary = MockProvider(source: .dbRest)
+        let primary = MockProvider(source: .bahnDe)
         primary.boards = [boardEntry(fast, minutes: 0), boardEntry(slow, minutes: 10), boardEntry(other, minutes: 20)]
         primary.trips = ["ice1": fast, "ice423": slow, "ice999": other]
         let provider = CombinedProvider(primary: primary, fallback: MockProvider(source: .transitous), bahnDe: nil)
@@ -269,7 +226,7 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
 
     @Test func replaceLastLeg() async throws {
         let (picker, fast, slow) = makePicker()
-        let journey = Journey(legs: [try #require(fast.leg(from: koeln, to: berlin))], source: .dbRest)
+        let journey = Journey(legs: [try #require(fast.leg(from: koeln, to: berlin))], source: .bahnDe)
         let newLeg = try #require(slow.leg(from: koeln, to: berlin))
         let replaced = try await picker.replacing(legAt: 0, in: journey, with: newLeg, finalDestination: berlin)
         #expect(replaced.legs.map(\.tripId) == ["ice423"])
@@ -289,17 +246,16 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(filter.includes(entry(.exitOnly)))
         #expect(filter.includes(entry(.normal)))
         #expect(StopAccess(pickupAllowed: false, dropoffAllowed: true) == .exitOnly)
-        #expect(DBRemark.access([DBRemark(type: "hint", text: "Kein Einstieg möglich", summary: nil)]) == .exitOnly)
     }
 
     final class SlowProvider: TransitProvider, @unchecked Sendable {
-        let source = DataSource.dbRest
+        let source = DataSource.bahnDe
         func searchStations(_ query: String) async throws -> [Station] {
             try await Task.sleep(for: .seconds(30))
             return []
         }
         func journeys(_ query: JourneyQuery) async throws -> JourneyPage { throw TransitError.timeout }
-        func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int) async throws -> [BoardEntry] { [] }
+        func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int, products: Set<Product>) async throws -> [BoardEntry] { [] }
         func trip(id: String) async throws -> Trip { throw TransitError.timeout }
     }
 
@@ -392,11 +348,11 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
             arrival: TimeInfo(planned: base.addingTimeInterval(arr * 60), actual: base.addingTimeInterval((arr + arrDelay) * 60)),
             departurePlatform: nil, arrivalPlatform: nil, tripId: walking ? nil : line,
             line: walking ? nil : Line(name: line, number: nil, product: .highSpeed, operatorName: nil),
-            direction: nil, isWalking: walking, cancelled: cancelled, stopovers: [], remarks: [], source: .dbRest)
+            direction: nil, isWalking: walking, cancelled: cancelled, stopovers: [], remarks: [], source: .bahnDe)
     }
 
     @Test func onTimeHasNoIssues() {
-        let journey = Journey(legs: [leg("ICE 1", "A", "B", dep: 0, arr: 60), leg("ICE 2", "B", "C", dep: 70, arr: 120)], source: .dbRest)
+        let journey = Journey(legs: [leg("ICE 1", "A", "B", dep: 0, arr: 60), leg("ICE 2", "B", "C", dep: 70, arr: 120)], source: .bahnDe)
         #expect(journey.connectionIssues().isEmpty)
     }
 
@@ -405,7 +361,7 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
             leg("ICE 1", "A", "B", dep: 0, arr: 60, arrDelay: 12),
             leg("", "B", "B", dep: 60, arr: 63, walking: true),
             leg("ICE 2", "B", "C", dep: 70, arr: 120),
-        ], source: .dbRest)
+        ], source: .bahnDe)
         let issues = journey.connectionIssues()
         #expect(issues.count == 1)
         guard case .transferMissed(let at, _, _, let buffer) = issues[0] else { Issue.record("wrong issue"); return }
@@ -415,12 +371,12 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
     }
 
     @Test func tightButPossible() {
-        let journey = Journey(legs: [leg("ICE 1", "A", "B", dep: 0, arr: 60, arrDelay: 6), leg("ICE 2", "B", "C", dep: 70, arr: 120)], source: .dbRest)
+        let journey = Journey(legs: [leg("ICE 1", "A", "B", dep: 0, arr: 60, arrDelay: 6), leg("ICE 2", "B", "C", dep: 70, arr: 120)], source: .bahnDe)
         #expect(journey.connectionIssues().first?.isBlocking == false)
     }
 
     @Test func cancellation() {
-        let journey = Journey(legs: [leg("ICE 1", "A", "B", dep: 0, arr: 60, cancelled: true)], source: .dbRest)
+        let journey = Journey(legs: [leg("ICE 1", "A", "B", dep: 0, arr: 60, cancelled: true)], source: .bahnDe)
         #expect(journey.connectionIssues().first?.title == "ICE 1 fällt aus")
     }
 }

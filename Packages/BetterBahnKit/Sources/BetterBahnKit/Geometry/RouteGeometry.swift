@@ -24,7 +24,8 @@ public struct RouteGeometryService: Sendable {
         if tripId == nil, let line = leg.line {
             // Find the same train in Transitous by line name/number around the planned departure.
             let entries = try await transitous.board(.departures, at: leg.origin,
-                                                     date: leg.departure.planned.addingTimeInterval(-5 * 60), duration: 15)
+                                                     date: leg.departure.planned.addingTimeInterval(-5 * 60), duration: 15,
+                                                     products: Set(Product.allCases))
             let wanted = Line.normalize(line.name)
             tripId = entries.first { entry in
                 abs(entry.time.planned.timeIntervalSince(leg.departure.planned)) <= 3 * 60
@@ -35,7 +36,7 @@ public struct RouteGeometryService: Sendable {
         guard let tripId else { return nil }
         let itinerary = try await http.get(
             transitous.baseURL.appending(path: "v5/trip").appending(queryItems: [.init(name: "tripId", value: tripId)]),
-            as: MItinerary.self)
+            as: MItinerary.self, headers: ["User-Agent": HTTPClient.identifyingUserAgent])
         guard let shape = itinerary.legs.first(where: { !$0.isWalking })?.geometry, shape.count > 1 else { return nil }
         let start = leg.origin.coordinate ?? leg.stopovers.first?.station.coordinate
         let end = leg.destination.coordinate ?? leg.stopovers.last?.station.coordinate

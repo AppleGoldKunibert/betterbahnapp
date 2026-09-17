@@ -20,7 +20,8 @@ struct StationBoardView: View {
     }
 
     private var reloadKey: String {
-        "\(station?.id ?? "")|\(kind)|\(useNow ? "now" : date.description)"
+        let productsKey = products.map(\.rawValue).sorted().joined(separator: ",")
+        return "\(station?.id ?? "")|\(kind)|\(useNow ? "now" : date.description)|\(productsKey)"
     }
 
     private var isFiltered: Bool { onlyBC100 || products.count != Product.allCases.count }
@@ -171,7 +172,7 @@ struct StationBoardView: View {
                     } label: {
                         HStack(spacing: 10) {
                             IconTile(systemImage: "star.fill", color: .yellow, size: 30)
-                            Text(favorite.name)
+                            Text(favorite.displayName)
                                 .font(.subheadline.weight(.semibold))
                                 .lineLimit(2)
                                 .multilineTextAlignment(.leading)
@@ -219,6 +220,7 @@ struct StationBoardView: View {
         } label: {
             Image(systemName: isFiltered ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
         }
+        .menuActionDismissBehavior(.disabled)
         .accessibilityLabel("Filter")
     }
 
@@ -228,7 +230,7 @@ struct StationBoardView: View {
         defer { isLoading = false }
         do {
             let start = useNow ? Date.now.addingTimeInterval(-5 * 60) : date
-            let loaded = try await model.provider.board(kind, at: station, date: start, duration: 90)
+            let loaded = try await model.provider.board(kind, at: station, date: start, duration: 90, products: products)
             withAnimation(.snappy) { entries = loaded }
             lastUpdate = .now
             error = nil

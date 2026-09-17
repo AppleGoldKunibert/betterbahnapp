@@ -4,6 +4,23 @@ import Foundation
 
 /// Live Activity for a journey. Basic version – more details (transfers, push updates) later.
 public struct TripActivityAttributes: ActivityAttributes {
+    /// Details of the incoming train shown once a transfer is close (see `ContentState.transfer`).
+    public struct TransferDetails: Codable, Hashable, Sendable {
+        public var incomingLine: String
+        public var incomingPlannedArrival: Date
+        public var incomingExpectedArrival: Date
+        public var incomingPlatform: String?
+
+        public init(incomingLine: String, incomingPlannedArrival: Date, incomingExpectedArrival: Date, incomingPlatform: String?) {
+            self.incomingLine = incomingLine
+            self.incomingPlannedArrival = incomingPlannedArrival
+            self.incomingExpectedArrival = incomingExpectedArrival
+            self.incomingPlatform = incomingPlatform
+        }
+
+        public var incomingDelayMinutes: Int { Int((incomingExpectedArrival.timeIntervalSince(incomingPlannedArrival) / 60).rounded()) }
+    }
+
     public struct ContentState: Codable, Hashable, Sendable {
         public var lineName: String
         public var nextStopName: String
@@ -19,10 +36,13 @@ public struct TripActivityAttributes: ActivityAttributes {
         public var product: Product
         /// E.g. "Anschluss in Hannover Hbf nicht mehr möglich".
         public var warning: String?
+        /// Set once a transfer is within 10 minutes, so the UI can show both trains' delay and platforms.
+        public var transfer: TransferDetails?
 
         public init(lineName: String, nextStopName: String, plannedTime: Date, expectedTime: Date,
                     platform: String?, isDeparture: Bool, cancelled: Bool,
-                    progressStart: Date, progressEnd: Date, product: Product, warning: String? = nil) {
+                    progressStart: Date, progressEnd: Date, product: Product, warning: String? = nil,
+                    transfer: TransferDetails? = nil) {
             self.warning = warning
             self.progressStart = progressStart
             self.progressEnd = max(progressEnd, progressStart.addingTimeInterval(60))
@@ -34,6 +54,7 @@ public struct TripActivityAttributes: ActivityAttributes {
             self.platform = platform
             self.isDeparture = isDeparture
             self.cancelled = cancelled
+            self.transfer = transfer
         }
 
         public var delayMinutes: Int { Int((expectedTime.timeIntervalSince(plannedTime) / 60).rounded()) }
@@ -62,14 +83,24 @@ public extension TripActivityAttributes.ContentState {
         let legs = journey.transitLegs
         guard !legs.isEmpty else { return nil }
         var previousArrival = min(now, legs[0].departure.best.addingTimeInterval(-30 * 60))
+        var previousLeg: Leg?
         for leg in legs {
             let line = leg.line?.name ?? "Zug"
             let product = leg.line?.product ?? .other
             if now < leg.departure.best {
+                var transfer: TripActivityAttributes.TransferDetails?
+                if let previousLeg, leg.departure.best.timeIntervalSince(now) <= 10 * 60 {
+                    transfer = TripActivityAttributes.TransferDetails(
+                        incomingLine: previousLeg.line?.name ?? "Zug",
+                        incomingPlannedArrival: previousLeg.arrival.planned,
+                        incomingExpectedArrival: previousLeg.arrival.best,
+                        incomingPlatform: previousLeg.arrivalPlatform?.best)
+                }
                 return Self(lineName: line, nextStopName: leg.origin.name, plannedTime: leg.departure.planned,
                             expectedTime: leg.departure.best, platform: leg.departurePlatform?.best,
                             isDeparture: true, cancelled: leg.cancelled,
-                            progressStart: previousArrival, progressEnd: leg.departure.best, product: product)
+                            progressStart: previousArrival, progressEnd: leg.departure.best, product: product,
+                            transfer: transfer)
             }
             if now < leg.arrival.best {
                 return Self(lineName: line, nextStopName: leg.destination.name, plannedTime: leg.arrival.planned,
@@ -78,6 +109,7 @@ public extension TripActivityAttributes.ContentState {
                             progressStart: leg.departure.best, progressEnd: leg.arrival.best, product: product)
             }
             previousArrival = leg.arrival.best
+            previousLeg = leg
         }
         let last = legs[legs.count - 1]
         return Self(lineName: last.line?.name ?? "Zug", nextStopName: last.destination.name,

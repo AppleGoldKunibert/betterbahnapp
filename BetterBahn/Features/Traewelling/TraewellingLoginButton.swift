@@ -40,6 +40,10 @@ struct TraewellingLoginButton: View {
             error = OAuthError.missingClientID
             return
         }
+        guard config.callbackHost != nil, config.callbackPath != nil else {
+            error = OAuthError.invalidRedirectURI
+            return
+        }
         isRunning = true
         let pkce = PKCE()
         Task {

@@ -21,16 +21,18 @@ public protocol TransitProvider: Sendable {
     var source: DataSource { get }
     func searchStations(_ query: String) async throws -> [Station]
     func journeys(_ query: JourneyQuery) async throws -> JourneyPage
-    func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int) async throws -> [BoardEntry]
+    /// `products` lets a provider that supports server-side mode filtering (e.g. Transitous) avoid
+    /// having rare long-distance trains crowded out of a fixed-size result page by frequent local ones.
+    func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int, products: Set<Product>) async throws -> [BoardEntry]
     func trip(id: String) async throws -> Trip
 }
 
 public extension TransitProvider {
-    func departures(at station: Station, date: Date = .now, duration: Int = 60) async throws -> [BoardEntry] {
-        try await board(.departures, at: station, date: date, duration: duration)
+    func departures(at station: Station, date: Date = .now, duration: Int = 60, products: Set<Product> = Set(Product.allCases)) async throws -> [BoardEntry] {
+        try await board(.departures, at: station, date: date, duration: duration, products: products)
     }
 
-    func arrivals(at station: Station, date: Date = .now, duration: Int = 60) async throws -> [BoardEntry] {
-        try await board(.arrivals, at: station, date: date, duration: duration)
+    func arrivals(at station: Station, date: Date = .now, duration: Int = 60, products: Set<Product> = Set(Product.allCases)) async throws -> [BoardEntry] {
+        try await board(.arrivals, at: station, date: date, duration: duration, products: products)
     }
 }

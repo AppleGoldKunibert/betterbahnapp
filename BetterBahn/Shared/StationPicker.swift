@@ -1,4 +1,5 @@
 import BetterBahnKit
+import Foundation
 import SwiftUI
 
 /// Inline station text field. While focused it shows up to 5 suggestions directly below
@@ -77,16 +78,16 @@ struct StationInput<Focus: Hashable>: View {
         }
         .animation(.snappy(duration: 0.25), value: isFocused)
         .animation(.snappy(duration: 0.25), value: suggestions.map(\.id))
-        .onAppear { query = station?.name ?? "" }
+        .onAppear { query = station?.displayName ?? "" }
         .onChange(of: station) { _, new in
-            if !isFocused { query = new?.name ?? "" }
+            if !isFocused { query = new?.displayName ?? "" }
         }
         .onChange(of: isFocused) { _, focused in
             if focused {
                 // Select all-ish behaviour: start fresh search when a station is set.
                 if station != nil { query = "" }
             } else if !submitPending {
-                query = station?.name ?? ""
+                query = station?.displayName ?? ""
             }
         }
         .task(id: query) {
@@ -131,7 +132,7 @@ struct StationInput<Focus: Hashable>: View {
                             .font(.subheadline)
                             .foregroundStyle(favorite ? Color.yellow : Color.secondary)
                             .frame(width: 24)
-                        highlighted(suggestion.name)
+                        highlighted(suggestion.displayName)
                             .font(.subheadline)
                             .lineLimit(1)
                         Spacer()
@@ -160,13 +161,17 @@ struct StationInput<Focus: Hashable>: View {
         guard query.count >= 2, let range = name.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) else {
             return Text(name)
         }
-        return Text(name[..<range.lowerBound]) + Text(name[range]).bold() + Text(name[range.upperBound...])
+        var attributed = AttributedString(name)
+        if let attributedRange = Range(range, in: attributed) {
+            attributed[attributedRange].inlinePresentationIntent = .stronglyEmphasized
+        }
+        return Text(attributed)
     }
 
     private func select(_ suggestion: Station) {
         submitPending = false
         station = suggestion
-        query = suggestion.name
+        query = suggestion.displayName
         model.rememberStation(suggestion)
         focus.wrappedValue = nil
     }

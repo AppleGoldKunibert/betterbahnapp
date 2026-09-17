@@ -1,7 +1,0 @@
-{"trip":{"id":"trip-1","direction":"Berlin Hbf","line":{"name":"ICE 423","fahrtNr":"423","product":"nationalExpress"},
- "stopovers":[
-  {"stop":{"type":"stop","id":"8000207","name":"Köln Hbf","location":{"latitude":50.943029,"longitude":6.958729}},"plannedDeparture":"2026-09-16T19:18:00+02:00","departure":"2026-09-16T19:23:00+02:00","plannedDeparturePlatform":"4","departurePlatform":"5"},
-  {"stop":{"type":"stop","id":"8000085","name":"Düsseldorf Hbf","location":{"latitude":51.219960,"longitude":6.794315}},"plannedArrival":"2026-09-16T19:40:00+02:00","plannedDeparture":"2026-09-16T19:42:00+02:00"},
-  {"stop":{"type":"stop","id":"8000142","name":"Hamm (Westf) Hbf","location":{"latitude":51.678,"longitude":7.808}},"plannedArrival":"2026-09-16T20:30:00+02:00","plannedDeparture":"2026-09-16T20:32:00+02:00"},
-  {"stop":{"type":"stop","id":"8011160","name":"Berlin Hbf","location":{"latitude":52.524925,"longitude":13.369629}},"plannedArrival":"2026-09-16T23:40:00+02:00"}
- ]}}

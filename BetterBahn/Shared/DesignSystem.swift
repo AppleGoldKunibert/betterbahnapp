@@ -34,6 +34,18 @@ func delayColor(_ minutes: Int?) -> Color {
     return minutes >= 6 ? .heavyDelay : minutes >= 1 ? .slightDelay : .punctual
 }
 
+/// Colors an Umstieg by how comfortable the transfer time is: very short or very long is risky (red),
+/// a bit tight or a long wait is okay (yellow), a relaxed transfer is ideal (green).
+func transferColor(_ minutes: Int) -> Color {
+    switch minutes {
+    case ..<5: .heavyDelay
+    case 5..<15: .slightDelay
+    case 15..<30: .punctual
+    case 30..<60: .slightDelay
+    default: .heavyDelay
+    }
+}
+
 // MARK: - Card container
 
 struct Card<Content: View>: View {
@@ -297,8 +309,8 @@ struct ErrorBanner: View {
 
 struct SourceNotice: View {
     var body: some View {
-        InfoChip(text: "db-rest nicht erreichbar · Daten von Transitous",
-                 systemImage: "point.3.connected.trianglepath.dotted", tint: .slightDelay)
+        InfoChip(text: "Daten von Transitous",
+                 systemImage: "point.3.connected.trianglepath.dotted", tint: .secondary)
     }
 }
 
@@ -395,7 +407,7 @@ struct TimelineNode<Content: View>: View {
         }
     }
 
-    private struct Line: Shape {
+    nonisolated private struct Line: Shape {
         func path(in rect: CGRect) -> Path {
             Path { p in
                 p.move(to: CGPoint(x: rect.midX, y: rect.minY))

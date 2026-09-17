@@ -35,14 +35,20 @@ struct TripLiveActivity: Widget {
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 8) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Label(state.nextStopName, systemImage: state.isDeparture ? "arrow.up.right.circle.fill" : "mappin.circle.fill")
-                                .font(.headline)
-                                .lineLimit(1)
-                            Spacer()
-                            Text(state.expectedTime, style: .time)
-                                .font(.title3.weight(.bold))
-                                .monospacedDigit()
+                        if let transfer = state.transfer {
+                            TransferRowView(transfer: transfer, outgoingLine: state.lineName, outgoingTime: state.expectedTime,
+                                            outgoingDelayMinutes: state.delayMinutes, outgoingPlatform: state.platform)
+                                .foregroundStyle(.primary)
+                        } else {
+                            HStack(alignment: .firstTextBaseline) {
+                                Label(state.nextStopName, systemImage: state.isDeparture ? "arrow.up.right.circle.fill" : "mappin.circle.fill")
+                                    .font(.headline)
+                                    .lineLimit(1)
+                                Spacer()
+                                Text(state.expectedTime, style: .time)
+                                    .font(.title3.weight(.bold))
+                                    .monospacedDigit()
+                            }
                         }
                         ProgressView(timerInterval: state.progressStart...state.progressEnd, countsDown: false) {
                             EmptyView()
@@ -95,32 +101,45 @@ struct LockScreenView: View {
         VStack(alignment: .leading, spacing: 6) {
             // Line + platform
             HStack(spacing: 8) {
-                ProductBadge(state: state, compact: true)
-                Spacer(minLength: 4)
-                if let platform = state.platform {
-                    PlatformChip(platform: platform)
+                if state.transfer != nil {
+                    Label("Umstieg in \(state.nextStopName)", systemImage: "arrow.triangle.2.circlepath")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                } else {
+                    ProductBadge(state: state, compact: true)
+                    Spacer(minLength: 4)
+                    if let platform = state.platform {
+                        PlatformChip(platform: platform)
+                    }
                 }
             }
 
-            // Countdown + time
-            HStack(alignment: .lastTextBaseline) {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("\(state.isDeparture ? "Abfahrt" : "Ankunft") \(state.nextStopName)")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.7))
-                        .lineLimit(1)
-                    Text(timerInterval: Date.now...max(state.expectedTime, .now), countsDown: true)
-                        .font(.system(size: 26, weight: .bold, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundStyle(.white)
-                }
-                Spacer(minLength: 8)
-                VStack(alignment: .trailing, spacing: 0) {
-                    Text(state.expectedTime, style: .time)
-                        .font(.headline.weight(.bold))
-                        .monospacedDigit()
-                        .foregroundStyle(.white)
-                    DelayText(state: state).font(.caption2.weight(.semibold))
+            if let transfer = state.transfer {
+                TransferRowView(transfer: transfer, outgoingLine: state.lineName, outgoingTime: state.expectedTime,
+                                outgoingDelayMinutes: state.delayMinutes, outgoingPlatform: state.platform)
+                    .foregroundStyle(.white)
+            } else {
+                // Countdown + time
+                HStack(alignment: .lastTextBaseline) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("\(state.isDeparture ? "Abfahrt" : "Ankunft") \(state.nextStopName)")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.7))
+                            .lineLimit(1)
+                        Text(timerInterval: Date.now...max(state.expectedTime, .now), countsDown: true)
+                            .font(.system(size: 26, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(.white)
+                    }
+                    Spacer(minLength: 8)
+                    VStack(alignment: .trailing, spacing: 0) {
+                        Text(state.expectedTime, style: .time)
+                            .font(.headline.weight(.bold))
+                            .monospacedDigit()
+                            .foregroundStyle(.white)
+                        DelayText(state: state).font(.caption2.weight(.semibold))
+                    }
                 }
             }
 
@@ -205,6 +224,57 @@ struct DelayText: View {
     }
 }
 
+/// Once a transfer is within 10 minutes: shows the incoming train's arrival and the outgoing train's
+/// departure side by side, each with its own delay and platform.
+struct TransferRowView: View {
+    let transfer: TripActivityAttributes.TransferDetails
+    let outgoingLine: String
+    let outgoingTime: Date
+    let outgoingDelayMinutes: Int
+    let outgoingPlatform: String?
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            TransferSideView(title: "Ankunft", line: transfer.incomingLine, time: transfer.incomingExpectedArrival,
+                              delayMinutes: transfer.incomingDelayMinutes, platform: transfer.incomingPlatform)
+            Image(systemName: "arrow.right")
+                .font(.caption2.weight(.bold))
+                .opacity(0.5)
+                .padding(.top, 14)
+            TransferSideView(title: "Abfahrt", line: outgoingLine, time: outgoingTime,
+                              delayMinutes: outgoingDelayMinutes, platform: outgoingPlatform, alignment: .trailing)
+        }
+    }
+}
+
+private struct TransferSideView: View {
+    let title: String
+    let line: String
+    let time: Date
+    let delayMinutes: Int
+    let platform: String?
+    var alignment: HorizontalAlignment = .leading
+
+    var body: some View {
+        VStack(alignment: alignment, spacing: 2) {
+            Text(title).font(.caption2.weight(.semibold)).opacity(0.6)
+            Text(line).font(.caption.weight(.bold)).lineLimit(1)
+            HStack(spacing: 4) {
+                Text(time, style: .time).font(.caption.monospacedDigit())
+                if delayMinutes != 0 {
+                    Text(delayMinutes > 0 ? "+\(delayMinutes)" : "\(delayMinutes)")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(delayColor(delayMinutes))
+                }
+                if let platform {
+                    Text("Gl. \(platform)").font(.caption2.weight(.bold)).opacity(0.8)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: alignment == .trailing ? .trailing : .leading)
+    }
+}
+
 extension TripActivityAttributes.ContentState {
     static let previewDeparture = Self(
         lineName: "ICE 645", nextStopName: "Köln Hbf",
@@ -217,6 +287,15 @@ extension TripActivityAttributes.ContentState {
         plannedTime: .now.addingTimeInterval(14 * 60), expectedTime: .now.addingTimeInterval(14 * 60),
         platform: "16", isDeparture: false, cancelled: false,
         progressStart: .now.addingTimeInterval(-10 * 60), progressEnd: .now.addingTimeInterval(14 * 60), product: .regionalExpress)
+
+    static let previewTransfer = Self(
+        lineName: "ICE 849", nextStopName: "Hannover Hbf",
+        plannedTime: .now.addingTimeInterval(8 * 60), expectedTime: .now.addingTimeInterval(8 * 60),
+        platform: "11", isDeparture: true, cancelled: false,
+        progressStart: .now.addingTimeInterval(-12 * 60), progressEnd: .now.addingTimeInterval(8 * 60), product: .highSpeed,
+        transfer: TripActivityAttributes.TransferDetails(
+            incomingLine: "ICE 645", incomingPlannedArrival: .now.addingTimeInterval(-1 * 60),
+            incomingExpectedArrival: .now.addingTimeInterval(3 * 60), incomingPlatform: "8"))
 }
 
 private let previewAttributes = TripActivityAttributes(originName: "Köln Hbf", destinationName: "Berlin Hbf", journeyID: "preview")
@@ -226,6 +305,7 @@ private let previewAttributes = TripActivityAttributes(originName: "Köln Hbf", 
 } contentStates: {
     TripActivityAttributes.ContentState.previewDeparture
     TripActivityAttributes.ContentState.previewRiding
+    TripActivityAttributes.ContentState.previewTransfer
 }
 
 #Preview("Dynamic Island", as: .dynamicIsland(.expanded), using: previewAttributes) {

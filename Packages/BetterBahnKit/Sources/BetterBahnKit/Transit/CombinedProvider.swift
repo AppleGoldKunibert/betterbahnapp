@@ -1,16 +1,16 @@
 import Foundation
 
-/// Uses db-rest first (best DB realtime data) and falls back to Transitous on errors.
-/// After a db-rest failure it skips db-rest for `cooldown` seconds.
+/// Transitous is primary. A separately configured provider can supply failover.
+/// bahn.de remains a station-search fallback and coach-sequence helper.
 public final class CombinedProvider: TransitProvider {
-    public let source = DataSource.dbRest
+    public var source: DataSource { primary.source }
     public let primary: any TransitProvider
-    public let fallback: any TransitProvider
+    public let fallback: (any TransitProvider)?
     public let bahnDe: BahnDeClient?
     private let health: Health
 
-    public init(primary: any TransitProvider = DBRestProvider(),
-                fallback: any TransitProvider = TransitousProvider(),
+    public init(primary: any TransitProvider = TransitousProvider(),
+                fallback: (any TransitProvider)? = nil,
                 bahnDe: BahnDeClient? = BahnDeClient(),
                 cooldown: TimeInterval = 120) {
         self.bahnDe = bahnDe
@@ -31,25 +31,29 @@ public final class CombinedProvider: TransitProvider {
         func markOK() { failedAt = nil }
     }
 
-    /// Runs `work` against db-rest if healthy, otherwise (or on error / after `deadline`) against Transitous.
+    /// Fail over on errors or deadlines only when another provider is configured.
     private func withFallback<T: Sendable>(
-        usePrimary: Bool = true,
         deadline: Duration = .seconds(8),
         _ primaryWork: @escaping @Sendable (any TransitProvider) async throws -> T,
         _ fallbackWork: @Sendable (any TransitProvider) async throws -> T
     ) async throws -> T {
-        if usePrimary, await health.primaryAvailable {
+        try Task.checkCancellation()
+        let available = await health.primaryAvailable
+        if fallback == nil || available {
             let primary = self.primary
             do {
                 let result = try await Self.withDeadline(deadline) { try await primaryWork(primary) }
                 await health.markOK()
                 return result
             } catch {
-                // The caller went away (e.g. user kept typing) – don't blame db-rest.
+                // The caller went away (e.g. user kept typing) – don't mark the provider unhealthy.
                 if Task.isCancelled { throw CancellationError() }
+                guard fallback != nil else { throw error }
                 await health.markFailed()
             }
         }
+        try Task.checkCancellation()
+        guard let fallback else { throw TransitError.invalidInput("Keine Ersatzdatenquelle verfügbar.") }
         return try await fallbackWork(fallback)
     }
 
@@ -66,39 +70,44 @@ public final class CombinedProvider: TransitProvider {
         }
     }
 
-    /// bahn.de first (fast, DB names with EVA numbers), then db-rest/Transitous.
+    /// Search Transitous first so fresh station IDs are ready for routing.
     public func searchStations(_ query: String) async throws -> [Station] {
-        if let bahnDe = self.bahnDe,
-           let stations = try? await Self.withDeadline(.milliseconds(2500), { try await bahnDe.searchStations(query) }),
-           !stations.isEmpty {
-            return stations
+        do {
+            let stations = try await withFallback(deadline: .milliseconds(2500),
+                { try await $0.searchStations(query) }, { try await $0.searchStations(query) })
+            if !stations.isEmpty || bahnDe == nil { return stations }
+        } catch {
+            try Task.checkCancellation()
+            guard let bahnDe else { throw error }
+            return try await Self.withDeadline(.milliseconds(2500)) { try await bahnDe.searchStations(query) }
         }
-        if Task.isCancelled { throw CancellationError() }
-        return try await withFallback(deadline: .milliseconds(2500),
-                                      { try await $0.searchStations(query) }, { try await $0.searchStations(query) })
+        try Task.checkCancellation()
+        guard let bahnDe else { return [] }
+        return try await Self.withDeadline(.milliseconds(2500)) { try await bahnDe.searchStations(query) }
     }
 
     public func journeys(_ query: JourneyQuery) async throws -> JourneyPage {
-        let bothFromPrimary = query.from.source == primary.source && query.to.source == primary.source
-        let cursorSource = query.cursor.flatMap(Self.cursorSource)
-        let usePrimary = bothFromPrimary && cursorSource != .transitous
-        var primaryQuery = query
-        primaryQuery.cursor = query.cursor.flatMap { Self.stripCursor($0, source: primary.source) }
-        var fallbackQuery = query
-        fallbackQuery.cursor = query.cursor.flatMap { Self.stripCursor($0, source: .transitous) }
-        let pQuery = primaryQuery, fQuery = fallbackQuery
-        var page = try await withFallback(usePrimary: usePrimary, deadline: .seconds(10),
-                                          { try await $0.journeys(pQuery) },
-                                          { try await $0.journeys(fQuery) })
+        var page: JourneyPage
+        if let cursor = query.cursor {
+            // Pagination is tied to its provider. Never silently restart on another source.
+            let provider = try provider(for: Self.cursorSource(cursor))
+            var nextQuery = query
+            nextQuery.cursor = Self.stripCursor(cursor, source: provider.source)
+            page = try await provider.journeys(nextQuery)
+        } else {
+            // Providers resolve foreign and previously saved station IDs themselves.
+            page = try await withFallback(deadline: .seconds(10),
+                { try await $0.journeys(query) }, { try await $0.journeys(query) })
+        }
         page.earlierCursor = page.earlierCursor.map { "\(page.source.rawValue):\($0)" }
         page.laterCursor = page.laterCursor.map { "\(page.source.rawValue):\($0)" }
         return page
     }
 
-    public func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int) async throws -> [BoardEntry] {
-        try await withFallback(usePrimary: station.source == primary.source || station.evaNumber != nil, deadline: .seconds(8),
-                               { try await $0.board(kind, at: station, date: date, duration: duration) },
-                               { try await $0.board(kind, at: station, date: date, duration: duration) })
+    public func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int, products: Set<Product>) async throws -> [BoardEntry] {
+        try await withFallback(deadline: .seconds(8),
+                               { try await $0.board(kind, at: station, date: date, duration: duration, products: products) },
+                               { try await $0.board(kind, at: station, date: date, duration: duration, products: products) })
     }
 
     /// Trip IDs are only valid for their source, so no fallback here.
@@ -107,7 +116,13 @@ public final class CombinedProvider: TransitProvider {
     }
 
     public func trip(id: String, source: DataSource) async throws -> Trip {
-        source == .transitous ? try await fallback.trip(id: id) : try await primary.trip(id: id)
+        try await provider(for: source).trip(id: id)
+    }
+
+    private func provider(for source: DataSource?) throws -> any TransitProvider {
+        if source == primary.source { return primary }
+        if let fallback, source == fallback.source { return fallback }
+        throw TransitError.invalidInput("Diese Datenquelle ist nicht mehr verfügbar. Bitte die Verbindung neu suchen.")
     }
 
     static func cursorSource(_ cursor: String) -> DataSource? {

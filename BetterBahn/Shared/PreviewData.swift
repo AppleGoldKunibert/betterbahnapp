@@ -8,7 +8,7 @@ enum PreviewData {
     static func at(_ minutes: Double) -> Date { base.addingTimeInterval(minutes * 60) }
 
     static func station(_ id: String, _ name: String) -> Station {
-        Station(id: id, name: name, coordinate: nil, evaNumber: id, source: .dbRest)
+        Station(id: id, name: name, coordinate: nil, evaNumber: id, source: .bahnDe)
     }
 
     static let koeln = station("8000207", "Köln Hbf")
@@ -42,13 +42,13 @@ enum PreviewData {
                     stop(station("8000080", "Dortmund Hbf"), arr: 68, dep: 71, delay: 4),
                     stop(station("8000036", "Bielefeld Hbf"), arr: 118, dep: 120, delay: 4),
                     stop(hannover, arr: 162, dep: nil, delay: 4, platform: "8")],
-        remarks: ["Bauarbeiten zwischen Dortmund und Hamm – Umleitung mit ca. 5 Min. Verspätung"], source: .dbRest)
+        remarks: ["Bauarbeiten zwischen Dortmund und Hamm – Umleitung mit ca. 5 Min. Verspätung"], source: .transitous)
 
     static let walk = Leg(
         origin: hannover, destination: hannover,
         departure: TimeInfo(planned: at(166), actual: nil), arrival: TimeInfo(planned: at(171), actual: nil),
         departurePlatform: nil, arrivalPlatform: nil, tripId: nil, line: nil, direction: nil,
-        isWalking: true, cancelled: false, stopovers: [], remarks: [], source: .dbRest)
+        isWalking: true, cancelled: false, stopovers: [], remarks: [], source: .transitous)
 
     static let secondLeg = Leg(
         origin: hannover, destination: berlin,
@@ -59,34 +59,34 @@ enum PreviewData {
         stopovers: [stop(hannover, arr: nil, dep: 180, platform: "11"), stop(wolfsburg, arr: 212, dep: 214),
                     stop(station("8010404", "Berlin-Spandau"), arr: 262, dep: 264, delay: 2),
                     stop(berlin, arr: 279, dep: nil, delay: 2, platform: "14")],
-        remarks: [], source: .dbRest)
+        remarks: [], source: .transitous)
 
-    static let journey = Journey(legs: [firstLeg, walk, secondLeg], source: .dbRest)
+    static let journey = Journey(legs: [firstLeg, walk, secondLeg], source: .transitous)
 
     static let directJourney = Journey(legs: [Leg(
         origin: koeln, destination: berlin,
         departure: TimeInfo(planned: at(48), actual: at(48)), arrival: TimeInfo(planned: at(316), actual: at(325)),
         departurePlatform: PlatformInfo(planned: "6", actual: "6"), arrivalPlatform: PlatformInfo(planned: "12", actual: "12"),
         tripId: "t3", line: Line(name: "ICE 947", number: "947", product: .highSpeed, operatorName: nil),
-        direction: "Berlin Ostbahnhof", isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .dbRest)],
-        source: .dbRest)
+        direction: "Berlin Ostbahnhof", isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)],
+        source: .transitous)
 
     static let regionalJourney = Journey(legs: [
         Leg(origin: koeln, destination: duesseldorf, departure: TimeInfo(planned: at(15), actual: at(15)),
             arrival: TimeInfo(planned: at(40), actual: at(40)), departurePlatform: nil, arrivalPlatform: nil,
-            tripId: "r1", line: re, direction: nil, isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .dbRest),
+            tripId: "r1", line: re, direction: nil, isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous),
         Leg(origin: duesseldorf, destination: berlin, departure: TimeInfo(planned: at(55), actual: nil),
             arrival: TimeInfo(planned: at(330), actual: nil), departurePlatform: nil, arrivalPlatform: nil,
             tripId: "r2", line: Line(name: "FLX 1245", number: "1245", product: .longDistance, operatorName: "FlixTrain"),
-            direction: nil, isWalking: false, cancelled: true, stopovers: [], remarks: [], source: .dbRest),
-    ], source: .dbRest)
+            direction: nil, isWalking: false, cancelled: true, stopovers: [], remarks: [], source: .transitous),
+    ], source: .transitous)
 
     static func entry(_ line: Line, _ minutes: Double, delay: Double?, to: String, platform: String, changed: String? = nil,
                       cancelled: Bool = false, kind: BoardKind = .departures, remark: String? = nil) -> BoardEntry {
         BoardEntry(kind: kind, tripId: UUID().uuidString, station: koeln, line: line, otherEnd: to,
                    time: TimeInfo(planned: at(minutes), actual: delay.map { at(minutes + $0) }),
                    platform: PlatformInfo(planned: platform, actual: changed ?? platform), cancelled: cancelled,
-                   terminatesOrOriginatesHere: false, remarks: remark.map { [$0] } ?? [], source: .dbRest)
+                   terminatesOrOriginatesHere: false, remarks: remark.map { [$0] } ?? [], source: .transitous)
     }
 
     static let board: [BoardEntry] = [
@@ -100,5 +100,5 @@ enum PreviewData {
 
     static let trip = Trip(id: "t1", line: ice, direction: "Berlin Ostbahnhof",
                            stopovers: firstLeg.stopovers + [stop(wolfsburg, arr: 200, dep: 202, delay: 4), stop(berlin, arr: 262, dep: nil, delay: 4, platform: "14")],
-                           cancelled: false, remarks: [], source: .dbRest)
+                           cancelled: false, remarks: [], source: .transitous)
 }

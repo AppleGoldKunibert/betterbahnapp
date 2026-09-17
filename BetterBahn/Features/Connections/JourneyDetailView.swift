@@ -25,15 +25,16 @@ struct JourneyDetailView: View {
                 summaryCard
                 if !readOnly { issuesCard }
                 ForEach(Array(journey.legs.enumerated()), id: \.element.id) { index, leg in
-                    if leg.isWalking {
-                        WalkRow(leg: leg)
-                    } else {
+                    if !leg.isWalking {
                         LegCard(
                             leg: leg,
                             transferBroken: journey.brokenTransferIndices.contains(journey.transitLegs.firstIndex(of: leg) ?? -1),
                             onReplace: readOnly ? nil : { legToReplace = LegSelection(index: index, leg: leg) },
                             onCheckin: readOnly ? nil : { checkinLeg = leg }
                         )
+                        if let info = transferInfo(after: leg) {
+                            TransferRow(from: leg, to: info.next, walk: info.walk)
+                        }
                     }
                 }
                 if !readOnly { historySection }
@@ -70,6 +71,14 @@ struct JourneyDetailView: View {
             // Pick up realtime refreshes of this saved journey.
             if let refreshed, refreshed != journey { journey = refreshed }
         }
+    }
+
+    /// The next transit leg after `leg`, plus the walking leg between them, if any.
+    private func transferInfo(after leg: Leg) -> (next: Leg, walk: Leg?)? {
+        guard let index = journey.legs.firstIndex(of: leg) else { return nil }
+        let rest = journey.legs[(index + 1)...]
+        guard let next = rest.first(where: { !$0.isWalking }) else { return nil }
+        return (next, rest.prefix(while: \.isWalking).first)
     }
 
     @ViewBuilder
@@ -140,14 +149,14 @@ struct JourneyDetailView: View {
                     if let departure = journey.departure, let first = journey.legs.first {
                         VStack(alignment: .leading, spacing: 4) {
                             TimeStack(time: departure, font: .largeTitle.weight(.bold))
-                            Text(first.origin.name).font(.subheadline.weight(.semibold)).lineLimit(2)
+                            Text(first.origin.displayName).font(.subheadline.weight(.semibold)).lineLimit(2)
                         }
                     }
                     Spacer(minLength: 12)
                     if let arrival = journey.arrival, let last = journey.legs.last {
                         VStack(alignment: .trailing, spacing: 4) {
                             TimeStack(time: arrival, alignment: .trailing, font: .largeTitle.weight(.bold))
-                            Text(last.destination.name).font(.subheadline.weight(.semibold)).lineLimit(2)
+                            Text(last.destination.displayName).font(.subheadline.weight(.semibold)).lineLimit(2)
                                 .multilineTextAlignment(.trailing)
                         }
                     }
@@ -193,21 +202,50 @@ struct JourneyDetailView: View {
     }
 }
 
-struct WalkRow: View {
-    let leg: Leg
+/// Shows the transfer between two transit legs: how much time there is (color-coded by comfort),
+/// the platform change, and the walking time if the connection requires walking.
+struct TransferRow: View {
+    let from: Leg
+    let to: Leg
+    var walk: Leg?
+
+    private var minutes: Int {
+        Int((to.departure.best.timeIntervalSince(from.arrival.best) / 60).rounded())
+    }
+    private var broken: Bool { minutes < 0 }
+    private var color: Color { transferColor(minutes) }
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "figure.walk")
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: walk != nil ? "figure.walk" : "arrow.triangle.2.circlepath")
                 .font(.subheadline.weight(.semibold))
+                .foregroundStyle(color)
                 .frame(width: 30, height: 30)
-                .background(Color.secondary.opacity(0.12), in: .circle)
-            Text("Umstieg · \(leg.arrival.best.timeIntervalSince(leg.departure.best).durationString) Fußweg")
-                .font(.subheadline)
+                .background(color.opacity(0.15), in: .circle)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(broken ? "Umstieg nicht erreichbar" : "Umstieg · \(minutes) min")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(color)
+                if let walk {
+                    Text("\(Int((walk.arrival.best.timeIntervalSince(walk.departure.best) / 60).rounded())) min Fußweg")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Spacer()
+
+            if from.arrivalPlatform?.best != nil || to.departurePlatform?.best != nil {
+                HStack(spacing: 6) {
+                    PlatformBadge(platform: from.arrivalPlatform)
+                    Image(systemName: "arrow.right").font(.caption2.weight(.bold)).foregroundStyle(.tertiary)
+                    PlatformBadge(platform: to.departurePlatform)
+                }
+            }
         }
-        .foregroundStyle(.secondary)
         .padding(.horizontal, 20)
+        .padding(.vertical, 4)
     }
 }
 
@@ -218,6 +256,7 @@ struct LegCard: View {
     var onCheckin: (() -> Void)?
 
     @State private var showStops = false
+    @State private var showDetails = false
 
     private var color: Color { leg.line?.product.color ?? .gray }
     private var intermediate: [Stopover] { Array(leg.stopovers.dropFirst().dropLast()) }
@@ -243,7 +282,7 @@ struct LegCard: View {
 
                 VStack(spacing: 0) {
                     TimelineNode(kind: .major, color: color, lineBelow: color) {
-                        stationRow(time: leg.departure, name: leg.origin.name, platform: leg.departurePlatform)
+                        stationRow(time: leg.departure, name: leg.origin.displayName, platform: leg.departurePlatform)
                     }
 
                     if !intermediate.isEmpty {
@@ -266,7 +305,7 @@ struct LegCard: View {
                             ForEach(intermediate) { stop in
                                 TimelineNode(kind: .minor, color: color, lineAbove: color, lineBelow: color) {
                                     HStack {
-                                        Text(stop.station.name).font(.caption).lineLimit(1)
+                                        Text(stop.station.displayName).font(.caption).lineLimit(1)
                                         Spacer()
                                         if let time = stop.departure ?? stop.arrival {
                                             Text(time.best.timeString)
@@ -282,14 +321,8 @@ struct LegCard: View {
                     }
 
                     TimelineNode(kind: .major, color: color, lineAbove: color) {
-                        stationRow(time: leg.arrival, name: leg.destination.name, platform: leg.arrivalPlatform)
+                        stationRow(time: leg.arrival, name: leg.destination.displayName, platform: leg.arrivalPlatform)
                     }
-                }
-
-                if let operatorName = leg.line?.operatorName {
-                    Label(operatorName, systemImage: "building.2.fill")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
 
                 if transferBroken {
@@ -297,13 +330,37 @@ struct LegCard: View {
                 }
                 ForEach(leg.remarks, id: \.self) { RemarkRow(text: $0) }
 
-                if onReplace != nil || onCheckin != nil {
-                    HStack(spacing: 10) {
-                        if let onReplace {
-                            ActionTileButton(title: "Anderer Zug", systemImage: "arrow.left.arrow.right", tint: .primary, action: onReplace)
+                if leg.line?.operatorName != nil || onReplace != nil || onCheckin != nil {
+                    Button {
+                        withAnimation(.snappy) { showDetails.toggle() }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(showDetails ? "Weniger" : "Mehr")
+                            Image(systemName: "chevron.down")
+                                .rotationEffect(.degrees(showDetails ? 180 : 0))
                         }
-                        if let onCheckin {
-                            ActionTileButton(title: "Träwelling", systemImage: "checkmark.seal.fill", tint: .brand, action: onCheckin)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+
+                    if showDetails {
+                        if let operatorName = leg.line?.operatorName {
+                            Label(operatorName, systemImage: "building.2.fill")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if onReplace != nil || onCheckin != nil {
+                            HStack(spacing: 10) {
+                                if let onReplace {
+                                    ActionTileButton(title: "Anderer Zug", systemImage: "arrow.left.arrow.right", tint: .primary, action: onReplace)
+                                }
+                                if let onCheckin {
+                                    ActionTileButton(title: "Träwelling", systemImage: "checkmark.seal.fill", tint: .brand, action: onCheckin)
+                                }
+                            }
+                            .transition(.opacity.combined(with: .move(edge: .top)))
                         }
                     }
                 }
@@ -345,7 +402,7 @@ struct AlternativeTrainsSheet: View {
                             HStack(spacing: 10) {
                                 IconTile(systemImage: "arrow.left.arrow.right", color: .brand, size: 34)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text("\(leg.origin.name) → \(leg.destination.name)")
+                                    Text("\(leg.origin.displayName) → \(leg.destination.displayName)")
                                         .font(.subheadline.weight(.semibold))
                                         .lineLimit(2)
                                     Text("Aktuell: \(leg.line?.name ?? "Zug") um \(leg.departure.planned.timeString)")
@@ -390,7 +447,7 @@ struct AlternativeTrainsSheet: View {
                     ProgressView("Suche Züge …")
                 } else if alternatives.isEmpty, error == nil {
                     ContentUnavailableView("Keine anderen Züge", systemImage: "tram.fill",
-                                           description: Text("Kein anderer Zug fährt in diesem Zeitraum direkt von \(leg.origin.name) nach \(leg.destination.name)."))
+                                           description: Text("Kein anderer Zug fährt in diesem Zeitraum direkt von \(leg.origin.displayName) nach \(leg.destination.displayName)."))
                 }
             }
             .navigationTitle("Anderen Zug wählen")
@@ -473,7 +530,7 @@ struct AlternativeRow: View {
     ScrollView {
         VStack(spacing: 16) {
             LegCard(leg: PreviewData.firstLeg, onReplace: {}, onCheckin: {})
-            WalkRow(leg: PreviewData.walk)
+            TransferRow(from: PreviewData.firstLeg, to: PreviewData.secondLeg, walk: PreviewData.walk)
             LegCard(leg: PreviewData.secondLeg, onReplace: {}, onCheckin: {})
             AlternativeRow(leg: PreviewData.secondLeg, current: PreviewData.firstLeg)
         }
@@ -525,8 +582,8 @@ struct AlternativeJourneySheet: View {
                             HStack(spacing: 12) {
                                 IconTile(systemImage: "arrow.triangle.branch", color: .brand, size: 38)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text("Ab \(restart.from.name)").font(.headline)
-                                    Text("nach \(destination.name), frühestens \(restart.date.timeString)")
+                                    Text("Ab \(restart.from.displayName)").font(.headline)
+                                    Text("nach \(destination.displayName), frühestens \(restart.date.timeString)")
                                         .font(.subheadline)
                                         .foregroundStyle(.secondary)
                                 }

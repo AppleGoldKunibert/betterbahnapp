@@ -55,7 +55,7 @@ public struct BahnDeClient: Sendable {
         return locations.compactMap { location in
             guard location.type == "ST", let eva = location.extId else { return nil }
             let coordinate = location.lat.flatMap { lat in location.lon.map { Coordinate(latitude: lat, longitude: $0) } }
-            return Station(id: eva, name: location.name, coordinate: coordinate, evaNumber: eva, source: .dbRest)
+            return Station(id: eva, name: location.name, coordinate: coordinate, evaNumber: eva, source: .bahnDe)
         }
     }
 

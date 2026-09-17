@@ -34,13 +34,14 @@ public struct PKCE: Sendable {
 public struct TraewellingConfig: Sendable {
     public var baseURL: URL
     /// Create an application at https://traewelling.de/settings/applications
-    /// with redirect URL `betterbahn://oauth` (no client secret, "confidential" off).
+    /// with redirect URL `https://betterbahn.kunibert88.workers.dev/oauth/traewelling/callback`
+    /// (public application: no client secret, "confidential" off).
     public var clientID: String
     public var redirectURI: String
     public var scopes: [String]
 
     public init(baseURL: URL = URL(string: "https://traewelling.de")!, clientID: String,
-                redirectURI: String = "betterbahn://oauth",
+                redirectURI: String = "https://betterbahn.kunibert88.workers.dev/oauth/traewelling/callback",
                 scopes: [String] = ["read-statuses", "write-statuses", "read-search"]) {
         self.baseURL = baseURL
         self.clientID = clientID
@@ -48,7 +49,24 @@ public struct TraewellingConfig: Sendable {
         self.scopes = scopes
     }
 
-    public var callbackScheme: String { URL(string: redirectURI)?.scheme ?? "betterbahn" }
+    /// Both components are nil unless the redirect is a valid HTTPS callback URL.
+    public var callbackHost: String? { callbackComponents?.host }
+    public var callbackPath: String? { callbackComponents?.percentEncodedPath }
+
+    /// The HTTPS Worker forwards the OAuth response to this app-only scheme.
+    /// Keep redirectURI unchanged in both OAuth requests; this is only the browser matcher.
+    public var callbackScheme: String { "betterbahn" }
+
+    private var callbackComponents: URLComponents? {
+        guard let url = URL(string: redirectURI, encodingInvalidCharacters: false),
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.scheme?.lowercased() == "https",
+              let host = components.host, !host.isEmpty,
+              components.percentEncodedPath.hasPrefix("/"),
+              components.user == nil, components.password == nil,
+              components.fragment == nil else { return nil }
+        return components
+    }
 
     public func authorizeURL(pkce: PKCE) -> URL {
         baseURL.appending(path: "oauth/authorize").appending(queryItems: [
@@ -96,6 +114,7 @@ public enum OAuthError: Error, LocalizedError, Equatable {
     case missingCode
     case notLoggedIn
     case missingClientID
+    case invalidRedirectURI
 
     public var errorDescription: String? {
         switch self {
@@ -103,6 +122,7 @@ public enum OAuthError: Error, LocalizedError, Equatable {
         case .missingCode: "Träwelling hat keinen Code zurückgegeben."
         case .notLoggedIn: "Nicht bei Träwelling angemeldet."
         case .missingClientID: "Keine Träwelling Client-ID eingetragen (Einstellungen)."
+        case .invalidRedirectURI: "Ungültige Träwelling-OAuth-Konfiguration: Die Weiterleitungs-URL muss eine gültige HTTPS-Adresse mit Host und Callback-Pfad sein."
         }
     }
 }

@@ -360,7 +360,8 @@ nonisolated final class RailwayTileOverlay: MKTileOverlay, @unchecked Sendable {
     override func loadTile(at path: MKTileOverlayPath, result: @escaping (Data?, (any Error)?) -> Void) {
         var request = URLRequest(url: url(forTilePath: path))
         request.setValue(HTTPClient.identifyingUserAgent, forHTTPHeaderField: "User-Agent")
-        URLSession.shared.dataTask(with: request) { data, _, error in result(data, error) }.resume()
+        nonisolated(unsafe) let completion = result
+        URLSession.shared.dataTask(with: request) { data, _, error in completion(data, error) }.resume()
     }
 }
 
