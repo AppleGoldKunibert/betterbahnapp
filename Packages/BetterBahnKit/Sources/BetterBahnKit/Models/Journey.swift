@@ -44,12 +44,18 @@ public struct Line: Codable, Sendable, Hashable {
     public var number: String?
     public var product: Product
     public var operatorName: String?
+    /// Some international trains are carried under two names by separate GTFS feeds Transitous
+    /// merges (e.g. an ÖBB "RJ 177" that Deutsche Bahn's own feed lists as "ICE 177") — one of them
+    /// usually without realtime data. Set when a duplicate was found and merged away (see
+    /// `TransitousProvider.board`), so callers like Träwelling check-in can still try that name too.
+    public var alternateName: String?
 
-    public init(name: String, number: String?, product: Product, operatorName: String?) {
+    public init(name: String, number: String?, product: Product, operatorName: String?, alternateName: String? = nil) {
         self.name = name
         self.number = number
         self.product = product
         self.operatorName = operatorName
+        self.alternateName = alternateName
     }
 
     /// "ICE423", "ice 423" and "ICE  423" all normalize to "ice423".

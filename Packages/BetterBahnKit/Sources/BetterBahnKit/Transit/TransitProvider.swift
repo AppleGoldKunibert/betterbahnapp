@@ -35,4 +35,20 @@ public extension TransitProvider {
     func arrivals(at station: Station, date: Date = .now, duration: Int = 60, products: Set<Product> = Set(Product.allCases)) async throws -> [BoardEntry] {
         try await board(.arrivals, at: station, date: date, duration: duration, products: products)
     }
+
+    /// If another feed also lists this leg's departure (same time + destination) under a different
+    /// name — see the deduplication in `TransitousProvider.board` — returns that other name too, so
+    /// callers can retry something that failed to match the leg's primary name (e.g. a Träwelling
+    /// check-in) before giving up.
+    func alternateLineName(for leg: Leg) async -> String? {
+        guard let line = leg.line, !leg.isWalking else { return nil }
+        guard let entries = try? await board(.departures, at: leg.origin,
+                                             date: leg.departure.planned.addingTimeInterval(-2 * 60),
+                                             duration: 6, products: Set(Product.allCases)) else { return nil }
+        let wantedName = Line.normalize(line.name)
+        return entries.first {
+            Line.normalize($0.line.name) == wantedName
+                && abs($0.time.planned.timeIntervalSince(leg.departure.planned)) <= 2 * 60
+        }?.line.alternateName
+    }
 }

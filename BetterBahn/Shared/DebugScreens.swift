@@ -19,6 +19,37 @@ extension AppModel {
 }
 
 extension AppModel {
+    /// Launch with `-seedStressTrips <count>` to fill the map with a large synthetic trip history (perf testing only).
+    func seedStressTripsIfRequested() {
+        let count = UserDefaults.standard.integer(forKey: "seedStressTrips")
+        guard count > 0, traewellingTrips.count < count else { return }
+        func station(_ id: String, _ name: String, _ lat: Double, _ lon: Double) -> Station {
+            Station(id: id, name: name, coordinate: Coordinate(latitude: lat, longitude: lon), evaNumber: id, source: .traewelling)
+        }
+        let stations = [
+            station("1", "Köln Hbf", 50.943, 6.958), station("2", "Berlin Hbf", 52.525, 13.369),
+            station("3", "Hamburg Hbf", 53.553, 10.007), station("4", "München Hbf", 48.140, 11.558),
+            station("5", "Frankfurt(Main)Hbf", 50.107, 8.663), station("6", "Hannover Hbf", 52.376, 9.741),
+            station("7", "Stuttgart Hbf", 48.784, 9.182), station("8", "Leipzig Hbf", 51.345, 12.383),
+        ]
+        var trips: [ImportedTrip] = []
+        for i in 0..<count {
+            let from = stations[i % stations.count]
+            let to = stations[(i + 1 + i / stations.count) % stations.count]
+            let departure = Date.now.addingTimeInterval(-Double(i) * 6 * 3600)
+            let leg = Leg(origin: from, destination: to,
+                          departure: TimeInfo(planned: departure, actual: nil),
+                          arrival: TimeInfo(planned: departure.addingTimeInterval(3600), actual: nil),
+                          departurePlatform: nil, arrivalPlatform: nil, tripId: "stress-\(i)",
+                          line: Line(name: "ICE \(100 + i % 400)", number: "\(100 + i % 400)", product: .highSpeed, operatorName: nil),
+                          direction: nil, isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .traewelling)
+            trips.append(ImportedTrip(statusID: i, journey: Journey(legs: [leg], source: .traewelling)))
+        }
+        traewellingTrips = trips
+    }
+}
+
+extension AppModel {
     /// Launch with `-seedBrokenTrip YES` to save a journey whose transfer no longer works.
     /// Re-seeds with fresh, relative-to-now times if the previous run's ICE 10 has already finished,
     /// since its times are frozen at first launch and would otherwise go stale across test sessions.

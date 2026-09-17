@@ -14,6 +14,7 @@ struct CheckinSheet: View {
     @State private var isSending = false
     @State private var result: CheckinResult?
     @State private var error: Error?
+    @State private var offerManualTrip = false
 
     var body: some View {
         NavigationStack {
@@ -50,6 +51,12 @@ struct CheckinSheet: View {
             .task {
                 isLoggedIn = await model.traewelling.isLoggedIn
                 visibility = model.settings.traewellingVisibility
+            }
+            .alert("Zug nicht gefunden", isPresented: $offerManualTrip) {
+                Button("Manuell eintragen") { send(allowManualTrip: true) }
+                Button("Abbrechen", role: .cancel) {}
+            } message: {
+                Text("Träwelling kennt \(leg.line?.name ?? "diesen Zug") nicht. Du kannst ihn manuell eintragen – die Verspätung wird dann automatisch aktualisiert, solange BetterBahn geöffnet ist.")
             }
         }
     }
@@ -138,7 +145,7 @@ struct CheckinSheet: View {
     }
 
     private var sendButton: some View {
-        Button(action: send) {
+        Button(action: { send() }) {
             Group {
                 if isSending {
                     ProgressView()
@@ -155,21 +162,42 @@ struct CheckinSheet: View {
         .disabled(isSending || message.count > 280)
     }
 
-    private func send() {
+    private func send(allowManualTrip: Bool = false) {
         isSending = true
-        let draft = CheckinDraft(leg: leg, message: message, visibility: visibility, business: business, toot: toot)
         Task {
             defer { isSending = false }
             do {
-                let checkin = try await model.traewelling.checkin(draft)
+                let checkin = try await attemptCheckin(leg: leg, allowManualTrip: allowManualTrip)
                 withAnimation(.bouncy) { result = checkin }
                 error = nil
+                if checkin.isManualTrip, let statusId = checkin.statusId {
+                    model.trackManualCheckin(statusId: statusId, leg: leg)
+                }
             } catch OAuthError.notLoggedIn {
                 isLoggedIn = false
+            } catch TraewellingError.tripNotFound where !allowManualTrip {
+                // Some international trains are listed under two names by separate feeds (e.g. an
+                // ÖBB "RJ 177" that Deutsche Bahn's own live feed calls "ICE 177") — try the other
+                // name Transitous knows about before asking to create a manual entry.
+                if let alternate = await model.provider.alternateLineName(for: leg) {
+                    var altLeg = leg
+                    altLeg.line?.name = alternate
+                    if let checkin = try? await attemptCheckin(leg: altLeg, allowManualTrip: false) {
+                        withAnimation(.bouncy) { result = checkin }
+                        error = nil
+                        return
+                    }
+                }
+                offerManualTrip = true
             } catch {
                 self.error = error
             }
         }
+    }
+
+    private func attemptCheckin(leg: Leg, allowManualTrip: Bool) async throws -> CheckinResult {
+        let draft = CheckinDraft(leg: leg, message: message, visibility: visibility, business: business, toot: toot)
+        return try await model.traewelling.checkin(draft, allowManualTrip: allowManualTrip)
     }
 }
 

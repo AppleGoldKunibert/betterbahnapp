@@ -53,10 +53,14 @@ struct MLineInfo {
         let name = displayName ?? tripShortName ?? routeShortName ?? mode
         let prefix = name.split(separator: " ").first.map { String($0).uppercased() } ?? ""
         let product = MLineInfo.product(mode: mode, prefix: prefix)
-        let digits = name.split(separator: " ").last.map(String.init)?.filter(\.isNumber)
-        let number = (digits?.isEmpty == false ? digits : tripShortName?.filter(\.isNumber))
+        let digitsInName = name.split(separator: " ").last.map(String.init)?.filter(\.isNumber)
+        let number = (digitsInName?.isEmpty == false ? digitsInName : tripShortName?.filter(\.isNumber))
             .map { String($0.drop(while: { $0 == "0" })) }
-        return Line(name: name, number: number, product: product, operatorName: agencyName)
+        // Some feeds only give a bare product code ("RJ") with the actual run number buried in a raw
+        // trip code ("000385") instead of the display name — fold it in, otherwise unrelated
+        // departures under the same product all look identically labeled.
+        let displayedName = (digitsInName?.isEmpty != false) ? number.map { "\(name) \($0)" } ?? name : name
+        return Line(name: displayedName, number: number, product: product, operatorName: agencyName)
     }
 
     static func product(mode: String, prefix: String) -> Product {

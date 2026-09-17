@@ -27,6 +27,11 @@ final class AppModel {
     var recentStations: [Station] {
         didSet { Storage.save(recentStations, key: "recentStations") }
     }
+    /// Manual Träwelling check-ins (trains Träwelling didn't know) whose delay we keep pushing
+    /// until the trip arrives, since Träwelling has no timetable of its own to track that.
+    var trackedManualCheckins: [TrackedManualCheckin] {
+        didSet { Storage.save(trackedManualCheckins, key: "trackedManualCheckins") }
+    }
 
     init() {
         provider = CombinedProvider()
@@ -36,6 +41,7 @@ final class AppModel {
         recentStations = Storage.load(key: "recentStations") ?? []
         savedJourneys = Storage.load(key: "savedJourneys") ?? []
         traewellingTrips = Storage.load(key: "traewellingTrips") ?? []
+        trackedManualCheckins = Storage.load(key: "trackedManualCheckins") ?? []
         // Move data from UserDefaults (older versions) into files.
         Storage.save(savedJourneys, key: "savedJourneys")
         Storage.save(favoriteStations, key: "favoriteStations")
@@ -120,18 +126,64 @@ final class AppModel {
 
     @ObservationIgnored private let geometryService = RouteGeometryService()
     /// Leg ID → encoded polyline, persisted so the map doesn't reload everything.
-    @ObservationIgnored private lazy var geometryCache: [String: String] = {
-        let cache: [String: String] = Storage.load(key: "legGeometries") ?? [:]
-        Storage.save(cache, key: "legGeometries")
-        return cache
-    }()
+    /// Loaded off the main thread on first use, since the file can grow large over time.
+    @ObservationIgnored private var geometryCacheTask: Task<[String: String], Never>?
+
+    private func loadedGeometryCache() async -> [String: String] {
+        if let geometryCacheTask { return await geometryCacheTask.value }
+        let task = Task.detached(priority: .utility) { () -> [String: String] in
+            Storage.load(key: "legGeometries") ?? [:]
+        }
+        geometryCacheTask = task
+        return await task.value
+    }
 
     func geometry(for leg: Leg) async -> [Coordinate]? {
-        if let cached = geometryCache[leg.id] { return Polyline.decode(cached) }
+        var cache = await loadedGeometryCache()
+        if let cached = cache[leg.id] { return Polyline.decode(cached) }
         guard let geometry = await geometryService.geometry(for: leg) else { return nil }
-        geometryCache[leg.id] = Polyline.encode(geometry)
-        Storage.save(geometryCache, key: "legGeometries")
+        cache[leg.id] = Polyline.encode(geometry)
+        geometryCacheTask = Task { cache }
+        Task.detached(priority: .utility) { Storage.save(cache, key: "legGeometries") }
         return geometry
+    }
+
+    // MARK: Travel map heatmap
+
+    /// The result of merging a set of journeys' track geometry into colored map segments.
+    struct MapHeatmap: Codable, Equatable {
+        var runs: [SegmentHeatmap.Run]
+        var journeysCount: Int
+        var legsCount: Int
+        var kilometers: Double
+        var hours: Double
+    }
+
+    /// Keyed by everything the heatmap depends on (date range, filters, data counts), so it
+    /// survives reopening the map or relaunching the app until the underlying data changes.
+    @ObservationIgnored private var mapHeatmapCacheTask: Task<[String: MapHeatmap], Never>?
+
+    private func loadedMapHeatmapCache() async -> [String: MapHeatmap] {
+        if let mapHeatmapCacheTask { return await mapHeatmapCacheTask.value }
+        let task = Task.detached(priority: .utility) { () -> [String: MapHeatmap] in
+            Storage.load(key: "mapHeatmapCache") ?? [:]
+        }
+        mapHeatmapCacheTask = task
+        return await task.value
+    }
+
+    func cachedMapHeatmap(for key: String) async -> MapHeatmap? {
+        await loadedMapHeatmapCache()[key]
+    }
+
+    func setCachedMapHeatmap(_ value: MapHeatmap, for key: String) async {
+        var cache = await loadedMapHeatmapCache()
+        // Keep only the most recent entries; each holds full route geometry, so unbounded growth
+        // (e.g. from toggling filters/ranges a lot) would bloat the cache file.
+        if cache.count >= 20, cache[key] == nil { cache.removeValue(forKey: cache.keys.randomElement()!) }
+        cache[key] = value
+        mapHeatmapCacheTask = Task { cache }
+        Task.detached(priority: .utility) { Storage.save(cache, key: "mapHeatmapCache") }
     }
 
     // MARK: Saved journeys
@@ -175,12 +227,13 @@ final class AppModel {
 
     @ObservationIgnored private var refreshLoop: Task<Void, Never>?
 
-    /// Refreshes upcoming journeys every 2 minutes while the app is active.
+    /// Refreshes upcoming journeys and manual Träwelling check-ins every 2 minutes while the app is active.
     func startRefreshing() {
         guard refreshLoop == nil else { return }
         refreshLoop = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.refreshSavedJourneys()
+                await self?.refreshManualCheckins()
                 try? await Task.sleep(for: .seconds(120))
             }
         }
@@ -189,6 +242,40 @@ final class AppModel {
     func stopRefreshing() {
         refreshLoop?.cancel()
         refreshLoop = nil
+    }
+
+    // MARK: Manual Träwelling check-ins
+
+    func trackManualCheckin(statusId: Int, leg: Leg) {
+        trackedManualCheckins.removeAll { $0.leg.id == leg.id }
+        trackedManualCheckins.append(TrackedManualCheckin(statusId: statusId, leg: leg, lastUpdate: .distantPast))
+    }
+
+    /// Pushes the current delay to Träwelling every 10 minutes, plus a final update once the leg has
+    /// arrived (after which tracking stops, since a manual trip's schedule never changes again).
+    func refreshManualCheckins() async {
+        guard !trackedManualCheckins.isEmpty else { return }
+        let refresher = JourneyRefresher(provider: provider)
+        for entry in trackedManualCheckins {
+            // Give up on anything that never got an update for way too long (e.g. the trip was
+            // abandoned) so tracking doesn't grow unbounded.
+            if entry.leg.departure.planned.addingTimeInterval(48 * 3600) < .now {
+                trackedManualCheckins.removeAll { $0.statusId == entry.statusId }
+                continue
+            }
+            let dueForUpdate = Date.now.timeIntervalSince(entry.lastUpdate) >= 10 * 60 || entry.leg.arrival.best < .now
+            guard dueForUpdate else { continue }
+            let refreshed = await refresher.refresh(Journey(legs: [entry.leg], source: entry.leg.source))
+            guard let leg = refreshed.legs.first else { continue }
+            guard (try? await traewelling.updateCheckin(statusId: entry.statusId, departure: leg.departure.actual, arrival: leg.arrival.actual)) != nil
+            else { continue }
+            guard let index = trackedManualCheckins.firstIndex(where: { $0.statusId == entry.statusId }) else { continue }
+            if leg.arrival.best.addingTimeInterval(10 * 60) < .now {
+                trackedManualCheckins.remove(at: index)
+            } else {
+                trackedManualCheckins[index] = TrackedManualCheckin(statusId: entry.statusId, leg: leg, lastUpdate: .now)
+            }
+        }
     }
 
     /// Updates realtime data of journeys in the next 24 hours and warns about broken connections.
@@ -242,6 +329,14 @@ struct ImportedTrip: Codable, Hashable, Identifiable {
     var journey: Journey
 }
 
+/// A manual Träwelling check-in whose delay we keep pushing until it arrives.
+struct TrackedManualCheckin: Codable, Identifiable {
+    var id: Int { statusId }
+    var statusId: Int
+    var leg: Leg
+    var lastUpdate: Date
+}
+
 /// An earlier version of a saved journey, kept when an alternative was chosen.
 struct PlanVersion: Codable, Hashable, Identifiable {
     var id = UUID()
@@ -274,7 +369,8 @@ struct RecentSearch: Codable, Hashable, Identifiable {
 }
 
 /// JSON files in Application Support (saved journeys and route shapes get large).
-enum Storage {
+/// Nonisolated so callers can load/save off the main actor for large files (e.g. route geometry).
+nonisolated enum Storage {
     private static var directory: URL {
         let url = URL.applicationSupportDirectory.appending(path: "BetterBahn", directoryHint: .isDirectory)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

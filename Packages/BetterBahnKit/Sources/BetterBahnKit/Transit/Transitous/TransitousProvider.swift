@@ -122,10 +122,51 @@ public struct TransitousProvider: TransitProvider {
         let response = try await http.get(url("v5/stoptimes", items),
             as: MStopTimesResponse.self, headers: ["User-Agent": HTTPClient.identifyingUserAgent])
         let end = date.addingTimeInterval(TimeInterval(duration * 60))
-        return response.stopTimes
+        let entries = response.stopTimes
             .compactMap { $0.toEntry(kind: kind) }
             .filter { $0.time.planned <= end }
-            .sorted { $0.time.planned < $1.time.planned }
+        return Self.deduplicated(entries).sorted { $0.time.planned < $1.time.planned }
+    }
+
+    /// Merges board rows that are almost certainly the same physical departure. Transitous stitches
+    /// together many feeds, and an international train sometimes gets one row per feed under a
+    /// different name — e.g. a Railjet also listed as DB's "ICE 177", usually with only one of them
+    /// carrying realtime data. Collapses to one row using whichever has live timing, but keeps the
+    /// more specific brand name for display: DB applies its generic "ICE" label even to codeshared
+    /// trains from other railways, so it shouldn't win over a more distinctive name (e.g. "RJ") just
+    /// because DB's own feed happens to be the one tracking delays. The other name is kept as
+    /// `alternateName` either way, so it can still be matched elsewhere (e.g. a Träwelling check-in).
+    /// If neither has live data yet (the feed that eventually tracks it hasn't started for this
+    /// departure), both rows are kept rather than guessing which is which.
+    static func deduplicated(_ entries: [BoardEntry]) -> [BoardEntry] {
+        var result: [BoardEntry] = []
+        outer: for entry in entries {
+            for (index, existing) in result.enumerated() {
+                guard existing.kind == entry.kind, existing.time.planned == entry.time.planned,
+                      Station.normalize(existing.otherEnd ?? "") == Station.normalize(entry.otherEnd ?? ""),
+                      existing.line.name != entry.line.name else { continue }
+                let entryIsLive = entry.time.actual != nil
+                let existingIsLive = existing.time.actual != nil
+                guard entryIsLive != existingIsLive else { continue }
+                let live = entryIsLive ? entry : existing
+                let stale = entryIsLive ? existing : entry
+                var merged = live
+                if Self.isGenericICEBrand(live.line.name), !Self.isGenericICEBrand(stale.line.name) {
+                    merged.line.name = stale.line.name
+                    merged.line.alternateName = live.line.name
+                } else {
+                    merged.line.alternateName = stale.line.name
+                }
+                result[index] = merged
+                continue outer
+            }
+            result.append(entry)
+        }
+        return result
+    }
+
+    private static func isGenericICEBrand(_ name: String) -> Bool {
+        Line.normalize(name).hasPrefix("ice")
     }
 
     public func trip(id: String) async throws -> Trip {

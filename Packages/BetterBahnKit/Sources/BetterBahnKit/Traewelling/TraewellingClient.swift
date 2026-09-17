@@ -87,6 +87,8 @@ public struct CheckinResult: Sendable {
     public var points: Int
     public var statusId: Int?
     public var alsoOnThisConnection: Int
+    /// Whether Träwelling didn't know this train and a manual trip was created for it.
+    public var isManualTrip = false
 }
 
 public enum TraewellingError: Error, LocalizedError, Equatable {
@@ -231,14 +233,16 @@ public actor TraewellingClient {
 
     /// Finds the matching Träwelling trip for a leg from our data sources and checks in. If Träwelling's
     /// own timetable doesn't know the train at all (common for trains the DB app shows but that are
-    /// missing from Träwelling's HAFAS import), a manual trip is created and checked into instead.
-    public func checkin(_ draft: CheckinDraft) async throws -> CheckinResult {
+    /// missing from Träwelling's HAFAS import), throws `.tripNotFound` unless `allowManualTrip` is set,
+    /// in which case a manual trip is created and checked into instead.
+    public func checkin(_ draft: CheckinDraft, allowManualTrip: Bool = false) async throws -> CheckinResult {
         let leg = draft.leg
-        guard leg.line != nil else { throw TraewellingError.tripNotFound("Fußweg") }
+        guard let line = leg.line else { throw TraewellingError.tripNotFound("Fußweg") }
 
         if let match = try await findDeparture(for: leg) {
             return try await checkin(draft, start: match.station, departure: match.departure)
         }
+        guard allowManualTrip else { throw TraewellingError.tripNotFound(line.name) }
         return try await checkinManualTrip(draft)
     }
 
@@ -283,9 +287,22 @@ public actor TraewellingClient {
         let data = try JSONSerialization.data(withJSONObject: body)
         let trip = try await api("trips", method: "POST", body: data, as: DataWrapper<ManualTrip>.self).data
 
-        return try await sendCheckin(draft, tripId: trip.tripId, lineName: trip.lineName,
-                                     startID: trip.origin.id, destinationID: trip.destination.id,
-                                     departure: leg.departure.planned, arrival: leg.arrival.planned)
+        var result = try await sendCheckin(draft, tripId: trip.tripId, lineName: trip.lineName,
+                                           startID: trip.origin.id, destinationID: trip.destination.id,
+                                           departure: leg.departure.planned, arrival: leg.arrival.planned)
+        result.isManualTrip = true
+        return result
+    }
+
+    /// Updates a manual trip's checked-in real times, used to reflect its live delay since
+    /// Träwelling has no timetable of its own to track that for a manually created trip.
+    @discardableResult
+    public func updateCheckin(statusId: Int, departure: Date?, arrival: Date?) async throws -> TraewellingStatus {
+        var body: [String: Any] = [:]
+        if let departure { body["manual_departure"] = JSONDecoding.isoString(departure) }
+        if let arrival { body["manual_arrival"] = JSONDecoding.isoString(arrival) }
+        let data = try JSONSerialization.data(withJSONObject: body)
+        return try await api("status/\(statusId)", method: "PUT", body: data, as: DataWrapper<TraewellingStatus>.self).data
     }
 
     private func sendCheckin(_ draft: CheckinDraft, tripId: String, lineName: String, startID: Int, destinationID: Int,
@@ -376,13 +393,26 @@ public actor TraewellingClient {
             guard let planned = dep.plannedWhen,
                   abs(planned.timeIntervalSince(leg.departure.planned)) <= tolerance else { return false }
             if let name = dep.line.name, Line.normalize(name) == wantedName { return true }
-            if let number = line.number, let fahrtNr = dep.line.fahrtNr, number == fahrtNr { return true }
+            if let number = line.number {
+                if let fahrtNr = dep.line.fahrtNr, number == fahrtNr { return true }
+                // Cross-border trains are sometimes carried under a different product brand once they
+                // switch networks (e.g. an ÖBB "RJ 177" is DB's "ICE 177" while still in Germany) — the
+                // shared train number still identifies it even when the name/product prefix doesn't match.
+                if let name = dep.line.name, Self.trailingNumber(name) == number { return true }
+            }
             return false
         }
         return candidates.min {
             abs(($0.plannedWhen ?? .distantPast).timeIntervalSince(leg.departure.planned))
                 < abs(($1.plannedWhen ?? .distantPast).timeIntervalSince(leg.departure.planned))
         }
+    }
+
+    /// The run of digits at the end of a line name (e.g. "ICE 177" → "177"), used to match a train
+    /// across networks that brand it under different names/products but keep the same number.
+    static func trailingNumber(_ name: String) -> String? {
+        let digits = name.reversed().prefix { $0.isNumber }
+        return digits.isEmpty ? nil : String(digits.reversed())
     }
 
     static func matchStop(_ stops: [TraewellingTrip.Stop], station: Station, arrival: Date) -> TraewellingTrip.Stop? {

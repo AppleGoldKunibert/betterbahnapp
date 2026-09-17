@@ -16,6 +16,7 @@ struct TravelMapView: View {
     @State private var showRangeSheet = false
     @State private var includeSaved = true
     @State private var includeTraewelling = true
+    @State private var hasJourneysInRange = true
 
     enum RangePreset: String, CaseIterable, Identifiable {
         case week = "7 Tage", month = "30 Tage", year = "1 Jahr", all = "Alle", custom = "Eigene"
@@ -53,15 +54,17 @@ struct TravelMapView: View {
     }
 
     /// Saved journeys and Träwelling check-ins; a Träwelling ride that matches a saved leg counts once.
+    /// Bucketed by normalized line name so matching stays fast with long trip histories.
     private var journeys: [Journey] {
         let saved = includeSaved ? model.savedJourneys.map(\.journey) : []
-        let savedLegs = saved.flatMap(\.transitLegs)
+        var savedDeparturesByLine: [String: [Date]] = [:]
+        for leg in saved.flatMap(\.transitLegs) {
+            savedDeparturesByLine[Line.normalize(leg.line?.name ?? ""), default: []].append(leg.departure.planned)
+        }
         let imported = (includeTraewelling ? model.traewellingTrips.map(\.journey) : []).filter { trip in
             guard let leg = trip.legs.first else { return false }
-            return !savedLegs.contains { other in
-                abs(other.departure.planned.timeIntervalSince(leg.departure.planned)) < 5 * 60
-                    && Line.normalize(other.line?.name ?? "") == Line.normalize(leg.line?.name ?? "")
-            }
+            let candidates = savedDeparturesByLine[Line.normalize(leg.line?.name ?? "")] ?? []
+            return !candidates.contains { abs($0.timeIntervalSince(leg.departure.planned)) < 5 * 60 }
         }
         return (saved + imported).filter { journey in
             guard let interval else { return true }
@@ -70,8 +73,13 @@ struct TravelMapView: View {
         }
     }
 
+    /// Identifies everything the loaded heatmap depends on, so unrelated view re-creations (e.g.
+    /// switching tabs) don't invalidate the cached result. `customFrom`/`customTo` default to
+    /// values derived from `.now`, so they're only mixed in while actually selected — otherwise
+    /// the key (and the persisted cache) would silently change on every app launch.
     private var reloadKey: String {
-        "\(range.rawValue)|\(customFrom.timeIntervalSince1970)|\(customTo.timeIntervalSince1970)|\(model.savedJourneys.count)|\(model.traewellingTrips.count)|\(includeSaved)|\(includeTraewelling)"
+        let customPart = range == .custom ? "\(customFrom.timeIntervalSince1970)|\(customTo.timeIntervalSince1970)" : ""
+        return "\(range.rawValue)|\(customPart)|\(model.savedJourneys.count)|\(model.traewellingTrips.count)|\(includeSaved)|\(includeTraewelling)"
     }
 
     var body: some View {
@@ -81,7 +89,7 @@ struct TravelMapView: View {
                 .overlay(alignment: .top) { header }
                 .overlay(alignment: .bottomLeading) { legend }
                 .overlay {
-                    if journeys.isEmpty, !model.isSyncingTraewelling {
+                    if !hasJourneysInRange, !model.isSyncingTraewelling {
                         emptyHint
                     }
                 }
@@ -298,10 +306,25 @@ struct TravelMapView: View {
 
     private func load() async {
         let selected = journeys
+        hasJourneysInRange = !selected.isEmpty
         let legs = selected.flatMap(\.transitLegs).filter { $0.line?.product.isTrain ?? true }
+        let key = reloadKey
+
+        // Reuse the last computed result instead of redoing the (potentially expensive) route
+        // merge every time the map is reopened, unless the underlying data actually changed.
+        if let cached = await model.cachedMapHeatmap(for: key) {
+            runs = cached.runs
+            stats = Stats(journeys: cached.journeysCount, legs: cached.legsCount, kilometers: cached.kilometers, hours: cached.hours)
+            progress = nil
+            return
+        }
+
         var lines: [[Coordinate]] = []
         var kilometers = 0.0
         progress = (0, legs.count)
+        // Capped so a long history doesn't recompute the (relatively expensive) heatmap from
+        // scratch too many times; each recompute still costs O(legs loaded so far).
+        let updateInterval = max(10, legs.count / 15)
         for (index, leg) in legs.enumerated() {
             if Task.isCancelled { return }
             if let geometry = await model.geometry(for: leg) {
@@ -309,15 +332,28 @@ struct TravelMapView: View {
                 kilometers += Polyline.length(geometry) / 1000
             }
             progress = (index + 1, legs.count)
-            // Update the map every few legs so it fills progressively.
-            if index % 5 == 4 { runs = SegmentHeatmap().runs(for: lines) }
+            // Update the map every few legs so it fills progressively. The heatmap itself can be
+            // expensive with long track histories, so it's built off the main thread; otherwise
+            // this loop (which never truly suspends once geometry is cached) would freeze the UI.
+            if index % updateInterval == updateInterval - 1 {
+                let snapshot = lines
+                let partial = await Task.detached(priority: .userInitiated) { SegmentHeatmap().runs(for: snapshot) }.value
+                if Task.isCancelled { return }
+                runs = partial
+            }
         }
-        let computed = SegmentHeatmap().runs(for: lines)
+        guard !Task.isCancelled else { return }
+        let finalLines = lines
+        let computed = await Task.detached(priority: .userInitiated) { SegmentHeatmap().runs(for: finalLines) }.value
+        guard !Task.isCancelled else { return }
+        let hours = legs.reduce(0) { $0 + $1.arrival.best.timeIntervalSince($1.departure.best) } / 3600
         withAnimation {
             runs = computed
-            stats = Stats(journeys: selected.count, legs: legs.count, kilometers: kilometers,
-                          hours: legs.reduce(0) { $0 + $1.arrival.best.timeIntervalSince($1.departure.best) } / 3600)
+            stats = Stats(journeys: selected.count, legs: legs.count, kilometers: kilometers, hours: hours)
         }
+        await model.setCachedMapHeatmap(
+            AppModel.MapHeatmap(runs: computed, journeysCount: selected.count, legsCount: legs.count, kilometers: kilometers, hours: hours),
+            for: key)
     }
 }
 

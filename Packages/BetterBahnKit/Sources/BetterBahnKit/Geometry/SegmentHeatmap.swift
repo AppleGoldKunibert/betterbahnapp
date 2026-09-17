@@ -2,7 +2,7 @@ import Foundation
 
 /// Merges many route lines into segments with a count of how often each stretch was travelled.
 public struct SegmentHeatmap: Sendable {
-    public struct Run: Sendable, Hashable {
+    public struct Run: Sendable, Hashable, Codable {
         public var coordinates: [Coordinate]
         public var count: Int
     }
