@@ -75,51 +75,68 @@ struct ConnectionsView: View {
 
     private var routeCard: some View {
         Card(padding: 0) {
-            ZStack(alignment: .trailing) {
-                VStack(spacing: 0) {
-                    StationInput(label: "Start", placeholder: "Von wo?", systemImage: "circle.circle.fill",
-                                 iconColor: .primary, station: $from, focus: $focused, focusValue: .from)
+            VStack(spacing: 0) {
+                StationInput(label: "Start", placeholder: "Von wo?", systemImage: "circle.circle.fill",
+                             iconColor: .primary, station: $from, focus: $focused, focusValue: .from)
 
-                    ForEach($viaRows) { $row in
-                        Divider().padding(.leading, 54).padding(.trailing, focused == nil ? 72 : 0)
-                        ViaRowView(row: $row, focus: $focused) {
-                            withAnimation(.snappy) { viaRows.removeAll { $0.id == row.id } }
-                        }
+                // The swap button always sits right below Start, so it never drifts onto (and
+                // covers) a via row's own remove button as the card grows with more stops.
+                routeDivider(showAdd: viaRows.isEmpty, showSwap: true)
+
+                ForEach($viaRows) { $row in
+                    ViaRowView(row: $row, focus: $focused) {
+                        withAnimation(.snappy) { viaRows.removeAll { $0.id == row.id } }
                     }
-
-                    ZStack(alignment: .leading) {
-                        Divider().padding(.leading, 54).padding(.trailing, focused == nil ? 72 : 0)
-                        if focused == nil, viaRows.count < Self.maxViaPoints {
-                            addViaButton.padding(.leading, 20)
-                        }
-                    }
-
-                    StationInput(label: "Ziel", placeholder: "Wohin?", systemImage: "mappin.circle.fill",
-                                 station: $to, focus: $focused, focusValue: .to)
+                    routeDivider(showAdd: row.id == viaRows.last?.id, showSwap: false)
                 }
 
-                if focused == nil {
-                    Button {
-                        withAnimation(.spring(duration: 0.4)) {
-                            swap(&from, &to)
-                            swapRotation += 180
-                        }
-                    } label: {
-                        Image(systemName: "arrow.up.arrow.down")
-                            .font(.headline)
-                            .rotationEffect(.degrees(swapRotation))
-                            .frame(width: 44, height: 44)
-                    }
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
-                    .padding(.trailing, 14)
-                    .disabled(from == nil && to == nil)
-                    .accessibilityLabel("Start und Ziel tauschen")
-                    .transition(.opacity)
-                }
+                StationInput(label: "Ziel", placeholder: "Wohin?", systemImage: "mappin.circle.fill",
+                             station: $to, focus: $focused, focusValue: .to)
             }
             .clipShape(.rect(cornerRadius: 22, style: .continuous))
         }
+    }
+
+    /// A divider row between two stops, optionally carrying the leading "add via point" button
+    /// and/or the trailing "swap" button (both hidden while any field is focused).
+    private func routeDivider(showAdd: Bool, showSwap: Bool) -> some View {
+        ZStack {
+            Divider().padding(.leading, 54).padding(.trailing, focused == nil && showSwap ? 72 : 0)
+            if focused == nil {
+                if showAdd, viaRows.count < Self.maxViaPoints {
+                    HStack {
+                        addViaButton.padding(.leading, 20)
+                        Spacer()
+                    }
+                }
+                if showSwap {
+                    HStack {
+                        Spacer()
+                        swapButton
+                    }
+                }
+            }
+        }
+    }
+
+    private var swapButton: some View {
+        Button {
+            withAnimation(.spring(duration: 0.4)) {
+                swap(&from, &to)
+                swapRotation += 180
+            }
+        } label: {
+            Image(systemName: "arrow.up.arrow.down")
+                .font(.headline)
+                .rotationEffect(.degrees(swapRotation))
+                .frame(width: 44, height: 44)
+        }
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
+        .padding(.trailing, 14)
+        .disabled(from == nil && to == nil)
+        .accessibilityLabel("Start und Ziel tauschen")
+        .transition(.opacity)
     }
 
     private var addViaButton: some View {

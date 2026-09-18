@@ -363,9 +363,19 @@ struct TrainNumberSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var train = ""
+    @State private var boardingStation: Station?
     @State private var isSearching = false
     @State private var error: Error?
-    @FocusState private var focused: Bool
+    @FocusState private var focused: Field?
+
+    private enum Field: Hashable { case train, station }
+
+    init(search: ConnectionSearch, suggestions: [String], onFound: @escaping (String, Journey) -> Void) {
+        self.search = search
+        self.suggestions = suggestions
+        self.onFound = onFound
+        _boardingStation = State(initialValue: search.from)
+    }
 
     var body: some View {
         NavigationStack {
@@ -377,7 +387,7 @@ struct TrainNumberSheet: View {
                                 IconTile(systemImage: "number", color: .brand, size: 38)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text("Zugnummer").font(.headline)
-                                    Text("\(search.from.displayName) → \(search.to.displayName)")
+                                    Text("Ziel: \(search.to.displayName)")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)
@@ -388,11 +398,16 @@ struct TrainNumberSheet: View {
                                 .textInputAutocapitalization(.characters)
                                 .autocorrectionDisabled()
                                 .submitLabel(.search)
-                                .focused($focused)
+                                .focused($focused, equals: .train)
                                 .onSubmit(find)
                                 .padding(12)
                                 .background(Color.secondary.opacity(0.1), in: .rect(cornerRadius: 12, style: .continuous))
                         }
+                    }
+
+                    Card(padding: 0) {
+                        StationInput(label: "Einstieg", placeholder: "Ab wo einsteigen?", systemImage: "figure.walk",
+                                     station: $boardingStation, focus: $focused, focusValue: .station)
                     }
 
                     if !suggestions.isEmpty {
@@ -421,7 +436,7 @@ struct TrainNumberSheet: View {
                     .buttonStyle(.glassProminent)
                     .tint(.brand)
                     .controlSize(.large)
-                    .disabled(train.trimmingCharacters(in: .whitespaces).isEmpty || isSearching)
+                    .disabled(train.trimmingCharacters(in: .whitespaces).isEmpty || boardingStation == nil || isSearching)
                 }
                 .padding()
             }
@@ -433,20 +448,20 @@ struct TrainNumberSheet: View {
                     Button("Abbrechen", systemImage: "xmark", role: .cancel) { dismiss() }
                 }
             }
-            .onAppear { focused = true }
+            .onAppear { focused = .train }
         }
         .presentationDetents([.medium, .large])
     }
 
     private func find() {
         let name = train.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty else { return }
+        guard !name.isEmpty, let origin = boardingStation else { return }
         isSearching = true
         Task {
             defer { isSearching = false }
             do {
                 let journey = try await model.trainPicker.journey(
-                    withTrain: name, from: search.from, to: search.to, date: search.date.addingTimeInterval(-30 * 60))
+                    withTrain: name, from: origin, to: search.to, date: search.date.addingTimeInterval(-30 * 60))
                 onFound(journey.transitLegs.first?.line?.name ?? name.uppercased(), journey)
                 dismiss()
             } catch {
