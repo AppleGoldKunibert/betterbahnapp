@@ -31,7 +31,7 @@ extension TimeInterval {
 
 func delayColor(_ minutes: Int?) -> Color {
     guard let minutes else { return .secondary }
-    return minutes >= 6 ? .heavyDelay : minutes >= 1 ? .slightDelay : .punctual
+    return minutes > 10 ? .heavyDelay : minutes > 5 ? .slightDelay : .punctual
 }
 
 /// Colors an Umstieg by how comfortable the transfer time is: very short or very long is risky (red),

@@ -15,6 +15,8 @@ struct CheckinSheet: View {
     @State private var result: CheckinResult?
     @State private var error: Error?
     @State private var offerManualTrip = false
+    @State private var activeTags: Set<String> = []
+    @State private var tagValues: [String: String] = [:]
 
     var body: some View {
         NavigationStack {
@@ -123,6 +125,10 @@ struct CheckinSheet: View {
                         ForEach(TraewellingBusiness.allCases, id: \.self) { Text($0.label).tag($0) }
                     }
                 }
+                if !model.settings.quickTags.isEmpty {
+                    Divider()
+                    tagsRow
+                }
                 Divider()
                 Toggle(isOn: $toot) {
                     HStack(spacing: 12) {
@@ -136,12 +142,18 @@ struct CheckinSheet: View {
     }
 
     private func pickerRow<P: View>(_ title: String, icon: String, color: Color, @ViewBuilder picker: () -> P) -> some View {
-        HStack(spacing: 12) {
-            IconTile(systemImage: icon, color: color, size: 32)
-            Text(title)
-                .font(.subheadline.weight(.medium))
-                .lineLimit(1)
-                .layoutPriority(1)
+        // `.top` keeps the icon and title pinned to the row's top edge even if the trailing
+        // picker's selected label is long enough to wrap onto two lines — with the default
+        // `.center` alignment, that extra height would otherwise drag the whole row (icon
+        // included) downward along with it.
+        HStack(alignment: .top, spacing: 12) {
+            HStack(spacing: 12) {
+                IconTile(systemImage: icon, color: color, size: 32)
+                Text(title)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                    .layoutPriority(1)
+            }
             Spacer(minLength: 8)
             picker()
                 .labelsHidden()
@@ -150,6 +162,49 @@ struct CheckinSheet: View {
                 .truncationMode(.tail)
                 .frame(maxWidth: 150, alignment: .trailing)
         }
+    }
+
+    private var tagsRow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                IconTile(systemImage: "tag.fill", color: .brand, size: 32)
+                Text("Tags").font(.subheadline.weight(.medium))
+                Spacer()
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(model.settings.quickTags) { tag in
+                        tagChip(tag)
+                    }
+                }
+            }
+            ForEach(model.settings.quickTags.filter { $0.value == nil && activeTags.contains($0.id) }) { tag in
+                TextField(tag.label, text: valueBinding(for: tag))
+                    .textFieldStyle(.roundedBorder)
+                    .font(.subheadline)
+            }
+        }
+    }
+
+    private func tagChip(_ tag: QuickTag) -> some View {
+        let isOn = activeTags.contains(tag.id)
+        return Button {
+            withAnimation(.snappy) {
+                if isOn { activeTags.remove(tag.id) } else { activeTags.insert(tag.id) }
+            }
+        } label: {
+            Label(tag.label, systemImage: tag.systemImage)
+                .font(.caption.weight(.medium))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .foregroundStyle(isOn ? .white : Color.brand)
+                .background(isOn ? Color.brand : Color.brand.opacity(0.12), in: .capsule)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func valueBinding(for tag: QuickTag) -> Binding<String> {
+        Binding(get: { tagValues[tag.id] ?? "" }, set: { tagValues[tag.id] = $0 })
     }
 
     private var sendButton: some View {
@@ -181,6 +236,9 @@ struct CheckinSheet: View {
                 if checkin.isManualTrip, let statusId = checkin.statusId {
                     model.trackManualCheckin(statusId: statusId, leg: leg)
                 }
+                if let statusId = checkin.statusId {
+                    await sendTags(statusId: statusId)
+                }
             } catch OAuthError.notLoggedIn {
                 isLoggedIn = false
             } catch TraewellingError.tripNotFound where !allowManualTrip {
@@ -206,6 +264,16 @@ struct CheckinSheet: View {
     private func attemptCheckin(leg: Leg, allowManualTrip: Bool) async throws -> CheckinResult {
         let draft = CheckinDraft(leg: leg, message: message, visibility: visibility, business: business, toot: toot)
         return try await model.traewelling.checkin(draft, allowManualTrip: allowManualTrip)
+    }
+
+    /// Adds the tags the user picked to the freshly created status. Best-effort: the checkin
+    /// itself already succeeded, so a single failed tag shouldn't surface as an error.
+    private func sendTags(statusId: Int) async {
+        for tag in model.settings.quickTags where activeTags.contains(tag.id) {
+            let value = tag.value ?? tagValues[tag.id]?.trimmingCharacters(in: .whitespaces) ?? ""
+            guard !value.isEmpty else { continue }
+            try? await model.traewelling.addTag(statusId: statusId, key: tag.key, value: value, visibility: visibility)
+        }
     }
 }
 

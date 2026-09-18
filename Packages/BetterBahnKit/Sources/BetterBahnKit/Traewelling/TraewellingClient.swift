@@ -84,6 +84,12 @@ public struct CheckinDraft: Sendable, Hashable {
     }
 }
 
+public struct StatusTag: Codable, Sendable, Hashable {
+    public var key: String
+    public var value: String
+    public var visibility: TraewellingVisibility?
+}
+
 public struct CheckinResult: Sendable {
     public var points: Int
     public var statusId: Int?
@@ -315,6 +321,14 @@ public actor TraewellingClient {
         if let arrival { body["manual_arrival"] = JSONDecoding.isoString(arrival) }
         let data = try JSONSerialization.data(withJSONObject: body)
         return try await api("status/\(statusId)", method: "PUT", body: data, as: DataWrapper<TraewellingStatus>.self).data
+    }
+
+    /// Adds a key/value tag (e.g. `trwl:seat` = `"61"`) to a checked-in status.
+    @discardableResult
+    public func addTag(statusId: Int, key: String, value: String, visibility: TraewellingVisibility) async throws -> StatusTag {
+        let body: [String: Any] = ["key": key, "value": value, "visibility": visibility.rawValue]
+        let data = try JSONSerialization.data(withJSONObject: body)
+        return try await api("status/\(statusId)/tags", method: "POST", body: data, as: DataWrapper<StatusTag>.self).data
     }
 
     private func sendCheckin(_ draft: CheckinDraft, tripId: String, lineName: String, startID: Int, destinationID: Int,

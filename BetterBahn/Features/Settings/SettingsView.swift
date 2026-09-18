@@ -77,6 +77,11 @@ struct SettingsView: View {
                     } label: {
                         IconLabel(title: "Sichtbarkeit", systemImage: "eye.fill", color: .purple)
                     }
+                    NavigationLink {
+                        QuickTagsView()
+                    } label: {
+                        IconLabel(title: "Tags", systemImage: "tag.fill", color: .brand)
+                    }
                 } header: {
                     Text("Träwelling")
                 }
@@ -228,6 +233,108 @@ struct BC100RulesView: View {
         rules.excludedOperators = split(operators)
         rules.excludedLinePrefixes = split(prefixes)
         model.settings.bc100Rules = rules
+    }
+}
+
+struct QuickTagsView: View {
+    @Environment(AppModel.self) private var model
+    @State private var tags: [QuickTag] = []
+    @State private var showAddSheet = false
+
+    var body: some View {
+        Form {
+            Section {
+                ForEach(tags) { tag in
+                    HStack(spacing: 12) {
+                        IconTile(systemImage: tag.systemImage, color: .brand, size: 32)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(tag.label).font(.subheadline.weight(.medium))
+                            Text(tag.value.map { "\(tag.key) = \($0)" } ?? tag.key)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .onDelete { indices in
+                    tags.remove(atOffsets: indices)
+                    save()
+                }
+                .onMove { indices, destination in
+                    tags.move(fromOffsets: indices, toOffset: destination)
+                    save()
+                }
+            } footer: {
+                Text("Diese Tags werden dir beim Einchecken als Schnellauswahl vorgeschlagen. Tags ohne festen Wert fragen beim Einchecken nach einem Wert, z. B. für eine Sitzplatznummer.")
+            }
+            Section {
+                Button {
+                    showAddSheet = true
+                } label: {
+                    IconLabel(title: "Tag hinzufügen", systemImage: "plus.circle.fill", color: .brand)
+                }
+                .foregroundStyle(.primary)
+                Button {
+                    tags = QuickTag.defaults
+                    save()
+                } label: {
+                    IconLabel(title: "Standard wiederherstellen", systemImage: "arrow.counterclockwise", color: .gray)
+                }
+                .foregroundStyle(.primary)
+            }
+        }
+        .navigationTitle("Tags")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { EditButton() }
+        .onAppear { tags = model.settings.quickTags }
+        .sheet(isPresented: $showAddSheet) {
+            AddQuickTagSheet { newTag in
+                tags.append(newTag)
+                save()
+            }
+        }
+    }
+
+    private func save() { model.settings.quickTags = tags }
+}
+
+struct AddQuickTagSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var label = ""
+    @State private var key = ""
+    @State private var value = ""
+    let onAdd: (QuickTag) -> Void
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Name, z. B. Triebzug", text: $label)
+                    TextField("Schlüssel, z. B. trwl:seat oder triebzug", text: $key)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                    TextField("Fester Wert (optional)", text: $value)
+                } footer: {
+                    Text("Lass den Wert leer, um beim Einchecken danach gefragt zu werden. Mit einem festen Wert wird der Tag durch Antippen direkt gesetzt, z. B. Schlüssel „triebzug“ mit Wert „Ja“.")
+                }
+            }
+            .navigationTitle("Neuer Tag")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen", role: .cancel) { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Hinzufügen") {
+                        let trimmedLabel = label.trimmingCharacters(in: .whitespaces)
+                        let trimmedKey = key.trimmingCharacters(in: .whitespaces)
+                        let trimmedValue = value.trimmingCharacters(in: .whitespaces)
+                        onAdd(QuickTag(label: trimmedLabel, key: trimmedKey, value: trimmedValue.isEmpty ? nil : trimmedValue))
+                        dismiss()
+                    }
+                    .disabled(label.trimmingCharacters(in: .whitespaces).isEmpty || key.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
     }
 }
 

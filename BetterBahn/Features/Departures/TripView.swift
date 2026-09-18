@@ -249,12 +249,21 @@ private struct DelayTimeText: View {
                     .lineLimit(1)
                     .fixedSize()
                     .foregroundStyle(Color.heavyDelay)
-            } else if let delayMinutes = time.delayMinutes, delayMinutes != 0 {
+            } else if showPlanned {
+                // Original/planned time is shown, so the delay isn't reflected above — always show it, even +0.
+                let delayMinutes = time.delayMinutes ?? 0
                 Text(delayMinutes > 0 ? "+\(delayMinutes)" : "\(delayMinutes)")
                     .font(.caption2.weight(.bold))
                     .lineLimit(1)
                     .fixedSize()
                     .monospacedDigit()
+                    .foregroundStyle(delayColor(delayMinutes))
+            } else if let delayMinutes = time.delayMinutes, delayMinutes != 0 {
+                // Real-time is shown above, already including the delay — just flag that it's delayed.
+                Text("(+)")
+                    .font(.caption2.weight(.bold))
+                    .lineLimit(1)
+                    .fixedSize()
                     .foregroundStyle(delayColor(delayMinutes))
             }
         }

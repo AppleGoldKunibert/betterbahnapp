@@ -34,6 +34,18 @@ final class AppModel {
     var trackedManualCheckins: [TrackedManualCheckin] {
         didSet { Storage.save(trackedManualCheckins, key: "trackedManualCheckins") }
     }
+    /// Explicit choice (from the route view) of which saved journey's Live Activity to show,
+    /// overriding the automatic pick until that journey finishes or another one is chosen.
+    var manualLiveActivityJourneyID: UUID? {
+        didSet {
+            if let id = manualLiveActivityJourneyID {
+                UserDefaults.standard.set(id.uuidString, forKey: "manualLiveActivityJourneyID")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "manualLiveActivityJourneyID")
+            }
+            syncLiveActivity()
+        }
+    }
 
     init() {
         provider = CombinedProvider()
@@ -45,6 +57,7 @@ final class AppModel {
         savedJourneys = Storage.load(key: "savedJourneys") ?? []
         traewellingTrips = Storage.load(key: "traewellingTrips") ?? []
         trackedManualCheckins = Storage.load(key: "trackedManualCheckins") ?? []
+        manualLiveActivityJourneyID = UserDefaults.standard.string(forKey: "manualLiveActivityJourneyID").flatMap(UUID.init)
         // Move data from UserDefaults (older versions) into files.
         Storage.save(savedJourneys, key: "savedJourneys")
         Storage.save(favoriteStations, key: "favoriteStations")
@@ -333,15 +346,27 @@ final class AppModel {
     // MARK: Realtime refresh & warnings
 
     @ObservationIgnored private var refreshLoop: Task<Void, Never>?
+    @ObservationIgnored private var liveActivitySyncLoop: Task<Void, Never>?
 
     /// Refreshes upcoming journeys and manual Träwelling check-ins every 2 minutes while the app is active.
     func startRefreshing() {
-        guard refreshLoop == nil else { return }
-        refreshLoop = Task { [weak self] in
+        if refreshLoop == nil {
+            refreshLoop = Task { [weak self] in
+                while !Task.isCancelled {
+                    await self?.refreshSavedJourneys()
+                    await self?.refreshManualCheckins()
+                    try? await Task.sleep(for: .seconds(120))
+                }
+            }
+        }
+        // Much cheaper than the network refresh above (no I/O), so it can run often — this is what
+        // keeps the Live Activity's countdown and next-stop delay moving without the countdown
+        // freezing at 0:00 until the app is reopened.
+        guard liveActivitySyncLoop == nil else { return }
+        liveActivitySyncLoop = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.refreshSavedJourneys()
-                await self?.refreshManualCheckins()
-                try? await Task.sleep(for: .seconds(120))
+                self?.syncLiveActivity()
+                try? await Task.sleep(for: .seconds(10))
             }
         }
     }
@@ -349,6 +374,8 @@ final class AppModel {
     func stopRefreshing() {
         refreshLoop?.cancel()
         refreshLoop = nil
+        liveActivitySyncLoop?.cancel()
+        liveActivitySyncLoop = nil
     }
 
     // MARK: Manual Träwelling check-ins
@@ -411,10 +438,38 @@ final class AppModel {
         savedJourneys.filter(\.isFinished).reversed()
     }
 
-    /// Shows the Live Activity for the next saved journey that hasn't ended yet.
+    /// Upcoming journeys within their Live Activity window: from 30 minutes before departure until
+    /// they finish. Only one of these is ever shown at a time (see `syncLiveActivity`).
+    var liveActivityEligibleJourneys: [SavedJourney] {
+        let now = Date.now
+        return upcomingJourneys.filter { ($0.journey.departure?.best ?? .distantFuture).addingTimeInterval(-30 * 60) <= now }
+    }
+
+    func isLiveActivityEligible(_ journey: Journey) -> Bool {
+        liveActivityEligibleJourneys.contains { $0.journey.id == journey.id }
+    }
+
+    /// Shows the Live Activity for whichever journey should currently be live:
+    /// - a manual pick from the route view wins as long as that journey has started;
+    /// - otherwise, whatever's already showing keeps going until it finishes — a later-added
+    ///   journey never interrupts one that's under way, it waits its turn;
+    /// - otherwise, the most recently added journey among the ones that have started.
     func syncLiveActivity() {
-        let next = upcomingJourneys.first?.journey
-        Task { await liveActivities.show(next) }
+        let eligible = liveActivityEligibleJourneys
+        if let manualID = manualLiveActivityJourneyID, !upcomingJourneys.contains(where: { $0.id == manualID }) {
+            manualLiveActivityJourneyID = nil
+            return // the didSet above already re-runs this
+        }
+        let candidate: SavedJourney?
+        if let manualID = manualLiveActivityJourneyID, let manual = eligible.first(where: { $0.id == manualID }) {
+            candidate = manual
+        } else if let activeID = liveActivities.activeJourneyID, let current = eligible.first(where: { $0.journey.id == activeID }) {
+            candidate = current
+        } else {
+            candidate = eligible.max { $0.savedAt < $1.savedAt }
+        }
+        let journey = candidate?.journey
+        Task { await liveActivities.show(journey) }
     }
 
     func rememberStation(_ station: Station) {
@@ -522,6 +577,10 @@ final class AppSettings {
     var lastTraewellingSync: Date? {
         didSet { UserDefaults.standard.set(lastTraewellingSync, forKey: "lastTraewellingSync") }
     }
+    /// Suggested tags offered as quick-add chips in the Träwelling check-in sheet.
+    var quickTags: [QuickTag] {
+        didSet { Storage.save(quickTags, key: "quickTags") }
+    }
 
     init() {
         let defaults = UserDefaults.standard
@@ -531,6 +590,7 @@ final class AppSettings {
         syncTraewellingToMap = defaults.object(forKey: "syncTraewellingToMap") as? Bool ?? true
         lastTraewellingSync = defaults.object(forKey: "lastTraewellingSync") as? Date
         connectionWarnings = defaults.object(forKey: "connectionWarnings") as? Bool ?? true
+        quickTags = Storage.load(key: "quickTags") ?? QuickTag.defaults
     }
 }
 

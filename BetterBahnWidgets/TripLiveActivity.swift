@@ -4,9 +4,16 @@ import SwiftUI
 import WidgetKit
 
 private let brand = Color(red: 0.86, green: 0.09, blue: 0.19)
+private let heavyDelayColor = Color(red: 1.0, green: 0.35, blue: 0.35)
 
 private func delayColor(_ minutes: Int) -> Color {
-    minutes >= 6 ? Color(red: 1.0, green: 0.35, blue: 0.35) : minutes >= 1 ? .orange : .green
+    minutes >= 6 ? heavyDelayColor : minutes >= 1 ? .yellow : .green
+}
+
+/// Color for a time/countdown shown for `state`'s current tracked event (its next stop's
+/// departure or arrival): red once cancelled, otherwise by how delayed that event is.
+private func timeColor(_ state: TripActivityAttributes.ContentState) -> Color {
+    state.cancelled ? heavyDelayColor : delayColor(state.delayMinutes)
 }
 
 struct TripLiveActivity: Widget {
@@ -48,6 +55,7 @@ struct TripLiveActivity: Widget {
                                 Text(state.expectedTime, style: .time)
                                     .font(.title3.weight(.bold))
                                     .monospacedDigit()
+                                    .foregroundStyle(timeColor(state))
                             }
                         }
                         ProgressView(timerInterval: state.progressStart...state.progressEnd, countsDown: false) {
@@ -60,6 +68,7 @@ struct TripLiveActivity: Widget {
                             Label {
                                 Text(timerInterval: Date.now...max(state.expectedTime, .now), countsDown: true)
                                     .monospacedDigit()
+                                    .foregroundStyle(timeColor(state))
                             } icon: {
                                 Image(systemName: "timer")
                             }
@@ -82,7 +91,7 @@ struct TripLiveActivity: Widget {
                 Text(timerInterval: Date.now...max(state.expectedTime, .now), countsDown: true)
                     .monospacedDigit()
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(state.delayMinutes > 0 ? delayColor(state.delayMinutes) : .white)
+                    .foregroundStyle(state.delayMinutes > 0 || state.cancelled ? timeColor(state) : .white)
                     .frame(maxWidth: 46)
             } minimal: {
                 Image(systemName: state.product.symbolName)
@@ -130,14 +139,14 @@ struct LockScreenView: View {
                         Text(timerInterval: Date.now...max(state.expectedTime, .now), countsDown: true)
                             .font(.system(size: 26, weight: .bold, design: .rounded))
                             .monospacedDigit()
-                            .foregroundStyle(.white)
+                            .foregroundStyle(timeColor(state))
                     }
                     Spacer(minLength: 8)
                     VStack(alignment: .trailing, spacing: 0) {
                         Text(state.expectedTime, style: .time)
                             .font(.headline.weight(.bold))
                             .monospacedDigit()
-                            .foregroundStyle(.white)
+                            .foregroundStyle(timeColor(state))
                         DelayText(state: state).font(.caption2.weight(.semibold))
                     }
                 }
@@ -214,7 +223,7 @@ struct DelayText: View {
 
     var body: some View {
         if state.cancelled {
-            Label("Fällt aus", systemImage: "xmark.octagon.fill").foregroundStyle(Color(red: 1, green: 0.35, blue: 0.35))
+            Label("Fällt aus", systemImage: "xmark.octagon.fill").foregroundStyle(heavyDelayColor)
         } else if state.delayMinutes > 0 {
             Label("+\(state.delayMinutes) min", systemImage: "clock.badge.exclamationmark.fill")
                 .foregroundStyle(delayColor(state.delayMinutes))
@@ -260,7 +269,7 @@ private struct TransferSideView: View {
             Text(title).font(.caption2.weight(.semibold)).opacity(0.6)
             Text(line).font(.caption.weight(.bold)).lineLimit(1)
             HStack(spacing: 4) {
-                Text(time, style: .time).font(.caption.monospacedDigit())
+                Text(time, style: .time).font(.caption.monospacedDigit()).foregroundStyle(delayColor(max(0, delayMinutes)))
                 if delayMinutes != 0 {
                     Text(delayMinutes > 0 ? "+\(delayMinutes)" : "\(delayMinutes)")
                         .font(.caption2.weight(.bold))

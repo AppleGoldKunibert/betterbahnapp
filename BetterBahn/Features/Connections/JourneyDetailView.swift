@@ -205,10 +205,21 @@ struct JourneyDetailView: View {
             if model.isSaved(journey) {
                 Label(model.liveActivities.isActive(journey)
                       ? "Wird als Live Activity angezeigt"
-                      : "Erscheint als Live Activity, sobald es die nächste Reise ist",
+                      : "Erscheint als Live Activity ab 30 Minuten vor der Abfahrt",
                       systemImage: "bolt.badge.clock.fill")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if let entry = model.savedEntry(for: journey), model.liveActivityEligibleJourneys.count > 1,
+                   model.isLiveActivityEligible(journey) {
+                    Toggle(isOn: Binding(
+                        get: { model.manualLiveActivityJourneyID == entry.id || model.liveActivities.isActive(journey) },
+                        set: { model.manualLiveActivityJourneyID = $0 ? entry.id : nil }
+                    )) {
+                        Label("Diese Reise als Live Activity zeigen", systemImage: "arrow.left.arrow.right.circle.fill")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .tint(.brand)
+                }
             }
         }
     }
