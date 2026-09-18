@@ -234,6 +234,13 @@ struct StationBoardView: View {
             withAnimation(.snappy) { entries = loaded }
             lastUpdate = .now
             error = nil
+            // Some feeds (e.g. S-Bahn Berlin's own) leave the platform out entirely even at stations
+            // where other lines on the same board carry one; fill the gap from DB's own schedule once
+            // the board is already showing, so this never blocks the initial render.
+            if let timetables = model.timetablesClient {
+                let filled = await timetables.fillMissingPlatforms(in: loaded, at: station)
+                if filled != entries { withAnimation(.snappy) { entries = filled } }
+            }
         } catch is CancellationError {
         } catch let urlError as URLError where urlError.code == .cancelled {
         } catch {

@@ -63,6 +63,15 @@ public struct BahnDeClient: Sendable {
     public func evaNumber(for station: Station) async throws -> String? {
         if let eva = station.evaNumber { return eva }
         let candidates = try await searchStations(station.name)
+        // A big interchange's own search also lists its separate entrances/exits a few hundred
+        // meters apart under their own EVA (e.g. Berlin Gesundbrunnen's search also returns
+        // "Gesundbrunnen Bahnhof Badstr.", which has no Timetables ("IRIS") schedule of its own) -
+        // nearest-by-distance alone can pick one of those over the actual station, so a name match
+        // is tried first.
+        let target = Station.normalize(station.displayName)
+        if let exact = candidates.first(where: { Station.normalize($0.displayName) == target }) {
+            return exact.evaNumber
+        }
         if let coordinate = station.coordinate {
             let nearest = candidates
                 .compactMap { c in c.coordinate.map { (c, $0.distance(to: coordinate)) } }

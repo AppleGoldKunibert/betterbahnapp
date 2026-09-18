@@ -24,6 +24,28 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(first.source == .transitous)
     }
 
+    /// Real-world response shape for the S-Bahn at Berlin Gesundbrunnen: VBB's feed leaves `track`
+    /// and `scheduledTrack` both null and only encodes the platform as free text in `description`
+    /// ("S-Bahnsteig Gleis 4"), unlike its U-Bahn feed which populates `track` directly - this is why
+    /// U8 departures showed a platform there but every S-Bahn one showed none at all.
+    @Test func stopTimesFallsBackToPlatformFromDescriptionWhenTrackIsMissing() throws {
+        let json = """
+        {"stopTimes": [{
+            "place": {
+                "name": "S+U Gesundbrunnen Bhf (Berlin)", "lat": 52.549034, "lon": 13.389919,
+                "arrival": "2026-09-18T23:31:00Z", "departure": "2026-09-18T23:31:00Z",
+                "scheduledArrival": "2026-09-18T23:31:00Z", "scheduledDeparture": "2026-09-18T23:31:00Z",
+                "description": "S-Bahnsteig Gleis 4"
+            },
+            "mode": "METRO", "realTime": false, "tripId": "s1-trip", "routeShortName": "S1", "displayName": "S1"
+        }]}
+        """
+        let response = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(json.utf8))
+        let entry = try #require(response.stopTimes.first?.toEntry(kind: .departures))
+
+        #expect(entry.platform.planned == "4")
+    }
+
     /// Real-world Transitous geocode response for "Berlin Gesundbrunnen": the DELFI feed's entry
     /// covers every product including the U8 subway, while a second, OpenOV-fed entry ~70m away
     /// covers almost the same products but misses the subway – and its `/v5/stoptimes` happens to
@@ -1144,6 +1166,230 @@ private final class TimetablesPlanProtocol: URLProtocol, @unchecked Sendable {
         // `base` (2026-01-15 08:00 UTC) plus 10 minutes, in Berlin local time, IRIS "YYMMDDHHmm" form.
         let body = Data("""
         <timetable station='Köln Hbf'><s id="1"><tl f="N" t="p" o="80" c="ICE" n="423"/><dp pt="2701150910" pp="7"/></s></timetable>
+        """.utf8)
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+@Suite struct TimetablesCategoryTests {
+    @Test func splitsCategoryAndNumberWhenSeparatedBySpace() {
+        #expect(TimetablesClient.category(from: "ICE 571") == "ICE")
+        #expect(TimetablesClient.category(from: "RE 5") == "RE")
+    }
+
+    /// Transitous names S-Bahn (and some other) lines with no space between the letter prefix and the
+    /// number ("S15", not "S 15") — this must still split into IRIS's own "S" category, or every
+    /// Timetables lookup for an S-Bahn train silently matches nothing.
+    @Test func splitsCategoryAndNumberWithNoSpace() {
+        #expect(TimetablesClient.category(from: "S15") == "S")
+        #expect(TimetablesClient.category(from: "U8") == "U")
+    }
+}
+
+/// Real-world scenario reported for the S15 (Berlin Hbf → Berlin Gesundbrunnen): Transitous returns
+/// no platform at all for some S-Bahn stops, even though DB's own Timetables ("IRIS") `plan` feed
+/// always carries the scheduled one. `TimetablesClient.realtime(for:)` should fill that gap, while
+/// still preferring a genuine Gleisänderung (`fchg`'s `cp`) over the leg's own planned platform when
+/// the leg already has one.
+@Suite struct TimetablesRealtimePlatformTests {
+    let berlinHbf = station("8011160", "Berlin Hbf", 52.525, 13.369, source: .bahnDe)
+    let gesundbrunnen = station("8011102", "Berlin Gesundbrunnen", 52.549, 13.391, source: .bahnDe)
+    // 2027-01-15 08:00 UTC == 09:00 Europe/Berlin (CET) -> IRIS "2701150900".
+    let departure = Date(timeIntervalSince1970: 1_800_000_000)
+
+    func leg(departurePlatform: PlatformInfo?) -> Leg {
+        Leg(origin: berlinHbf, destination: gesundbrunnen,
+            departure: TimeInfo(planned: departure, actual: nil),
+            arrival: TimeInfo(planned: departure.addingTimeInterval(600), actual: nil),
+            departurePlatform: departurePlatform, arrivalPlatform: nil, tripId: "s15",
+            // No space between category and number, matching how Transitous actually names S-Bahn
+            // lines ("S15", not "S 15") - this is what tripped up `category(from:)` originally.
+            line: Line(name: "S15", number: "15", product: .suburban, operatorName: nil),
+            direction: nil, isWalking: false, cancelled: false, stopovers: [], remarks: [],
+            source: .transitous)
+    }
+
+    func client(_ protocolClass: URLProtocol.Type) -> (TimetablesClient, URLSession) {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [protocolClass]
+        let session = URLSession(configuration: config)
+        let client = TimetablesClient(credentials: TimetablesCredentials(clientID: "x", apiKey: "y"),
+                                      http: HTTPClient(session: session))
+        return (client, session)
+    }
+
+    @Test func fillsInAMissingPlatformFromDBsOwnScheduleWhenNothingChanged() async throws {
+        let (timetables, session) = client(UnchangedS15Protocol.self)
+        defer { session.invalidateAndCancel() }
+
+        let override = await timetables.realtime(for: leg(departurePlatform: nil))
+
+        #expect(override?.departurePlatform?.planned == "12")
+        #expect(override?.departurePlatform?.actual == nil)
+    }
+
+    @Test func doesNotOverwriteAnExistingPlatformWithoutARealtimeChange() async throws {
+        let (timetables, session) = client(UnchangedS15Protocol.self)
+        defer { session.invalidateAndCancel() }
+
+        let override = await timetables.realtime(for: leg(departurePlatform: PlatformInfo(planned: "3", actual: nil)))
+
+        #expect(override?.departurePlatform == nil)
+    }
+
+    @Test func overlaysAGleisaenderungOntoTheExistingPlannedPlatform() async throws {
+        let (timetables, session) = client(ChangedS15Protocol.self)
+        defer { session.invalidateAndCancel() }
+
+        let override = await timetables.realtime(for: leg(departurePlatform: PlatformInfo(planned: "3", actual: nil)))
+
+        #expect(override?.departurePlatform == PlatformInfo(planned: "3", actual: "14"))
+    }
+}
+
+/// `/plan` has a scheduled platform for the S15 at Berlin Hbf, but `/fchg` reports no Gleisänderung
+/// (or anything else) yet. `/fchg` for Gesundbrunnen (the arrival side, not under test) is likewise
+/// empty for every request, matched here by responding the same way regardless of path.
+private final class UnchangedS15Protocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let path = request.url!.path
+        let body: Data = path.contains("plan/")
+            ? Data("""
+              <timetable station='Berlin Hbf'><s id="1"><tl c="S" n="15"/><dp pt="2701150900" pp="12"/></s></timetable>
+              """.utf8)
+            : Data("<timetable></timetable>".utf8)
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+/// Same schedule as `UnchangedS15Protocol`, but `/fchg` now reports a Gleisänderung (platform 12 -> 14).
+private final class ChangedS15Protocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let path = request.url!.path
+        let body: Data
+        if path.contains("plan/") {
+            body = Data("""
+            <timetable station='Berlin Hbf'><s id="1"><tl c="S" n="15"/><dp pt="2701150900" pp="12"/></s></timetable>
+            """.utf8)
+        } else if path.contains("fchg/8011160") {
+            // `event(from:)` only builds an event when a time (planned or changed) is present, so a
+            // pure platform swap still needs `ct` — here unchanged from `pt`, i.e. no delay.
+            body = Data("""
+            <timetable station='Berlin Hbf'><s id="1"><dp ct="2701150900" cp="14"/></s></timetable>
+            """.utf8)
+        } else {
+            body = Data("<timetable></timetable>".utf8)
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+/// Real-world scenario reported for the departure board at Berlin Gesundbrunnen: Transitous carries a
+/// platform for the U8 (U-Bahn) but not for the S15 (S-Bahn) on the very same board, even though DB's
+/// own IRIS schedule has the S15's. `fillMissingPlatforms(in:at:)` should fill only the actual gap and
+/// leave an entry that already has a platform untouched (and not fire a lookup for it at all).
+@Suite struct TimetablesBoardPlatformTests {
+    let gesundbrunnen = station("8011102", "Berlin Gesundbrunnen", 52.549, 13.391, source: .bahnDe)
+    // 2027-01-15 08:00 UTC == 09:00 Europe/Berlin (CET) -> IRIS "2701150900".
+    let departure = Date(timeIntervalSince1970: 1_800_000_000)
+
+    func entry(line: Line, platform: PlatformInfo) -> BoardEntry {
+        BoardEntry(kind: .departures, tripId: line.name, station: gesundbrunnen, line: line, otherEnd: nil,
+                   time: TimeInfo(planned: departure, actual: nil), platform: platform, cancelled: false,
+                   terminatesOrOriginatesHere: nil, remarks: [], source: .transitous)
+    }
+
+    @Test func fillsOnlyTheEntryMissingAPlatform() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [GesundbrunnenBoardProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let timetables = TimetablesClient(credentials: TimetablesCredentials(clientID: "x", apiKey: "y"),
+                                          http: HTTPClient(session: session))
+
+        let u8 = entry(line: Line(name: "U8", number: "8", product: .subway, operatorName: nil),
+                        platform: PlatformInfo(planned: "2", actual: nil))
+        let s15 = entry(line: Line(name: "S15", number: "15", product: .suburban, operatorName: nil),
+                         platform: PlatformInfo(planned: nil, actual: nil))
+
+        let filled = await timetables.fillMissingPlatforms(in: [u8, s15], at: gesundbrunnen)
+
+        #expect(filled[0].platform == PlatformInfo(planned: "2", actual: nil))
+        #expect(filled[1].platform.planned == "12")
+    }
+}
+
+private final class GesundbrunnenBoardProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let path = request.url!.path
+        let body: Data = path.contains("plan/")
+            ? Data("""
+              <timetable station='Berlin Gesundbrunnen'><s id="1"><tl c="S" n="15"/><dp pt="2701150900" pp="12"/></s></timetable>
+              """.utf8)
+            : Data("<timetable></timetable>".utf8)
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+@Suite struct BahnDeEvaNumberTests {
+    /// Real-world bug found while investigating the Gesundbrunnen platform report: bahn.de's own
+    /// search for "Berlin Gesundbrunnen" also returns two closely clustered, separately-EVA'd
+    /// entrances ("Gesundbrunnen Bahnhof (S+U)" and "Gesundbrunnen Bahnhof Badstr.") a few hundred
+    /// meters from the main station. `evaNumber(for:)` used to pick whichever was nearest by raw
+    /// coordinate distance, which landed on "610701" (Badstr.) - a sub-entrance with no Timetables
+    /// ("IRIS") schedule of its own - instead of the actual station EVA "8011102", silently making
+    /// every DB Timetables lookup for Gesundbrunnen come back empty. A name match must be preferred.
+    @Test func prefersExactNameMatchOverNearerDecoyEntrance() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [GesundbrunnenSearchProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let bahnDe = BahnDeClient(http: HTTPClient(session: session))
+
+        // Transitous's own coordinate for the station, closer to the "Badstr." decoy than to the
+        // main station's own bahn.de coordinate - reproducing the real report.
+        let station = Station(id: "de:11000:900003201", name: "S+U Gesundbrunnen Bhf (Berlin)",
+                               coordinate: Coordinate(latitude: 52.548424, longitude: 13.388507),
+                               evaNumber: nil, source: .transitous)
+
+        let eva = try await bahnDe.evaNumber(for: station)
+
+        #expect(eva == "8011102")
+    }
+}
+
+private final class GesundbrunnenSearchProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let body = Data("""
+        [
+          {"extId":"8011102","name":"Berlin Gesundbrunnen","lat":52.548656,"lon":13.39106,"type":"ST"},
+          {"extId":"730796","name":"Gesundbrunnen Bahnhof (S+U), Berlin","lat":52.54897,"lon":13.388264,"type":"ST"},
+          {"extId":"610701","name":"Gesundbrunnen Bahnhof Badstr., Berlin","lat":52.548424,"lon":13.388507,"type":"ST"}
+        ]
         """.utf8)
         let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)

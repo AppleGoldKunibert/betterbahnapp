@@ -84,6 +84,12 @@ struct TripView: View {
                 }
             }
             error = nil
+            // Transitous sometimes lacks a platform for the trip's own first/last stop even though it
+            // has one for stops in between (e.g. reported for the S15 at Berlin Hbf); fill that in from
+            // DB's own schedule once the trip is already showing, so this never blocks the initial render.
+            if let timetables = model.timetablesClient {
+                trip = await timetables.fillMissingPlatforms(in: loaded)
+            }
         } catch is CancellationError {
         } catch {
             self.error = error
@@ -259,8 +265,8 @@ private struct DelayTimeText: View {
                     .monospacedDigit()
                     .foregroundStyle(delayColor(delayMinutes))
             } else if let delayMinutes = time.delayMinutes, delayMinutes != 0 {
-                // Real-time is shown above, already including the delay — just flag that it's delayed.
-                Text("(+)")
+                // Real-time is shown above, already including the delay — flag it without repeating the time.
+                Text(delayMinutes > 0 ? "(+\(delayMinutes))" : "(\(delayMinutes))")
                     .font(.caption2.weight(.bold))
                     .lineLimit(1)
                     .fixedSize()
@@ -325,8 +331,12 @@ struct LegTripSheet: View {
             return
         }
         do {
-            trip = try await model.provider.trip(id: tripId, source: leg.source)
+            let loaded = try await model.provider.trip(id: tripId, source: leg.source)
+            trip = loaded
             error = nil
+            if let timetables = model.timetablesClient {
+                trip = await timetables.fillMissingPlatforms(in: loaded)
+            }
         } catch is CancellationError {
         } catch {
             self.error = error

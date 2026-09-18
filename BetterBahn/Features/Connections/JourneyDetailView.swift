@@ -209,8 +209,7 @@ struct JourneyDetailView: View {
                       systemImage: "bolt.badge.clock.fill")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                if let entry = model.savedEntry(for: journey), model.liveActivityEligibleJourneys.count > 1,
-                   model.isLiveActivityEligible(journey) {
+                if let entry = model.savedEntry(for: journey), model.isLiveActivityEligible(journey) {
                     Toggle(isOn: Binding(
                         get: { model.manualLiveActivityJourneyID == entry.id || model.liveActivities.isActive(journey) },
                         set: { model.manualLiveActivityJourneyID = $0 ? entry.id : nil }

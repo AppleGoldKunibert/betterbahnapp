@@ -14,12 +14,26 @@ struct MPlace: Decodable {
     var scheduledDeparture: Date?
     var track: String?
     var scheduledTrack: String?
+    /// VBB's S-Bahn Berlin feed (unlike its U-Bahn one) leaves `track`/`scheduledTrack` unset and only
+    /// encodes the platform as free text here, e.g. "S-Bahnsteig Gleis 4" - see `descriptionTrack`.
+    var description: String?
     var cancelled: Bool?
     var pickupType: String?
     var dropoffType: String?
 
     var access: StopAccess {
         StopAccess(pickupAllowed: pickupType != "NOT_ALLOWED", dropoffAllowed: dropoffType != "NOT_ALLOWED")
+    }
+
+    /// The platform number out of `description`'s "... Gleis <n>" (e.g. "S-Bahnsteig Gleis 4" -> "4"),
+    /// for stops whose feed never fills in `track`/`scheduledTrack` at all - reported for the S-Bahn at
+    /// Berlin Gesundbrunnen, which otherwise showed no platform anywhere despite the U8 at the very
+    /// same station having one (its feed does populate `track` directly).
+    var descriptionTrack: String? {
+        guard let description,
+              let match = description.range(of: #"Gleis\s+(\w+)"#, options: .regularExpression) else { return nil }
+        return String(description[match]).replacingOccurrences(of: "Gleis", with: "")
+            .trimmingCharacters(in: .whitespaces)
     }
 
     func toStation() -> Station {
@@ -31,12 +45,13 @@ struct MPlace: Decodable {
     }
 
     func toStopover() -> Stopover {
-        Stopover(
+        let platform = PlatformInfo(planned: scheduledTrack ?? descriptionTrack, actual: track ?? descriptionTrack)
+        return Stopover(
             station: toStation(),
             arrival: timeInfo(planned: scheduledArrival, actual: arrival),
             departure: timeInfo(planned: scheduledDeparture, actual: departure),
-            arrivalPlatform: PlatformInfo(planned: scheduledTrack, actual: track),
-            departurePlatform: PlatformInfo(planned: scheduledTrack, actual: track),
+            arrivalPlatform: platform,
+            departurePlatform: platform,
             cancelled: cancelled ?? false,
             access: access
         )
@@ -156,8 +171,8 @@ struct MLeg: Decodable {
         return Leg(
             origin: from.toStation(), destination: to.toStation(),
             departure: dep, arrival: arr,
-            departurePlatform: PlatformInfo(planned: from.scheduledTrack, actual: from.track),
-            arrivalPlatform: PlatformInfo(planned: to.scheduledTrack, actual: to.track),
+            departurePlatform: PlatformInfo(planned: from.scheduledTrack ?? from.descriptionTrack, actual: from.track ?? from.descriptionTrack),
+            arrivalPlatform: PlatformInfo(planned: to.scheduledTrack ?? to.descriptionTrack, actual: to.track ?? to.descriptionTrack),
             tripId: tripId, line: isWalking ? nil : lineInfo.toLine(), direction: direction,
             isWalking: isWalking, cancelled: (cancelled ?? false) || (tripCancelled ?? false),
             stopovers: stopovers, remarks: [], source: .transitous, geometry: geometry
@@ -208,7 +223,8 @@ struct MStopTime: Decodable {
             kind: kind, tripId: tripId, station: station, line: line,
             otherEnd: otherEndName.map(Station.displayName(for:)),
             time: time,
-            platform: PlatformInfo(planned: place.scheduledTrack, actual: realtime ? place.track : nil),
+            platform: PlatformInfo(planned: place.scheduledTrack ?? place.descriptionTrack,
+                                   actual: realtime ? (place.track ?? place.descriptionTrack) : nil),
             cancelled: (cancelled ?? false) || (tripCancelled ?? false),
             terminatesOrOriginatesHere: otherEnd.map { $0.toStation().isSamePlace(as: station) },
             remarks: [], access: place.access, source: .transitous

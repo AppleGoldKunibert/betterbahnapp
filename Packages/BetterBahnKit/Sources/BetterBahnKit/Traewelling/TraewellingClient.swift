@@ -443,14 +443,27 @@ public actor TraewellingClient {
 
     static func matchStop(_ stops: [TraewellingTrip.Stop], station: Station,
                           arrival: Date? = nil, departure: Date? = nil) -> TraewellingTrip.Stop? {
-        if let arrival, let stop = stops.first(where: {
-            guard let planned = $0.arrivalPlanned else { return false }
-            return abs(planned.timeIntervalSince(arrival)) <= 2 * 60
-        }) { return stop }
-        if let departure, let stop = stops.first(where: {
-            guard let planned = $0.departurePlanned else { return false }
-            return abs(planned.timeIntervalSince(departure)) <= 2 * 60
-        }) { return stop }
+        // On a leg whose final stops are only a minute or two apart (common on S-Bahn runs),
+        // more than one stop can fall inside the tolerance window — picking the *first* one
+        // within it (rather than the closest) could return the stop before the actual exit.
+        if let arrival {
+            let candidates = stops.filter {
+                guard let planned = $0.arrivalPlanned else { return false }
+                return abs(planned.timeIntervalSince(arrival)) <= 2 * 60
+            }
+            if let closest = candidates.min(by: { abs($0.arrivalPlanned!.timeIntervalSince(arrival)) < abs($1.arrivalPlanned!.timeIntervalSince(arrival)) }) {
+                return closest
+            }
+        }
+        if let departure {
+            let candidates = stops.filter {
+                guard let planned = $0.departurePlanned else { return false }
+                return abs(planned.timeIntervalSince(departure)) <= 2 * 60
+            }
+            if let closest = candidates.min(by: { abs($0.departurePlanned!.timeIntervalSince(departure)) < abs($1.departurePlanned!.timeIntervalSince(departure)) }) {
+                return closest
+            }
+        }
         return stops.first { Station.normalize($0.name) == Station.normalize(station.name) }
     }
 }

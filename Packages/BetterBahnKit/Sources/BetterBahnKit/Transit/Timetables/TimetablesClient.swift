@@ -141,14 +141,21 @@ public struct TimetablesClient: Sendable {
         return try? await bahnDe.evaNumber(for: station)
     }
 
-    /// The live event (actual time/platform/cancellation) for `category`+`number` at `eva`, on
-    /// whichever `side` (arrival or departure) has a planned time within `matchTolerance` of `time`.
+    /// The event for `category`+`number` at `eva`, on whichever `side` (arrival or departure) has a
+    /// planned time within `matchTolerance` of `time`. Starts from the scheduled `plan` entry (which
+    /// always carries the planned platform, even when nothing has changed) and overlays whatever
+    /// `fchg` (Gleisänderungen, delays, cancellations) currently reports for that same stop.
     private func liveEvent(eva: String, category: String, number: String, time: Date,
                             side: KeyPath<TimetablesStop, TimetablesEvent?>) async -> TimetablesEvent? {
         guard let planned = try? await plan(eva: eva, around: time),
               let stop = Self.match(planned, category: category, number: number, plannedTime: time, side: side) else { return nil }
-        guard let changed = try? await changes(eva: eva)[stop.id] else { return nil }
-        return changed[keyPath: side]
+        var event = stop[keyPath: side]
+        if let changed = try? await changes(eva: eva)[stop.id], let change = changed[keyPath: side] {
+            if let actual = change.actual { event?.actual = actual }
+            if let actualPlatform = change.actualPlatform { event?.actualPlatform = actualPlatform }
+            if change.cancelled { event?.cancelled = true }
+        }
+        return event
     }
 
     /// Live data for `leg`'s departure and arrival, matched by category, train number and planned
@@ -167,24 +174,101 @@ public struct TimetablesClient: Sendable {
         if let eva = await eva(for: leg.origin),
            let event = await liveEvent(eva: eva, category: category, number: number, time: leg.departure.planned, side: \.departure) {
             departure = TimeInfo(planned: leg.departure.planned, actual: event.actual)
-            if event.actualPlatform != nil {
-                departurePlatform = PlatformInfo(planned: leg.departurePlatform?.planned, actual: event.actualPlatform)
-            }
+            departurePlatform = Self.mergedPlatform(existing: leg.departurePlatform, event: event)
             if event.cancelled { cancelled = true }
         }
 
         if let eva = await eva(for: leg.destination),
            let event = await liveEvent(eva: eva, category: category, number: number, time: leg.arrival.planned, side: \.arrival) {
             arrival = TimeInfo(planned: leg.arrival.planned, actual: event.actual)
-            if event.actualPlatform != nil {
-                arrivalPlatform = PlatformInfo(planned: leg.arrivalPlatform?.planned, actual: event.actualPlatform)
-            }
+            arrivalPlatform = Self.mergedPlatform(existing: leg.arrivalPlatform, event: event)
             if event.cancelled { cancelled = true }
         }
 
         guard departure != nil || arrival != nil else { return nil }
         return TimetablesLegOverride(departure: departure, departurePlatform: departurePlatform,
                                       arrival: arrival, arrivalPlatform: arrivalPlatform, cancelled: cancelled)
+    }
+
+    /// Combines whatever platform a caller already had with a DB Timetables `event`: a genuine
+    /// Gleisänderung (`event.actualPlatform`, from `fchg`) always wins and is overlaid onto the
+    /// existing planned platform; otherwise, only when nothing was known at all, DB's own scheduled
+    /// platform (`event.plannedPlatform`, from `plan`) fills the gap rather than showing nothing.
+    private static func mergedPlatform(existing: PlatformInfo?, event: TimetablesEvent) -> PlatformInfo? {
+        if let actualPlatform = event.actualPlatform {
+            return PlatformInfo(planned: existing?.planned, actual: actualPlatform)
+        } else if existing?.best == nil, let plannedPlatform = event.plannedPlatform {
+            return PlatformInfo(planned: plannedPlatform, actual: nil)
+        }
+        return nil
+    }
+
+    /// Fills in a missing platform for any of `trip`'s stopovers – in practice mainly the trip's own
+    /// first and last stop: Transitous' `v5/trip` response reliably carries a platform for
+    /// `intermediateStops` but sometimes omits it for the leg's own `from`/`to` place (reported for
+    /// the S15 at Berlin Hbf/Berlin Gesundbrunnen, which DB Navigator shows correctly) – using DB's
+    /// own Timetables ("IRIS") schedule. Only queried for stopovers that are actually missing a
+    /// platform, so a long route doesn't fire a lookup per stop; a stopover that already has one is
+    /// left untouched (see `realtime(for:)` for overlaying live Gleisänderungen onto an existing leg).
+    public func fillMissingPlatforms(in trip: Trip) async -> Trip {
+        guard credentials.isConfigured, let line = trip.line, let number = line.number,
+              let category = Self.category(from: line.name) else { return trip }
+        var trip = trip
+        await withTaskGroup(of: (Int, PlatformInfo?, PlatformInfo?).self) { group in
+            for index in trip.stopovers.indices {
+                let stop = trip.stopovers[index]
+                let needsArrival = stop.arrival != nil && stop.arrivalPlatform?.best == nil
+                let needsDeparture = stop.departure != nil && stop.departurePlatform?.best == nil
+                guard needsArrival || needsDeparture else { continue }
+                group.addTask {
+                    guard let eva = await self.eva(for: stop.station) else { return (index, nil, nil) }
+                    var arrivalPlatform: PlatformInfo?
+                    var departurePlatform: PlatformInfo?
+                    if needsArrival, let time = stop.arrival?.planned,
+                       let event = await self.liveEvent(eva: eva, category: category, number: number, time: time, side: \.arrival) {
+                        arrivalPlatform = Self.mergedPlatform(existing: stop.arrivalPlatform, event: event)
+                    }
+                    if needsDeparture, let time = stop.departure?.planned,
+                       let event = await self.liveEvent(eva: eva, category: category, number: number, time: time, side: \.departure) {
+                        departurePlatform = Self.mergedPlatform(existing: stop.departurePlatform, event: event)
+                    }
+                    return (index, arrivalPlatform, departurePlatform)
+                }
+            }
+            for await (index, arrivalPlatform, departurePlatform) in group {
+                if let arrivalPlatform { trip.stopovers[index].arrivalPlatform = arrivalPlatform }
+                if let departurePlatform { trip.stopovers[index].departurePlatform = departurePlatform }
+            }
+        }
+        return trip
+    }
+
+    /// Fills in a missing platform for any of `entries` – e.g. reported for Berlin Gesundbrunnen,
+    /// where Transitous carries a platform for U-Bahn departures but not for the S-Bahn ones at the
+    /// very same board, apparently a gap in S-Bahn Berlin's own feed rather than anything DB Navigator
+    /// hits – using DB's own Timetables ("IRIS") schedule. Only queried for entries actually missing a
+    /// platform, and only one `eva` lookup for the whole board since every entry shares `station`.
+    public func fillMissingPlatforms(in entries: [BoardEntry], at station: Station) async -> [BoardEntry] {
+        guard credentials.isConfigured, let eva = await eva(for: station) else { return entries }
+        var entries = entries
+        await withTaskGroup(of: (Int, PlatformInfo?).self) { group in
+            for index in entries.indices {
+                let entry = entries[index]
+                guard entry.platform.best == nil, let number = entry.line.number,
+                      let category = Self.category(from: entry.line.name) else { continue }
+                group.addTask {
+                    let event = entry.kind == .arrivals
+                        ? await self.liveEvent(eva: eva, category: category, number: number, time: entry.time.planned, side: \.arrival)
+                        : await self.liveEvent(eva: eva, category: category, number: number, time: entry.time.planned, side: \.departure)
+                    guard let event else { return (index, nil) }
+                    return (index, Self.mergedPlatform(existing: entry.platform, event: event))
+                }
+            }
+            for await (index, platform) in group {
+                if let platform { entries[index].platform = platform }
+            }
+        }
+        return entries
     }
 
     /// Every scheduled departure/arrival at `station` matching `category` (optional, case-insensitive)
@@ -231,9 +315,13 @@ public struct TimetablesClient: Sendable {
             .sorted()
     }
 
-    /// "ICE 571" -> "ICE".
+    /// "ICE 571" -> "ICE". Also handles names with no space between category and number ("S15" -> "S",
+    /// as Transitous names S-Bahn lines) by taking the leading non-digit run of the first token, since
+    /// IRIS always splits them into a separate category (`tl`'s `c`) and number (`n`).
     static func category(from lineName: String) -> String? {
-        lineName.split(separator: " ").first.map(String.init)?.uppercased()
+        guard let first = lineName.split(separator: " ").first else { return nil }
+        let letters = first.prefix(while: { !$0.isNumber })
+        return letters.isEmpty ? nil : letters.uppercased()
     }
 
     static func match(_ stops: [TimetablesStop], category: String, number: String, plannedTime: Date,

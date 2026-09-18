@@ -114,17 +114,9 @@ struct CheckinSheet: View {
                         .frame(maxWidth: .infinity, alignment: .trailing)
                 }
                 Divider()
-                pickerRow("Sichtbarkeit", icon: "eye.fill", color: .purple) {
-                    Picker("Sichtbarkeit", selection: $visibility) {
-                        ForEach(TraewellingVisibility.allCases, id: \.self) { Text($0.label).tag($0) }
-                    }
-                }
+                pickerRow("Sichtbarkeit", icon: "eye.fill", color: .purple, selection: $visibility, options: TraewellingVisibility.allCases) { $0.label }
                 Divider()
-                pickerRow("Reiseart", icon: "briefcase.fill", color: .orange) {
-                    Picker("Reiseart", selection: $business) {
-                        ForEach(TraewellingBusiness.allCases, id: \.self) { Text($0.label).tag($0) }
-                    }
-                }
+                pickerRow("Reiseart", icon: "briefcase.fill", color: .orange, selection: $business, options: TraewellingBusiness.allCases) { $0.label }
                 if !model.settings.quickTags.isEmpty {
                     Divider()
                     tagsRow
@@ -141,26 +133,40 @@ struct CheckinSheet: View {
         }
     }
 
-    private func pickerRow<P: View>(_ title: String, icon: String, color: Color, @ViewBuilder picker: () -> P) -> some View {
-        // `.top` keeps the icon and title pinned to the row's top edge even if the trailing
-        // picker's selected label is long enough to wrap onto two lines — with the default
-        // `.center` alignment, that extra height would otherwise drag the whole row (icon
-        // included) downward along with it.
-        HStack(alignment: .top, spacing: 12) {
-            HStack(spacing: 12) {
-                IconTile(systemImage: icon, color: color, size: 32)
-                Text(title)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
-                    .layoutPriority(1)
-            }
-            Spacer(minLength: 8)
-            picker()
-                .labelsHidden()
-                .tint(.secondary)
+    /// A settings row with a leading icon/title and a trailing value that opens a `Menu` to pick
+    /// from `options`. Built on `Menu` rather than a system `Picker` because a menu-style
+    /// `Picker`'s auto-generated label ignores an outer `.lineLimit(1)` and can still wrap a long
+    /// selected value onto a second line; here the label is our own `Text`, so the line limit
+    /// actually takes effect and long values truncate with "…" instead.
+    private func pickerRow<T: Hashable>(_ title: String, icon: String, color: Color,
+                                        selection: Binding<T>, options: [T], label: @escaping (T) -> String) -> some View {
+        HStack(spacing: 12) {
+            IconTile(systemImage: icon, color: color, size: 32)
+            Text(title)
+                .font(.subheadline.weight(.medium))
                 .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(maxWidth: 150, alignment: .trailing)
+                .layoutPriority(1)
+            Spacer(minLength: 8)
+            Menu {
+                ForEach(options, id: \.self) { option in
+                    Button {
+                        selection.wrappedValue = option
+                    } label: {
+                        if option == selection.wrappedValue {
+                            Label(label(option), systemImage: "checkmark")
+                        } else {
+                            Text(label(option))
+                        }
+                    }
+                }
+            } label: {
+                Text(label(selection.wrappedValue))
+                    .font(.subheadline)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: 150, alignment: .trailing)
         }
     }
 
