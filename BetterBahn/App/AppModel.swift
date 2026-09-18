@@ -54,6 +54,8 @@ final class AppModel {
 
     var trainPicker: TrainPicker { TrainPicker(provider: provider) }
 
+    var trainRoutePlanner: TrainRoutePlanner { TrainRoutePlanner(provider: provider) }
+
     var bc100Rules: BC100Rules { settings.bc100Rules }
 
     /// Overlays fresher delay/platform data straight from DB onto legs. Uses the user's own
@@ -177,12 +179,41 @@ final class AppModel {
 
     func geometry(for leg: Leg) async -> [Coordinate]? {
         var cache = await loadedGeometryCache()
-        if let cached = cache[leg.id] { return Polyline.decode(cached) }
+        if let encoded = cache[leg.id] {
+            let cached = Polyline.decode(encoded)
+            // Earlier versions cached straight lines between the two stations; look those up again
+            // instead of drawing them across the map forever.
+            if RouteGeometryService.followsTracks(cached) { return cached }
+        }
         guard let geometry = await geometryService.geometry(for: leg) else { return nil }
         cache[leg.id] = Polyline.encode(geometry)
         geometryCacheTask = Task { cache }
         Task.detached(priority: .utility) { Storage.save(cache, key: "legGeometries") }
         return geometry
+    }
+
+    /// The already-cached geometry of many legs at once, decoded off the main thread.
+    ///
+    /// The map needs a few hundred of these at a time; decoding them one by one from a main-actor
+    /// loop is what used to freeze the screen for half a minute. Returns the legs it couldn't
+    /// serve, which the caller then loads individually.
+    func cachedGeometries(for legs: [Leg]) async -> (lines: [(leg: Leg, coordinates: [Coordinate])], missing: [Leg]) {
+        let cache = await loadedGeometryCache()
+        let encoded = legs.map { (leg: $0, encoded: cache[$0.id]) }
+        return await Task.detached(priority: .userInitiated) {
+            var lines: [(leg: Leg, coordinates: [Coordinate])] = []
+            var missing: [Leg] = []
+            for entry in encoded {
+                guard let string = entry.encoded else { missing.append(entry.leg); continue }
+                let coordinates = Polyline.decode(string)
+                if RouteGeometryService.followsTracks(coordinates) {
+                    lines.append((entry.leg, coordinates))
+                } else {
+                    missing.append(entry.leg)
+                }
+            }
+            return (lines, missing)
+        }.value
     }
 
     // MARK: Travel map heatmap
@@ -221,6 +252,45 @@ final class AppModel {
         cache[key] = value
         mapHeatmapCacheTask = Task { cache }
         Task.detached(priority: .utility) { Storage.save(cache, key: "mapHeatmapCache") }
+    }
+
+    // MARK: Travel map prewarm
+
+    @ObservationIgnored private var mapPrewarmTask: Task<Void, Never>?
+
+    /// Warms the travel map in the background after launch so opening its tab is instant.
+    ///
+    /// The slow part is the track geometry, which is fetched leg by leg and may hit the network, so
+    /// this runs at low priority with a pause between ranges — a long history mustn't compete with
+    /// what the user is actually doing. Results land in the same cache the map view reads.
+    func prewarmTravelMap() {
+        guard mapPrewarmTask == nil else { return }
+        mapPrewarmTask = Task(priority: .utility) { [self] in
+            // Let the app finish launching before touching the disk and the network.
+            try? await Task.sleep(for: .seconds(3))
+            // Träwelling check-ins are part of the map, and the cache key counts them — warming
+            // before the sync lands would just cache a result that's stale right away.
+            await syncTraewelling()
+            // RootView kicks off a sync of its own on launch; `syncTraewelling` returns right away
+            // while that one runs, so wait it out rather than caching a result the new check-ins
+            // invalidate a moment later.
+            while isSyncingTraewelling, !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+            for range in TravelMapRange.prewarmOrder {
+                guard !Task.isCancelled else { break }
+                _ = await mapHeatmap(for: TravelMapSelection(range: range), progressively: false)
+                try? await Task.sleep(for: .seconds(1))
+            }
+            mapPrewarmTask = nil
+        }
+    }
+
+    /// Stops the prewarm while the map view builds the same thing itself. Nothing is lost: the
+    /// geometry fetched so far is already cached.
+    func stopTravelMapPrewarm() {
+        mapPrewarmTask?.cancel()
+        mapPrewarmTask = nil
     }
 
     // MARK: Saved journeys

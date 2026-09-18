@@ -99,6 +99,8 @@ struct TripContent: View {
     @Binding var exitID: String?
     /// When false, stops are shown read-only (e.g. viewing the full route of a leg already booked).
     var interactive = true
+    /// Tapping any stop time flips every stop in the list between real-time and scheduled times.
+    @State private var showPlannedTimes = false
 
     private var color: Color { trip.line?.product.color ?? .gray }
 
@@ -162,45 +164,53 @@ struct TripContent: View {
         let segmentBelow = index < trip.stopovers.count - 1 ? (isRidden(index) && isRidden(index + 1) ? color : color.opacity(0.25)) : nil
         let dimmed = boardingIndex != nil && !isRidden(index) && !isExit
 
-        return Button {
-            guard interactive else { return }
-            select(index)
-        } label: {
-            TimelineNode(kind: isMajor ? .major : .minor, color: isRidden(index) ? color : color.opacity(0.45),
-                         lineAbove: segmentAbove, lineBelow: segmentBelow, dimmed: dimmed) {
-                HStack(alignment: .top, spacing: 10) {
+        return TimelineNode(kind: isMajor ? .major : .minor, color: isRidden(index) ? color : color.opacity(0.45),
+                             lineAbove: segmentAbove, lineBelow: segmentBelow, dimmed: dimmed) {
+            HStack(alignment: .top, spacing: 10) {
+                Button {
+                    withAnimation(.snappy) { showPlannedTimes.toggle() }
+                } label: {
                     VStack(alignment: .leading, spacing: 2) {
-                        if let arrival = stop.arrival, stop.departure != nil {
-                            Text(arrival.best.timeString)
-                                .font(.caption2.weight(.semibold))
-                                .monospacedDigit()
-                                .strikethrough(stop.cancelled, color: .heavyDelay)
-                                .foregroundStyle(.secondary)
+                        if let arrival = stop.arrival {
+                            DelayTimeText(time: arrival, cancelled: stop.cancelled, showPlanned: showPlannedTimes,
+                                          font: isMajor ? .subheadline.weight(.semibold) : .caption.weight(.semibold))
                         }
-                        if let time = stop.departure ?? stop.arrival {
-                            TimeStack(time: time, cancelled: stop.cancelled, font: isMajor ? .headline : .subheadline)
+                        if let departure = stop.departure {
+                            DelayTimeText(time: departure, cancelled: stop.cancelled, showPlanned: showPlannedTimes,
+                                          font: isMajor ? .headline : .subheadline)
                         }
                     }
-                    .frame(width: 52, alignment: .leading)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(stop.station.displayName)
-                            .font(isMajor ? .headline : .subheadline)
-                            .fontWeight(stop.station.isSamePlace(as: highlight) ? .bold : nil)
-                            .lineLimit(2)
-                        if isBoarding {
-                            InfoChip(text: "Einstieg", systemImage: "arrow.up.right.circle.fill", tint: .punctual)
-                        } else if isExit {
-                            InfoChip(text: "Ausstieg", systemImage: "arrow.down.right.circle.fill", tint: .brand)
-                        }
-                    }
-                    Spacer()
-                    PlatformBadge(platform: stop.departurePlatform?.best != nil ? stop.departurePlatform : stop.arrivalPlatform)
+                    .fixedSize()
+                    .frame(minWidth: 68, alignment: .leading)
+                    .contentShape(.rect)
                 }
-                .contentShape(.rect)
+                .buttonStyle(.plain)
+
+                Button {
+                    guard interactive else { return }
+                    select(index)
+                } label: {
+                    HStack(alignment: .top, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(stop.station.displayName)
+                                .font(isMajor ? .headline : .subheadline)
+                                .fontWeight(stop.station.isSamePlace(as: highlight) ? .bold : nil)
+                                .lineLimit(2)
+                            if isBoarding {
+                                InfoChip(text: "Einstieg", systemImage: "arrow.up.right.circle.fill", tint: .punctual)
+                            } else if isExit {
+                                InfoChip(text: "Ausstieg", systemImage: "arrow.down.right.circle.fill", tint: .brand)
+                            }
+                        }
+                        Spacer()
+                        PlatformBadge(platform: stop.departurePlatform?.best != nil ? stop.departurePlatform : stop.arrivalPlatform)
+                    }
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .disabled(!interactive)
             }
         }
-        .buttonStyle(.plain)
-        .disabled(!interactive)
     }
 
     private func select(_ index: Int) {
@@ -211,6 +221,41 @@ struct TripContent: View {
             } else {
                 boardingID = stop.id
                 exitID = nil
+            }
+        }
+    }
+}
+
+/// One stop time, showing either the real-time or the scheduled time (`showPlanned`) with the delay
+/// as a compact "+n" badge — tap any time in the list to flip all of them between the two.
+private struct DelayTimeText: View {
+    let time: TimeInfo
+    var cancelled = false
+    var showPlanned = false
+    var font: Font = .subheadline
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 3) {
+            Text((showPlanned ? time.planned : time.best).timeString)
+                .font(font)
+                .monospacedDigit()
+                .lineLimit(1)
+                .fixedSize()
+                .strikethrough(cancelled, color: .heavyDelay)
+                .foregroundStyle(cancelled ? .secondary : .primary)
+            if cancelled {
+                Text("Ausfall")
+                    .font(.caption2.weight(.bold))
+                    .lineLimit(1)
+                    .fixedSize()
+                    .foregroundStyle(Color.heavyDelay)
+            } else if let delayMinutes = time.delayMinutes, delayMinutes != 0 {
+                Text(delayMinutes > 0 ? "+\(delayMinutes)" : "\(delayMinutes)")
+                    .font(.caption2.weight(.bold))
+                    .lineLimit(1)
+                    .fixedSize()
+                    .monospacedDigit()
+                    .foregroundStyle(delayColor(delayMinutes))
             }
         }
     }

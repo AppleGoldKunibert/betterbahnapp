@@ -10,13 +10,27 @@ public struct RouteGeometryService: Sendable {
         self.http = http
     }
 
+    /// Whether a shape actually follows the tracks instead of cutting across country.
+    ///
+    /// Some sources hand out a leg as two points — the two stations — which draws a ruler-straight
+    /// line across the map. A real track shape has far more detail than one point per 5 km, so
+    /// anything coarser is treated as "no geometry" and looked up properly instead.
+    public static func followsTracks(_ coordinates: [Coordinate]) -> Bool {
+        guard coordinates.count > 1 else { return false }
+        return Double(coordinates.count - 1) >= Polyline.length(coordinates) / 5_000
+    }
+
     public func geometry(for leg: Leg) async -> [Coordinate]? {
-        if let geometry = leg.geometry, geometry.count > 1 { return geometry }
+        if let geometry = leg.geometry, Self.followsTracks(geometry) { return geometry }
         guard !leg.isWalking else { return nil }
-        if let shape = try? await shapeFromTransitous(leg), shape.count > 1 { return shape }
+        if let shape = try? await shapeFromTransitous(leg), Self.followsTracks(shape) { return shape }
         // Fallback: follow the stops instead of a straight line.
         let stops = leg.stopovers.compactMap(\.station.coordinate)
-        return stops.count > 1 ? stops : nil
+        if Self.followsTracks(stops) { return stops }
+        // Nothing track-shaped to be had. Use the most detailed thing we have, but never a bare
+        // straight line between two cities — leaving the leg off the map beats drawing a fiction.
+        let candidates = [leg.geometry ?? [], stops].filter { $0.count > 2 }
+        return candidates.max { $0.count < $1.count }
     }
 
     private func shapeFromTransitous(_ leg: Leg) async throws -> [Coordinate]? {

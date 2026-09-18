@@ -16,14 +16,35 @@ struct JourneyResultsView: View {
     @State private var error: Error?
     @State private var showTrainSheet = false
     @State private var showTimePicker = false
-    @State private var forcedTrain: String?
-    @State private var forcedJourney: Journey?
-    @State private var forcedBreaksBoardingRules = false
-    @State private var forcedAlternative: Journey?
+    /// Trains the route has to use, in ride order. Adding another one keeps the existing ones.
+    @State private var requirements: [TrainRequirement] = []
+    @State private var plan: TrainRoutePlan?
+    @State private var planError: Error?
+    @State private var isPlanning = false
+
+    /// A route counts as noticeably slower than the free choice from this much extra travel time.
+    private static let slowRouteThreshold: TimeInterval = 60 * 60
 
     init(search: ConnectionSearch) {
         self.search = search
         _searchDate = State(initialValue: search.date)
+    }
+
+    /// Only routes that fulfil every train requirement are shown once one is set.
+    private var visibleJourneys: [Journey] {
+        requirements.isEmpty ? journeys : (plan?.journeys ?? [])
+    }
+
+    /// Fastest connection without any train requirement, for comparison.
+    private var baselineDuration: TimeInterval? {
+        journeys.filter { !$0.isCancelled }.compactMap(\.duration).min()
+    }
+
+    /// How much longer the best required route takes than the free choice, if it's worth warning about.
+    private var extraTravelTime: TimeInterval? {
+        guard let baseline = baselineDuration, let forced = plan?.best?.duration else { return nil }
+        let extra = forced - baseline
+        return extra >= Self.slowRouteThreshold ? extra : nil
     }
 
     var body: some View {
@@ -35,71 +56,69 @@ struct JourneyResultsView: View {
                     ErrorBanner(error: error)
                 }
 
-                trainButton
+                trainBar
 
-                if let forcedJourney, let forcedTrain {
-                    SectionHeader(title: "Mit \(forcedTrain)", systemImage: "pin.fill")
-                    NavigationLink {
-                        JourneyDetailView(journey: forcedJourney, finalDestination: search.to)
-                    } label: {
-                        JourneyCard(journey: forcedJourney)
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                    .strokeBorder(Color.brand, lineWidth: 2)
-                            }
-                    }
-                    .buttonStyle(.plain)
+                if !requirements.isEmpty {
+                    requirementList
 
-                    if forcedBreaksBoardingRules {
-                        HStack(alignment: .top, spacing: 10) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .font(.title3)
-                                .foregroundStyle(Color.slightDelay)
-                            Text("Ein- oder Ausstieg an dieser Station ist laut Fahrplan nicht vorgesehen (Nur Einstieg/Nur Ausstieg).")
+                    if isPlanning {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("Route mit deinen Zügen wird geplant …")
                                 .font(.callout)
+                                .foregroundStyle(.secondary)
                         }
-                        .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.slightDelay.opacity(0.1), in: .rect(cornerRadius: 14, style: .continuous))
-
-                        if let forcedAlternative {
-                            SectionHeader(title: "Reguläre Alternative", systemImage: "checkmark.shield.fill")
-                            NavigationLink {
-                                JourneyDetailView(journey: forcedAlternative, finalDestination: search.to)
-                            } label: {
-                                JourneyCard(journey: forcedAlternative)
-                            }
-                            .buttonStyle(.plain)
-                        }
+                        .padding(.vertical, 4)
                     }
 
-                    SectionHeader(title: "Alle Verbindungen", systemImage: "list.bullet")
-                        .padding(.top, 6)
+                    if let planError {
+                        ErrorBanner(error: planError)
+                    }
+
+                    if let extraTravelTime {
+                        warningBanner("Mit dieser Zugvorgabe dauert die Reise \(extraTravelTime.compactDuration) länger als die schnellste Verbindung.")
+                    }
+
+                    if plan?.breaksBoardingRules == true {
+                        warningBanner("Ein- oder Ausstieg an einer gewählten Station ist laut Fahrplan nicht vorgesehen (Nur Einstieg/Nur Ausstieg).")
+                    }
+
+                    if !visibleJourneys.isEmpty {
+                        SectionHeader(title: "Routen mit \(requirements.count == 1 ? "diesem Zug" : "diesen Zügen")",
+                                      systemImage: "pin.fill")
+                    }
                 }
 
-                if earlierCursor != nil {
+                if requirements.isEmpty, earlierCursor != nil {
                     pageButton("Frühere Verbindungen", systemImage: "chevron.up") {
                         await load(cursor: earlierCursor, prepend: true)
                     }
                 }
 
-                ForEach(journeys) { journey in
+                ForEach(Array(visibleJourneys.enumerated()), id: \.element.id) { index, journey in
                     NavigationLink {
                         JourneyDetailView(journey: journey, finalDestination: search.to)
                     } label: {
                         JourneyCard(journey: journey)
+                            .overlay {
+                                if !requirements.isEmpty, index == 0 {
+                                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                        .strokeBorder(Color.brand, lineWidth: 2)
+                                }
+                            }
                     }
                     .buttonStyle(.plain)
                 }
 
-                if laterCursor != nil {
+                if requirements.isEmpty, laterCursor != nil {
                     pageButton("Spätere Verbindungen", systemImage: "chevron.down") {
                         await load(cursor: laterCursor, prepend: false)
                     }
                 }
 
                 VStack(spacing: 8) {
-                    if hiddenCount > 0 {
+                    if hiddenCount > 0, requirements.isEmpty {
                         InfoChip(text: "\(hiddenCount) ohne BC100-Gültigkeit ausgeblendet", systemImage: "eye.slash.fill")
                     }
                     if source == .transitous {
@@ -116,26 +135,41 @@ struct JourneyResultsView: View {
         .overlay {
             if isLoading, journeys.isEmpty {
                 ProgressView("Suche Verbindungen …")
-            } else if !isLoading, journeys.isEmpty, error == nil {
+            } else if !isLoading, !isPlanning, visibleJourneys.isEmpty, error == nil, planError == nil {
                 ContentUnavailableView("Keine Verbindungen", systemImage: "tram.fill",
-                                       description: Text("Versuche eine andere Uhrzeit oder schalte Filter aus."))
+                                       description: Text(requirements.isEmpty
+                                                         ? "Versuche eine andere Uhrzeit oder schalte Filter aus."
+                                                         : "Mit den gewählten Zügen ließ sich keine Route bilden."))
             }
         }
         .navigationTitle("Verbindungen")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showTrainSheet) {
-            TrainNumberSheet(search: search, suggestions: trainSuggestions) { name, match in
-                withAnimation(.snappy) {
-                    forcedTrain = name
-                    forcedJourney = match.journey
-                    forcedBreaksBoardingRules = match.breaksBoardingRules
-                    forcedAlternative = match.alternative
-                }
+            TrainNumberSheet(search: search, suggestions: trainSuggestions, defaultBoarding: nextBoardingDefault) { requirement in
+                requirements.append(requirement)
+                Task { await replan() }
             }
         }
         .task { await load(cursor: nil, prepend: false) }
-        .refreshable { await load(cursor: nil, prepend: false) }
+        .refreshable {
+            await load(cursor: nil, prepend: false)
+            await replan()
+        }
     }
+
+    private func warningBanner(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.title3)
+                .foregroundStyle(Color.slightDelay)
+            Text(text)
+                .font(.callout)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.slightDelay.opacity(0.1), in: .rect(cornerRadius: 14, style: .continuous))
+    }
+
 
     private var header: some View {
         HStack(spacing: 10) {
@@ -201,12 +235,12 @@ struct JourneyResultsView: View {
         .presentationDetents([.height(500)])
     }
 
-    private var trainButton: some View {
+    private var trainBar: some View {
         HStack(spacing: 10) {
             Button {
                 showTrainSheet = true
             } label: {
-                Label(forcedTrain.map { "Zug: \($0)" } ?? "Bestimmten Zug wählen", systemImage: "number")
+                Label(requirements.isEmpty ? "Bestimmten Zug wählen" : "Weiteren Zug vorgeben", systemImage: "number")
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
             }
@@ -214,23 +248,80 @@ struct JourneyResultsView: View {
             .controlSize(.large)
             .tint(.brand)
 
-            if forcedTrain != nil {
+            if !requirements.isEmpty {
                 Button {
-                    withAnimation(.snappy) {
-                        forcedTrain = nil
-                        forcedJourney = nil
-                    }
+                    withAnimation(.snappy) { resetRequirements() }
                 } label: {
-                    Image(systemName: "xmark")
-                        .font(.subheadline.weight(.bold))
+                    Label("Zurücksetzen", systemImage: "arrow.counterclockwise")
+                        .font(.subheadline.weight(.semibold))
+                        .labelStyle(.iconOnly)
                         .frame(width: 22, height: 22)
                 }
                 .buttonStyle(.glass)
                 .buttonBorderShape(.circle)
                 .controlSize(.large)
-                .accessibilityLabel("Zug entfernen")
+                .accessibilityLabel("Zugvorgaben zurücksetzen")
             }
         }
+    }
+
+    /// The trains the route must use, each removable on its own.
+    private var requirementList: some View {
+        VStack(spacing: 8) {
+            ForEach(requirements) { requirement in
+                HStack(spacing: 10) {
+                    IconTile(systemImage: "tram.fill", color: .brand, size: 32)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(plan?.resolvedNames[requirement.id] ?? requirement.trainName.uppercased())
+                            .font(.subheadline.weight(.semibold))
+                        Text(requirementSubtitle(requirement))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Button {
+                        withAnimation(.snappy) { remove(requirement) }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Zugvorgabe entfernen")
+                }
+                .padding(10)
+                .background(Color.card, in: .rect(cornerRadius: 14, style: .continuous))
+            }
+        }
+    }
+
+    private func requirementSubtitle(_ requirement: TrainRequirement) -> String {
+        if let exit = requirement.exit {
+            return "ab \(requirement.boarding.displayName) → \(exit.displayName)"
+        }
+        return "ab \(requirement.boarding.displayName) → schnellster Weiterweg"
+    }
+
+    /// A new requirement usually continues where the last one ends.
+    private var nextBoardingDefault: Station {
+        requirements.last.flatMap { $0.exit } ?? search.from
+    }
+
+    private func remove(_ requirement: TrainRequirement) {
+        requirements.removeAll { $0.id == requirement.id }
+        if requirements.isEmpty {
+            plan = nil
+            planError = nil
+        } else {
+            Task { await replan() }
+        }
+    }
+
+    private func resetRequirements() {
+        requirements = []
+        plan = nil
+        planError = nil
     }
 
     private func viaLabel(_ waypoint: ViaWaypoint) -> String {
@@ -269,9 +360,34 @@ struct JourneyResultsView: View {
         earlierCursor = nil
         laterCursor = nil
         hiddenCount = 0
-        forcedTrain = nil
-        forcedJourney = nil
         await load(cursor: nil, prepend: false)
+        // Train requirements survive a new time – they're only cleared by the reset button.
+        await replan()
+    }
+
+    /// Rebuilds the routes that ride every required train. Keeps the previous plan on failure only
+    /// long enough to surface the error – an unfulfillable requirement must not show stale routes.
+    private func replan() async {
+        guard !requirements.isEmpty else { return }
+        isPlanning = true
+        defer { isPlanning = false }
+        do {
+            var result = try await model.trainRoutePlanner.plan(
+                requirements, from: search.from, to: search.to, date: searchDate)
+            if search.onlyBC100 {
+                // Don't leave the user with nothing if the forced train itself isn't BC100 valid.
+                let valid = result.journeys.filter(model.bc100Rules.isValid)
+                if !valid.isEmpty { result.journeys = valid }
+            }
+            withAnimation(.snappy) {
+                plan = result
+                planError = nil
+            }
+        } catch is CancellationError {
+        } catch {
+            plan = nil
+            planError = error
+        }
     }
 
     private func load(cursor: String?, prepend: Bool) async {
@@ -382,28 +498,30 @@ struct JourneyCard: View {
     }
 }
 
-/// Enter a train number after searching; finds a journey with exactly that train.
+/// Collects one "ride this train" requirement: which train, where to board, and optionally where
+/// to get off again. The route itself is planned by the results view once the sheet is done.
 struct TrainNumberSheet: View {
     let search: ConnectionSearch
     let suggestions: [String]
-    let onFound: (String, TrainMatch) -> Void
+    /// Pre-selected boarding station – the end of the previous requirement, or the search origin.
+    let defaultBoarding: Station
+    let onAdd: (TrainRequirement) -> Void
 
-    @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var train = ""
     @State private var boardingStation: Station?
     @State private var exitStation: Station?
-    @State private var isSearching = false
-    @State private var error: Error?
     @FocusState private var focused: Field?
 
     private enum Field: Hashable { case train, boardingStation, exitStation }
 
-    init(search: ConnectionSearch, suggestions: [String], onFound: @escaping (String, TrainMatch) -> Void) {
+    init(search: ConnectionSearch, suggestions: [String], defaultBoarding: Station,
+         onAdd: @escaping (TrainRequirement) -> Void) {
         self.search = search
         self.suggestions = suggestions
-        self.onFound = onFound
-        _boardingStation = State(initialValue: search.from)
+        self.defaultBoarding = defaultBoarding
+        self.onAdd = onAdd
+        _boardingStation = State(initialValue: defaultBoarding)
     }
 
     var body: some View {
@@ -426,9 +544,9 @@ struct TrainNumberSheet: View {
                                 .font(.title3.weight(.semibold))
                                 .textInputAutocapitalization(.characters)
                                 .autocorrectionDisabled()
-                                .submitLabel(.search)
+                                .submitLabel(.done)
                                 .focused($focused, equals: .train)
-                                .onSubmit(find)
+                                .onSubmit(add)
                                 .padding(12)
                                 .background(Color.secondary.opacity(0.1), in: .rect(cornerRadius: 12, style: .continuous))
                         }
@@ -445,33 +563,30 @@ struct TrainNumberSheet: View {
                         }
                     }
 
+                    Text(exitStation == nil
+                         ? "Ohne Ausstieg wird ab jedem Halt nach dem Einstieg weitergesucht und der schnellste Weg zum Ziel genommen."
+                         : "Ab dem Ausstieg wird die schnellste Weiterfahrt zum Ziel gesucht und zur Gesamtroute zusammengesetzt.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 4)
+
                     if !suggestions.isEmpty {
                         SectionHeader(title: "Züge aus den Ergebnissen", systemImage: "tram.fill")
                         FlowChips(items: suggestions) { name in
                             train = name
-                            find()
+                            focused = boardingStation == nil ? .boardingStation : nil
                         }
                     }
 
-                    if let error {
-                        ErrorBanner(error: error)
-                    }
-
-                    Button(action: find) {
-                        Group {
-                            if isSearching {
-                                ProgressView()
-                            } else {
-                                Label("Verbindung mit diesem Zug suchen", systemImage: "magnifyingglass")
-                            }
-                        }
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
+                    Button(action: add) {
+                        Label("Zug vorgeben", systemImage: "pin.fill")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.glassProminent)
                     .tint(.brand)
                     .controlSize(.large)
-                    .disabled(train.trimmingCharacters(in: .whitespaces).isEmpty || boardingStation == nil || isSearching)
+                    .disabled(train.trimmingCharacters(in: .whitespaces).isEmpty || boardingStation == nil)
                 }
                 .padding()
             }
@@ -488,22 +603,11 @@ struct TrainNumberSheet: View {
         .presentationDetents([.medium, .large])
     }
 
-    private func find() {
+    private func add() {
         let name = train.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty, let origin = boardingStation else { return }
-        let destination = exitStation ?? search.to
-        isSearching = true
-        Task {
-            defer { isSearching = false }
-            do {
-                let match = try await model.trainPicker.journey(
-                    withTrain: name, from: origin, to: destination, date: search.date.addingTimeInterval(-30 * 60))
-                onFound(match.journey.transitLegs.first?.line?.name ?? name.uppercased(), match)
-                dismiss()
-            } catch {
-                self.error = error
-            }
-        }
+        guard !name.isEmpty, let boarding = boardingStation else { return }
+        onAdd(TrainRequirement(trainName: name, boarding: boarding, exit: exitStation))
+        dismiss()
     }
 }
 

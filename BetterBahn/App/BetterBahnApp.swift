@@ -49,6 +49,8 @@ struct RootView: View {
                 model.syncLiveActivity()
                 model.startRefreshing()
                 Task { await model.syncTraewelling() }
+                // Build the travel map's heatmap in the background so its tab opens instantly.
+                model.prewarmTravelMap()
             } else if phase == .background {
                 model.stopRefreshing()
             }

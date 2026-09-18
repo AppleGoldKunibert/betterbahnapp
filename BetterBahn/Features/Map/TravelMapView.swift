@@ -6,31 +6,20 @@ import SwiftUI
 /// stronger colors. Lines follow the real tracks, OpenRailwayMap is shown as base layer.
 struct TravelMapView: View {
     @Environment(AppModel.self) private var model
-    @State private var range: RangePreset = .month
+    @State private var range: TravelMapRange = .month
     @State private var customFrom = Calendar.current.date(byAdding: .day, value: -30, to: .now)!
     @State private var customTo = Date.now
     @State private var showRailwayLayer = true
     @State private var runs: [SegmentHeatmap.Run] = []
+    /// Bumped with every new set of runs. Comparing a counter beats comparing a few hundred
+    /// thousand coordinates on every SwiftUI update.
+    @State private var runsVersion = 0
     @State private var stats = Stats()
     @State private var progress: (done: Int, total: Int)?
     @State private var showRangeSheet = false
     @State private var includeSaved = true
     @State private var includeTraewelling = true
     @State private var hasJourneysInRange = true
-
-    enum RangePreset: String, CaseIterable, Identifiable {
-        case week = "7 Tage", month = "30 Tage", year = "1 Jahr", all = "Alle", custom = "Eigene"
-        var id: String { rawValue }
-
-        var days: Int? {
-            switch self {
-            case .week: 7
-            case .month: 30
-            case .year: 365
-            case .all, .custom: nil
-            }
-        }
-    }
 
     struct Stats {
         var journeys = 0
@@ -39,52 +28,19 @@ struct TravelMapView: View {
         var hours = 0.0
     }
 
-    private var interval: DateInterval? {
-        switch range {
-        case .all: return nil
-        case .custom:
-            let start = Calendar.current.startOfDay(for: min(customFrom, customTo))
-            let end = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: max(customFrom, customTo)))!
-            return DateInterval(start: start, end: end)
-        default:
-            // Up to the end of today, so today's saved trips are included.
-            let endOfToday = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: .now))!
-            return DateInterval(start: Calendar.current.date(byAdding: .day, value: -(range.days ?? 0), to: .now)!, end: endOfToday)
-        }
-    }
-
-    /// Saved journeys and Träwelling check-ins; a Träwelling ride that matches a saved leg counts once.
-    /// Bucketed by normalized line name so matching stays fast with long trip histories.
-    private var journeys: [Journey] {
-        let saved = includeSaved ? model.savedJourneys.map(\.journey) : []
-        var savedDeparturesByLine: [String: [Date]] = [:]
-        for leg in saved.flatMap(\.transitLegs) {
-            savedDeparturesByLine[Line.normalize(leg.line?.name ?? ""), default: []].append(leg.departure.planned)
-        }
-        let imported = (includeTraewelling ? model.traewellingTrips.map(\.journey) : []).filter { trip in
-            guard let leg = trip.legs.first else { return false }
-            let candidates = savedDeparturesByLine[Line.normalize(leg.line?.name ?? "")] ?? []
-            return !candidates.contains { abs($0.timeIntervalSince(leg.departure.planned)) < 5 * 60 }
-        }
-        return (saved + imported).filter { journey in
-            guard let interval else { return true }
-            guard let departure = journey.departure?.planned else { return false }
-            return interval.contains(departure)
-        }
-    }
-
-    /// Identifies everything the loaded heatmap depends on, so unrelated view re-creations (e.g.
-    /// switching tabs) don't invalidate the cached result. `customFrom`/`customTo` default to
-    /// values derived from `.now`, so they're only mixed in while actually selected — otherwise
-    /// the key (and the persisted cache) would silently change on every app launch.
-    private var reloadKey: String {
-        let customPart = range == .custom ? "\(customFrom.timeIntervalSince1970)|\(customTo.timeIntervalSince1970)" : ""
-        return "\(range.rawValue)|\(customPart)|\(model.savedJourneys.count)|\(model.traewellingTrips.count)|\(includeSaved)|\(includeTraewelling)"
+    /// What's shown; also the identity of the loaded heatmap, so unrelated view re-creations
+    /// (e.g. switching tabs) don't throw the result away.
+    private var selection: TravelMapSelection {
+        TravelMapSelection(range: range,
+                           customFrom: range == .custom ? customFrom : nil,
+                           customTo: range == .custom ? customTo : nil,
+                           includeSaved: includeSaved,
+                           includeTraewelling: includeTraewelling)
     }
 
     var body: some View {
         NavigationStack {
-            TravelMap(runs: runs, showRailwayLayer: showRailwayLayer)
+            TravelMap(runs: runs, version: runsVersion, showRailwayLayer: showRailwayLayer)
                 .ignoresSafeArea(edges: .top)
                 .overlay(alignment: .top) { header }
                 .overlay(alignment: .bottomLeading) { legend }
@@ -94,7 +50,7 @@ struct TravelMapView: View {
                     }
                 }
                 .toolbar(.hidden, for: .navigationBar)
-                .task(id: reloadKey) { await load() }
+                .task(id: selection) { await load() }
                 .task { await model.syncTraewelling() }
                 .sheet(isPresented: $showRangeSheet) { rangeSheet }
         }
@@ -106,7 +62,7 @@ struct TravelMapView: View {
         VStack(spacing: 10) {
             // Fixed-width segments so nothing scrolls out of the capsule.
             HStack(spacing: 2) {
-                ForEach(RangePreset.allCases) { preset in
+                ForEach(TravelMapRange.allCases) { preset in
                     Button {
                         if preset == .custom { showRangeSheet = true }
                         withAnimation(.snappy) { range = preset }
@@ -305,55 +261,25 @@ struct TravelMapView: View {
     // MARK: Data
 
     private func load() async {
-        let selected = journeys
-        hasJourneysInRange = !selected.isEmpty
-        let legs = selected.flatMap(\.transitLegs).filter { $0.line?.product.isTrain ?? true }
-        let key = reloadKey
-
-        // Reuse the last computed result instead of redoing the (potentially expensive) route
-        // merge every time the map is reopened, unless the underlying data actually changed.
-        if let cached = await model.cachedMapHeatmap(for: key) {
-            runs = cached.runs
-            stats = Stats(journeys: cached.journeysCount, legs: cached.legsCount, kilometers: cached.kilometers, hours: cached.hours)
-            progress = nil
-            return
-        }
-
-        var lines: [[Coordinate]] = []
-        var kilometers = 0.0
-        progress = (0, legs.count)
-        // Capped so a long history doesn't recompute the (relatively expensive) heatmap from
-        // scratch too many times; each recompute still costs O(legs loaded so far).
-        let updateInterval = max(10, legs.count / 15)
-        for (index, leg) in legs.enumerated() {
-            if Task.isCancelled { return }
-            if let geometry = await model.geometry(for: leg) {
-                lines.append(geometry)
-                kilometers += Polyline.length(geometry) / 1000
-            }
-            progress = (index + 1, legs.count)
-            // Update the map every few legs so it fills progressively. The heatmap itself can be
-            // expensive with long track histories, so it's built off the main thread; otherwise
-            // this loop (which never truly suspends once geometry is cached) would freeze the UI.
-            if index % updateInterval == updateInterval - 1 {
-                let snapshot = lines
-                let partial = await Task.detached(priority: .userInitiated) { SegmentHeatmap().runs(for: snapshot) }.value
-                if Task.isCancelled { return }
+        // The background prewarm builds the same thing; let this one have the CPU and network.
+        model.stopTravelMapPrewarm()
+        let selection = selection
+        hasJourneysInRange = !model.mapJourneys(for: selection).isEmpty
+        guard let heatmap = await model.mapHeatmap(
+            for: selection,
+            onProgress: { done, total in progress = (done, total) },
+            onPartial: { partial in
                 runs = partial
-            }
-        }
-        guard !Task.isCancelled else { return }
-        let finalLines = lines
-        let computed = await Task.detached(priority: .userInitiated) { SegmentHeatmap().runs(for: finalLines) }.value
-        guard !Task.isCancelled else { return }
-        let hours = legs.reduce(0) { $0 + $1.arrival.best.timeIntervalSince($1.departure.best) } / 3600
+                runsVersion += 1
+            })
+        else { return } // cancelled
         withAnimation {
-            runs = computed
-            stats = Stats(journeys: selected.count, legs: legs.count, kilometers: kilometers, hours: hours)
+            runs = heatmap.runs
+            runsVersion += 1
+            stats = Stats(journeys: heatmap.journeysCount, legs: heatmap.legsCount,
+                          kilometers: heatmap.kilometers, hours: heatmap.hours)
         }
-        await model.setCachedMapHeatmap(
-            AppModel.MapHeatmap(runs: computed, journeysCount: selected.count, legsCount: legs.count, kilometers: kilometers, hours: hours),
-            for: key)
+        progress = nil
     }
 }
 
@@ -403,6 +329,7 @@ nonisolated final class RailwayTileOverlay: MKTileOverlay, @unchecked Sendable {
 
 struct TravelMap: UIViewRepresentable {
     let runs: [SegmentHeatmap.Run]
+    let version: Int
     let showRailwayLayer: Bool
 
     func makeUIView(context: Context) -> MKMapView {
@@ -429,8 +356,8 @@ struct TravelMap: UIViewRepresentable {
         }
 
         // Route lines: only rebuild when data changed. Draw rare stretches first so frequent ones are on top.
-        guard coordinator.renderedRuns != runs else { return }
-        coordinator.renderedRuns = runs
+        guard coordinator.renderedVersion != version else { return }
+        coordinator.renderedVersion = version
         map.removeOverlays(map.overlays.filter { $0 is HeatPolyline })
         var bounds = MKMapRect.null
         for run in runs.sorted(by: { $0.count < $1.count }) {
@@ -450,7 +377,7 @@ struct TravelMap: UIViewRepresentable {
 
     final class Coordinator: NSObject, MKMapViewDelegate {
         var railwayOverlay: RailwayTileOverlay?
-        var renderedRuns: [SegmentHeatmap.Run] = []
+        var renderedVersion = -1
         var didFit = false
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: any MKOverlay) -> MKOverlayRenderer {

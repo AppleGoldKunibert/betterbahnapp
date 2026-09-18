@@ -222,43 +222,68 @@ public struct TransitousProvider: TransitProvider {
         )
     }
 
-    /// Collapses two adjacent legs that are really one continuous physical train ride which
-    /// Transitous split at a border because its constituent feeds model the two halves as separate
-    /// trips — e.g. a Berlin–Amsterdam ICE whose German feed data ends at Hengelo (both `to` and
-    /// `headsign` say "Hengelo") while the Dutch feed's own trip record picks up right there and
-    /// continues to Amsterdam Centraal, or a Berlin–Warszawa EuroCity that Deutsche Bahn's domestic
-    /// feed only brands as a generic "IC" up to the border while the Polish feed correctly brands its
-    /// half "EC". Recognized by the same train number continuing from exactly where the previous leg
-    /// ends with no real dwell time — a same-train, back-to-back "transfer" that isn't one.
+    /// Collapses two legs that are really one continuous physical train ride which Transitous split
+    /// at a border because its constituent feeds model the two halves as separate trips — e.g. a
+    /// Berlin–Amsterdam ICE whose German feed data ends at Hengelo (both `to` and `headsign` say
+    /// "Hengelo") while the Dutch feed's own trip record picks up right there and continues to
+    /// Amsterdam Centraal, or a Berlin–Warszawa EuroCity that Deutsche Bahn's domestic feed only
+    /// brands as a generic "IC" up to the border while the Polish feed correctly brands its half "EC".
+    /// Recognized by the same train number continuing from exactly where the previous leg ends with no
+    /// real dwell time — a same-train, back-to-back "transfer" that isn't one. The two legs are
+    /// sometimes truly adjacent, and sometimes separated by a short "walk" leg this data inserts
+    /// between two stops that are really the same platform under different feeds (e.g. a Dutch feed's
+    /// "Rheine" and the German feed's "Rheine, Bahnhof" for an Amsterdam–Hannover ICE, ~50 m apart) —
+    /// that walk is folded away too rather than shown as a change.
     static func mergeThroughTrainLegs(_ legs: [Leg]) -> [Leg] {
         var result: [Leg] = []
         for leg in legs {
-            if let last = result.last, !last.isWalking, !leg.isWalking,
-               last.destination.isSamePlace(as: leg.origin),
-               last.line?.product == leg.line?.product,
-               let lastNumber = last.line?.number, lastNumber == leg.line?.number,
-               leg.departure.planned.timeIntervalSince(last.arrival.planned) <= 5 * 60 {
-                var merged = last
+            if !leg.isWalking, let anchorIndex = continuationAnchorIndex(in: result, for: leg) {
+                let anchor = result[anchorIndex]
+                var merged = anchor
                 merged.destination = leg.destination
                 merged.arrival = leg.arrival
                 merged.arrivalPlatform = leg.arrivalPlatform
                 merged.direction = leg.direction ?? leg.destination.displayName
-                merged.line = Self.preferredLine(last.line, leg.line)
-                merged.cancelled = last.cancelled || leg.cancelled
-                merged.stopovers = last.stopovers + leg.stopovers.dropFirst()
-                merged.remarks = last.remarks + leg.remarks
-                switch (last.geometry, leg.geometry) {
+                merged.line = Self.preferredLine(anchor.line, leg.line)
+                merged.cancelled = anchor.cancelled || leg.cancelled
+                merged.stopovers = anchor.stopovers + leg.stopovers.dropFirst()
+                merged.remarks = anchor.remarks + leg.remarks
+                switch (anchor.geometry, leg.geometry) {
                 case let (a?, b?): merged.geometry = a + b
                 case let (a?, nil): merged.geometry = a
                 case let (nil, b?): merged.geometry = b
                 case (nil, nil): merged.geometry = nil
                 }
-                result[result.count - 1] = merged
+                result.removeLast(result.count - anchorIndex)
+                result.append(merged)
                 continue
             }
             result.append(leg)
         }
         return result
+    }
+
+    /// Index of the most recent leg in `result` that `leg` is really a direct continuation of –
+    /// either truly back-to-back, or separated only by a single short walk leg bridging two stops
+    /// that are really the same platform (see `mergeThroughTrainLegs` above). Recognized by the same
+    /// train number and product continuing with no real dwell time between the two train legs' own
+    /// planned times — the walk leg's own bounds don't factor in, only that it doesn't hide an actual
+    /// transfer.
+    static func continuationAnchorIndex(in result: [Leg], for leg: Leg) -> Int? {
+        guard let lastIndex = result.indices.last else { return nil }
+        let last = result[lastIndex]
+        let anchorIndex = last.isWalking ? lastIndex - 1 : lastIndex
+        guard anchorIndex >= 0, !result[anchorIndex].isWalking else { return nil }
+        let anchor = result[anchorIndex]
+        let bridged = last.isWalking
+            ? anchor.destination.isSamePlace(as: last.origin) && last.destination.isSamePlace(as: leg.origin)
+            : anchor.destination.isSamePlace(as: leg.origin)
+        guard bridged,
+              anchor.line?.product == leg.line?.product,
+              let anchorNumber = anchor.line?.number, anchorNumber == leg.line?.number,
+              leg.departure.planned.timeIntervalSince(anchor.arrival.planned) <= 5 * 60
+        else { return nil }
+        return anchorIndex
     }
 
     /// A domestic feed sometimes genericizes an international EuroCity as a plain "IC"; when the
@@ -272,28 +297,57 @@ public struct TransitousProvider: TransitProvider {
         return first
     }
 
-    public func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int, products: Set<Product>) async throws -> [BoardEntry] {
-        let stop = try await resolve(station)
+    /// Modes rare enough, next to a busy station's local traffic, to get crowded out of the
+    /// fixed-size `n` stoptimes page entirely before their own departure is ever reached (see
+    /// `board(_:at:date:duration:products:)`).
+    private static let longDistanceModes: [Product] = [.highSpeed, .longDistance]
+
+    private func fetchStopTimes(stopId: String, date: Date, duration: Int, kind: BoardKind, modes: [String]?) async throws -> [MStopTime] {
         var items: [URLQueryItem] = [
-            .init(name: "stopId", value: stop.id),
+            .init(name: "stopId", value: stopId),
             .init(name: "time", value: JSONDecoding.isoString(date)),
             .init(name: "n", value: "150"),
             .init(name: "arriveBy", value: kind == .arrivals ? "true" : "false"),
             .init(name: "window", value: String(duration * 60)),
         ]
-        // A narrowed selection is restricted server-side too, so e.g. rare long-distance trains
-        // aren't crowded out of the fixed-size `n` page by frequent regional/S-Bahn departures.
-        // `.other` has no known mode mapping, so leave the request unfiltered when it's included.
-        if products != Set(Product.allCases), !products.contains(.other) {
-            let modes = Set(products.flatMap(MLineInfo.motisModes(for:)))
-            if !modes.isEmpty {
-                items.append(.init(name: "mode", value: modes.sorted().joined(separator: ",")))
-            }
+        if let modes, !modes.isEmpty {
+            items.append(.init(name: "mode", value: modes.sorted().joined(separator: ",")))
         }
         let response = try await http.get(url("v5/stoptimes", items),
             as: MStopTimesResponse.self, headers: ["User-Agent": HTTPClient.identifyingUserAgent])
+        return response.stopTimes
+    }
+
+    public func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int, products: Set<Product>) async throws -> [BoardEntry] {
+        let stop = try await resolve(station)
+
+        // A narrowed selection is restricted server-side too, so e.g. rare long-distance trains
+        // aren't crowded out of the fixed-size `n` page by frequent regional/S-Bahn departures.
+        // `.other` has no known mode mapping, so leave that branch of the request unfiltered.
+        let stopTimes: [MStopTime]
+        if products != Set(Product.allCases), !products.contains(.other) {
+            let modes = Set(products.flatMap(MLineInfo.motisModes(for:)))
+            stopTimes = try await fetchStopTimes(stopId: stop.id, date: date, duration: duration, kind: kind,
+                                                 modes: modes.isEmpty ? nil : Array(modes))
+        } else if products.contains(.highSpeed) || products.contains(.longDistance) {
+            // Unfiltered (or `.other`-inclusive) requests would otherwise send no `mode` param at
+            // all, so at a busy multimodal hub (e.g. Amsterdam Centraal, with dozens of bus/tram/
+            // metro/ferry departures sharing the stop cluster) the fixed-size page can fill up with
+            // local traffic within minutes, hiding long-distance/high-speed trains scheduled later
+            // in the requested window entirely – not just pushed down, genuinely absent. Fetch that
+            // slice in its own request so it's never starved by everything else.
+            let longDistanceModes = Set(Self.longDistanceModes.filter(products.contains).flatMap(MLineInfo.motisModes(for:)))
+            async let longDistance = fetchStopTimes(stopId: stop.id, date: date, duration: duration, kind: kind,
+                                                     modes: Array(longDistanceModes))
+            async let rest = fetchStopTimes(stopId: stop.id, date: date, duration: duration, kind: kind, modes: nil)
+            var seenTripIds = Set<String>()
+            stopTimes = try await (longDistance + rest).filter { seenTripIds.insert($0.tripId).inserted }
+        } else {
+            stopTimes = try await fetchStopTimes(stopId: stop.id, date: date, duration: duration, kind: kind, modes: nil)
+        }
+
         let end = date.addingTimeInterval(TimeInterval(duration * 60))
-        let entries = Self.mergeBorderSplitDuplicates(response.stopTimes, kind: kind)
+        let entries = Self.mergeBorderSplitDuplicates(stopTimes, kind: kind)
             .compactMap { $0.toEntry(kind: kind) }
             .filter { $0.time.planned <= end }
         let deduplicated = Self.deduplicated(entries).sorted { $0.time.planned < $1.time.planned }

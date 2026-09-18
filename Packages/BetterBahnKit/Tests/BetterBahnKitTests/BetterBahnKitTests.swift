@@ -200,7 +200,7 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         """
         let leg = try JSONDecoding.decoder.decode(MLeg.self, from: Data(json.utf8)).toLeg()
         #expect(leg.destination.name == "Innsbruck Hauptbahnhof")
-        #expect(leg.direction == "Innsbruck Hauptbahnhof")
+        #expect(leg.direction == "Innsbruck Hbf")
     }
 
     /// A leg that genuinely terminates where its headsign says must keep that headsign as-is.
@@ -236,6 +236,141 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(leg.origin.name == "München Hbf")
         #expect(leg.stopovers.count == 14)
     }
+
+    private func mergeTestLeg(_ line: String?, number: String? = nil, from: (String, Double, Double),
+                              to: (String, Double, Double), departure: String, arrival: String,
+                              isWalking: Bool = false) -> Leg {
+        func date(_ value: String) -> Date { ISO8601DateFormatter().date(from: value)! }
+        func station(_ place: (String, Double, Double)) -> Station {
+            Station(id: place.0, name: place.0, coordinate: Coordinate(latitude: place.1, longitude: place.2),
+                    evaNumber: nil, source: .transitous)
+        }
+        return Leg(origin: station(from), destination: station(to),
+                   departure: TimeInfo(planned: date(departure), actual: nil),
+                   arrival: TimeInfo(planned: date(arrival), actual: nil),
+                   departurePlatform: nil, arrivalPlatform: nil, tripId: nil,
+                   line: line.map { Line(name: $0, number: number, product: .highSpeed, operatorName: nil) },
+                   direction: nil, isWalking: isWalking, cancelled: false, stopovers: [], remarks: [],
+                   source: .transitous)
+    }
+
+    /// Real-world case: an Amsterdam–Hannover ICE 243 crossing the border at Rheine, where the Dutch
+    /// feed's trip ends at "Rheine" (52.2763, 7.4342) and the German feed's own trip for the very same
+    /// physical train picks up at "Rheine, Bahnhof" (52.2760, 7.4348) ~50 m away – modelled as a short
+    /// walk leg between the two train legs rather than a direct hand-off. Left unmerged, the planner
+    /// shows ICE 243 twice with a spurious "change at Rheine" in between.
+    @Test func mergeThroughTrainLegsFoldsShortWalkBetweenSameTrainAcrossABorder() {
+        let firstHalf = mergeTestLeg("ICE 243", number: "243", from: ("Amsterdam Centraal", 52.379, 4.899),
+                                     to: ("Rheine", 52.2763, 7.4342), departure: "2026-09-21T16:00:00Z", arrival: "2026-09-21T18:24:00Z")
+        let walk = mergeTestLeg(nil, from: ("Rheine", 52.2763, 7.4342), to: ("Rheine, Bahnhof", 52.2760, 7.4348),
+                                departure: "2026-09-21T18:24:00Z", arrival: "2026-09-21T18:26:00Z", isWalking: true)
+        let secondHalf = mergeTestLeg("ICE 243", number: "243", from: ("Rheine, Bahnhof", 52.2760, 7.4348),
+                                      to: ("Hannover Hbf", 52.377, 9.742), departure: "2026-09-21T18:26:00Z", arrival: "2026-09-21T20:01:00Z")
+
+        let merged = TransitousProvider.mergeThroughTrainLegs([firstHalf, walk, secondHalf])
+
+        #expect(merged.count == 1)
+        let ride = merged.first
+        #expect(ride?.origin.name == "Amsterdam Centraal")
+        #expect(ride?.destination.name == "Hannover Hbf")
+        #expect(ride?.arrival.planned == secondHalf.arrival.planned)
+    }
+
+    /// A short walk between two nearby stops is only folded away when the numbered train actually
+    /// continues – a genuine transfer to a different train stays a transfer even if it happens to
+    /// depart moments later from a stop just as close by.
+    @Test func mergeThroughTrainLegsKeepsWalkWhenTheNextTrainDiffers() {
+        let firstHalf = mergeTestLeg("ICE 243", number: "243", from: ("Amsterdam Centraal", 52.379, 4.899),
+                                     to: ("Rheine", 52.2763, 7.4342), departure: "2026-09-21T16:00:00Z", arrival: "2026-09-21T18:24:00Z")
+        let walk = mergeTestLeg(nil, from: ("Rheine", 52.2763, 7.4342), to: ("Rheine, Bahnhof", 52.2760, 7.4348),
+                                departure: "2026-09-21T18:24:00Z", arrival: "2026-09-21T18:26:00Z", isWalking: true)
+        let otherTrain = mergeTestLeg("IC 118", number: "118", from: ("Rheine, Bahnhof", 52.2760, 7.4348),
+                                      to: ("Hannover Hbf", 52.377, 9.742), departure: "2026-09-21T18:26:00Z", arrival: "2026-09-21T20:01:00Z")
+
+        let merged = TransitousProvider.mergeThroughTrainLegs([firstHalf, walk, otherTrain])
+
+        #expect(merged.count == 3)
+    }
+
+    /// At a busy multimodal hub (Amsterdam Centraal: buses, trams, metro, ferry and regional trains
+    /// all sharing the stop cluster), the unfiltered `/v5/stoptimes` request's fixed-size `n` page can
+    /// fill up with local traffic long before a later, rarer long-distance train like "ICE 147" is
+    /// ever reached – it's not just pushed down the board, it's entirely absent from the response.
+    /// With the default "all products" filter selected, `board(_:at:date:duration:products:)` must
+    /// still fetch that slice in its own mode-scoped request so it's never starved this way.
+    @Test func boardFetchesLongDistanceSeparatelySoItIsNotCrowdedOutByLocalTraffic() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [CrowdedHubStopTimesProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let provider = TransitousProvider(http: HTTPClient(session: session))
+        let amsterdam = station("ams", "Amsterdam Centraal", source: .transitous)
+        let queryDate = try #require(JSONDecoding.parseISODate("2026-09-19T08:00:00Z"))
+
+        let entries = try await provider.board(.departures, at: amsterdam, date: queryDate, duration: 90, products: Set(Product.allCases))
+
+        #expect(entries.contains { $0.line.name.contains("147") })
+        // The regional entry that both the long-distance and the "rest" request happen to echo back
+        // (same tripId) must not show up twice.
+        #expect(entries.filter { $0.tripId == "shared-trip" }.count == 1)
+    }
+}
+
+/// Serves two different `/v5/stoptimes` fixtures depending on whether a `mode` query parameter
+/// scoped to long-distance/high-speed rail is present, simulating a hub whose unfiltered response
+/// never reaches a later long-distance departure.
+private final class CrowdedHubStopTimesProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let mode = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+            .queryItems?.first { $0.name == "mode" }?.value
+        let body: Data
+        // Query window is 2026-09-19T08:00Z through 09:30Z (date=08:00, duration=90 minutes).
+        if mode == "HIGHSPEED_RAIL,LONG_DISTANCE,NIGHT_RAIL" {
+            body = Data("""
+            {"stopTimes": [
+                {"place": {"name": "Amsterdam Centraal", "stopId": "ams", "lat": 52.379, "lon": 4.899,
+                           "scheduledDeparture": "2026-09-19T09:00:00Z", "pickupType": "NORMAL"},
+                 "mode": "HIGHSPEED_RAIL", "tripId": "ice-147", "tripShortName": "ICE 147",
+                 "displayName": "ICE 147", "headsign": "Berlin Hbf",
+                 "tripTo": {"name": "Berlin Hbf", "lat": 52.5, "lon": 13.4}},
+                {"place": {"name": "Amsterdam Centraal", "stopId": "ams", "lat": 52.379, "lon": 4.899,
+                           "scheduledDeparture": "2026-09-19T08:50:00Z", "pickupType": "NORMAL"},
+                 "mode": "LONG_DISTANCE", "tripId": "shared-trip", "tripShortName": "IC 118",
+                 "displayName": "IC 118", "headsign": "Rotterdam Centraal",
+                 "tripTo": {"name": "Rotterdam Centraal", "lat": 51.9, "lon": 4.5}}
+            ]}
+            """.utf8)
+        } else {
+            // The unfiltered ("rest") request is drowned out by local traffic before it ever reaches
+            // 09:00 – exactly like the real Amsterdam Centraal board – so "ICE 147" never appears here.
+            body = Data("""
+            {"stopTimes": [
+                {"place": {"name": "Amsterdam Centraal", "stopId": "ams", "lat": 52.379, "lon": 4.899,
+                           "scheduledDeparture": "2026-09-19T08:01:00Z", "pickupType": "NORMAL"},
+                 "mode": "BUS", "tripId": "bus-1", "tripShortName": "N84",
+                 "displayName": "N84", "headsign": "Nieuwe Meer",
+                 "tripTo": {"name": "Nieuwe Meer", "lat": 52.34, "lon": 4.83}},
+                {"place": {"name": "Amsterdam Centraal", "stopId": "ams", "lat": 52.379, "lon": 4.899,
+                           "scheduledDeparture": "2026-09-19T08:02:00Z", "pickupType": "NORMAL"},
+                 "mode": "REGIONAL_RAIL", "tripId": "regional-1", "tripShortName": "Sprinter",
+                 "displayName": "Sprinter", "headsign": "Hoorn",
+                 "tripTo": {"name": "Hoorn", "lat": 52.64, "lon": 5.06}},
+                {"place": {"name": "Amsterdam Centraal", "stopId": "ams", "lat": 52.379, "lon": 4.899,
+                           "scheduledDeparture": "2026-09-19T08:50:00Z", "pickupType": "NORMAL"},
+                 "mode": "LONG_DISTANCE", "tripId": "shared-trip", "tripShortName": "IC 118",
+                 "displayName": "IC 118", "headsign": "Rotterdam Centraal",
+                 "tripTo": {"name": "Rotterdam Centraal", "lat": 51.9, "lon": 4.5}}
+            ]}
+            """.utf8)
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }
 
 // MARK: - Station display names
@@ -545,6 +680,46 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(part.count == 5)
     }
 
+    @Test func sliceKeepsTheTrackWhenTheShapeRunsBackwards() {
+        // A shape stored against the direction of travel used to collapse into a straight line
+        // between the two stations, drawn right across the map.
+        let track = (0...10).map { Coordinate(latitude: 50 + 0.05 * sin(Double($0)), longitude: 7 + Double($0) * 0.1) }
+        let part = Polyline.slice(track.reversed(), from: track[2], to: track[8])
+        #expect(part.count == 7)
+        #expect(part.first?.longitude == track[2].longitude)
+        #expect(part.last?.longitude == track[8].longitude)
+    }
+
+    @Test func sliceKeepsTheWholeShapeWhenTheEndsDontFit() {
+        let track = (0...10).map { Coordinate(latitude: 50, longitude: 7 + Double($0) * 0.1) }
+        // Endpoints from a different trip entirely.
+        let part = Polyline.slice(track, from: Coordinate(latitude: 48, longitude: 11), to: Coordinate(latitude: 53, longitude: 10))
+        #expect(part.count == track.count)
+    }
+
+    @Test func straightLineBetweenCitiesIsNotTrackGeometry() {
+        let straight = [Coordinate(latitude: 50.943, longitude: 6.958), Coordinate(latitude: 52.376, longitude: 9.741)]
+        #expect(!RouteGeometryService.followsTracks(straight))
+        // A short hop between neighbouring stops legitimately has only two points.
+        let hop = [Coordinate(latitude: 50.943, longitude: 6.958), Coordinate(latitude: 50.951, longitude: 6.969)]
+        #expect(RouteGeometryService.followsTracks(hop))
+    }
+
+    @Test func simplifyKeepsTheShape() {
+        let track = (0...500).map { i -> Coordinate in
+            let t = Double(i) / 500
+            return Coordinate(latitude: 50 + 0.3 * t + 0.02 * sin(t * 12), longitude: 7 + 0.4 * t)
+        }
+        let simplified = Polyline.simplify(track, tolerance: 8)
+        #expect(simplified.count < track.count / 4)
+        // Every dropped point was within the tolerance of what's left.
+        for point in track {
+            let deviation = zip(simplified, simplified.dropFirst())
+                .map { Polyline.distance(from: point, toSegment: $0.0, $0.1) }.min() ?? .infinity
+            #expect(deviation < 10)
+        }
+    }
+
     @Test func heatmapCountsOverlaps() {
         let a = (0...20).map { Coordinate(latitude: 50, longitude: 7 + Double($0) * 0.01) }
         let b = (10...30).map { Coordinate(latitude: 50.0001, longitude: 7 + Double($0) * 0.01) } // parallel track
@@ -552,6 +727,98 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(runs.contains { $0.count == 2 })
         #expect(runs.contains { $0.count == 1 })
         #expect(runs.map(\.count).max() == 2)
+    }
+
+    @Test func heatmapFollowsTheOriginalGeometry() {
+        // A curve whose points sit nowhere near the centres of a 0.0015° grid.
+        let curve = (0 ... 200).map { i -> Coordinate in
+            let t = Double(i) / 200
+            return Coordinate(latitude: 50.00073 + 0.2 * t, longitude: 7.00061 + 0.3 * t + 0.02 * sin(t * 8))
+        }
+        let runs = SegmentHeatmap().runs(for: [curve])
+        let drawn = runs.flatMap(\.coordinates)
+        #expect(!drawn.isEmpty)
+        // Every drawn point lies on the original line, not on a grid centre.
+        func distanceToCurve(_ p: Coordinate) -> Double {
+            zip(curve, curve.dropFirst()).map { a, b in
+                // Project onto the segment in degrees, then measure in meters.
+                let dx = b.longitude - a.longitude, dy = b.latitude - a.latitude
+                let square = dx * dx + dy * dy
+                let t = square == 0 ? 0 : max(0, min(1, ((p.longitude - a.longitude) * dx + (p.latitude - a.latitude) * dy) / square))
+                return p.distance(to: Coordinate(latitude: a.latitude + dy * t, longitude: a.longitude + dx * t))
+            }.min() ?? .infinity
+        }
+        for point in drawn { #expect(distanceToCurve(point) < 1) }
+        // And the line keeps its length instead of being replaced by a staircase.
+        let length = runs.reduce(0.0) { $0 + Polyline.length($1.coordinates) }
+        #expect(abs(length - Polyline.length(curve)) < Polyline.length(curve) * 0.01)
+    }
+
+    @Test func heatmapDrawsASharedStretchWithoutGaps() {
+        // Same track twice, sampled differently by each source.
+        let fine = (0 ... 100).map { Coordinate(latitude: 50, longitude: 7 + Double($0) * 0.002) }
+        let coarse = (0 ... 10).map { Coordinate(latitude: 50.0004, longitude: 7 + Double($0) * 0.02) }
+        let runs = SegmentHeatmap().runs(for: [fine, coarse])
+        #expect(runs.allSatisfy { $0.count == 2 })
+        let covered = runs.reduce(0.0) { $0 + Polyline.length($1.coordinates) }
+        #expect(covered > Polyline.length(fine) * 0.98)
+    }
+}
+
+@Suite struct RideMatchTests {
+    private func leg(_ line: String?, number: String? = nil, from: String, to: String,
+                     departure: String, arrival: String) -> Leg {
+        func date(_ value: String) -> Date {
+            let formatter = ISO8601DateFormatter()
+            return formatter.date(from: value)!
+        }
+        func station(_ name: String) -> Station {
+            Station(id: name, name: name, coordinate: nil, evaNumber: nil, source: .transitous)
+        }
+        return Leg(origin: station(from), destination: station(to),
+                   departure: TimeInfo(planned: date(departure), actual: nil),
+                   arrival: TimeInfo(planned: date(arrival), actual: nil),
+                   departurePlatform: nil, arrivalPlatform: nil, tripId: nil,
+                   line: line.map { Line(name: $0, number: number, product: .highSpeed, operatorName: nil) },
+                   direction: nil, isWalking: false, cancelled: false, stopovers: [], remarks: [],
+                   source: .transitous)
+    }
+
+    @Test func checkinStartingLaterStillMatches() {
+        let saved = leg("ICE 645", from: "Köln Hbf", to: "Hannover Hbf",
+                        departure: "2026-03-04T09:00:00Z", arrival: "2026-03-04T11:30:00Z")
+        // Checked in one stop late and under a slightly different spelling.
+        let checkin = leg("ICE645", from: "Köln Messe/Deutz", to: "Hannover Hbf",
+                          departure: "2026-03-04T09:12:00Z", arrival: "2026-03-04T11:34:00Z")
+        #expect(RideMatch.isSameRide(checkin, saved))
+        #expect(RideMatch.deduplicated([Journey(legs: [checkin], source: .traewelling)],
+                                       against: [Journey(legs: [saved], source: .transitous)]).isEmpty)
+    }
+
+    @Test func differentNameButSameStretchMatches() {
+        let saved = leg("RE 5", from: "Koblenz Hbf", to: "Bonn Hbf",
+                        departure: "2026-03-04T14:00:00Z", arrival: "2026-03-04T15:00:00Z")
+        let checkin = leg("RE 5 (12345)", from: "Koblenz Hbf", to: "Bonn Hbf",
+                          departure: "2026-03-04T14:02:00Z", arrival: "2026-03-04T15:01:00Z")
+        #expect(RideMatch.isSameRide(checkin, saved))
+    }
+
+    @Test func sameTrainOnAnotherDayIsKept() {
+        let saved = leg("ICE 645", from: "Köln Hbf", to: "Hannover Hbf",
+                        departure: "2026-03-04T09:00:00Z", arrival: "2026-03-04T11:30:00Z")
+        let checkin = leg("ICE 645", from: "Köln Hbf", to: "Hannover Hbf",
+                          departure: "2026-03-11T09:00:00Z", arrival: "2026-03-11T11:30:00Z")
+        #expect(!RideMatch.isSameRide(checkin, saved))
+        #expect(RideMatch.deduplicated([Journey(legs: [checkin], source: .traewelling)],
+                                       against: [Journey(legs: [saved], source: .transitous)]).count == 1)
+    }
+
+    @Test func aDifferentTrainOnTheSameDayIsKept() {
+        let saved = leg("ICE 645", from: "Köln Hbf", to: "Hannover Hbf",
+                        departure: "2026-03-04T09:00:00Z", arrival: "2026-03-04T11:30:00Z")
+        let checkin = leg("RE 1", from: "Hannover Hbf", to: "Bremen Hbf",
+                          departure: "2026-03-04T12:00:00Z", arrival: "2026-03-04T13:00:00Z")
+        #expect(!RideMatch.isSameRide(checkin, saved))
     }
 }
 
@@ -634,5 +901,186 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         let journey = Journey(legs: [leg("ICE 1", "A", "B", dep: 0, arr: 60, arrDelay: 10), leg("ICE 2", "B", "C", dep: 70, arr: 120)], source: .bahnDe)
         guard case .transferMissed(_, _, _, let buffer) = journey.connectionIssues().first else { Issue.record("wrong issue"); return }
         #expect(buffer == 0)
+    }
+}
+
+// MARK: - Train route planning
+
+/// Mock that answers boards and journey queries per station pair, so chained planning can be tested.
+final class RoutingMockProvider: TransitProvider, @unchecked Sendable {
+    let source: DataSource = .bahnDe
+    /// Departure boards keyed by station name.
+    var boards: [String: [BoardEntry]] = [:]
+    var trips: [String: Trip] = [:]
+    /// Journeys keyed by "<from> -> <to>"; the planner filters them by time itself.
+    var routes: [String: [Journey]] = [:]
+    private(set) var journeyQueries: [String] = []
+    private let lock = NSLock()
+
+    func searchStations(_ query: String) async throws -> [Station] { [] }
+
+    func journeys(_ query: JourneyQuery) async throws -> JourneyPage {
+        let key = "\(query.from.name) -> \(query.to.name)"
+        lock.withLock { journeyQueries.append(key) }
+        return JourneyPage(journeys: routes[key] ?? [], earlierCursor: nil, laterCursor: nil, source: source)
+    }
+
+    func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int, products: Set<Product>) async throws -> [BoardEntry] {
+        (boards[station.name] ?? []).filter {
+            $0.time.best >= date && $0.time.best <= date.addingTimeInterval(TimeInterval(duration * 60))
+        }
+    }
+
+    func trip(id: String) async throws -> Trip {
+        guard let trip = trips[id] else { throw TransitError.notFound(id) }
+        return trip
+    }
+}
+
+@Suite struct TrainRoutePlannerTests {
+    let koeln = station("8000207", "Köln Hbf", 50.943, 6.958)
+    let duesseldorf = station("8000085", "Düsseldorf Hbf", 51.219, 6.794)
+    let hamm = station("8000149", "Hamm (Westf)", 51.678, 7.808)
+    let hannover = station("8000152", "Hannover Hbf", 52.377, 9.741)
+    let berlin = station("8011160", "Berlin Hbf", 52.525, 13.369)
+    let base = Date(timeIntervalSince1970: 1_800_000_000)
+
+    func time(_ minutes: Double) -> TimeInfo { TimeInfo(planned: base.addingTimeInterval(minutes * 60), actual: nil) }
+
+    func stop(_ s: Station, arr: Double?, dep: Double?) -> Stopover {
+        Stopover(station: s, arrival: arr.map(time), departure: dep.map(time),
+                 arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+    }
+
+    func trip(_ id: String, _ name: String, _ stops: [Stopover]) -> Trip {
+        Trip(id: id, line: Line(name: name, number: String(name.split(separator: " ").last!), product: .highSpeed,
+                                operatorName: "DB Fernverkehr AG"),
+             direction: stops.last?.station.name, stopovers: stops, cancelled: false, remarks: [], source: .bahnDe)
+    }
+
+    func entry(_ trip: Trip, at station: Station, minutes: Double) -> BoardEntry {
+        BoardEntry(kind: .departures, tripId: trip.id, station: station, line: trip.line!,
+                   otherEnd: trip.stopovers.last?.station.name, time: time(minutes),
+                   platform: PlatformInfo(planned: nil, actual: nil), cancelled: false,
+                   terminatesOrOriginatesHere: false, remarks: [], source: .bahnDe)
+    }
+
+    func journey(_ name: String, _ from: Station, _ to: Station, dep: Double, arr: Double) -> Journey {
+        let ride = trip("t-\(name)-\(dep)", name, [stop(from, arr: nil, dep: dep), stop(to, arr: arr, dep: nil)])
+        return Journey(legs: [ride.leg(from: from, to: to)!], source: .bahnDe)
+    }
+
+    func makeProvider() -> RoutingMockProvider { RoutingMockProvider() }
+
+    func planner(_ mock: RoutingMockProvider) -> TrainRoutePlanner {
+        TrainRoutePlanner(provider: CombinedProvider(primary: mock, fallback: nil, bahnDe: nil))
+    }
+
+    /// Exit named: the ride ends there and the fastest onward connection is appended.
+    @Test func continuesFromNamedExitStation() async throws {
+        let mock = makeProvider()
+        let ice = trip("ice423", "ICE 423", [
+            stop(koeln, arr: nil, dep: 10), stop(hamm, arr: 70, dep: 72), stop(hannover, arr: 130, dep: nil),
+        ])
+        mock.trips[ice.id] = ice
+        mock.boards[koeln.name] = [entry(ice, at: koeln, minutes: 10)]
+        mock.routes["Hamm (Westf) -> Berlin Hbf"] = [
+            journey("ICE 500", hamm, berlin, dep: 80, arr: 260),
+            journey("IC 140", hamm, berlin, dep: 75, arr: 300),
+        ]
+
+        let requirement = TrainRequirement(trainName: "423", boarding: koeln, exit: hamm)
+        let plan = try await planner(mock).plan([requirement], from: koeln, to: berlin, date: base)
+        let best = try #require(plan.best)
+        #expect(best.transitLegs.map { $0.line?.name } == ["ICE 423", "ICE 500"])
+        #expect(best.legs.first?.origin.isSamePlace(as: koeln) == true)
+        #expect(best.legs.last?.destination.isSamePlace(as: berlin) == true)
+        #expect(plan.resolvedNames[requirement.id] == "ICE 423")
+    }
+
+    /// No exit named: every stop after boarding is tried and the fastest way on wins.
+    @Test func picksFastestAlightingStopWhenNoneGiven() async throws {
+        let mock = makeProvider()
+        let ice = trip("ice423", "ICE 423", [
+            stop(koeln, arr: nil, dep: 10), stop(duesseldorf, arr: 30, dep: 32),
+            stop(hamm, arr: 70, dep: 72), stop(hannover, arr: 130, dep: nil),
+        ])
+        mock.trips[ice.id] = ice
+        mock.boards[koeln.name] = [entry(ice, at: koeln, minutes: 10)]
+        // Staying on until Hannover is slowest; Hamm has the sprinter.
+        mock.routes["Düsseldorf Hbf -> Berlin Hbf"] = [journey("IC 2", duesseldorf, berlin, dep: 40, arr: 330)]
+        mock.routes["Hamm (Westf) -> Berlin Hbf"] = [journey("ICE 500", hamm, berlin, dep: 80, arr: 250)]
+        mock.routes["Hannover Hbf -> Berlin Hbf"] = [journey("ICE 700", hannover, berlin, dep: 140, arr: 280)]
+
+        let plan = try await planner(mock).plan(
+            [TrainRequirement(trainName: "ICE 423", boarding: koeln)], from: koeln, to: berlin, date: base)
+        let best = try #require(plan.best)
+        #expect(best.transitLegs.map { $0.line?.name } == ["ICE 423", "ICE 500"])
+        #expect(best.transitLegs.first?.destination.isSamePlace(as: hamm) == true)
+        #expect(best.arrival?.best == base.addingTimeInterval(250 * 60))
+        // All three onward options were compared.
+        #expect(plan.journeys.count > 1)
+    }
+
+    /// Riding through to the destination wins when nothing faster branches off.
+    @Test func staysOnBoardWhenTrainReachesDestination() async throws {
+        let mock = makeProvider()
+        let ice = trip("ice423", "ICE 423", [
+            stop(koeln, arr: nil, dep: 10), stop(hamm, arr: 70, dep: 72), stop(berlin, arr: 250, dep: nil),
+        ])
+        mock.trips[ice.id] = ice
+        mock.boards[koeln.name] = [entry(ice, at: koeln, minutes: 10)]
+        mock.routes["Hamm (Westf) -> Berlin Hbf"] = [journey("IC 140", hamm, berlin, dep: 80, arr: 330)]
+
+        let plan = try await planner(mock).plan(
+            [TrainRequirement(trainName: "ICE 423", boarding: koeln)], from: koeln, to: berlin, date: base)
+        #expect(plan.best?.transitLegs.map { $0.line?.name } == ["ICE 423"])
+    }
+
+    /// A second requirement is added to the first one, not replacing it.
+    @Test func chainsTwoRequirements() async throws {
+        let mock = makeProvider()
+        let first = trip("ice423", "ICE 423", [stop(koeln, arr: nil, dep: 10), stop(hamm, arr: 70, dep: nil)])
+        let second = trip("ice500", "ICE 500", [stop(hannover, arr: nil, dep: 150), stop(berlin, arr: 270, dep: nil)])
+        mock.trips[first.id] = first
+        mock.trips[second.id] = second
+        mock.boards[koeln.name] = [entry(first, at: koeln, minutes: 10)]
+        mock.boards[hannover.name] = [entry(second, at: hannover, minutes: 150)]
+        mock.routes["Hamm (Westf) -> Hannover Hbf"] = [journey("RE 1", hamm, hannover, dep: 80, arr: 140)]
+
+        let plan = try await planner(mock).plan([
+            TrainRequirement(trainName: "ICE 423", boarding: koeln, exit: hamm),
+            TrainRequirement(trainName: "ICE 500", boarding: hannover, exit: berlin),
+        ], from: koeln, to: berlin, date: base)
+        let best = try #require(plan.best)
+        #expect(best.transitLegs.map { $0.line?.name } == ["ICE 423", "RE 1", "ICE 500"])
+        #expect(best.arrival?.best == base.addingTimeInterval(270 * 60))
+    }
+
+    /// The traveller has to get to the boarding station first – that feeder is part of the route.
+    @Test func addsFeederToBoardingStation() async throws {
+        let mock = makeProvider()
+        let ice = trip("ice423", "ICE 423", [stop(hamm, arr: nil, dep: 90), stop(berlin, arr: 260, dep: nil)])
+        mock.trips[ice.id] = ice
+        mock.boards[hamm.name] = [entry(ice, at: hamm, minutes: 90)]
+        mock.routes["Köln Hbf -> Hamm (Westf)"] = [
+            journey("RE 1", koeln, hamm, dep: 5, arr: 60),
+            journey("RE 3", koeln, hamm, dep: 30, arr: 85),
+        ]
+
+        let plan = try await planner(mock).plan(
+            [TrainRequirement(trainName: "ICE 423", boarding: hamm)], from: koeln, to: berlin, date: base)
+        let best = try #require(plan.best)
+        // Both feeders make it – the later one is the more comfortable choice.
+        #expect(best.transitLegs.map { $0.line?.name } == ["RE 3", "ICE 423"])
+    }
+
+    @Test func reportsUnknownTrain() async throws {
+        let mock = makeProvider()
+        mock.boards[koeln.name] = []
+        await #expect(throws: TransitError.self) {
+            try await planner(mock).plan([TrainRequirement(trainName: "ICE 999", boarding: koeln)],
+                                         from: koeln, to: berlin, date: base)
+        }
     }
 }

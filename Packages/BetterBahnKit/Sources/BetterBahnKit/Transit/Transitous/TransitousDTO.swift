@@ -142,7 +142,7 @@ struct MLeg: Decodable {
         guard let headsign else { return nil }
         let passesHeadsignAsIntermediateStop = (intermediateStops ?? [])
             .contains { Station.normalize($0.name) == Station.normalize(headsign) }
-        return passesHeadsignAsIntermediateStop ? to.name : headsign
+        return Station.displayName(for: passesHeadsignAsIntermediateStop ? to.name : headsign)
     }
 
     func toLeg() -> Leg {
@@ -203,9 +203,10 @@ struct MStopTime: Decodable {
         let station = place.toStation()
         let otherEnd = kind == .departures ? tripTo : tripFrom
         let line = lineInfo.toLine()
+        let otherEndName = kind == .departures ? (headsign ?? tripTo?.name) : tripFrom?.name
         return BoardEntry(
             kind: kind, tripId: tripId, station: station, line: line,
-            otherEnd: kind == .departures ? (headsign ?? tripTo?.name) : tripFrom?.name,
+            otherEnd: otherEndName.map(Station.displayName(for:)),
             time: time,
             platform: PlatformInfo(planned: place.scheduledTrack, actual: realtime ? place.track : nil),
             cancelled: (cancelled ?? false) || (tripCancelled ?? false),
