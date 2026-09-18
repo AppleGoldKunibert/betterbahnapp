@@ -2,6 +2,11 @@ import BetterBahnKit
 import Foundation
 import SwiftUI
 
+/// Generic stop-type suffixes ("Bhf", "Hbf", …) stripped when comparing station names, so "Bernau"
+/// and "Bernau Bhf" are recognized as needing to be told apart while "Bernau a. Chiemsee" – whose
+/// name already carries real place info beyond a generic suffix – isn't flagged unnecessarily.
+private let genericSuffixWords: Set<String> = ["bhf", "hbf", "bahnhof"]
+
 /// Inline station text field. While focused it shows up to 5 suggestions directly below
 /// (favorites and recent stations when empty, search results while typing).
 struct StationInput<Focus: Hashable>: View {
@@ -132,7 +137,7 @@ struct StationInput<Focus: Hashable>: View {
                             .font(.subheadline)
                             .foregroundStyle(favorite ? Color.yellow : Color.secondary)
                             .frame(width: 24)
-                        highlighted(suggestion.displayName)
+                        rowLabel(for: suggestion)
                             .font(.subheadline)
                             .lineLimit(1)
                         Spacer()
@@ -166,6 +171,27 @@ struct StationInput<Focus: Hashable>: View {
             attributed[attributedRange].inlinePresentationIntent = .stronglyEmphasized
         }
         return Text(attributed)
+    }
+
+    /// Station name plus, only when another visible suggestion would otherwise look the same,
+    /// its region in parentheses – "Bernau (Bayern)" next to "Bernau (Brandenburg)" – the way DB's
+    /// own timetables disambiguate same-named stations. Stations whose name is already distinct
+    /// (e.g. "Bernau a. Chiemsee") are left alone.
+    private func rowLabel(for suggestion: Station) -> Text {
+        let name = highlighted(suggestion.displayName)
+        guard let region = suggestion.region, needsRegion(suggestion) else { return name }
+        return name + Text(" (\(region))").foregroundStyle(.secondary)
+    }
+
+    private func needsRegion(_ suggestion: Station) -> Bool {
+        let key = Self.baseKey(suggestion.displayName)
+        return suggestions.contains { $0.id != suggestion.id && Self.baseKey($0.displayName) == key }
+    }
+
+    private static func baseKey(_ name: String) -> String {
+        name.lowercased().split(separator: " ")
+            .filter { !genericSuffixWords.contains(String($0)) }
+            .joined(separator: " ")
     }
 
     private func select(_ suggestion: Station) {
@@ -239,7 +265,7 @@ struct TimeSelector: View {
             }
             .padding()
             .presentationCompactAdaptation(.sheet)
-            .presentationDetents([.medium, .large])
+            .presentationDetents([.height(500)])
         }
     }
 

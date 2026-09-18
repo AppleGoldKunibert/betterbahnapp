@@ -48,7 +48,7 @@ struct SavedJourneyRow: View {
                     }
                     Spacer()
                     if let first = entry.journey.legs.first, let last = entry.journey.legs.last {
-                        Text("\(first.origin.name) → \(last.destination.name)").lineLimit(1)
+                        Text("\(first.origin.displayName) → \(last.destination.displayName)").lineLimit(1)
                     }
                 }
                 .font(.caption.weight(.semibold))

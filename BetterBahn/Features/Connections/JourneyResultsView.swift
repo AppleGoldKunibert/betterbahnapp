@@ -5,6 +5,7 @@ struct JourneyResultsView: View {
     let search: ConnectionSearch
 
     @Environment(AppModel.self) private var model
+    @State private var searchDate: Date
     @State private var journeys: [Journey] = []
     @State private var earlierCursor: String?
     @State private var laterCursor: String?
@@ -14,8 +15,14 @@ struct JourneyResultsView: View {
     @State private var loadingMore = false
     @State private var error: Error?
     @State private var showTrainSheet = false
+    @State private var showTimePicker = false
     @State private var forcedTrain: String?
     @State private var forcedJourney: Journey?
+
+    init(search: ConnectionSearch) {
+        self.search = search
+        _searchDate = State(initialValue: search.date)
+    }
 
     var body: some View {
         ScrollView {
@@ -112,11 +119,25 @@ struct JourneyResultsView: View {
                 }
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+                if !search.via.isEmpty {
+                    Text("über " + search.via.map(viaLabel).joined(separator: ", "))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 4) {
-                InfoChip(text: search.date.formatted(.dateTime.weekday(.abbreviated).hour().minute()),
-                         systemImage: search.isArrival ? "arrow.down.right" : "arrow.up.right")
+                Button {
+                    showTimePicker = true
+                } label: {
+                    InfoChip(text: searchDate.formatted(.dateTime.weekday(.abbreviated).hour().minute()),
+                             systemImage: search.isArrival ? "arrow.down.right" : "arrow.up.right")
+                }
+                .buttonStyle(.plain)
+                .popover(isPresented: $showTimePicker) {
+                    timePickerPopover
+                }
                 if search.onlyBC100 {
                     InfoChip(text: "BC100", systemImage: "creditcard.fill", tint: .brand)
                 }
@@ -124,6 +145,32 @@ struct JourneyResultsView: View {
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 8)
+    }
+
+    private var timePickerPopover: some View {
+        VStack(spacing: 12) {
+            DatePicker("Zeit", selection: $searchDate)
+                .datePickerStyle(.graphical)
+                .tint(.brand)
+            HStack {
+                Button {
+                    searchDate = .now
+                } label: {
+                    Label("Jetzt", systemImage: "clock.fill")
+                }
+                .buttonStyle(.bordered)
+                Spacer()
+                Button("Fertig") {
+                    showTimePicker = false
+                    Task { await reload() }
+                }
+                .buttonStyle(.glassProminent)
+            }
+            .tint(.brand)
+        }
+        .padding()
+        .presentationCompactAdaptation(.sheet)
+        .presentationDetents([.height(500)])
     }
 
     private var trainButton: some View {
@@ -158,6 +205,10 @@ struct JourneyResultsView: View {
         }
     }
 
+    private func viaLabel(_ waypoint: ViaWaypoint) -> String {
+        waypoint.minStayMinutes > 0 ? "\(waypoint.station.displayName) (≥ \(waypoint.minStayMinutes) Min.)" : waypoint.station.displayName
+    }
+
     /// Long-distance trains from the loaded results, as quick picks.
     private var trainSuggestions: [String] {
         var names: [String] = []
@@ -184,30 +235,50 @@ struct JourneyResultsView: View {
         .disabled(loadingMore)
     }
 
+    /// Re-runs the search from scratch, e.g. after the user picks a new time.
+    private func reload() async {
+        journeys = []
+        earlierCursor = nil
+        laterCursor = nil
+        hiddenCount = 0
+        forcedTrain = nil
+        forcedJourney = nil
+        await load(cursor: nil, prepend: false)
+    }
+
     private func load(cursor: String?, prepend: Bool) async {
         isLoading = true
         defer { isLoading = false }
         do {
-            let page = try await model.provider.journeys(JourneyQuery(
-                from: search.from, to: search.to, date: search.date, isArrival: search.isArrival, cursor: cursor))
-            var result = page.journeys
+            var result: [Journey]
+            var page: JourneyPage?
+            if search.via.isEmpty {
+                let loaded = try await model.provider.journeys(JourneyQuery(
+                    from: search.from, to: search.to, date: searchDate, isArrival: search.isArrival, cursor: cursor))
+                result = loaded.journeys
+                page = loaded
+            } else {
+                // Routed via search has no cursor-based paging – it's a single chained search.
+                result = try await ViaRoutePlanner(provider: model.provider).journeys(
+                    from: search.from, to: search.to, via: search.via, date: searchDate)
+            }
             if search.onlyBC100 {
                 let rules = model.bc100Rules
                 let before = result.count
                 result = result.filter(rules.isValid)
                 hiddenCount += before - result.count
             }
-            source = page.source
+            source = page?.source ?? model.provider.source
             if cursor == nil {
                 journeys = result
-                earlierCursor = page.earlierCursor
-                laterCursor = page.laterCursor
+                earlierCursor = page?.earlierCursor
+                laterCursor = page?.laterCursor
             } else if prepend {
                 journeys = result + journeys
-                earlierCursor = page.earlierCursor
+                earlierCursor = page?.earlierCursor
             } else {
                 journeys += result
-                laterCursor = page.laterCursor
+                laterCursor = page?.laterCursor
             }
             error = nil
         } catch is CancellationError {

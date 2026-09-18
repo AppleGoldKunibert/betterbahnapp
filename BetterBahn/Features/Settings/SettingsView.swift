@@ -5,7 +5,7 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @State private var user: TraewellingUser?
     @State private var isLoggedIn = false
-    @State private var clientID = ""
+    @State private var showClearHistoryConfirmation = false
 
     var body: some View {
         @Bindable var settings = model.settings
@@ -50,15 +50,6 @@ struct SettingsView: View {
                             .listRowBackground(Color.clear)
                             .listRowInsets(EdgeInsets())
                     }
-                    LabeledContent {
-                        TextField("Client-ID", text: $clientID)
-                            .multilineTextAlignment(.trailing)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .onSubmit(applyClientID)
-                    } label: {
-                        IconLabel(title: "Client-ID", systemImage: "key.fill", color: .gray)
-                    }
                     Toggle(isOn: $settings.syncTraewellingToMap) {
                         IconLabel(title: "Fahrten in Karte übernehmen", systemImage: "map.fill", color: .teal)
                     }
@@ -88,8 +79,6 @@ struct SettingsView: View {
                     }
                 } header: {
                     Text("Träwelling")
-                } footer: {
-                    Text("Lege unter traewelling.de/settings/applications eine öffentliche Anwendung an („confidential“ deaktivieren). Verwende https://betterbahn.kunibert88.workers.dev/oauth/traewelling/callback als Weiterleitungs-URL und trage hier nur die Client-ID ein. Ein Client Secret wird nicht benötigt.")
                 }
 
                 Section {
@@ -118,6 +107,14 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    NavigationLink {
+                        AdvancedSettingsView()
+                    } label: {
+                        IconLabel(title: "Erweiterte Einstellungen", systemImage: "gearshape.2.fill", color: .gray)
+                    }
+                }
+
+                Section {
                     Toggle(isOn: $settings.connectionWarnings) {
                         IconLabel(title: "Warnen, wenn Anschluss platzt", systemImage: "exclamationmark.triangle.fill", color: .orange)
                     }
@@ -132,6 +129,18 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Button(role: .destructive) {
+                        showClearHistoryConfirmation = true
+                    } label: {
+                        IconLabel(title: "Suchverlauf löschen", systemImage: "clock.arrow.circlepath", color: .heavyDelay)
+                    }
+                } header: {
+                    Text("Verlauf")
+                } footer: {
+                    Text("Löscht deine zuletzt gesuchten Bahnhöfe und Verbindungen. Favoriten, gespeicherte Reisen und deine Anmeldung bleiben erhalten.")
+                }
+
+                Section {
                     Button {
                         Task { await model.liveActivities.endAll() }
                     } label: {
@@ -143,21 +152,19 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Einstellungen")
-            .task {
-                clientID = model.settings.traewellingClientID
-                await refreshLogin()
-            }
-            .onDisappear {
-                applyClientID()
+            .task { await refreshLogin() }
+            .confirmationDialog(
+                "Suchverlauf löschen?",
+                isPresented: $showClearHistoryConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Suchverlauf löschen", role: .destructive) {
+                    model.clearSearchHistory()
+                }
+            } message: {
+                Text("Favoriten, gespeicherte Reisen und deine Anmeldung bleiben erhalten.")
             }
         }
-    }
-
-    private func applyClientID() {
-        let trimmed = clientID.trimmingCharacters(in: .whitespaces)
-        guard trimmed != model.settings.traewellingClientID else { return }
-        model.settings.traewellingClientID = trimmed
-        model.applySettings()
     }
 
     private func refreshLogin() async {
@@ -221,6 +228,58 @@ struct BC100RulesView: View {
         rules.excludedOperators = split(operators)
         rules.excludedLinePrefixes = split(prefixes)
         model.settings.bc100Rules = rules
+    }
+}
+
+/// Settings that ship with a working default and only need touching to override it.
+struct AdvancedSettingsView: View {
+    @Environment(AppModel.self) private var model
+    @State private var timetablesClientID = ""
+    @State private var timetablesApiKey = ""
+
+    var body: some View {
+        Form {
+            Section {
+                LabeledContent {
+                    TextField("Standard", text: $timetablesClientID)
+                        .multilineTextAlignment(.trailing)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .onSubmit(applyTimetablesCredentials)
+                } label: {
+                    IconLabel(title: "Client-ID", systemImage: "key.fill", color: .gray)
+                }
+                LabeledContent {
+                    SecureField("Standard", text: $timetablesApiKey)
+                        .multilineTextAlignment(.trailing)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .onSubmit(applyTimetablesCredentials)
+                } label: {
+                    IconLabel(title: "API-Key", systemImage: "lock.fill", color: .gray)
+                }
+                Link("Eigene Zugangsdaten auf developers.deutschebahn.com beantragen",
+                     destination: URL(string: "https://developers.deutschebahn.com/db-api-marketplace/apis/product/timetables")!)
+            } header: {
+                Text("DB-Echtzeitdaten")
+            } footer: {
+                Text("BetterBahn gleicht Verspätungen und Gleisänderungen bereits standardmäßig zusätzlich mit der offiziellen DB-Timetables-API ab, nützlich wenn Transitous sie verspätet oder gar nicht meldet. Trage hier nur eigene Zugangsdaten ein, wenn du den mitgelieferten Zugang ersetzen möchtest.")
+            }
+        }
+        .navigationTitle("Erweiterte Einstellungen")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            timetablesClientID = model.timetablesCredentials?.clientID ?? ""
+            timetablesApiKey = model.timetablesCredentials?.apiKey ?? ""
+        }
+        .onDisappear(perform: applyTimetablesCredentials)
+    }
+
+    private func applyTimetablesCredentials() {
+        let trimmedID = timetablesClientID.trimmingCharacters(in: .whitespaces)
+        let trimmedKey = timetablesApiKey.trimmingCharacters(in: .whitespaces)
+        guard trimmedID != (model.timetablesCredentials?.clientID ?? "") || trimmedKey != (model.timetablesCredentials?.apiKey ?? "") else { return }
+        model.updateTimetablesCredentials(clientID: trimmedID, apiKey: trimmedKey)
     }
 }
 

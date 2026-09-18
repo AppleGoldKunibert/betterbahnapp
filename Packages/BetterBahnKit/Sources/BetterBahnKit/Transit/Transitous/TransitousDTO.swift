@@ -131,6 +131,19 @@ struct MLeg: Decodable {
                   tripShortName: tripShortName, agencyName: agencyName)
     }
 
+    /// `headsign` as reported by the feed, corrected for a border-truncated source trip: a leg that
+    /// was stitched together across a border (e.g. a Munich–Innsbruck ICE whose German feed data only
+    /// covers the domestic portion up to Kufstein) keeps arriving at the requested destination, but
+    /// its `headsign` still names that feed's own truncated endpoint — which then shows up as just
+    /// another intermediate stop of this same leg rather than as its `to`. Prefer the leg's actual
+    /// destination whenever `headsign` names a stop the train already passes through on the way there.
+    var direction: String? {
+        guard let headsign else { return nil }
+        let passesHeadsignAsIntermediateStop = (intermediateStops ?? [])
+            .contains { Station.normalize($0.name) == Station.normalize(headsign) }
+        return passesHeadsignAsIntermediateStop ? to.name : headsign
+    }
+
     func toLeg() -> Leg {
         let realtime = realTime ?? false
         let dep = TimeInfo(planned: scheduledStartTime ?? startTime, actual: realtime ? startTime : nil)
@@ -144,7 +157,7 @@ struct MLeg: Decodable {
             departure: dep, arrival: arr,
             departurePlatform: PlatformInfo(planned: from.scheduledTrack, actual: from.track),
             arrivalPlatform: PlatformInfo(planned: to.scheduledTrack, actual: to.track),
-            tripId: tripId, line: isWalking ? nil : lineInfo.toLine(), direction: headsign,
+            tripId: tripId, line: isWalking ? nil : lineInfo.toLine(), direction: direction,
             isWalking: isWalking, cancelled: (cancelled ?? false) || (tripCancelled ?? false),
             stopovers: stopovers, remarks: [], source: .transitous, geometry: geometry
         )
@@ -176,6 +189,11 @@ struct MStopTime: Decodable {
     var cancelled: Bool?
     var tripCancelled: Bool?
 
+    var lineInfo: MLineInfo {
+        MLineInfo(mode: mode, displayName: displayName, routeShortName: routeShortName,
+                  tripShortName: tripShortName, agencyName: agencyName)
+    }
+
     func toEntry(kind: BoardKind) -> BoardEntry? {
         let realtime = realTime ?? false
         let planned = kind == .departures ? place.scheduledDeparture : place.scheduledArrival
@@ -183,8 +201,7 @@ struct MStopTime: Decodable {
         guard let time = timeInfo(planned: planned, actual: realtime ? actual : nil) else { return nil }
         let station = place.toStation()
         let otherEnd = kind == .departures ? tripTo : tripFrom
-        let line = MLineInfo(mode: mode, displayName: displayName, routeShortName: routeShortName,
-                             tripShortName: tripShortName, agencyName: agencyName).toLine()
+        let line = lineInfo.toLine()
         return BoardEntry(
             kind: kind, tripId: tripId, station: station, line: line,
             otherEnd: kind == .departures ? (headsign ?? tripTo?.name) : tripFrom?.name,
@@ -204,6 +221,19 @@ struct MStopTimesResponse: Decodable {
 }
 
 struct MGeocodeMatch: Decodable {
+    /// One level of the place hierarchy a stop sits in (country → state → district → town → …),
+    /// from least to most specific. `isDefault` marks the level that best names the immediate area.
+    struct Area: Decodable {
+        var name: String
+        var adminLevel: Double?
+        var isDefault: Bool?
+
+        enum CodingKeys: String, CodingKey {
+            case name, adminLevel
+            case isDefault = "default"
+        }
+    }
+
     var type: String
     var name: String
     var id: String
@@ -211,6 +241,7 @@ struct MGeocodeMatch: Decodable {
     var lon: Double
     var country: String?
     var modes: [String]?
+    var areas: [Area]?
 
     /// Higher is better: train stations in Germany first.
     var relevance: Int {
@@ -222,8 +253,18 @@ struct MGeocodeMatch: Decodable {
         return score
     }
 
+    /// "Bayern" for a stop just named "Bernau" – the shortest qualifier that places it, meant to be
+    /// shown as "Bernau (Bayern)" next to same-named stops elsewhere in the country. Prefers the
+    /// state; falls back to the most specific named area if a stop has none (foreign stops).
+    var region: String? {
+        guard let areas, !areas.isEmpty else { return nil }
+        if let state = areas.first(where: { $0.adminLevel == 4 })?.name { return state }
+        return areas.first { $0.isDefault == true }?.name
+    }
+
     func toStation() -> Station {
-        Station(id: id, name: name, coordinate: Coordinate(latitude: lat, longitude: lon), evaNumber: nil, source: .transitous)
+        Station(id: id, name: name, coordinate: Coordinate(latitude: lat, longitude: lon), evaNumber: nil,
+                source: .transitous, region: region)
     }
 }
 

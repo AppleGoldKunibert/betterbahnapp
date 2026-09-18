@@ -38,13 +38,17 @@ public struct Station: Codable, Sendable, Hashable, Identifiable {
     /// DB EVA number / IBNR, if known. Used to match stations across sources.
     public var evaNumber: String?
     public var source: DataSource
+    /// District/state, e.g. "Bernau am Chiemsee, Bayern" for a station whose own name is just
+    /// "Bernau" – tells apart same-named stations in different parts of the country.
+    public var region: String?
 
-    public init(id: String, name: String, coordinate: Coordinate?, evaNumber: String?, source: DataSource) {
+    public init(id: String, name: String, coordinate: Coordinate?, evaNumber: String?, source: DataSource, region: String? = nil) {
         self.id = id
         self.name = name
         self.coordinate = coordinate
         self.evaNumber = evaNumber
         self.source = source
+        self.region = region
     }
 
     /// Loose equality across sources: same EVA, or same-ish name within 400 m.

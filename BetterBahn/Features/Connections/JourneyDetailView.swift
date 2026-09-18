@@ -42,6 +42,7 @@ struct JourneyDetailView: View {
             .padding(.horizontal)
             .padding(.bottom, 32)
         }
+        .refreshable { await refreshRealtime() }
         .tabBarSafePadding()
         .background { AppBackground() }
         .toolbar(.hidden, for: .tabBar)
@@ -71,6 +72,17 @@ struct JourneyDetailView: View {
             // Pick up realtime refreshes of this saved journey.
             if let refreshed, refreshed != journey { journey = refreshed }
         }
+    }
+
+    /// Pull-to-refresh: re-fetches realtime data (delays, platforms, cancellations) for every leg.
+    private func refreshRealtime() async {
+        guard !readOnly else { return }
+        let refreshed = await model.journeyRefresher.refresh(journey)
+        guard refreshed != journey else { return }
+        if let entry = model.savedEntry(for: journey) {
+            model.updateSavedJourneyData(id: entry.id, journey: refreshed)
+        }
+        withAnimation { journey = refreshed }
     }
 
     /// The next transit leg after `leg`, plus the walking leg between them, if any.
@@ -257,6 +269,7 @@ struct LegCard: View {
 
     @State private var showStops = false
     @State private var showDetails = false
+    @State private var showFullTrip = false
 
     private var color: Color { leg.line?.product.color ?? .gray }
     private var intermediate: [Stopover] { Array(leg.stopovers.dropFirst().dropLast()) }
@@ -264,21 +277,33 @@ struct LegCard: View {
     var body: some View {
         Card {
             VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 10) {
-                    IconTile(systemImage: leg.line?.product.symbolName ?? "tram.fill", color: color, size: 38)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(leg.line?.name ?? "Zug").font(.headline)
-                        if let direction = leg.direction {
-                            Text("Richtung \(direction)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Button {
+                    showFullTrip = true
+                } label: {
+                    HStack(spacing: 10) {
+                        IconTile(systemImage: leg.line?.product.symbolName ?? "tram.fill", color: color, size: 38)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(leg.line?.name ?? "Zug").font(.headline)
+                            if let direction = leg.direction {
+                                Text("Richtung \(direction)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                        }
+                        Spacer()
+                        if leg.cancelled {
+                            InfoChip(text: "Fällt aus", systemImage: "xmark.octagon.fill", tint: .heavyDelay)
+                        } else {
+                            DelayPill(minutes: leg.departure.delayMinutes)
+                        }
+                        if leg.tripId != nil {
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tertiary)
                         }
                     }
-                    Spacer()
-                    if leg.cancelled {
-                        InfoChip(text: "Fällt aus", systemImage: "xmark.octagon.fill", tint: .heavyDelay)
-                    } else {
-                        DelayPill(minutes: leg.departure.delayMinutes)
-                    }
+                    .contentShape(.rect)
                 }
+                .buttonStyle(.plain)
+                .disabled(leg.tripId == nil)
 
                 VStack(spacing: 0) {
                     TimelineNode(kind: .major, color: color, lineBelow: color) {
@@ -365,6 +390,9 @@ struct LegCard: View {
                     }
                 }
             }
+        }
+        .sheet(isPresented: $showFullTrip) {
+            LegTripSheet(leg: leg)
         }
     }
 
@@ -537,6 +565,7 @@ struct AlternativeRow: View {
         .padding()
     }
     .background { AppBackground() }
+    .environment(AppModel())
 }
 
 /// Finds a new way to the destination after a missed transfer or cancellation.

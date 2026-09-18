@@ -1,7 +1,7 @@
 import Foundation
 
 public enum TraewellingVisibility: Int, CaseIterable, Codable, Sendable {
-    case publicVisible = 0, unlisted = 1, followers = 2, privateVisible = 3, authenticated = 4
+    case publicVisible = 0, unlisted = 1, followers = 2, privateVisible = 3, authenticated = 4, trusted = 5
 
     public var label: String {
         switch self {
@@ -9,7 +9,8 @@ public enum TraewellingVisibility: Int, CaseIterable, Codable, Sendable {
         case .unlisted: "Nicht gelistet"
         case .followers: "Nur Follower"
         case .privateVisible: "Privat"
-        case .authenticated: "Nur angemeldete Nutzer"
+        case .authenticated: "Angemeldete Nutzer"
+        case .trusted: "Vertraute Nutzer"
         }
     }
 }
@@ -214,8 +215,10 @@ public actor TraewellingClient {
     }
 
     public func stations(matching query: String) async throws -> [TraewellingStation] {
-        let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? query
-        return try await api("trains/station/autocomplete/\(encoded)", as: DataWrapper<[TraewellingStation]>.self).data
+        // `api(_:)` builds the request URL with `URL.appending(path:)`, which percent-encodes
+        // whatever it's given — pre-encoding here too would double-encode (e.g. "Berlin Hbf" →
+        // "Berlin%20Hbf" → "Berlin%2520Hbf" on the wire), so the raw name is passed straight through.
+        try await api("trains/station/autocomplete/\(query)", as: DataWrapper<[TraewellingStation]>.self).data
     }
 
     public func departures(stationID: Int, when: Date) async throws -> [TraewellingDeparture] {
@@ -251,12 +254,21 @@ public actor TraewellingClient {
         guard let line = leg.line else { throw TraewellingError.tripNotFound("Fußweg") }
         let lineName = departure.line.name ?? line.name
         let trip = try await trip(tripID: departure.tripId, lineName: lineName)
+        // Träwelling's own timetable can list a station under a different internal ID than the one our
+        // departure-board lookup found (e.g. a grouped "Hbf" ID vs. the specific ID this trip's own
+        // stopovers reference) — sending an ID the trip itself doesn't recognize makes `trains/checkin`
+        // fail with "Given stations are not on the trip". Resolve both ends against `trip.stopovers`,
+        // the same source Träwelling validates against, instead of trusting the board lookup's ID.
+        guard let origin = Self.matchStop(trip.stopovers, station: leg.origin,
+                                          departure: departure.plannedWhen ?? leg.departure.planned) else {
+            throw TraewellingError.stationNotFound(leg.origin.name)
+        }
         guard let destination = Self.matchStop(trip.stopovers, station: leg.destination, arrival: leg.arrival.planned) else {
             throw TraewellingError.stationNotFound(leg.destination.name)
         }
         return try await sendCheckin(draft, tripId: departure.tripId, lineName: lineName,
-                                     startID: start.id, destinationID: destination.stationID,
-                                     departure: departure.plannedWhen ?? leg.departure.planned,
+                                     startID: origin.stationID, destinationID: destination.stationID,
+                                     departure: origin.departurePlanned ?? departure.plannedWhen ?? leg.departure.planned,
                                      arrival: destination.arrivalPlanned ?? leg.arrival.planned)
     }
 
@@ -415,10 +427,16 @@ public actor TraewellingClient {
         return digits.isEmpty ? nil : String(digits.reversed())
     }
 
-    static func matchStop(_ stops: [TraewellingTrip.Stop], station: Station, arrival: Date) -> TraewellingTrip.Stop? {
-        stops.first {
+    static func matchStop(_ stops: [TraewellingTrip.Stop], station: Station,
+                          arrival: Date? = nil, departure: Date? = nil) -> TraewellingTrip.Stop? {
+        if let arrival, let stop = stops.first(where: {
             guard let planned = $0.arrivalPlanned else { return false }
             return abs(planned.timeIntervalSince(arrival)) <= 2 * 60
-        } ?? stops.first { Station.normalize($0.name) == Station.normalize(station.name) }
+        }) { return stop }
+        if let departure, let stop = stops.first(where: {
+            guard let planned = $0.departurePlanned else { return false }
+            return abs(planned.timeIntervalSince(departure)) <= 2 * 60
+        }) { return stop }
+        return stops.first { Station.normalize($0.name) == Station.normalize(station.name) }
     }
 }

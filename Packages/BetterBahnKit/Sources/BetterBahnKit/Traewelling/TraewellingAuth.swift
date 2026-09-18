@@ -33,14 +33,12 @@ public struct PKCE: Sendable {
 
 public struct TraewellingConfig: Sendable {
     public var baseURL: URL
-    /// Create an application at https://traewelling.de/settings/applications
-    /// with redirect URL `https://betterbahn.kunibert88.workers.dev/oauth/traewelling/callback`
-    /// (public application: no client secret, "confidential" off).
+    /// BetterBahn's own public Träwelling OAuth client (no client secret, "confidential" off).
     public var clientID: String
     public var redirectURI: String
     public var scopes: [String]
 
-    public init(baseURL: URL = URL(string: "https://traewelling.de")!, clientID: String,
+    public init(baseURL: URL = URL(string: "https://traewelling.de")!, clientID: String = "406",
                 redirectURI: String = "https://betterbahn.kunibert88.workers.dev/oauth/traewelling/callback",
                 scopes: [String] = ["read-statuses", "write-statuses", "read-search"]) {
         self.baseURL = baseURL
@@ -113,7 +111,6 @@ public enum OAuthError: Error, LocalizedError, Equatable {
     case stateMismatch
     case missingCode
     case notLoggedIn
-    case missingClientID
     case invalidRedirectURI
 
     public var errorDescription: String? {
@@ -121,7 +118,6 @@ public enum OAuthError: Error, LocalizedError, Equatable {
         case .stateMismatch: "Anmeldung abgebrochen (ungültiger Status)."
         case .missingCode: "Träwelling hat keinen Code zurückgegeben."
         case .notLoggedIn: "Nicht bei Träwelling angemeldet."
-        case .missingClientID: "Keine Träwelling Client-ID eingetragen (Einstellungen)."
         case .invalidRedirectURI: "Ungültige Träwelling-OAuth-Konfiguration: Die Weiterleitungs-URL muss eine gültige HTTPS-Adresse mit Host und Callback-Pfad sein."
         }
     }

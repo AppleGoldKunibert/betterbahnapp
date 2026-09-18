@@ -36,10 +36,6 @@ struct TraewellingLoginButton: View {
 
     private func login() {
         let config = model.traewelling.config
-        guard !config.clientID.isEmpty else {
-            error = OAuthError.missingClientID
-            return
-        }
         guard config.callbackHost != nil, config.callbackPath != nil else {
             error = OAuthError.invalidRedirectURI
             return

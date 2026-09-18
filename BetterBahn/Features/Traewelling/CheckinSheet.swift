@@ -138,9 +138,17 @@ struct CheckinSheet: View {
     private func pickerRow<P: View>(_ title: String, icon: String, color: Color, @ViewBuilder picker: () -> P) -> some View {
         HStack(spacing: 12) {
             IconTile(systemImage: icon, color: color, size: 32)
-            Text(title).font(.subheadline.weight(.medium))
-            Spacer()
-            picker().labelsHidden().tint(.secondary)
+            Text(title)
+                .font(.subheadline.weight(.medium))
+                .lineLimit(1)
+                .layoutPriority(1)
+            Spacer(minLength: 8)
+            picker()
+                .labelsHidden()
+                .tint(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: 150, alignment: .trailing)
         }
     }
 
@@ -224,7 +232,7 @@ struct CheckinTicket: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     TimeStack(time: leg.departure, font: .title2.weight(.bold))
-                    Text(leg.origin.name).font(.subheadline.weight(.semibold)).lineLimit(2)
+                    Text(leg.origin.displayName).font(.subheadline.weight(.semibold)).lineLimit(2)
                     PlatformBadge(platform: leg.departurePlatform)
                 }
                 Spacer()
@@ -240,7 +248,7 @@ struct CheckinTicket: View {
                 Spacer()
                 VStack(alignment: .trailing, spacing: 4) {
                     TimeStack(time: leg.arrival, alignment: .trailing, font: .title2.weight(.bold))
-                    Text(leg.destination.name).font(.subheadline.weight(.semibold)).lineLimit(2)
+                    Text(leg.destination.displayName).font(.subheadline.weight(.semibold)).lineLimit(2)
                         .multilineTextAlignment(.trailing)
                     PlatformBadge(platform: leg.arrivalPlatform)
                 }

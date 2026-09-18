@@ -53,9 +53,9 @@ struct TripView: View {
     private func actionBar(_ leg: Leg) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
-                Text(leg.origin.name).lineLimit(1)
+                Text(leg.origin.displayName).lineLimit(1)
                 Image(systemName: "arrow.right").font(.caption.weight(.bold))
-                Text(leg.destination.name).lineLimit(1)
+                Text(leg.destination.displayName).lineLimit(1)
                 Spacer()
                 Text(leg.arrival.best.timeIntervalSince(leg.departure.best).compactDuration)
                     .foregroundStyle(.secondary)
@@ -97,6 +97,8 @@ struct TripContent: View {
     let highlight: Station
     @Binding var boardingID: String?
     @Binding var exitID: String?
+    /// When false, stops are shown read-only (e.g. viewing the full route of a leg already booked).
+    var interactive = true
 
     private var color: Color { trip.line?.product.color ?? .gray }
 
@@ -108,7 +110,7 @@ struct TripContent: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(trip.line?.name ?? "Zug").font(.title3.weight(.bold))
                         if let origin = trip.origin, let destination = trip.destination {
-                            Text("\(origin.name) → \(destination.name)")
+                            Text("\(origin.displayName) → \(destination.displayName)")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(2)
@@ -121,14 +123,16 @@ struct TripContent: View {
                 }
             }
 
-            HStack(spacing: 8) {
-                Image(systemName: "hand.tap.fill").foregroundStyle(Color.brand)
-                Text("Tippe auf Halte, um Ein- und Ausstieg zu wählen.")
-                Spacer()
+            if interactive {
+                HStack(spacing: 8) {
+                    Image(systemName: "hand.tap.fill").foregroundStyle(Color.brand)
+                    Text("Tippe auf Halte, um Ein- und Ausstieg zu wählen.")
+                    Spacer()
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 4)
 
             Card {
                 VStack(spacing: 0) {
@@ -159,6 +163,7 @@ struct TripContent: View {
         let dimmed = boardingIndex != nil && !isRidden(index) && !isExit
 
         return Button {
+            guard interactive else { return }
             select(index)
         } label: {
             TimelineNode(kind: isMajor ? .major : .minor, color: isRidden(index) ? color : color.opacity(0.45),
@@ -169,7 +174,7 @@ struct TripContent: View {
                             .frame(width: 52, alignment: .leading)
                     }
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(stop.station.name)
+                        Text(stop.station.displayName)
                             .font(isMajor ? .headline : .subheadline)
                             .fontWeight(stop.station.isSamePlace(as: highlight) ? .bold : nil)
                             .lineLimit(2)
@@ -186,6 +191,7 @@ struct TripContent: View {
             }
         }
         .buttonStyle(.plain)
+        .disabled(!interactive)
     }
 
     private func select(_ index: Int) {
@@ -201,6 +207,70 @@ struct TripContent: View {
     }
 }
 
+/// Read-only full route of a train, opened by tapping a leg in a journey plan — shows every stop
+/// the train makes, not just the portion between the leg's own origin and destination.
+struct LegTripSheet: View {
+    let leg: Leg
+
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    @State private var trip: Trip?
+    @State private var error: Error?
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 16) {
+                    if let error {
+                        ErrorBanner(error: error)
+                    }
+                    if let trip {
+                        TripContent(trip: trip, highlight: leg.origin,
+                                    boardingID: .constant(boardingID(in: trip)), exitID: .constant(exitID(in: trip)),
+                                    interactive: false)
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 16)
+            }
+            .background { AppBackground() }
+            .overlay {
+                if trip == nil, error == nil { ProgressView("Lade Fahrtverlauf …") }
+            }
+            .navigationTitle(leg.line?.name ?? "Zug")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Fertig", systemImage: "xmark", role: .cancel) { dismiss() }
+                }
+            }
+            .task { await load() }
+        }
+    }
+
+    private func boardingID(in trip: Trip) -> String? {
+        trip.stopovers.first { $0.station.isSamePlace(as: leg.origin) }?.id
+    }
+
+    private func exitID(in trip: Trip) -> String? {
+        trip.stopovers.last { $0.station.isSamePlace(as: leg.destination) }?.id
+    }
+
+    private func load() async {
+        guard let tripId = leg.tripId else {
+            error = TransitError.notFound("Fahrt")
+            return
+        }
+        do {
+            trip = try await model.provider.trip(id: tripId, source: leg.source)
+            error = nil
+        } catch is CancellationError {
+        } catch {
+            self.error = error
+        }
+    }
+}
+
 #Preview("Fahrtverlauf") {
     @Previewable @State var boarding: String? = PreviewData.trip.stopovers[1].id
     @Previewable @State var exit: String? = PreviewData.trip.stopovers[5].id
@@ -209,4 +279,5 @@ struct TripContent: View {
             .padding()
     }
     .background { AppBackground() }
+    .environment(AppModel())
 }

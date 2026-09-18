@@ -32,8 +32,8 @@ final class LiveActivityManager {
             }
         } else {
             guard areActivitiesEnabled,
-                  let origin = journey.legs.first?.origin.name,
-                  let destination = journey.legs.last?.destination.name else { return }
+                  let origin = journey.legs.first?.origin.displayName,
+                  let destination = journey.legs.last?.destination.displayName else { return }
             let attributes = TripActivityAttributes(originName: origin, destinationName: destination, journeyID: journey.id)
             _ = try? Activity.request(attributes: attributes, content: content)
         }

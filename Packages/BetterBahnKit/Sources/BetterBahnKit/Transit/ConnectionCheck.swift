@@ -44,8 +44,10 @@ public enum ConnectionIssue: Sendable, Hashable, Identifiable {
 }
 
 public extension Journey {
-    /// Transfers under `minimumTransfer` minutes count as missed, under `riskTransfer` as at risk.
-    func connectionIssues(minimumTransfer: Int = 2, riskTransfer: Int = 5) -> [ConnectionIssue] {
+    /// Transfers under `minimumTransfer` minutes (based on realtime data) count as missed, under
+    /// `riskTransfer` as at risk. Any walking time between the legs is shown separately in the UI and
+    /// doesn't factor into these thresholds, since a planned transfer already accounts for it.
+    func connectionIssues(minimumTransfer: Int = 1, riskTransfer: Int = 5) -> [ConnectionIssue] {
         var issues: [ConnectionIssue] = []
         let transit = transitLegs
         for leg in transit where leg.cancelled {
@@ -55,16 +57,12 @@ public extension Journey {
         for index in 1..<transit.count {
             let arriving = transit[index - 1], departing = transit[index]
             guard !arriving.cancelled, !departing.cancelled else { continue }
-            // Walking time between the legs is part of the required buffer.
-            let walk = legs.filter { $0.isWalking && $0.departure.planned >= arriving.arrival.planned
-                && $0.arrival.planned <= departing.departure.planned }
-                .reduce(0.0) { $0 + $1.arrival.planned.timeIntervalSince($1.departure.planned) }
-            let buffer = Int(((departing.departure.best.timeIntervalSince(arriving.arrival.best) - walk) / 60).rounded(.down))
+            let buffer = Int(((departing.departure.best.timeIntervalSince(arriving.arrival.best)) / 60).rounded(.down))
             let station = departing.origin.name
             let a = arriving.line?.name ?? "Zug", d = departing.line?.name ?? "Zug"
             if buffer < minimumTransfer {
                 issues.append(.transferMissed(at: station, arrivingLine: a, departingLine: d, bufferMinutes: buffer))
-            } else if buffer < riskTransfer, departing.departure.planned.timeIntervalSince(arriving.arrival.planned) - walk >= Double(riskTransfer * 60) {
+            } else if buffer < riskTransfer, departing.departure.planned.timeIntervalSince(arriving.arrival.planned) >= Double(riskTransfer * 60) {
                 // Only warn about risk when realtime made the transfer tighter than planned.
                 issues.append(.transferAtRisk(at: station, arrivingLine: a, departingLine: d, bufferMinutes: buffer))
             }
@@ -73,20 +71,29 @@ public extension Journey {
     }
 }
 
-/// Updates the times, platforms and cancellations of a journey from current trip data.
+/// Updates the times, platforms and cancellations of a journey from current trip data, optionally
+/// overlaid with fresher data straight from DB (see `TimetablesClient`) for legs where that helps.
 public struct JourneyRefresher: Sendable {
     let provider: CombinedProvider
+    let timetables: TimetablesClient?
 
-    public init(provider: CombinedProvider) {
+    public init(provider: CombinedProvider, timetables: TimetablesClient? = nil) {
         self.provider = provider
+        self.timetables = timetables
     }
 
     public func refresh(_ journey: Journey) async -> Journey {
         var updated = journey
-        for (index, leg) in journey.legs.enumerated() {
-            guard !leg.isWalking, let tripId = leg.tripId, leg.source != .traewelling,
-                  let trip = try? await provider.trip(id: tripId, source: leg.source) else { continue }
-            updated.legs[index] = Self.apply(trip, to: leg)
+        for (index, originalLeg) in journey.legs.enumerated() {
+            var leg = originalLeg
+            if !leg.isWalking, let tripId = leg.tripId, leg.source != .traewelling,
+               let trip = try? await provider.trip(id: tripId, source: leg.source) {
+                leg = Self.apply(trip, to: leg)
+            }
+            if let timetables, let override = await timetables.realtime(for: leg) {
+                leg = Self.apply(override, to: leg)
+            }
+            updated.legs[index] = leg
         }
         return updated
     }
@@ -104,6 +111,16 @@ public struct JourneyRefresher: Sendable {
             if end.arrivalPlatform?.best != nil { leg.arrivalPlatform = end.arrivalPlatform }
             if end.cancelled { leg.cancelled = true }
         }
+        return leg
+    }
+
+    static func apply(_ override: TimetablesLegOverride, to leg: Leg) -> Leg {
+        var leg = leg
+        if let departure = override.departure { leg.departure = departure }
+        if let departurePlatform = override.departurePlatform { leg.departurePlatform = departurePlatform }
+        if let arrival = override.arrival { leg.arrival = arrival }
+        if let arrivalPlatform = override.arrivalPlatform { leg.arrivalPlatform = arrivalPlatform }
+        if override.cancelled { leg.cancelled = true }
         return leg
     }
 }

@@ -9,6 +9,8 @@ final class AppModel {
     private(set) var provider: CombinedProvider
     private(set) var traewelling: TraewellingClient
     let liveActivities = LiveActivityManager()
+    @ObservationIgnored private let timetablesStore = TimetablesCredentialsStore()
+    private(set) var timetablesCredentials: TimetablesCredentials?
 
     var favoriteStations: [Station] {
         didSet { Storage.save(favoriteStations, key: "favoriteStations") }
@@ -35,7 +37,8 @@ final class AppModel {
 
     init() {
         provider = CombinedProvider()
-        traewelling = TraewellingClient(config: TraewellingConfig(clientID: settings.traewellingClientID))
+        traewelling = TraewellingClient(config: TraewellingConfig())
+        timetablesCredentials = timetablesStore.load()
         favoriteStations = Storage.load(key: "favoriteStations") ?? []
         recentSearches = Storage.load(key: "recentSearches") ?? []
         recentStations = Storage.load(key: "recentStations") ?? []
@@ -53,10 +56,37 @@ final class AppModel {
 
     var bc100Rules: BC100Rules { settings.bc100Rules }
 
-    /// Rebuilds clients after the client ID changed.
-    func applySettings() {
-        provider = CombinedProvider()
-        traewelling = TraewellingClient(config: TraewellingConfig(clientID: settings.traewellingClientID))
+    /// Overlays fresher delay/platform data straight from DB onto legs. Uses the user's own
+    /// credentials from Einstellungen → Erweiterte Einstellungen when set, otherwise the key
+    /// BetterBahn ships with (`TimetablesCredentials.shipped`); `nil` when neither is configured.
+    var timetablesClient: TimetablesClient? {
+        let credentials = timetablesCredentials ?? .shipped
+        guard credentials.isConfigured else { return nil }
+        return TimetablesClient(credentials: credentials)
+    }
+
+    var journeyRefresher: JourneyRefresher { JourneyRefresher(provider: provider, timetables: timetablesClient) }
+
+    /// Saves (or, when both fields are empty, clears back to the shipped default) the DB Timetables
+    /// API credentials.
+    func updateTimetablesCredentials(clientID: String, apiKey: String) {
+        let trimmedID = clientID.trimmingCharacters(in: .whitespaces)
+        let trimmedKey = apiKey.trimmingCharacters(in: .whitespaces)
+        guard !trimmedID.isEmpty || !trimmedKey.isEmpty else {
+            timetablesStore.clear()
+            timetablesCredentials = nil
+            return
+        }
+        let credentials = TimetablesCredentials(clientID: trimmedID, apiKey: trimmedKey)
+        timetablesStore.save(credentials)
+        timetablesCredentials = credentials
+    }
+
+    /// Applies a manual realtime refresh (e.g. pull-to-refresh in the journey detail view) to a
+    /// saved journey in place, without touching its version history or already-sent notifications.
+    func updateSavedJourneyData(id: UUID, journey: Journey) {
+        guard let index = savedJourneys.firstIndex(where: { $0.id == id }) else { return }
+        savedJourneys[index].journey = journey
     }
 
     func toggleFavorite(_ station: Station) {
@@ -69,6 +99,13 @@ final class AppModel {
 
     func isFavorite(_ station: Station) -> Bool {
         favoriteStations.contains { $0.isSamePlace(as: station) }
+    }
+
+    /// Clears recently searched stations and connections only. Favorites, saved journeys, imported
+    /// Träwelling trips, and the Träwelling login itself (kept in the Keychain, not here) are untouched.
+    func clearSearchHistory() {
+        recentStations = []
+        recentSearches = []
     }
 
     // MARK: Träwelling sync
@@ -255,7 +292,7 @@ final class AppModel {
     /// arrived (after which tracking stops, since a manual trip's schedule never changes again).
     func refreshManualCheckins() async {
         guard !trackedManualCheckins.isEmpty else { return }
-        let refresher = JourneyRefresher(provider: provider)
+        let refresher = journeyRefresher
         for entry in trackedManualCheckins {
             // Give up on anything that never got an update for way too long (e.g. the trip was
             // abandoned) so tracking doesn't grow unbounded.
@@ -280,7 +317,7 @@ final class AppModel {
 
     /// Updates realtime data of journeys in the next 24 hours and warns about broken connections.
     func refreshSavedJourneys() async {
-        let refresher = JourneyRefresher(provider: provider)
+        let refresher = journeyRefresher
         let horizon = Date.now.addingTimeInterval(24 * 3600)
         for entry in upcomingJourneys where (entry.journey.departure?.best ?? .distantFuture) < horizon {
             let refreshed = await refresher.refresh(entry.journey)
@@ -400,9 +437,6 @@ final class AppSettings {
     var onlyBC100ByDefault: Bool {
         didSet { UserDefaults.standard.set(onlyBC100ByDefault, forKey: "onlyBC100ByDefault") }
     }
-    var traewellingClientID: String {
-        didSet { UserDefaults.standard.set(traewellingClientID, forKey: "traewellingClientID") }
-    }
     var traewellingVisibility: TraewellingVisibility {
         didSet { UserDefaults.standard.set(traewellingVisibility.rawValue, forKey: "traewellingVisibility") }
     }
@@ -422,7 +456,6 @@ final class AppSettings {
     init() {
         let defaults = UserDefaults.standard
         onlyBC100ByDefault = defaults.bool(forKey: "onlyBC100ByDefault")
-        traewellingClientID = defaults.string(forKey: "traewellingClientID") ?? ""
         traewellingVisibility = TraewellingVisibility(rawValue: defaults.integer(forKey: "traewellingVisibility")) ?? .publicVisible
         bc100Rules = Storage.load(key: "bc100Rules") ?? .default
         syncTraewellingToMap = defaults.object(forKey: "syncTraewellingToMap") as? Bool ?? true
@@ -440,7 +473,7 @@ enum ConnectionNotifier {
     static func notify(_ issue: ConnectionIssue, journey: Journey) async {
         let content = UNMutableNotificationContent()
         content.title = issue.title
-        let route = [journey.legs.first?.origin.name, journey.legs.last?.destination.name].compactMap { $0 }.joined(separator: " → ")
+        let route = [journey.legs.first?.origin.displayName, journey.legs.last?.destination.displayName].compactMap { $0 }.joined(separator: " → ")
         content.body = issue.message + (route.isEmpty ? "" : "\n\(route)")
         content.sound = issue.isBlocking ? .defaultCritical : .default
         content.interruptionLevel = issue.isBlocking ? .timeSensitive : .active

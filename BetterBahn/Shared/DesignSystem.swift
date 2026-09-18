@@ -168,6 +168,36 @@ struct LineBadge: View {
     }
 }
 
+/// ICE/IC series (e.g. "ICE 3neo") and Triebzugnummer (e.g. "Tz 9465") of a leg, loaded lazily from
+/// bahn.de's coach-sequence API since it's DB-only and needs an extra network request.
+struct TrainFormationLabel: View {
+    let leg: Leg?
+
+    @Environment(AppModel.self) private var model
+    @State private var formation: TrainFormation?
+
+    private var summary: String? {
+        guard let formation else { return nil }
+        let parts = [formation.modelSummary, formation.unitSummary].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    var body: some View {
+        Group {
+            if let summary {
+                Label(summary, systemImage: "tram.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .task(id: leg?.id) {
+            formation = nil
+            guard let leg, let bahnDe = model.provider.bahnDe else { return }
+            formation = try? await bahnDe.formation(for: leg)
+        }
+    }
+}
+
 /// Large planned time with the realtime time below, colored by delay.
 struct TimeStack: View {
     let time: TimeInfo

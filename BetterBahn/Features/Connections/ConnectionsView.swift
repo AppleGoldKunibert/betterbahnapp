@@ -4,6 +4,7 @@ import SwiftUI
 struct ConnectionSearch: Hashable {
     var from: Station
     var to: Station
+    var via: [ViaWaypoint] = []
     var date: Date
     var isArrival: Bool
     var onlyBC100: Bool
@@ -13,6 +14,7 @@ struct ConnectionsView: View {
     @Environment(AppModel.self) private var model
     @State private var from: Station?
     @State private var to: Station?
+    @State private var viaRows: [ViaRow] = []
     @State private var date = Date.now
     @State private var useNow = true
     @State private var isArrival = false
@@ -21,8 +23,19 @@ struct ConnectionsView: View {
     @State private var path: [ConnectionSearch] = []
     @State private var swapRotation = 0.0
 
+    /// Up to this many intermediate stops can be added to a single search.
+    private static let maxViaPoints = 4
+
     enum Field: Hashable {
-        case from, to
+        case from, to, via(UUID)
+    }
+
+    /// UI-side row for an in-progress via point: it needs a stable identity before a station has
+    /// even been picked, which `ViaWaypoint` (identified by station id) can't provide.
+    struct ViaRow: Identifiable {
+        let id = UUID()
+        var station: Station?
+        var minStayMinutes = 0
     }
 
     var body: some View {
@@ -66,12 +79,26 @@ struct ConnectionsView: View {
                 VStack(spacing: 0) {
                     StationInput(label: "Start", placeholder: "Von wo?", systemImage: "circle.circle.fill",
                                  iconColor: .primary, station: $from, focus: $focused, focusValue: .from)
-                    Divider().padding(.leading, 54).padding(.trailing, focused == .from || focused == .to ? 0 : 72)
+
+                    ForEach($viaRows) { $row in
+                        Divider().padding(.leading, 54).padding(.trailing, focused == nil ? 72 : 0)
+                        ViaRowView(row: $row, focus: $focused) {
+                            withAnimation(.snappy) { viaRows.removeAll { $0.id == row.id } }
+                        }
+                    }
+
+                    ZStack(alignment: .leading) {
+                        Divider().padding(.leading, 54).padding(.trailing, focused == nil ? 72 : 0)
+                        if focused == nil, viaRows.count < Self.maxViaPoints {
+                            addViaButton.padding(.leading, 20)
+                        }
+                    }
+
                     StationInput(label: "Ziel", placeholder: "Wohin?", systemImage: "mappin.circle.fill",
                                  station: $to, focus: $focused, focusValue: .to)
                 }
 
-                if focused != .from, focused != .to {
+                if focused == nil {
                     Button {
                         withAnimation(.spring(duration: 0.4)) {
                             swap(&from, &to)
@@ -95,6 +122,22 @@ struct ConnectionsView: View {
         }
     }
 
+    private var addViaButton: some View {
+        Button {
+            withAnimation(.snappy) {
+                viaRows.append(ViaRow())
+            }
+        } label: {
+            Image(systemName: "plus")
+                .font(.subheadline.weight(.bold))
+                .frame(width: 28, height: 28)
+        }
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
+        .tint(.brand)
+        .accessibilityLabel("Zwischenhalt hinzufügen")
+    }
+
     // MARK: Options
 
     private var optionsCard: some View {
@@ -107,10 +150,17 @@ struct ConnectionsView: View {
                     }
                     .pickerStyle(.segmented)
                     .frame(maxWidth: 200)
+                    .disabled(!viaRows.isEmpty)
 
                     Spacer()
 
                     TimeSelector(date: $date, useNow: $useNow)
+                }
+
+                if !viaRows.isEmpty {
+                    Label("Mit Zwischenhalten wird immer ab der gewählten Zeit gesucht.", systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 Divider()
@@ -146,7 +196,7 @@ struct ConnectionsView: View {
         .buttonStyle(.glassProminent)
         .tint(.brand)
         .controlSize(.large)
-        .disabled(from == nil || to == nil)
+        .disabled(from == nil || to == nil || viaRows.contains { $0.station == nil })
     }
 
     private var recentSection: some View {
@@ -160,6 +210,7 @@ struct ConnectionsView: View {
                             withAnimation {
                                 from = recent.from
                                 to = recent.to
+                                viaRows = []
                             }
                         } label: {
                             HStack(spacing: 14) {
@@ -194,9 +245,69 @@ struct ConnectionsView: View {
 
     private func search() {
         guard let from, let to else { return }
+        let via = viaRows.compactMap { row in row.station.map { ViaWaypoint(station: $0, minStayMinutes: row.minStayMinutes) } }
         model.remember(from: from, to: to)
-        path.append(ConnectionSearch(from: from, to: to, date: useNow ? .now : date, isArrival: isArrival,
-                                     onlyBC100: onlyBC100))
+        // Via routing only supports "depart at" — an arrival deadline doesn't compose with per-stop minimum stays.
+        path.append(ConnectionSearch(from: from, to: to, via: via, date: useNow ? .now : date,
+                                     isArrival: via.isEmpty ? isArrival : false, onlyBC100: onlyBC100))
+    }
+}
+
+/// One intermediate stop in the route card: a station field plus its minimum-stay control.
+private struct ViaRowView: View {
+    @Binding var row: ConnectionsView.ViaRow
+    let focus: FocusState<ConnectionsView.Field?>.Binding
+    let onRemove: () -> Void
+
+    @State private var showStayPopover = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            StationInput(label: "Zwischenhalt", placeholder: "Über welchen Ort?", systemImage: "smallcircle.filled.circle",
+                         iconColor: .secondary, station: $row.station, focus: focus, focusValue: .via(row.id))
+
+            HStack(spacing: 10) {
+                Button {
+                    showStayPopover = true
+                } label: {
+                    Label(row.minStayMinutes > 0 ? "Mind. \(row.minStayMinutes) Min." : "Mindestaufenthalt",
+                          systemImage: "clock.badge.checkmark")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(row.minStayMinutes > 0 ? Color.brand : Color.secondary)
+                }
+                .buttonStyle(.plain)
+                .popover(isPresented: $showStayPopover) { stayPopover }
+
+                Spacer()
+
+                Button(role: .destructive, action: onRemove) {
+                    Image(systemName: "trash")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Zwischenhalt entfernen")
+            }
+            .padding(.leading, 54)
+            .padding(.trailing, 16)
+            .padding(.bottom, 12)
+        }
+    }
+
+    private var stayPopover: some View {
+        VStack(spacing: 14) {
+            Text("Mindestaufenthalt in \(row.station?.displayName ?? "diesem Ort")")
+                .font(.subheadline.weight(.semibold))
+                .multilineTextAlignment(.center)
+            Stepper("\(row.minStayMinutes) Minuten", value: $row.minStayMinutes, in: 0...120, step: 5)
+                .fixedSize()
+            Button("Fertig") { showStayPopover = false }
+                .buttonStyle(.glassProminent)
+                .tint(.brand)
+        }
+        .padding()
+        .frame(minWidth: 260)
+        .presentationCompactAdaptation(.popover)
     }
 }
 

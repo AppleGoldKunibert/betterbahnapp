@@ -101,13 +101,20 @@ public final class CombinedProvider: TransitProvider {
         }
         page.earlierCursor = page.earlierCursor.map { "\(page.source.rawValue):\($0)" }
         page.laterCursor = page.laterCursor.map { "\(page.source.rawValue):\($0)" }
+        page.journeys = page.journeys.filter { journey in !journey.transitLegs.contains { Self.isFlixBus($0.line) } }
         return page
     }
 
     public func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int, products: Set<Product>) async throws -> [BoardEntry] {
-        try await withFallback(deadline: .seconds(8),
+        let entries = try await withFallback(deadline: .seconds(8),
                                { try await $0.board(kind, at: station, date: date, duration: duration, products: products) },
                                { try await $0.board(kind, at: station, date: date, duration: duration, products: products) })
+        return entries.filter { !Self.isFlixBus($0.line) }
+    }
+
+    /// FlixBus results are hidden from journey planning and departure boards entirely.
+    private static func isFlixBus(_ line: Line?) -> Bool {
+        line?.operatorName?.lowercased().contains("flixbus") ?? false
     }
 
     /// Trip IDs are only valid for their source, so no fallback here.

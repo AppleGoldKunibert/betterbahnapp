@@ -24,6 +24,199 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(first.source == .transitous)
     }
 
+    /// Real-world Transitous geocode response for "Berlin Gesundbrunnen": the DELFI feed's entry
+    /// covers every product including the U8 subway, while a second, OpenOV-fed entry ~70m away
+    /// covers almost the same products but misses the subway – and its `/v5/stoptimes` happens to
+    /// return only a single bus line for that ID. Left undeduplicated, both show up as separate,
+    /// near-identically-named suggestions in the station picker, and picking the second one leaves
+    /// the board looking almost empty. Only the more complete one should survive.
+    @Test func searchStationsMergesSameStationAcrossFeeds() {
+        let complete = MGeocodeMatch(type: "STOP", name: "S+U Gesundbrunnen Bhf (Berlin)",
+                                     id: "de-DELFI_de:11000:900007102", lat: 52.548637, lon: 13.388372,
+                                     country: "DE", modes: ["HIGHSPEED_RAIL", "LONG_DISTANCE", "REGIONAL_RAIL", "SUBURBAN", "SUBWAY", "BUS"])
+        let partial = MGeocodeMatch(type: "STOP", name: "Berlin Gesundbrunnen",
+                                    id: "nl-OpenOV_stoparea:489941", lat: 52.548610, lon: 13.389444,
+                                    country: "DE", modes: ["HIGHSPEED_RAIL", "LONG_DISTANCE", "NIGHT_RAIL", "REGIONAL_RAIL", "BUS"])
+        let farAway = MGeocodeMatch(type: "STOP", name: "Rügener Str. (Berlin)",
+                                    id: "de-VBB_de:11000:900007157::1", lat: 52.545128, lon: 13.390834,
+                                    country: "DE", modes: ["BUS"])
+
+        let merged = TransitousProvider.mergingNearbyDuplicates([complete, partial, farAway])
+
+        #expect(merged.map(\.id) == [complete.id, farAway.id])
+    }
+
+    /// German train stations first, then the listed neighbours' train stations (AT, CH, NL, PL, CZ,
+    /// in that order), then German buses, then German U-Bahn, then everything else.
+    @Test func searchRankOrdersByCountryAndMode() {
+        func match(_ id: String, country: String, modes: [String]) -> MGeocodeMatch {
+            MGeocodeMatch(type: "STOP", name: id, id: id, lat: 0, lon: 0, country: country, modes: modes)
+        }
+        let deTrain = match("deTrain", country: "DE", modes: ["REGIONAL_RAIL"])
+        let atTrain = match("atTrain", country: "AT", modes: ["REGIONAL_RAIL"])
+        let chTrain = match("chTrain", country: "CH", modes: ["REGIONAL_RAIL"])
+        let nlTrain = match("nlTrain", country: "NL", modes: ["REGIONAL_RAIL"])
+        let plTrain = match("plTrain", country: "PL", modes: ["REGIONAL_RAIL"])
+        let czTrain = match("czTrain", country: "CZ", modes: ["REGIONAL_RAIL"])
+        let deBus = match("deBus", country: "DE", modes: ["BUS"])
+        let deSubway = match("deSubway", country: "DE", modes: ["SUBWAY"])
+        let frTram = match("frTram", country: "FR", modes: ["TRAM"])
+
+        let shuffled = [frTram, deSubway, czTrain, deBus, nlTrain, atTrain, deTrain, plTrain, chTrain]
+        let ranked = shuffled.enumerated()
+            .sorted { TransitousProvider.searchRank($0.element, query: "x", offset: $0.offset)
+                    > TransitousProvider.searchRank($1.element, query: "x", offset: $1.offset) }
+            .map(\.element.id)
+
+        #expect(ranked == ["deTrain", "atTrain", "chTrain", "nlTrain", "plTrain", "czTrain", "deBus", "deSubway", "frTram"])
+    }
+
+    /// An exact name match jumps to the very top, but only for Germany or a listed neighbour, with
+    /// Germany still winning over the neighbour when both match exactly – a German bus stop named
+    /// exactly like the query should still outrank a same-named Austrian train station.
+    @Test func searchRankPrefersExactMatchFromPriorityCountries() {
+        func match(_ id: String, name: String, country: String, modes: [String]) -> MGeocodeMatch {
+            MGeocodeMatch(type: "STOP", name: name, id: id, lat: 0, lon: 0, country: country, modes: modes)
+        }
+        let exactDeBus = match("exactDeBus", name: "Berlin Hbf", country: "DE", modes: ["BUS"])
+        let exactAtTrain = match("exactAtTrain", name: "Berlin Hbf", country: "AT", modes: ["REGIONAL_RAIL"])
+        let exactFrTrain = match("exactFrTrain", name: "Berlin Hbf", country: "FR", modes: ["REGIONAL_RAIL"])
+        let plainDeTrain = match("plainDeTrain", name: "Berlin Ostkreuz", country: "DE", modes: ["REGIONAL_RAIL"])
+
+        let shuffled = [exactFrTrain, plainDeTrain, exactAtTrain, exactDeBus]
+        let ranked = shuffled.enumerated()
+            .sorted { TransitousProvider.searchRank($0.element, query: "Berlin Hbf", offset: $0.offset)
+                    > TransitousProvider.searchRank($1.element, query: "Berlin Hbf", offset: $1.offset) }
+            .map(\.element.id)
+
+        // Exact matches from Germany/neighbours beat everything else, Germany first among them;
+        // the exact match from France (not a listed country) doesn't get the boost.
+        #expect(ranked == ["exactDeBus", "exactAtTrain", "plainDeTrain", "exactFrTrain"])
+    }
+
+    /// Regression: the exact-match bonus must key off the cleaned display name, not each feed's raw
+    /// spelling – otherwise, for the very cluster `mergingNearbyDuplicates` exists to collapse, whichever
+    /// feed's raw formatting happens to read like plain "<City> <Stop>" wins the exact-match tier over
+    /// a more complete sibling just because its raw name still carries "S+U "/" Bhf (…)" formatting,
+    /// undoing the completeness-based pick for real stations like Berlin Gesundbrunnen.
+    @Test func searchRankExactMatchUsesDisplayNameNotRawFeedName() {
+        let complete = MGeocodeMatch(type: "STOP", name: "S+U Gesundbrunnen Bhf (Berlin)", id: "de-DELFI",
+                                     lat: 52.548637, lon: 13.388372, country: "DE",
+                                     modes: ["HIGHSPEED_RAIL", "LONG_DISTANCE", "REGIONAL_RAIL", "SUBURBAN", "SUBWAY", "BUS"])
+        let partial = MGeocodeMatch(type: "STOP", name: "Berlin Gesundbrunnen", id: "nl-OpenOV",
+                                    lat: 52.548610, lon: 13.389444, country: "DE",
+                                    modes: ["HIGHSPEED_RAIL", "LONG_DISTANCE", "NIGHT_RAIL", "REGIONAL_RAIL", "BUS"])
+
+        let ranked = [partial, complete].enumerated()
+            .sorted { TransitousProvider.searchRank($0.element, query: "Berlin Gesundbrunnen", offset: $0.offset)
+                    > TransitousProvider.searchRank($1.element, query: "Berlin Gesundbrunnen", offset: $1.offset) }
+            .map(\.element.id)
+
+        #expect(ranked == [complete.id, partial.id])
+    }
+
+    /// Some feeds (e.g. European rail interoperability reference data) carry an all-caps, umlaut-free
+    /// alias for a station alongside its properly written local name, and the geocoder can echo back
+    /// either one depending on which alias matched the query text – confirmed live for "München Hbf"
+    /// (typed as ASCII "Muenchen Hbf", the API answers "MUENCHEN HBF") and "Berlin Südkreuz" (typed as
+    /// "Suedkreuz", it answers "Berlin Suedkreuz"). Prefer the properly written variant either way.
+    @Test func isBetterNamePrefersProperlyWrittenVariant() {
+        #expect(TransitousProvider.isBetterName("München Hbf", than: "MUENCHEN HBF"))
+        #expect(!TransitousProvider.isBetterName("MUENCHEN HBF", than: "München Hbf"))
+        #expect(TransitousProvider.isBetterName("Berlin Südkreuz", than: "Berlin Suedkreuz"))
+        #expect(!TransitousProvider.isBetterName("Berlin Suedkreuz", than: "Berlin Südkreuz"))
+        // Unrelated names never get swapped just because one happens to be prettier.
+        #expect(!TransitousProvider.isBetterName("Frankfurt Hbf", than: "Berlin Hbf"))
+        #expect(!TransitousProvider.isBetterName("Berlin Hbf", than: "Berlin Hbf"))
+    }
+
+    /// A cross-border ICE/Railjet (Munich–Bologna) is listed twice: Deutsche Bahn's own feed only
+    /// models it up to the border and calls it "Kufstein" (matching its own last stop), while ÖBB's
+    /// feed for the identical physical train correctly keeps "Bologna" as the headsign. The merge
+    /// should keep the row that names the real destination, not the one stuck at the border.
+    @Test func stopTimesMergeBorderSplitDuplicate() throws {
+        let json = """
+        {"stopTimes": [
+            {"place": {"name": "München Hbf", "stopId": "at:1", "lat": 48.14, "lon": 11.56,
+                       "scheduledDeparture": "2026-09-18T11:22:00Z"},
+             "mode": "HIGHSPEED_RAIL", "headsign": "Bologna, Stazione di Bologna Centrale",
+             "tripFrom": {"name": "München Hbf", "lat": 48.14, "lon": 11.56},
+             "tripTo": {"name": "Kufstein Bahnhof", "lat": 47.58, "lon": 12.16},
+             "tripId": "at-trip", "displayName": "RJ 87", "agencyName": "Deutsche Bahn AG"},
+            {"place": {"name": "München Hbf", "stopId": "de:1", "lat": 48.14, "lon": 11.56,
+                       "scheduledDeparture": "2026-09-18T11:22:00Z"},
+             "mode": "HIGHSPEED_RAIL", "headsign": "Kufstein",
+             "tripFrom": {"name": "München Hbf", "lat": 48.14, "lon": 11.56},
+             "tripTo": {"name": "Kufstein", "lat": 47.58, "lon": 12.16},
+             "tripId": "de-trip", "displayName": "ICE 87", "agencyName": "DB Fernverkehr AG"}
+        ]}
+        """
+        let response = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(json.utf8))
+        let merged = TransitousProvider.mergeBorderSplitDuplicates(response.stopTimes, kind: .departures)
+        #expect(merged.count == 1)
+        #expect(merged.first?.tripId == "at-trip")
+        let entries = merged.compactMap { $0.toEntry(kind: .departures) }
+        #expect(entries.first?.otherEnd == "Bologna, Stazione di Bologna Centrale")
+    }
+
+    /// Two genuinely different trains sharing a number by coincidence (or two rows that both/neither
+    /// know a continuation) must not be merged away.
+    @Test func stopTimesKeepsAmbiguousOrDistinctRows() throws {
+        let json = """
+        {"stopTimes": [
+            {"place": {"name": "München Hbf", "stopId": "a:1", "lat": 48.14, "lon": 11.56,
+                       "scheduledDeparture": "2026-09-18T11:22:00Z"},
+             "mode": "HIGHSPEED_RAIL", "headsign": "Kufstein",
+             "tripTo": {"name": "Kufstein", "lat": 47.58, "lon": 12.16},
+             "tripId": "a", "displayName": "ICE 87", "agencyName": "DB Fernverkehr AG"},
+            {"place": {"name": "München Hbf", "stopId": "b:1", "lat": 48.14, "lon": 11.56,
+                       "scheduledDeparture": "2026-09-18T12:22:00Z"},
+             "mode": "HIGHSPEED_RAIL", "headsign": "Kufstein",
+             "tripTo": {"name": "Kufstein", "lat": 47.58, "lon": 12.16},
+             "tripId": "b", "displayName": "ICE 87", "agencyName": "DB Fernverkehr AG"}
+        ]}
+        """
+        let response = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(json.utf8))
+        let merged = TransitousProvider.mergeBorderSplitDuplicates(response.stopTimes, kind: .departures)
+        #expect(merged.count == 2)
+    }
+
+    /// A single stitched itinerary leg (München–Innsbruck) riding the German feed's border-truncated
+    /// trip still reaches the real destination as its `to`, but the trip's own `headsign` only names
+    /// the border stop, which then shows up as one of this same leg's intermediate stops. The leg's
+    /// direction should read the true destination, not the stop it already passes through.
+    @Test func legDirectionIgnoresHeadsignThatIsJustAnIntermediateStop() throws {
+        let json = """
+        {"mode": "HIGHSPEED_RAIL",
+         "from": {"name": "München Ostbahnhof", "lat": 48.13, "lon": 11.6},
+         "to": {"name": "Innsbruck Hauptbahnhof", "lat": 47.26, "lon": 11.4},
+         "startTime": "2026-09-17T11:55:00Z", "endTime": "2026-09-17T13:31:00Z",
+         "headsign": "Kufstein", "tripId": "de-trip", "displayName": "ICE 87",
+         "intermediateStops": [
+            {"name": "Rosenheim", "lat": 47.85, "lon": 12.13},
+            {"name": "Kufstein", "lat": 47.58, "lon": 12.16},
+            {"name": "Wörgl Hbf", "lat": 47.48, "lon": 12.06}
+         ]}
+        """
+        let leg = try JSONDecoding.decoder.decode(MLeg.self, from: Data(json.utf8)).toLeg()
+        #expect(leg.destination.name == "Innsbruck Hauptbahnhof")
+        #expect(leg.direction == "Innsbruck Hauptbahnhof")
+    }
+
+    /// A leg that genuinely terminates where its headsign says must keep that headsign as-is.
+    @Test func legDirectionKeepsHeadsignMatchingRealDestination() throws {
+        let json = """
+        {"mode": "HIGHSPEED_RAIL",
+         "from": {"name": "München Hbf", "lat": 48.14, "lon": 11.56},
+         "to": {"name": "Kufstein", "lat": 47.58, "lon": 12.16},
+         "startTime": "2026-09-17T11:22:00Z", "endTime": "2026-09-17T13:07:00Z",
+         "headsign": "Kufstein", "tripId": "de-trip", "displayName": "ICE 87",
+         "intermediateStops": [{"name": "Rosenheim", "lat": 47.85, "lon": 12.13}]}
+        """
+        let leg = try JSONDecoding.decoder.decode(MLeg.self, from: Data(json.utf8)).toLeg()
+        #expect(leg.direction == "Kufstein")
+    }
+
     @Test func plan() throws {
         let response = try fixture("transitous-plan", as: MPlanResponse.self)
         let journey = Journey(legs: try #require(response.itineraries.first).legs.map { $0.toLeg() }, source: .transitous)
@@ -42,6 +235,23 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         let leg = try #require(itinerary.legs.first).toLeg()
         #expect(leg.origin.name == "München Hbf")
         #expect(leg.stopovers.count == 14)
+    }
+}
+
+// MARK: - Station display names
+
+@Suite struct StationDisplayNameTests {
+    /// The same physical station reaches `Station.name` in several raw forms depending on which
+    /// feed/provider produced it – they should all read the same to the user.
+    @Test func sameStationReadsIdenticallyAcrossRawNameForms() {
+        let forms = ["S+U Gesundbrunnen Bhf (Berlin)", "Berlin Gesundbrunnen", "S Gesundbrunnen Bhf (Berlin)"]
+        let displayNames = Set(forms.map(Station.displayName(for:)))
+        #expect(displayNames == ["Berlin Gesundbrunnen"])
+    }
+
+    @Test func stripsProductPrefixAndReordersCityStop() {
+        #expect(Station.displayName(for: "S+U Berlin Hauptbahnhof") == "Berlin Hbf")
+        #expect(Station.displayName(for: "S Spandau Bhf (Berlin)") == "Berlin-Spandau")
     }
 }
 
@@ -366,7 +576,7 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(issues.count == 1)
         guard case .transferMissed(let at, _, _, let buffer) = issues[0] else { Issue.record("wrong issue"); return }
         #expect(at == "B")
-        #expect(buffer == -5)
+        #expect(buffer == -2)
         #expect(issues[0].isBlocking)
     }
 
@@ -378,5 +588,26 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
     @Test func cancellation() {
         let journey = Journey(legs: [leg("ICE 1", "A", "B", dep: 0, arr: 60, cancelled: true)], source: .bahnDe)
         #expect(journey.connectionIssues().first?.title == "ICE 1 fällt aus")
+    }
+
+    @Test func walkingTimeDoesNotShrinkTheTransferBuffer() {
+        // A 3 min walk between platforms used to be subtracted from the buffer; it no longer is.
+        let journey = Journey(legs: [
+            leg("ICE 1", "A", "B", dep: 0, arr: 60),
+            leg("", "B", "B", dep: 60, arr: 63, walking: true),
+            leg("ICE 2", "B", "C", dep: 65, arr: 120),
+        ], source: .bahnDe)
+        #expect(journey.connectionIssues().isEmpty)
+    }
+
+    @Test func oneMinuteRealtimeBufferIsStillPossible() {
+        let journey = Journey(legs: [leg("ICE 1", "A", "B", dep: 0, arr: 60, arrDelay: 9), leg("ICE 2", "B", "C", dep: 70, arr: 120)], source: .bahnDe)
+        #expect(journey.connectionIssues().allSatisfy { !$0.isBlocking })
+    }
+
+    @Test func zeroMinuteRealtimeBufferIsImpossible() {
+        let journey = Journey(legs: [leg("ICE 1", "A", "B", dep: 0, arr: 60, arrDelay: 10), leg("ICE 2", "B", "C", dep: 70, arr: 120)], source: .bahnDe)
+        guard case .transferMissed(_, _, _, let buffer) = journey.connectionIssues().first else { Issue.record("wrong issue"); return }
+        #expect(buffer == 0)
     }
 }
