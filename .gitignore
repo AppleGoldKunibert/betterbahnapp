@@ -65,3 +65,7 @@ fastlane/test_output
 .swiftpm/
 Packages/BetterBahnKit/Package.resolved
 .DS_Store
+
+# Local API credentials — copy DefaultCredentials.swift.template to DefaultCredentials.swift
+# and fill in your own key. Never commit the real file.
+Packages/BetterBahnKit/Sources/BetterBahnKit/Transit/Timetables/DefaultCredentials.swift
