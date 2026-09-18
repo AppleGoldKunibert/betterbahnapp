@@ -386,10 +386,10 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
     let berlin = station("8011160", "Berlin Hbf", 52.525, 13.369)
     let base = Date(timeIntervalSince1970: 1_800_000_000)
 
-    func stop(_ s: Station, arr: Double?, dep: Double?) -> Stopover {
+    func stop(_ s: Station, arr: Double?, dep: Double?, access: StopAccess = .normal) -> Stopover {
         Stopover(station: s, arrival: arr.map { TimeInfo(planned: base.addingTimeInterval($0 * 60), actual: nil) },
                  departure: dep.map { TimeInfo(planned: base.addingTimeInterval($0 * 60), actual: nil) },
-                 arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+                 arrivalPlatform: nil, departurePlatform: nil, cancelled: false, access: access)
     }
 
     func trip(_ id: String, _ name: String, _ stops: [Stopover]) -> Trip {
@@ -424,14 +424,39 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
 
     @Test func forceTrainByName() async throws {
         let (picker, _, _) = makePicker()
-        let journey = try await picker.journey(withTrain: "ice423", from: koeln, to: berlin, date: base)
-        #expect(journey.legs.count == 1)
-        #expect(journey.legs[0].line?.name == "ICE 423")
+        let match = try await picker.journey(withTrain: "ice423", from: koeln, to: berlin, date: base)
+        #expect(match.journey.legs.count == 1)
+        #expect(match.journey.legs[0].line?.name == "ICE 423")
+        #expect(match.breaksBoardingRules == false)
+        #expect(match.alternative == nil)
         let byNumber = try await picker.journey(withTrain: "423", from: koeln, to: berlin, date: base)
-        #expect(byNumber.legs[0].tripId == "ice423")
+        #expect(byNumber.journey.legs[0].tripId == "ice423")
         await #expect(throws: TransitError.self) {
             try await picker.journey(withTrain: "ICE 999", from: koeln, to: berlin, date: base)
         }
+    }
+
+    @Test func forceTrainIgnoresBoardingRestrictionAndOffersAlternative() async throws {
+        let restricted = trip("ice777", "ICE 777", [
+            stop(koeln, arr: nil, dep: 0, access: .exitOnly),
+            stop(berlin, arr: 240, dep: nil),
+        ])
+        let primary = MockProvider(source: .bahnDe)
+        primary.boards = [BoardEntry(kind: .departures, tripId: restricted.id, station: koeln, line: restricted.line!,
+                                     otherEnd: "Berlin Hbf", time: TimeInfo(planned: base, actual: nil),
+                                     platform: PlatformInfo(planned: nil, actual: nil), cancelled: false,
+                                     terminatesOrOriginatesHere: false, remarks: [], access: .exitOnly, source: .bahnDe)]
+        primary.trips = ["ice777": restricted]
+        let legalTrip = trip("re1", "RE 1", [stop(koeln, arr: nil, dep: 5), stop(berlin, arr: 260, dep: nil)])
+        primary.journeyPages = [JourneyPage(journeys: [Journey(legs: [try #require(legalTrip.leg(from: koeln, to: berlin))], source: .bahnDe)],
+                                            earlierCursor: nil, laterCursor: nil, source: .bahnDe)]
+        let provider = CombinedProvider(primary: primary, fallback: MockProvider(source: .transitous), bahnDe: nil)
+        let picker = TrainPicker(provider: provider)
+
+        let match = try await picker.journey(withTrain: "ICE 777", from: koeln, to: berlin, date: base)
+        #expect(match.journey.legs[0].tripId == "ice777")
+        #expect(match.breaksBoardingRules == true)
+        #expect(match.alternative?.legs.first?.line?.name == "RE 1")
     }
 
     @Test func replaceLastLeg() async throws {

@@ -105,15 +105,35 @@ public struct Stopover: Codable, Sendable, Hashable, Identifiable {
     public var arrivalPlatform: PlatformInfo?
     public var departurePlatform: PlatformInfo?
     public var cancelled: Bool
+    /// Whether passengers may actually board/alight here ("Nur Einstieg" / "Nur Ausstieg").
+    public var access: StopAccess
 
     public init(station: Station, arrival: TimeInfo?, departure: TimeInfo?,
-                arrivalPlatform: PlatformInfo?, departurePlatform: PlatformInfo?, cancelled: Bool) {
+                arrivalPlatform: PlatformInfo?, departurePlatform: PlatformInfo?, cancelled: Bool,
+                access: StopAccess = .normal) {
         self.station = station
         self.arrival = arrival
         self.departure = departure
         self.arrivalPlatform = arrivalPlatform
         self.departurePlatform = departurePlatform
         self.cancelled = cancelled
+        self.access = access
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case station, arrival, departure, arrivalPlatform, departurePlatform, cancelled, access
+    }
+
+    /// Custom-decoded so journeys cached to disk before `access` existed still load, defaulting to `.normal`.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        station = try c.decode(Station.self, forKey: .station)
+        arrival = try c.decodeIfPresent(TimeInfo.self, forKey: .arrival)
+        departure = try c.decodeIfPresent(TimeInfo.self, forKey: .departure)
+        arrivalPlatform = try c.decodeIfPresent(PlatformInfo.self, forKey: .arrivalPlatform)
+        departurePlatform = try c.decodeIfPresent(PlatformInfo.self, forKey: .departurePlatform)
+        cancelled = try c.decode(Bool.self, forKey: .cancelled)
+        access = try c.decodeIfPresent(StopAccess.self, forKey: .access) ?? .normal
     }
 }
 

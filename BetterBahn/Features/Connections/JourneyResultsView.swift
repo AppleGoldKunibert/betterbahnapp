@@ -18,6 +18,8 @@ struct JourneyResultsView: View {
     @State private var showTimePicker = false
     @State private var forcedTrain: String?
     @State private var forcedJourney: Journey?
+    @State private var forcedBreaksBoardingRules = false
+    @State private var forcedAlternative: Journey?
 
     init(search: ConnectionSearch) {
         self.search = search
@@ -47,6 +49,30 @@ struct JourneyResultsView: View {
                             }
                     }
                     .buttonStyle(.plain)
+
+                    if forcedBreaksBoardingRules {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.title3)
+                                .foregroundStyle(Color.slightDelay)
+                            Text("Ein- oder Ausstieg an dieser Station ist laut Fahrplan nicht vorgesehen (Nur Einstieg/Nur Ausstieg).")
+                                .font(.callout)
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.slightDelay.opacity(0.1), in: .rect(cornerRadius: 14, style: .continuous))
+
+                        if let forcedAlternative {
+                            SectionHeader(title: "Reguläre Alternative", systemImage: "checkmark.shield.fill")
+                            NavigationLink {
+                                JourneyDetailView(journey: forcedAlternative, finalDestination: search.to)
+                            } label: {
+                                JourneyCard(journey: forcedAlternative)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+
                     SectionHeader(title: "Alle Verbindungen", systemImage: "list.bullet")
                         .padding(.top, 6)
                 }
@@ -98,10 +124,12 @@ struct JourneyResultsView: View {
         .navigationTitle("Verbindungen")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showTrainSheet) {
-            TrainNumberSheet(search: search, suggestions: trainSuggestions) { name, journey in
+            TrainNumberSheet(search: search, suggestions: trainSuggestions) { name, match in
                 withAnimation(.snappy) {
                     forcedTrain = name
-                    forcedJourney = journey
+                    forcedJourney = match.journey
+                    forcedBreaksBoardingRules = match.breaksBoardingRules
+                    forcedAlternative = match.alternative
                 }
             }
         }
@@ -358,19 +386,20 @@ struct JourneyCard: View {
 struct TrainNumberSheet: View {
     let search: ConnectionSearch
     let suggestions: [String]
-    let onFound: (String, Journey) -> Void
+    let onFound: (String, TrainMatch) -> Void
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var train = ""
     @State private var boardingStation: Station?
+    @State private var exitStation: Station?
     @State private var isSearching = false
     @State private var error: Error?
     @FocusState private var focused: Field?
 
-    private enum Field: Hashable { case train, station }
+    private enum Field: Hashable { case train, boardingStation, exitStation }
 
-    init(search: ConnectionSearch, suggestions: [String], onFound: @escaping (String, Journey) -> Void) {
+    init(search: ConnectionSearch, suggestions: [String], onFound: @escaping (String, TrainMatch) -> Void) {
         self.search = search
         self.suggestions = suggestions
         self.onFound = onFound
@@ -406,8 +435,14 @@ struct TrainNumberSheet: View {
                     }
 
                     Card(padding: 0) {
-                        StationInput(label: "Einstieg", placeholder: "Ab wo einsteigen?", systemImage: "figure.walk",
-                                     station: $boardingStation, focus: $focused, focusValue: .station)
+                        VStack(spacing: 0) {
+                            StationInput(label: "Einstieg", placeholder: "Ab wo einsteigen?", systemImage: "figure.walk",
+                                         station: $boardingStation, focus: $focused, focusValue: .boardingStation)
+                            Divider().padding(.leading, 54)
+                            StationInput(label: "Ausstieg (optional)", placeholder: "Ideal: \(search.to.displayName)",
+                                         systemImage: "mappin.circle.fill",
+                                         station: $exitStation, focus: $focused, focusValue: .exitStation)
+                        }
                     }
 
                     if !suggestions.isEmpty {
@@ -456,13 +491,14 @@ struct TrainNumberSheet: View {
     private func find() {
         let name = train.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty, let origin = boardingStation else { return }
+        let destination = exitStation ?? search.to
         isSearching = true
         Task {
             defer { isSearching = false }
             do {
-                let journey = try await model.trainPicker.journey(
-                    withTrain: name, from: origin, to: search.to, date: search.date.addingTimeInterval(-30 * 60))
-                onFound(journey.transitLegs.first?.line?.name ?? name.uppercased(), journey)
+                let match = try await model.trainPicker.journey(
+                    withTrain: name, from: origin, to: destination, date: search.date.addingTimeInterval(-30 * 60))
+                onFound(match.journey.transitLegs.first?.line?.name ?? name.uppercased(), match)
                 dismiss()
             } catch {
                 self.error = error

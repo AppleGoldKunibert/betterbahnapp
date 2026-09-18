@@ -18,6 +18,15 @@ public extension Trip {
     }
 }
 
+/// Result of picking a specific train: the ride itself, plus – when boarding at the requested origin
+/// or alighting at the requested destination isn't actually allowed on it – a rule-respecting
+/// alternative between the same two stations.
+public struct TrainMatch: Sendable {
+    public var journey: Journey
+    public var breaksBoardingRules: Bool
+    public var alternative: Journey?
+}
+
 /// Lets the user force a specific train into a route (e.g. ICE 423 instead of the faster ICE 1).
 public struct TrainPicker: Sendable {
     let provider: CombinedProvider
@@ -43,8 +52,11 @@ public struct TrainPicker: Sendable {
     }
 
     /// Finds a train by name (e.g. "ICE 423") departing `origin` within the next hours that reaches `destination`.
+    /// Boarding/alighting restrictions ("Nur Einstieg" / "Nur Ausstieg") at either station are ignored when
+    /// matching – the ride is built regardless – but flagged on the result, with a rule-respecting
+    /// alternative looked up alongside it for anyone who'd rather not rely on it.
     public func journey(withTrain trainName: String, from origin: Station, to destination: Station,
-                        date: Date, windowMinutes: Int = 240) async throws -> Journey {
+                        date: Date, windowMinutes: Int = 240) async throws -> TrainMatch {
         let wanted = Line.normalize(trainName)
         guard !wanted.isEmpty else { throw TransitError.invalidInput("Bitte einen Zug angeben, z. B. „ICE 423“.") }
         let entries = try await provider.departures(at: origin, date: date, duration: windowMinutes)
@@ -60,7 +72,21 @@ public struct TrainPicker: Sendable {
         guard let leg = legs.min(by: { $0.departure.planned < $1.departure.planned }) else {
             throw TransitError.notFound("\(trainName) nach \(destination.name) (hält dort nicht)")
         }
-        return Journey(legs: [leg], source: leg.source)
+        let breaksBoardingRules = leg.stopovers.first?.access.allowsBoarding == false
+            || leg.stopovers.last?.access.allowsAlighting == false
+        var alternative: Journey?
+        if breaksBoardingRules {
+            alternative = try? await legalAlternative(from: origin, to: destination, date: leg.departure.planned)
+        }
+        return TrainMatch(journey: Journey(legs: [leg], source: leg.source),
+                          breaksBoardingRules: breaksBoardingRules, alternative: alternative)
+    }
+
+    /// A normal connection between the same two stations, for when the picked train doesn't actually
+    /// allow boarding/alighting at one of them.
+    private func legalAlternative(from origin: Station, to destination: Station, date: Date) async throws -> Journey? {
+        let page = try await provider.journeys(JourneyQuery(from: origin, to: destination, date: date))
+        return page.journeys.first { !$0.isCancelled }
     }
 
     /// Replaces the leg at `index` and replans everything after it.

@@ -23,6 +23,9 @@ public enum StopAccess: String, Codable, Sendable, Hashable {
         case (false, false): self = .passThrough
         }
     }
+
+    public var allowsBoarding: Bool { self == .normal || self == .entryOnly }
+    public var allowsAlighting: Bool { self == .normal || self == .exitOnly }
 }
 
 /// One row of a departure or arrival board.

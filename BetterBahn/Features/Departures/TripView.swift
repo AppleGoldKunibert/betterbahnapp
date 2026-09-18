@@ -169,10 +169,19 @@ struct TripContent: View {
             TimelineNode(kind: isMajor ? .major : .minor, color: isRidden(index) ? color : color.opacity(0.45),
                          lineAbove: segmentAbove, lineBelow: segmentBelow, dimmed: dimmed) {
                 HStack(alignment: .top, spacing: 10) {
-                    if let time = stop.departure ?? stop.arrival {
-                        TimeStack(time: time, cancelled: stop.cancelled, font: isMajor ? .headline : .subheadline)
-                            .frame(width: 52, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let arrival = stop.arrival, stop.departure != nil {
+                            Text(arrival.best.timeString)
+                                .font(.caption2.weight(.semibold))
+                                .monospacedDigit()
+                                .strikethrough(stop.cancelled, color: .heavyDelay)
+                                .foregroundStyle(.secondary)
+                        }
+                        if let time = stop.departure ?? stop.arrival {
+                            TimeStack(time: time, cancelled: stop.cancelled, font: isMajor ? .headline : .subheadline)
+                        }
                     }
+                    .frame(width: 52, alignment: .leading)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(stop.station.displayName)
                             .font(isMajor ? .headline : .subheadline)

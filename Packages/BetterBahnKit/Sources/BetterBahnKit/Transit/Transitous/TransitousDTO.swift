@@ -37,7 +37,8 @@ struct MPlace: Decodable {
             departure: timeInfo(planned: scheduledDeparture, actual: departure),
             arrivalPlatform: PlatformInfo(planned: scheduledTrack, actual: track),
             departurePlatform: PlatformInfo(planned: scheduledTrack, actual: track),
-            cancelled: cancelled ?? false
+            cancelled: cancelled ?? false,
+            access: access
         )
     }
 }
