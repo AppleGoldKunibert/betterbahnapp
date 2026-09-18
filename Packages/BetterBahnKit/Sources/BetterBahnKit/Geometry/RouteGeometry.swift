@@ -24,13 +24,38 @@ public struct RouteGeometryService: Sendable {
         if let geometry = leg.geometry, Self.followsTracks(geometry) { return geometry }
         guard !leg.isWalking else { return nil }
         if let shape = try? await shapeFromTransitous(leg), Self.followsTracks(shape) { return shape }
-        // Fallback: follow the stops instead of a straight line.
+        if let shape = try? await shapeFromRouting(leg), Self.followsTracks(shape) { return shape }
+        // Stops are only worth using when there are enough of them to trace the route.
         let stops = leg.stopovers.compactMap(\.station.coordinate)
         if Self.followsTracks(stops) { return stops }
-        // Nothing track-shaped to be had. Use the most detailed thing we have, but never a bare
-        // straight line between two cities — leaving the leg off the map beats drawing a fiction.
-        let candidates = [leg.geometry ?? [], stops].filter { $0.count > 2 }
-        return candidates.max { $0.count < $1.count }
+        // Nothing track-shaped to be had: leaving the leg off the map beats drawing a line straight
+        // across country, which is what every remaining candidate would amount to here.
+        return nil
+    }
+
+    /// Asks for a connection between the two stations around that time and takes its track
+    /// geometry. Slower than looking the trip up directly, and used only when that failed — but it
+    /// comes back with real rails, which is the whole point.
+    private func shapeFromRouting(_ leg: Leg) async throws -> [Coordinate]? {
+        let page = try await transitous.journeys(
+            JourneyQuery(from: leg.origin, to: leg.destination,
+                         date: leg.departure.planned.addingTimeInterval(-10 * 60)))
+        // The same train, if the routing happened to find it.
+        let wanted = Line.normalize(leg.line?.name ?? "")
+        if !wanted.isEmpty {
+            for journey in page.journeys {
+                for candidate in journey.transitLegs where Line.normalize(candidate.line?.name ?? "") == wanted {
+                    if let shape = candidate.geometry, Self.followsTracks(shape) { return shape }
+                }
+            }
+        }
+        // Otherwise the most direct rail connection between the two: another train on the same
+        // rails is an approximation, but it's the route a train actually takes.
+        let railOnly = page.journeys.filter { journey in
+            !journey.transitLegs.isEmpty && journey.transitLegs.allSatisfy { $0.line?.product.isTrain ?? false }
+        }
+        guard let best = railOnly.min(by: { $0.transitLegs.count < $1.transitLegs.count }) else { return nil }
+        return best.transitLegs.compactMap(\.geometry).flatMap { $0 }
     }
 
     private func shapeFromTransitous(_ leg: Leg) async throws -> [Coordinate]? {

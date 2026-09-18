@@ -73,7 +73,7 @@ extension AppModel {
             : ""
         // Bumped whenever the heatmap is built differently, so results cached by an older build
         // (with grid-snapped lines or the old duplicate matching) aren't shown again.
-        let version = "v2"
+        let version = "v3"
         return "\(version)|\(selection.range.rawValue)|\(custom)|\(savedJourneys.count)|\(traewellingTrips.count)|\(selection.includeSaved)|\(selection.includeTraewelling)"
     }
 

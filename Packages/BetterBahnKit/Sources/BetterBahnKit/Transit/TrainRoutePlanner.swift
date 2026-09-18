@@ -41,6 +41,10 @@ public struct TrainRoutePlan: Sendable {
 /// remaining route wins.
 public struct TrainRoutePlanner: Sendable {
     public let provider: CombinedProvider
+    /// DB's own dispatching plan, consulted when a named train can't be matched on `provider`'s own
+    /// board – its coverage or branding can miss a train that genuinely exists. Optional: without
+    /// credentials configured, the planner still works, just without that rescue.
+    public let timetables: TimetablesClient?
     /// How many partial routes to carry from one requirement to the next.
     public var beamWidth: Int
     /// Upper bound on the stops tried when no exit station was given (keeps request counts sane).
@@ -52,9 +56,10 @@ public struct TrainRoutePlanner: Sendable {
     /// Minimum time between getting off one train and the next one departing.
     public var minTransfer: TimeInterval
 
-    public init(provider: CombinedProvider, beamWidth: Int = 3, maxAlightCandidates: Int = 8,
-                branchFactor: Int = 2, windowMinutes: Int = 480, minTransferMinutes: Int = 3) {
+    public init(provider: CombinedProvider, timetables: TimetablesClient? = nil, beamWidth: Int = 3,
+                maxAlightCandidates: Int = 8, branchFactor: Int = 2, windowMinutes: Int = 480, minTransferMinutes: Int = 3) {
         self.provider = provider
+        self.timetables = timetables
         self.beamWidth = beamWidth
         self.maxAlightCandidates = maxAlightCandidates
         self.branchFactor = branchFactor
@@ -256,9 +261,12 @@ public struct TrainRoutePlanner: Sendable {
         // Two windows: a train named for a search in the evening may only run again next morning.
         for _ in 0..<2 {
             let entries = try await provider.departures(at: station, date: windowStart, duration: windowMinutes)
-            let matches = entries
+            var matches = entries
                 .filter { $0.time.best >= notBefore.addingTimeInterval(slack) && !$0.cancelled && Self.matches(wanted, $0.line) }
                 .sorted { $0.time.best < $1.time.best }
+            if matches.isEmpty {
+                matches = await rescuedMatches(name: name, at: station, windowStart: windowStart, in: entries)
+            }
             for match in matches {
                 if let trip = try? await provider.trip(id: match.tripId, source: match.source) {
                     return (match, trip)
@@ -269,11 +277,41 @@ public struct TrainRoutePlanner: Sendable {
         throw TransitError.notFound("\(name) ab \(station.displayName)")
     }
 
+    /// When nothing in `entries` matched by name, asks DB's own dispatching plan (`TimetablesClient`)
+    /// for the train's real scheduled time – its board can brand a train differently (e.g. an ÖBB "RJ"
+    /// that DB calls "ICE") or simply not carry it at all – and treats whichever board entry departs
+    /// closest to that confirmed time as it, so its trip can still be built from `provider`, which
+    /// already has this station resolved (DB's own plan has no journey/trip data of its own).
+    private func rescuedMatches(name: String, at station: Station, windowStart: Date, in entries: [BoardEntry]) async -> [BoardEntry] {
+        guard let timetables, let parsed = Self.parseCategoryAndNumber(name) else { return [] }
+        let times = await timetables.scheduledTimes(category: parsed.category, number: parsed.number, at: station,
+                                                     from: windowStart, duration: windowMinutes)
+        guard !times.isEmpty else { return [] }
+        let tolerance: TimeInterval = 2 * 60
+        let candidates = entries.filter { !$0.cancelled }
+        var rescued: [BoardEntry] = []
+        for time in times {
+            guard let closest = candidates.min(by: { abs($0.time.best.timeIntervalSince(time)) < abs($1.time.best.timeIntervalSince(time)) }),
+                  abs(closest.time.best.timeIntervalSince(time)) <= tolerance
+            else { continue }
+            rescued.append(closest)
+        }
+        return rescued
+    }
+
     /// "ICE 423" matches the line name, "423" the train number alone.
     static func matches(_ wanted: String, _ line: Line) -> Bool {
         if Line.normalize(line.name) == wanted { return true }
         if let alternate = line.alternateName, Line.normalize(alternate) == wanted { return true }
         return wanted.allSatisfy(\.isNumber) && line.number == wanted
+    }
+
+    /// "ICE 423" -> ("ICE", "423"); "423" -> (nil, "423"); "ICE" alone -> nil (no number to look up).
+    static func parseCategoryAndNumber(_ name: String) -> (category: String?, number: String)? {
+        let tokens = name.trimmingCharacters(in: .whitespaces).split(separator: " ").map(String.init)
+        guard let last = tokens.last, !last.isEmpty, last.allSatisfy(\.isNumber) else { return nil }
+        let category = tokens.count > 1 ? tokens.dropLast().joined(separator: " ") : nil
+        return (category, last)
     }
 
     // MARK: - Helpers

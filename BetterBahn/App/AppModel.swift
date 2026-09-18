@@ -54,7 +54,7 @@ final class AppModel {
 
     var trainPicker: TrainPicker { TrainPicker(provider: provider) }
 
-    var trainRoutePlanner: TrainRoutePlanner { TrainRoutePlanner(provider: provider) }
+    var trainRoutePlanner: TrainRoutePlanner { TrainRoutePlanner(provider: provider, timetables: timetablesClient) }
 
     var bc100Rules: BC100Rules { settings.bc100Rules }
 

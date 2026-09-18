@@ -187,6 +187,50 @@ public struct TimetablesClient: Sendable {
                                       arrival: arrival, arrivalPlatform: arrivalPlatform, cancelled: cancelled)
     }
 
+    /// Every scheduled departure/arrival at `station` matching `category` (optional, case-insensitive)
+    /// and `number`, across the requested window – straight from DB's own dispatching plan (`/plan`),
+    /// which lists every train by its real category and number regardless of how any particular
+    /// journey-planning feed brands or names it. Used to confirm a user-named train really exists and
+    /// find its true scheduled time when another provider's board doesn't carry it under a matching
+    /// name (different branding – e.g. an ÖBB "RJ" that DB's own feed calls "ICE" – or misses the
+    /// departure from its board data entirely): see `TrainRoutePlanner`'s use of this for "Bestimmter
+    /// Zug". Returns an empty array (rather than throwing) on any failure, since this is always a
+    /// best-effort supplement to another provider's board, never the primary source.
+    public func scheduledTimes(category: String?, number: String, at station: Station,
+                               from: Date, duration: Int) async -> [Date] {
+        guard credentials.isConfigured, let eva = await eva(for: station) else { return [] }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = Self.berlin
+        let end = from.addingTimeInterval(TimeInterval(duration * 60))
+        var hours: [Date] = []
+        var cursor = from
+        // `/plan` is bucketed by hour; cap the pagination so a generous window (e.g. the custom-train
+        // picker's default 8h) can't fire dozens of concurrent requests.
+        repeat {
+            hours.append(cursor)
+            cursor = calendar.date(byAdding: .hour, value: 1, to: cursor) ?? cursor.addingTimeInterval(3600)
+        } while cursor < end && hours.count < 10
+
+        let stops = await withTaskGroup(of: [TimetablesStop].self) { group in
+            for hour in hours {
+                group.addTask { (try? await self.plan(eva: eva, around: hour)) ?? [] }
+            }
+            var all: [TimetablesStop] = []
+            for await page in group { all += page }
+            return all
+        }
+
+        let wantedCategory = category?.uppercased()
+        return stops
+            .filter { stop in
+                (wantedCategory == nil || stop.category?.uppercased() == wantedCategory)
+                    && stop.number.map { Self.sameNumber($0, number) } == true
+            }
+            .compactMap { ($0.departure ?? $0.arrival)?.planned }
+            .filter { $0 >= from.addingTimeInterval(-60) && $0 <= end }
+            .sorted()
+    }
+
     /// "ICE 571" -> "ICE".
     static func category(from lineName: String) -> String? {
         lineName.split(separator: " ").first.map(String.init)?.uppercased()

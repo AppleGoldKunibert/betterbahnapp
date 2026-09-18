@@ -1083,4 +1083,72 @@ final class RoutingMockProvider: TransitProvider, @unchecked Sendable {
                                          from: koeln, to: berlin, date: base)
         }
     }
+
+    /// The board's own feed brands the train differently from how the user typed it (an ÖBB "RJ" that
+    /// DB's own feed would call "ICE", per `TransitousProvider`'s own doc comments on this) – direct
+    /// name matching finds nothing, so the DB Timetables API's real category/number/time is used to
+    /// find it anyway, purely by which board entry departs closest to that confirmed time.
+    @Test func rescuesTrainReportedUnderADifferentBrandViaTimetables() async throws {
+        let mock = makeProvider()
+        let rj = trip("rj423", "RJ 423", [stop(koeln, arr: nil, dep: 10), stop(berlin, arr: 240, dep: nil)])
+        mock.trips[rj.id] = rj
+        mock.boards[koeln.name] = [entry(rj, at: koeln, minutes: 10)]
+
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [TimetablesPlanProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let timetables = TimetablesClient(credentials: TimetablesCredentials(clientID: "x", apiKey: "y"),
+                                          http: HTTPClient(session: session))
+        let planner = TrainRoutePlanner(provider: CombinedProvider(primary: mock, fallback: nil, bahnDe: nil), timetables: timetables)
+
+        let plan = try await planner.plan([TrainRequirement(trainName: "ICE 423", boarding: koeln)],
+                                          from: koeln, to: berlin, date: base)
+
+        #expect(plan.best?.transitLegs.map(\.tripId) == ["rj423"])
+        #expect(plan.resolvedNames.values.first == "RJ 423")
+    }
+
+    /// Without any Timetables client configured, an unmatched name still just fails to find the
+    /// train – no crash, no silent misbehavior.
+    @Test func skipsRescueWithoutTimetablesConfigured() async throws {
+        let mock = makeProvider()
+        let rj = trip("rj423", "RJ 423", [stop(koeln, arr: nil, dep: 10), stop(berlin, arr: 240, dep: nil)])
+        mock.trips[rj.id] = rj
+        mock.boards[koeln.name] = [entry(rj, at: koeln, minutes: 10)]
+
+        await #expect(throws: TransitError.self) {
+            try await planner(mock).plan([TrainRequirement(trainName: "ICE 423", boarding: koeln)],
+                                         from: koeln, to: berlin, date: base)
+        }
+    }
+
+    @Test func parsesCategoryAndNumberFromFreeText() {
+        let iceMatch = TrainRoutePlanner.parseCategoryAndNumber("ICE 423")
+        #expect(iceMatch?.category == "ICE")
+        #expect(iceMatch?.number == "423")
+        let numberOnly = TrainRoutePlanner.parseCategoryAndNumber("423")
+        #expect(numberOnly?.category == nil)
+        #expect(numberOnly?.number == "423")
+        #expect(TrainRoutePlanner.parseCategoryAndNumber("ICE") == nil)
+    }
+}
+
+/// Serves a fixed DB Timetables `/plan` XML response (one ICE 423 departure) regardless of which
+/// hour bucket is requested, so `scheduledTimes`'s multi-bucket pagination doesn't need a fragile
+/// hour-by-hour fixture.
+private final class TimetablesPlanProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        // `base` (2026-01-15 08:00 UTC) plus 10 minutes, in Berlin local time, IRIS "YYMMDDHHmm" form.
+        let body = Data("""
+        <timetable station='Köln Hbf'><s id="1"><tl f="N" t="p" o="80" c="ICE" n="423"/><dp pt="2701150910" pp="7"/></s></timetable>
+        """.utf8)
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }
