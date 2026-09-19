@@ -178,9 +178,29 @@ struct StationInput<Focus: Hashable>: View {
     /// own timetables disambiguate same-named stations. Stations whose name is already distinct
     /// (e.g. "Bernau a. Chiemsee") are left alone.
     private func rowLabel(for suggestion: Station) -> Text {
-        let name = highlighted(suggestion.displayName)
-        guard let region = suggestion.region, needsRegion(suggestion) else { return name }
-        return name + Text(" (\(region))").foregroundStyle(.secondary)
+        let query = self.query
+        let displayName = suggestion.displayName
+        guard let region = suggestion.region, needsRegion(suggestion) else {
+            return highlighted(displayName)
+        }
+        let fullText = "\(displayName) (\(region))"
+        var attributed = AttributedString(fullText)
+
+        // Highlight query match in the main name part
+        if query.count >= 2, let range = displayName.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) {
+            if let attributedRange = Range(range, in: attributed) {
+                attributed[attributedRange].inlinePresentationIntent = .stronglyEmphasized
+            }
+        }
+
+        // Style region part in secondary color
+        if let regionStart = fullText.range(of: " (\(region))") {
+            if let attributedRange = Range(regionStart, in: attributed) {
+                attributed[attributedRange].foregroundColor = .secondary
+            }
+        }
+
+        return Text(attributed)
     }
 
     private func needsRegion(_ suggestion: Station) -> Bool {

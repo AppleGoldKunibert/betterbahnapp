@@ -221,14 +221,31 @@ struct TravelMapView: View {
     private var legend: some View {
         Group {
             if legendExpanded {
-                Button {
-                    withAnimation(.snappy) { legendExpanded = false }
-                } label: {
-                    legendContent
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Wie oft gefahren").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                        Spacer()
+                        Button {
+                            withAnimation(.snappy) { legendExpanded = false }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    ForEach(HeatColor.legend, id: \.label) { item in
+                        HStack(spacing: 8) {
+                            Capsule().fill(Color(item.color)).frame(width: 22, height: 5)
+                            Text(item.label).font(.caption2.monospacedDigit())
+                        }
+                    }
+                    Text("© OpenStreetMap, OpenRailwayMap")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.tertiary)
                 }
-                .buttonStyle(.plain)
+                .padding(12)
                 .glassEffect(.regular, in: .rect(cornerRadius: 16))
-                .accessibilityHint("Legende einklappen")
             } else {
                 Button {
                     withAnimation(.snappy) { legendExpanded = true }
@@ -243,23 +260,7 @@ struct TravelMapView: View {
             }
         }
         .padding(.trailing)
-        .padding(.bottom, 8)
-    }
-
-    private var legendContent: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Wie oft gefahren").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-            ForEach(HeatColor.legend, id: \.label) { item in
-                HStack(spacing: 8) {
-                    Capsule().fill(Color(item.color)).frame(width: 22, height: 5)
-                    Text(item.label).font(.caption2.monospacedDigit())
-                }
-            }
-            Text("© OpenStreetMap, OpenRailwayMap")
-                .font(.system(size: 8))
-                .foregroundStyle(.tertiary)
-        }
-        .padding(12)
+        .padding(.bottom, 16)
     }
 
     private var customLabel: String {

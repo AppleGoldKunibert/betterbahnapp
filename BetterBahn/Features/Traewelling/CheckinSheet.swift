@@ -278,7 +278,7 @@ struct CheckinSheet: View {
         for tag in model.settings.quickTags where activeTags.contains(tag.id) {
             let value = tag.value ?? tagValues[tag.id]?.trimmingCharacters(in: .whitespaces) ?? ""
             guard !value.isEmpty else { continue }
-            try? await model.traewelling.addTag(statusId: statusId, key: tag.key, value: value, visibility: visibility)
+            _ = try? await model.traewelling.addTag(statusId: statusId, key: tag.key, value: value, visibility: visibility)
         }
     }
 }
