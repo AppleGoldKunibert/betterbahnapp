@@ -46,11 +46,13 @@ struct ConnectionsView: View {
     /// Per-section selections; the section from the start is keyed by `startLegID`, the others by the via row they start at.
     @State private var legProducts: [UUID: Set<Product>] = [:]
     @State private var showProductsPopover = false
+    @State private var productsTapCount = 0
     @FocusState private var focused: Field?
     @State private var path: [ConnectionsRoute] = []
     @State private var swapRotation = 0.0
 
     private static let startLegID = UUID()
+    private static let productsRowID = "productsRow"
 
     /// Up to this many intermediate stops can be added to a single search.
     private static let maxViaPoints = 4
@@ -69,6 +71,7 @@ struct ConnectionsView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
+            ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 20) {
                     routeCard
@@ -88,6 +91,15 @@ struct ConnectionsView: View {
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 32)
+            }
+            .onChange(of: productsTapCount) {
+                // Bring the row into view first so the popover has room instead of being squeezed.
+                withAnimation(.snappy) { proxy.scrollTo(Self.productsRowID, anchor: .center) }
+                Task {
+                    try? await Task.sleep(for: .milliseconds(350))
+                    showProductsPopover = true
+                }
+            }
             }
             .tabBarSafePadding()
             .background { AppBackground() }
@@ -254,11 +266,10 @@ struct ConnectionsView: View {
 
     private var productsButton: some View {
         Button {
-            showProductsPopover = true
+            productsTapCount += 1
         } label: {
             HStack {
-                optionLabel("Verkehrsmittel",
-                            subtitle: products.count == Product.allCases.count ? "Alle" : productSummary,
+                optionLabel("Verkehrsmittel", subtitle: productSummary,
                             icon: "train.side.front.car", color: .brand)
                 Spacer()
                 Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
@@ -266,6 +277,7 @@ struct ConnectionsView: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .id(Self.productsRowID)
         .popover(isPresented: $showProductsPopover) { productsPopover }
     }
 
@@ -296,10 +308,10 @@ struct ConnectionsView: View {
     private var productsPopover: some View {
         // A ScrollView alone would stretch the popover to full height; only scroll once the content is too tall.
         ViewThatFits(in: .vertical) {
-            productsPopoverContent
+            productsPopoverContent.fixedSize(horizontal: false, vertical: true)
             ScrollView { productsPopoverContent }
         }
-        .frame(minWidth: 300)
+        .frame(minWidth: 340)
         .presentationCompactAdaptation(.popover)
     }
 
@@ -484,15 +496,16 @@ private struct ProductChips: View {
             }
             .font(.caption.weight(.semibold))
             .buttonStyle(.bordered)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 8)], alignment: .leading, spacing: 8) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 8)], alignment: .leading, spacing: 8) {
                 ForEach(Product.allCases, id: \.self) { product in
                     let isOn = products.contains(product)
                     Button {
                         if isOn { products.remove(product) } else { products.insert(product) }
                     } label: {
-                        Label(product.displayName, systemImage: product.symbolName)
+                        Label(product == .highSpeed ? "ICE" : product.displayName, systemImage: product.symbolName)
                             .font(.caption.weight(.semibold))
                             .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 8)
                             .foregroundStyle(isOn ? Color.white : Color.primary)
