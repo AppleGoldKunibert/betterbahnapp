@@ -221,7 +221,18 @@ struct TravelMapView: View {
         Group {
             if legendExpanded {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Wie oft gefahren").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    HStack {
+                        Text("Wie oft gefahren").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                        Spacer()
+                        Button {
+                            withAnimation(.snappy) { legendExpanded = false }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
                     ForEach(HeatColor.legend, id: \.label) { item in
                         HStack(spacing: 8) {
                             Capsule().fill(Color(item.color)).frame(width: 22, height: 5)
@@ -234,7 +245,6 @@ struct TravelMapView: View {
                 }
                 .padding(12)
                 .glassEffect(.regular, in: .rect(cornerRadius: 16))
-                .onTapGesture { withAnimation(.snappy) { legendExpanded = false } }
             } else {
                 Button {
                     withAnimation(.snappy) { legendExpanded = true }
@@ -249,7 +259,7 @@ struct TravelMapView: View {
             }
         }
         .padding(.trailing)
-        .padding(.bottom, 100)
+        .padding(.bottom, 16)
     }
 
     private var customLabel: String {
