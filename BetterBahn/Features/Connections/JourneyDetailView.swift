@@ -12,6 +12,7 @@ struct JourneyDetailView: View {
     @State private var legToReplace: LegSelection?
     @State private var checkinLeg: Leg?
     @State private var showAlternatives = false
+    @State private var showJourneyMap = false
 
     struct LegSelection: Identifiable {
         let index: Int
@@ -77,6 +78,9 @@ struct JourneyDetailView: View {
                     withAnimation { journey = newJourney }
                 }
             }
+        }
+        .sheet(isPresented: $showJourneyMap) {
+            JourneyMapView(journey: journey, finalDestination: finalDestination)
         }
         .onChange(of: model.savedEntry(for: journey)?.journey) { _, refreshed in
             // Pick up realtime refreshes of this saved journey.
@@ -193,6 +197,19 @@ struct JourneyDetailView: View {
                              systemImage: "arrow.triangle.swap")
                     if model.bc100Rules.isValid(journey) {
                         InfoChip(text: "BC100", systemImage: "creditcard.fill", tint: .punctual)
+                    }
+                    Spacer(minLength: 0)
+                    if !readOnly {
+                        Button {
+                            showJourneyMap = true
+                        } label: {
+                            Image(systemName: "map.fill")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(width: 34, height: 34)
+                        }
+                        .buttonStyle(.plain)
+                        .glassEffect(.regular, in: .circle)
+                        .accessibilityLabel("Reise auf Karte anzeigen")
                     }
                 }
 
