@@ -41,10 +41,16 @@ struct ConnectionsView: View {
     @State private var onlyBC100 = false
     @State private var products = Set(Product.allCases)
     @State private var maxTransfers: Int?
+    /// When on, each route section (start → first stop, stop → next stop, …) has its own vehicle selection.
+    @State private var productsPerLeg = false
+    /// Per-section selections; the section from the start is keyed by `startLegID`, the others by the via row they start at.
+    @State private var legProducts: [UUID: Set<Product>] = [:]
     @State private var showProductsPopover = false
     @FocusState private var focused: Field?
     @State private var path: [ConnectionsRoute] = []
     @State private var swapRotation = 0.0
+
+    private static let startLegID = UUID()
 
     /// Up to this many intermediate stops can be added to a single search.
     private static let maxViaPoints = 4
@@ -59,8 +65,6 @@ struct ConnectionsView: View {
         let id = UUID()
         var station: Station?
         var minStayMinutes = 0
-        /// Vehicle types for the leg from this stop to the next one; `nil` follows the search-wide selection.
-        var products: Set<Product>?
     }
 
     var body: some View {
@@ -266,12 +270,66 @@ struct ConnectionsView: View {
     }
 
     private var productSummary: String {
+        if perLeg { return "Pro Abschnitt festgelegt" }
+        if products.count == Product.allCases.count { return "Alle" }
         let names = Product.allCases.filter(products.contains).map(\.displayName)
         return names.isEmpty ? "Keine ausgewählt" : names.joined(separator: ", ")
     }
 
+    private var all: Set<Product> { Set(Product.allCases) }
+
+    /// Per-section selection only makes sense once there is more than one section.
+    private var perLeg: Bool { productsPerLeg && !viaRows.isEmpty }
+
+    private var hasEmptyProductSelection: Bool {
+        perLeg ? legProducts.filter { legIDs.contains($0.key) }.values.contains { $0.isEmpty } : products.isEmpty
+    }
+
+    private var legIDs: [UUID] { [Self.startLegID] + viaRows.map(\.id) }
+
+    /// The route sections between consecutive stops, as (key, title) pairs.
+    private var legs: [(id: UUID, title: String)] {
+        let names = [from?.displayName ?? "Start"] + viaRows.map { $0.station?.displayName ?? "Zwischenhalt" } + [to?.displayName ?? "Ziel"]
+        return legIDs.enumerated().map { ($1, "\(names[$0]) → \(names[$0 + 1])") }
+    }
+
     private var productsPopover: some View {
-        ProductPickerPopover(title: "Verkehrsmittel", products: $products) { showProductsPopover = false }
+        // A ScrollView alone would stretch the popover to full height; only scroll once the content is too tall.
+        ViewThatFits(in: .vertical) {
+            productsPopoverContent
+            ScrollView { productsPopoverContent }
+        }
+        .frame(minWidth: 300)
+        .presentationCompactAdaptation(.popover)
+    }
+
+    private var productsPopoverContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+                Text("Verkehrsmittel").font(.subheadline.weight(.semibold))
+                if !viaRows.isEmpty {
+                    Picker("Gültig für", selection: $productsPerLeg) {
+                        Text("Gesamte Reise").tag(false)
+                        Text("Pro Abschnitt").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                }
+                if perLeg {
+                    ForEach(legs, id: \.id) { leg in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(leg.title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                            ProductChips(products: Binding(get: { legProducts[leg.id] ?? all },
+                                                           set: { legProducts[leg.id] = $0 }))
+                        }
+                    }
+                } else {
+                    ProductChips(products: $products)
+                }
+                Button("Fertig") { showProductsPopover = false }
+                    .buttonStyle(.glassProminent)
+                    .tint(.brand)
+                    .frame(maxWidth: .infinity)
+        }
+        .padding()
     }
 
     private func optionLabel(_ title: String, subtitle: String, icon: String, color: Color) -> some View {
@@ -296,7 +354,7 @@ struct ConnectionsView: View {
         .buttonStyle(.glassProminent)
         .tint(.brand)
         .controlSize(.large)
-        .disabled(from == nil || to == nil || products.isEmpty || viaRows.contains { $0.station == nil || $0.products?.isEmpty == true })
+        .disabled(from == nil || to == nil || hasEmptyProductSelection || viaRows.contains { $0.station == nil })
     }
 
     private var recentSection: some View {
@@ -345,12 +403,13 @@ struct ConnectionsView: View {
 
     private func search() {
         guard let from, let to else { return }
-        let via = viaRows.compactMap { row in row.station.map { ViaWaypoint(station: $0, minStayMinutes: row.minStayMinutes, products: row.products) } }
+        let via = viaRows.compactMap { row in row.station.map { ViaWaypoint(station: $0, minStayMinutes: row.minStayMinutes, products: perLeg ? legProducts[row.id] ?? all : nil) } }
         model.remember(from: from, to: to)
         // Via routing only supports "depart at" — an arrival deadline doesn't compose with per-stop minimum stays.
         path.append(.search(ConnectionSearch(from: from, to: to, via: via, date: useNow ? .now : date,
                                      isArrival: via.isEmpty ? isArrival : false, onlyBC100: onlyBC100,
-                                     products: products, maxTransfers: maxTransfers)))
+                                     products: perLeg ? legProducts[Self.startLegID] ?? all : products,
+                                     maxTransfers: maxTransfers)))
     }
 }
 
@@ -361,7 +420,6 @@ private struct ViaRowView: View {
     let onRemove: () -> Void
 
     @State private var showStayPopover = false
-    @State private var showProductsPopover = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -379,23 +437,6 @@ private struct ViaRowView: View {
                 }
                 .buttonStyle(.plain)
                 .popover(isPresented: $showStayPopover) { stayPopover }
-
-                Button {
-                    showProductsPopover = true
-                } label: {
-                    Image(systemName: "train.side.front.car")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(row.products == nil ? Color.secondary : Color.brand)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Verkehrsmittel bis zum nächsten Halt")
-                .popover(isPresented: $showProductsPopover) {
-                    ProductPickerPopover(
-                        title: "Verkehrsmittel ab \(row.station?.displayName ?? "diesem Halt") bis zum nächsten Halt",
-                        products: Binding(get: { row.products ?? Set(Product.allCases) },
-                                          set: { row.products = $0 == Set(Product.allCases) ? nil : $0 })
-                    ) { showProductsPopover = false }
-                }
 
                 Spacer()
 
@@ -430,15 +471,12 @@ private struct ViaRowView: View {
     }
 }
 
-/// Toggle chips for choosing which vehicle types a search or a single route leg may use.
-private struct ProductPickerPopover: View {
-    let title: String
+/// Quick presets and toggle chips for choosing which vehicle types may be used.
+private struct ProductChips: View {
     @Binding var products: Set<Product>
-    let onDone: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title).font(.subheadline.weight(.semibold))
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Button("Nur Züge") { products = Set(Product.allCases.filter(\.isTrain)) }
                 Button("Nur Fernverkehr") { products = [.highSpeed, .longDistance] }
@@ -463,14 +501,7 @@ private struct ProductPickerPopover: View {
                     .buttonStyle(.plain)
                 }
             }
-            Button("Fertig", action: onDone)
-                .buttonStyle(.glassProminent)
-                .tint(.brand)
-                .frame(maxWidth: .infinity)
         }
-        .padding()
-        .frame(minWidth: 300)
-        .presentationCompactAdaptation(.popover)
     }
 }
 
