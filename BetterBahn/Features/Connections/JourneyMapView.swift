@@ -57,7 +57,7 @@ struct JourneyMapView: View {
                     let query = JourneyQuery(
                         from: transfer.station,
                         to: finalDestination,
-                        departure: searchStart
+                        date: searchStart
                     )
                     let page = try await model.provider.journeys(query)
 
@@ -104,14 +104,31 @@ struct TransferPoint: Identifiable {
     let arrivalTime: Date?
     let departureTime: Date?
     let platform: PlatformInfo?
+    let departurePlatform: PlatformInfo?
     let type: PointType
     let legIndex: Int
+
+    var transferTimeMinutes: Int? {
+        guard type == .transfer, let arrival = arrivalTime, let departure = departureTime else { return nil }
+        return Int(departure.timeIntervalSince(arrival) / 60)
+    }
+
+    var transferColor: UIColor {
+        guard let minutes = transferTimeMinutes else { return UIColor.systemBlue }
+        if minutes > 30 {
+            return UIColor.systemGreen
+        } else if minutes >= 15 {
+            return UIColor.systemYellow
+        } else {
+            return UIColor.systemRed
+        }
+    }
 }
 
-/// Extract all transfer points, stopovers, start and end.
+/// Extract transfer points (start, transfers, and end only - no intermediate stopovers).
 private func extractTransferPoints(from journey: Journey) -> [TransferPoint] {
     var transfers: [TransferPoint] = []
-
+    
     // Start point
     if let firstLeg = journey.transitLegs.first {
         transfers.append(TransferPoint(
@@ -119,26 +136,13 @@ private func extractTransferPoints(from journey: Journey) -> [TransferPoint] {
             arrivalTime: nil,
             departureTime: firstLeg.departure.best,
             platform: firstLeg.departurePlatform,
+            departurePlatform: nil,
             type: .start,
             legIndex: 0
         ))
     }
 
-    // For each leg, add intermediate stopovers
-    for (legIndex, leg) in journey.transitLegs.enumerated() {
-        for stopover in leg.stopovers {
-            transfers.append(TransferPoint(
-                station: stopover.station,
-                arrivalTime: stopover.arrival?.best,
-                departureTime: stopover.departure?.best,
-                platform: stopover.arrivalPlatform,
-                type: .stopover,
-                legIndex: legIndex
-            ))
-        }
-    }
-
-    // Transfer points (between legs)
+    // Transfer points (between legs only)
     for (index, leg) in journey.transitLegs.dropLast().enumerated() {
         let station = leg.destination
         let nextLeg = journey.transitLegs[index + 1]
@@ -147,6 +151,7 @@ private func extractTransferPoints(from journey: Journey) -> [TransferPoint] {
             arrivalTime: leg.arrival.best,
             departureTime: nextLeg.departure.best,
             platform: leg.arrivalPlatform,
+            departurePlatform: nextLeg.departurePlatform,
             type: .transfer,
             legIndex: index
         ))
@@ -159,11 +164,12 @@ private func extractTransferPoints(from journey: Journey) -> [TransferPoint] {
             arrivalTime: lastLeg.arrival.best,
             departureTime: nil,
             platform: lastLeg.arrivalPlatform,
+            departurePlatform: nil,
             type: .end,
             legIndex: journey.transitLegs.count - 1
         ))
     }
-
+    
     return transfers
 }
 
@@ -252,30 +258,30 @@ struct JourneyMap: UIViewRepresentable {
 
         func mapView(_ mapView: MKMapView, viewFor annotation: any MKAnnotation) -> MKAnnotationView? {
             guard let annotation = annotation as? JourneyMarkerAnnotation else { return nil }
-
-            let identifier = annotation.transfer.type == .stopover ? "StopoverMarker" : "JourneyMarker"
-            var view = mapView.dequeueReusableAnnotationView(withIdentifier: identifier)
-
-            if annotation.transfer.type == .stopover {
-                if view == nil {
-                    view = MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: identifier)
-                }
-                if let markerView = view as? MKMarkerAnnotationView {
-                    markerView.markerTintColor = UIColor(Color.brand).withAlphaComponent(0.6)
-                    markerView.glyphText = "·"
-                    markerView.canShowCallout = true
-                }
-            } else {
-                if view == nil {
-                    view = MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: identifier)
-                }
-                if let markerView = view as? MKMarkerAnnotationView {
-                    markerView.canShowCallout = true
-                    markerView.markerTintColor = annotationColor(for: annotation.transfer.type)
-                    markerView.glyphImage = UIImage(systemName: annotation.transfer.type.symbol)
-                }
+            
+            let identifier = "TransferMarker"
+            var view = mapView.dequeueReusableAnnotationView(withIdentifier: identifier) as? MKMarkerAnnotationView
+            
+            if view == nil {
+                view = MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: identifier)
+                view?.canShowCallout = true
             }
-
+            
+            view?.annotation = annotation
+            
+            // Different colors for each type
+            switch annotation.transfer.type {
+            case .start:
+                view?.markerTintColor = UIColor.systemBlue
+            case .stopover:
+                view?.markerTintColor = UIColor.systemRed
+            case .transfer:
+                view?.markerTintColor = annotation.transfer.transferColor
+                view?.glyphText = annotation.transfer.transferTimeMinutes.map { "\($0)m" } ?? "∞"
+            case .end:
+                view?.markerTintColor = UIColor.systemGreen
+            }
+            
             return view
         }
 
@@ -381,7 +387,22 @@ struct TransferDetailsSheet: View {
                             }
                         }
 
-                        if let platform = transfer.platform?.best {
+                        if transfer.type == .transfer, transfer.platform?.best != nil || transfer.departurePlatform?.best != nil {
+                            HStack {
+                                Label("Gleiswechsel", systemImage: "train.side.front.car")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                HStack(spacing: 6) {
+                                    Text(transfer.platform?.best ?? "?")
+                                    Image(systemName: "arrow.right")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                    Text(transfer.departurePlatform?.best ?? "?")
+                                }
+                                .font(.headline)
+                            }
+                        } else if let platform = transfer.platform?.best {
                             HStack {
                                 Label("Gleis", systemImage: "train.side.front.car")
                                     .font(.caption.weight(.semibold))
