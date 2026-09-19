@@ -6,7 +6,8 @@ import Observation
 /// Projects a single journey onto the (one) Live Activity. State is derived locally from the
 /// journey every time `show` is called — `AppModel` is responsible for calling it often enough
 /// (see `AppModel.syncLiveActivity`), since ActivityKit gives no way to run our own timer once the
-/// app is suspended in the background.
+/// app is suspended in the background. While backgrounded, `AppModel.scheduleLiveActivityBackgroundCheck`
+/// covers ending a finished journey's activity via a `BGAppRefreshTask` instead.
 @Observable
 final class LiveActivityManager {
     private(set) var activeJourneyID: String?
