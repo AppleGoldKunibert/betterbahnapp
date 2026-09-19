@@ -24,6 +24,10 @@ struct ConnectionSearch: Hashable {
     var date: Date
     var isArrival: Bool
     var onlyBC100: Bool
+    var products = Set(Product.allCases)
+    var maxTransfers: Int?
+
+    var isFiltered: Bool { products != Set(Product.allCases) || maxTransfers != nil }
 }
 
 struct ConnectionsView: View {
@@ -35,6 +39,9 @@ struct ConnectionsView: View {
     @State private var useNow = true
     @State private var isArrival = false
     @State private var onlyBC100 = false
+    @State private var products = Set(Product.allCases)
+    @State private var maxTransfers: Int?
+    @State private var showProductsPopover = false
     @FocusState private var focused: Field?
     @State private var path: [ConnectionsRoute] = []
     @State private var swapRotation = 0.0
@@ -52,6 +59,8 @@ struct ConnectionsView: View {
         let id = UUID()
         var station: Station?
         var minStayMinutes = 0
+        /// Vehicle types for the leg from this stop to the next one; `nil` follows the search-wide selection.
+        var products: Set<Product>?
     }
 
     var body: some View {
@@ -217,8 +226,52 @@ struct ConnectionsView: View {
                 }
                 .tint(.brand)
 
+                Divider()
+
+                transfersPicker
+
+                productsButton
             }
         }
+    }
+
+    private var transfersPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            optionLabel("Max. Umstiege", subtitle: "Weniger Umstiege, ggf. längere Fahrzeit", icon: "arrow.triangle.swap", color: .brand)
+            Picker("Max. Umstiege", selection: $maxTransfers) {
+                Text("Beliebig").tag(Int?.none)
+                Text("Direkt").tag(Int?.some(0))
+                Text("≤ 1").tag(Int?.some(1))
+                Text("≤ 2").tag(Int?.some(2))
+            }
+            .pickerStyle(.segmented)
+        }
+    }
+
+    private var productsButton: some View {
+        Button {
+            showProductsPopover = true
+        } label: {
+            HStack {
+                optionLabel("Verkehrsmittel",
+                            subtitle: products.count == Product.allCases.count ? "Alle" : productSummary,
+                            icon: "train.side.front.car", color: .brand)
+                Spacer()
+                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showProductsPopover) { productsPopover }
+    }
+
+    private var productSummary: String {
+        let names = Product.allCases.filter(products.contains).map(\.displayName)
+        return names.isEmpty ? "Keine ausgewählt" : names.joined(separator: ", ")
+    }
+
+    private var productsPopover: some View {
+        ProductPickerPopover(title: "Verkehrsmittel", products: $products) { showProductsPopover = false }
     }
 
     private func optionLabel(_ title: String, subtitle: String, icon: String, color: Color) -> some View {
@@ -243,7 +296,7 @@ struct ConnectionsView: View {
         .buttonStyle(.glassProminent)
         .tint(.brand)
         .controlSize(.large)
-        .disabled(from == nil || to == nil || viaRows.contains { $0.station == nil })
+        .disabled(from == nil || to == nil || products.isEmpty || viaRows.contains { $0.station == nil || $0.products?.isEmpty == true })
     }
 
     private var recentSection: some View {
@@ -292,11 +345,12 @@ struct ConnectionsView: View {
 
     private func search() {
         guard let from, let to else { return }
-        let via = viaRows.compactMap { row in row.station.map { ViaWaypoint(station: $0, minStayMinutes: row.minStayMinutes) } }
+        let via = viaRows.compactMap { row in row.station.map { ViaWaypoint(station: $0, minStayMinutes: row.minStayMinutes, products: row.products) } }
         model.remember(from: from, to: to)
         // Via routing only supports "depart at" — an arrival deadline doesn't compose with per-stop minimum stays.
         path.append(.search(ConnectionSearch(from: from, to: to, via: via, date: useNow ? .now : date,
-                                     isArrival: via.isEmpty ? isArrival : false, onlyBC100: onlyBC100)))
+                                     isArrival: via.isEmpty ? isArrival : false, onlyBC100: onlyBC100,
+                                     products: products, maxTransfers: maxTransfers)))
     }
 }
 
@@ -307,6 +361,7 @@ private struct ViaRowView: View {
     let onRemove: () -> Void
 
     @State private var showStayPopover = false
+    @State private var showProductsPopover = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -324,6 +379,23 @@ private struct ViaRowView: View {
                 }
                 .buttonStyle(.plain)
                 .popover(isPresented: $showStayPopover) { stayPopover }
+
+                Button {
+                    showProductsPopover = true
+                } label: {
+                    Image(systemName: "train.side.front.car")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(row.products == nil ? Color.secondary : Color.brand)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Verkehrsmittel bis zum nächsten Halt")
+                .popover(isPresented: $showProductsPopover) {
+                    ProductPickerPopover(
+                        title: "Verkehrsmittel ab \(row.station?.displayName ?? "diesem Halt") bis zum nächsten Halt",
+                        products: Binding(get: { row.products ?? Set(Product.allCases) },
+                                          set: { row.products = $0 == Set(Product.allCases) ? nil : $0 })
+                    ) { showProductsPopover = false }
+                }
 
                 Spacer()
 
@@ -354,6 +426,50 @@ private struct ViaRowView: View {
         }
         .padding()
         .frame(minWidth: 260)
+        .presentationCompactAdaptation(.popover)
+    }
+}
+
+/// Toggle chips for choosing which vehicle types a search or a single route leg may use.
+private struct ProductPickerPopover: View {
+    let title: String
+    @Binding var products: Set<Product>
+    let onDone: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title).font(.subheadline.weight(.semibold))
+            HStack {
+                Button("Nur Züge") { products = Set(Product.allCases.filter(\.isTrain)) }
+                Button("Nur Fernverkehr") { products = [.highSpeed, .longDistance] }
+                Button("Alle") { products = Set(Product.allCases) }
+            }
+            .font(.caption.weight(.semibold))
+            .buttonStyle(.bordered)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 8)], alignment: .leading, spacing: 8) {
+                ForEach(Product.allCases, id: \.self) { product in
+                    let isOn = products.contains(product)
+                    Button {
+                        if isOn { products.remove(product) } else { products.insert(product) }
+                    } label: {
+                        Label(product.displayName, systemImage: product.symbolName)
+                            .font(.caption.weight(.semibold))
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .foregroundStyle(isOn ? Color.white : Color.primary)
+                            .background(isOn ? product.color : Color.secondary.opacity(0.15), in: .capsule)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            Button("Fertig", action: onDone)
+                .buttonStyle(.glassProminent)
+                .tint(.brand)
+                .frame(maxWidth: .infinity)
+        }
+        .padding()
+        .frame(minWidth: 300)
         .presentationCompactAdaptation(.popover)
     }
 }

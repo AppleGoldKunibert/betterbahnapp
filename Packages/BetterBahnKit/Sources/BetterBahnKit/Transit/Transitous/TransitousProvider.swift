@@ -217,9 +217,17 @@ public struct TransitousProvider: TransitProvider {
             .init(name: "detailedTransfers", value: "false"),
         ]
         if let cursor = query.cursor { items.append(.init(name: "pageCursor", value: cursor)) }
+        if let maxTransfers = query.maxTransfers { items.append(.init(name: "maxTransfers", value: String(maxTransfers))) }
+        // `.other` has no known mode mapping, so a selection containing it stays unfiltered server-side.
+        if query.products != Set(Product.allCases), !query.products.contains(.other) {
+            let modes = Set(query.products.flatMap(MLineInfo.motisModes(for:)))
+            if !modes.isEmpty { items.append(.init(name: "transitModes", value: modes.sorted().joined(separator: ","))) }
+        }
         let response = try await http.get(url("v5/plan", items), as: MPlanResponse.self, headers: ["User-Agent": HTTPClient.identifyingUserAgent])
         return JourneyPage(
-            journeys: response.itineraries.map { Journey(legs: Self.mergeThroughTrainLegs($0.legs.map { $0.toLeg() }), source: .transitous) },
+            journeys: response.itineraries
+                .map { Journey(legs: Self.mergeThroughTrainLegs($0.legs.map { $0.toLeg() }), source: .transitous) }
+                .filter(query.allows),
             earlierCursor: response.previousPageCursor,
             laterCursor: response.nextPageCursor,
             source: .transitous
