@@ -104,6 +104,7 @@ public final class CombinedProvider: TransitProvider {
         }
         page.earlierCursor = page.earlierCursor.map { "\(page.source.rawValue):\($0)" }
         page.laterCursor = page.laterCursor.map { "\(page.source.rawValue):\($0)" }
+        page.journeys = page.journeys.filter(query.allows)
         page.journeys = page.journeys.filter { journey in !journey.transitLegs.contains { Self.isFlixBus($0.line) } }
         return page
     }

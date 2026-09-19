@@ -90,8 +90,13 @@ public struct JourneyRefresher: Sendable {
                let trip = try? await provider.trip(id: tripId, source: leg.source) {
                 leg = Self.apply(trip, to: leg)
             }
+            // DB Timetables wins wherever it knows the stop; the trip data above only fills in
+            // what DB can't match (regional operators, far-off stops).
             if let timetables, let override = await timetables.realtime(for: leg) {
                 leg = Self.apply(override, to: leg)
+            }
+            if let timetables, timetables.canLookUp(leg) {
+                leg.stopovers = await timetables.stopoversWithRealtime(for: leg)
             }
             updated.legs[index] = leg
         }
@@ -101,6 +106,8 @@ public struct JourneyRefresher: Sendable {
     static func apply(_ trip: Trip, to leg: Leg) -> Leg {
         var leg = leg
         if trip.cancelled { leg.cancelled = true }
+        // Journeys saved before `tripNumber` existed pick up the real train number here.
+        if leg.line?.tripNumber == nil { leg.line?.tripNumber = trip.line?.tripNumber }
         if let start = trip.stopovers.first(where: { $0.station.isSamePlace(as: leg.origin) }) {
             if let departure = start.departure { leg.departure = departure }
             if start.departurePlatform?.best != nil { leg.departurePlatform = start.departurePlatform }
@@ -110,6 +117,17 @@ public struct JourneyRefresher: Sendable {
             if let arrival = end.arrival { leg.arrival = arrival }
             if end.arrivalPlatform?.best != nil { leg.arrivalPlatform = end.arrivalPlatform }
             if end.cancelled { leg.cancelled = true }
+        }
+        // Keep the intermediate stops as current as the endpoints.
+        for index in leg.stopovers.indices {
+            let stop = leg.stopovers[index]
+            guard let live = trip.stopovers.first(where: {
+                $0.station.isSamePlace(as: stop.station)
+                    && $0.arrival?.planned == stop.arrival?.planned && $0.departure?.planned == stop.departure?.planned
+            }) else { continue }
+            if let arrival = live.arrival { leg.stopovers[index].arrival = arrival }
+            if let departure = live.departure { leg.stopovers[index].departure = departure }
+            if live.cancelled { leg.stopovers[index].cancelled = true }
         }
         return leg
     }

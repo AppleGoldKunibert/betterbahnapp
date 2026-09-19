@@ -35,10 +35,9 @@ struct SavedJourneyRow: View {
 
     var body: some View {
         let blocking = entry.issues.first(where: \.isBlocking)
-        NavigationLink {
-            JourneyDetailView(journey: entry.journey,
-                              finalDestination: entry.journey.legs.last?.destination ?? entry.journey.legs[0].destination)
-        } label: {
+        NavigationLink(value: ConnectionsRoute.journey(JourneyRoute(
+            journey: entry.journey,
+            finalDestination: entry.journey.legs.last?.destination ?? entry.journey.legs[0].destination))) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
                     Image(systemName: "calendar")

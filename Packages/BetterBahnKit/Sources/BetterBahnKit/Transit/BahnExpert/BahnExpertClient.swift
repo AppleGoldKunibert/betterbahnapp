@@ -19,6 +19,20 @@ public struct TrainTypeLookup: Codable, Sendable, Hashable {
         public var origin: String?
         public var destination: String?
         public var coachCount: Int
+
+        /// Marketing family: "ICE 1", "ICE 2", "ICE 3", "ICE 3neo", "ICE 4", "ICE T", "ICE L", or the
+        /// cleaned-up bahn.expert name for anything else (e.g. "IC 2").
+        public var family: String? {
+            switch baureihe {
+            case "401": "ICE 1"
+            case "402": "ICE 2"
+            case "403", "406", "407": "ICE 3"
+            case "408": "ICE 3neo"
+            case "411", "415": "ICE T"
+            case "412": "ICE 4"
+            default: seriesName.map(TrainTypeLookup.family(of:))
+            }
+        }
     }
 
     public var category: String
@@ -38,7 +52,7 @@ public struct TrainTypeLookup: Codable, Sendable, Hashable {
     /// Distinct marketing families in order, e.g. ["ICE 4"] — "ICE 4 Lang (BR412)" collapses to "ICE 4".
     public var families: [String] {
         var result: [String] = []
-        for family in groups.compactMap({ $0.seriesName.map(TrainTypeLookup.family(of:)) }) where !result.contains(family) {
+        for family in groups.compactMap(\.family) where !result.contains(family) {
             result.append(family)
         }
         return result
@@ -49,7 +63,7 @@ public struct TrainTypeLookup: Codable, Sendable, Hashable {
 
     /// Adapter for the existing formation UI.
     public var formation: TrainFormation {
-        TrainFormation(units: groups.map { .init(model: $0.seriesName.map(Self.family(of:)), number: $0.unitNumber) })
+        TrainFormation(units: groups.map { .init(model: $0.family, number: $0.unitNumber) })
     }
 
     /// Strips the variant and the parenthesised class: "ICE 4 Lang (BR412)" → "ICE 4", "ICE 3neo (BR408)" → "ICE 3neo".
@@ -59,6 +73,21 @@ public struct TrainTypeLookup: Codable, Sendable, Hashable {
         name = name.trimmingCharacters(in: .whitespaces)
         for suffix in [" Lang", " Kurz"] where name.hasSuffix(suffix) { name = String(name.dropLast(suffix.count)) }
         return name
+    }
+}
+
+/// Where a running train is right now.
+public struct TrainPosition: Codable, Sendable, Hashable {
+    public var coordinate: Coordinate
+    /// When the train's sensor took this fix (not when it was fetched).
+    public var time: Date
+    public var speedKmh: Double?
+    /// bahn.expert's origin of the fix, e.g. "SENSOR".
+    public var source: String?
+
+    /// Fixes are sent every few seconds; an older one means the feed stalled (tunnel, no coverage).
+    public func isStale(after seconds: TimeInterval = 120, now: Date = .now) -> Bool {
+        now.timeIntervalSince(time) > seconds
     }
 }
 
@@ -115,6 +144,7 @@ public struct BahnExpertClient: Sendable {
                 var name: String?
                 var originName: String?
                 var destinationName: String?
+                var journeyNumber: Int?
                 var baureihe: Baureihe?
                 var coaches: [Coach]?
             }
@@ -123,6 +153,14 @@ public struct BahnExpertClient: Sendable {
         var isRealtime: Bool
         var source: String?
         var sequence: Sequence?
+    }
+
+    struct PositionResponse: Decodable {
+        var latitude: Double
+        var longitude: Double
+        var time: Date
+        var speed: Double?
+        var metaSource: String?
     }
 
     // MARK: Lookup
@@ -136,22 +174,7 @@ public struct BahnExpertClient: Sendable {
     public func trainType(category: String, number: String, date: String,
                           administration: String = BahnExpertClient.dbAdministration) async throws -> TrainTypeLookup? {
         let category = category.uppercased()
-        guard let journeyNumber = Int(number), Self.isValidDay(date) else {
-            throw TransitError.invalidInput("Zugnummer oder Datum ungültig.")
-        }
-        let noon = "\(date)T12:00:00.000Z"
-
-        let found: [FoundJourney] = try await call("journey/find", input: [
-            "json": [
-                "journeyNumber": journeyNumber, "administration": administration, "category": category,
-                "initialDepartureDate": noon, "withOEV": true, "limit": 1,
-            ] as [String: Any],
-            "meta": [["date", "initialDepartureDate"]],
-        ])
-        // A journey ID can resolve to a different train than asked for, so verify what came back.
-        guard let journey = found.first(where: {
-            $0.train?.journeyNumber == journeyNumber && $0.train?.category?.uppercased() == category
-        }) else { throw TransitError.notFound("\(category) \(number)") }
+        let (journey, journeyNumber) = try await resolveJourney(category: category, number: number, date: date, administration: administration)
 
         let details: Details = try await call("journey/detailsByJourneyId", input: ["json": journey.journeyId])
         guard let firstStop = details.stops.first, let departure = firstStop.departure?.scheduledTime else { return nil }
@@ -170,7 +193,10 @@ public struct BahnExpertClient: Sendable {
         ])
         guard let sequence = sequenceResponse.sequence, !sequence.groups.isEmpty else { return nil }
 
-        let groups = sequence.groups.map { group in
+        // Split trains (e.g. ICE 950 + ICE 940 coupled up to Hamm) list every half; keep the ones that
+        // run as the requested train so the other half's series doesn't leak in.
+        let own = sequence.groups.filter { $0.journeyNumber == journeyNumber }
+        let groups = (own.isEmpty ? sequence.groups : own).map { group in
             TrainTypeLookup.Group(
                 seriesName: group.baureihe?.name, baureihe: group.baureihe?.baureihe,
                 unitNumber: sequenceResponse.isRealtime ? Self.unitNumber(from: group.name) : nil,
@@ -183,13 +209,73 @@ public struct BahnExpertClient: Sendable {
 
     /// Looks up a leg's train on the day it departs (Berlin time). Only DB long-distance categories.
     public func trainType(for leg: Leg) async throws -> TrainTypeLookup? {
-        guard let line = leg.line, let number = line.number,
+        guard let ref = Self.trainReference(for: leg.line) else { return nil }
+        return try await trainType(category: ref.category, number: ref.number, date: Self.berlinDay(leg.departure.planned))
+    }
+
+    /// Live position of a running train, from the train's own GPS sensor as relayed by bahn.expert.
+    /// - Returns: nil while the train is not underway (before departure or after arrival).
+    /// - Throws: `TransitError.notFound` if no such journey exists on that day.
+    public func position(category: String, number: String, date: String,
+                         administration: String = BahnExpertClient.dbAdministration) async throws -> TrainPosition? {
+        let category = category.uppercased()
+        let (journey, _) = try await resolveJourney(category: category, number: number, date: date, administration: administration)
+        do {
+            let wire: PositionResponse = try await call("journey/journeyPosition", input: ["json": journey.journeyId])
+            return TrainPosition(coordinate: Coordinate(latitude: wire.latitude, longitude: wire.longitude),
+                                 time: wire.time, speedKmh: wire.speed, source: wire.metaSource)
+        } catch TransitError.notFound {
+            return nil
+        }
+    }
+
+    /// Live position of a leg's train. Only ICE, since that is what carries the position sensor feed.
+    /// A train that left before midnight runs under the previous day's date, so that day is tried too
+    /// for departures in the early hours.
+    public func position(for leg: Leg) async throws -> TrainPosition? {
+        guard let ref = Self.trainReference(for: leg.line), ref.category == "ICE" else { return nil }
+        var days = [Self.berlinDay(leg.departure.planned)]
+        if Self.berlinHour(leg.departure.planned) < 6 {
+            days.append(Self.berlinDay(leg.departure.planned.addingTimeInterval(-86_400)))
+        }
+        for day in days {
+            do {
+                if let position = try await position(category: ref.category, number: ref.number, date: day) { return position }
+            } catch TransitError.notFound {
+                continue
+            }
+        }
+        return nil
+    }
+
+    /// "ICE 950" → ("ICE", "950"); nil for anything that is not a DB long-distance train.
+    public static func trainReference(for line: Line?) -> (category: String, number: String)? {
+        guard let line, let number = line.number,
               let category = line.name.split(separator: " ").first.map(String.init)?.uppercased(),
               ["ICE", "IC", "EC", "ECE"].contains(category) else { return nil }
-        return try await trainType(category: category, number: number, date: Self.berlinDay(leg.departure.planned))
+        return (category, number)
     }
 
     // MARK: Helpers
+
+    private func resolveJourney(category: String, number: String, date: String,
+                                administration: String) async throws -> (FoundJourney, Int) {
+        guard let journeyNumber = Int(number), Self.isValidDay(date) else {
+            throw TransitError.invalidInput("Zugnummer oder Datum ungültig.")
+        }
+        let found: [FoundJourney] = try await call("journey/find", input: [
+            "json": [
+                "journeyNumber": journeyNumber, "administration": administration, "category": category,
+                "initialDepartureDate": "\(date)T12:00:00.000Z", "withOEV": true, "limit": 1,
+            ] as [String: Any],
+            "meta": [["date", "initialDepartureDate"]],
+        ])
+        // A journey ID can resolve to a different train than asked for, so verify what came back.
+        guard let journey = found.first(where: {
+            $0.train?.journeyNumber == journeyNumber && $0.train?.category?.uppercased() == category
+        }) else { throw TransitError.notFound("\(category) \(number)") }
+        return (journey, journeyNumber)
+    }
 
     /// Group names for live data look like "ICE9465"; planned ones like "373-planned".
     static func unitNumber(from groupName: String?) -> String? {
@@ -201,11 +287,18 @@ public struct BahnExpertClient: Sendable {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    static func berlinDay(_ date: Date) -> String {
+    /// Calendar day of `date` in Europe/Berlin as `yyyy-MM-dd`, the form bahn.expert expects.
+    public static func berlinDay(_ date: Date) -> String {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "Europe/Berlin")!
         let parts = calendar.dateComponents([.year, .month, .day], from: date)
         return String(format: "%04d-%02d-%02d", parts.year!, parts.month!, parts.day!)
+    }
+
+    static func berlinHour(_ date: Date) -> Int {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/Berlin")!
+        return calendar.component(.hour, from: date)
     }
 
     /// Rejects malformed dates and impossible ones like 2026-02-31.

@@ -97,9 +97,7 @@ struct JourneyResultsView: View {
                 }
 
                 ForEach(Array(visibleJourneys.enumerated()), id: \.element.id) { index, journey in
-                    NavigationLink {
-                        JourneyDetailView(journey: journey, finalDestination: search.to)
-                    } label: {
+                    NavigationLink(value: ConnectionsRoute.journey(JourneyRoute(journey: journey, finalDestination: search.to))) {
                         JourneyCard(journey: journey)
                             .overlay {
                                 if !requirements.isEmpty, index == 0 {
@@ -202,6 +200,13 @@ struct JourneyResultsView: View {
                 }
                 if search.onlyBC100 {
                     InfoChip(text: "BC100", systemImage: "creditcard.fill", tint: .brand)
+                }
+                if let maxTransfers = search.maxTransfers {
+                    InfoChip(text: maxTransfers == 0 ? "Direkt" : "≤ \(maxTransfers) Umstieg\(maxTransfers == 1 ? "" : "e")",
+                             systemImage: "arrow.triangle.swap", tint: .brand)
+                }
+                if search.products != Set(Product.allCases) {
+                    InfoChip(text: "Verkehrsmittel gefiltert", systemImage: "line.3.horizontal.decrease", tint: .brand)
                 }
             }
         }
@@ -398,13 +403,18 @@ struct JourneyResultsView: View {
             var page: JourneyPage?
             if search.via.isEmpty {
                 let loaded = try await model.provider.journeys(JourneyQuery(
-                    from: search.from, to: search.to, date: searchDate, isArrival: search.isArrival, cursor: cursor))
+                    from: search.from, to: search.to, date: searchDate, isArrival: search.isArrival, cursor: cursor,
+                    products: search.products, maxTransfers: search.maxTransfers))
                 result = loaded.journeys
                 page = loaded
             } else {
                 // Routed via search has no cursor-based paging – it's a single chained search.
-                result = try await ViaRoutePlanner(provider: model.provider).journeys(
+                result = try await ViaRoutePlanner(provider: model.provider, products: search.products).journeys(
                     from: search.from, to: search.to, via: search.via, date: searchDate)
+                // Products are applied per leg by the planner; only the overall transfer limit is left.
+                if let maxTransfers = search.maxTransfers {
+                    result = result.filter { $0.transfers <= maxTransfers }
+                }
             }
             if search.onlyBC100 {
                 let rules = model.bc100Rules
@@ -473,7 +483,6 @@ struct JourneyCard: View {
                         }
                     }
                 }
-                .scrollClipDisabled()
 
                 HStack(spacing: 8) {
                     InfoChip(text: journey.transfers == 0 ? "Direkt" : "\(journey.transfers) Umstieg\(journey.transfers == 1 ? "" : "e")",

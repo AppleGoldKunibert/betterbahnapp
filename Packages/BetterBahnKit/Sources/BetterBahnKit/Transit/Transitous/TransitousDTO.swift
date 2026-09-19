@@ -76,7 +76,8 @@ struct MLineInfo {
         // trip code ("000385") instead of the display name — fold it in, otherwise unrelated
         // departures under the same product all look identically labeled.
         let displayedName = (digitsInName?.isEmpty != false) ? number.map { "\(name) \($0)" } ?? name : name
-        return Line(name: displayedName, number: number, product: product, operatorName: agencyName)
+        let tripNumber = tripShortName.map { String($0.filter(\.isNumber).drop(while: { $0 == "0" })) }.flatMap { $0.isEmpty ? nil : $0 }
+        return Line(name: displayedName, number: number, product: product, operatorName: agencyName, tripNumber: tripNumber)
     }
 
     static func product(mode: String, prefix: String) -> Product {

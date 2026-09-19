@@ -36,11 +36,25 @@ struct TripView: View {
             }
         }
         .animation(.snappy, value: selectedLeg?.id)
-        .toolbar(.hidden, for: .tabBar)
         .navigationTitle(entry.line.name)
         .navigationBarTitleDisplayMode(.inline)
-        .task { await load() }
-        .refreshable { await load() }
+        .task {
+            await load()
+            await autoRefresh(tripId: entry.tripId)
+        }
+        .refreshable {
+            await TimetablesClient.invalidateDelays()
+            await load()
+        }
+    }
+
+    /// Re-loads every 5 minutes while this trip belongs to a saved journey.
+    private func autoRefresh(tripId: String) async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: AppModel.realtimeRefreshInterval)
+            guard !Task.isCancelled else { return }
+            if model.isTripSaved(tripId) { await load() }
+        }
     }
 
     private var selectedLeg: Leg? {
@@ -88,7 +102,8 @@ struct TripView: View {
             // has one for stops in between (e.g. reported for the S15 at Berlin Hbf); fill that in from
             // DB's own schedule once the trip is already showing, so this never blocks the initial render.
             if let timetables = model.timetablesClient {
-                trip = await timetables.fillMissingPlatforms(in: loaded)
+                let withDelays = await timetables.tripWithRealtime(loaded)
+                trip = await timetables.fillMissingPlatforms(in: withDelays)
             }
         } catch is CancellationError {
         } catch {
@@ -105,8 +120,8 @@ struct TripContent: View {
     @Binding var exitID: String?
     /// When false, stops are shown read-only (e.g. viewing the full route of a leg already booked).
     var interactive = true
-    /// Tapping any stop time flips every stop in the list between real-time and scheduled times.
-    @State private var showPlannedTimes = false
+    /// Tapping any stop time flips every stop between real-time and scheduled times — app-wide, and remembered.
+    @AppStorage("showPlannedTimes") private var showPlannedTimes = false
 
     private var color: Color { trip.line?.product.color ?? .gray }
 
@@ -116,7 +131,10 @@ struct TripContent: View {
                 HStack(spacing: 12) {
                     IconTile(systemImage: trip.line?.product.symbolName ?? "tram.fill", color: color, size: 46)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(trip.line?.name ?? "Zug").font(.title3.weight(.bold))
+                        HStack(spacing: 8) {
+                            Text(trip.line?.name ?? "Zug").font(.title3.weight(.bold))
+                            TrainSeriesTag(line: trip.line, date: trip.stopovers.first?.departure?.planned ?? .now)
+                        }
                         if let origin = trip.origin, let destination = trip.destination {
                             Text("\(origin.displayName) → \(destination.displayName)")
                                 .font(.subheadline)
@@ -313,7 +331,15 @@ struct LegTripSheet: View {
                     Button("Fertig", systemImage: "xmark", role: .cancel) { dismiss() }
                 }
             }
-            .task { await load() }
+            .task {
+                await load()
+                guard let tripId = leg.tripId else { return }
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: AppModel.realtimeRefreshInterval)
+                    guard !Task.isCancelled else { return }
+                    if model.isTripSaved(tripId) { await load() }
+                }
+            }
         }
     }
 
@@ -335,7 +361,8 @@ struct LegTripSheet: View {
             trip = loaded
             error = nil
             if let timetables = model.timetablesClient {
-                trip = await timetables.fillMissingPlatforms(in: loaded)
+                let withDelays = await timetables.tripWithRealtime(loaded)
+                trip = await timetables.fillMissingPlatforms(in: withDelays)
             }
         } catch is CancellationError {
         } catch {

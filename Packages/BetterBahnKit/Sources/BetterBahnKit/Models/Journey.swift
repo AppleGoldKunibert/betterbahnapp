@@ -49,8 +49,16 @@ public struct Line: Codable, Sendable, Hashable {
     /// usually without realtime data. Set when a duplicate was found and merged away (see
     /// `TransitousProvider.board`), so callers like Träwelling check-in can still try that name too.
     public var alternateName: String?
+    /// The run's own train number where it differs from `number` (a regional "RE3" is line 3 but run
+    /// 3307) – what DB's dispatching feed knows the train by.
+    public var tripNumber: String?
 
-    public init(name: String, number: String?, product: Product, operatorName: String?, alternateName: String? = nil) {
+    /// The number to look this train up by in DB's own feed.
+    public var dispatchNumber: String? { tripNumber ?? number }
+
+    public init(name: String, number: String?, product: Product, operatorName: String?, alternateName: String? = nil,
+                tripNumber: String? = nil) {
+        self.tripNumber = tripNumber
         self.name = name
         self.number = number
         self.product = product

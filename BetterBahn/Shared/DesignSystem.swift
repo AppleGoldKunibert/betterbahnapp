@@ -20,11 +20,13 @@ extension Date {
 extension TimeInterval {
     var durationString: String {
         let minutes = Int((self / 60).rounded())
+        if minutes >= 60, minutes % 60 == 0 { return "\(minutes / 60) h" }
         return minutes >= 60 ? "\(minutes / 60) h \(String(format: "%02d", minutes % 60)) min" : "\(minutes) min"
     }
 
     var compactDuration: String {
         let minutes = Int((self / 60).rounded())
+        if minutes >= 60, minutes % 60 == 0 { return "\(minutes / 60) h" }
         return minutes >= 60 ? "\(minutes / 60):\(String(format: "%02d", minutes % 60)) h" : "\(minutes) min"
     }
 }
@@ -203,6 +205,34 @@ struct TrainFormationLabel: View {
     }
 }
 
+/// "ICE 4" / "ICE 3neo" / "ICE L" … next to a train's name. Only shown for ICEs, once bahn.expert answers.
+struct TrainSeriesTag: View {
+    let line: Line?
+    let date: Date
+
+    @Environment(AppModel.self) private var model
+    @State private var family: String?
+
+    var body: some View {
+        // A ZStack rather than Group: `.task` never fires on a view that is empty, and this one is
+        // empty until the lookup it starts has finished.
+        ZStack {
+            if let family {
+                Text(family)
+                    .font(.caption2.weight(.bold))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .foregroundStyle(.secondary)
+                    .background(Color.secondary.opacity(0.15), in: .capsule)
+                    .accessibilityLabel("Baureihe \(family)")
+            }
+        }
+        .task(id: "\(line?.name ?? "")|\(date)") {
+            family = await model.trainFamily(for: line, on: date)
+        }
+    }
+}
+
 /// Large planned time with the realtime time below, colored by delay.
 struct TimeStack: View {
     let time: TimeInfo
@@ -210,18 +240,21 @@ struct TimeStack: View {
     var alignment: HorizontalAlignment = .leading
     var font: Font = .title3.weight(.semibold)
 
+    /// Live data confirms it's on schedule: the planned time itself turns green instead of repeating below.
+    private var liveOnTime: Bool { time.actual != nil && time.delayMinutes == 0 }
+
     var body: some View {
         VStack(alignment: alignment, spacing: 0) {
             Text(time.planned.timeString)
                 .font(font)
                 .monospacedDigit()
                 .strikethrough(cancelled, color: .heavyDelay)
-                .foregroundStyle(cancelled ? .secondary : .primary)
+                .foregroundStyle(cancelled ? .secondary : liveOnTime ? delayColor(0) : .primary)
             if cancelled {
                 Text("Ausfall")
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(Color.heavyDelay)
-            } else if let actual = time.actual {
+            } else if let actual = time.actual, !liveOnTime {
                 Text(actual.timeString)
                     .font(.caption.weight(.semibold))
                     .monospacedDigit()

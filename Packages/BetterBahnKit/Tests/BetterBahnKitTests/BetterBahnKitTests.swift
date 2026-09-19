@@ -705,6 +705,16 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(response.sequence?.groups.first?.coaches?.count == 2)
     }
 
+    @Test func decodesSplitTrainGroupsWithTheirOwnJourneyNumbers() throws {
+        let json = #"""
+        {"isRealtime": true, "sequence": {"groups": [
+            {"name": "ICE9220", "journeyNumber": 940, "destinationName": "Düsseldorf Hbf", "baureihe": {"baureihe": "412", "name": "ICE 4 Kurz (BR412)"}},
+            {"name": "ICE9227", "journeyNumber": 950, "destinationName": "Köln Hbf", "baureihe": {"baureihe": "412", "name": "ICE 4 Kurz (BR412)"}}]}}
+        """#
+        let response = try JSONDecoding.decoder.decode(BahnExpertClient.SequenceResponse.self, from: Data(json.utf8))
+        #expect(response.sequence?.groups.map(\.journeyNumber) == [940, 950])
+    }
+
     @Test func decodesDetailsWithFractionalDates() throws {
         let json = """
         {"stops": [{"stopPlace": {"evaNumber": "8500010"}, "departure": {"scheduledTime": "2026-09-20T16:07:00.000Z"}}],
@@ -719,6 +729,34 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(BahnExpertClient.unitNumber(from: "ICE9465") == "9465")
         #expect(BahnExpertClient.unitNumber(from: "ICE0160") == "160")
         #expect(BahnExpertClient.unitNumber(from: "373-planned") == nil)
+    }
+
+    @Test func decodesPosition() throws {
+        let json = #"{"longitude": 11.0772616667, "latitude": 52.45801, "time": "2026-09-19T10:48:08.000Z", "metaSource": "SENSOR", "speed": 240.21}"#
+        let wire = try JSONDecoding.decoder.decode(BahnExpertClient.PositionResponse.self, from: Data(json.utf8))
+        let position = TrainPosition(coordinate: .init(latitude: wire.latitude, longitude: wire.longitude), time: wire.time, speedKmh: wire.speed, source: wire.metaSource)
+        #expect(position.speedKmh == 240.21)
+        #expect(!position.isStale(now: wire.time.addingTimeInterval(30)))
+        #expect(position.isStale(now: wire.time.addingTimeInterval(300)))
+    }
+
+    @Test func familyPrefersBaureiheNumber() {
+        let group = { (number: String?, name: String?) in
+            TrainTypeLookup.Group(seriesName: name, baureihe: number, unitNumber: nil, origin: nil, destination: nil, coachCount: 0)
+        }
+        #expect(group("412", "ICE 4 Lang (BR412)").family == "ICE 4")
+        #expect(group("407", "ICE 3 Velaro (BR407)").family == "ICE 3")
+        #expect(group("411", "ICE T (BR411)").family == "ICE T")
+        #expect(group("408", "ICE 3neo (BR408)").family == "ICE 3neo")
+        #expect(group(nil, "ICE L").family == "ICE L")
+        #expect(group(nil, nil).family == nil)
+    }
+
+    @Test func trainReferenceOnlyForLongDistance() {
+        let line = { (name: String, number: String) in Line(name: name, number: number, product: .highSpeed, operatorName: nil) }
+        #expect(BahnExpertClient.trainReference(for: line("ICE 950", "950"))?.category == "ICE")
+        #expect(BahnExpertClient.trainReference(for: line("RE 5", "5")) == nil)
+        #expect(BahnExpertClient.trainReference(for: nil) == nil)
     }
 
     @Test func dayValidation() {

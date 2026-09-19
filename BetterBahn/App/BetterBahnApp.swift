@@ -1,14 +1,40 @@
+import BackgroundTasks
 import SwiftUI
 
 @main
 struct BetterBahnApp: App {
-    @State private var model = AppModel()
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @State private var model: AppModel
+
+    init() {
+        let model = AppModel()
+        _model = State(initialValue: model)
+        appDelegate.model = model
+    }
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(model)
         }
+    }
+}
+
+/// Only exists to register the background task that ends the Live Activity while the app is
+/// backgrounded (`BGTaskScheduler.register` must run before the app finishes launching, which
+/// SwiftUI's `App` protocol gives no hook for on its own).
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    weak var model: AppModel?
+
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: AppModel.liveActivityBackgroundTaskID, using: nil) { [weak self] task in
+            guard let model = self?.model, let refreshTask = task as? BGAppRefreshTask else {
+                task.setTaskCompleted(success: false)
+                return
+            }
+            model.handleLiveActivityBackgroundTask(refreshTask)
+        }
+        return true
     }
 }
 
@@ -46,6 +72,7 @@ struct RootView: View {
         .tint(.brand)
         .onChange(of: scenePhase, initial: true) { _, phase in
             if phase == .active {
+                model.cancelLiveActivityBackgroundCheck()
                 model.syncLiveActivity()
                 model.startRefreshing()
                 Task { await model.syncTraewelling() }
@@ -53,6 +80,7 @@ struct RootView: View {
                 model.prewarmTravelMap()
             } else if phase == .background {
                 model.stopRefreshing()
+                model.scheduleLiveActivityBackgroundCheck()
             }
         }
         #if DEBUG

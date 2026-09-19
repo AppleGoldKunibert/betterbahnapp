@@ -1,6 +1,22 @@
 import BetterBahnKit
 import SwiftUI
 
+/// A journey pushed onto a tab's navigation stack. Pushed by value (instead of an inline
+/// `NavigationLink`) so the stack's path knows a journey is open and the tab bar can be hidden
+/// from the stack itself — hiding it from inside the pushed view made it come back late after a swipe-back.
+struct JourneyRoute: Hashable {
+    var journey: Journey
+    var finalDestination: Station
+    var readOnly = false
+    var title = "Reiseplan"
+}
+
+enum ConnectionsRoute: Hashable {
+    case search(ConnectionSearch)
+    case journey(JourneyRoute)
+    case pastTrips
+}
+
 struct ConnectionSearch: Hashable {
     var from: Station
     var to: Station
@@ -8,6 +24,10 @@ struct ConnectionSearch: Hashable {
     var date: Date
     var isArrival: Bool
     var onlyBC100: Bool
+    var products = Set(Product.allCases)
+    var maxTransfers: Int?
+
+    var isFiltered: Bool { products != Set(Product.allCases) || maxTransfers != nil }
 }
 
 struct ConnectionsView: View {
@@ -19,9 +39,20 @@ struct ConnectionsView: View {
     @State private var useNow = true
     @State private var isArrival = false
     @State private var onlyBC100 = false
+    @State private var products = Set(Product.allCases)
+    @State private var maxTransfers: Int?
+    /// When on, each route section (start → first stop, stop → next stop, …) has its own vehicle selection.
+    @State private var productsPerLeg = false
+    /// Per-section selections; the section from the start is keyed by `startLegID`, the others by the via row they start at.
+    @State private var legProducts: [UUID: Set<Product>] = [:]
+    @State private var showProductsPopover = false
+    @State private var productsTapCount = 0
     @FocusState private var focused: Field?
-    @State private var path: [ConnectionSearch] = []
+    @State private var path: [ConnectionsRoute] = []
     @State private var swapRotation = 0.0
+
+    private static let startLegID = UUID()
+    private static let productsRowID = "productsRow"
 
     /// Up to this many intermediate stops can be added to a single search.
     private static let maxViaPoints = 4
@@ -40,6 +71,7 @@ struct ConnectionsView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
+            ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 20) {
                     routeCard
@@ -49,9 +81,7 @@ struct ConnectionsView: View {
                     if !model.recentSearches.isEmpty {
                         recentSection
                     }
-                    NavigationLink {
-                        PastTripsView()
-                    } label: {
+                    NavigationLink(value: ConnectionsRoute.pastTrips) {
                         Label("Vergangene Fahrten", systemImage: "clock.arrow.circlepath")
                             .font(.subheadline.weight(.semibold))
                             .frame(maxWidth: .infinity)
@@ -62,13 +92,38 @@ struct ConnectionsView: View {
                 .padding(.horizontal)
                 .padding(.bottom, 32)
             }
+            .onChange(of: productsTapCount) {
+                // Bring the row into view first so the popover has room instead of being squeezed.
+                withAnimation(.snappy) { proxy.scrollTo(Self.productsRowID, anchor: .center) }
+                Task {
+                    try? await Task.sleep(for: .milliseconds(350))
+                    showProductsPopover = true
+                }
+            }
+            }
             .tabBarSafePadding()
             .background { AppBackground() }
             .navigationTitle("Verbindungen")
-            .navigationDestination(for: ConnectionSearch.self) { JourneyResultsView(search: $0) }
+            .navigationDestination(for: ConnectionsRoute.self) { route in
+                switch route {
+                case .search(let search):
+                    JourneyResultsView(search: search)
+                case .journey(let journey):
+                    JourneyDetailView(journey: journey.journey, finalDestination: journey.finalDestination,
+                                      readOnly: journey.readOnly, title: journey.title)
+                case .pastTrips:
+                    PastTripsView()
+                }
+            }
             .scrollDismissesKeyboard(.interactively)
             .onAppear { onlyBC100 = model.settings.onlyBC100ByDefault }
         }
+        .toolbar(showsJourney ? .hidden : .automatic, for: .tabBar)
+    }
+
+    private var showsJourney: Bool {
+        if case .journey = path.last { return true }
+        return false
     }
 
     // MARK: Route
@@ -187,8 +242,106 @@ struct ConnectionsView: View {
                 }
                 .tint(.brand)
 
+                Divider()
+
+                transfersPicker
+
+                productsButton
             }
         }
+    }
+
+    private var transfersPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            optionLabel("Max. Umstiege", subtitle: "Weniger Umstiege, ggf. längere Fahrzeit", icon: "arrow.triangle.swap", color: .brand)
+            Picker("Max. Umstiege", selection: $maxTransfers) {
+                Text("Beliebig").tag(Int?.none)
+                Text("Direkt").tag(Int?.some(0))
+                Text("≤ 1").tag(Int?.some(1))
+                Text("≤ 2").tag(Int?.some(2))
+            }
+            .pickerStyle(.segmented)
+        }
+    }
+
+    private var productsButton: some View {
+        Button {
+            productsTapCount += 1
+        } label: {
+            HStack {
+                optionLabel("Verkehrsmittel", subtitle: productSummary,
+                            icon: "train.side.front.car", color: .brand)
+                Spacer()
+                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .id(Self.productsRowID)
+        .popover(isPresented: $showProductsPopover) { productsPopover }
+    }
+
+    private var productSummary: String {
+        if perLeg { return "Pro Abschnitt festgelegt" }
+        if products.count == Product.allCases.count { return "Alle" }
+        let names = Product.allCases.filter(products.contains).map(\.displayName)
+        return names.isEmpty ? "Keine ausgewählt" : names.joined(separator: ", ")
+    }
+
+    private var all: Set<Product> { Set(Product.allCases) }
+
+    /// Per-section selection only makes sense once there is more than one section.
+    private var perLeg: Bool { productsPerLeg && !viaRows.isEmpty }
+
+    private var hasEmptyProductSelection: Bool {
+        perLeg ? legProducts.filter { legIDs.contains($0.key) }.values.contains { $0.isEmpty } : products.isEmpty
+    }
+
+    private var legIDs: [UUID] { [Self.startLegID] + viaRows.map(\.id) }
+
+    /// The route sections between consecutive stops, as (key, title) pairs.
+    private var legs: [(id: UUID, title: String)] {
+        let names = [from?.displayName ?? "Start"] + viaRows.map { $0.station?.displayName ?? "Zwischenhalt" } + [to?.displayName ?? "Ziel"]
+        return legIDs.enumerated().map { ($1, "\(names[$0]) → \(names[$0 + 1])") }
+    }
+
+    private var productsPopover: some View {
+        // A ScrollView alone would stretch the popover to full height; only scroll once the content is too tall.
+        ViewThatFits(in: .vertical) {
+            productsPopoverContent.fixedSize(horizontal: false, vertical: true)
+            ScrollView { productsPopoverContent }
+        }
+        .frame(minWidth: 340)
+        .presentationCompactAdaptation(.popover)
+    }
+
+    private var productsPopoverContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+                Text("Verkehrsmittel").font(.subheadline.weight(.semibold))
+                if !viaRows.isEmpty {
+                    Picker("Gültig für", selection: $productsPerLeg) {
+                        Text("Gesamte Reise").tag(false)
+                        Text("Pro Abschnitt").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                }
+                if perLeg {
+                    ForEach(legs, id: \.id) { leg in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(leg.title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                            ProductChips(products: Binding(get: { legProducts[leg.id] ?? all },
+                                                           set: { legProducts[leg.id] = $0 }))
+                        }
+                    }
+                } else {
+                    ProductChips(products: $products)
+                }
+                Button("Fertig") { showProductsPopover = false }
+                    .buttonStyle(.glassProminent)
+                    .tint(.brand)
+                    .frame(maxWidth: .infinity)
+        }
+        .padding()
     }
 
     private func optionLabel(_ title: String, subtitle: String, icon: String, color: Color) -> some View {
@@ -213,7 +366,7 @@ struct ConnectionsView: View {
         .buttonStyle(.glassProminent)
         .tint(.brand)
         .controlSize(.large)
-        .disabled(from == nil || to == nil || viaRows.contains { $0.station == nil })
+        .disabled(from == nil || to == nil || hasEmptyProductSelection || viaRows.contains { $0.station == nil })
     }
 
     private var recentSection: some View {
@@ -262,11 +415,13 @@ struct ConnectionsView: View {
 
     private func search() {
         guard let from, let to else { return }
-        let via = viaRows.compactMap { row in row.station.map { ViaWaypoint(station: $0, minStayMinutes: row.minStayMinutes) } }
+        let via = viaRows.compactMap { row in row.station.map { ViaWaypoint(station: $0, minStayMinutes: row.minStayMinutes, products: perLeg ? legProducts[row.id] ?? all : nil) } }
         model.remember(from: from, to: to)
         // Via routing only supports "depart at" — an arrival deadline doesn't compose with per-stop minimum stays.
-        path.append(ConnectionSearch(from: from, to: to, via: via, date: useNow ? .now : date,
-                                     isArrival: via.isEmpty ? isArrival : false, onlyBC100: onlyBC100))
+        path.append(.search(ConnectionSearch(from: from, to: to, via: via, date: useNow ? .now : date,
+                                     isArrival: via.isEmpty ? isArrival : false, onlyBC100: onlyBC100,
+                                     products: perLeg ? legProducts[Self.startLegID] ?? all : products,
+                                     maxTransfers: maxTransfers)))
     }
 }
 
@@ -325,6 +480,41 @@ private struct ViaRowView: View {
         .padding()
         .frame(minWidth: 260)
         .presentationCompactAdaptation(.popover)
+    }
+}
+
+/// Quick presets and toggle chips for choosing which vehicle types may be used.
+private struct ProductChips: View {
+    @Binding var products: Set<Product>
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Button("Nur Züge") { products = Set(Product.allCases.filter(\.isTrain)) }
+                Button("Nur Fernverkehr") { products = [.highSpeed, .longDistance] }
+                Button("Alle") { products = Set(Product.allCases) }
+            }
+            .font(.caption.weight(.semibold))
+            .buttonStyle(.bordered)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 8)], alignment: .leading, spacing: 8) {
+                ForEach(Product.allCases, id: \.self) { product in
+                    let isOn = products.contains(product)
+                    Button {
+                        if isOn { products.remove(product) } else { products.insert(product) }
+                    } label: {
+                        Label(product == .highSpeed ? "ICE" : product.displayName, systemImage: product.symbolName)
+                            .font(.caption.weight(.semibold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .foregroundStyle(isOn ? Color.white : Color.primary)
+                            .background(isOn ? product.color : Color.secondary.opacity(0.15), in: .capsule)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
     }
 }
 

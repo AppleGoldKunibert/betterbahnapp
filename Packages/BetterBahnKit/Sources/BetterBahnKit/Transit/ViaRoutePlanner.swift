@@ -6,10 +6,13 @@ public struct ViaWaypoint: Codable, Sendable, Hashable, Identifiable {
     public var id: String { station.id }
     public var station: Station
     public var minStayMinutes: Int
+    /// Vehicle types allowed on the leg from this waypoint to the next stop; `nil` uses the search-wide selection.
+    public var products: Set<Product>?
 
-    public init(station: Station, minStayMinutes: Int = 0) {
+    public init(station: Station, minStayMinutes: Int = 0, products: Set<Product>? = nil) {
         self.station = station
         self.minStayMinutes = minStayMinutes
+        self.products = products
     }
 
     var minStay: TimeInterval { TimeInterval(minStayMinutes * 60) }
@@ -25,11 +28,15 @@ public struct ViaRoutePlanner: Sendable {
     public var beamWidth: Int
     /// How many of each leg's own results to branch into.
     public var branchFactor: Int
+    /// Vehicle types for every leg that has no waypoint-specific selection.
+    public var products: Set<Product>
 
-    public init(provider: any TransitProvider, beamWidth: Int = 3, branchFactor: Int = 2) {
+    public init(provider: any TransitProvider, beamWidth: Int = 3, branchFactor: Int = 2,
+                products: Set<Product> = Set(Product.allCases)) {
         self.provider = provider
         self.beamWidth = beamWidth
         self.branchFactor = branchFactor
+        self.products = products
     }
 
     private struct Candidate: Sendable {
@@ -54,13 +61,14 @@ public struct ViaRoutePlanner: Sendable {
             let segmentFrom = stops[index]
             let segmentTo = stops[index + 1]
             let minStay = index == 0 ? 0 : via[index - 1].minStay
+            let segmentProducts = index == 0 ? products : (via[index - 1].products ?? products)
 
             var next: [Candidate] = []
             try await withThrowingTaskGroup(of: [Candidate].self) { group in
                 for candidate in beam {
                     let departAfter = candidate.arrival.addingTimeInterval(minStay)
                     group.addTask {
-                        let page = try await provider.journeys(JourneyQuery(from: segmentFrom, to: segmentTo, date: departAfter))
+                        let page = try await provider.journeys(JourneyQuery(from: segmentFrom, to: segmentTo, date: departAfter, products: segmentProducts))
                         return page.journeys.prefix(branchFactor).compactMap { option -> Candidate? in
                             guard let arrival = option.arrival?.best else { return nil }
                             return Candidate(legs: candidate.legs + [option], arrival: arrival)

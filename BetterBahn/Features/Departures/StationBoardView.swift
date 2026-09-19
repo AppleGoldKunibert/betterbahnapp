@@ -10,6 +10,8 @@ struct StationBoardView: View {
     @State private var products: Set<Product> = Set(Product.allCases)
     @State private var onlyBC100 = false
     @State private var entries: [BoardEntry] = []
+    /// Open trips; the tab bar is hidden while one is showing (see `ConnectionsRoute` for why it's done here).
+    @State private var path: [BoardEntry] = []
     @State private var isLoading = false
     @State private var error: Error?
     @State private var lastUpdate: Date?
@@ -27,7 +29,7 @@ struct StationBoardView: View {
     private var isFiltered: Bool { onlyBC100 || products.count != Product.allCases.count }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 LazyVStack(spacing: 12, pinnedViews: []) {
                     headerCard
@@ -52,9 +54,7 @@ struct StationBoardView: View {
                             VStack(spacing: 0) {
                                 ForEach(Array(visible.enumerated()), id: \.element.id) { index, entry in
                                     if index > 0 { Divider().padding(.leading, 84) }
-                                    NavigationLink {
-                                        TripView(entry: entry)
-                                    } label: {
+                                    NavigationLink(value: entry) {
                                         BoardRow(entry: entry)
                                     }
                                     .buttonStyle(.plain)
@@ -112,7 +112,9 @@ struct StationBoardView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .onAppear { onlyBC100 = model.settings.onlyBC100ByDefault }
+            .navigationDestination(for: BoardEntry.self) { TripView(entry: $0) }
         }
+        .toolbar(path.isEmpty ? .automatic : .hidden, for: .tabBar)
     }
 
     private var headerCard: some View {
