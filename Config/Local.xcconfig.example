@@ -1,0 +1,5 @@
+// Copy this file to Config/Local.xcconfig (gitignored) to build under your own Apple Developer
+// account — e.g. so two people can each have their own build installed on the same test device
+// at the same time, or so you can test without touching the shared signing settings.
+LOCAL_DEVELOPMENT_TEAM = YOURTEAMID
+LOCAL_BUNDLE_ID_SUFFIX = .yourname

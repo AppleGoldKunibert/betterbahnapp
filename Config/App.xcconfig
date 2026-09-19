@@ -1,0 +1,4 @@
+#include "Signing.xcconfig"
+
+DEVELOPMENT_TEAM = $(LOCAL_DEVELOPMENT_TEAM)
+PRODUCT_BUNDLE_IDENTIFIER = de.goldkunibert.BetterBahn$(LOCAL_BUNDLE_ID_SUFFIX)

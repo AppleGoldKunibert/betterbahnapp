@@ -1,0 +1,10 @@
+// Shared default signing values, used by App.xcconfig and Widgets.xcconfig.
+//
+// To build under your own Apple Developer account (e.g. to test alongside someone else's build
+// on the same device) without touching this shared file, copy Config/Local.xcconfig.example to
+// Config/Local.xcconfig and fill in your own team ID and bundle ID suffix. That file is
+// gitignored, so it only affects your own machine.
+LOCAL_DEVELOPMENT_TEAM = 9NXP66M9UL
+LOCAL_BUNDLE_ID_SUFFIX =
+
+#include? "Local.xcconfig"
