@@ -483,7 +483,6 @@ struct JourneyCard: View {
                         }
                     }
                 }
-                .scrollClipDisabled()
 
                 HStack(spacing: 8) {
                     InfoChip(text: journey.transfers == 0 ? "Direkt" : "\(journey.transfers) Umstieg\(journey.transfers == 1 ? "" : "e")",
