@@ -1,6 +1,21 @@
 import BetterBahnKit
 import SwiftUI
 
+/// A journey pushed onto a tab's navigation stack. Pushed by value (instead of an inline
+/// `NavigationLink`) so the stack's path knows a journey is open and the tab bar can be hidden
+/// from the stack itself — hiding it from inside the pushed view made it come back late after a swipe-back.
+struct JourneyRoute: Hashable {
+    var journey: Journey
+    var finalDestination: Station
+    var readOnly = false
+    var title = "Reiseplan"
+}
+
+enum ConnectionsRoute: Hashable {
+    case search(ConnectionSearch)
+    case journey(JourneyRoute)
+}
+
 struct ConnectionSearch: Hashable {
     var from: Station
     var to: Station
@@ -20,7 +35,7 @@ struct ConnectionsView: View {
     @State private var isArrival = false
     @State private var onlyBC100 = false
     @FocusState private var focused: Field?
-    @State private var path: [ConnectionSearch] = []
+    @State private var path: [ConnectionsRoute] = []
     @State private var swapRotation = 0.0
 
     /// Up to this many intermediate stops can be added to a single search.
@@ -65,10 +80,24 @@ struct ConnectionsView: View {
             .tabBarSafePadding()
             .background { AppBackground() }
             .navigationTitle("Verbindungen")
-            .navigationDestination(for: ConnectionSearch.self) { JourneyResultsView(search: $0) }
+            .navigationDestination(for: ConnectionsRoute.self) { route in
+                switch route {
+                case .search(let search):
+                    JourneyResultsView(search: search)
+                case .journey(let journey):
+                    JourneyDetailView(journey: journey.journey, finalDestination: journey.finalDestination,
+                                      readOnly: journey.readOnly, title: journey.title)
+                }
+            }
             .scrollDismissesKeyboard(.interactively)
             .onAppear { onlyBC100 = model.settings.onlyBC100ByDefault }
         }
+        .toolbar(showsJourney ? .hidden : .automatic, for: .tabBar)
+    }
+
+    private var showsJourney: Bool {
+        if case .journey = path.last { return true }
+        return false
     }
 
     // MARK: Route
@@ -265,8 +294,8 @@ struct ConnectionsView: View {
         let via = viaRows.compactMap { row in row.station.map { ViaWaypoint(station: $0, minStayMinutes: row.minStayMinutes) } }
         model.remember(from: from, to: to)
         // Via routing only supports "depart at" — an arrival deadline doesn't compose with per-stop minimum stays.
-        path.append(ConnectionSearch(from: from, to: to, via: via, date: useNow ? .now : date,
-                                     isArrival: via.isEmpty ? isArrival : false, onlyBC100: onlyBC100))
+        path.append(.search(ConnectionSearch(from: from, to: to, via: via, date: useNow ? .now : date,
+                                     isArrival: via.isEmpty ? isArrival : false, onlyBC100: onlyBC100)))
     }
 }
 
