@@ -677,6 +677,63 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
     }
 }
 
+@Suite struct BahnExpertTests {
+    @Test func familyStripsVariantAndClass() {
+        #expect(TrainTypeLookup.family(of: "ICE 4 Lang (BR412)") == "ICE 4")
+        #expect(TrainTypeLookup.family(of: "ICE 3neo (BR408)") == "ICE 3neo")
+        #expect(TrainTypeLookup.family(of: "ICE 3") == "ICE 3")
+    }
+
+    @Test func summaryDeduplicatesFamilies() {
+        let group = { (name: String) in TrainTypeLookup.Group(seriesName: name, baureihe: nil, unitNumber: nil, origin: nil, destination: nil, coachCount: 13) }
+        let lookup = TrainTypeLookup(category: "ICE", number: "373", date: "2026-09-20", administration: "80",
+                                     groups: [group("ICE 4 Lang (BR412)"), group("ICE 4 Kurz (BR412)")], status: .planned,
+                                     source: "DB-plan", retrievedAt: .now)
+        #expect(lookup.summary == "ICE 4")
+        #expect(lookup.pageURL?.absoluteString == "https://bahn.expert/details/ICE%20373/2026-09-20T12:00:00.000Z?administration=80")
+    }
+
+    @Test func decodesSequenceResponse() throws {
+        let json = """
+        {"isRealtime": false, "source": "DB-plan", "sequence": {"groups": [
+            {"name": "373-planned", "originName": "Berlin", "destinationName": "Chur",
+             "baureihe": {"identifier": "412.13", "baureihe": "412", "name": "ICE 4 Lang (BR412)"},
+             "coaches": [{"type": "Apmzf"}, {"type": "Bpmz"}]}]}}
+        """
+        let response = try JSONDecoding.decoder.decode(BahnExpertClient.SequenceResponse.self, from: Data(json.utf8))
+        #expect(response.sequence?.groups.first?.baureihe?.name == "ICE 4 Lang (BR412)")
+        #expect(response.sequence?.groups.first?.coaches?.count == 2)
+    }
+
+    @Test func decodesDetailsWithFractionalDates() throws {
+        let json = """
+        {"stops": [{"stopPlace": {"evaNumber": "8500010"}, "departure": {"scheduledTime": "2026-09-20T16:07:00.000Z"}}],
+         "train": {"category": "ICE", "journeyNumber": 373, "admin": "85"}}
+        """
+        let details = try JSONDecoding.decoder.decode(BahnExpertClient.Details.self, from: Data(json.utf8))
+        #expect(details.stops.first?.stopPlace.evaNumber == "8500010")
+        #expect(details.train?.admin == "85")
+    }
+
+    @Test func unitNumberOnlyFromLiveGroupNames() {
+        #expect(BahnExpertClient.unitNumber(from: "ICE9465") == "9465")
+        #expect(BahnExpertClient.unitNumber(from: "ICE0160") == "160")
+        #expect(BahnExpertClient.unitNumber(from: "373-planned") == nil)
+    }
+
+    @Test func dayValidation() {
+        #expect(BahnExpertClient.isValidDay("2026-09-20"))
+        #expect(!BahnExpertClient.isValidDay("2026-02-31"))
+        #expect(!BahnExpertClient.isValidDay("20.09.2026"))
+    }
+
+    @Test func berlinDayUsesLocalCalendarDay() {
+        // 23:30 UTC on the 19th is already the 20th in Berlin (CEST).
+        let date = Date(timeIntervalSince1970: 1_789_860_600)
+        #expect(BahnExpertClient.berlinDay(date) == "2026-09-20")
+    }
+}
+
 @Suite struct GeometryTests {
     @Test func polylineRoundTrip() {
         let coords = [Coordinate(latitude: 50.943029, longitude: 6.958729), Coordinate(latitude: 51.21996, longitude: 6.794315),

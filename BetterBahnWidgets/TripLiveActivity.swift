@@ -26,11 +26,11 @@ struct TripLiveActivity: Widget {
             let state = context.state
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    ProductBadge(state: state, compact: false)
+                    TrainHeader(state: state, compact: false)
                         .padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    if let platform = state.platform {
+                    if let platform = state.displayPlatform {
                         PlatformChip(platform: platform)
                             .padding(.trailing, 4)
                     }
@@ -83,8 +83,10 @@ struct TripLiveActivity: Widget {
                 HStack(spacing: 4) {
                     Image(systemName: state.product.symbolName)
                         .foregroundStyle(state.product.color)
-                    if let platform = state.platform {
-                        Text(platform).font(.caption.weight(.bold)).monospacedDigit()
+                    if let platform = state.displayPlatform {
+                        Text(platform).font(.caption.weight(.bold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.7)
+                    } else {
+                        Text(state.lineName).font(.caption.weight(.bold)).lineLimit(1).minimumScaleFactor(0.7)
                     }
                 }
             } compactTrailing: {
@@ -116,9 +118,9 @@ struct LockScreenView: View {
                         .foregroundStyle(.white)
                         .lineLimit(1)
                 } else {
-                    ProductBadge(state: state, compact: true)
+                    TrainHeader(state: state, compact: true)
                     Spacer(minLength: 4)
-                    if let platform = state.platform {
+                    if let platform = state.displayPlatform {
                         PlatformChip(platform: platform)
                     }
                 }
@@ -200,6 +202,23 @@ struct ProductBadge: View {
         .foregroundStyle(.white)
         .background(state.product.color.gradient, in: .capsule)
         .overlay(Capsule().strokeBorder(.white.opacity(0.25), lineWidth: 0.5))
+    }
+}
+
+/// Train badge with the delay at the next stop (clock icon + "+2") beside it.
+struct TrainHeader: View {
+    let state: TripActivityAttributes.ContentState
+    var compact: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ProductBadge(state: state, compact: compact)
+            if let minutes = state.currentDelayMinutes, minutes > 0, !state.cancelled {
+                Label("+\(minutes)", systemImage: "clock.fill")
+                    .font((compact ? Font.caption : Font.subheadline).weight(.bold))
+                    .foregroundStyle(delayColor(minutes))
+            }
+        }
     }
 }
 

@@ -7,13 +7,16 @@ public final class CombinedProvider: TransitProvider {
     public let primary: any TransitProvider
     public let fallback: (any TransitProvider)?
     public let bahnDe: BahnDeClient?
+    public let bahnExpert: BahnExpertClient?
     private let health: Health
 
     public init(primary: any TransitProvider = TransitousProvider(),
                 fallback: (any TransitProvider)? = nil,
                 bahnDe: BahnDeClient? = BahnDeClient(),
+                bahnExpert: BahnExpertClient? = BahnExpertClient(),
                 cooldown: TimeInterval = 120) {
         self.bahnDe = bahnDe
+        self.bahnExpert = bahnExpert
         self.primary = primary
         self.fallback = fallback
         self.health = Health(cooldown: cooldown)

@@ -51,7 +51,8 @@ public struct TransitousProvider: TransitProvider {
     /// 4. German bus stations.
     /// 5. German U-Bahn stations.
     /// 6. Everything else (other countries, and buses/trams outside Germany).
-    static func searchRank(_ match: MGeocodeMatch, query: String, offset: Int) -> (Int, Int, Int, Int, Int) {
+    /// Within a tier, Hauptbahnhöfe ("… Hbf") come before other stations.
+    static func searchRank(_ match: MGeocodeMatch, query: String, offset: Int) -> (Int, Int, Int, Int, Int, Int) {
         let modes = Set(match.modes ?? [])
         let isTrain = !modes.isDisjoint(with: trainModes)
         let isBus = !modes.isDisjoint(with: busModes)
@@ -81,7 +82,10 @@ public struct TransitousProvider: TransitProvider {
         let exactMatch = (isGermany || neighborRank > 0) && isExactMatch(Station.displayName(for: match.name), query: query)
         let exactTier = exactMatch ? (isGermany ? 2 : 1) : 0
 
-        return (exactTier, tier, neighborRank, match.modes?.count ?? 0, -offset)
+        // Within a tier, a main station ("Hannover Hbf") outranks its siblings ("Hannover Flughafen").
+        let isMainStation = tier > 0 && Station.normalize(Station.displayName(for: match.name)).hasSuffix("hbf")
+
+        return (exactTier, tier, isMainStation ? 1 : 0, neighborRank, match.modes?.count ?? 0, -offset)
     }
 
     /// True if `name` is the same place name the user typed (e.g. "Berlin Hauptbahnhof"), ignoring

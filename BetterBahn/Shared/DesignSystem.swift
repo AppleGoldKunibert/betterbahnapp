@@ -169,7 +169,8 @@ struct LineBadge: View {
 }
 
 /// ICE/IC series (e.g. "ICE 3neo") and Triebzugnummer (e.g. "Tz 9465") of a leg, loaded lazily from
-/// bahn.de's coach-sequence API since it's DB-only and needs an extra network request.
+/// bahn.de's coach-sequence API since it's DB-only and needs an extra network request. Falls back to
+/// bahn.expert, which also has the planned formation for days ahead.
 struct TrainFormationLabel: View {
     let leg: Leg?
 
@@ -192,8 +193,12 @@ struct TrainFormationLabel: View {
         }
         .task(id: leg?.id) {
             formation = nil
-            guard let leg, let bahnDe = model.provider.bahnDe else { return }
-            formation = try? await bahnDe.formation(for: leg)
+            guard let leg else { return }
+            if let bahnDe = model.provider.bahnDe, let live = try? await bahnDe.formation(for: leg) {
+                formation = live
+            } else if let bahnExpert = model.provider.bahnExpert {
+                formation = try? await bahnExpert.trainType(for: leg)?.formation
+            }
         }
     }
 }

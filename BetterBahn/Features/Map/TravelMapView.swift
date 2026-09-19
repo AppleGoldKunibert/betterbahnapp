@@ -20,6 +20,7 @@ struct TravelMapView: View {
     @State private var includeSaved = true
     @State private var includeTraewelling = true
     @State private var hasJourneysInRange = true
+    @State private var legendExpanded = true
 
     struct Stats {
         var journeys = 0
@@ -43,7 +44,7 @@ struct TravelMapView: View {
             TravelMap(runs: runs, version: runsVersion, showRailwayLayer: showRailwayLayer)
                 .ignoresSafeArea(edges: .top)
                 .overlay(alignment: .top) { header }
-                .overlay(alignment: .bottomLeading) { legend }
+                .overlay(alignment: .bottomTrailing) { legend }
                 .overlay {
                     if !hasJourneysInRange, !model.isSyncingTraewelling {
                         emptyHint
@@ -217,21 +218,37 @@ struct TravelMapView: View {
     }
 
     private var legend: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Wie oft gefahren").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-            ForEach(HeatColor.legend, id: \.label) { item in
-                HStack(spacing: 8) {
-                    Capsule().fill(Color(item.color)).frame(width: 22, height: 5)
-                    Text(item.label).font(.caption2.monospacedDigit())
+        Group {
+            if legendExpanded {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Wie oft gefahren").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    ForEach(HeatColor.legend, id: \.label) { item in
+                        HStack(spacing: 8) {
+                            Capsule().fill(Color(item.color)).frame(width: 22, height: 5)
+                            Text(item.label).font(.caption2.monospacedDigit())
+                        }
+                    }
+                    Text("© OpenStreetMap, OpenRailwayMap")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.tertiary)
                 }
+                .padding(12)
+                .glassEffect(.regular, in: .rect(cornerRadius: 16))
+                .onTapGesture { withAnimation(.snappy) { legendExpanded = false } }
+            } else {
+                Button {
+                    withAnimation(.snappy) { legendExpanded = true }
+                } label: {
+                    Image(systemName: "list.bullet")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(width: 38, height: 38)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(.regular, in: .circle)
+                .accessibilityLabel("Legende anzeigen")
             }
-            Text("© OpenStreetMap, OpenRailwayMap")
-                .font(.system(size: 8))
-                .foregroundStyle(.tertiary)
         }
-        .padding(12)
-        .glassEffect(.regular, in: .rect(cornerRadius: 16))
-        .padding(.leading)
+        .padding(.trailing)
         .padding(.bottom, 100)
     }
 

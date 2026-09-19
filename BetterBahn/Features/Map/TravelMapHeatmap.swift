@@ -65,6 +65,16 @@ extension AppModel {
         }
     }
 
+    /// The train legs of these journeys that have actually been ridden: a leg counts once it has
+    /// arrived (delay included), even while the rest of its journey is still ahead.
+    func travelledLegs(of journeys: [Journey]) -> [(leg: Leg, group: Int)] {
+        journeys.enumerated().flatMap { index, journey in
+            journey.transitLegs
+                .filter { ($0.line?.product.isTrain ?? true) && $0.arrival.best <= .now }
+                .map { (leg: $0, group: index) }
+        }
+    }
+
     /// Identifies everything a heatmap depends on, so unrelated view re-creations (e.g. switching
     /// tabs) don't invalidate the cached result.
     func mapHeatmapKey(for selection: TravelMapSelection) -> String {
@@ -73,8 +83,8 @@ extension AppModel {
             : ""
         // Bumped whenever the heatmap is built differently, so results cached by an older build
         // (with grid-snapped lines or the old duplicate matching) aren't shown again.
-        let version = "v3"
-        return "\(version)|\(selection.range.rawValue)|\(custom)|\(savedJourneys.count)|\(traewellingTrips.count)|\(selection.includeSaved)|\(selection.includeTraewelling)"
+        let version = "v5"
+        return "\(version)|\(selection.range.rawValue)|\(custom)|\(savedJourneys.count)|\(traewellingTrips.count)|\(travelledLegs(of: mapJourneys(for: selection)).count)|\(selection.includeSaved)|\(selection.includeTraewelling)"
     }
 
     /// The finished heatmap for a selection, from the cache when possible.
@@ -91,7 +101,8 @@ extension AppModel {
         if let cached = await cachedMapHeatmap(for: key) { return cached }
 
         let journeys = mapJourneys(for: selection)
-        let legs = journeys.flatMap(\.transitLegs).filter { $0.line?.product.isTrain ?? true }
+        let entries = travelledLegs(of: journeys)
+        let legs = entries.map(\.leg)
         onProgress(0, legs.count)
 
         // Everything already on disk in one go, so the common case (reopening the map) never walks
@@ -127,7 +138,7 @@ extension AppModel {
             lines.reduce(0.0) { $0 + Polyline.length($1) / 1000 }
         }.value
         let hours = legs.reduce(0) { $0 + $1.arrival.best.timeIntervalSince($1.departure.best) } / 3600
-        let heatmap = MapHeatmap(runs: merged, journeysCount: journeys.count, legsCount: legs.count,
+        let heatmap = MapHeatmap(runs: merged, journeysCount: Set(entries.map(\.group)).count, legsCount: legs.count,
                                  kilometers: kilometers, hours: hours)
         await setCachedMapHeatmap(heatmap, for: key)
         return heatmap
