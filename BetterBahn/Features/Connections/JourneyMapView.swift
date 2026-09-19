@@ -15,21 +15,20 @@ struct JourneyMapView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                JourneyMap(journey: journey, version: mapVersion, onMarkerTap: { selectedTransfer = $0 })
-                    .ignoresSafeArea(edges: .top)
-
-                VStack {
-                    HStack {
-                        Button("Schließen") { dismiss() }
-                        Spacer()
+            JourneyMap(journey: journey, version: mapVersion, onMarkerTap: { selectedTransfer = $0 })
+                .ignoresSafeArea(edges: .top)
+                .navigationTitle("\(journey.legs.first?.origin.displayName ?? "Reise") → \(finalDestination.displayName)")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            dismiss()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .foregroundStyle(.black)
+                        }
                     }
-                    .padding()
-                    Spacer()
                 }
-            }
-            .navigationTitle("\(journey.legs.first?.origin.displayName ?? "Reise") → \(finalDestination.displayName)")
-            .navigationBarTitleDisplayMode(.inline)
         }
         .sheet(item: $selectedTransfer) { transfer in
             TransferDetailsSheet(
