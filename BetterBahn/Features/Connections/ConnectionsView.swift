@@ -14,6 +14,7 @@ struct JourneyRoute: Hashable {
 enum ConnectionsRoute: Hashable {
     case search(ConnectionSearch)
     case journey(JourneyRoute)
+    case pastTrips
 }
 
 struct ConnectionSearch: Hashable {
@@ -64,9 +65,7 @@ struct ConnectionsView: View {
                     if !model.recentSearches.isEmpty {
                         recentSection
                     }
-                    NavigationLink {
-                        PastTripsView()
-                    } label: {
+                    NavigationLink(value: ConnectionsRoute.pastTrips) {
                         Label("Vergangene Fahrten", systemImage: "clock.arrow.circlepath")
                             .font(.subheadline.weight(.semibold))
                             .frame(maxWidth: .infinity)
@@ -87,6 +86,8 @@ struct ConnectionsView: View {
                 case .journey(let journey):
                     JourneyDetailView(journey: journey.journey, finalDestination: journey.finalDestination,
                                       readOnly: journey.readOnly, title: journey.title)
+                case .pastTrips:
+                    PastTripsView()
                 }
             }
             .scrollDismissesKeyboard(.interactively)
