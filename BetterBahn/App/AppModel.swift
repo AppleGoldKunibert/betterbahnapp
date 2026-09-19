@@ -36,6 +36,26 @@ final class AppModel {
     }
     /// Explicit choice (from the route view) of which saved journey's Live Activity to show,
     /// overriding the automatic pick until that journey finishes or another one is chosen.
+    /// Journeys whose Live Activity was switched off by hand, so the automatic pick skips them.
+    var dismissedLiveActivityJourneyIDs: Set<UUID> = Set(
+        (UserDefaults.standard.stringArray(forKey: "dismissedLiveActivityJourneyIDs") ?? []).compactMap(UUID.init)
+    ) {
+        didSet {
+            UserDefaults.standard.set(dismissedLiveActivityJourneyIDs.map(\.uuidString), forKey: "dismissedLiveActivityJourneyIDs")
+            syncLiveActivity()
+        }
+    }
+
+    func setLiveActivity(_ on: Bool, for id: UUID) {
+        if on {
+            dismissedLiveActivityJourneyIDs.remove(id)
+            manualLiveActivityJourneyID = id
+        } else {
+            if manualLiveActivityJourneyID == id { manualLiveActivityJourneyID = nil }
+            dismissedLiveActivityJourneyIDs.insert(id)
+        }
+    }
+
     var manualLiveActivityJourneyID: UUID? {
         didSet {
             if let id = manualLiveActivityJourneyID {
@@ -345,17 +365,82 @@ final class AppModel {
 
     // MARK: Realtime refresh & warnings
 
+    /// How often realtime data of saved journeys and their trip views is refreshed.
+    static let realtimeRefreshInterval: Duration = .seconds(300)
+
+    /// Whether any saved journey rides the trip `id`, so its trip view should keep itself fresh.
+    func isTripSaved(_ id: String) -> Bool {
+        savedJourneys.contains { $0.journey.legs.contains { $0.tripId == id } }
+    }
+
+    // MARK: Live train positions
+
+    /// How often the position of running ICEs of saved journeys is fetched.
+    static let positionRefreshInterval: Duration = .seconds(120)
+
+    /// Latest GPS fix of every ICE on a saved journey that is running right now, keyed by train name.
+    private(set) var trainPositions: [String: LiveTrainPosition] = [:]
+
+    @ObservationIgnored private var positionLoop: Task<Void, Never>?
+    @ObservationIgnored private var familyCache: [String: String?] = [:]
+
+    /// Fetches the position of each ICE leg of an unfinished saved journey that is underway
+    /// (plus 10 minutes either side, since departures and arrivals shift).
+    func refreshTrainPositions() async {
+        guard let bahnExpert = provider.bahnExpert else { return }
+        let now = Date.now
+        let legs = upcomingJourneys.flatMap(\.journey.transitLegs).filter { leg in
+            BahnExpertClient.trainReference(for: leg.line)?.category == "ICE" && !leg.cancelled
+                && leg.departure.best.addingTimeInterval(-600) <= now && now <= leg.arrival.best.addingTimeInterval(600)
+        }
+        var found: [String: LiveTrainPosition] = [:]
+        await withTaskGroup(of: LiveTrainPosition?.self) { group in
+            for leg in legs {
+                group.addTask {
+                    guard let name = leg.line?.name, let position = try? await bahnExpert.position(for: leg) else { return nil }
+                    return LiveTrainPosition(trainName: name, position: position)
+                }
+            }
+            for await live in group {
+                if let live { found[live.trainName] = live }
+            }
+        }
+        trainPositions = found
+    }
+
+    /// "ICE 4", "ICE 3neo", "ICE L" … for an ICE, from bahn.expert. Cached per train and day;
+    /// failed requests are not cached so they are retried.
+    func trainFamily(for line: Line?, on date: Date) async -> String? {
+        guard let ref = BahnExpertClient.trainReference(for: line), ref.category == "ICE",
+              let bahnExpert = provider.bahnExpert else { return nil }
+        let day = BahnExpertClient.berlinDay(date)
+        let key = "\(ref.category) \(ref.number)|\(day)"
+        if let cached = familyCache[key] { return cached }
+        guard let lookup = try? await bahnExpert.trainType(category: ref.category, number: ref.number, date: day) else { return nil }
+        let family = lookup.summary
+        familyCache[key] = .some(family)
+        return family
+    }
+
     @ObservationIgnored private var refreshLoop: Task<Void, Never>?
     @ObservationIgnored private var liveActivitySyncLoop: Task<Void, Never>?
 
-    /// Refreshes upcoming journeys and manual Träwelling check-ins every 2 minutes while the app is active.
+    /// Refreshes upcoming journeys and manual Träwelling check-ins every 5 minutes while the app is active.
     func startRefreshing() {
         if refreshLoop == nil {
             refreshLoop = Task { [weak self] in
                 while !Task.isCancelled {
                     await self?.refreshSavedJourneys()
                     await self?.refreshManualCheckins()
-                    try? await Task.sleep(for: .seconds(120))
+                    try? await Task.sleep(for: .seconds(300))
+                }
+            }
+        }
+        if positionLoop == nil {
+            positionLoop = Task { [weak self] in
+                while !Task.isCancelled {
+                    await self?.refreshTrainPositions()
+                    try? await Task.sleep(for: Self.positionRefreshInterval)
                 }
             }
         }
@@ -374,6 +459,8 @@ final class AppModel {
     func stopRefreshing() {
         refreshLoop?.cancel()
         refreshLoop = nil
+        positionLoop?.cancel()
+        positionLoop = nil
         liveActivitySyncLoop?.cancel()
         liveActivitySyncLoop = nil
     }
@@ -442,7 +529,7 @@ final class AppModel {
     /// they finish. Only one of these is ever shown at a time (see `syncLiveActivity`).
     var liveActivityEligibleJourneys: [SavedJourney] {
         let now = Date.now
-        return upcomingJourneys.filter { ($0.journey.departure?.best ?? .distantFuture).addingTimeInterval(-30 * 60) <= now }
+        return upcomingJourneys.filter { !dismissedLiveActivityJourneyIDs.contains($0.id) && ($0.journey.departure?.best ?? .distantFuture).addingTimeInterval(-30 * 60) <= now }
     }
 
     func isLiveActivityEligible(_ journey: Journey) -> Bool {
@@ -522,6 +609,13 @@ struct SavedJourney: Codable, Hashable, Identifiable {
     var isFinished: Bool {
         (journey.arrival?.best ?? .distantFuture).addingTimeInterval(10 * 60) < .now
     }
+}
+
+/// Where a saved journey's ICE is right now.
+struct LiveTrainPosition: Identifiable, Hashable, Sendable {
+    var id: String { trainName }
+    let trainName: String
+    let position: TrainPosition
 }
 
 struct RecentSearch: Codable, Hashable, Identifiable {

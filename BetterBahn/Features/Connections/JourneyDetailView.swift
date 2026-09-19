@@ -42,10 +42,20 @@ struct JourneyDetailView: View {
             .padding(.horizontal)
             .padding(.bottom, 32)
         }
-        .refreshable { await refreshRealtime() }
+        .refreshable {
+            await TimetablesClient.invalidateDelays()
+            await refreshRealtime()
+        }
+        .task {
+            // Keep a saved journey's delays current while it's open.
+            while !Task.isCancelled {
+                try? await Task.sleep(for: AppModel.realtimeRefreshInterval)
+                guard !Task.isCancelled else { return }
+                if model.savedEntry(for: journey) != nil { await refreshRealtime() }
+            }
+        }
         .tabBarSafePadding()
         .background { AppBackground() }
-        .toolbar(.hidden, for: .tabBar)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $legToReplace) { selection in
@@ -133,10 +143,9 @@ struct JourneyDetailView: View {
             VStack(alignment: .leading, spacing: 10) {
                 SectionHeader(title: "Frühere Reisepläne", systemImage: "clock.arrow.circlepath")
                 ForEach(versions) { version in
-                    NavigationLink {
-                        JourneyDetailView(journey: version.journey, finalDestination: finalDestination, readOnly: true,
-                                          title: "Früherer Reiseplan")
-                    } label: {
+                    NavigationLink(value: ConnectionsRoute.journey(JourneyRoute(
+                        journey: version.journey, finalDestination: finalDestination, readOnly: true,
+                        title: "Früherer Reiseplan"))) {
                         VStack(alignment: .leading, spacing: 6) {
                             Label("Ersetzt \(version.replacedAt.formatted(date: .abbreviated, time: .shortened)) · \(version.reason)",
                                   systemImage: "arrow.uturn.backward")
@@ -209,10 +218,12 @@ struct JourneyDetailView: View {
                       systemImage: "bolt.badge.clock.fill")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                if let entry = model.savedEntry(for: journey), model.isLiveActivityEligible(journey) {
+                if let entry = model.savedEntry(for: journey),
+                   model.isLiveActivityEligible(journey) || model.dismissedLiveActivityJourneyIDs.contains(entry.id) {
                     Toggle(isOn: Binding(
-                        get: { model.manualLiveActivityJourneyID == entry.id || model.liveActivities.isActive(journey) },
-                        set: { model.manualLiveActivityJourneyID = $0 ? entry.id : nil }
+                        get: { !model.dismissedLiveActivityJourneyIDs.contains(entry.id)
+                            && (model.manualLiveActivityJourneyID == entry.id || model.liveActivities.isActive(journey)) },
+                        set: { model.setLiveActivity($0, for: entry.id) }
                     )) {
                         Label("Diese Reise als Live Activity zeigen", systemImage: "arrow.left.arrow.right.circle.fill")
                             .font(.caption.weight(.semibold))
@@ -272,6 +283,8 @@ struct TransferRow: View {
 }
 
 struct LegCard: View {
+    /// Shared with the trip view: show scheduled instead of live times at intermediate stops.
+    @AppStorage("showPlannedTimes") private var showPlannedTimes = false
     let leg: Leg
     var transferBroken = false
     var onReplace: (() -> Void)?
@@ -293,7 +306,10 @@ struct LegCard: View {
                     HStack(spacing: 10) {
                         IconTile(systemImage: leg.line?.product.symbolName ?? "tram.fill", color: color, size: 38)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(leg.line?.name ?? "Zug").font(.headline)
+                            HStack(spacing: 6) {
+                                Text(leg.line?.name ?? "Zug").font(.headline)
+                                TrainSeriesTag(line: leg.line, date: leg.departure.planned)
+                            }
                             if let direction = leg.direction {
                                 Text("Richtung \(direction)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                             }
@@ -343,9 +359,25 @@ struct LegCard: View {
                                         Text(stop.station.displayName).font(.caption).lineLimit(1)
                                         Spacer()
                                         if let time = stop.departure ?? stop.arrival {
-                                            Text(time.best.timeString)
-                                                .font(.caption.monospacedDigit())
+                                            Button {
+                                                withAnimation(.snappy) { showPlannedTimes.toggle() }
+                                            } label: {
+                                                HStack(spacing: 4) {
+                                                    Text((showPlannedTimes ? time.planned : time.best).timeString)
+                                                        .font(.caption.monospacedDigit())
+                                                    // Always shown once live data exists, so an on-time (or early)
+                                                    // stop is visibly live. Bracketed while the shown time already
+                                                    // includes it; plain next to the scheduled time.
+                                                    if let minutes = time.delayMinutes {
+                                                        let text = minutes >= 0 ? "+\(minutes)" : "\(minutes)"
+                                                        Text(showPlannedTimes ? text : "(\(text))")
+                                                            .font(.caption2.weight(.bold).monospacedDigit())
+                                                    }
+                                                }
                                                 .foregroundStyle(delayColor(time.delayMinutes))
+                                                .contentShape(.rect)
+                                            }
+                                            .buttonStyle(.plain)
                                         }
                                     }
                                     .strikethrough(stop.cancelled)
