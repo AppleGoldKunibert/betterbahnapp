@@ -213,10 +213,13 @@ struct TrainHeader: View {
     var body: some View {
         HStack(spacing: 6) {
             ProductBadge(state: state, compact: compact)
-            if let minutes = state.currentDelayMinutes, minutes > 0, !state.cancelled {
-                Label("+\(minutes)", systemImage: "clock.fill")
-                    .font((compact ? Font.caption : Font.subheadline).weight(.bold))
-                    .foregroundStyle(delayColor(minutes))
+            if let minutes = state.currentDelayMinutes, !state.cancelled {
+                HStack(spacing: 3) {
+                    Image(systemName: "clock.fill")
+                    Text(minutes > 0 ? "+\(minutes)" : "0").monospacedDigit()
+                }
+                .font((compact ? Font.caption : Font.subheadline).weight(.bold))
+                .foregroundStyle(delayColor(max(0, minutes)))
             }
         }
     }
