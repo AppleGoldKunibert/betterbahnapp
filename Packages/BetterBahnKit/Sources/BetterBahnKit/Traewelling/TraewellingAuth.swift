@@ -136,7 +136,9 @@ public struct TokenStore: Sendable {
     private var baseQuery: [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
          kSecAttrService as String: service,
-         kSecAttrAccount as String: account]
+         kSecAttrAccount as String: account,
+         // Matches both the iCloud Keychain item and one saved before syncing was added.
+         kSecAttrSynchronizable as String: kSecAttrSynchronizableAny]
     }
 
     public func load() -> OAuthToken? {
@@ -155,6 +157,7 @@ public struct TokenStore: Sendable {
         var query = baseQuery
         query[kSecValueData as String] = data
         query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        query[kSecAttrSynchronizable as String] = true // syncs via iCloud Keychain
         SecItemAdd(query as CFDictionary, nil)
     }
 
