@@ -54,14 +54,14 @@ struct JourneyMapView: View {
             do {
                 if let arrivalTime = transfer.arrivalTime {
                     let searchStart = arrivalTime.addingTimeInterval(60)
-                    let results = try await model.trainRoutePlanner.query(
+                    let query = JourneyQuery(
                         from: transfer.station,
                         to: finalDestination,
-                        departure: searchStart,
-                        duration: 60
+                        departure: searchStart
                     )
+                    let page = try await model.provider.journeys(query)
 
-                    let longDistance = results.filter { journey in
+                    let longDistance = page.journeys.filter { journey in
                         journey.legs.contains { leg in
                             let name = leg.line?.name ?? ""
                             return name.contains("IC") || name.contains("EC") || name.contains("RJ") ||
@@ -257,7 +257,6 @@ struct JourneyMap: UIViewRepresentable {
             var view = mapView.dequeueReusableAnnotationView(withIdentifier: identifier)
 
             if annotation.transfer.type == .stopover {
-                // Small circle for stopovers
                 if view == nil {
                     view = MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: identifier)
                 }
@@ -267,7 +266,6 @@ struct JourneyMap: UIViewRepresentable {
                     markerView.canShowCallout = true
                 }
             } else {
-                // Larger markers for start/transfer/end
                 if view == nil {
                     view = MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: identifier)
                 }
