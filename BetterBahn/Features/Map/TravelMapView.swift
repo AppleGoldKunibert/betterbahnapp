@@ -41,8 +41,9 @@ struct TravelMapView: View {
 
     var body: some View {
         NavigationStack {
-            TravelMap(runs: runs, version: runsVersion, showRailwayLayer: showRailwayLayer)
-                .ignoresSafeArea(edges: .top)
+            TravelMap(runs: runs, version: runsVersion, showRailwayLayer: showRailwayLayer,
+                      trains: Array(model.trainPositions.values))
+                .ignoresSafeArea(edges: [.top, .bottom])
                 .overlay(alignment: .top) { header }
                 .overlay(alignment: .bottomTrailing) { legend }
                 .overlay {
@@ -220,21 +221,14 @@ struct TravelMapView: View {
     private var legend: some View {
         Group {
             if legendExpanded {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Wie oft gefahren").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-                    ForEach(HeatColor.legend, id: \.label) { item in
-                        HStack(spacing: 8) {
-                            Capsule().fill(Color(item.color)).frame(width: 22, height: 5)
-                            Text(item.label).font(.caption2.monospacedDigit())
-                        }
-                    }
-                    Text("© OpenStreetMap, OpenRailwayMap")
-                        .font(.system(size: 8))
-                        .foregroundStyle(.tertiary)
+                Button {
+                    withAnimation(.snappy) { legendExpanded = false }
+                } label: {
+                    legendContent
                 }
-                .padding(12)
+                .buttonStyle(.plain)
                 .glassEffect(.regular, in: .rect(cornerRadius: 16))
-                .onTapGesture { withAnimation(.snappy) { legendExpanded = false } }
+                .accessibilityHint("Legende einklappen")
             } else {
                 Button {
                     withAnimation(.snappy) { legendExpanded = true }
@@ -249,7 +243,23 @@ struct TravelMapView: View {
             }
         }
         .padding(.trailing)
-        .padding(.bottom, 100)
+        .padding(.bottom, 8)
+    }
+
+    private var legendContent: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Wie oft gefahren").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+            ForEach(HeatColor.legend, id: \.label) { item in
+                HStack(spacing: 8) {
+                    Capsule().fill(Color(item.color)).frame(width: 22, height: 5)
+                    Text(item.label).font(.caption2.monospacedDigit())
+                }
+            }
+            Text("© OpenStreetMap, OpenRailwayMap")
+                .font(.system(size: 8))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(12)
     }
 
     private var customLabel: String {
@@ -324,6 +334,35 @@ enum HeatColor {
 
 // MARK: - MapKit bridge
 
+/// A running train. Title is its name; the callout subtitle carries speed and the time of the GPS fix.
+final class TrainAnnotation: NSObject, MKAnnotation {
+    @objc dynamic var coordinate: CLLocationCoordinate2D
+    @objc dynamic var title: String?
+    @objc dynamic var subtitle: String?
+    private(set) var isStale = false
+
+    init(_ live: LiveTrainPosition) {
+        coordinate = live.position.coordinate.clCoordinate
+        super.init()
+        update(live)
+    }
+
+    func update(_ live: LiveTrainPosition) {
+        let position = live.position
+        coordinate = position.coordinate.clCoordinate
+        title = live.trainName
+        var parts: [String] = []
+        if let speed = position.speedKmh { parts.append("\(Int(speed.rounded())) km/h") }
+        parts.append("Stand \(position.time.formatted(date: .omitted, time: .standard))")
+        subtitle = parts.joined(separator: " · ")
+        isStale = position.isStale()
+    }
+}
+
+private extension Coordinate {
+    var clCoordinate: CLLocationCoordinate2D { CLLocationCoordinate2D(latitude: latitude, longitude: longitude) }
+}
+
 nonisolated final class HeatPolyline: MKPolyline, @unchecked Sendable {
     var count = 1
 }
@@ -348,6 +387,8 @@ struct TravelMap: UIViewRepresentable {
     let runs: [SegmentHeatmap.Run]
     let version: Int
     let showRailwayLayer: Bool
+    /// Running ICEs of saved journeys, shown as train markers with speed and fix time in the callout.
+    var trains: [LiveTrainPosition] = []
 
     func makeUIView(context: Context) -> MKMapView {
         let map = MKMapView()
@@ -371,6 +412,8 @@ struct TravelMap: UIViewRepresentable {
             map.removeOverlay(overlay)
             coordinator.railwayOverlay = nil
         }
+
+        coordinator.syncTrains(trains, on: map)
 
         // Route lines: only rebuild when data changed. Draw rare stretches first so frequent ones are on top.
         guard coordinator.renderedVersion != version else { return }
@@ -396,6 +439,38 @@ struct TravelMap: UIViewRepresentable {
         var railwayOverlay: RailwayTileOverlay?
         var renderedVersion = -1
         var didFit = false
+        private var trainAnnotations: [String: TrainAnnotation] = [:]
+
+        /// Adds, moves and removes train markers in place so an open callout survives the 2-minute refresh.
+        func syncTrains(_ trains: [LiveTrainPosition], on map: MKMapView) {
+            let current = Dictionary(trains.map { ($0.trainName, $0) }, uniquingKeysWith: { $1 })
+            for (name, annotation) in trainAnnotations where current[name] == nil {
+                map.removeAnnotation(annotation)
+                trainAnnotations[name] = nil
+            }
+            for (name, live) in current {
+                if let annotation = trainAnnotations[name] {
+                    annotation.update(live)
+                } else {
+                    let annotation = TrainAnnotation(live)
+                    trainAnnotations[name] = annotation
+                    map.addAnnotation(annotation)
+                }
+            }
+        }
+
+        func mapView(_ mapView: MKMapView, viewFor annotation: any MKAnnotation) -> MKAnnotationView? {
+            guard let train = annotation as? TrainAnnotation else { return nil }
+            let id = "train"
+            let view = (mapView.dequeueReusableAnnotationView(withIdentifier: id) as? MKMarkerAnnotationView)
+                ?? MKMarkerAnnotationView(annotation: train, reuseIdentifier: id)
+            view.annotation = train
+            view.glyphImage = UIImage(systemName: "tram.fill")
+            view.markerTintColor = train.isStale ? .systemGray : UIColor(Color.brand)
+            view.displayPriority = .required
+            view.canShowCallout = true
+            return view
+        }
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: any MKOverlay) -> MKOverlayRenderer {
             if let tiles = overlay as? MKTileOverlay {
