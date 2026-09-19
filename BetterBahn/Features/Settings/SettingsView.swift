@@ -134,14 +134,6 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Label("Aktiv", systemImage: "icloud.fill")
-                } header: {
-                    Text("iCloud")
-                } footer: {
-                    Text("Favoriten, gespeicherte Reisen, Einstellungen und deine Anmeldungen werden über iCloud auf deine anderen Geräte übertragen.")
-                }
-
-                Section {
                     Button(role: .destructive) {
                         showClearHistoryConfirmation = true
                     } label: {

@@ -26,19 +26,22 @@ struct TripLiveActivity: Widget {
             let state = context.state
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    TrainHeader(state: state, compact: false)
+                    StopDelayLabel(state: state)
                         .padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    if let platform = state.displayPlatform {
-                        PlatformChip(platform: platform)
-                            .padding(.trailing, 4)
+                    HStack(spacing: 8) {
+                        Text(state.isDeparture ? "Abfahrt" : "Ankunft")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        if let platform = state.displayPlatform {
+                            PlatformChip(platform: platform)
+                        }
                     }
+                    .padding(.trailing, 4)
                 }
-                DynamicIslandExpandedRegion(.center) {
-                    Text(state.isDeparture ? "Abfahrt" : "Ankunft")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                DynamicIslandExpandedRegion(.center, priority: 2) {
+                    ProductBadge(state: state, compact: false)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 8) {
@@ -81,12 +84,13 @@ struct TripLiveActivity: Widget {
                 }
             } compactLeading: {
                 HStack(spacing: 4) {
-                    Image(systemName: state.product.symbolName)
-                        .foregroundStyle(state.product.color)
-                    if let platform = state.displayPlatform {
-                        Text(platform).font(.caption.weight(.bold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.7)
+                    if state.cancelled {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(heavyDelayColor)
                     } else {
-                        Text(state.lineName).font(.caption.weight(.bold)).lineLimit(1).minimumScaleFactor(0.7)
+                        let minutes = state.currentDelayMinutes ?? state.delayMinutes
+                        Text(minutes > 0 ? "+\(minutes)" : "0")
+                            .font(.caption.weight(.bold)).monospacedDigit()
+                            .foregroundStyle(delayColor(max(0, minutes)))
                     }
                 }
             } compactTrailing: {
@@ -96,8 +100,15 @@ struct TripLiveActivity: Widget {
                     .foregroundStyle(state.delayMinutes > 0 || state.cancelled ? timeColor(state) : .white)
                     .frame(maxWidth: 46)
             } minimal: {
-                Image(systemName: state.product.symbolName)
-                    .foregroundStyle(state.product.color)
+                // Shown instead of the compact layout while another Live Activity is running.
+                let minutes = state.currentDelayMinutes ?? state.delayMinutes
+                if state.cancelled {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(heavyDelayColor)
+                } else {
+                    Text(minutes > 0 ? "+\(minutes)" : "0").font(.caption.weight(.bold)).monospacedDigit()
+                        .lineLimit(1).minimumScaleFactor(0.5)
+                        .foregroundStyle(delayColor(max(0, minutes)))
+                }
             }
             .keylineTint(state.product.color)
         }
@@ -118,7 +129,10 @@ struct LockScreenView: View {
                         .foregroundStyle(.white)
                         .lineLimit(1)
                 } else {
-                    TrainHeader(state: state, compact: true)
+                    HStack(spacing: 6) {
+                        ProductBadge(state: state, compact: true)
+                        StopDelayLabel(state: state, compact: true)
+                    }
                     Spacer(minLength: 4)
                     if let platform = state.displayPlatform {
                         PlatformChip(platform: platform)
@@ -194,7 +208,7 @@ struct ProductBadge: View {
     var body: some View {
         HStack(spacing: 5) {
             Image(systemName: state.product.symbolName)
-            Text(state.lineName).lineLimit(1)
+            Text(state.lineName).lineLimit(1).fixedSize()
         }
         .font((compact ? Font.caption : Font.subheadline).weight(.bold))
         .padding(.horizontal, compact ? 8 : 10)
@@ -205,22 +219,19 @@ struct ProductBadge: View {
     }
 }
 
-/// Train badge with the delay at the next stop (clock icon + "+2") beside it.
-struct TrainHeader: View {
+/// Delay at the next stop (clock icon + "+2").
+struct StopDelayLabel: View {
     let state: TripActivityAttributes.ContentState
-    var compact: Bool
+    var compact = false
 
     var body: some View {
-        HStack(spacing: 6) {
-            ProductBadge(state: state, compact: compact)
-            if let minutes = state.currentDelayMinutes, !state.cancelled {
-                HStack(spacing: 3) {
-                    Image(systemName: "clock.fill")
-                    Text(minutes > 0 ? "+\(minutes)" : "0").monospacedDigit()
-                }
-                .font((compact ? Font.caption : Font.subheadline).weight(.bold))
-                .foregroundStyle(delayColor(max(0, minutes)))
+        if let minutes = state.currentDelayMinutes, !state.cancelled {
+            HStack(spacing: 3) {
+                Image(systemName: "clock.fill")
+                Text(minutes > 0 ? "+\(minutes)" : "0").monospacedDigit()
             }
+            .font((compact ? Font.caption : Font.subheadline).weight(.bold))
+            .foregroundStyle(delayColor(max(0, minutes)))
         }
     }
 }

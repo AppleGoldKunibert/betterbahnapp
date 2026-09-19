@@ -13,31 +13,21 @@ final class AppModel {
     private(set) var timetablesCredentials: TimetablesCredentials?
 
     var favoriteStations: [Station] {
-        didSet {
-            Storage.save(favoriteStations, key: "favoriteStations")
-            CloudSync.shared.push(favoriteStations, key: "favoriteStations")
-        }
+        didSet { Storage.save(favoriteStations, key: "favoriteStations") }
     }
     var recentSearches: [RecentSearch] {
-        didSet {
-            Storage.save(recentSearches, key: "recentSearches")
-            CloudSync.shared.push(recentSearches, key: "recentSearches")
-        }
+        didSet { Storage.save(recentSearches, key: "recentSearches") }
     }
     /// Journeys the user saved. The next upcoming one is shown as Live Activity.
     var savedJourneys: [SavedJourney] {
         didSet {
             Storage.save(savedJourneys, key: "savedJourneys")
-            CloudSync.shared.push(cloudJourneys, key: "savedJourneys")
             syncLiveActivity()
         }
     }
     /// Recently picked stations, newest first (used as suggestions).
     var recentStations: [Station] {
-        didSet {
-            Storage.save(recentStations, key: "recentStations")
-            CloudSync.shared.push(recentStations, key: "recentStations")
-        }
+        didSet { Storage.save(recentStations, key: "recentStations") }
     }
     /// Manual Träwelling check-ins (trains Träwelling didn't know) whose delay we keep pushing
     /// until the trip arrives, since Träwelling has no timetable of its own to track that.
@@ -93,59 +83,6 @@ final class AppModel {
         Storage.save(favoriteStations, key: "favoriteStations")
         Storage.save(recentSearches, key: "recentSearches")
         Storage.save(recentStations, key: "recentStations")
-        startCloudSync()
-    }
-
-    // MARK: iCloud sync
-
-    /// Saved journeys as sent to iCloud: without version history, oldest finished ones dropped first
-    /// when the list gets too big for the key-value store.
-    private var cloudJourneys: [SavedJourney] {
-        var journeys = savedJourneys.map { journey -> SavedJourney in
-            var slim = journey
-            slim.previousVersions = nil
-            return slim
-        }
-        while journeys.count > 1, ((try? JSONEncoder().encode(journeys).count) ?? 0) > 400_000 {
-            let oldest = journeys.enumerated().filter { $0.element.isFinished }.min { $0.element.savedAt < $1.element.savedAt }
-                ?? journeys.enumerated().min { $0.element.savedAt < $1.element.savedAt }!
-            journeys.remove(at: oldest.offset)
-        }
-        return journeys
-    }
-
-    /// On launch, merges what is in iCloud with what is on this device (so neither side loses
-    /// entries), then keeps listening for changes from other devices.
-    private func startCloudSync() {
-        let cloud = CloudSync.shared
-        func union<T>(_ remote: [T]?, _ local: [T], same: (T, T) -> Bool) -> [T] {
-            guard let remote else { return local }
-            return remote + local.filter { item in !remote.contains { same($0, item) } }
-        }
-        favoriteStations = union(cloud.value([Station].self, key: "favoriteStations"), favoriteStations) { $0.isSamePlace(as: $1) }
-        recentStations = Array(union(cloud.value([Station].self, key: "recentStations"), recentStations) { $0.isSamePlace(as: $1) }.prefix(10))
-        recentSearches = Array(union(cloud.value([RecentSearch].self, key: "recentSearches"), recentSearches) { $0.id == $1.id }.prefix(8))
-        savedJourneys = union(cloud.value([SavedJourney].self, key: "savedJourneys"), savedJourneys) { $0.id == $1.id }
-        settings.startCloudSync()
-        cloud.start { [weak self] keys in self?.applyCloud(keys) }
-    }
-
-    /// Replaces local data with what another device wrote.
-    private func applyCloud(_ keys: Set<String>) {
-        let cloud = CloudSync.shared
-        if keys.contains("favoriteStations"), let value = cloud.value([Station].self, key: "favoriteStations") { favoriteStations = value }
-        if keys.contains("recentStations"), let value = cloud.value([Station].self, key: "recentStations") { recentStations = value }
-        if keys.contains("recentSearches"), let value = cloud.value([RecentSearch].self, key: "recentSearches") { recentSearches = value }
-        if keys.contains("savedJourneys"), let remote = cloud.value([SavedJourney].self, key: "savedJourneys") {
-            let local = Dictionary(savedJourneys.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-            savedJourneys = remote.map { journey in
-                var merged = journey
-                merged.previousVersions = local[journey.id]?.previousVersions
-                merged.notifiedIssues = local[journey.id]?.notifiedIssues ?? journey.notifiedIssues
-                return merged
-            }
-        }
-        settings.applyCloud(keys)
     }
 
     var trainPicker: TrainPicker { TrainPicker(provider: provider) }
@@ -717,44 +654,26 @@ nonisolated enum Storage {
 @Observable
 final class AppSettings {
     var onlyBC100ByDefault: Bool {
-        didSet {
-            UserDefaults.standard.set(onlyBC100ByDefault, forKey: "onlyBC100ByDefault")
-            CloudSync.shared.pushPlain(onlyBC100ByDefault, key: "onlyBC100ByDefault")
-        }
+        didSet { UserDefaults.standard.set(onlyBC100ByDefault, forKey: "onlyBC100ByDefault") }
     }
     var traewellingVisibility: TraewellingVisibility {
-        didSet {
-            UserDefaults.standard.set(traewellingVisibility.rawValue, forKey: "traewellingVisibility")
-            CloudSync.shared.pushPlain(traewellingVisibility.rawValue, key: "traewellingVisibility")
-        }
+        didSet { UserDefaults.standard.set(traewellingVisibility.rawValue, forKey: "traewellingVisibility") }
     }
     var bc100Rules: BC100Rules {
-        didSet {
-            Storage.save(bc100Rules, key: "bc100Rules")
-            CloudSync.shared.push(bc100Rules, key: "bc100Rules")
-        }
+        didSet { Storage.save(bc100Rules, key: "bc100Rules") }
     }
     var syncTraewellingToMap: Bool {
-        didSet {
-            UserDefaults.standard.set(syncTraewellingToMap, forKey: "syncTraewellingToMap")
-            CloudSync.shared.pushPlain(syncTraewellingToMap, key: "syncTraewellingToMap")
-        }
+        didSet { UserDefaults.standard.set(syncTraewellingToMap, forKey: "syncTraewellingToMap") }
     }
     var connectionWarnings: Bool {
-        didSet {
-            UserDefaults.standard.set(connectionWarnings, forKey: "connectionWarnings")
-            CloudSync.shared.pushPlain(connectionWarnings, key: "connectionWarnings")
-        }
+        didSet { UserDefaults.standard.set(connectionWarnings, forKey: "connectionWarnings") }
     }
     var lastTraewellingSync: Date? {
         didSet { UserDefaults.standard.set(lastTraewellingSync, forKey: "lastTraewellingSync") }
     }
     /// Suggested tags offered as quick-add chips in the Träwelling check-in sheet.
     var quickTags: [QuickTag] {
-        didSet {
-            Storage.save(quickTags, key: "quickTags")
-            CloudSync.shared.push(quickTags, key: "quickTags")
-        }
+        didSet { Storage.save(quickTags, key: "quickTags") }
     }
 
     init() {
@@ -766,32 +685,6 @@ final class AppSettings {
         lastTraewellingSync = defaults.object(forKey: "lastTraewellingSync") as? Date
         connectionWarnings = defaults.object(forKey: "connectionWarnings") as? Bool ?? true
         quickTags = Storage.load(key: "quickTags") ?? QuickTag.defaults
-    }
-
-    /// Settings already in iCloud win (new device); otherwise this device's are uploaded.
-    func startCloudSync() {
-        let cloud = CloudSync.shared
-        applyCloud(Set(Self.cloudKeys.filter(cloud.hasValue)))
-        cloud.pushPlain(onlyBC100ByDefault, key: "onlyBC100ByDefault")
-        cloud.pushPlain(traewellingVisibility.rawValue, key: "traewellingVisibility")
-        cloud.pushPlain(syncTraewellingToMap, key: "syncTraewellingToMap")
-        cloud.pushPlain(connectionWarnings, key: "connectionWarnings")
-        cloud.push(bc100Rules, key: "bc100Rules")
-        cloud.push(quickTags, key: "quickTags")
-    }
-
-    private static let cloudKeys = ["onlyBC100ByDefault", "traewellingVisibility", "syncTraewellingToMap",
-                                    "connectionWarnings", "bc100Rules", "quickTags"]
-
-    func applyCloud(_ keys: Set<String>) {
-        let cloud = CloudSync.shared
-        if keys.contains("onlyBC100ByDefault"), let value = cloud.plain(key: "onlyBC100ByDefault") as? Bool { onlyBC100ByDefault = value }
-        if keys.contains("traewellingVisibility"), let raw = cloud.plain(key: "traewellingVisibility") as? Int,
-           let value = TraewellingVisibility(rawValue: raw) { traewellingVisibility = value }
-        if keys.contains("syncTraewellingToMap"), let value = cloud.plain(key: "syncTraewellingToMap") as? Bool { syncTraewellingToMap = value }
-        if keys.contains("connectionWarnings"), let value = cloud.plain(key: "connectionWarnings") as? Bool { connectionWarnings = value }
-        if keys.contains("bc100Rules"), let value = cloud.value(BC100Rules.self, key: "bc100Rules") { bc100Rules = value }
-        if keys.contains("quickTags"), let value = cloud.value([QuickTag].self, key: "quickTags") { quickTags = value }
     }
 }
 
