@@ -1,4 +1,5 @@
 import BackgroundTasks
+import BetterBahnKit
 import SwiftUI
 
 @main
@@ -41,6 +42,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
+    @State private var incomingSharedJourney: Journey?
+    @State private var showInvalidShareLinkAlert = false
 
     var body: some View {
         #if DEBUG
@@ -90,5 +93,18 @@ struct RootView: View {
             await model.seedDemoTripsIfRequested()
         }
         #endif
+        .onOpenURL { url in
+            guard let journey = JourneyShareLink.journey(from: url) else {
+                showInvalidShareLinkAlert = true
+                return
+            }
+            incomingSharedJourney = journey
+        }
+        .sheet(item: $incomingSharedJourney) { SharedJourneyPreviewView(journey: $0) }
+        .alert("Reise-Link ungültig", isPresented: $showInvalidShareLinkAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Dieser Reise-Link konnte nicht gelesen werden.")
+        }
     }
 }

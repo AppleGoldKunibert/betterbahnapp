@@ -1,5 +1,19 @@
 import BetterBahnKit
 import SwiftUI
+import UIKit
+
+extension UIImage {
+    /// The app's own icon, as shown on the home screen. Xcode's icon-set compiler flattens it into
+    /// a plain bundle resource referenced from `CFBundleIcons`, so it isn't reachable via the
+    /// asset catalog (`UIImage(named: "AppIcon")` returns nil) — this reads it the way Settings.app does.
+    static var appIcon: UIImage? {
+        guard let icons = Bundle.main.infoDictionary?["CFBundleIcons"] as? [String: Any],
+              let primary = icons["CFBundlePrimaryIcon"] as? [String: Any],
+              let files = primary["CFBundleIconFiles"] as? [String],
+              let name = files.last else { return nil }
+        return UIImage(named: name)
+    }
+}
 
 // MARK: - Tokens
 
