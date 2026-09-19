@@ -1,3 +1,4 @@
+import BackgroundTasks
 import BetterBahnKit
 import Foundation
 import Observation
@@ -470,6 +471,45 @@ final class AppModel {
         }
         let journey = candidate?.journey
         Task { await liveActivities.show(journey) }
+    }
+
+    /// Identifier for the background refresh task that ends the Live Activity once its journey
+    /// finishes while the app is backgrounded (see `scheduleLiveActivityBackgroundCheck`). Must
+    /// match an entry in `BGTaskSchedulerPermittedIdentifiers` in Info.plist.
+    static let liveActivityBackgroundTaskID = "de.goldkunibert.BetterBahn.endLiveActivity"
+
+    /// Schedules a background wake-up for shortly after the currently live journey is expected to
+    /// finish, since `liveActivitySyncLoop` (which normally detects that) only runs in the
+    /// foreground. No-op if no journey is currently live. Called when the app backgrounds.
+    func scheduleLiveActivityBackgroundCheck() {
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.liveActivityBackgroundTaskID)
+        guard let activeID = liveActivities.activeJourneyID,
+              let entry = savedJourneys.first(where: { $0.journey.id == activeID }),
+              let arrival = entry.journey.arrival?.best else { return }
+        // Matches the 10-minute grace period in `SavedJourney.isFinished`, plus a small buffer so
+        // the eligibility check has already flipped by the time the task runs.
+        let fireDate = arrival.addingTimeInterval(10 * 60 + 30)
+        guard fireDate > .now else { return }
+        let request = BGAppRefreshTaskRequest(identifier: Self.liveActivityBackgroundTaskID)
+        request.earliestBeginDate = fireDate
+        try? BGTaskScheduler.shared.submit(request)
+    }
+
+    func cancelLiveActivityBackgroundCheck() {
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.liveActivityBackgroundTaskID)
+    }
+
+    /// Runs when the background task fires: refreshes the live journey, re-evaluates eligibility
+    /// (ending the Live Activity if it's now finished), and reschedules for whatever's live
+    /// afterwards — e.g. if realtime data pushed the arrival back, or another journey took over.
+    func handleLiveActivityBackgroundTask(_ task: BGAppRefreshTask) {
+        let work = Task {
+            await refreshSavedJourneys()
+            syncLiveActivity()
+            scheduleLiveActivityBackgroundCheck()
+            task.setTaskCompleted(success: true)
+        }
+        task.expirationHandler = { work.cancel() }
     }
 
     func rememberStation(_ station: Station) {

@@ -239,6 +239,7 @@
 				DEVELOPMENT_TEAM = 9NXP66M9UL;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/BetterBahn-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = BetterBahn;
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_NSSupportsLiveActivitiesFrequentUpdates = YES;
@@ -290,6 +291,7 @@
 				DEVELOPMENT_TEAM = 9NXP66M9UL;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/BetterBahn-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = BetterBahn;
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_NSSupportsLiveActivitiesFrequentUpdates = YES;
