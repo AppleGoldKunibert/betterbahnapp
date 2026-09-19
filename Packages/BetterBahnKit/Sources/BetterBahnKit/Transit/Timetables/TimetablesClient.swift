@@ -110,7 +110,48 @@ public struct TimetablesClient: Sendable {
         self.bahnDe = bahnDe
     }
 
-    private func get(path: String) async throws -> [TimetablesStop] {
+    /// Shared by every `TimetablesClient` (the app makes a fresh one per use), so the journey
+    /// refresh and the trip views reuse each other's responses instead of hitting the API again.
+    /// Concurrent requests for the same path are merged into one.
+    private actor Cache {
+        struct Entry { let date: Date; let stops: [TimetablesStop] }
+        var entries: [String: Entry] = [:]
+        var inFlight: [String: Task<[TimetablesStop], Error>] = [:]
+
+        func stops(for path: String, maxAge: TimeInterval,
+                   fetch: @escaping @Sendable () async throws -> [TimetablesStop]) async throws -> [TimetablesStop] {
+            if let entry = entries[path], Date.now.timeIntervalSince(entry.date) < maxAge { return entry.stops }
+            if let task = inFlight[path] { return try await task.value }
+            let task = Task { try await fetch() }
+            inFlight[path] = task
+            defer { inFlight[path] = nil }
+            let stops = try await task.value
+            entries[path] = Entry(date: .now, stops: stops)
+            return stops
+        }
+
+        func clear(prefix: String) {
+            entries = entries.filter { !$0.key.hasPrefix(prefix) }
+        }
+    }
+    private static let cache = Cache()
+    /// The schedule (`plan`) barely changes; live changes (`fchg`) are re-fetched at most this often.
+    static let planMaxAge: TimeInterval = 30 * 60
+    static let changesMaxAge: TimeInterval = 4 * 60
+
+    /// Drops cached delays so the next lookup asks DB again (e.g. on pull-to-refresh).
+    public static func invalidateDelays() async {
+        await cache.clear(prefix: "fchg/")
+    }
+
+    private func get(path: String, maxAge: TimeInterval) async throws -> [TimetablesStop] {
+        // Only the app's real session shares the cache; a client on a custom session (tests, mocks)
+        // must never see another client's stored responses for the same path.
+        guard http.session === URLSession.shared else { return try await fetch(path: path) }
+        return try await Self.cache.stops(for: path, maxAge: maxAge) { try await self.fetch(path: path) }
+    }
+
+    private func fetch(path: String) async throws -> [TimetablesStop] {
         let url = Self.baseURL.appending(path: path)
         var request = URLRequest(url: url, timeoutInterval: http.timeout)
         request.setValue(credentials.clientID, forHTTPHeaderField: "DB-Client-Id")
@@ -127,12 +168,12 @@ public struct TimetablesClient: Sendable {
         let components = calendar.dateComponents([.year, .month, .day, .hour], from: time)
         let date = String(format: "%02d%02d%02d", (components.year ?? 0) % 100, components.month ?? 0, components.day ?? 0)
         let hour = String(format: "%02d", components.hour ?? 0)
-        return try await get(path: "plan/\(eva)/\(date)/\(hour)")
+        return try await get(path: "plan/\(eva)/\(date)/\(hour)", maxAge: Self.planMaxAge)
     }
 
     /// Every currently known change (delay, platform swap, cancellation) at `eva`, keyed by stop id.
     private func changes(eva: String) async throws -> [String: TimetablesStop] {
-        let stops = try await get(path: "fchg/\(eva)")
+        let stops = try await get(path: "fchg/\(eva)", maxAge: Self.changesMaxAge)
         return Dictionary(stops.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
@@ -158,11 +199,28 @@ public struct TimetablesClient: Sendable {
         return event
     }
 
+    /// Whether DB's own dispatching feed reports the departure of `category`+`number` at `station`
+    /// (planned `time`) as cancelled. `nil` when it can't tell (no credentials, train not found, or
+    /// the request failed), so callers can keep trusting whatever another provider said.
+    public func departureCancelled(category: String, number: String, at station: Station, plannedTime: Date) async -> Bool? {
+        guard credentials.isConfigured, let eva = await eva(for: station),
+              let event = await liveEvent(eva: eva, category: category, number: number, time: plannedTime, side: \.departure)
+        else { return nil }
+        return event.cancelled
+    }
+
+    /// Whether `realtime(for:)` can even try to look `leg` up (credentials set, a train with a
+    /// category and number).
+    public func canLookUp(_ leg: Leg) -> Bool {
+        credentials.isConfigured && !leg.isWalking && leg.line?.dispatchNumber != nil
+            && leg.line.flatMap { Self.category(from: $0.name) } != nil
+    }
+
     /// Live data for `leg`'s departure and arrival, matched by category, train number and planned
     /// time. Returns `nil` when nothing changed is known yet at either station, so callers should
     /// keep whatever schedule they already have.
     public func realtime(for leg: Leg) async -> TimetablesLegOverride? {
-        guard credentials.isConfigured, !leg.isWalking, let line = leg.line, let number = line.number,
+        guard credentials.isConfigured, !leg.isWalking, let line = leg.line, let number = line.dispatchNumber,
               let category = Self.category(from: line.name) else { return nil }
 
         var departure: TimeInfo?
@@ -173,14 +231,15 @@ public struct TimetablesClient: Sendable {
 
         if let eva = await eva(for: leg.origin),
            let event = await liveEvent(eva: eva, category: category, number: number, time: leg.departure.planned, side: \.departure) {
-            departure = TimeInfo(planned: leg.departure.planned, actual: event.actual)
+            // DB lists only changes: a matched stop without one is live and on time.
+            departure = TimeInfo(planned: leg.departure.planned, actual: event.actual ?? leg.departure.actual ?? leg.departure.planned)
             departurePlatform = Self.mergedPlatform(existing: leg.departurePlatform, event: event)
             if event.cancelled { cancelled = true }
         }
 
         if let eva = await eva(for: leg.destination),
            let event = await liveEvent(eva: eva, category: category, number: number, time: leg.arrival.planned, side: \.arrival) {
-            arrival = TimeInfo(planned: leg.arrival.planned, actual: event.actual)
+            arrival = TimeInfo(planned: leg.arrival.planned, actual: event.actual ?? leg.arrival.actual ?? leg.arrival.planned)
             arrivalPlatform = Self.mergedPlatform(existing: leg.arrivalPlatform, event: event)
             if event.cancelled { cancelled = true }
         }
@@ -188,6 +247,57 @@ public struct TimetablesClient: Sendable {
         guard departure != nil || arrival != nil else { return nil }
         return TimetablesLegOverride(departure: departure, departurePlatform: departurePlatform,
                                       arrival: arrival, arrivalPlatform: arrivalPlatform, cancelled: cancelled)
+    }
+
+    /// `leg`'s stopovers with DB Timetables' delays laid over them: where DB knows a stop its data wins
+    /// (unchanged means on time), and a stop DB can't match keeps whatever delay it already had.
+    public func stopoversWithRealtime(for leg: Leg) async -> [Stopover] {
+        guard canLookUp(leg), let line = leg.line else { return leg.stopovers }
+        return await stopoversWithRealtime(leg.stopovers, line: line)
+    }
+
+    /// `trip` with DB Timetables delays laid over it (see `stopoversWithRealtime(for:)`);
+    /// returned unchanged when there are no credentials or the train has no category/number.
+    public func tripWithRealtime(_ trip: Trip) async -> Trip {
+        guard credentials.isConfigured, let line = trip.line else { return trip }
+        var trip = trip
+        trip.stopovers = await stopoversWithRealtime(trip.stopovers, line: line)
+        return trip
+    }
+
+    private func stopoversWithRealtime(_ original: [Stopover], line: Line) async -> [Stopover] {
+        guard let number = line.dispatchNumber, let category = Self.category(from: line.name) else { return original }
+        var stops = original
+        await withTaskGroup(of: (Int, TimetablesEvent?, TimetablesEvent?).self) { group in
+            for index in stops.indices {
+                let stop = stops[index]
+                group.addTask {
+                    guard let eva = await self.eva(for: stop.station) else { return (index, nil, nil) }
+                    var arrival: TimetablesEvent?
+                    var departure: TimetablesEvent?
+                    if let time = stop.arrival?.planned {
+                        arrival = await self.liveEvent(eva: eva, category: category, number: number, time: time, side: \.arrival)
+                    }
+                    if let time = stop.departure?.planned {
+                        departure = await self.liveEvent(eva: eva, category: category, number: number, time: time, side: \.departure)
+                    }
+                    return (index, arrival, departure)
+                }
+            }
+            for await (index, arrival, departure) in group {
+                if let arrival {
+                    let known = stops[index].arrival
+                    stops[index].arrival?.actual = arrival.actual ?? known?.actual ?? known?.planned
+                    if arrival.cancelled { stops[index].cancelled = true }
+                }
+                if let departure {
+                    let known = stops[index].departure
+                    stops[index].departure?.actual = departure.actual ?? known?.actual ?? known?.planned
+                    if departure.cancelled { stops[index].cancelled = true }
+                }
+            }
+        }
+        return stops
     }
 
     /// Combines whatever platform a caller already had with a DB Timetables `event`: a genuine
@@ -211,7 +321,7 @@ public struct TimetablesClient: Sendable {
     /// platform, so a long route doesn't fire a lookup per stop; a stopover that already has one is
     /// left untouched (see `realtime(for:)` for overlaying live Gleisänderungen onto an existing leg).
     public func fillMissingPlatforms(in trip: Trip) async -> Trip {
-        guard credentials.isConfigured, let line = trip.line, let number = line.number,
+        guard credentials.isConfigured, let line = trip.line, let number = line.dispatchNumber,
               let category = Self.category(from: line.name) else { return trip }
         var trip = trip
         await withTaskGroup(of: (Int, PlatformInfo?, PlatformInfo?).self) { group in
@@ -254,7 +364,7 @@ public struct TimetablesClient: Sendable {
         await withTaskGroup(of: (Int, PlatformInfo?).self) { group in
             for index in entries.indices {
                 let entry = entries[index]
-                guard entry.platform.best == nil, let number = entry.line.number,
+                guard entry.platform.best == nil, let number = entry.line.dispatchNumber,
                       let category = Self.category(from: entry.line.name) else { continue }
                 group.addTask {
                     let event = entry.kind == .arrivals

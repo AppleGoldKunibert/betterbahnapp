@@ -261,9 +261,12 @@ public struct TrainRoutePlanner: Sendable {
         // Two windows: a train named for a search in the evening may only run again next morning.
         for _ in 0..<2 {
             let entries = try await provider.departures(at: station, date: windowStart, duration: windowMinutes)
-            var matches = entries
-                .filter { $0.time.best >= notBefore.addingTimeInterval(slack) && !$0.cancelled && Self.matches(wanted, $0.line) }
-                .sorted { $0.time.best < $1.time.best }
+            var matches: [BoardEntry] = []
+            for entry in entries.filter({ $0.time.best >= notBefore.addingTimeInterval(slack) && Self.matches(wanted, $0.line) })
+                .sorted(by: { $0.time.best < $1.time.best }) {
+                if entry.cancelled, !(await cancellationDisputed(entry, at: station)) { continue }
+                matches.append(entry)
+            }
             if matches.isEmpty {
                 matches = await rescuedMatches(name: name, at: station, windowStart: windowStart, in: entries)
             }
@@ -275,6 +278,16 @@ public struct TrainRoutePlanner: Sendable {
             windowStart = windowStart.addingTimeInterval(TimeInterval(windowMinutes * 60))
         }
         throw TransitError.notFound("\(name) ab \(station.displayName)")
+    }
+
+    /// The provider's board says `entry` is cancelled – that is sometimes wrong (stale or mismatched
+    /// realtime), so ask DB's own dispatching feed. Only when it explicitly reports the departure as
+    /// not cancelled is the entry kept; if it can't tell, the provider's verdict stands.
+    private func cancellationDisputed(_ entry: BoardEntry, at station: Station) async -> Bool {
+        guard let timetables, let number = entry.line.dispatchNumber,
+              let category = TimetablesClient.category(from: entry.line.name) else { return false }
+        return await timetables.departureCancelled(category: category, number: number, at: station,
+                                                   plannedTime: entry.time.planned) == false
     }
 
     /// When nothing in `entries` matched by name, asks DB's own dispatching plan (`TimetablesClient`)
