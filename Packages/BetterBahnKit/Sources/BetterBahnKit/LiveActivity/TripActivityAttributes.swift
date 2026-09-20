@@ -124,7 +124,7 @@ public extension TripActivityAttributes.ContentState {
             var holdUntil = leg.arrival.best.addingTimeInterval(60)
             if index + 1 < legs.count { holdUntil = min(holdUntil, max(leg.arrival.best, legs[index + 1].departure.best)) }
             if now < holdUntil {
-                return Self(lineName: line, nextStopName: leg.destination.name, plannedTime: leg.arrival.planned,
+                return Self(lineName: line, nextStopName: leg.destination.displayName, plannedTime: leg.arrival.planned,
                             expectedTime: leg.arrival.best, platform: leg.arrivalPlatform?.best,
                             isDeparture: false, cancelled: leg.cancelled,
                             progressStart: leg.departure.best, progressEnd: leg.arrival.best, product: product,
