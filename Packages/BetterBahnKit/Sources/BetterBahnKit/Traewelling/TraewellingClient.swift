@@ -100,6 +100,8 @@ public struct CheckinResult: Sendable {
 
 public enum TraewellingError: Error, LocalizedError, Equatable {
     case stationNotFound(String)
+    /// The station was found on Träwelling, but none of the trip's stops matched it.
+    case stopNotOnTrip(String, tripStops: [String])
     case tripNotFound(String)
     case collision
     case api(status: Int, message: String?)
@@ -107,6 +109,8 @@ public enum TraewellingError: Error, LocalizedError, Equatable {
     public var errorDescription: String? {
         switch self {
         case .stationNotFound(let name): "Träwelling kennt den Bahnhof „\(name)“ nicht."
+        case .stopNotOnTrip(let name, let stops):
+            "„\(name)“ ist auf der Träwelling-Fahrt nicht enthalten. Halte dort: \(stops.joined(separator: ", "))."
         case .tripNotFound(let line): "\(line) wurde auf Träwelling nicht gefunden."
         case .collision: "Du bist zu dieser Zeit schon eingecheckt."
         case .api(let status, let message): message ?? "Träwelling-Fehler (\(status))"
@@ -267,10 +271,10 @@ public actor TraewellingClient {
         // the same source Träwelling validates against, instead of trusting the board lookup's ID.
         guard let origin = Self.matchStop(trip.stopovers, station: leg.origin,
                                           departure: departure.plannedWhen ?? leg.departure.planned) else {
-            throw TraewellingError.stationNotFound(leg.origin.name)
+            throw TraewellingError.stopNotOnTrip(leg.origin.name, tripStops: trip.stopovers.map(\.name))
         }
         guard let destination = Self.matchStop(trip.stopovers, station: leg.destination, arrival: leg.arrival.planned) else {
-            throw TraewellingError.stationNotFound(leg.destination.name)
+            throw TraewellingError.stopNotOnTrip(leg.destination.name, tripStops: trip.stopovers.map(\.name))
         }
         return try await sendCheckin(draft, tripId: departure.tripId, lineName: lineName,
                                      startID: origin.stationID, destinationID: destination.stationID,
@@ -377,18 +381,26 @@ public actor TraewellingClient {
 
     /// Candidate Träwelling stations for `station`, nearest first (or API order if we have no coordinate).
     private func candidateStations(for station: Station) async throws -> [(TraewellingStation, Double)] {
+        // Keep querying until something plausible turns up: a query can return only far-away or
+        // unrelated stations, in which case the simpler variants may still find the right one.
         var results: [TraewellingStation] = []
+        var seen = Set<Int>()
+        var ranked: [(TraewellingStation, Double)] = []
         for query in Self.stationQueries(for: station.name) {
-            results = try await stations(matching: query)
-            if !results.isEmpty { break }
-        }
-        guard let coordinate = station.coordinate else { return results.map { ($0, .infinity) } }
-        return results
-            .compactMap { s -> (TraewellingStation, Double)? in
-                guard let lat = s.latitude, let lon = s.longitude else { return nil }
-                return (s, Coordinate(latitude: lat, longitude: lon).distance(to: coordinate))
+            for s in try await stations(matching: query) where seen.insert(s.id).inserted {
+                results.append(s)
+                var distance = Double.infinity
+                if let coordinate = station.coordinate, let lat = s.latitude, let lon = s.longitude {
+                    distance = Coordinate(latitude: lat, longitude: lon).distance(to: coordinate)
+                }
+                ranked.append((s, distance))
             }
-            .sorted { $0.1 < $1.1 }
+            if station.coordinate == nil ? !results.isEmpty : ranked.contains(where: { $0.1 < 1_500 }) { break }
+        }
+        // Nearest first; stations without a coordinate keep API order at the end.
+        return ranked.enumerated()
+            .sorted { ($0.element.1, $0.offset) < ($1.element.1, $1.offset) }
+            .map(\.element)
     }
 
     /// Autocomplete queries to try for a station name, most specific first. Some sources append a
@@ -489,6 +501,18 @@ public actor TraewellingClient {
                 return closest
             }
         }
-        return stops.first { Station.normalize($0.name) == Station.normalize(station.name) }
+        // Our source names can carry a suffix Träwelling's don't ("Friesack (Mark), Bahnhof" vs
+        // "Friesack (Mark)"), so compare against the simplified variants too.
+        let wanted = Set(stationQueries(for: station.name).map(Station.normalize))
+        if let byName = stops.first(where: { wanted.contains(Station.normalize($0.name)) }) { return byName }
+        // Last resort: the stop within 1.5 km of our coordinate.
+        guard let coordinate = station.coordinate else { return nil }
+        return stops
+            .compactMap { stop -> (TraewellingTrip.Stop, Double)? in
+                guard let lat = stop.station?.latitude, let lon = stop.station?.longitude else { return nil }
+                return (stop, Coordinate(latitude: lat, longitude: lon).distance(to: coordinate))
+            }
+            .filter { $0.1 < 1_500 }
+            .min { $0.1 < $1.1 }?.0
     }
 }

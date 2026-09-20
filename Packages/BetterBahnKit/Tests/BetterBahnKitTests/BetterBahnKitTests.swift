@@ -731,6 +731,14 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(BahnExpertClient.unitNumber(from: "373-planned") == nil)
     }
 
+    /// Without a Referer bahn.expert returns an empty 206 and every lookup silently fails.
+    @Test func requestsCarryTheRefererBahnExpertRequires() throws {
+        let request = try BahnExpertClient.request(procedure: "journey/find", input: ["json": ["journeyNumber": 373]])
+        #expect(request.value(forHTTPHeaderField: "Referer") == "https://bahn.expert/")
+        #expect(request.url?.absoluteString == "https://bahn.expert/api/orpc/journey/find")
+        #expect(request.httpMethod == "POST")
+    }
+
     @Test func decodesPosition() throws {
         let json = #"{"longitude": 11.0772616667, "latitude": 52.45801, "time": "2026-09-19T10:48:08.000Z", "metaSource": "SENSOR", "speed": 240.21}"#
         let wire = try JSONDecoding.decoder.decode(BahnExpertClient.PositionResponse.self, from: Data(json.utf8))

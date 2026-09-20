@@ -311,12 +311,20 @@ public struct BahnExpertClient: Sendable {
         return calendar.dateComponents([.year, .month, .day], from: date) == DateComponents(year: parts[0], month: parts[1], day: parts[2])
     }
 
-    private func call<T: Decodable>(_ procedure: String, input: [String: Any]) async throws -> T {
-        var request = URLRequest(url: Self.baseURL.appending(path: "api/orpc/\(procedure)"), timeoutInterval: 12)
+    /// bahn.expert answers requests without a `Referer` from its own site with an empty `206`
+    /// (it did not until 2026-09-20), so every call identifies where the API is meant to be used from.
+    static func request(procedure: String, input: [String: Any]) throws -> URLRequest {
+        var request = URLRequest(url: baseURL.appending(path: "api/orpc/\(procedure)"), timeoutInterval: 12)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(baseURL.absoluteString + "/", forHTTPHeaderField: "Referer")
         request.httpBody = try JSONSerialization.data(withJSONObject: input)
+        return request
+    }
+
+    private func call<T: Decodable>(_ procedure: String, input: [String: Any]) async throws -> T {
+        let request = try Self.request(procedure: procedure, input: input)
         do {
             return try await http.send(request, as: Envelope<T>.self).json
         } catch TransitError.http(let status, _) where status == 404 {

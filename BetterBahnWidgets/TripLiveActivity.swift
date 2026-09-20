@@ -69,7 +69,7 @@ struct TripLiveActivity: Widget {
                         .tint(state.product.color)
                         HStack {
                             Label {
-                                Text(timerInterval: Date.now...max(state.expectedTime, .now), countsDown: true)
+                                Text(timerInterval: state.countdownRange, countsDown: true)
                                     .monospacedDigit()
                                     .foregroundStyle(timeColor(state))
                             } icon: {
@@ -94,7 +94,7 @@ struct TripLiveActivity: Widget {
                     }
                 }
             } compactTrailing: {
-                Text(timerInterval: Date.now...max(state.expectedTime, .now), countsDown: true)
+                Text(timerInterval: state.countdownRange, countsDown: true)
                     .monospacedDigit()
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(state.delayMinutes > 0 || state.cancelled ? timeColor(state) : .white)
@@ -152,7 +152,7 @@ struct LockScreenView: View {
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.white.opacity(0.7))
                             .lineLimit(1)
-                        Text(timerInterval: Date.now...max(state.expectedTime, .now), countsDown: true)
+                        Text(timerInterval: state.countdownRange, countsDown: true)
                             .font(.system(size: 26, weight: .bold, design: .rounded))
                             .monospacedDigit()
                             .foregroundStyle(timeColor(state))
@@ -318,6 +318,13 @@ private struct TransferSideView: View {
 }
 
 extension TripActivityAttributes.ContentState {
+    /// Fixed range for the countdown. It must not start at `Date.now`: that is evaluated whenever the
+    /// system renders the view, and a range starting after the moment it's shown reads 0:00 until the
+    /// app re-renders it.
+    var countdownRange: ClosedRange<Date> {
+        min(progressStart, expectedTime.addingTimeInterval(-60))...expectedTime
+    }
+
     static let previewDeparture = Self(
         lineName: "ICE 645", nextStopName: "Köln Hbf",
         plannedTime: .now.addingTimeInterval(8 * 60), expectedTime: .now.addingTimeInterval(12 * 60),
