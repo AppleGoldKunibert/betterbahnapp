@@ -377,7 +377,11 @@ public actor TraewellingClient {
 
     /// Candidate Träwelling stations for `station`, nearest first (or API order if we have no coordinate).
     private func candidateStations(for station: Station) async throws -> [(TraewellingStation, Double)] {
-        let results = try await stations(matching: station.name)
+        var results: [TraewellingStation] = []
+        for query in Self.stationQueries(for: station.name) {
+            results = try await stations(matching: query)
+            if !results.isEmpty { break }
+        }
         guard let coordinate = station.coordinate else { return results.map { ($0, .infinity) } }
         return results
             .compactMap { s -> (TraewellingStation, Double)? in
@@ -385,6 +389,27 @@ public actor TraewellingClient {
                 return (s, Coordinate(latitude: lat, longitude: lon).distance(to: coordinate))
             }
             .sorted { $0.1 < $1.1 }
+    }
+
+    /// Autocomplete queries to try for a station name, most specific first. Some sources append a
+    /// stop type ("Friesack (Mark), Bahnhof") that Träwelling's name search doesn't know, so the
+    /// name is retried without the comma suffix and without a trailing "Bahnhof"/"Bhf".
+    static func stationQueries(for name: String) -> [String] {
+        var queries = [name.trimmingCharacters(in: .whitespaces)]
+        func add(_ candidate: String) {
+            let trimmed = candidate.trimmingCharacters(in: .whitespaces)
+            if !trimmed.isEmpty, !queries.contains(trimmed) { queries.append(trimmed) }
+        }
+        var base = queries[0]
+        if let comma = base.firstIndex(of: ",") { base = String(base[..<comma]) }
+        add(base)
+        for suffix in [" Bahnhof", " Bhf"] where base.hasSuffix(suffix) {
+            add(String(base.dropLast(suffix.count)))
+        }
+        // Drop a parenthetical like "(Mark)" before trying DB's short form, which would reorder it.
+        if let open = base.firstIndex(of: "(") { add(String(base[..<open])) }
+        add(Station.displayName(for: base))
+        return queries
     }
 
     private func matchStation(_ station: Station) async throws -> TraewellingStation {
