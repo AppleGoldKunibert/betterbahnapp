@@ -180,6 +180,16 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(ranked(near: munich) == ["bernau-berlin", "bernau-chiemsee", "salzburg", "far", "bus"])
         // Without a location: Bernau bei Berlin, then German trains (main stations first), then Austria.
         #expect(ranked(near: nil) == ["bernau-berlin", "far", "bernau-chiemsee", "salzburg", "bus"])
+
+        // Typing "Bernau": a bus stop named exactly "Bernau" is an exact match, but Bernau bei Berlin
+        // matches exactly too (without its bracket) and still comes first.
+        let exactBus = MGeocodeMatch(type: "STOP", name: "Bernau", id: "exact-bus", lat: 49.17, lon: 10.33,
+                                     country: "DE", modes: ["BUS"])
+        let typed = [exactBus, near, far].enumerated()
+            .sorted { TransitousProvider.searchRank($0.element, query: "Bernau", offset: $0.offset, near: munich)
+                    > TransitousProvider.searchRank($1.element, query: "Bernau", offset: $1.offset, near: munich) }
+            .map(\.element.id)
+        #expect(typed == ["bernau-berlin", "exact-bus", "bernau-chiemsee"])
         #expect(TransitousProvider.distanceBand(forMeters: 75_000) == 1)
         #expect(TransitousProvider.distanceBand(forMeters: 1_200_000) == 7)
     }

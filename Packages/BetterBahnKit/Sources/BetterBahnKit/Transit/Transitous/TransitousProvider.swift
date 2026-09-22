@@ -92,8 +92,17 @@ public struct TransitousProvider: TransitProvider {
         // comparing raw strings would hand the exact-match bonus to whichever feed's formatting
         // happens to read like common usage – regardless of which one actually has fuller product
         // coverage – undoing `mergingNearbyDuplicates`'s completeness-based pick for that cluster.
-        let exactMatch = (isGermany || neighborRank > 0) && isExactMatch(Station.displayName(for: match.fullName), query: query)
-        let exactTier = exactMatch ? (isGermany ? 2 : 1) : 0
+        let displayName = Station.displayName(for: match.fullName)
+        let exactMatch = (isGermany || neighborRank > 0) && isExactMatch(displayName, query: query)
+        var exactTier = exactMatch ? (isGermany ? 2 : 1) : 0
+
+        // A preferred station also matches exactly on its name without the bracket ("Bernau" for
+        // "Bernau (bei Berlin)") and then beats other exact matches - otherwise a bus stop called
+        // just "Bernau" would still come first.
+        let isPreferred = tier > 0 && preferredStations.contains(displayName)
+        if isPreferred, exactMatch || isExactMatch(Self.withoutQualifier(displayName), query: query) {
+            exactTier = 3
+        }
 
         // Within a tier, a main station ("Hannover Hbf") outranks its siblings ("Hannover Flughafen").
         let isMainStation = tier > 0 && Station.normalize(Station.displayName(for: match.fullName)).hasSuffix("hbf")
@@ -106,7 +115,7 @@ public struct TransitousProvider: TransitProvider {
             group = 600 - Self.distanceBand(forMeters: distance)
         }
         // A preferred station stays ahead of its tier and every distance band.
-        if tier > 0, preferredStations.contains(Station.displayName(for: match.fullName)) {
+        if isPreferred {
             group = tier * 100 + 50
         }
 
@@ -116,6 +125,12 @@ public struct TransitousProvider: TransitProvider {
     /// Stations that come first among same-named ones even when another is nearer, e.g.
     /// "Bernau (bei Berlin)" before "Bernau am Chiemsee".
     static let preferredStations: Set<String> = ["Bernau (bei Berlin)"]
+
+    /// "Bernau (bei Berlin)" -> "Bernau".
+    static func withoutQualifier(_ name: String) -> String {
+        guard name.hasSuffix(")"), let openParen = name.range(of: " (", options: .backwards) else { return name }
+        return String(name[..<openParen.lowerBound])
+    }
 
     /// Upper bounds (km) of the distance bands search results are grouped into; anything farther
     /// is in one last band.
