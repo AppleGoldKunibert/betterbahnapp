@@ -514,7 +514,15 @@ final class AppModel {
                 for issue in newIssues {
                     await ConnectionNotifier.notify(issue, journey: refreshed)
                 }
-                updated.notifiedIssues = Array(known.union(newIssues.map(\.id)))
+                // New delay reasons from DB ("Reparatur an einem Signal") get a notification too;
+                // plain notices (no WLAN, missing coach) only show as the yellow triangle.
+                let newReasons = refreshed.transitLegs.flatMap { leg in
+                    leg.messages.filter { $0.kind == .delay }.map { (id: "reason|\(leg.id)|\($0.text)", leg: leg, message: $0) }
+                }.filter { !known.contains($0.id) }
+                for reason in newReasons {
+                    await ConnectionNotifier.notify(reason.message, leg: reason.leg, id: reason.id)
+                }
+                updated.notifiedIssues = Array(known.union(newIssues.map(\.id)).union(newReasons.map(\.id)))
             }
             if updated != savedJourneys[index] { savedJourneys[index] = updated }
         }
@@ -768,7 +776,7 @@ final class AppSettings {
     }
 }
 
-/// Local notifications for broken connections.
+/// Local notifications for broken connections and new delay reasons.
 enum ConnectionNotifier {
     static func requestAuthorization() async {
         _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
@@ -782,6 +790,22 @@ enum ConnectionNotifier {
         content.sound = issue.isBlocking ? .defaultCritical : .default
         content.interruptionLevel = issue.isBlocking ? .timeSensitive : .active
         let request = UNNotificationRequest(identifier: issue.id + journey.id, content: content, trigger: nil)
+        try? await UNUserNotificationCenter.current().add(request)
+    }
+
+    static func notify(_ message: TrainMessage, leg: Leg, id: String) async {
+        let content = UNMutableNotificationContent()
+        let line = leg.line?.name ?? "Zug"
+        if let delay = leg.departure.delayMinutes, delay > 0 {
+            content.title = "\(line): +\(delay) Min."
+        } else {
+            content.title = "\(line): Verspätungsgrund"
+        }
+        let since = message.timestamp.map { " (seit \($0.timeString))" } ?? ""
+        content.body = message.text + since + "\n\(leg.origin.displayName) → \(leg.destination.displayName)"
+        content.sound = .default
+        content.interruptionLevel = .timeSensitive
+        let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
         try? await UNUserNotificationCenter.current().add(request)
     }
 }
