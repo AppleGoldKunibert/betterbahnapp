@@ -237,14 +237,7 @@ struct CheckinSheet: View {
             defer { isSending = false }
             do {
                 let checkin = try await attemptCheckin(leg: leg, allowManualTrip: allowManualTrip)
-                withAnimation(.bouncy) { result = checkin }
-                error = nil
-                if checkin.isManualTrip, let statusId = checkin.statusId {
-                    model.trackManualCheckin(statusId: statusId, leg: leg)
-                }
-                if let statusId = checkin.statusId {
-                    await sendTags(statusId: statusId)
-                }
+                await finishSuccess(checkin, leg: leg)
             } catch OAuthError.notLoggedIn {
                 isLoggedIn = false
             } catch TraewellingError.tripNotFound where !allowManualTrip {
@@ -255,10 +248,17 @@ struct CheckinSheet: View {
                     var altLeg = leg
                     altLeg.line?.name = alternate
                     if let checkin = try? await attemptCheckin(leg: altLeg, allowManualTrip: false) {
-                        withAnimation(.bouncy) { result = checkin }
-                        error = nil
+                        await finishSuccess(checkin, leg: altLeg)
                         return
                     }
+                }
+                // `leg.origin` may be a Zusatzhalt (an unscheduled stop, e.g. after a diversion) —
+                // Träwelling's own timetable never has those, which is exactly why the checkin above
+                // just failed. Bridge the gap with a short manual trip instead of asking the user to
+                // manually enter the whole rest of the journey.
+                if let checkin = try? await attemptZusatzhaltCheckin() {
+                    await finishSuccess(checkin, leg: leg)
+                    return
                 }
                 offerManualTrip = true
             } catch {
@@ -270,6 +270,33 @@ struct CheckinSheet: View {
     private func attemptCheckin(leg: Leg, allowManualTrip: Bool) async throws -> CheckinResult {
         let draft = CheckinDraft(leg: leg, message: message, visibility: visibility, business: business, toot: toot)
         return try await model.traewelling.checkin(draft, allowManualTrip: allowManualTrip)
+    }
+
+    /// If `leg` boards at a Zusatzhalt bahn.expert's realtime feed knows about, checks in the hop up
+    /// to the next regular stop as a short manual trip and then checks in normally from there. `nil`
+    /// if bahn.expert doesn't know this train, or `leg.origin` isn't actually a Zusatzhalt (some other
+    /// reason Träwelling didn't recognise the departure).
+    private func attemptZusatzhaltCheckin() async throws -> CheckinResult? {
+        guard let bahnExpert = model.provider.bahnExpert,
+              let stops = try await bahnExpert.journeyStops(for: leg),
+              let (zusatzhalt, nextRegular) = BahnExpertClient.nextRegularStop(after: leg.origin, in: stops)
+        else { return nil }
+        let draft = CheckinDraft(leg: leg, message: message, visibility: visibility, business: business, toot: toot)
+        return try await model.traewelling.checkin(draft, fromZusatzhalt: zusatzhalt, toNextRegularStop: nextRegular)
+    }
+
+    private func finishSuccess(_ checkin: CheckinResult, leg: Leg) async {
+        withAnimation(.bouncy) { result = checkin }
+        error = nil
+        if checkin.isManualTrip, let statusId = checkin.statusId {
+            model.trackManualCheckin(statusId: statusId, leg: leg)
+        }
+        if let hop = checkin.zusatzhaltHop {
+            model.trackManualCheckin(statusId: hop.statusId, leg: hop.leg)
+        }
+        if let statusId = checkin.statusId {
+            await sendTags(statusId: statusId)
+        }
     }
 
     /// Adds the tags the user picked to the freshly created status. Best-effort: the checkin

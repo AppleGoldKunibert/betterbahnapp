@@ -76,6 +76,37 @@ public struct TrainTypeLookup: Codable, Sendable, Hashable {
     }
 }
 
+/// One stop of a journey's realtime course, as bahn.expert reports it (sourced from DB's RIS::Journeys
+/// feed) — the only source in this app that carries a Zusatzhalt (an unscheduled stop a train
+/// additionally picked up, e.g. after a diversion) or a stop it skipped, since Transitous and
+/// Träwelling's own trip data only carry the planned schedule.
+public struct JourneyStop: Sendable, Hashable {
+    public var evaNumber: String
+    public var name: String
+    public var arrival: TimeInfo?
+    public var departure: TimeInfo?
+    public var arrivalPlatform: PlatformInfo?
+    public var departurePlatform: PlatformInfo?
+    public var isAdditional: Bool
+    public var isCancelled: Bool
+
+    init(_ stop: BahnExpertClient.Details.Stop) {
+        evaNumber = stop.stopPlace.evaNumber
+        name = stop.stopPlace.name ?? stop.stopPlace.evaNumber
+        arrival = stop.arrival.map { TimeInfo(planned: $0.scheduledTime, actual: $0.time) }
+        departure = stop.departure.map { TimeInfo(planned: $0.scheduledTime, actual: $0.time) }
+        arrivalPlatform = Self.platform(stop.arrival)
+        departurePlatform = Self.platform(stop.departure)
+        isAdditional = stop.additional ?? false
+        isCancelled = stop.cancelled ?? false
+    }
+
+    private static func platform(_ event: BahnExpertClient.Details.Stop.Event?) -> PlatformInfo? {
+        guard let event, event.scheduledPlatform != nil || event.platform != nil else { return nil }
+        return PlatformInfo(planned: event.scheduledPlatform, actual: event.platform)
+    }
+}
+
 /// Where a running train is right now.
 public struct TrainPosition: Codable, Sendable, Hashable {
     public var coordinate: Coordinate
@@ -126,10 +157,23 @@ public struct BahnExpertClient: Sendable {
 
     struct Details: Decodable {
         struct Stop: Decodable {
-            struct Place: Decodable { var evaNumber: String }
-            struct Event: Decodable { var scheduledTime: Date }
+            struct Place: Decodable { var evaNumber: String; var name: String? }
+            struct Event: Decodable {
+                var scheduledTime: Date
+                var time: Date?
+                var scheduledPlatform: String?
+                var platform: String?
+            }
             var stopPlace: Place
+            var arrival: Event?
             var departure: Event?
+            /// The stop was dropped from this run today (e.g. after a diversion) — the counterpart to
+            /// `additional` below. Neither is carried by Transitous' or Träwelling's own schedule-only
+            /// timetable data.
+            var cancelled: Bool?
+            /// An unscheduled stop the train picked up today ("Zusatzhalt"), not part of its regular
+            /// timetable.
+            var additional: Bool?
         }
         struct Train: Decodable { var category: String?; var journeyNumber: Int?; var admin: String? }
         var stops: [Stop]
@@ -246,6 +290,34 @@ public struct BahnExpertClient: Sendable {
             }
         }
         return nil
+    }
+
+    /// The realtime stop sequence for `leg`'s train on the day it departs, including any Zusatzhalt
+    /// (unscheduled stop) or stop it skipped — data Transitous doesn't carry at all (see
+    /// `TimetablesClient` for the same gap on delays/platforms) since it only ever has the planned
+    /// schedule. `nil` if `leg`'s train isn't a DB long-distance category bahn.expert can look up at
+    /// all; throws `TransitError.notFound` if it is one but no such journey exists on that day.
+    public func journeyStops(for leg: Leg) async throws -> [JourneyStop]? {
+        guard let ref = Self.trainReference(for: leg.line) else { return nil }
+        let date = Self.berlinDay(leg.departure.planned)
+        let (journey, _) = try await resolveJourney(category: ref.category, number: ref.number, date: date, administration: Self.dbAdministration)
+        let details: Details = try await call("journey/detailsByJourneyId", input: ["json": journey.journeyId])
+        return details.stops.map(JourneyStop.init)
+    }
+
+    /// If `station` is a Zusatzhalt in `stops`, the pair of (that stop, the next stop after it that
+    /// *is* part of the train's regular schedule) — the hop a Träwelling checkin needs to bridge with
+    /// a manual trip before it can check in normally again. `nil` when `station` isn't a Zusatzhalt
+    /// here, or there's no regular stop left after it (e.g. it's also the train's actual last stop).
+    public static func nextRegularStop(after station: Station, in stops: [JourneyStop]) -> (zusatzhalt: JourneyStop, nextRegular: JourneyStop)? {
+        guard let index = stops.firstIndex(where: { $0.isAdditional && matches($0, station) }) else { return nil }
+        guard let next = stops[(index + 1)...].first(where: { !$0.isAdditional && !$0.isCancelled }) else { return nil }
+        return (stops[index], next)
+    }
+
+    private static func matches(_ stop: JourneyStop, _ station: Station) -> Bool {
+        if let eva = station.evaNumber, eva == stop.evaNumber { return true }
+        return Station.normalize(stop.name) == Station.normalize(station.name)
     }
 
     /// "ICE 950" → ("ICE", "950"); nil for anything that is not a DB long-distance train.

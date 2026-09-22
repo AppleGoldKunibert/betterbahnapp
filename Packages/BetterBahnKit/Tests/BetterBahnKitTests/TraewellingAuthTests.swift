@@ -87,6 +87,125 @@ import Testing
     }
 }
 
+/// Real-world case: ICE 372 skipped Frankfurt (Main) Hbf on 2026-09-22 and picked up an unscheduled
+/// stop at Frankfurt (Main) Süd instead — Träwelling's own timetable data never has a Zusatzhalt like
+/// that, so a plain checkin from there always fails with `.tripNotFound` even though Träwelling knows
+/// the train. `checkin(_:fromZusatzhalt:toNextRegularStop:)` is what bridges that gap: a short manual
+/// trip for the Zusatzhalt hop, then an ordinary HAFAS-matched checkin from the next regular stop
+/// onwards, end to end against a mocked Träwelling API.
+@Suite struct TraewellingZusatzhaltCheckinTests {
+    static let zusatzhaltDeparture = TimeInfo(planned: Date(timeIntervalSince1970: 1_790_161_140), actual: Date(timeIntervalSince1970: 1_790_163_484))
+    static let nextRegularArrival = Date(timeIntervalSince1970: 1_790_161_680)
+    static let nextRegularDeparture = Date(timeIntervalSince1970: 1_790_161_800)
+    static let finalArrival = Date(timeIntervalSince1970: 1_790_170_000)
+
+    @Test func bridgesTheZusatzhaltWithAManualTripThenChecksInNormally() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ZusatzhaltCheckinProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let store = TokenStore(service: "BetterBahnKitTests.\(UUID().uuidString)")
+        store.save(OAuthToken(accessToken: "test-token", refreshToken: nil, expiresAt: .distantFuture))
+        let client = TraewellingClient(config: TraewellingConfig(clientID: "public-client"), http: HTTPClient(session: session), store: store)
+
+        let hanau = station("8000150", "Hanau Hbf", 50.1066, 8.9166)
+        let leg = Leg(origin: station("8002041", "Frankfurt (Main) Süd", 50.0937, 8.6822),
+                     destination: station("8098160", "Berlin Hbf", 52.5251, 13.3694),
+                     departure: Self.zusatzhaltDeparture,
+                     arrival: TimeInfo(planned: Self.finalArrival, actual: nil),
+                     departurePlatform: nil, arrivalPlatform: nil, tripId: "transitous-trip",
+                     line: Line(name: "ICE 372", number: "372", product: .highSpeed, operatorName: "DB Fernverkehr AG"),
+                     direction: "Berlin Hbf", isWalking: false, cancelled: false,
+                     stopovers: [Stopover(station: hanau, arrival: nil, departure: nil, arrivalPlatform: nil, departurePlatform: nil, cancelled: false)],
+                     remarks: [], source: .transitous)
+        let draft = CheckinDraft(leg: leg, message: "unterwegs", visibility: .publicVisible, business: .privateTrip, toot: false)
+
+        let json = """
+        {"stops": [
+            {"stopPlace": {"evaNumber": "8002041", "name": "Frankfurt (Main) Süd"},
+             "departure": {"scheduledTime": "2026-09-22T11:19:00Z", "time": "2026-09-22T11:58:04Z", "additional": true},
+             "additional": true},
+            {"stopPlace": {"evaNumber": "8000150", "name": "Hanau Hbf"},
+             "arrival": {"scheduledTime": "2026-09-22T11:28:00Z", "time": "2026-09-22T12:07:20Z"},
+             "departure": {"scheduledTime": "2026-09-22T11:30:00Z", "time": "2026-09-22T12:09:01Z"}}
+        ]}
+        """
+        let details = try JSONDecoding.decoder.decode(BahnExpertClient.Details.self, from: Data(json.utf8))
+        let stops = details.stops.map(JourneyStop.init)
+
+        let result = try await client.checkin(draft, fromZusatzhalt: stops[0], toNextRegularStop: stops[1])
+
+        #expect(result.statusId == 9002)
+        #expect(result.points == 47)
+        #expect(result.alsoOnThisConnection == 2)
+        #expect(result.zusatzhaltHop?.statusId == 9001)
+        #expect(result.zusatzhaltHop?.leg.origin.name == "Frankfurt (Main) Süd")
+        #expect(result.zusatzhaltHop?.leg.destination.name == "Hanau Hbf")
+    }
+}
+
+private final class ZusatzhaltCheckinProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let path = request.url!.path
+        let body = Self.body(of: request)
+        let json: String
+        switch true {
+        case path.contains("autocomplete") && path.contains("Hanau"):
+            // `findDeparture`'s distance check needs a coordinate on the candidate too, not just on
+            // the `Station` being searched for — close to `hanau`'s own coordinate in the test leg.
+            json = #"{"data":[{"id":555,"name":"Hanau Hbf","latitude":50.1066,"longitude":8.9166}]}"#
+        case path.contains("autocomplete"):
+            json = #"{"data":[{"id":901,"name":"Frankfurt (Main) Süd"}]}"#
+        case path == "/api/v1/trips":
+            json = #"{"data":{"tripId":"hop-trip","lineName":"ICE 372","origin":{"id":901},"destination":{"id":555}}}"#
+        case path.contains("/departures"):
+            json = """
+            {"data":[{"tripId":"main-trip","plannedWhen":"2026-09-22T11:30:00Z",
+                      "line":{"name":"ICE 372","fahrtNr":"372"},"direction":"Berlin Hbf",
+                      "station":{"id":555,"name":"Hanau Hbf"}}]}
+            """
+        case path == "/api/v1/trains/trip":
+            json = """
+            {"data":{"id":1,"lineName":"ICE 372","stopovers":[
+                {"id":555,"name":"Hanau Hbf","station":{"id":555,"name":"Hanau Hbf"},"departurePlanned":"2026-09-22T11:30:00Z"},
+                {"id":777,"name":"Berlin Hbf","station":{"id":777,"name":"Berlin Hbf"},"arrivalPlanned":"2026-09-24T21:46:40Z"}
+            ]}}
+            """
+        case path == "/api/v1/trains/checkin" && body?["tripId"] as? String == "hop-trip":
+            json = #"{"data":{"status":{"id":9001},"points":{"points":5},"alsoOnThisConnection":[]}}"#
+        case path == "/api/v1/trains/checkin":
+            json = #"{"data":{"status":{"id":9002},"points":{"points":42},"alsoOnThisConnection":[{"id":1},{"id":2}]}}"#
+        default:
+            client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
+            return
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(json.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+
+    private static func body(of request: URLRequest) -> [String: Any]? {
+        var data = request.httpBody ?? Data()
+        if let stream = request.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                guard count > 0 else { break }
+                data.append(contentsOf: buffer.prefix(count))
+            }
+        }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+}
+
 private final class OAuthTokenRequestProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }

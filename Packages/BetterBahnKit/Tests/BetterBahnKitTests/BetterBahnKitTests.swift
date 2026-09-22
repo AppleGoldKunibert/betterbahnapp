@@ -725,6 +725,48 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(details.train?.admin == "85")
     }
 
+    /// Real ICE 372 run (2026-09-22): it skipped Frankfurt (Main) Hbf and instead picked up an
+    /// unscheduled stop at Frankfurt (Main) Süd — bahn.expert flags exactly that pair (`cancelled` /
+    /// `additional`) in `journey/detailsByJourneyId`, which is the only source this app has for either.
+    @Test func decodesCancelledAndAdditionalStops() throws {
+        let json = #"""
+        {"stops": [
+            {"stopPlace": {"evaNumber": "8000244", "name": "Mannheim Hbf"},
+             "arrival": {"scheduledTime": "2026-09-22T10:22:00.000Z", "time": "2026-09-22T10:58:29.000Z"},
+             "departure": {"scheduledTime": "2026-09-22T10:30:00.000Z", "time": "2026-09-22T11:02:52.000Z"}},
+            {"stopPlace": {"evaNumber": "8000105", "name": "Frankfurt (Main) Hbf"},
+             "arrival": {"scheduledTime": "2026-09-22T11:09:00.000Z", "time": "2026-09-22T11:09:00.000Z", "cancelled": true},
+             "departure": {"scheduledTime": "2026-09-22T11:15:00.000Z", "time": "2026-09-22T11:15:00.000Z", "cancelled": true},
+             "cancelled": true},
+            {"stopPlace": {"evaNumber": "8002041", "name": "Frankfurt (Main) Süd"},
+             "arrival": {"scheduledTime": "2026-09-22T11:19:00.000Z", "time": "2026-09-22T11:38:28.000Z", "additional": true, "scheduledPlatform": "6", "platform": "7"},
+             "departure": {"scheduledTime": "2026-09-22T11:19:00.000Z", "time": "2026-09-22T11:58:04.000Z", "additional": true, "scheduledPlatform": "6", "platform": "7"},
+             "additional": true},
+            {"stopPlace": {"evaNumber": "8000150", "name": "Hanau Hbf"},
+             "arrival": {"scheduledTime": "2026-09-22T11:28:00.000Z", "time": "2026-09-22T12:07:20.000Z"},
+             "departure": {"scheduledTime": "2026-09-22T11:30:00.000Z", "time": "2026-09-22T12:09:01.000Z"}}
+        ]}
+        """#
+        let details = try JSONDecoding.decoder.decode(BahnExpertClient.Details.self, from: Data(json.utf8))
+        let stops = details.stops.map(JourneyStop.init)
+
+        #expect(stops[1].isCancelled)
+        #expect(stops[2].isAdditional)
+        #expect(stops[2].name == "Frankfurt (Main) Süd")
+        #expect(stops[2].departurePlatform == PlatformInfo(planned: "6", actual: "7"))
+        #expect(!stops[0].isAdditional && !stops[0].isCancelled)
+
+        let zusatzhaltStation = station("8002041", "Frankfurt (Main) Süd")
+        let match = try #require(BahnExpertClient.nextRegularStop(after: zusatzhaltStation, in: stops))
+        #expect(match.zusatzhalt.evaNumber == "8002041")
+        #expect(match.nextRegular.evaNumber == "8000150")
+
+        // A regular (non-additional) stop is never mistaken for a Zusatzhalt.
+        #expect(BahnExpertClient.nextRegularStop(after: station("8000244", "Mannheim Hbf"), in: stops) == nil)
+        // No regular stop left after the Zusatzhalt (e.g. it's also the run's last stop).
+        #expect(BahnExpertClient.nextRegularStop(after: zusatzhaltStation, in: Array(stops.prefix(3))) == nil)
+    }
+
     @Test func unitNumberOnlyFromLiveGroupNames() {
         #expect(BahnExpertClient.unitNumber(from: "ICE9465") == "9465")
         #expect(BahnExpertClient.unitNumber(from: "ICE0160") == "160")

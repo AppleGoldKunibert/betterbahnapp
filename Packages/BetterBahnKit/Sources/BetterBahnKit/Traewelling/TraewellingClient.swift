@@ -96,6 +96,11 @@ public struct CheckinResult: Sendable {
     public var alsoOnThisConnection: Int
     /// Whether Träwelling didn't know this train and a manual trip was created for it.
     public var isManualTrip = false
+    /// Set when boarding at a Zusatzhalt (unscheduled stop) required a short manual trip up to the
+    /// next regular stop before checking in normally from there (see
+    /// `checkin(_:fromZusatzhalt:toNextRegularStop:)`) — that hop's own status id and leg, tracked
+    /// separately from `statusId` so its delay keeps updating like any other manual trip.
+    public var zusatzhaltHop: (statusId: Int, leg: Leg)?
 }
 
 public enum TraewellingError: Error, LocalizedError, Equatable {
@@ -327,6 +332,59 @@ public actor TraewellingClient {
                                            departure: leg.departure.planned, arrival: leg.arrival.planned)
         result.isManualTrip = true
         return result
+    }
+
+    /// Checks in a leg that boards at a Zusatzhalt (an unscheduled stop, e.g. after a diversion) which
+    /// Träwelling's own timetable doesn't have — the reason the ordinary `checkin(_:allowManualTrip:)`
+    /// above just failed with `.tripNotFound` even though Träwelling does know the train itself.
+    /// Bridges the gap with a short manual trip from `zusatzhalt` up to `nextRegular` (the next stop
+    /// that *is* part of the train's regular schedule, from `BahnExpertClient.nextRegularStop`), then
+    /// checks in normally from there to `draft.leg.destination`, since that part of the ride is
+    /// exactly what Träwelling's timetable already has.
+    public func checkin(_ draft: CheckinDraft, fromZusatzhalt zusatzhalt: JourneyStop, toNextRegularStop nextRegular: JourneyStop) async throws -> CheckinResult {
+        let leg = draft.leg
+        guard let line = leg.line else { throw TraewellingError.tripNotFound("Fußweg") }
+        guard let departure = zusatzhalt.departure ?? zusatzhalt.arrival,
+              let arrival = nextRegular.arrival ?? nextRegular.departure else {
+            throw TraewellingError.tripNotFound(line.name)
+        }
+        // `leg.origin` already *is* the Zusatzhalt, with whatever real `Station` (coordinate included)
+        // the app boarded the user at — no need to rebuild it from bahn.expert's bare name. The next
+        // regular stop isn't that lucky on its own (bahn.expert reports no coordinate for it), but
+        // Transitous' own stopovers for this leg do have it (unlike the Zusatzhalt, it's a stop
+        // Transitous already knows) — looking it up there instead of a coordinate-less `Station` is
+        // what lets the plain HAFAS-matched checkin below find it on Träwelling's departure board,
+        // which needs a coordinate to trust a name match.
+        let nextStation = Self.matchingStation(leg.stopovers, evaNumber: nextRegular.evaNumber, name: nextRegular.name)
+            ?? Station(id: nextRegular.evaNumber, name: nextRegular.name, coordinate: nil, evaNumber: nextRegular.evaNumber, source: .bahnDe)
+
+        var hopLeg = leg
+        hopLeg.destination = nextStation
+        hopLeg.departure = departure
+        hopLeg.arrival = arrival
+        hopLeg.departurePlatform = zusatzhalt.departurePlatform
+        hopLeg.arrivalPlatform = nextRegular.arrivalPlatform
+        hopLeg.stopovers = []
+        // The user's message/toot belong on the main checkin below, not this short bridging hop, so
+        // boarding at a Zusatzhalt doesn't post the same note to Träwelling twice.
+        let hopResult = try await checkinManualTrip(CheckinDraft(leg: hopLeg, visibility: draft.visibility, business: draft.business))
+
+        var mainLeg = leg
+        mainLeg.origin = nextStation
+        mainLeg.departure = nextRegular.departure ?? arrival
+        mainLeg.departurePlatform = nextRegular.departurePlatform
+        let mainDraft = CheckinDraft(leg: mainLeg, message: draft.message, visibility: draft.visibility, business: draft.business, toot: draft.toot)
+
+        var result = try await checkin(mainDraft, allowManualTrip: false)
+        result.points += hopResult.points
+        if let hopStatusId = hopResult.statusId { result.zusatzhaltHop = (hopStatusId, hopLeg) }
+        return result
+    }
+
+    private static func matchingStation(_ stopovers: [Stopover], evaNumber: String, name: String) -> Station? {
+        if let byEva = stopovers.first(where: { $0.station.evaNumber == evaNumber })?.station { return byEva }
+        let normalized = Station.normalize(name)
+        return stopovers.first(where: { Station.normalize($0.station.name) == normalized })?.station
     }
 
     /// Updates a manual trip's checked-in real times, used to reflect its live delay since
