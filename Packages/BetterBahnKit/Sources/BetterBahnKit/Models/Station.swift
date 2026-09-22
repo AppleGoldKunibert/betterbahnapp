@@ -107,6 +107,8 @@ public struct Station: Codable, Sendable, Hashable, Identifiable {
     /// and has to stay where it is instead of becoming "b. Leipzig-Böhlen".
     static func displayName(for rawName: String) -> String {
         var name = rawName.trimmingCharacters(in: .whitespaces)
+        // DB's own names leave out the space before the bracket ("Bernau(b Berlin)", "Frankfurt(Oder)").
+        name = name.replacingOccurrences(of: #"(?<=\p{L})\("#, with: " (", options: .regularExpression)
 
         while name.hasSuffix(")"), let openParen = name.range(of: " (", options: .backwards) {
             let qualifier = name[openParen.upperBound..<name.index(before: name.endIndex)].lowercased()

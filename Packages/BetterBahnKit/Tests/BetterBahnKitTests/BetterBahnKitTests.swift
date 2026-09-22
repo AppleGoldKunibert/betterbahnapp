@@ -146,6 +146,12 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(match("Ulm Hauptbahnhof", town: "Ulm").toStation().displayName == "Ulm Hbf")
     }
 
+    /// DB's own names leave out the space before the bracket, which the bracket rules missed.
+    @Test func displayNameHandlesDBsBracketsWithoutSpace() {
+        #expect(Station.displayName(for: "Bernau(b Berlin)") == "Bernau (bei Berlin)")
+        #expect(Station.displayName(for: "Frankfurt(Oder)") == "Frankfurt (Oder)")
+    }
+
     /// Real-world Transitous geocode response for "Berlin Gesundbrunnen": the DELFI feed's entry
     /// covers every product including the U8 subway, while a second, OpenOV-fed entry ~70m away
     /// covers almost the same products but misses the subway – and its `/v5/stoptimes` happens to

@@ -379,10 +379,10 @@ struct ConnectionsView: View {
                             HStack(spacing: 14) {
                                 IconTile(systemImage: "arrow.triangle.swap", color: .secondary.opacity(0.6), size: 30)
                                 VStack(alignment: .leading, spacing: 1) {
-                                    Text(recent.from.name).font(.subheadline.weight(.semibold)).lineLimit(1)
+                                    Text(recent.from.displayName).font(.subheadline.weight(.semibold)).lineLimit(1)
                                     HStack(spacing: 4) {
                                         Image(systemName: "arrow.turn.down.right").font(.caption2)
-                                        Text(recent.to.name).lineLimit(1)
+                                        Text(recent.to.displayName).lineLimit(1)
                                     }
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
