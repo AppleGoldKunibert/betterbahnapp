@@ -98,6 +98,12 @@ public struct JourneyRefresher: Sendable {
             if let timetables, timetables.canLookUp(leg) {
                 leg.stopovers = await timetables.stopoversWithRealtime(for: leg)
             }
+            // Neither Transitous nor DB Timetables above ever *inserts* a stop — only bahn.expert
+            // reports a Zusatzhalt (an unscheduled stop the train additionally picked up today) at
+            // all, so it's the only way one ends up in `leg.stopovers` for the UI to show.
+            if !leg.stopovers.isEmpty, let bahnExpert = provider.bahnExpert, let stops = try? await bahnExpert.journeyStops(for: leg) {
+                leg.stopovers = BahnExpertClient.inserting(stops, into: leg.stopovers)
+            }
             updated.legs[index] = leg
         }
         return updated

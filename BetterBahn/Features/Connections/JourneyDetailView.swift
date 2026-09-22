@@ -433,6 +433,9 @@ struct LegCard: View {
                                 TimelineNode(kind: .minor, color: color, lineAbove: color, lineBelow: color) {
                                     HStack {
                                         Text(stop.station.displayName).font(.caption).lineLimit(1)
+                                        if stop.isAdditional {
+                                            InfoChip(text: "Zusatzhalt", systemImage: "plus.circle.fill", tint: .brand)
+                                        }
                                         Spacer()
                                         if let time = stop.departure ?? stop.arrival {
                                             Button {

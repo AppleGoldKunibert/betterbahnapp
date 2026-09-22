@@ -105,10 +105,18 @@ struct TripView: View {
                 let withDelays = await timetables.tripWithRealtime(loaded)
                 trip = await timetables.fillMissingPlatforms(in: withDelays)
             }
+            await insertZusatzhalte()
         } catch is CancellationError {
         } catch {
             self.error = error
         }
+    }
+
+    /// Only bahn.expert reports a Zusatzhalt (an unscheduled stop the train additionally picked up
+    /// today) at all — Transitous and DB Timetables above only ever overlay onto stops already there.
+    private func insertZusatzhalte() async {
+        guard let trip, let bahnExpert = model.provider.bahnExpert, let stops = try? await bahnExpert.journeyStops(for: trip) else { return }
+        self.trip?.stopovers = BahnExpertClient.inserting(stops, into: trip.stopovers)
     }
 }
 
@@ -231,6 +239,9 @@ struct TripContent: View {
                                 InfoChip(text: "Einstieg", systemImage: "arrow.up.right.circle.fill", tint: .punctual)
                             } else if isExit {
                                 InfoChip(text: "Ausstieg", systemImage: "arrow.down.right.circle.fill", tint: .brand)
+                            }
+                            if stop.isAdditional {
+                                InfoChip(text: "Zusatzhalt", systemImage: "plus.circle.fill", tint: .brand)
                             }
                         }
                         Spacer()
@@ -374,10 +385,18 @@ struct LegTripSheet: View {
                 let withDelays = await timetables.tripWithRealtime(loaded)
                 trip = await timetables.fillMissingPlatforms(in: withDelays)
             }
+            await insertZusatzhalte()
         } catch is CancellationError {
         } catch {
             self.error = error
         }
+    }
+
+    /// Only bahn.expert reports a Zusatzhalt (an unscheduled stop the train additionally picked up
+    /// today) at all — Transitous and DB Timetables above only ever overlay onto stops already there.
+    private func insertZusatzhalte() async {
+        guard let trip, let bahnExpert = model.provider.bahnExpert, let stops = try? await bahnExpert.journeyStops(for: trip) else { return }
+        self.trip?.stopovers = BahnExpertClient.inserting(stops, into: trip.stopovers)
     }
 }
 

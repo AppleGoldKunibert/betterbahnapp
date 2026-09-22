@@ -767,6 +767,47 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(BahnExpertClient.nextRegularStop(after: zusatzhaltStation, in: Array(stops.prefix(3))) == nil)
     }
 
+    /// `Trip`/`Leg` stopovers only ever come from Transitous, which never has a Zusatzhalt at all —
+    /// `inserting(_:into:)` is what splices Frankfurt (Main) Süd into the existing (already
+    /// realtime-overlaid) stop list rather than it being silently missing from the journey view.
+    @Test func insertsTheZusatzhaltAtItsRightfulPlace() throws {
+        let json = #"""
+        {"stops": [
+            {"stopPlace": {"evaNumber": "8000244", "name": "Mannheim Hbf"}},
+            {"stopPlace": {"evaNumber": "8000105", "name": "Frankfurt (Main) Hbf"}, "cancelled": true},
+            {"stopPlace": {"evaNumber": "8002041", "name": "Frankfurt (Main) Süd"}, "additional": true,
+             "departure": {"scheduledTime": "2026-09-22T11:19:00.000Z", "time": "2026-09-22T11:58:04.000Z"}},
+            {"stopPlace": {"evaNumber": "8000150", "name": "Hanau Hbf"}}
+        ]}
+        """#
+        let details = try JSONDecoding.decoder.decode(BahnExpertClient.Details.self, from: Data(json.utf8))
+        let stops = details.stops.map(JourneyStop.init)
+
+        // The already-refreshed schedule: no Zusatzhalt (Transitous never has it), but Frankfurt Hbf
+        // is already flagged cancelled by an earlier realtime overlay, which must survive the merge.
+        let existing = [
+            station("8000244", "Mannheim Hbf"),
+            station("8000105", "Frankfurt (Main) Hbf"),
+            station("8000150", "Hanau Hbf"),
+        ].enumerated().map { index, s in
+            Stopover(station: s, arrival: nil, departure: nil, arrivalPlatform: nil, departurePlatform: nil, cancelled: index == 1)
+        }
+
+        let merged = BahnExpertClient.inserting(stops, into: existing)
+
+        #expect(merged.map(\.station.name) == ["Mannheim Hbf", "Frankfurt (Main) Hbf", "Frankfurt (Main) Süd", "Hanau Hbf"])
+        #expect(merged[1].cancelled)
+        #expect(merged[2].isAdditional)
+        #expect(!merged[0].isAdditional && !merged[3].isAdditional)
+        #expect(merged[2].departure?.actual == JSONDecoding.parseISODate("2026-09-22T11:58:04.000Z"))
+
+        // Nothing to insert: the list comes back untouched (same stops, no Zusatzhalt in `stops`).
+        let withoutZusatzhalt = stops.filter { !$0.isAdditional }
+        #expect(BahnExpertClient.inserting(withoutZusatzhalt, into: existing) == existing)
+        // Stopovers never loaded for this leg/trip: stays empty rather than showing a partial list.
+        #expect(BahnExpertClient.inserting(stops, into: []).isEmpty)
+    }
+
     @Test func unitNumberOnlyFromLiveGroupNames() {
         #expect(BahnExpertClient.unitNumber(from: "ICE9465") == "9465")
         #expect(BahnExpertClient.unitNumber(from: "ICE0160") == "160")

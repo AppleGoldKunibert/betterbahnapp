@@ -107,6 +107,20 @@ public struct JourneyStop: Sendable, Hashable {
     }
 }
 
+extension Stopover {
+    /// A `Stopover` for a Zusatzhalt bahn.expert reported (see `BahnExpertClient.inserting(_:into:)`).
+    /// No coordinate — bahn.expert doesn't report one, and this is only ever used for display; a
+    /// Zusatzhalt's Träwelling checkin goes through `TraewellingClient.checkin(_:fromZusatzhalt:toNextRegularStop:)`,
+    /// not through this station.
+    init(_ stop: JourneyStop) {
+        self.init(station: Station(id: "bahnexpert:\(stop.evaNumber)", name: stop.name, coordinate: nil,
+                                   evaNumber: stop.evaNumber, source: .bahnDe),
+                  arrival: stop.arrival, departure: stop.departure,
+                  arrivalPlatform: stop.arrivalPlatform, departurePlatform: stop.departurePlatform,
+                  cancelled: false, isAdditional: true)
+    }
+}
+
 /// Where a running train is right now.
 public struct TrainPosition: Codable, Sendable, Hashable {
     public var coordinate: Coordinate
@@ -298,8 +312,19 @@ public struct BahnExpertClient: Sendable {
     /// schedule. `nil` if `leg`'s train isn't a DB long-distance category bahn.expert can look up at
     /// all; throws `TransitError.notFound` if it is one but no such journey exists on that day.
     public func journeyStops(for leg: Leg) async throws -> [JourneyStop]? {
-        guard let ref = Self.trainReference(for: leg.line) else { return nil }
-        let date = Self.berlinDay(leg.departure.planned)
+        try await journeyStops(line: leg.line, referenceTime: leg.departure.planned)
+    }
+
+    /// The realtime stop sequence for `trip`'s train (see `journeyStops(for:)` above); `nil` under the
+    /// same conditions, plus when `trip` has no stopovers to infer the departure day from at all.
+    public func journeyStops(for trip: Trip) async throws -> [JourneyStop]? {
+        guard let referenceTime = trip.stopovers.first?.departure?.planned ?? trip.stopovers.first?.arrival?.planned else { return nil }
+        return try await journeyStops(line: trip.line, referenceTime: referenceTime)
+    }
+
+    private func journeyStops(line: Line?, referenceTime: Date) async throws -> [JourneyStop]? {
+        guard let ref = Self.trainReference(for: line) else { return nil }
+        let date = Self.berlinDay(referenceTime)
         let (journey, _) = try await resolveJourney(category: ref.category, number: ref.number, date: date, administration: Self.dbAdministration)
         let details: Details = try await call("journey/detailsByJourneyId", input: ["json": journey.journeyId])
         return details.stops.map(JourneyStop.init)
@@ -318,6 +343,30 @@ public struct BahnExpertClient: Sendable {
     private static func matches(_ stop: JourneyStop, _ station: Station) -> Bool {
         if let eva = station.evaNumber, eva == stop.evaNumber { return true }
         return Station.normalize(stop.name) == Station.normalize(station.name)
+    }
+
+    /// `stopovers` (a leg's or trip's own schedule-only stop list) with every Zusatzhalt from `stops`
+    /// inserted at its rightful place, so an unscheduled stop shows up in the UI instead of silently
+    /// being missing — found by walking `stops` in bahn.expert's own order and using every stop that
+    /// *isn't* additional to re-anchor the position in `stopovers`, which already carries whatever
+    /// realtime overlay (delay, cancellation) a caller applied. `stopovers` is returned unchanged if
+    /// it's empty (stopovers were never loaded for this leg/trip) or `stops` has no Zusatzhalt at all.
+    public static func inserting(_ stops: [JourneyStop], into stopovers: [Stopover]) -> [Stopover] {
+        guard !stopovers.isEmpty, stops.contains(where: \.isAdditional) else { return stopovers }
+        var result: [Stopover] = []
+        var index = 0
+        for stop in stops {
+            if stop.isAdditional {
+                result.append(Stopover(stop))
+                continue
+            }
+            guard let match = stopovers[index...].firstIndex(where: { matches(stop, $0.station) }) else { continue }
+            result.append(contentsOf: stopovers[index..<match])
+            result.append(stopovers[match])
+            index = match + 1
+        }
+        result.append(contentsOf: stopovers[index...])
+        return result
     }
 
     /// "ICE 950" → ("ICE", "950"); nil for anything that is not a DB long-distance train.

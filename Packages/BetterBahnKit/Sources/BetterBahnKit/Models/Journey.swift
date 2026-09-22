@@ -115,10 +115,13 @@ public struct Stopover: Codable, Sendable, Hashable, Identifiable {
     public var cancelled: Bool
     /// Whether passengers may actually board/alight here ("Nur Einstieg" / "Nur Ausstieg").
     public var access: StopAccess
+    /// An unscheduled stop the train additionally picked up today ("Zusatzhalt"), not part of its
+    /// regular timetable — only `BahnExpertClient` knows about these, see `inserting(_:into:)`.
+    public var isAdditional: Bool
 
     public init(station: Station, arrival: TimeInfo?, departure: TimeInfo?,
                 arrivalPlatform: PlatformInfo?, departurePlatform: PlatformInfo?, cancelled: Bool,
-                access: StopAccess = .normal) {
+                access: StopAccess = .normal, isAdditional: Bool = false) {
         self.station = station
         self.arrival = arrival
         self.departure = departure
@@ -126,13 +129,15 @@ public struct Stopover: Codable, Sendable, Hashable, Identifiable {
         self.departurePlatform = departurePlatform
         self.cancelled = cancelled
         self.access = access
+        self.isAdditional = isAdditional
     }
 
     enum CodingKeys: String, CodingKey {
-        case station, arrival, departure, arrivalPlatform, departurePlatform, cancelled, access
+        case station, arrival, departure, arrivalPlatform, departurePlatform, cancelled, access, isAdditional
     }
 
-    /// Custom-decoded so journeys cached to disk before `access` existed still load, defaulting to `.normal`.
+    /// Custom-decoded so journeys cached to disk before `access`/`isAdditional` existed still load,
+    /// defaulting to `.normal`/`false`.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         station = try c.decode(Station.self, forKey: .station)
@@ -142,6 +147,7 @@ public struct Stopover: Codable, Sendable, Hashable, Identifiable {
         departurePlatform = try c.decodeIfPresent(PlatformInfo.self, forKey: .departurePlatform)
         cancelled = try c.decode(Bool.self, forKey: .cancelled)
         access = try c.decodeIfPresent(StopAccess.self, forKey: .access) ?? .normal
+        isAdditional = try c.decodeIfPresent(Bool.self, forKey: .isAdditional) ?? false
     }
 }
 
