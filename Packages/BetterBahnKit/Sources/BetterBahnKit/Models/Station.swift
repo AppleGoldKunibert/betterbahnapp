@@ -83,6 +83,18 @@ public struct Station: Codable, Sendable, Hashable, Identifiable {
     /// turned into "oben Hbf" by the "<stop> (<city>)" rule below.
     private static let levelQualifiers: Set<String> = ["oben", "tief", "unten"]
 
+    /// Parenthesized rivers/regions that tell apart same-named towns, e.g. "Frankfurt (Oder)",
+    /// "Halle (Saale)", "Rheinfelden (Baden)" - not a city, so kept as they are instead of being
+    /// turned into "Oder-Frankfurt" by the "<stop> (<city>)" rule below.
+    private static let regionQualifiers: Set<String> = [
+        "main", "neckar", "oder", "saale", "donau", "rhein", "mosel", "lahn", "elbe", "weser", "fils",
+        "rems", "enz", "murr", "ruhr", "sieg", "havel", "spree", "ilm", "baden", "pfalz", "westf",
+        "oldb", "holst", "weinstr", "weinstraße", "allgäu", "vogtl", "erzgeb", "sachs", "thür",
+    ]
+
+    /// Abbreviated rivers used in Baden-Württemberg's feed, e.g. "Esslingen (N)" for "Esslingen (Neckar)".
+    private static let abbreviatedQualifiers: [String: String] = ["N": "Neckar", "F": "Fils"]
+
     static func displayName(for rawName: String) -> String {
         var name = rawName.trimmingCharacters(in: .whitespaces)
 
@@ -98,6 +110,13 @@ public struct Station: Codable, Sendable, Hashable, Identifiable {
 
         if name.hasSuffix(")"), let openParen = name.range(of: " (", options: .backwards) {
             let city = String(name[openParen.upperBound..<name.index(before: name.endIndex)])
+            let town = String(name[name.startIndex..<openParen.lowerBound])
+            if let river = abbreviatedQualifiers[city] {
+                return "\(town) (\(river))".replacingOccurrences(of: "Hauptbahnhof", with: "Hbf")
+            }
+            if regionQualifiers.contains(city.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))) {
+                return name.replacingOccurrences(of: "Hauptbahnhof", with: "Hbf")
+            }
             var stop = String(name[name.startIndex..<openParen.lowerBound])
             if stop.hasSuffix(" Bhf") {
                 stop.removeLast(" Bhf".count)

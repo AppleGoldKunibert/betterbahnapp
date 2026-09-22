@@ -99,6 +99,19 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(Station.displayName(for: "Hauptbahnhof (tief)") == "Hbf")
     }
 
+    /// Real-world Transitous names where the part in brackets is a river or region telling apart
+    /// same-named towns, not a city - these showed up as "N-Wendlingen" or "Oder-Frankfurt".
+    @Test func riverAndRegionQualifiersAreNotTreatedAsCities() {
+        #expect(Station.displayName(for: "Wendlingen (N)") == "Wendlingen (Neckar)")
+        #expect(Station.displayName(for: "Esslingen (N)") == "Esslingen (Neckar)")
+        #expect(Station.displayName(for: "Ebersbach (F)") == "Ebersbach (Fils)")
+        #expect(Station.displayName(for: "Frankfurt (Oder)") == "Frankfurt (Oder)")
+        #expect(Station.displayName(for: "Rheinfelden (Baden)") == "Rheinfelden (Baden)")
+        #expect(Station.displayName(for: "Neustadt (Weinstr.)") == "Neustadt (Weinstr.)")
+        // A real "<stop> (<city>)" name is still rewritten.
+        #expect(Station.displayName(for: "S Spandau Bhf (Berlin)") == "Berlin-Spandau")
+    }
+
     /// Real-world Transitous geocode response for "Berlin Gesundbrunnen": the DELFI feed's entry
     /// covers every product including the U8 subway, while a second, OpenOV-fed entry ~70m away
     /// covers almost the same products but misses the subway – and its `/v5/stoptimes` happens to
