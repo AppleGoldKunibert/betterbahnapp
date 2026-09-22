@@ -152,6 +152,38 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(Station.displayName(for: "Frankfurt(Oder)") == "Frankfurt (Oder)")
     }
 
+    /// With the user's location, train stations are grouped into distance bands (50–100 km before
+    /// 200–300 km and so on), ahead of the usual Germany-first/main-station order, so searching
+    /// "Bernau" from Munich finds Bernau am Chiemsee (~80 km) before Bernau bei Berlin (~500 km).
+    @Test func searchSortsTrainStationsByDistanceBand() {
+        let munich = Coordinate(latitude: 48.14, longitude: 11.56)
+        let farMain = MGeocodeMatch(type: "STOP", name: "Berlin Hauptbahnhof", id: "far", lat: 52.52, lon: 13.37,
+                                    country: "DE", modes: ["HIGHSPEED_RAIL", "REGIONAL_RAIL"])
+        let far = MGeocodeMatch(type: "STOP", name: "S Bernau Bhf", id: "bernau-berlin", lat: 52.68, lon: 13.59,
+                                country: "DE", modes: ["REGIONAL_RAIL", "SUBURBAN"])
+        let near = MGeocodeMatch(type: "STOP", name: "Bernau am Chiemsee", id: "bernau-chiemsee", lat: 47.82, lon: 12.38,
+                                 country: "DE", modes: ["REGIONAL_RAIL"])
+        let austria = MGeocodeMatch(type: "STOP", name: "Salzburg Hbf", id: "salzburg", lat: 47.81, lon: 13.05,
+                                    country: "AT", modes: ["HIGHSPEED_RAIL", "REGIONAL_RAIL"])
+        let bus = MGeocodeMatch(type: "STOP", name: "Bernau Bus", id: "bus", lat: 48.14, lon: 11.56,
+                                country: "DE", modes: ["BUS"])
+
+        func ranked(near location: Coordinate?) -> [String] {
+            [bus, farMain, far, austria, near].enumerated()
+                .sorted { TransitousProvider.searchRank($0.element, query: "x", offset: $0.offset, near: location)
+                        > TransitousProvider.searchRank($1.element, query: "x", offset: $1.offset, near: location) }
+                .map(\.element.id)
+        }
+
+        // Bernau bei Berlin is preferred and stays first; then ~80 km and ~120 km, Berlin Hbf
+        // (~500 km) after, the nearby bus stop last.
+        #expect(ranked(near: munich) == ["bernau-berlin", "bernau-chiemsee", "salzburg", "far", "bus"])
+        // Without a location: Bernau bei Berlin, then German trains (main stations first), then Austria.
+        #expect(ranked(near: nil) == ["bernau-berlin", "far", "bernau-chiemsee", "salzburg", "bus"])
+        #expect(TransitousProvider.distanceBand(forMeters: 75_000) == 1)
+        #expect(TransitousProvider.distanceBand(forMeters: 1_200_000) == 7)
+    }
+
     /// Real-world Transitous geocode response for "Berlin Gesundbrunnen": the DELFI feed's entry
     /// covers every product including the U8 subway, while a second, OpenOV-fed entry ~70m away
     /// covers almost the same products but misses the subway – and its `/v5/stoptimes` happens to

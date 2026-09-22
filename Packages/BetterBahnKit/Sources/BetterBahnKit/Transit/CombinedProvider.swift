@@ -75,9 +75,13 @@ public final class CombinedProvider: TransitProvider {
 
     /// Search Transitous first so fresh station IDs are ready for routing.
     public func searchStations(_ query: String) async throws -> [Station] {
+        try await searchStations(query, near: nil)
+    }
+
+    public func searchStations(_ query: String, near location: Coordinate?) async throws -> [Station] {
         do {
             let stations = try await withFallback(deadline: .milliseconds(2500),
-                { try await $0.searchStations(query) }, { try await $0.searchStations(query) })
+                { try await $0.searchStations(query, near: location) }, { try await $0.searchStations(query, near: location) })
             if !stations.isEmpty || bahnDe == nil { return stations }
         } catch {
             try Task.checkCancellation()

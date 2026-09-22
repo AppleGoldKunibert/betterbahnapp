@@ -18,10 +18,17 @@ public struct TransitousProvider: TransitProvider {
     }
 
     public func searchStations(_ query: String) async throws -> [Station] {
+        try await searchStations(query, near: nil)
+    }
+
+    public func searchStations(_ query: String, near location: Coordinate?) async throws -> [Station] {
         let matches = try await geocode(query)
         // Stable sort by search ranking (then completeness) keeps the API's text ranking within each group.
         let ranked = matches.enumerated()
-            .sorted { Self.searchRank($0.element, query: query, offset: $0.offset) > Self.searchRank($1.element, query: query, offset: $1.offset) }
+            .sorted {
+                Self.searchRank($0.element, query: query, offset: $0.offset, near: location)
+                    > Self.searchRank($1.element, query: query, offset: $1.offset, near: location)
+            }
             .map { $0.element }
         return Self.mergingNearbyDuplicates(ranked).map { $0.toStation() }
     }
@@ -52,7 +59,13 @@ public struct TransitousProvider: TransitProvider {
     /// 5. German U-Bahn stations.
     /// 6. Everything else (other countries, and buses/trams outside Germany).
     /// Within a tier, Hauptbahnhöfe ("… Hbf") come before other stations.
-    static func searchRank(_ match: MGeocodeMatch, query: String, offset: Int) -> (Int, Int, Int, Int, Int, Int) {
+    ///
+    /// With the user's `location`, tiers 2 and 3 become one, ordered by `distanceBands` first: a train
+    /// station 50–100 km away comes before one 200–300 km away, whatever country it's in, while
+    /// stations within the same band keep the order above.
+    static func searchRank(_ match: MGeocodeMatch, query: String, offset: Int, near location: Coordinate? = nil)
+        -> (Int, Int, Int, Int, Int, Int)
+    {
         let modes = Set(match.modes ?? [])
         let isTrain = !modes.isDisjoint(with: trainModes)
         let isBus = !modes.isDisjoint(with: busModes)
@@ -85,7 +98,32 @@ public struct TransitousProvider: TransitProvider {
         // Within a tier, a main station ("Hannover Hbf") outranks its siblings ("Hannover Flughafen").
         let isMainStation = tier > 0 && Station.normalize(Station.displayName(for: match.fullName)).hasSuffix("hbf")
 
-        return (exactTier, tier, isMainStation ? 1 : 0, neighborRank, match.modes?.count ?? 0, -offset)
+        // Trains in Germany and its neighbours share one group, ordered by distance band, when the
+        // user's location is known; otherwise `group` is just `tier` and the order is as above.
+        var group = tier * 100
+        if let location, tier >= 5 {
+            let distance = location.distance(to: Coordinate(latitude: match.lat, longitude: match.lon))
+            group = 600 - Self.distanceBand(forMeters: distance)
+        }
+        // A preferred station stays ahead of its tier and every distance band.
+        if tier > 0, preferredStations.contains(Station.displayName(for: match.fullName)) {
+            group = tier * 100 + 50
+        }
+
+        return (exactTier, group, tier * 10 + (isMainStation ? 1 : 0), neighborRank, match.modes?.count ?? 0, -offset)
+    }
+
+    /// Stations that come first among same-named ones even when another is nearer, e.g.
+    /// "Bernau (bei Berlin)" before "Bernau am Chiemsee".
+    static let preferredStations: Set<String> = ["Bernau (bei Berlin)"]
+
+    /// Upper bounds (km) of the distance bands search results are grouped into; anything farther
+    /// is in one last band.
+    static let distanceBands: [Double] = [50, 100, 200, 300, 500, 750, 1000]
+
+    /// 0 for the nearest band (under 50 km), counting up to `distanceBands.count` for 1000 km and more.
+    static func distanceBand(forMeters meters: Double) -> Int {
+        distanceBands.firstIndex { meters / 1000 < $0 } ?? distanceBands.count
     }
 
     /// True if `name` is the same place name the user typed (e.g. "Berlin Hauptbahnhof"), ignoring

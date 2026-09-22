@@ -89,6 +89,8 @@ struct StationInput<Focus: Hashable>: View {
         }
         .onChange(of: isFocused) { _, focused in
             if focused {
+                // Nearer train stations come first in search, so get a location ready while typing.
+                LocationService.shared.refresh()
                 // Select all-ish behaviour: start fresh search when a station is set.
                 if station != nil { query = "" }
             } else if !submitPending {
@@ -102,7 +104,7 @@ struct StationInput<Focus: Hashable>: View {
             isSearching = true
             defer { isSearching = false }
             do {
-                results = try await model.provider.searchStations(query)
+                results = try await model.provider.searchStations(query, near: LocationService.shared.coordinate)
                 error = nil
                 if submitPending, let first = results.first {
                     submitPending = false
