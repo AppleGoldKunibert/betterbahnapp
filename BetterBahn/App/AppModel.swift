@@ -10,8 +10,6 @@ final class AppModel {
     private(set) var provider: CombinedProvider
     private(set) var traewelling: TraewellingClient
     let liveActivities = LiveActivityManager()
-    @ObservationIgnored private let timetablesStore = TimetablesCredentialsStore()
-    private(set) var timetablesCredentials: TimetablesCredentials?
 
     var favoriteStations: [Station] {
         didSet { Storage.save(favoriteStations, key: "favoriteStations") }
@@ -71,7 +69,6 @@ final class AppModel {
     init() {
         provider = CombinedProvider()
         traewelling = TraewellingClient(config: TraewellingConfig())
-        timetablesCredentials = timetablesStore.load()
         favoriteStations = Storage.load(key: "favoriteStations") ?? []
         recentSearches = Storage.load(key: "recentSearches") ?? []
         recentStations = Storage.load(key: "recentStations") ?? []
@@ -100,31 +97,14 @@ final class AppModel {
         }
     }
 
-    /// Overlays fresher delay/platform data straight from DB onto legs. Uses the user's own
-    /// credentials from Einstellungen → Erweiterte Einstellungen when set, otherwise the key
-    /// BetterBahn ships with (`TimetablesCredentials.shipped`); `nil` when neither is configured.
+    /// Overlays fresher delay/platform data straight from DB onto legs, using the key BetterBahn
+    /// ships with (`TimetablesCredentials.shipped`); `nil` when the build has none configured.
     var timetablesClient: TimetablesClient? {
-        let credentials = timetablesCredentials ?? .shipped
-        guard credentials.isConfigured else { return nil }
-        return TimetablesClient(credentials: credentials)
+        guard TimetablesCredentials.shipped.isConfigured else { return nil }
+        return TimetablesClient(credentials: .shipped)
     }
 
     var journeyRefresher: JourneyRefresher { JourneyRefresher(provider: provider, timetables: timetablesClient) }
-
-    /// Saves (or, when both fields are empty, clears back to the shipped default) the DB Timetables
-    /// API credentials.
-    func updateTimetablesCredentials(clientID: String, apiKey: String) {
-        let trimmedID = clientID.trimmingCharacters(in: .whitespaces)
-        let trimmedKey = apiKey.trimmingCharacters(in: .whitespaces)
-        guard !trimmedID.isEmpty || !trimmedKey.isEmpty else {
-            timetablesStore.clear()
-            timetablesCredentials = nil
-            return
-        }
-        let credentials = TimetablesCredentials(clientID: trimmedID, apiKey: trimmedKey)
-        timetablesStore.save(credentials)
-        timetablesCredentials = credentials
-    }
 
     /// Applies a manual realtime refresh (e.g. pull-to-refresh in the journey detail view) to a
     /// saved journey in place, without touching its version history or already-sent notifications.

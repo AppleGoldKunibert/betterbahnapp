@@ -1,5 +1,4 @@
 import Foundation
-import Security
 
 /// Credentials for the official DB "Timetables" API (developers.deutschebahn.com, API Marketplace,
 /// free plan), the classic IRIS-based feed also used by e.g. bahn.de's own delay data.
@@ -13,47 +12,6 @@ public struct TimetablesCredentials: Codable, Sendable, Equatable {
     }
 
     public var isConfigured: Bool { !clientID.isEmpty && !apiKey.isEmpty }
-}
-
-/// Stores `TimetablesCredentials` in the Keychain, since (unlike the Träwelling client ID) the API
-/// key is a real secret.
-public struct TimetablesCredentialsStore: Sendable {
-    let service: String
-    let account: String
-
-    public init(service: String = "de.betterbahn.timetables", account: String = "credentials") {
-        self.service = service
-        self.account = account
-    }
-
-    private var baseQuery: [String: Any] {
-        [kSecClass as String: kSecClassGenericPassword,
-         kSecAttrService as String: service,
-         kSecAttrAccount as String: account]
-    }
-
-    public func load() -> TimetablesCredentials? {
-        var query = baseQuery
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-        var result: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data else { return nil }
-        return try? JSONDecoder().decode(TimetablesCredentials.self, from: data)
-    }
-
-    public func save(_ credentials: TimetablesCredentials) {
-        SecItemDelete(baseQuery as CFDictionary)
-        guard let data = try? JSONEncoder().encode(credentials) else { return }
-        var query = baseQuery
-        query[kSecValueData as String] = data
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        SecItemAdd(query as CFDictionary, nil)
-    }
-
-    public func clear() {
-        SecItemDelete(baseQuery as CFDictionary)
-    }
 }
 
 /// One `<ar>`/`<dp>` (arrival/departure) side of a stop, from either a `plan` response (planned

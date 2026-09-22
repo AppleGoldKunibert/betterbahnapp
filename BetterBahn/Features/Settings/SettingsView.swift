@@ -101,11 +101,6 @@ struct SettingsView: View {
                         }
                         .tint(.brand)
                     }
-                    NavigationLink {
-                        AdvancedSettingsView()
-                    } label: {
-                        IconLabel(title: "Erweiterte Einstellungen", systemImage: "gearshape.2.fill", color: .gray)
-                    }
                 } header: {
                     Text("Für Profis")
                 } footer: {
@@ -364,58 +359,6 @@ struct AddQuickTagSheet: View {
                 }
             }
         }
-    }
-}
-
-/// Settings that ship with a working default and only need touching to override it.
-struct AdvancedSettingsView: View {
-    @Environment(AppModel.self) private var model
-    @State private var timetablesClientID = ""
-    @State private var timetablesApiKey = ""
-
-    var body: some View {
-        Form {
-            Section {
-                LabeledContent {
-                    TextField("Standard", text: $timetablesClientID)
-                        .multilineTextAlignment(.trailing)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                        .onSubmit(applyTimetablesCredentials)
-                } label: {
-                    IconLabel(title: "Client-ID", systemImage: "key.fill", color: .gray)
-                }
-                LabeledContent {
-                    SecureField("Standard", text: $timetablesApiKey)
-                        .multilineTextAlignment(.trailing)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                        .onSubmit(applyTimetablesCredentials)
-                } label: {
-                    IconLabel(title: "API-Key", systemImage: "lock.fill", color: .gray)
-                }
-                Link("Zugang bei der DB beantragen",
-                     destination: URL(string: "https://developers.deutschebahn.com/db-api-marketplace/apis/product/timetables")!)
-            } header: {
-                Text("Eigener DB-Zugang")
-            } footer: {
-                Text("Verspätungen und Gleiswechsel kommen schon direkt von der DB. Nur ausfüllen, wenn du einen eigenen Zugang nutzen möchtest.")
-            }
-        }
-        .navigationTitle("Erweiterte Einstellungen")
-        .navigationBarTitleDisplayMode(.inline)
-        .task {
-            timetablesClientID = model.timetablesCredentials?.clientID ?? ""
-            timetablesApiKey = model.timetablesCredentials?.apiKey ?? ""
-        }
-        .onDisappear(perform: applyTimetablesCredentials)
-    }
-
-    private func applyTimetablesCredentials() {
-        let trimmedID = timetablesClientID.trimmingCharacters(in: .whitespaces)
-        let trimmedKey = timetablesApiKey.trimmingCharacters(in: .whitespaces)
-        guard trimmedID != (model.timetablesCredentials?.clientID ?? "") || trimmedKey != (model.timetablesCredentials?.apiKey ?? "") else { return }
-        model.updateTimetablesCredentials(clientID: trimmedID, apiKey: trimmedKey)
     }
 }
 
