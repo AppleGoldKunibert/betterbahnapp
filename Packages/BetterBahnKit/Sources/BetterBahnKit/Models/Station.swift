@@ -78,8 +78,18 @@ public struct Station: Codable, Sendable, Hashable, Identifiable {
         "lichtenberg", "schönefeld flughafen",
     ]
 
+    /// Parenthesized level qualifiers of stations split across levels, e.g. Stuttgart's
+    /// "Hauptbahnhof (oben)" / "Hauptbahnhof (tief)" - not a city, so dropped instead of being
+    /// turned into "oben Hbf" by the "<stop> (<city>)" rule below.
+    private static let levelQualifiers: Set<String> = ["oben", "tief", "unten"]
+
     static func displayName(for rawName: String) -> String {
         var name = rawName.trimmingCharacters(in: .whitespaces)
+
+        if name.hasSuffix(")"), let openParen = name.range(of: " (", options: .backwards),
+           levelQualifiers.contains(name[openParen.upperBound..<name.index(before: name.endIndex)].lowercased()) {
+            name = String(name[name.startIndex..<openParen.lowerBound])
+        }
 
         for prefix in ["S+U ", "S ", "U ", "Bus "] where name.hasPrefix(prefix) {
             name.removeFirst(prefix.count)

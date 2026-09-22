@@ -74,6 +74,31 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(entries[1].platform.best == "F")
     }
 
+    /// Real-world Transitous names for Stuttgart Hbf: DELFI splits it into "Hauptbahnhof (oben)"
+    /// and "Hauptbahnhof (tief)" without the city, which showed up as "oben Hbf" and "tief Hbf".
+    @Test func stuttgartHbfLevelsShowAsStuttgartHbf() throws {
+        let json = """
+        {"stopTimes": [{
+            "place": {
+                "name": "Hauptbahnhof (oben)", "stopId": "de-DELFI_de:08111:6115:6:12", "parentId": "de-DELFI_de:08111:6115",
+                "lat": 48.78, "lon": 9.18, "departure": "2026-09-22T21:35:00Z", "scheduledDeparture": "2026-09-22T21:35:00Z"
+            },
+            "mode": "REGIONAL_RAIL", "realTime": false, "tripId": "re-trip", "routeShortName": "MEX18", "displayName": "MEX18"
+        }, {
+            "place": {
+                "name": "Hauptbahnhof (tief)", "stopId": "de-DELFI_de:08111:6118:1:101", "parentId": "de-DELFI_de:08111:6118",
+                "lat": 48.78, "lon": 9.18, "departure": "2026-09-22T21:40:00Z", "scheduledDeparture": "2026-09-22T21:40:00Z"
+            },
+            "mode": "SUBURBAN", "realTime": false, "tripId": "s-trip", "routeShortName": "S1", "displayName": "S1"
+        }]}
+        """
+        let response = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(json.utf8))
+        let entries = response.stopTimes.compactMap { $0.toEntry(kind: .departures) }
+
+        #expect(entries.map(\.station.displayName) == ["Stuttgart Hbf", "Stuttgart Hbf"])
+        #expect(Station.displayName(for: "Hauptbahnhof (tief)") == "Hbf")
+    }
+
     /// Real-world Transitous geocode response for "Berlin Gesundbrunnen": the DELFI feed's entry
     /// covers every product including the U8 subway, while a second, OpenOV-fed entry ~70m away
     /// covers almost the same products but misses the subway – and its `/v5/stoptimes` happens to

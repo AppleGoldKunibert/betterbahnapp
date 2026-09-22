@@ -431,7 +431,7 @@ public struct TransitousProvider: TransitProvider {
 
     private static func namesContinuation(headsign: String?, ownEnd: MPlace?) -> Bool {
         guard let headsign, let ownEnd else { return false }
-        return Station.normalize(headsign) != Station.normalize(ownEnd.name)
+        return Station.normalize(headsign) != Station.normalize(ownEnd.stationName)
     }
 
     /// Merges board rows that are almost certainly the same physical departure. Transitous stitches

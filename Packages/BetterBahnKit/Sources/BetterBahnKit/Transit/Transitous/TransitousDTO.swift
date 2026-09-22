@@ -53,9 +53,27 @@ struct MPlace: Decodable {
                             actual: realtime ? (track ?? descriptionTrack) : nil)
     }
 
+    /// DELFI stop areas whose feed name leaves out the city, keyed by their DHID. Stuttgart Hbf is
+    /// split into "Hauptbahnhof (oben)" (the terminus) and "Hauptbahnhof (tief)" (the S-Bahn below),
+    /// which otherwise showed up as two separate stations named "oben Hbf" and "tief Hbf".
+    private static let namesWithoutCity: [String: String] = [
+        "de:08111:6115": "Stuttgart Hbf",
+        "de:08111:6118": "Stuttgart Hbf",
+    ]
+
+    /// `name`, or the full name from `namesWithoutCity` when this stop belongs to one of those areas.
+    var stationName: String {
+        let ids = [parentId, stopId].compactMap { $0 }
+        for (dhid, fullName) in Self.namesWithoutCity
+        where ids.contains(where: { $0.hasSuffix("_\(dhid)") || $0.contains("_\(dhid):") }) {
+            return fullName
+        }
+        return name
+    }
+
     func toStation() -> Station {
         Station(
-            id: parentId ?? stopId ?? "\(lat),\(lon)", name: name,
+            id: parentId ?? stopId ?? "\(lat),\(lon)", name: stationName,
             coordinate: Coordinate(latitude: lat, longitude: lon),
             evaNumber: nil, source: .transitous
         )
@@ -180,8 +198,8 @@ struct MLeg: Decodable {
     var direction: String? {
         guard let headsign else { return nil }
         let passesHeadsignAsIntermediateStop = (intermediateStops ?? [])
-            .contains { Station.normalize($0.name) == Station.normalize(headsign) }
-        return Station.displayName(for: passesHeadsignAsIntermediateStop ? to.name : headsign)
+            .contains { Station.normalize($0.stationName) == Station.normalize(headsign) }
+        return Station.displayName(for: passesHeadsignAsIntermediateStop ? to.stationName : headsign)
     }
 
     func toLeg() -> Leg {
@@ -244,7 +262,7 @@ struct MStopTime: Decodable {
         let station = place.toStation()
         let otherEnd = kind == .departures ? tripTo : tripFrom
         let line = lineInfo.toLine()
-        let otherEndName = kind == .departures ? (headsign ?? tripTo?.name) : tripFrom?.name
+        let otherEndName = kind == .departures ? (headsign ?? tripTo?.stationName) : tripFrom?.stationName
         return BoardEntry(
             kind: kind, tripId: tripId, station: station, line: line,
             otherEnd: otherEndName.map(Station.displayName(for:)),
