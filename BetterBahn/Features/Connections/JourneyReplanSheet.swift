@@ -54,6 +54,10 @@ struct JourneyReplanSheet: View {
     @State private var breaksBoardingRules = false
     @State private var showTrainSheet = false
 
+    /// A faster way to the goal that gets off somewhere else – offered as a note, never forced.
+    @State private var fasterOption: ExitOption?
+    @State private var isScanningExits = false
+
     @State private var results: [Journey] = []
     @State private var hasSearched = false
     @State private var isSearching = false
@@ -189,6 +193,15 @@ struct JourneyReplanSheet: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 4)
         }
+        if isScanningExits, !isSearching {
+            HStack(spacing: 10) {
+                ProgressView()
+                Text("Prüfe, ob ein anderer Halt schneller ist …").font(.callout).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 4)
+        }
+        if let fasterOption { fasterNote(fasterOption) }
         if !results.isEmpty {
             SectionHeader(title: "Weiterfahrt ab \(exitStation.displayName)", systemImage: "arrow.triangle.branch")
                 .padding(.top, 4)
@@ -338,6 +351,58 @@ struct JourneyReplanSheet: View {
         breaksBoardingRules = false
         results = []
         hasSearched = false
+        fasterOption = nil
+    }
+
+    /// A hint that staying on (or leaving earlier) reaches the goal sooner than the chosen exit.
+    /// Purely a suggestion – the user's own results stay listed below it.
+    private func fasterNote(_ option: ExitOption) -> some View {
+        Card {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    IconTile(systemImage: "bolt.fill", color: .punctual, size: 38)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(option.exit.station.isSamePlace(as: leg.destination)
+                             ? "Im Zug bleiben bis \(option.exit.station.displayName)"
+                             : "Schneller: Ausstieg in \(option.exit.station.displayName)")
+                            .font(.headline)
+                            .lineLimit(2)
+                        Text(fasterSubtitle(option))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+                if let continuation = option.continuation {
+                    JourneyCard(journey: continuation)
+                } else {
+                    Text("Von dort ist es dein Ziel – keine Weiterfahrt nötig.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Button {
+                    apply(continuation: option.continuation, exit: option.ride)
+                } label: {
+                    Label("Diesen Weg nehmen", systemImage: "checkmark.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glassProminent)
+                .tint(.punctual)
+                .controlSize(.large)
+                .disabled(applyingID != nil)
+                Text("Nur ein Vorschlag – deine eigene Auswahl bleibt unten stehen.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    private func fasterSubtitle(_ option: ExitOption) -> String {
+        let arrival = "an \(option.arrival.timeString) in \(target.displayName)"
+        guard let mine = results.compactMap({ $0.arrival?.best }).min() else { return arrival }
+        let saved = Int(mine.timeIntervalSince(option.arrival) / 60)
+        return saved > 0 ? "\(arrival) · \(saved) Min. früher" : arrival
     }
 
     /// The train with its stop list – tapping a stop moves the exit.
@@ -528,7 +593,10 @@ struct JourneyReplanSheet: View {
             }
         } else {
             Button {
-                Task { await runSearch() }
+                Task {
+                    await runSearch()
+                    await scanForFasterExit()
+                }
             } label: {
                 Label("Verbindungen suchen", systemImage: "magnifyingglass")
                     .font(.headline)
@@ -637,6 +705,7 @@ struct JourneyReplanSheet: View {
             showStops = false
             results = []
             hasSearched = false
+            fasterOption = nil
         }
     }
 
@@ -663,6 +732,7 @@ struct JourneyReplanSheet: View {
         exitID = nil
         results = []
         hasSearched = false
+        fasterOption = nil
         resetRequirements()
         seedStops(in: legTrip)
         await loadTrip()
@@ -736,8 +806,28 @@ struct JourneyReplanSheet: View {
         }
     }
 
-    private func apply(continuation: Journey?) {
-        guard let exit = exitLeg, let index = legIndex else {
+    /// Looks for a stop that reaches the goal sooner than the one the user picked – e.g. a new goal
+    /// that lies before the planned exit, where riding on and coming back costs time. Only stops the
+    /// train hasn't passed yet are considered, so a station already left is never proposed.
+    private func scanForFasterExit() async {
+        fasterOption = nil
+        guard requirements.isEmpty, let destination, let trip = shownTrip else { return }
+        isScanningExits = true
+        defer { isScanningExits = false }
+        let options = ReplanOptions(destination: destination, via: viaRows.waypoints(),
+                                    products: products, maxTransfers: maxTransfers,
+                                    minTransferMinutes: minTransferMinutes)
+        let found = await model.journeyReplanner.exitOptions(
+            on: trip, boardingAt: leg.origin, notBefore: .now, options: options)
+        guard let best = found.first(where: { !$0.exit.station.isSamePlace(as: exitStation) }) else { return }
+        // With results of their own, only a noticeably earlier arrival is worth interrupting for.
+        if let mine = results.compactMap({ $0.arrival?.best }).min(),
+           best.arrival > mine.addingTimeInterval(-JourneyReplanner.worthMentioning) { return }
+        withAnimation(.snappy) { fasterOption = best }
+    }
+
+    private func apply(continuation: Journey?, exit overrideExit: Leg? = nil) {
+        guard let exit = overrideExit ?? exitLeg, let index = legIndex else {
             error = TransitError.notFound("Diese Teilstrecke im Reiseplan")
             return
         }
@@ -770,7 +860,7 @@ struct JourneyReplanSheet: View {
 
     /// Checks whether a Träwelling check-in on this train now ends somewhere the user isn't going.
     private func lookUpCheckin(exit: Leg) async {
-        guard await model.traewelling.isLoggedIn, exitChanged else { return }
+        guard await model.traewelling.isLoggedIn, !exit.destination.isSamePlace(as: leg.destination) else { return }
         isLookingUpCheckin = true
         defer { isLookingUpCheckin = false }
         guard let status = try? await model.traewelling.checkin(matching: leg),

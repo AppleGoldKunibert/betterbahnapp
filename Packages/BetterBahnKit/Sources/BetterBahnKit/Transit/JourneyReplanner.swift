@@ -79,3 +79,92 @@ public struct JourneyReplanner: Sendable {
         return Journey(legs: legs + rest, source: journey.source)
     }
 }
+
+/// One way of finishing the journey: leave the train at `exit` and carry on from there.
+public struct ExitOption: Sendable, Identifiable {
+    public var id: String { exit.id }
+    /// The stop to get off at.
+    public var exit: Stopover
+    /// The ride from where the traveller boarded up to that stop.
+    public var ride: Leg
+    /// How to go on; `nil` when the exit already is the destination.
+    public var continuation: Journey?
+    /// When the destination is reached this way.
+    public var arrival: Date
+
+    public init(exit: Stopover, ride: Leg, continuation: Journey?, arrival: Date) {
+        self.exit = exit
+        self.ride = ride
+        self.continuation = continuation
+        self.arrival = arrival
+    }
+}
+
+public extension JourneyReplanner {
+    /// How long a suggested exit has to save before it's worth mentioning.
+    static var worthMentioning: TimeInterval { 5 * 60 }
+
+    /// Ways to reach `options.destination` by getting off this train somewhere, earliest arrival
+    /// first.
+    ///
+    /// Only stops *after* `boarding` that the train hasn't called at yet are considered – a station
+    /// the traveller has already left can't be routed from. When a new destination lies behind the
+    /// planned exit, this is what finds the earlier stop to leave at instead of riding on and
+    /// coming back.
+    func exitOptions(on trip: Trip, boardingAt boarding: Station, notBefore now: Date,
+                     options: ReplanOptions, maxCandidates: Int = 6, limit: Int = 3) async -> [ExitOption] {
+        guard let boardIndex = trip.stopovers.firstIndex(where: { $0.station.isSamePlace(as: boarding) }) else { return [] }
+        var rest = trip.stopovers[(boardIndex + 1)...].filter { stop in
+            guard let arrival = stop.arrival, !stop.cancelled, stop.access.allowsAlighting else { return false }
+            return arrival.best >= now
+        }
+        // The destination itself is always worth trying; the other slots go to the stops closest to it.
+        var head: [Stopover] = []
+        if let index = rest.firstIndex(where: { $0.station.isSamePlace(as: options.destination) }) {
+            head = [rest.remove(at: index)]
+        }
+        let slots = max(0, maxCandidates - head.count)
+        if rest.count > slots {
+            if let goal = options.destination.coordinate {
+                rest.sort {
+                    ($0.station.coordinate?.distance(to: goal) ?? .greatestFiniteMagnitude)
+                        < ($1.station.coordinate?.distance(to: goal) ?? .greatestFiniteMagnitude)
+                }
+            }
+            rest = Array(rest.prefix(slots))
+        }
+
+        let candidates = head + rest
+        let planner = self
+        let found = await withTaskGroup(of: ExitOption?.self) { group in
+            var iterator = candidates.makeIterator()
+            var running = 0
+            var results: [ExitOption] = []
+            func addNext() -> Bool {
+                guard let stop = iterator.next() else { return false }
+                group.addTask { await planner.option(for: stop, on: trip, boardingAt: boarding, options: options) }
+                return true
+            }
+            // At most 4 parallel searches, like the other planners, to stay within API rate limits.
+            while running < 4, addNext() { running += 1 }
+            while let result = await group.next() {
+                if let result { results.append(result) }
+                _ = addNext()
+            }
+            return results
+        }
+        return Array(found.sorted { $0.arrival < $1.arrival }.prefix(limit))
+    }
+
+    private func option(for stop: Stopover, on trip: Trip, boardingAt boarding: Station,
+                        options: ReplanOptions) async -> ExitOption? {
+        guard let ride = trip.leg(from: boarding, to: stop.station) else { return nil }
+        if stop.station.isSamePlace(as: options.destination) {
+            return ExitOption(exit: stop, ride: ride, continuation: nil, arrival: ride.arrival.best)
+        }
+        guard let onward = try? await continuations(from: stop.station, arriving: ride.arrival.best,
+                                                    options: options, limit: 1).first,
+              let arrival = onward.arrival?.best else { return nil }
+        return ExitOption(exit: stop, ride: ride, continuation: onward, arrival: arrival)
+    }
+}

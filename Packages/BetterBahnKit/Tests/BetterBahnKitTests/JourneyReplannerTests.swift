@@ -77,3 +77,82 @@ import Testing
         #expect(shortened.stopovers.count == 2)
     }
 }
+
+/// Getting off somewhere else than planned: which stops may be proposed, and which one wins.
+@Suite struct ExitOptionTests {
+    let a = station("1", "Stop A", 52.0, 13.0)
+    let b = station("2", "Stop B", 52.3, 13.0)
+    let c = station("3", "Stop C", 52.5, 13.0)
+    let d = station("4", "Stop D", 53.0, 13.0)
+    let base = Date(timeIntervalSince1970: 1_800_000_000)
+
+    private func time(_ minutes: Double) -> TimeInfo { TimeInfo(planned: base.addingTimeInterval(minutes * 60), actual: nil) }
+
+    private func stop(_ s: Station, arr: Double?, dep: Double?) -> Stopover {
+        Stopover(station: s, arrival: arr.map(time), departure: dep.map(time),
+                 arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+    }
+
+    /// A → C → D, boarding in A.
+    private func ride() -> Trip {
+        Trip(id: "ice1", line: Line(name: "ICE 1", number: "1", product: .highSpeed, operatorName: nil),
+             direction: "Stop D",
+             stopovers: [stop(a, arr: nil, dep: 0), stop(c, arr: 60, dep: 62), stop(d, arr: 120, dep: nil)],
+             cancelled: false, remarks: [], source: .bahnDe)
+    }
+
+    private func journey(_ from: Station, _ to: Station, dep: Double, arr: Double) -> Journey {
+        let trip = Trip(id: "rb-\(dep)", line: Line(name: "RB 10", number: "10", product: .regional, operatorName: nil),
+                        direction: to.name, stopovers: [stop(from, arr: nil, dep: dep), stop(to, arr: arr, dep: nil)],
+                        cancelled: false, remarks: [], source: .bahnDe)
+        return Journey(legs: [trip.leg(from: from, to: to)!], source: .bahnDe)
+    }
+
+    /// New goal B: riding on to D and coming back is slower than leaving the train in C.
+    @Test func prefersTheEarlierExitWhenTheGoalLiesBehindIt() async throws {
+        let mock = RoutingMockProvider()
+        mock.routes["Stop C -> Stop B"] = [journey(c, b, dep: 70, arr: 90)]
+        mock.routes["Stop D -> Stop B"] = [journey(d, b, dep: 130, arr: 190)]
+        let replanner = JourneyReplanner(provider: mock)
+
+        let options = await replanner.exitOptions(on: ride(), boardingAt: a, notBefore: base,
+                                                  options: ReplanOptions(destination: b, minTransferMinutes: 5))
+
+        let best = try #require(options.first)
+        #expect(best.exit.station.name == "Stop C")
+        #expect(best.arrival == base.addingTimeInterval(90 * 60))
+        #expect(best.ride.destination.name == "Stop C")
+        // The boarding station itself is never offered – the train has already left it.
+        #expect(!options.contains { $0.exit.station.name == "Stop A" })
+        #expect(!mock.journeyQueries.contains { $0.hasPrefix("Stop A ->") })
+    }
+
+    /// Stops the train has already called at are no route to anywhere.
+    @Test func skipsStopsThatArePassed() async throws {
+        let mock = RoutingMockProvider()
+        mock.routes["Stop C -> Stop B"] = [journey(c, b, dep: 70, arr: 90)]
+        mock.routes["Stop D -> Stop B"] = [journey(d, b, dep: 130, arr: 190)]
+        let replanner = JourneyReplanner(provider: mock)
+
+        // Standing between C and D: C is behind us, only D is left.
+        let options = await replanner.exitOptions(on: ride(), boardingAt: a,
+                                                  notBefore: base.addingTimeInterval(90 * 60),
+                                                  options: ReplanOptions(destination: b, minTransferMinutes: 5))
+
+        #expect(options.map(\.exit.station.name) == ["Stop D"])
+    }
+
+    /// An exit that already is the goal needs no onward connection.
+    @Test func exitAtTheGoalItselfNeedsNoContinuation() async throws {
+        let mock = RoutingMockProvider()
+        let replanner = JourneyReplanner(provider: mock)
+
+        let options = await replanner.exitOptions(on: ride(), boardingAt: a, notBefore: base,
+                                                  options: ReplanOptions(destination: c))
+
+        let best = try #require(options.first)
+        #expect(best.exit.station.name == "Stop C")
+        #expect(best.continuation == nil)
+        #expect(best.arrival == base.addingTimeInterval(60 * 60))
+    }
+}
