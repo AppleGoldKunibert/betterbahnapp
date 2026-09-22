@@ -325,10 +325,46 @@ public struct BahnExpertClient: Sendable {
     private func journeyStops(line: Line?, referenceTime: Date) async throws -> [JourneyStop]? {
         guard let ref = Self.trainReference(for: line) else { return nil }
         let date = Self.berlinDay(referenceTime)
-        let (journey, _) = try await resolveJourney(category: ref.category, number: ref.number, date: date, administration: Self.dbAdministration)
+        let key = "\(ref.category) \(ref.number) \(date)"
+        // Only the app's real session shares the cache; a client on a custom session (tests, mocks)
+        // must never see another client's stored responses for the same key.
+        guard http.session === URLSession.shared else { return try await fetchJourneyStops(category: ref.category, number: ref.number, date: date) }
+        return try await Self.journeyStopsCache.stops(for: key, maxAge: Self.journeyStopsMaxAge) {
+            try await self.fetchJourneyStops(category: ref.category, number: ref.number, date: date)
+        }
+    }
+
+    private func fetchJourneyStops(category: String, number: String, date: String) async throws -> [JourneyStop] {
+        let (journey, _) = try await resolveJourney(category: category, number: number, date: date, administration: Self.dbAdministration)
         let details: Details = try await call("journey/detailsByJourneyId", input: ["json": journey.journeyId])
         return details.stops.map(JourneyStop.init)
     }
+
+    /// Shared by every `BahnExpertClient` (the app makes a fresh one per use), so reopening the same
+    /// train's stop list — the full trip sheet, a saved journey's periodic realtime refresh — doesn't
+    /// repeat the multi-second resolve-then-details round trip every time. Concurrent requests for the
+    /// same train/day are merged into one.
+    private actor JourneyStopsCache {
+        struct Entry { let date: Date; let stops: [JourneyStop] }
+        var entries: [String: Entry] = [:]
+        var inFlight: [String: Task<[JourneyStop], Error>] = [:]
+
+        func stops(for key: String, maxAge: TimeInterval,
+                   fetch: @escaping @Sendable () async throws -> [JourneyStop]) async throws -> [JourneyStop] {
+            if let entry = entries[key], Date.now.timeIntervalSince(entry.date) < maxAge { return entry.stops }
+            if let task = inFlight[key] { return try await task.value }
+            let task = Task { try await fetch() }
+            inFlight[key] = task
+            defer { inFlight[key] = nil }
+            let stops = try await task.value
+            entries[key] = Entry(date: .now, stops: stops)
+            return stops
+        }
+    }
+    private static let journeyStopsCache = JourneyStopsCache()
+    /// Matches `TimetablesClient.changesMaxAge`: short enough that a realtime refresh still sees
+    /// changes soon, long enough that reopening the same view right after doesn't wait again.
+    static let journeyStopsMaxAge: TimeInterval = 4 * 60
 
     /// If `station` is a Zusatzhalt in `stops`, the pair of (that stop, the next stop after it that
     /// *is* part of the train's regular schedule) — the hop a Träwelling checkin needs to bridge with
@@ -352,6 +388,9 @@ public struct BahnExpertClient: Sendable {
     /// realtime overlay (delay, cancellation) a caller applied. `stopovers` is returned unchanged if
     /// it's empty (stopovers were never loaded for this leg/trip) or `stops` has no Zusatzhalt at all.
     public static func inserting(_ stops: [JourneyStop], into stopovers: [Stopover]) -> [Stopover] {
+        // Callers re-run this on every realtime refresh against a stop list that may already carry a
+        // Zusatzhalt this same function spliced in last time — drop it first so it isn't duplicated.
+        let stopovers = stopovers.filter { !$0.isAdditional }
         guard !stopovers.isEmpty, stops.contains(where: \.isAdditional) else { return stopovers }
         var result: [Stopover] = []
         var index = 0

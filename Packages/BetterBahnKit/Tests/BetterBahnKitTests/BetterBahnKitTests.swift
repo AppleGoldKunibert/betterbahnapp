@@ -806,6 +806,12 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(BahnExpertClient.inserting(withoutZusatzhalt, into: existing) == existing)
         // Stopovers never loaded for this leg/trip: stays empty rather than showing a partial list.
         #expect(BahnExpertClient.inserting(stops, into: []).isEmpty)
+
+        // Callers (a saved journey's periodic realtime refresh, the trip sheet's own reload) re-run
+        // this against a stop list that already carries the Zusatzhalt from a previous call — it must
+        // not show up twice.
+        let mergedAgain = BahnExpertClient.inserting(stops, into: merged)
+        #expect(mergedAgain == merged)
     }
 
     @Test func unitNumberOnlyFromLiveGroupNames() {
