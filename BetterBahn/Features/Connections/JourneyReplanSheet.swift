@@ -43,7 +43,7 @@ struct JourneyReplanSheet: View {
     @State private var products = Set(Product.allCases)
     @State private var maxTransfers: Int?
     @State private var onlyBC100 = false
-    @State private var minTransferMinutes = 5
+    @State private var minTransferMinutes = defaultTransferMinutes
     @State private var showProductsPopover = false
     @State private var showBufferPopover = false
     @FocusState private var focused: Field?
@@ -80,6 +80,14 @@ struct JourneyReplanSheet: View {
     /// Up to this many intermediate stops can be added, matching the normal search.
     private static let maxViaPoints = 4
 
+    /// Default buffer between getting off and the next departure. Anything longer is a break the
+    /// user asked for, so the plan isn't argued against in that case.
+    private static let defaultTransferMinutes = 5
+
+    /// How much later than the original plan a re-planned arrival has to be before it's worth
+    /// pointing out that staying on the train gets there sooner.
+    private static let noticeableDelay: TimeInterval = 10 * 60
+
     /// The train the journey is re-planned from.
     private var leg: Leg {
         if let selectedLegID, let match = journey.legs.first(where: { $0.id == selectedLegID }) { return match }
@@ -113,6 +121,24 @@ struct JourneyReplanSheet: View {
     }
 
     private var target: Station { destination ?? finalDestination }
+
+    /// Whether the user asked to spend time somewhere – then a later arrival is the point, not a problem.
+    private var wantsToLinger: Bool {
+        minTransferMinutes > Self.defaultTransferMinutes || viaRows.contains { $0.minStayMinutes > 0 }
+    }
+
+    /// How much later than the current plan the best option on screen reaches the goal, if that is
+    /// worth mentioning. Only applies while the goal itself is unchanged – with a new goal there is
+    /// nothing to compare against.
+    private var timeLostVersusPlan: TimeInterval? {
+        guard target.isSamePlace(as: finalDestination), !wantsToLinger,
+              journey.legs.last?.destination.isSamePlace(as: finalDestination) == true,
+              let planned = journey.arrival?.best else { return nil }
+        let arrivals = results.compactMap { $0.arrival?.best } + [fasterOption?.arrival].compactMap { $0 }
+        guard let best = arrivals.min() else { return nil }
+        let lost = best.timeIntervalSince(planned)
+        return lost >= Self.noticeableDelay ? lost : nil
+    }
 
     /// No continuation is needed when the new exit is already the destination.
     private var endsAtExit: Bool { exitStation.isSamePlace(as: target) && viaRows.isEmpty }
@@ -201,6 +227,7 @@ struct JourneyReplanSheet: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 4)
         }
+        if let timeLostVersusPlan { stayOnTrainNote(lost: timeLostVersusPlan) }
         if let fasterOption { fasterNote(fasterOption) }
         if !results.isEmpty {
             SectionHeader(title: "Weiterfahrt ab \(exitStation.displayName)", systemImage: "arrow.triangle.branch")
@@ -352,6 +379,43 @@ struct JourneyReplanSheet: View {
         results = []
         hasSearched = false
         fasterOption = nil
+    }
+
+    /// A hint that the journey as planned is simply quicker – shown only while the goal is
+    /// unchanged and no extra waiting time was asked for, since a break is a reason of its own.
+    private func stayOnTrainNote(lost: TimeInterval) -> some View {
+        Card {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    IconTile(systemImage: "tram.fill", color: .slightDelay, size: 38)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Mit dem geplanten Zug bist du früher da").font(.headline).lineLimit(2)
+                        Text(stayOnTrainSubtitle(lost: lost)).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+                Button {
+                    dismiss()
+                } label: {
+                    Label("Reiseplan behalten", systemImage: "checkmark.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glass)
+                .tint(.brand)
+                .controlSize(.large)
+                Text("Nur ein Hinweis – du kannst unten trotzdem umplanen.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    private func stayOnTrainSubtitle(lost: TimeInterval) -> String {
+        let minutes = Int(lost / 60)
+        guard let planned = journey.arrival?.best else { return "Umplanen kostet \(minutes) Min." }
+        return "Bleibst du sitzen, bist du um \(planned.timeString) in \(finalDestination.displayName) – "
+            + "\(minutes) Min. früher als jede Umplanung hier."
     }
 
     /// A hint that staying on (or leaving earlier) reaches the goal sooner than the chosen exit.
