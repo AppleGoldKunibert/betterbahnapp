@@ -1749,3 +1749,69 @@ private final class GesundbrunnenSearchProtocol: URLProtocol, @unchecked Sendabl
     }
     override func stopLoading() {}
 }
+
+@Suite struct TimetablesMessageTests {
+    /// A `fchg` stop with a delay reason, a quality notice and a deleted message, as DB Navigator
+    /// shows them under "Aktuelle Informationen".
+    @Test func parsesDelayReasonsAndNotices() {
+        let xml = Data("""
+        <timetable station="Hamm(Westf)Hbf" eva="8000149">
+          <s id="-123-2409221000-5" eva="8000149">
+            <m id="r1" t="q" c="93" ts="2409221010"/>
+            <ar ct="2409221215">
+              <m id="r2" t="d" c="34" ts="2409221210"/>
+              <m id="r3" t="d" c="43" ts="2409221205" del="1"/>
+            </ar>
+          </s>
+        </timetable>
+        """.utf8)
+
+        let stops = TimetablesXMLParser.parse(xml)
+        let messages = TimetablesMessage.resolve(stops.flatMap(\.messages))
+
+        #expect(stops.count == 1)
+        #expect(messages.map(\.text) == ["Keine behindertengerechte Einrichtung", "Reparatur an einem Signal"])
+        #expect(messages.map(\.kind) == [.notice, .delay])
+        #expect(messages.containsDelayReason)
+    }
+
+    /// "Keine Qualitätsmängel" clears the quality notices reported before it, and isn't shown itself.
+    @Test func allClearRemovesOlderNotices() {
+        let messages = TimetablesMessage.resolve([
+            TimetablesMessage(code: 70, timestamp: Date(timeIntervalSince1970: 100)),
+            TimetablesMessage(code: 88, timestamp: Date(timeIntervalSince1970: 200)),
+            TimetablesMessage(code: 91, timestamp: Date(timeIntervalSince1970: 300)),
+            TimetablesMessage(code: 99, timestamp: Date(timeIntervalSince1970: 50)),
+        ])
+
+        #expect(messages.map(\.text) == ["Verzögerungen im Betriebsablauf", "Fahrradmitnahme nicht möglich"])
+    }
+
+    /// The same notice reported at several stations shows once, at its first report.
+    @Test func mergesRepeatedMessages() {
+        let merged = TrainMessage.merged([
+            TrainMessage(kind: .notice, text: "WLAN nicht verfügbar", timestamp: Date(timeIntervalSince1970: 200)),
+            TrainMessage(kind: .notice, text: "WLAN nicht verfügbar", timestamp: Date(timeIntervalSince1970: 100)),
+        ])
+
+        #expect(merged.count == 1)
+        #expect(merged.first?.timestamp == Date(timeIntervalSince1970: 100))
+    }
+
+    /// Journeys saved before `messages` existed still decode.
+    @Test func decodesLegWithoutMessages() throws {
+        var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(PreviewLegs.leg)) as! [String: Any]
+        json.removeValue(forKey: "messages")
+        let leg = try JSONDecoder().decode(Leg.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(leg.messages.isEmpty)
+    }
+}
+
+private enum PreviewLegs {
+    static let station = Station(id: "8000149", name: "Hamm(Westf)Hbf", coordinate: nil, evaNumber: "8000149", source: .transitous)
+    static let leg = Leg(origin: station, destination: station, departure: TimeInfo(planned: .now, actual: nil),
+                         arrival: TimeInfo(planned: .now, actual: nil), departurePlatform: nil, arrivalPlatform: nil,
+                         tripId: "t", line: nil, direction: nil, isWalking: false, cancelled: false, stopovers: [],
+                         remarks: [], messages: [TrainMessage(kind: .delay, text: "Bauarbeiten", timestamp: nil)],
+                         source: .transitous)
+}

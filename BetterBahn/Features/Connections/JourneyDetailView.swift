@@ -381,36 +381,34 @@ struct LegCard: View {
     var body: some View {
         Card {
             VStack(alignment: .leading, spacing: 14) {
-                Button {
-                    showFullTrip = true
-                } label: {
-                    HStack(spacing: 10) {
-                        IconTile(systemImage: leg.line?.product.symbolName ?? "tram.fill", color: color, size: 38)
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: 6) {
-                                Text(leg.line?.name ?? "Zug").font(.headline)
-                                TrainSeriesTag(line: leg.line, date: leg.departure.planned)
-                            }
-                            if let direction = leg.direction {
-                                Text("Richtung \(direction)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            }
+                // A tap gesture rather than a Button, so the warning triangle inside can be its own button.
+                HStack(spacing: 10) {
+                    IconTile(systemImage: leg.line?.product.symbolName ?? "tram.fill", color: color, size: 38)
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text(leg.line?.name ?? "Zug").font(.headline)
+                            TrainSeriesTag(line: leg.line, date: leg.departure.planned)
                         }
-                        Spacer()
-                        if leg.cancelled {
-                            InfoChip(text: "Fällt aus", systemImage: "xmark.octagon.fill", tint: .heavyDelay)
-                        } else {
-                            DelayPill(minutes: leg.departure.delayMinutes)
-                        }
-                        if leg.tripId != nil {
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.tertiary)
+                        if let direction = leg.direction {
+                            Text("Richtung \(direction)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }
                     }
-                    .contentShape(.rect)
+                    Spacer()
+                    TrainMessagesButton(messages: leg.messages)
+                    if leg.cancelled {
+                        InfoChip(text: "Fällt aus", systemImage: "xmark.octagon.fill", tint: .heavyDelay)
+                    } else {
+                        DelayPill(minutes: leg.departure.delayMinutes)
+                    }
+                    if leg.tripId != nil {
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
                 }
-                .buttonStyle(.plain)
-                .disabled(leg.tripId == nil)
+                .contentShape(.rect)
+                .onTapGesture { if leg.tripId != nil { showFullTrip = true } }
+                .accessibilityAddTraits(leg.tripId != nil ? .isButton : [])
 
                 VStack(spacing: 0) {
                     TimelineNode(kind: .major, color: color, lineBelow: color) {

@@ -397,6 +397,60 @@ struct RemarkRow: View {
     }
 }
 
+/// Warning triangle for a train's current notes from DB (see `TrainMessage`): red when any of them is
+/// a delay reason, yellow for other notices. Tapping it lists them with the time DB reported each.
+struct TrainMessagesButton: View {
+    let messages: [TrainMessage]
+    @State private var showList = false
+
+    private var tint: Color { messages.containsDelayReason ? .heavyDelay : .slightDelay }
+
+    var body: some View {
+        if !messages.isEmpty {
+            Button {
+                showList = true
+            } label: {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.body)
+                    .foregroundStyle(tint)
+                    .padding(4)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(messages.containsDelayReason ? "Verspätungsgründe" : "Hinweise zum Zug")
+            .popover(isPresented: $showList) {
+                TrainMessageList(messages: messages)
+                    .presentationCompactAdaptation(.popover)
+            }
+        }
+    }
+}
+
+struct TrainMessageList: View {
+    let messages: [TrainMessage]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Aktuelle Informationen")
+                .font(.subheadline.weight(.semibold))
+            ForEach(messages) { message in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: message.kind == .delay ? "clock.badge.exclamationmark.fill" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(message.kind == .delay ? Color.heavyDelay : Color.slightDelay)
+                    Text(message.timestamp?.timeString ?? "–")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    Text(message.text)
+                        .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .padding()
+        .frame(minWidth: 240, maxWidth: 340, alignment: .leading)
+    }
+}
+
 struct ErrorBanner: View {
     let error: Error
 

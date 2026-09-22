@@ -42,7 +42,10 @@ enum PreviewData {
                     stop(station("8000080", "Dortmund Hbf"), arr: 68, dep: 71, delay: 4),
                     stop(station("8000036", "Bielefeld Hbf"), arr: 118, dep: 120, delay: 4),
                     stop(hannover, arr: 162, dep: nil, delay: 4, platform: "8")],
-        remarks: ["Bauarbeiten zwischen Dortmund und Hamm – Umleitung mit ca. 5 Min. Verspätung"], source: .transitous)
+        remarks: ["Bauarbeiten zwischen Dortmund und Hamm – Umleitung mit ca. 5 Min. Verspätung"],
+        messages: [TrainMessage(kind: .notice, text: "Keine behindertengerechte Einrichtung", timestamp: at(-50)),
+                   TrainMessage(kind: .delay, text: "Reparatur an einem Signal", timestamp: at(-5))],
+        source: .transitous)
 
     static let walk = Leg(
         origin: hannover, destination: hannover,

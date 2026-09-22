@@ -106,7 +106,8 @@ struct JourneyReplanSheet: View {
     private var legTrip: Trip? {
         guard leg.stopovers.count > 1 else { return nil }
         return Trip(id: leg.tripId ?? leg.id, line: leg.line, direction: leg.direction,
-                    stopovers: leg.stopovers, cancelled: leg.cancelled, remarks: leg.remarks, source: leg.source)
+                    stopovers: leg.stopovers, cancelled: leg.cancelled, remarks: leg.remarks, messages: leg.messages,
+                    source: leg.source)
     }
 
     private var exitStop: Stopover? { shownTrip?.stopovers.first { $0.id == exitID } }

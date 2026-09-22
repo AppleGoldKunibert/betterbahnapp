@@ -160,6 +160,7 @@ struct TripContent: View {
                         }
                     }
                     Spacer()
+                    TrainMessagesButton(messages: trip.messages)
                 }
             }
 

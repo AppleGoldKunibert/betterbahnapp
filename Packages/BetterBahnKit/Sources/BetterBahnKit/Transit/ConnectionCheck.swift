@@ -96,7 +96,9 @@ public struct JourneyRefresher: Sendable {
                 leg = Self.apply(override, to: leg)
             }
             if let timetables, timetables.canLookUp(leg) {
-                leg.stopovers = await timetables.stopoversWithRealtime(for: leg)
+                let live = await timetables.liveStopovers(for: leg)
+                leg.stopovers = live.stopovers
+                leg.messages = TrainMessage.merged(leg.messages + live.messages)
             }
             // Neither Transitous nor DB Timetables above ever *inserts* a stop — only bahn.expert
             // reports a Zusatzhalt (an unscheduled stop the train additionally picked up today) at
@@ -145,6 +147,8 @@ public struct JourneyRefresher: Sendable {
         if let arrival = override.arrival { leg.arrival = arrival }
         if let arrivalPlatform = override.arrivalPlatform { leg.arrivalPlatform = arrivalPlatform }
         if override.cancelled { leg.cancelled = true }
+        // Only what DB reports right now: an earlier refresh's notices may have been lifted since.
+        leg.messages = override.messages
         return leg
     }
 }

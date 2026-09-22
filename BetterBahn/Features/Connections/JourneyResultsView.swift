@@ -501,7 +501,9 @@ struct JourneyCard: View {
                         InfoChip(text: "Anschluss weg", systemImage: "exclamationmark.triangle.fill", tint: .heavyDelay)
                     } else if !journey.connectionIssues().isEmpty {
                         InfoChip(text: "Knapp", systemImage: "exclamationmark.triangle.fill", tint: .slightDelay)
-                    } else if journey.legs.contains(where: { !$0.remarks.isEmpty }) {
+                    } else if journey.legs.contains(where: { $0.messages.containsDelayReason }) {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.heavyDelay)
+                    } else if journey.legs.contains(where: { !$0.remarks.isEmpty || !$0.messages.isEmpty }) {
                         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.slightDelay)
                     }
                 }

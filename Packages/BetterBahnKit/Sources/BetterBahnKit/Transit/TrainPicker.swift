@@ -13,7 +13,7 @@ public extension Trip {
             departurePlatform: start.departurePlatform, arrivalPlatform: end.arrivalPlatform,
             tripId: id, line: line, direction: direction, isWalking: false,
             cancelled: cancelled || start.cancelled || end.cancelled,
-            stopovers: Array(stopovers[startIndex...endIndex]), remarks: remarks, source: source
+            stopovers: Array(stopovers[startIndex...endIndex]), remarks: remarks, messages: messages, source: source
         )
     }
 }

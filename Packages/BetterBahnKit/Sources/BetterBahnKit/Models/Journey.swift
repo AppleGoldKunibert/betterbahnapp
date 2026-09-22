@@ -167,6 +167,8 @@ public struct Leg: Codable, Sendable, Hashable, Identifiable {
     /// Intermediate stops including origin and destination, if loaded.
     public var stopovers: [Stopover]
     public var remarks: [String]
+    /// Delay reasons and notices from DB's own feed along this leg (see `TrainMessage`).
+    public var messages: [TrainMessage]
     public var source: DataSource
     /// Track geometry of the leg, if known.
     public var geometry: [Coordinate]?
@@ -174,7 +176,9 @@ public struct Leg: Codable, Sendable, Hashable, Identifiable {
     public init(origin: Station, destination: Station, departure: TimeInfo, arrival: TimeInfo,
                 departurePlatform: PlatformInfo?, arrivalPlatform: PlatformInfo?, tripId: String?,
                 line: Line?, direction: String?, isWalking: Bool, cancelled: Bool,
-                stopovers: [Stopover], remarks: [String], source: DataSource, geometry: [Coordinate]? = nil) {
+                stopovers: [Stopover], remarks: [String], messages: [TrainMessage] = [], source: DataSource,
+                geometry: [Coordinate]? = nil) {
+        self.messages = messages
         self.geometry = geometry
         self.origin = origin
         self.destination = destination
@@ -190,6 +194,32 @@ public struct Leg: Codable, Sendable, Hashable, Identifiable {
         self.stopovers = stopovers
         self.remarks = remarks
         self.source = source
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case origin, destination, departure, arrival, departurePlatform, arrivalPlatform, tripId, line, direction
+        case isWalking, cancelled, stopovers, remarks, messages, source, geometry
+    }
+
+    /// Custom-decoded so journeys saved before `messages` existed still load.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        origin = try c.decode(Station.self, forKey: .origin)
+        destination = try c.decode(Station.self, forKey: .destination)
+        departure = try c.decode(TimeInfo.self, forKey: .departure)
+        arrival = try c.decode(TimeInfo.self, forKey: .arrival)
+        departurePlatform = try c.decodeIfPresent(PlatformInfo.self, forKey: .departurePlatform)
+        arrivalPlatform = try c.decodeIfPresent(PlatformInfo.self, forKey: .arrivalPlatform)
+        tripId = try c.decodeIfPresent(String.self, forKey: .tripId)
+        line = try c.decodeIfPresent(Line.self, forKey: .line)
+        direction = try c.decodeIfPresent(String.self, forKey: .direction)
+        isWalking = try c.decode(Bool.self, forKey: .isWalking)
+        cancelled = try c.decode(Bool.self, forKey: .cancelled)
+        stopovers = try c.decode([Stopover].self, forKey: .stopovers)
+        remarks = try c.decode([String].self, forKey: .remarks)
+        messages = try c.decodeIfPresent([TrainMessage].self, forKey: .messages) ?? []
+        source = try c.decode(DataSource.self, forKey: .source)
+        geometry = try c.decodeIfPresent([Coordinate].self, forKey: .geometry)
     }
 }
 
@@ -242,10 +272,13 @@ public struct Trip: Codable, Sendable, Hashable {
     public var stopovers: [Stopover]
     public var cancelled: Bool
     public var remarks: [String]
+    /// Delay reasons and notices from DB's own feed along the whole trip (see `TrainMessage`).
+    public var messages: [TrainMessage]
     public var source: DataSource
 
     public init(id: String, line: Line?, direction: String?, stopovers: [Stopover],
-                cancelled: Bool, remarks: [String], source: DataSource) {
+                cancelled: Bool, remarks: [String], messages: [TrainMessage] = [], source: DataSource) {
+        self.messages = messages
         self.id = id
         self.line = line
         self.direction = direction
@@ -253,6 +286,23 @@ public struct Trip: Codable, Sendable, Hashable {
         self.cancelled = cancelled
         self.remarks = remarks
         self.source = source
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, line, direction, stopovers, cancelled, remarks, messages, source
+    }
+
+    /// Custom-decoded so data saved before `messages` existed still loads.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        line = try c.decodeIfPresent(Line.self, forKey: .line)
+        direction = try c.decodeIfPresent(String.self, forKey: .direction)
+        stopovers = try c.decode([Stopover].self, forKey: .stopovers)
+        cancelled = try c.decode(Bool.self, forKey: .cancelled)
+        remarks = try c.decode([String].self, forKey: .remarks)
+        messages = try c.decodeIfPresent([TrainMessage].self, forKey: .messages) ?? []
+        source = try c.decode(DataSource.self, forKey: .source)
     }
 
     public var origin: Station? { stopovers.first?.station }

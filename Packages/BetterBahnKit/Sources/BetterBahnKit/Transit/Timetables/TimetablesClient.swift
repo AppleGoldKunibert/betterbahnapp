@@ -22,6 +22,31 @@ struct TimetablesEvent {
     var plannedPlatform: String?
     var actualPlatform: String?
     var cancelled: Bool
+    /// The stop's `<m>` messages from `fchg` (filled in by `liveEvent`; `plan` never has any).
+    var messages: [TimetablesMessage] = []
+}
+
+/// One `<m>` element from `fchg`: a numeric delay-reason or quality code, reported at `timestamp`.
+struct TimetablesMessage: Hashable {
+    var code: Int
+    var timestamp: Date?
+
+    /// Readable messages for `raw`, collected from any number of stops: unknown codes are dropped,
+    /// and "all clear" codes (e.g. "keine Qualitätsmängel") remove the older notices they resolve.
+    static func resolve(_ raw: [TimetablesMessage]) -> [TrainMessage] {
+        let shown = raw.filter { message in
+            guard TrainMessageCodes.clearing[message.code] == nil else { return false }
+            return !raw.contains { clearing in
+                TrainMessageCodes.clearing[clearing.code]?.contains(message.code) == true
+                    && (clearing.timestamp ?? .distantPast) > (message.timestamp ?? .distantPast)
+            }
+        }
+        return TrainMessage.merged(shown.compactMap { message in
+            guard let text = TrainMessageCodes.text(for: message.code) else { return nil }
+            let isDelay = message.code < 70 || message.code == 99
+            return TrainMessage(kind: isDelay ? .delay : .notice, text: text, timestamp: message.timestamp)
+        })
+    }
 }
 
 /// One `<s>` (stop) element from a DB Timetables XML response. In `fchg`, most stops carry only
@@ -33,6 +58,7 @@ struct TimetablesStop {
     var number: String?
     var arrival: TimetablesEvent?
     var departure: TimetablesEvent?
+    var messages: [TimetablesMessage] = []
 }
 
 /// Overlay to apply onto a `Leg` once a matching `TimetablesStop` was found.
@@ -42,6 +68,8 @@ public struct TimetablesLegOverride: Sendable {
     public var arrival: TimeInfo?
     public var arrivalPlatform: PlatformInfo?
     public var cancelled: Bool
+    /// Delay reasons and notices DB reports for the train at either end.
+    public var messages: [TrainMessage] = []
 }
 
 /// Reads live delay, platform and cancellation data straight from Deutsche Bahn's own dispatching
@@ -149,10 +177,13 @@ public struct TimetablesClient: Sendable {
         guard let planned = try? await plan(eva: eva, around: time),
               let stop = Self.match(planned, category: category, number: number, plannedTime: time, side: side) else { return nil }
         var event = stop[keyPath: side]
-        if let changed = try? await changes(eva: eva)[stop.id], let change = changed[keyPath: side] {
-            if let actual = change.actual { event?.actual = actual }
-            if let actualPlatform = change.actualPlatform { event?.actualPlatform = actualPlatform }
-            if change.cancelled { event?.cancelled = true }
+        if let changed = try? await changes(eva: eva)[stop.id] {
+            if let change = changed[keyPath: side] {
+                if let actual = change.actual { event?.actual = actual }
+                if let actualPlatform = change.actualPlatform { event?.actualPlatform = actualPlatform }
+                if change.cancelled { event?.cancelled = true }
+            }
+            event?.messages = changed.messages
         }
         return event
     }
@@ -186,6 +217,7 @@ public struct TimetablesClient: Sendable {
         var arrival: TimeInfo?
         var arrivalPlatform: PlatformInfo?
         var cancelled = false
+        var messages: [TimetablesMessage] = []
 
         if let eva = await eva(for: leg.origin),
            let event = await liveEvent(eva: eva, category: category, number: number, time: leg.departure.planned, side: \.departure) {
@@ -193,6 +225,7 @@ public struct TimetablesClient: Sendable {
             departure = TimeInfo(planned: leg.departure.planned, actual: event.actual ?? leg.departure.actual ?? leg.departure.planned)
             departurePlatform = Self.mergedPlatform(existing: leg.departurePlatform, event: event)
             if event.cancelled { cancelled = true }
+            messages += event.messages
         }
 
         if let eva = await eva(for: leg.destination),
@@ -200,18 +233,27 @@ public struct TimetablesClient: Sendable {
             arrival = TimeInfo(planned: leg.arrival.planned, actual: event.actual ?? leg.arrival.actual ?? leg.arrival.planned)
             arrivalPlatform = Self.mergedPlatform(existing: leg.arrivalPlatform, event: event)
             if event.cancelled { cancelled = true }
+            messages += event.messages
         }
 
         guard departure != nil || arrival != nil else { return nil }
         return TimetablesLegOverride(departure: departure, departurePlatform: departurePlatform,
-                                      arrival: arrival, arrivalPlatform: arrivalPlatform, cancelled: cancelled)
+                                      arrival: arrival, arrivalPlatform: arrivalPlatform, cancelled: cancelled,
+                                      messages: TimetablesMessage.resolve(messages))
     }
 
     /// `leg`'s stopovers with DB Timetables' delays laid over them: where DB knows a stop its data wins
     /// (unchanged means on time), and a stop DB can't match keeps whatever delay it already had.
     public func stopoversWithRealtime(for leg: Leg) async -> [Stopover] {
-        guard canLookUp(leg), let line = leg.line else { return leg.stopovers }
-        return await stopoversWithRealtime(leg.stopovers, line: line)
+        await liveStopovers(for: leg).stopovers
+    }
+
+    /// `stopoversWithRealtime(for:)` plus every delay reason and notice DB reports at any of those
+    /// stops — what DB Navigator lists under "Aktuelle Informationen" for this part of the ride.
+    public func liveStopovers(for leg: Leg) async -> (stopovers: [Stopover], messages: [TrainMessage]) {
+        guard canLookUp(leg), let line = leg.line else { return (leg.stopovers, []) }
+        let (stopovers, messages) = await stopoversWithRealtime(leg.stopovers, line: line)
+        return (stopovers, TimetablesMessage.resolve(messages))
     }
 
     /// `trip` with DB Timetables delays laid over it (see `stopoversWithRealtime(for:)`);
@@ -219,13 +261,16 @@ public struct TimetablesClient: Sendable {
     public func tripWithRealtime(_ trip: Trip) async -> Trip {
         guard credentials.isConfigured, let line = trip.line else { return trip }
         var trip = trip
-        trip.stopovers = await stopoversWithRealtime(trip.stopovers, line: line)
+        let (stopovers, messages) = await stopoversWithRealtime(trip.stopovers, line: line)
+        trip.stopovers = stopovers
+        trip.messages = TrainMessage.merged(trip.messages + TimetablesMessage.resolve(messages))
         return trip
     }
 
-    private func stopoversWithRealtime(_ original: [Stopover], line: Line) async -> [Stopover] {
-        guard let number = line.dispatchNumber, let category = Self.category(from: line.name) else { return original }
+    private func stopoversWithRealtime(_ original: [Stopover], line: Line) async -> ([Stopover], [TimetablesMessage]) {
+        guard let number = line.dispatchNumber, let category = Self.category(from: line.name) else { return (original, []) }
         var stops = original
+        var messages: [TimetablesMessage] = []
         await withTaskGroup(of: (Int, TimetablesEvent?, TimetablesEvent?).self) { group in
             for index in stops.indices {
                 let stop = stops[index]
@@ -243,6 +288,7 @@ public struct TimetablesClient: Sendable {
                 }
             }
             for await (index, arrival, departure) in group {
+                messages += (arrival?.messages ?? []) + (departure?.messages ?? [])
                 if let arrival {
                     let known = stops[index].arrival
                     stops[index].arrival?.actual = arrival.actual ?? known?.actual ?? known?.planned
@@ -255,7 +301,7 @@ public struct TimetablesClient: Sendable {
                 }
             }
         }
-        return stops
+        return (stops, messages)
     }
 
     /// Combines whatever platform a caller already had with a DB Timetables `event`: a genuine
@@ -415,6 +461,8 @@ public struct TimetablesClient: Sendable {
 /// endpoints: a `<timetable>` of `<s id="...">` stops, each with an optional `<tl>` (trip label:
 /// category `c`, number `n`) and optional `<ar>`/`<dp>` (arrival/departure: planned time `pt`,
 /// changed time `ct`, planned/changed platform `pp`/`cp`, changed status `cs` — "c" means cancelled).
+/// `fchg` also nests `<m>` messages (type `t`, code `c`, timestamp `ts`, deleted `del`) in a stop and
+/// its `<ar>`/`<dp>`; the delay-reason (`t="d"`) and quality (`t="q"`) ones are collected per stop.
 enum TimetablesXMLParser {
     static func parse(_ data: Data) -> [TimetablesStop] {
         let delegate = Delegate()
@@ -431,12 +479,13 @@ enum TimetablesXMLParser {
         private var number: String?
         private var arrival: TimetablesEvent?
         private var departure: TimetablesEvent?
+        private var messages: [TimetablesMessage] = []
 
         func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?,
                     qualifiedName: String?, attributes: [String: String] = [:]) {
             switch elementName {
             case "s":
-                id = attributes["id"]; category = nil; number = nil; arrival = nil; departure = nil
+                id = attributes["id"]; category = nil; number = nil; arrival = nil; departure = nil; messages = []
             case "tl":
                 category = attributes["c"]
                 number = attributes["n"]
@@ -444,13 +493,21 @@ enum TimetablesXMLParser {
                 arrival = Self.event(from: attributes)
             case "dp":
                 departure = Self.event(from: attributes)
+            case "m":
+                guard id != nil, attributes["t"] == "d" || attributes["t"] == "q", attributes["del"] != "1",
+                      let code = attributes["c"].flatMap({ Int($0) }) else { break }
+                messages.append(TimetablesMessage(code: code, timestamp: attributes["ts"].flatMap { Self.parseTime(String($0.prefix(10))) }))
             default: break
             }
         }
 
         func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName: String?) {
-            guard elementName == "s", let id, arrival != nil || departure != nil else { return }
-            stops.append(TimetablesStop(id: id, category: category, number: number, arrival: arrival, departure: departure))
+            guard elementName == "s", let id else { return }
+            // Keep the id around until here: `<m>` elements only count while inside a stop.
+            defer { self.id = nil }
+            guard arrival != nil || departure != nil || !messages.isEmpty else { return }
+            stops.append(TimetablesStop(id: id, category: category, number: number, arrival: arrival,
+                                        departure: departure, messages: messages))
         }
 
         private static func event(from attributes: [String: String]) -> TimetablesEvent? {
