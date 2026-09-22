@@ -8,12 +8,16 @@ struct JourneyDetailView: View {
     /// Old plans are shown without actions.
     var readOnly = false
     var title = "Reiseplan"
+    /// Options this journey was searched with, so a re-plan can pick them up.
+    var search: ConnectionSearch?
 
     @Environment(AppModel.self) private var model
     @State private var legToReplace: LegSelection?
+    @State private var legToReplan: LegSelection?
     @State private var checkinLeg: Leg?
     @State private var showAlternatives = false
     @State private var showJourneyMap = false
+    @State private var showJourneyEditor = false
 
     struct LegSelection: Identifiable {
         let index: Int
@@ -32,6 +36,7 @@ struct JourneyDetailView: View {
                             leg: leg,
                             transferBroken: journey.brokenTransferIndices.contains(journey.transitLegs.firstIndex(of: leg) ?? -1),
                             onReplace: readOnly ? nil : { legToReplace = LegSelection(index: index, leg: leg) },
+                            onReplan: readOnly ? nil : { legToReplan = LegSelection(index: index, leg: leg) },
                             onCheckin: readOnly ? nil : { checkinLeg = leg }
                         )
                         if let info = transferInfo(after: leg) {
@@ -72,6 +77,18 @@ struct JourneyDetailView: View {
                 }
             }
         }
+        .sheet(item: $legToReplan) { selection in
+            JourneyReplanSheet(journey: journey, startLeg: selection.leg, finalDestination: finalDestination,
+                               search: replanSearch) { updated in
+                withAnimation { journey = updated }
+            }
+        }
+        .sheet(isPresented: $showJourneyEditor) {
+            JourneyReplanSheet(journey: journey, finalDestination: finalDestination,
+                               search: replanSearch) { updated in
+                withAnimation { journey = updated }
+            }
+        }
         .sheet(item: $checkinLeg) { CheckinSheet(leg: $0) }
         .sheet(isPresented: $showAlternatives) {
             if let entry = model.savedEntry(for: journey) {
@@ -88,6 +105,9 @@ struct JourneyDetailView: View {
             if let refreshed, refreshed != journey { journey = refreshed }
         }
     }
+
+    /// The options to start a re-plan from: this view's own, else whatever was saved with the journey.
+    private var replanSearch: ConnectionSearch? { search ?? model.savedEntry(for: journey)?.search }
 
     /// Pull-to-refresh: re-fetches realtime data (delays, platforms, cancellations) for every leg.
     private func refreshRealtime() async {
@@ -239,8 +259,8 @@ struct JourneyDetailView: View {
 
     private var liveActivityButton: some View {
         VStack(spacing: 8) {
-            HStack(spacing: 8) {
-                SaveJourneyButton(journey: journey)
+            HStack(spacing: 10) {
+                SaveJourneyButton(journey: journey, search: search, shortLabel: true)
                 if let shareURL = journey.shareURL {
                     ShareLink(
                         item: shareURL,
@@ -254,6 +274,17 @@ struct JourneyDetailView: View {
                     .glassEffect(.regular, in: .circle)
                     .accessibilityLabel("Reise teilen")
                 }
+                Button {
+                    showJourneyEditor = true
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(width: 40, height: 40)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(.regular, in: .circle)
+                .tint(.brand)
+                .accessibilityLabel("Reise bearbeiten")
             }
             if model.isSaved(journey) {
                 Label(model.liveActivities.isActive(journey)
@@ -332,6 +363,7 @@ struct LegCard: View {
     let leg: Leg
     var transferBroken = false
     var onReplace: (() -> Void)?
+    var onReplan: (() -> Void)?
     var onCheckin: (() -> Void)?
 
     @State private var showStops = false
@@ -441,7 +473,7 @@ struct LegCard: View {
                 }
                 ForEach(leg.remarks, id: \.self) { RemarkRow(text: $0) }
 
-                if leg.line?.operatorName != nil || onReplace != nil || onCheckin != nil {
+                if leg.line?.operatorName != nil || onReplace != nil || onReplan != nil || onCheckin != nil {
                     Button {
                         withAnimation(.snappy) { showDetails.toggle() }
                     } label: {
@@ -462,10 +494,14 @@ struct LegCard: View {
                                 .foregroundStyle(.secondary)
                         }
 
-                        if onReplace != nil || onCheckin != nil {
-                            HStack(spacing: 10) {
+                        if onReplace != nil || onReplan != nil || onCheckin != nil {
+                            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)],
+                                      spacing: 10) {
                                 if let onReplace {
                                     ActionTileButton(title: "Anderer Zug", systemImage: "arrow.left.arrow.right", tint: .primary, action: onReplace)
+                                }
+                                if let onReplan {
+                                    ActionTileButton(title: "Ausstieg wechseln", systemImage: "arrow.down.right.circle.fill", tint: .brand, action: onReplan)
                                 }
                                 if let onCheckin {
                                     ActionTileButton(title: "Träwelling", systemImage: "checkmark.seal.fill", tint: .brand, action: onCheckin)
@@ -643,7 +679,7 @@ struct AlternativeRow: View {
 #Preview("Reiseplan-Teilstrecke") {
     ScrollView {
         VStack(spacing: 16) {
-            LegCard(leg: PreviewData.firstLeg, onReplace: {}, onCheckin: {})
+            LegCard(leg: PreviewData.firstLeg, onReplace: {}, onReplan: {}, onCheckin: {})
             TransferRow(from: PreviewData.firstLeg, to: PreviewData.secondLeg, walk: PreviewData.walk)
             LegCard(leg: PreviewData.secondLeg, onReplace: {}, onCheckin: {})
             AlternativeRow(leg: PreviewData.secondLeg, current: PreviewData.firstLeg)
