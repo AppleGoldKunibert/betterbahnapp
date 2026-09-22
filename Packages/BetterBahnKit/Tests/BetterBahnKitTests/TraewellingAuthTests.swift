@@ -68,6 +68,23 @@ import Testing
             try await client.completeLogin(callbackURL: callback, pkce: PKCE(state: "wrong-state"))
         }
     }
+
+    @Test func updateCheckinSendsBothManualTimeKeySpellings() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StatusUpdateRequestProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let store = TokenStore(service: "BetterBahnKitTests.\(UUID().uuidString)")
+        store.save(OAuthToken(accessToken: "test-token", refreshToken: nil, expiresAt: .distantFuture))
+        let client = TraewellingClient(
+            config: TraewellingConfig(clientID: "public-client"),
+            http: HTTPClient(session: session),
+            store: store
+        )
+        let departure = Date(timeIntervalSince1970: 1_700_000_000)
+        let arrival = Date(timeIntervalSince1970: 1_700_003_600)
+        _ = try await client.updateCheckin(statusId: 42, departure: departure, arrival: arrival)
+    }
 }
 
 private final class OAuthTokenRequestProtocol: URLProtocol, @unchecked Sendable {
@@ -108,6 +125,47 @@ private final class OAuthTokenRequestProtocol: URLProtocol, @unchecked Sendable 
         }
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data("{}".utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+private final class StatusUpdateRequestProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        #expect(request.url?.absoluteString == "https://traewelling.de/api/v1/status/42")
+        #expect(request.httpMethod == "PUT")
+        var body = request.httpBody ?? Data()
+        if let stream = request.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            var buffer = [UInt8](repeating: 0, count: 1024)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                guard count > 0 else { break }
+                body.append(contentsOf: buffer.prefix(count))
+            }
+        }
+        let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any]
+        #expect(json?["manualDeparture"] as? String == "2023-11-14T22:13:20Z")
+        #expect(json?["manual_departure"] as? String == "2023-11-14T22:13:20Z")
+        #expect(json?["manualArrival"] as? String == "2023-11-14T23:13:20Z")
+        #expect(json?["manual_arrival"] as? String == "2023-11-14T23:13:20Z")
+        guard let url = request.url,
+              let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil) else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+        let statusJSON = """
+        {"data":{"id":101,"createdAt":"2026-09-10T08:00:00+00:00","checkin":{"trip":5,"category":"nationalExpress","lineName":"ICE 645","journeyNumber":645,"distance":290000,"duration":160,"manualDeparture":null,"manualArrival":null,
+        "origin":{"name":"Köln Hbf","station":{"id":1,"name":"Köln Hbf","latitude":50.943,"longitude":6.958},"departurePlanned":"2026-09-10T08:12:00+00:00","departureReal":"2026-09-10T08:16:00+00:00"},
+        "destination":{"name":"Hannover Hbf","station":{"id":2,"name":"Hannover Hbf","latitude":52.376,"longitude":9.741},"arrivalPlanned":"2026-09-10T10:54:00+00:00","arrivalReal":null}}}}
+        """
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(statusJSON.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
 
