@@ -37,7 +37,8 @@ struct SavedJourneyRow: View {
         let blocking = entry.issues.first(where: \.isBlocking)
         NavigationLink(value: ConnectionsRoute.journey(JourneyRoute(
             journey: entry.journey,
-            finalDestination: entry.journey.legs.last?.destination ?? entry.journey.legs[0].destination))) {
+            finalDestination: entry.journey.legs.last?.destination ?? entry.journey.legs[0].destination,
+            search: entry.search))) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
                     Image(systemName: "calendar")
@@ -109,18 +110,24 @@ struct PastTripsView: View {
 /// Save/unsave toggle for a journey.
 struct SaveJourneyButton: View {
     let journey: Journey
+    /// Options the journey was found with, kept with it so a re-plan can start from them.
+    var search: ConnectionSearch?
+    /// Shortens the label to just "Speichern", so the button can share its row with the round
+    /// share/edit actions without squeezing them out.
+    var shortLabel = false
     @Environment(AppModel.self) private var model
+
+    private var title: String {
+        if shortLabel { return model.isSaved(journey) ? "Gespeichert" : "Speichern" }
+        return model.isSaved(journey) ? "Reise gespeichert" : "Reise speichern"
+    }
 
     var body: some View {
         let saved = model.isSaved(journey)
-        Button {
-            withAnimation(.snappy) {
-                if saved { model.unsave(journey) } else { model.save(journey) }
-            }
-        } label: {
-            Label(saved ? "Reise gespeichert" : "Reise speichern",
-                  systemImage: saved ? "bookmark.fill" : "bookmark")
+        Button(action: { toggle(saved) }) {
+            Label(title, systemImage: saved ? "bookmark.fill" : "bookmark")
                 .font(.headline)
+                .lineLimit(1)
                 .frame(maxWidth: .infinity)
                 .contentTransition(.symbolEffect(.replace))
         }
@@ -128,5 +135,11 @@ struct SaveJourneyButton: View {
         .tint(saved ? Color.punctual : Color.brand)
         .controlSize(.large)
         .sensoryFeedback(.success, trigger: saved)
+    }
+
+    private func toggle(_ saved: Bool) {
+        withAnimation(.snappy) {
+            if saved { model.unsave(journey) } else { model.save(journey, search: search) }
+        }
     }
 }

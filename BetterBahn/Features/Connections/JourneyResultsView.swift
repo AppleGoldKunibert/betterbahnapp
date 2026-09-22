@@ -97,7 +97,7 @@ struct JourneyResultsView: View {
                 }
 
                 ForEach(Array(visibleJourneys.enumerated()), id: \.element.id) { index, journey in
-                    NavigationLink(value: ConnectionsRoute.journey(JourneyRoute(journey: journey, finalDestination: search.to))) {
+                    NavigationLink(value: ConnectionsRoute.journey(JourneyRoute(journey: journey, finalDestination: search.to, search: search))) {
                         JourneyCard(journey: journey)
                             .overlay {
                                 if !requirements.isEmpty, index == 0 {

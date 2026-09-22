@@ -120,6 +120,12 @@ struct TripContent: View {
     @Binding var exitID: String?
     /// When false, stops are shown read-only (e.g. viewing the full route of a leg already booked).
     var interactive = true
+    /// Locks the boarding stop, so tapping only ever moves the exit (used when re-planning a
+    /// journey from a train you are already on).
+    var exitOnly = false
+    /// Called when the user taps a stop, so callers can react to a hand-picked change only (the
+    /// bindings also move when a caller seeds them itself).
+    var onSelectStop: ((Stopover) -> Void)?
     /// Tapping any stop time flips every stop between real-time and scheduled times — app-wide, and remembered.
     @AppStorage("showPlannedTimes") private var showPlannedTimes = false
 
@@ -152,7 +158,8 @@ struct TripContent: View {
             if interactive {
                 HStack(spacing: 8) {
                     Image(systemName: "hand.tap.fill").foregroundStyle(Color.brand)
-                    Text("Tippe auf Halte, um Ein- und Ausstieg zu wählen.")
+                    Text(exitOnly ? "Tippe auf einen Halt, um dort auszusteigen."
+                                  : "Tippe auf Halte, um Ein- und Ausstieg zu wählen.")
                     Spacer()
                 }
                 .font(.caption)
@@ -242,11 +249,14 @@ struct TripContent: View {
         withAnimation(.snappy) {
             if let boardingIndex, index > boardingIndex {
                 exitID = stop.id
-            } else {
+            } else if !exitOnly {
                 boardingID = stop.id
                 exitID = nil
+            } else {
+                return
             }
         }
+        onSelectStop?(stop)
     }
 }
 
