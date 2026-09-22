@@ -186,7 +186,7 @@ struct TravelMapView: View {
             let hasAny = !model.savedJourneys.isEmpty || !model.traewellingTrips.isEmpty
             Text(hasAny ? "Keine Fahrten in diesem Zeitraum" : "Noch keine Fahrten")
                 .font(.headline)
-            Text(hasAny ? "Wähle einen längeren Zeitraum." : "Gespeicherte Reisen und deine Träwelling-Check-ins erscheinen hier auf der Karte.")
+            Text(hasAny ? "Wähle einen längeren Zeitraum." : "Deine gespeicherten Reisen erscheinen hier auf der Karte.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

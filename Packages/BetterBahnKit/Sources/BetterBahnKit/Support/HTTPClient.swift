@@ -15,7 +15,7 @@ public enum TransitError: Error, Sendable, Equatable, LocalizedError {
         case .decoding(let detail): "Antwort konnte nicht gelesen werden: \(detail)"
         case .notFound(let what): "\(what) nicht gefunden."
         case .invalidInput(let detail): detail
-        case .timeout: "Zeitüberschreitung – der Server antwortet nicht."
+        case .timeout: "Keine Antwort. Bitte versuch es später noch mal."
         }
     }
 }

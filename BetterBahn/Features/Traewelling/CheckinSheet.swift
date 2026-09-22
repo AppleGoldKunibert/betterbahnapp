@@ -58,7 +58,7 @@ struct CheckinSheet: View {
                 Button("Manuell eintragen") { send(allowManualTrip: true) }
                 Button("Abbrechen", role: .cancel) {}
             } message: {
-                Text("Träwelling kennt \(leg.line?.name ?? "diesen Zug") nicht. Du kannst ihn manuell eintragen – die Verspätung wird dann automatisch aktualisiert, solange BetterBahn geöffnet ist.")
+                Text("Träwelling kennt \(leg.line?.name ?? "diesen Zug") nicht. Du kannst ihn selbst eintragen.")
             }
         }
     }
@@ -68,7 +68,7 @@ struct CheckinSheet: View {
             VStack(spacing: 14) {
                 IconTile(systemImage: "person.badge.key.fill", color: .brand, size: 52)
                 Text("Bei Träwelling anmelden").font(.headline)
-                Text("Zum Einchecken brauchst du ein Träwelling-Konto. Die Anmeldung läuft sicher über traewelling.de.")
+                Text("Zum Einchecken brauchst du ein Träwelling-Konto.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

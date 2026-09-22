@@ -231,7 +231,7 @@ struct ConnectionsView: View {
                 }
 
                 if !viaRows.isEmpty {
-                    Label("Mit Zwischenhalten wird immer ab der gewählten Zeit gesucht.", systemImage: "info.circle")
+                    Label("Mit Zwischenhalten suchen wir ab der gewählten Abfahrtszeit.", systemImage: "info.circle")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -255,7 +255,7 @@ struct ConnectionsView: View {
 
     private var transfersPicker: some View {
         VStack(alignment: .leading, spacing: 8) {
-            optionLabel("Max. Umstiege", subtitle: "Weniger Umstiege, ggf. längere Fahrzeit", icon: "arrow.triangle.swap", color: .brand)
+            optionLabel("Max. Umstiege", subtitle: "Weniger Umsteigen, evtl. länger unterwegs", icon: "arrow.triangle.swap", color: .brand)
             MaxTransfersPicker(maxTransfers: $maxTransfers)
         }
     }

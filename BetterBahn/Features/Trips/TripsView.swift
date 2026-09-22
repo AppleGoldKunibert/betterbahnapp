@@ -14,7 +14,7 @@ struct UpcomingTripsSection: View {
                 Card {
                     HStack(spacing: 12) {
                         IconTile(systemImage: "bookmark", color: .secondary.opacity(0.6), size: 34)
-                        Text("Gespeicherte Reisen erscheinen hier. Die nächste läuft als Live Activity.")
+                        Text("Hier erscheinen deine gespeicherten Reisen.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }

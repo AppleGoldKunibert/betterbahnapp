@@ -23,8 +23,8 @@ public enum ConnectionIssue: Sendable, Hashable, Identifiable {
 
     public var title: String {
         switch self {
-        case .transferMissed(let at, _, _, _): "Anschluss in \(at) nicht mehr möglich"
-        case .transferAtRisk(let at, _, _, _): "Anschluss in \(at) gefährdet"
+        case .transferMissed(let at, _, _, _): "Umstieg in \(at) klappt nicht mehr"
+        case .transferAtRisk(let at, _, _, _): "Umstieg in \(at) wird knapp"
         case .legCancelled(let line, _, _): "\(line) fällt aus"
         }
     }
@@ -34,7 +34,7 @@ public enum ConnectionIssue: Sendable, Hashable, Identifiable {
         case .transferMissed(_, let arriving, let departing, let buffer):
             buffer < 0
                 ? "\(departing) fährt \(-buffer) Min. bevor \(arriving) ankommt."
-                : "Nur \(buffer) Min. Umstiegszeit zwischen \(arriving) und \(departing)."
+                : "Nur \(buffer) Min. zum Umsteigen von \(arriving) in \(departing)."
         case .transferAtRisk(_, let arriving, let departing, let buffer):
             "\(buffer) Min. zum Umsteigen von \(arriving) in \(departing)."
         case .legCancelled(_, let from, let to):

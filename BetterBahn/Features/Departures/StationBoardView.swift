@@ -65,7 +65,7 @@ struct StationBoardView: View {
 
                         if !isLoading, visible.isEmpty, error == nil, lastUpdate != nil {
                             ContentUnavailableView("Keine Züge", systemImage: "tram.fill",
-                                                   description: Text(isFiltered ? "Probiere es ohne Filter." : "In den nächsten 90 Minuten fährt hier nichts."))
+                                                   description: Text(isFiltered ? "Versuch es ohne Filter." : "In den nächsten 90 Minuten fährt hier nichts."))
                                 .padding(.top, 40)
                         }
                         if entries.first?.source == .transitous {
@@ -162,7 +162,7 @@ struct StationBoardView: View {
             ContentUnavailableView {
                 Label("Bahnhof wählen", systemImage: "building.2.fill")
             } description: {
-                Text("Wähle einen Bahnhof, um alle Abfahrten und Ankünfte zu sehen – inklusive Züge ohne Einstieg. Mit dem Stern speicherst du Favoriten.")
+                Text("Such einen Bahnhof, um Abfahrten und Ankünfte zu sehen. Mit dem Stern merkst du ihn dir.")
             }
             .padding(.top, 30)
         } else {

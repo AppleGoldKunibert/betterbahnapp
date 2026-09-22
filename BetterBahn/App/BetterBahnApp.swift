@@ -104,7 +104,7 @@ struct RootView: View {
         .alert("Reise-Link ungültig", isPresented: $showInvalidShareLinkAlert) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("Dieser Reise-Link konnte nicht gelesen werden.")
+            Text("Dieser Link funktioniert leider nicht.")
         }
     }
 }

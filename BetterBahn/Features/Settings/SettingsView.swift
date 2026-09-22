@@ -165,7 +165,7 @@ struct SettingsView: View {
                     .listRowInsets(EdgeInsets())
             }
             Toggle(isOn: $settings.syncTraewellingToMap) {
-                IconLabel(title: "Fahrten in Karte übernehmen", systemImage: "map.fill", color: .teal)
+                IconLabel(title: "Fahrten auf der Karte zeigen", systemImage: "map.fill", color: .teal)
             }
             .tint(.brand)
             if isLoggedIn, settings.syncTraewellingToMap {
@@ -217,22 +217,22 @@ struct BC100RulesView: View {
             Section {
                 HStack(alignment: .top, spacing: 12) {
                     IconTile(systemImage: "info.circle.fill", color: .blue)
-                    Text("Die BahnCard 100 gilt in DB-Zügen und im Nahverkehr, aber nicht bei unabhängigen Fernverkehrsanbietern. Passe die Liste an, falls etwas fehlt.")
+                    Text("Die BahnCard 100 gilt nicht bei allen Anbietern. Hier kannst du die Liste anpassen.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
             }
             Section {
-                TextField("Betreiber", text: $operators, axis: .vertical)
+                TextField("Anbieter", text: $operators, axis: .vertical)
             } header: {
-                Label("Betreiber (kommagetrennt)", systemImage: "building.2.fill")
+                Label("Anbieter (mit Komma trennen)", systemImage: "building.2.fill")
             } footer: {
-                Text("Züge, deren Betreibername einen dieser Begriffe enthält, werden ausgeblendet.")
+                Text("Züge dieser Anbieter werden ausgeblendet.")
             }
             Section {
                 TextField("Präfixe", text: $prefixes, axis: .vertical)
             } header: {
-                Label("Linien-Präfixe (kommagetrennt)", systemImage: "textformat.abc")
+                Label("Zugnamen, die beginnen mit (mit Komma trennen)", systemImage: "textformat.abc")
             }
             Section {
                 Button {
@@ -293,7 +293,7 @@ struct QuickTagsView: View {
                     save()
                 }
             } footer: {
-                Text("Diese Tags werden dir beim Einchecken als Schnellauswahl vorgeschlagen. Tags ohne festen Wert fragen beim Einchecken nach einem Wert, z. B. für eine Sitzplatznummer.")
+                Text("Diese Tags schlagen wir dir beim Einchecken vor. Ohne festen Wert fragen wir dich jedes Mal, z. B. nach deinem Sitzplatz.")
             }
             Section {
                 Button {
@@ -343,7 +343,7 @@ struct AddQuickTagSheet: View {
                         .textInputAutocapitalization(.never)
                     TextField("Fester Wert (optional)", text: $value)
                 } footer: {
-                    Text("Lass den Wert leer, um beim Einchecken danach gefragt zu werden. Mit einem festen Wert wird der Tag durch Antippen direkt gesetzt, z. B. Schlüssel „triebzug“ mit Wert „Ja“.")
+                    Text("Ohne Wert fragen wir dich beim Einchecken. Mit Wert reicht ein Tipp.")
                 }
             }
             .navigationTitle("Neuer Tag")
@@ -394,12 +394,12 @@ struct AdvancedSettingsView: View {
                 } label: {
                     IconLabel(title: "API-Key", systemImage: "lock.fill", color: .gray)
                 }
-                Link("Eigene Zugangsdaten auf developers.deutschebahn.com beantragen",
+                Link("Zugang bei der DB beantragen",
                      destination: URL(string: "https://developers.deutschebahn.com/db-api-marketplace/apis/product/timetables")!)
             } header: {
-                Text("DB-Echtzeitdaten")
+                Text("Eigener DB-Zugang")
             } footer: {
-                Text("BetterBahn gleicht Verspätungen und Gleisänderungen bereits standardmäßig zusätzlich mit der offiziellen DB-Timetables-API ab, nützlich wenn Transitous sie verspätet oder gar nicht meldet. Trage hier nur eigene Zugangsdaten ein, wenn du den mitgelieferten Zugang ersetzen möchtest.")
+                Text("Verspätungen und Gleiswechsel kommen schon direkt von der DB. Nur ausfüllen, wenn du einen eigenen Zugang nutzen möchtest.")
             }
         }
         .navigationTitle("Erweiterte Einstellungen")

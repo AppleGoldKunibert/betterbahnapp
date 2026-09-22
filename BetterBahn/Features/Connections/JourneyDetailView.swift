@@ -240,7 +240,7 @@ struct JourneyDetailView: View {
                 if !readOnly {
                     liveActivityButton
                 } else {
-                    Label("Früherer Plan – nicht mehr aktiv", systemImage: "archivebox.fill")
+                    Label("Alter Plan", systemImage: "archivebox.fill")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity)
@@ -293,8 +293,8 @@ struct JourneyDetailView: View {
             }
             if model.isSaved(journey) {
                 Label(model.liveActivities.isActive(journey)
-                      ? "Wird als Live Activity angezeigt"
-                      : "Erscheint als Live Activity ab 30 Minuten vor der Abfahrt",
+                      ? "Läuft als Live-Aktivität"
+                      : "Startet 30 Min. vor Abfahrt als Live-Aktivität",
                       systemImage: "bolt.badge.clock.fill")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -305,7 +305,7 @@ struct JourneyDetailView: View {
                             && (model.manualLiveActivityJourneyID == entry.id || model.liveActivities.isActive(journey)) },
                         set: { model.setLiveActivity($0, for: entry.id) }
                     )) {
-                        Label("Diese Reise als Live Activity zeigen", systemImage: "arrow.left.arrow.right.circle.fill")
+                        Label("Als Live-Aktivität zeigen", systemImage: "arrow.left.arrow.right.circle.fill")
                             .font(.caption.weight(.semibold))
                     }
                     .tint(.brand)
@@ -477,7 +477,7 @@ struct LegCard: View {
                 }
 
                 if transferBroken {
-                    RemarkRow(text: "Dieser Anschluss ist wegen Verspätung nicht mehr erreichbar.")
+                    RemarkRow(text: "Wegen Verspätung klappt dieser Umstieg nicht mehr.")
                 }
                 ForEach(leg.remarks, id: \.self) { RemarkRow(text: $0) }
 
@@ -605,7 +605,7 @@ struct AlternativeTrainsSheet: View {
                     ProgressView("Suche Züge …")
                 } else if alternatives.isEmpty, error == nil {
                     ContentUnavailableView("Keine anderen Züge", systemImage: "tram.fill",
-                                           description: Text("Kein anderer Zug fährt in diesem Zeitraum direkt von \(leg.origin.displayName) nach \(leg.destination.displayName)."))
+                                           description: Text("Gerade fährt kein anderer Zug direkt von \(leg.origin.displayName) nach \(leg.destination.displayName)."))
                 }
             }
             .navigationTitle("Anderen Zug wählen")
@@ -758,7 +758,7 @@ struct AlternativeJourneySheet: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    Text("Der bisherige Reiseplan bleibt unter „Frühere Reisepläne“ erhalten.")
+                    Text("Deinen alten Plan findest du weiter unter „Frühere Reisepläne“.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity)

@@ -204,7 +204,7 @@ struct JourneyReplanSheet: View {
         if !requirements.isEmpty {
             requirementList
             if breaksBoardingRules {
-                warningBanner("Ein- oder Ausstieg an einer gewählten Station ist laut Fahrplan nicht vorgesehen (Nur Einstieg/Nur Ausstieg).")
+                warningBanner("An einem gewählten Halt ist Ein- oder Aussteigen laut Fahrplan nicht erlaubt.")
             }
         }
         if let error { ErrorBanner(error: error) }
@@ -222,7 +222,7 @@ struct JourneyReplanSheet: View {
         if isScanningExits, !isSearching {
             HStack(spacing: 10) {
                 ProgressView()
-                Text("Prüfe, ob ein anderer Halt schneller ist …").font(.callout).foregroundStyle(.secondary)
+                Text("Suche einen schnelleren Weg …").font(.callout).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 4)
@@ -242,14 +242,14 @@ struct JourneyReplanSheet: View {
                 .buttonStyle(.plain)
                 .disabled(applyingID != nil)
             }
-            Text("Der bisherige Reiseplan bleibt unter „Frühere Reisepläne“ erhalten.")
+            Text("Deinen alten Plan findest du weiter unter „Frühere Reisepläne“.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity)
                 .padding(.top, 4)
         } else if hasSearched, !isSearching, error == nil {
             ContentUnavailableView("Keine Weiterfahrt gefunden", systemImage: "tram.fill",
-                                   description: Text("Mit diesen Filtern geht es ab \(exitStation.displayName) nicht weiter. Versuche andere Verkehrsmittel oder weniger Zwischenhalte."))
+                                   description: Text("Ab \(exitStation.displayName) haben wir nichts gefunden. Versuch es mit weniger Filtern."))
         }
     }
 
@@ -257,7 +257,7 @@ struct JourneyReplanSheet: View {
     private var legPicker: some View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
-                OptionLabel(title: "Ab welchem Zug?", subtitle: "Alles davor bleibt unverändert", icon: "tram.fill")
+                OptionLabel(title: "Ab welchem Zug?", subtitle: "Alles davor bleibt gleich", icon: "tram.fill")
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(journey.transitLegs) { option in
@@ -326,7 +326,7 @@ struct JourneyReplanSheet: View {
                         Text(resolvedTrainNames[requirement.id] ?? requirement.trainName.uppercased())
                             .font(.subheadline.weight(.semibold))
                         Text(requirement.exit.map { "ab \(requirement.boarding.displayName) → \($0.displayName)" }
-                             ?? "ab \(requirement.boarding.displayName) → schnellster Weiterweg")
+                             ?? "ab \(requirement.boarding.displayName) → schnellster Weg")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -404,7 +404,7 @@ struct JourneyReplanSheet: View {
                 .buttonStyle(.glass)
                 .tint(.brand)
                 .controlSize(.large)
-                Text("Nur ein Hinweis – du kannst unten trotzdem umplanen.")
+                Text("Du kannst trotzdem umplanen.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -414,8 +414,8 @@ struct JourneyReplanSheet: View {
     private func stayOnTrainSubtitle(lost: TimeInterval) -> String {
         let minutes = Int(lost / 60)
         guard let planned = journey.arrival?.best else { return "Umplanen kostet \(minutes) Min." }
-        return "Bleibst du sitzen, bist du um \(planned.timeString) in \(finalDestination.displayName) – "
-            + "\(minutes) Min. früher als jede Umplanung hier."
+        return "Bleibst du im Zug, bist du um \(planned.timeString) in \(finalDestination.displayName) – "
+            + "\(minutes) Min. früher."
     }
 
     /// A hint that staying on (or leaving earlier) reaches the goal sooner than the chosen exit.
@@ -440,7 +440,7 @@ struct JourneyReplanSheet: View {
                 if let continuation = option.continuation {
                     JourneyCard(journey: continuation)
                 } else {
-                    Text("Von dort ist es dein Ziel – keine Weiterfahrt nötig.")
+                    Text("Dort bist du schon am Ziel.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -455,7 +455,7 @@ struct JourneyReplanSheet: View {
                 .tint(.punctual)
                 .controlSize(.large)
                 .disabled(applyingID != nil)
-                Text("Nur ein Vorschlag – deine eigene Auswahl bleibt unten stehen.")
+                Text("Nur ein Vorschlag.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -572,7 +572,7 @@ struct JourneyReplanSheet: View {
                     showBufferPopover = true
                 } label: {
                     HStack {
-                        OptionLabel(title: "Umstiegspuffer", subtitle: "\(minTransferMinutes) Min. nach der Ankunft",
+                        OptionLabel(title: "Zeit zum Umsteigen", subtitle: "\(minTransferMinutes) Min.",
                                     icon: "clock.badge.checkmark")
                         Spacer()
                         Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
@@ -596,7 +596,7 @@ struct JourneyReplanSheet: View {
                 Divider()
 
                 VStack(alignment: .leading, spacing: 8) {
-                    OptionLabel(title: "Max. Umstiege", subtitle: "Weniger Umstiege, ggf. längere Fahrzeit",
+                    OptionLabel(title: "Max. Umstiege", subtitle: "Weniger Umsteigen, evtl. länger unterwegs",
                                 icon: "arrow.triangle.swap")
                     MaxTransfersPicker(maxTransfers: $maxTransfers)
                 }
@@ -656,7 +656,7 @@ struct JourneyReplanSheet: View {
                 .tint(.brand)
                 .controlSize(.large)
                 .disabled(applyingID != nil || exitLeg == nil || legIndex == nil)
-                Text("\(exitStation.displayName) ist schon dein Ziel – es braucht keine Weiterfahrt.")
+                Text("\(exitStation.displayName) ist schon dein Ziel.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -703,7 +703,7 @@ struct JourneyReplanSheet: View {
         if isLookingUpCheckin {
             HStack(spacing: 10) {
                 ProgressView()
-                Text("Prüfe deinen Träwelling-Check-in …").font(.callout).foregroundStyle(.secondary)
+                Text("Prüfe deinen Check-in …").font(.callout).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -716,7 +716,7 @@ struct JourneyReplanSheet: View {
                     IconTile(systemImage: "checkmark.seal.fill", color: .punctual, size: 38)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Check-in angepasst").font(.headline)
-                        Text("Dein Träwelling-Check-in endet jetzt in \(exit.destination.displayName).")
+                        Text("Dein Check-in endet jetzt in \(exit.destination.displayName).")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

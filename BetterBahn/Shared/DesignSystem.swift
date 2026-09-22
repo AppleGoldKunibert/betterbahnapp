@@ -416,7 +416,7 @@ struct ErrorBanner: View {
 
 struct SourceNotice: View {
     var body: some View {
-        InfoChip(text: "Daten von Transitous",
+        InfoChip(text: "Fahrplandaten: Transitous",
                  systemImage: "point.3.connected.trianglepath.dotted", tint: .secondary)
     }
 }

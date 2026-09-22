@@ -66,7 +66,7 @@ struct JourneyResultsView: View {
                     if isPlanning {
                         HStack(spacing: 10) {
                             ProgressView()
-                            Text("Route mit deinen Zügen wird geplant …")
+                            Text("Suche Verbindungen mit deinen Zügen …")
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
                         }
@@ -79,11 +79,11 @@ struct JourneyResultsView: View {
                     }
 
                     if let extraTravelTime {
-                        warningBanner("Mit dieser Zugvorgabe dauert die Reise \(extraTravelTime.compactDuration) länger als die schnellste Verbindung.")
+                        warningBanner("Mit diesem Zug bist du \(extraTravelTime.compactDuration) länger unterwegs.")
                     }
 
                     if plan?.breaksBoardingRules == true {
-                        warningBanner("Ein- oder Ausstieg an einer gewählten Station ist laut Fahrplan nicht vorgesehen (Nur Einstieg/Nur Ausstieg).")
+                        warningBanner("An einem gewählten Halt ist Ein- oder Aussteigen laut Fahrplan nicht erlaubt.")
                     }
 
                     if !visibleJourneys.isEmpty {
@@ -119,7 +119,7 @@ struct JourneyResultsView: View {
 
                 VStack(spacing: 8) {
                     if hiddenCount > 0, requirements.isEmpty {
-                        InfoChip(text: "\(hiddenCount) ohne \(model.settings.ticketType.shortName)-Gültigkeit ausgeblendet", systemImage: "eye.slash.fill")
+                        InfoChip(text: "\(hiddenCount) nicht mit \(model.settings.ticketType.shortName) nutzbar", systemImage: "eye.slash.fill")
                     }
                     if source == .transitous {
                         SourceNotice()
@@ -138,8 +138,8 @@ struct JourneyResultsView: View {
             } else if !isLoading, !isPlanning, visibleJourneys.isEmpty, error == nil, planError == nil {
                 ContentUnavailableView("Keine Verbindungen", systemImage: "tram.fill",
                                        description: Text(requirements.isEmpty
-                                                         ? "Versuche eine andere Uhrzeit oder schalte Filter aus."
-                                                         : "Mit den gewählten Zügen ließ sich keine Route bilden."))
+                                                         ? "Versuch eine andere Uhrzeit oder weniger Filter."
+                                                         : "Mit diesen Zügen haben wir keine Verbindung gefunden."))
             }
         }
         .navigationTitle("Verbindungen")
@@ -268,7 +268,7 @@ struct JourneyResultsView: View {
                 .buttonStyle(.glass)
                 .buttonBorderShape(.circle)
                 .controlSize(.large)
-                .accessibilityLabel("Zugvorgaben zurücksetzen")
+                .accessibilityLabel("Alle Züge entfernen")
             }
         }
     }
@@ -296,7 +296,7 @@ struct JourneyResultsView: View {
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Zugvorgabe entfernen")
+                    .accessibilityLabel("Zug entfernen")
                 }
                 .padding(10)
                 .background(Color.card, in: .rect(cornerRadius: 14, style: .continuous))
@@ -308,7 +308,7 @@ struct JourneyResultsView: View {
         if let exit = requirement.exit {
             return "ab \(requirement.boarding.displayName) → \(exit.displayName)"
         }
-        return "ab \(requirement.boarding.displayName) → schnellster Weiterweg"
+        return "ab \(requirement.boarding.displayName) → schnellster Weg"
     }
 
     /// A new requirement usually continues where the last one ends.
@@ -576,8 +576,8 @@ struct TrainNumberSheet: View {
                     }
 
                     Text(exitStation == nil
-                         ? "Ohne Ausstieg wird ab jedem Halt nach dem Einstieg weitergesucht und der schnellste Weg zum Ziel genommen."
-                         : "Ab dem Ausstieg wird die schnellste Weiterfahrt zum Ziel gesucht und zur Gesamtroute zusammengesetzt.")
+                         ? "Ohne Ausstieg suchen wir den schnellsten Weg zum Ziel."
+                         : "Ab dem Ausstieg suchen wir den schnellsten Weg zum Ziel.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 4)
