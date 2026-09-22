@@ -36,7 +36,7 @@ struct TravelMapView: View {
                            customFrom: range == .custom ? customFrom : nil,
                            customTo: range == .custom ? customTo : nil,
                            includeSaved: includeSaved,
-                           includeTraewelling: includeTraewelling)
+                           includeTraewelling: includeTraewelling && model.settings.traewellingEnabled)
     }
 
     var body: some View {
@@ -131,9 +131,13 @@ struct TravelMapView: View {
 
             HStack(spacing: 8) {
                 sourceToggle("Gespeichert", icon: "bookmark.fill", isOn: $includeSaved)
-                sourceToggle("Träwelling", icon: "checkmark.seal.fill", isOn: $includeTraewelling)
+                if model.settings.traewellingEnabled {
+                    sourceToggle("Träwelling", icon: "checkmark.seal.fill", isOn: $includeTraewelling)
+                }
                 Spacer(minLength: 0)
-                if model.isSyncingTraewelling {
+                if !model.settings.traewellingEnabled {
+                    EmptyView()
+                } else if model.isSyncingTraewelling {
                     ProgressView().controlSize(.small)
                         .padding(8)
                         .glassEffect(.regular, in: .circle)
@@ -151,7 +155,7 @@ struct TravelMapView: View {
                 }
             }
 
-            if let error = model.traewellingSyncError {
+            if model.settings.traewellingEnabled, let error = model.traewellingSyncError {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundStyle(Color.slightDelay)

@@ -27,6 +27,25 @@ extension Color {
     static let card = Color(.secondarySystemGroupedBackground)
 }
 
+extension TicketType {
+    /// Title of the "only valid with this ticket" filter toggle.
+    var filterTitle: String { "Nur \(displayName)" }
+
+    var filterSubtitle: String {
+        switch self {
+        case .deutschlandticket: "ICE, IC & Co. ausblenden"
+        case .bahnCard100: "FlixTrain & Co. ausblenden"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .deutschlandticket: "ticket.fill"
+        case .bahnCard100: "creditcard.fill"
+        }
+    }
+}
+
 extension Date {
     var timeString: String { formatted(date: .omitted, time: .shortened) }
 }

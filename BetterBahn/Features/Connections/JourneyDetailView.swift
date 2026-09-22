@@ -35,9 +35,11 @@ struct JourneyDetailView: View {
                         LegCard(
                             leg: leg,
                             transferBroken: journey.brokenTransferIndices.contains(journey.transitLegs.firstIndex(of: leg) ?? -1),
-                            onReplace: readOnly ? nil : { legToReplace = LegSelection(index: index, leg: leg) },
-                            onReplan: readOnly ? nil : { legToReplan = LegSelection(index: index, leg: leg) },
-                            onCheckin: readOnly ? nil : { checkinLeg = leg }
+                            onReplace: readOnly || !model.settings.trainChoiceEnabled ? nil
+                                : { legToReplace = LegSelection(index: index, leg: leg) },
+                            onReplan: readOnly || !model.settings.editJourneyEnabled ? nil
+                                : { legToReplan = LegSelection(index: index, leg: leg) },
+                            onCheckin: readOnly || !model.settings.traewellingEnabled ? nil : { checkinLeg = leg }
                         )
                         if let info = transferInfo(after: leg) {
                             TransferRow(from: leg, to: info.next, walk: info.walk)
@@ -216,8 +218,9 @@ struct JourneyDetailView: View {
                     }
                     InfoChip(text: journey.transfers == 0 ? "Direkt" : "\(journey.transfers) Umstieg\(journey.transfers == 1 ? "" : "e")",
                              systemImage: "arrow.triangle.swap")
-                    if model.bc100Rules.isValid(journey) {
-                        InfoChip(text: "BC100", systemImage: "creditcard.fill", tint: .punctual)
+                    if model.ticketFilter.isValid(journey) {
+                        let ticket = model.settings.ticketType
+                        InfoChip(text: ticket.shortName, systemImage: ticket.symbolName, tint: .punctual)
                     }
                     Spacer(minLength: 0)
                     if !readOnly {
@@ -274,17 +277,19 @@ struct JourneyDetailView: View {
                     .glassEffect(.regular, in: .circle)
                     .accessibilityLabel("Reise teilen")
                 }
-                Button {
-                    showJourneyEditor = true
-                } label: {
-                    Image(systemName: "pencil")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(width: 40, height: 40)
+                if model.settings.editJourneyEnabled {
+                    Button {
+                        showJourneyEditor = true
+                    } label: {
+                        Image(systemName: "pencil")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(width: 40, height: 40)
+                    }
+                    .buttonStyle(.plain)
+                    .glassEffect(.regular, in: .circle)
+                    .tint(.brand)
+                    .accessibilityLabel("Reise bearbeiten")
                 }
-                .buttonStyle(.plain)
-                .glassEffect(.regular, in: .circle)
-                .tint(.brand)
-                .accessibilityLabel("Reise bearbeiten")
             }
             if model.isSaved(journey) {
                 Label(model.liveActivities.isActive(journey)
@@ -543,7 +548,7 @@ struct AlternativeTrainsSheet: View {
     @State private var alternatives: [Leg] = []
     @State private var isLoading = true
     @State private var applyingID: String?
-    @State private var onlyBC100 = false
+    @State private var onlyValidTicket = false
     @State private var error: Error?
 
     var body: some View {
@@ -564,8 +569,8 @@ struct AlternativeTrainsSheet: View {
                                 }
                             }
                             Divider()
-                            Toggle(isOn: $onlyBC100) {
-                                Label("Nur BahnCard 100", systemImage: "creditcard.fill")
+                            Toggle(isOn: $onlyValidTicket) {
+                                Label(model.settings.ticketType.filterTitle, systemImage: model.settings.ticketType.symbolName)
                                     .font(.subheadline.weight(.medium))
                             }
                             .tint(.brand)
@@ -610,8 +615,8 @@ struct AlternativeTrainsSheet: View {
                     Button("Abbrechen", systemImage: "xmark", role: .cancel) { dismiss() }
                 }
             }
-            .task(id: onlyBC100) { await load() }
-            .onAppear { onlyBC100 = model.settings.onlyBC100ByDefault }
+            .task(id: onlyValidTicket) { await load() }
+            .onAppear { onlyValidTicket = model.settings.ticketFilterByDefault }
         }
     }
 
@@ -620,7 +625,7 @@ struct AlternativeTrainsSheet: View {
         defer { isLoading = false }
         do {
             alternatives = try await model.trainPicker.alternatives(
-                for: leg, bc100Rules: onlyBC100 ? model.bc100Rules : nil)
+                for: leg, ticketFilter: onlyValidTicket ? model.ticketFilter : nil)
             error = nil
         } catch is CancellationError {
         } catch {
@@ -790,7 +795,7 @@ struct AlternativeJourneySheet: View {
             let page = try await model.provider.journeys(JourneyQuery(
                 from: restart.from, to: destination, date: restart.date.addingTimeInterval(2 * 60)))
             var results = page.journeys.filter { !$0.connectionIssues().contains(where: \.isBlocking) }
-            if model.settings.onlyBC100ByDefault { results = results.filter(model.bc100Rules.isValid) }
+            if model.settings.ticketFilterByDefault { results = results.filter(model.ticketFilter.isValid) }
             alternatives = results
         } catch {
             self.error = error

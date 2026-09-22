@@ -432,6 +432,17 @@ private final class CrowdedHubStopTimesProtocol: URLProtocol, @unchecked Sendabl
         #expect(!rules.isValid(sleeper))
     }
 
+    @Test func deutschlandticket() {
+        let filter = TicketFilter.deutschlandticket
+        #expect(filter.isValid(regio))
+        #expect(filter.isValid(Line(name: "S 1", number: nil, product: .suburban, operatorName: "DB Regio")))
+        #expect(filter.isValid(Line(name: "Bus EN", number: nil, product: .bus, operatorName: nil)))
+        #expect(!filter.isValid(ice))
+        #expect(!filter.isValid(flix))
+        #expect(!filter.isValid(coach))
+        #expect(!filter.isValid(Line(name: "IC 2013", number: "2013", product: .regional, operatorName: nil)))
+    }
+
     func entry(_ line: Line, kind: BoardKind = .departures, otherEnd: String = "Berlin Hbf", terminal: Bool? = false) -> BoardEntry {
         BoardEntry(kind: kind, tripId: UUID().uuidString, station: station("8000207", "Köln Hbf"), line: line,
                    otherEnd: otherEnd, time: TimeInfo(planned: .now, actual: nil),
@@ -448,7 +459,7 @@ private final class CrowdedHubStopTimesProtocol: URLProtocol, @unchecked Sendabl
     }
 
     @Test func boardProductsAndBC100() {
-        let filter = BoardFilter(products: [.highSpeed, .longDistance], bc100Rules: .default)
+        let filter = BoardFilter(products: [.highSpeed, .longDistance], ticketFilter: .bahnCard100(.default))
         #expect(filter.includes(entry(ice)))
         #expect(!filter.includes(entry(flix)))
         #expect(!filter.includes(entry(regio)))

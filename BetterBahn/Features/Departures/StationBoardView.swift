@@ -8,7 +8,7 @@ struct StationBoardView: View {
     @State private var date = Date.now
     @State private var useNow = true
     @State private var products: Set<Product> = Set(Product.allCases)
-    @State private var onlyBC100 = false
+    @State private var onlyValidTicket = false
     @State private var entries: [BoardEntry] = []
     /// Open trips; the tab bar is hidden while one is showing (see `ConnectionsRoute` for why it's done here).
     @State private var path: [BoardEntry] = []
@@ -18,7 +18,7 @@ struct StationBoardView: View {
     @FocusState private var stationFocused: Bool?
 
     private var filter: BoardFilter {
-        BoardFilter(products: products, bc100Rules: onlyBC100 ? model.bc100Rules : nil)
+        BoardFilter(products: products, ticketFilter: onlyValidTicket ? model.ticketFilter : nil)
     }
 
     private var reloadKey: String {
@@ -26,7 +26,7 @@ struct StationBoardView: View {
         return "\(station?.id ?? "")|\(kind)|\(useNow ? "now" : date.description)|\(productsKey)"
     }
 
-    private var isFiltered: Bool { onlyBC100 || products.count != Product.allCases.count }
+    private var isFiltered: Bool { onlyValidTicket || products.count != Product.allCases.count }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -111,7 +111,7 @@ struct StationBoardView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
-            .onAppear { onlyBC100 = model.settings.onlyBC100ByDefault }
+            .onAppear { onlyValidTicket = model.settings.ticketFilterByDefault }
             .navigationDestination(for: BoardEntry.self) { TripView(entry: $0) }
         }
         .toolbar(path.isEmpty ? .automatic : .hidden, for: .tabBar)
@@ -139,8 +139,9 @@ struct StationBoardView: View {
                 if isFiltered {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
-                            if onlyBC100 {
-                                InfoChip(text: "BahnCard 100", systemImage: "creditcard.fill", tint: .brand)
+                            if onlyValidTicket {
+                                let ticket = model.settings.ticketType
+                                InfoChip(text: ticket.displayName, systemImage: ticket.symbolName, tint: .brand)
                             }
                             if products.count != Product.allCases.count {
                                 ForEach(Product.allCases.filter(products.contains), id: \.self) { product in
@@ -198,32 +199,37 @@ struct StationBoardView: View {
 
     private var filterMenu: some View {
         Menu {
-            Toggle(isOn: $onlyBC100) {
-                Label("Nur BahnCard 100", systemImage: "creditcard.fill")
+            Toggle(isOn: $onlyValidTicket) {
+                Label(model.settings.ticketType.filterTitle, systemImage: model.settings.ticketType.symbolName)
             }
-            Section("Verkehrsmittel") {
-                Button("Nur Züge", systemImage: "train.side.front.car") {
-                    products = Set(Product.allCases.filter(\.isTrain))
-                }
-                Button("Alle anzeigen", systemImage: "square.grid.2x2") {
-                    products = Set(Product.allCases)
-                }
-            }
-            Section {
-                ForEach(Product.allCases, id: \.self) { product in
-                    Toggle(isOn: Binding(
-                        get: { products.contains(product) },
-                        set: { if $0 { products.insert(product) } else { products.remove(product) } }
-                    )) {
-                        Label(product.displayName, systemImage: product.symbolName)
-                    }
-                }
-            }
+            productFilterItems
         } label: {
             Image(systemName: isFiltered ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
         }
         .menuActionDismissBehavior(.disabled)
         .accessibilityLabel("Filter")
+    }
+
+    @ViewBuilder
+    private var productFilterItems: some View {
+        Section("Verkehrsmittel") {
+            Button("Nur Züge", systemImage: "train.side.front.car") {
+                products = Set(Product.allCases.filter(\.isTrain))
+            }
+            Button("Alle anzeigen", systemImage: "square.grid.2x2") {
+                products = Set(Product.allCases)
+            }
+        }
+        Section {
+            ForEach(Product.allCases, id: \.self) { product in
+                Toggle(isOn: Binding(
+                    get: { products.contains(product) },
+                    set: { if $0 { products.insert(product) } else { products.remove(product) } }
+                )) {
+                    Label(product.displayName, systemImage: product.symbolName)
+                }
+            }
+        }
     }
 
     private func load() async {

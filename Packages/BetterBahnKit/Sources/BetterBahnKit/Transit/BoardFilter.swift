@@ -6,12 +6,12 @@ import Foundation
 /// ("kein Einstieg") stay visible on the departure board and are marked in the UI.
 public struct BoardFilter: Sendable, Hashable {
     public var products: Set<Product>
-    public var bc100Rules: BC100Rules?
+    public var ticketFilter: TicketFilter?
     public var hideCancelled: Bool
 
-    public init(products: Set<Product> = Set(Product.allCases), bc100Rules: BC100Rules? = nil, hideCancelled: Bool = false) {
+    public init(products: Set<Product> = Set(Product.allCases), ticketFilter: TicketFilter? = nil, hideCancelled: Bool = false) {
         self.products = products
-        self.bc100Rules = bc100Rules
+        self.ticketFilter = ticketFilter
         self.hideCancelled = hideCancelled
     }
 
@@ -23,7 +23,7 @@ public struct BoardFilter: Sendable, Hashable {
         guard products.contains(entry.line.product) else { return false }
         if entry.access == .passThrough { return false }
         if hideCancelled, entry.cancelled { return false }
-        if let bc100Rules, !bc100Rules.isValid(entry) { return false }
+        if let ticketFilter, !ticketFilter.isValid(entry) { return false }
         // A departure whose final destination is this station ends here → not rideable.
         if entry.kind == .departures, entry.terminatesOrOriginatesHere == true,
            let other = entry.otherEnd, Station.normalize(other) == Station.normalize(entry.station.name) {

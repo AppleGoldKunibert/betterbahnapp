@@ -42,7 +42,7 @@ struct JourneyReplanSheet: View {
     @State private var viaRows: [ViaRow] = []
     @State private var products = Set(Product.allCases)
     @State private var maxTransfers: Int?
-    @State private var onlyBC100 = false
+    @State private var onlyValidTicket = false
     @State private var minTransferMinutes = defaultTransferMinutes
     @State private var showProductsPopover = false
     @State private var showBufferPopover = false
@@ -189,7 +189,7 @@ struct JourneyReplanSheet: View {
     /// The remaining route as a normal search, for the sheets that take one.
     private var continuationSearch: ConnectionSearch {
         ConnectionSearch(from: exitStation, to: target, via: viaRows.waypoints(), date: exitArrival,
-                         isArrival: false, onlyBC100: onlyBC100, products: products, maxTransfers: maxTransfers)
+                         isArrival: false, onlyValidTicket: onlyValidTicket, products: products, maxTransfers: maxTransfers)
     }
 
     // MARK: Configure
@@ -200,7 +200,7 @@ struct JourneyReplanSheet: View {
         exitCard
         routeCard
         optionsCard
-        trainBar
+        if model.settings.trainChoiceEnabled { trainBar }
         if !requirements.isEmpty {
             requirementList
             if breaksBoardingRules {
@@ -587,8 +587,9 @@ struct JourneyReplanSheet: View {
 
                 Divider()
 
-                Toggle(isOn: $onlyBC100) {
-                    OptionLabel(title: "Nur BahnCard 100", subtitle: "FlixTrain & Co. ausblenden", icon: "creditcard.fill")
+                Toggle(isOn: $onlyValidTicket) {
+                    let ticket = model.settings.ticketType
+                    OptionLabel(title: ticket.filterTitle, subtitle: ticket.filterSubtitle, icon: ticket.symbolName)
                 }
                 .tint(.brand)
 
@@ -600,32 +601,36 @@ struct JourneyReplanSheet: View {
                     MaxTransfersPicker(maxTransfers: $maxTransfers)
                 }
 
-                Button {
-                    showProductsPopover = true
-                } label: {
-                    HStack {
-                        OptionLabel(title: "Verkehrsmittel", subtitle: productSummary(products),
-                                    icon: "train.side.front.car")
-                        Spacer()
-                        Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
-                    }
-                    .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .popover(isPresented: $showProductsPopover) {
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text("Verkehrsmittel").font(.subheadline.weight(.semibold))
-                        ProductChips(products: $products)
-                        Button("Fertig") { showProductsPopover = false }
-                            .buttonStyle(.glassProminent)
-                            .tint(.brand)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .padding()
-                    .frame(minWidth: 340)
-                    .presentationCompactAdaptation(.popover)
-                }
+                productsButton
             }
+        }
+    }
+
+    private var productsButton: some View {
+        Button {
+            showProductsPopover = true
+        } label: {
+            HStack {
+                OptionLabel(title: "Verkehrsmittel", subtitle: productSummary(products),
+                            icon: "train.side.front.car")
+                Spacer()
+                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showProductsPopover) {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Verkehrsmittel").font(.subheadline.weight(.semibold))
+                ProductChips(products: $products)
+                Button("Fertig") { showProductsPopover = false }
+                    .buttonStyle(.glassProminent)
+                    .tint(.brand)
+                    .frame(maxWidth: .infinity)
+            }
+            .padding()
+            .frame(minWidth: 340)
+            .presentationCompactAdaptation(.popover)
         }
     }
 
@@ -780,7 +785,7 @@ struct JourneyReplanSheet: View {
         viaRows = (search?.via ?? []).map(ViaRow.init)
         products = search?.products ?? Set(Product.allCases)
         maxTransfers = search?.maxTransfers
-        onlyBC100 = search?.onlyBC100 ?? model.settings.onlyBC100ByDefault
+        onlyValidTicket = search?.onlyValidTicket ?? model.settings.ticketFilterByDefault
         // Via stops already passed are no longer part of the remaining route.
         let ridden = journey.legs.prefix((legIndex ?? 0) + 1)
         viaRows.removeAll { row in
@@ -843,7 +848,7 @@ struct JourneyReplanSheet: View {
                                             minTransferMinutes: minTransferMinutes)
                 found = try await model.journeyReplanner.continuations(
                     from: exitStation, arriving: exitArrival, options: options)
-                if onlyBC100 { found = found.filter(model.bc100Rules.isValid) }
+                if onlyValidTicket { found = found.filter(model.ticketFilter.isValid) }
             } else {
                 // A pinned train decides the route; via stops and vehicle filters don't apply to it.
                 let departAfter = exitArrival.addingTimeInterval(TimeInterval(minTransferMinutes * 60))
@@ -852,9 +857,9 @@ struct JourneyReplanSheet: View {
                 resolvedTrainNames = plan.resolvedNames
                 breaksBoardingRules = plan.breaksBoardingRules
                 found = plan.journeys.filter { ($0.departure?.best ?? .distantPast) >= exitArrival }
-                if onlyBC100 {
-                    // Don't leave the user with nothing if the pinned train itself isn't BC100 valid.
-                    let valid = found.filter(model.bc100Rules.isValid)
+                if onlyValidTicket {
+                    // Don't leave the user with nothing if the pinned train itself isn't valid with the ticket.
+                    let valid = found.filter(model.ticketFilter.isValid)
                     if !valid.isEmpty { found = valid }
                 }
             }
@@ -918,13 +923,13 @@ struct JourneyReplanSheet: View {
         updated.via = viaRows.waypoints()
         updated.products = products
         updated.maxTransfers = maxTransfers
-        updated.onlyBC100 = onlyBC100
+        updated.onlyValidTicket = onlyValidTicket
         return updated
     }
 
     /// Checks whether a Träwelling check-in on this train now ends somewhere the user isn't going.
     private func lookUpCheckin(exit: Leg) async {
-        guard await model.traewelling.isLoggedIn, !exit.destination.isSamePlace(as: leg.destination) else { return }
+        guard model.settings.traewellingEnabled, await model.traewelling.isLoggedIn, !exit.destination.isSamePlace(as: leg.destination) else { return }
         isLookingUpCheckin = true
         defer { isLookingUpCheckin = false }
         guard let status = try? await model.traewelling.checkin(matching: leg),

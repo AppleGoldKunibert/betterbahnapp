@@ -56,7 +56,9 @@ struct JourneyResultsView: View {
                     ErrorBanner(error: error)
                 }
 
-                trainBar
+                if model.settings.trainChoiceEnabled {
+                    trainBar
+                }
 
                 if !requirements.isEmpty {
                     requirementList
@@ -117,7 +119,7 @@ struct JourneyResultsView: View {
 
                 VStack(spacing: 8) {
                     if hiddenCount > 0, requirements.isEmpty {
-                        InfoChip(text: "\(hiddenCount) ohne BC100-Gültigkeit ausgeblendet", systemImage: "eye.slash.fill")
+                        InfoChip(text: "\(hiddenCount) ohne \(model.settings.ticketType.shortName)-Gültigkeit ausgeblendet", systemImage: "eye.slash.fill")
                     }
                     if source == .transitous {
                         SourceNotice()
@@ -198,8 +200,9 @@ struct JourneyResultsView: View {
                 .popover(isPresented: $showTimePicker) {
                     timePickerPopover
                 }
-                if search.onlyBC100 {
-                    InfoChip(text: "BC100", systemImage: "creditcard.fill", tint: .brand)
+                if search.onlyValidTicket {
+                    let ticket = model.settings.ticketType
+                    InfoChip(text: ticket.shortName, systemImage: ticket.symbolName, tint: .brand)
                 }
                 if let maxTransfers = search.maxTransfers {
                     InfoChip(text: maxTransfers == 0 ? "Direkt" : "≤ \(maxTransfers) Umstieg\(maxTransfers == 1 ? "" : "e")",
@@ -379,9 +382,9 @@ struct JourneyResultsView: View {
         do {
             var result = try await model.trainRoutePlanner.plan(
                 requirements, from: search.from, to: search.to, date: searchDate)
-            if search.onlyBC100 {
-                // Don't leave the user with nothing if the forced train itself isn't BC100 valid.
-                let valid = result.journeys.filter(model.bc100Rules.isValid)
+            if search.onlyValidTicket {
+                // Don't leave the user with nothing if the forced train itself isn't valid with the ticket.
+                let valid = result.journeys.filter(model.ticketFilter.isValid)
                 if !valid.isEmpty { result.journeys = valid }
             }
             withAnimation(.snappy) {
@@ -416,10 +419,10 @@ struct JourneyResultsView: View {
                     result = result.filter { $0.transfers <= maxTransfers }
                 }
             }
-            if search.onlyBC100 {
-                let rules = model.bc100Rules
+            if search.onlyValidTicket {
+                let filter = model.ticketFilter
                 let before = result.count
-                result = result.filter(rules.isValid)
+                result = result.filter(filter.isValid)
                 hiddenCount += before - result.count
             }
             source = page?.source ?? model.provider.source

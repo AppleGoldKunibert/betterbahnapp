@@ -22,115 +22,54 @@ struct SettingsView: View {
                     .padding(.vertical, 6)
                 }
 
-                Section {
-                    if isLoggedIn {
-                        HStack(spacing: 12) {
-                            IconTile(systemImage: "person.crop.circle.badge.checkmark", color: .punctual)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(user?.displayName ?? "Angemeldet").font(.body.weight(.semibold))
-                                if let user {
-                                    Text("@\(user.username)").font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
-                            Spacer()
-                            if let points = user?.points {
-                                InfoChip(text: "\(points)", systemImage: "sparkles", tint: .brand)
-                            }
-                        }
-                        Button(role: .destructive) {
-                            Task {
-                                await model.traewelling.logout()
-                                await refreshLogin()
-                            }
-                        } label: {
-                            IconLabel(title: "Abmelden", systemImage: "rectangle.portrait.and.arrow.right", color: .heavyDelay)
-                        }
-                    } else {
-                        TraewellingLoginButton { Task { await refreshLogin() } }
-                            .listRowBackground(Color.clear)
-                            .listRowInsets(EdgeInsets())
-                    }
-                    Toggle(isOn: $settings.syncTraewellingToMap) {
-                        IconLabel(title: "Fahrten in Karte übernehmen", systemImage: "map.fill", color: .teal)
-                    }
-                    .tint(.brand)
-                    if isLoggedIn, settings.syncTraewellingToMap {
-                        Button {
-                            Task { await model.syncTraewelling(force: true) }
-                        } label: {
-                            HStack {
-                                IconLabel(title: "Jetzt synchronisieren", systemImage: "arrow.triangle.2.circlepath", color: .blue)
-                                Spacer()
-                                if model.isSyncingTraewelling {
-                                    ProgressView()
-                                } else {
-                                    Text("\(model.traewellingTrips.count) Fahrten")
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        .foregroundStyle(.primary)
-                        .disabled(model.isSyncingTraewelling)
-                    }
-                    Picker(selection: $settings.traewellingVisibility) {
-                        ForEach(TraewellingVisibility.allCases, id: \.self) { Text($0.label).tag($0) }
-                    } label: {
-                        IconLabel(title: "Sichtbarkeit", systemImage: "eye.fill", color: .purple)
-                    }
-                    NavigationLink {
-                        QuickTagsView()
-                    } label: {
-                        IconLabel(title: "Tags", systemImage: "tag.fill", color: .brand)
-                    }
-                } header: {
-                    Text("Träwelling")
+                if settings.traewellingEnabled {
+                    traewellingSection
                 }
 
                 Section {
-                    Toggle(isOn: $settings.onlyBC100ByDefault) {
-                        IconLabel(title: "Standardmäßig nur BC100", systemImage: "creditcard.fill", color: .brand)
+                    Picker(selection: $settings.ticketType) {
+                        ForEach(TicketType.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                    } label: {
+                        IconLabel(title: "Mein Ticket", systemImage: settings.ticketType.symbolName, color: .brand)
+                    }
+                    Toggle(isOn: $settings.ticketFilterByDefault) {
+                        IconLabel(title: "Nur passende Züge zeigen",
+                                  systemImage: "line.3.horizontal.decrease.circle.fill", color: .brand)
                     }
                     .tint(.brand)
-                    NavigationLink {
-                        BC100RulesView()
-                    } label: {
-                        IconLabel(title: "Ausgeschlossene Betreiber", systemImage: "nosign", color: .orange)
+                    if settings.ticketType == .bahnCard100 {
+                        NavigationLink {
+                            BC100RulesView()
+                        } label: {
+                            IconLabel(title: "Ausgeschlossene Anbieter", systemImage: "nosign", color: .orange)
+                        }
                     }
                 } header: {
-                    Text("BahnCard 100")
-                }
-
-                Section {
-                    LabeledContent("Hauptdatenquelle", value: "Transitous")
-                    LabeledContent("Stationssuche bei Ausfall", value: "bahn.de")
-                    Link("Transitous-Datenquellen", destination: URL(string: "https://transitous.org/sources/")!)
-                    Link("© OpenStreetMap-Mitwirkende", destination: URL(string: "https://www.openstreetmap.org/copyright")!)
-                } header: {
-                    Text("Datenquellen")
+                    Text("Ticket")
                 } footer: {
-                    Text("Verbindungen, Bahnhofstafeln und Fahrtverläufe kommen von Transitous. Echtzeitdaten hängen von den jeweiligen Verkehrsunternehmen ab.")
-                }
-
-                Section {
-                    NavigationLink {
-                        AdvancedSettingsView()
-                    } label: {
-                        IconLabel(title: "Erweiterte Einstellungen", systemImage: "gearshape.2.fill", color: .gray)
-                    }
+                    Text(settings.ticketType == .deutschlandticket
+                         ? "Blendet Fernzüge wie ICE und IC aus, in denen das Deutschlandticket nicht gilt."
+                         : "Blendet Züge aus, in denen die BahnCard 100 nicht gilt, z. B. FlixTrain.")
                 }
 
                 Section {
                     Toggle(isOn: $settings.connectionWarnings) {
-                        IconLabel(title: "Warnen, wenn Anschluss platzt", systemImage: "exclamationmark.triangle.fill", color: .orange)
+                        IconLabel(title: "Bei Problemen benachrichtigen", systemImage: "exclamationmark.triangle.fill", color: .orange)
                     }
                     .tint(.brand)
                     .onChange(of: settings.connectionWarnings) { _, enabled in
                         if enabled { Task { await ConnectionNotifier.requestAuthorization() } }
                     }
+                    Button {
+                        Task { await model.liveActivities.endAll() }
+                    } label: {
+                        IconLabel(title: "Live-Aktivitäten beenden", systemImage: "stop.circle.fill", color: .indigo)
+                    }
+                    .foregroundStyle(.primary)
                 } header: {
-                    Text("Gespeicherte Reisen")
+                    Text("Meine Reisen")
                 } footer: {
-                    Text("Gespeicherte Reisen der nächsten 24 Stunden werden mit Echtzeitdaten aktualisiert. Klappt ein Umstieg nicht mehr oder fällt ein Zug aus, bekommst du eine Mitteilung und kannst eine Alternative wählen.")
+                    Text("Wir sagen dir Bescheid, wenn ein Zug ausfällt oder du deinen Anschluss verpasst.")
                 }
 
                 Section {
@@ -139,21 +78,44 @@ struct SettingsView: View {
                     } label: {
                         IconLabel(title: "Suchverlauf löschen", systemImage: "clock.arrow.circlepath", color: .heavyDelay)
                     }
-                } header: {
-                    Text("Verlauf")
                 } footer: {
-                    Text("Löscht deine zuletzt gesuchten Bahnhöfe und Verbindungen. Favoriten, gespeicherte Reisen und deine Anmeldung bleiben erhalten.")
+                    Text("Favoriten und gespeicherte Reisen bleiben erhalten.")
                 }
 
                 Section {
-                    Button {
-                        Task { await model.liveActivities.endAll() }
-                    } label: {
-                        IconLabel(title: "Alle Live Activities beenden", systemImage: "stop.circle.fill", color: .indigo)
+                    Toggle(isOn: $settings.expertMode.animation()) {
+                        IconLabel(title: "Expertenmodus", systemImage: "wand.and.stars", color: .indigo)
                     }
-                    .foregroundStyle(.primary)
+                    .tint(.brand)
+                    if settings.expertMode {
+                        Toggle(isOn: $settings.expertTraewelling) {
+                            IconLabel(title: "Träwelling", systemImage: "checkmark.seal.fill", color: .brand)
+                        }
+                        .tint(.brand)
+                        Toggle(isOn: $settings.expertEditJourney) {
+                            IconLabel(title: "Reise bearbeiten", systemImage: "pencil", color: .orange)
+                        }
+                        .tint(.brand)
+                        Toggle(isOn: $settings.expertTrainChoice) {
+                            IconLabel(title: "Bestimmten Zug wählen", systemImage: "number", color: .purple)
+                        }
+                        .tint(.brand)
+                    }
+                    NavigationLink {
+                        AdvancedSettingsView()
+                    } label: {
+                        IconLabel(title: "Erweiterte Einstellungen", systemImage: "gearshape.2.fill", color: .gray)
+                    }
                 } header: {
-                    Text("Live Activity")
+                    Text("Für Profis")
+                } footer: {
+                    Text("Zusätzliche Funktionen für Vielfahrer. Schalte nur ein, was du brauchst.")
+                }
+
+                Section {
+                    LabeledContent("Fahrplandaten", value: "Transitous")
+                } footer: {
+                    Text("[Quellen](https://transitous.org/sources/) · [© OpenStreetMap](https://www.openstreetmap.org/copyright)")
                 }
             }
             .navigationTitle("Einstellungen")
@@ -169,6 +131,73 @@ struct SettingsView: View {
             } message: {
                 Text("Favoriten, gespeicherte Reisen und deine Anmeldung bleiben erhalten.")
             }
+        }
+    }
+
+    private var traewellingSection: some View {
+        @Bindable var settings = model.settings
+        return Section {
+            if isLoggedIn {
+                HStack(spacing: 12) {
+                    IconTile(systemImage: "person.crop.circle.badge.checkmark", color: .punctual)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(user?.displayName ?? "Angemeldet").font(.body.weight(.semibold))
+                        if let user {
+                            Text("@\(user.username)").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    if let points = user?.points {
+                        InfoChip(text: "\(points)", systemImage: "sparkles", tint: .brand)
+                    }
+                }
+                Button(role: .destructive) {
+                    Task {
+                        await model.traewelling.logout()
+                        await refreshLogin()
+                    }
+                } label: {
+                    IconLabel(title: "Abmelden", systemImage: "rectangle.portrait.and.arrow.right", color: .heavyDelay)
+                }
+            } else {
+                TraewellingLoginButton { Task { await refreshLogin() } }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets())
+            }
+            Toggle(isOn: $settings.syncTraewellingToMap) {
+                IconLabel(title: "Fahrten in Karte übernehmen", systemImage: "map.fill", color: .teal)
+            }
+            .tint(.brand)
+            if isLoggedIn, settings.syncTraewellingToMap {
+                Button {
+                    Task { await model.syncTraewelling(force: true) }
+                } label: {
+                    HStack {
+                        IconLabel(title: "Jetzt synchronisieren", systemImage: "arrow.triangle.2.circlepath", color: .blue)
+                        Spacer()
+                        if model.isSyncingTraewelling {
+                            ProgressView()
+                        } else {
+                            Text("\(model.traewellingTrips.count) Fahrten")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .foregroundStyle(.primary)
+                .disabled(model.isSyncingTraewelling)
+            }
+            Picker(selection: $settings.traewellingVisibility) {
+                ForEach(TraewellingVisibility.allCases, id: \.self) { Text($0.label).tag($0) }
+            } label: {
+                IconLabel(title: "Sichtbarkeit", systemImage: "eye.fill", color: .purple)
+            }
+            NavigationLink {
+                QuickTagsView()
+            } label: {
+                IconLabel(title: "Tags", systemImage: "tag.fill", color: .brand)
+            }
+        } header: {
+            Text("Träwelling")
         }
     }
 

@@ -39,12 +39,12 @@ public struct TrainPicker: Sendable {
 
     /// Other trains that also go from `leg.origin` to `leg.destination` around the same time.
     public func alternatives(for leg: Leg, minutesBefore: Int = 30, minutesAfter: Int = 180,
-                             bc100Rules: BC100Rules? = nil) async throws -> [Leg] {
+                             ticketFilter: TicketFilter? = nil) async throws -> [Leg] {
         let start = leg.departure.planned.addingTimeInterval(TimeInterval(-minutesBefore * 60))
         let entries = try await provider.departures(at: leg.origin, date: start, duration: minutesBefore + minutesAfter)
         let candidates = entries
             .filter { $0.line.product.isTrain && $0.tripId != leg.tripId && !$0.cancelled }
-            .filter { bc100Rules?.isValid($0) ?? true }
+            .filter { ticketFilter?.isValid($0) ?? true }
             .sorted { Self.rank($0, like: leg) < Self.rank($1, like: leg) }
             .prefix(maxCandidates)
         let legs = await legs(for: Array(candidates), from: leg.origin, to: leg.destination)

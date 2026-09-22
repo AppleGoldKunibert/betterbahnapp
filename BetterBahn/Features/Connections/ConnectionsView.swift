@@ -25,11 +25,18 @@ struct ConnectionSearch: Hashable, Codable {
     var via: [ViaWaypoint] = []
     var date: Date
     var isArrival: Bool
-    var onlyBC100: Bool
+    /// Only journeys valid with the ticket picked in the settings (Deutschlandticket or BahnCard 100).
+    var onlyValidTicket: Bool
     var products = Set(Product.allCases)
     var maxTransfers: Int?
 
     var isFiltered: Bool { products != Set(Product.allCases) || maxTransfers != nil }
+
+    /// Stored under the old "onlyBC100" key so journeys saved before the Deutschlandticket filter still load.
+    enum CodingKeys: String, CodingKey {
+        case from, to, via, date, isArrival, products, maxTransfers
+        case onlyValidTicket = "onlyBC100"
+    }
 }
 
 struct ConnectionsView: View {
@@ -40,7 +47,7 @@ struct ConnectionsView: View {
     @State private var date = Date.now
     @State private var useNow = true
     @State private var isArrival = false
-    @State private var onlyBC100 = false
+    @State private var onlyValidTicket = false
     @State private var products = Set(Product.allCases)
     @State private var maxTransfers: Int?
     /// When on, each route section (start → first stop, stop → next stop, …) has its own vehicle selection.
@@ -110,7 +117,7 @@ struct ConnectionsView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
-            .onAppear { onlyBC100 = model.settings.onlyBC100ByDefault }
+            .onAppear { onlyValidTicket = model.settings.ticketFilterByDefault }
         }
         .toolbar(showsJourney ? .hidden : .automatic, for: .tabBar)
     }
@@ -231,8 +238,9 @@ struct ConnectionsView: View {
 
                 Divider()
 
-                Toggle(isOn: $onlyBC100) {
-                    optionLabel("Nur BahnCard 100", subtitle: "FlixTrain & Co. ausblenden", icon: "creditcard.fill", color: .brand)
+                Toggle(isOn: $onlyValidTicket) {
+                    let ticket = model.settings.ticketType
+                    optionLabel(ticket.filterTitle, subtitle: ticket.filterSubtitle, icon: ticket.symbolName, color: .brand)
                 }
                 .tint(.brand)
 
@@ -404,7 +412,7 @@ struct ConnectionsView: View {
         model.remember(from: from, to: to)
         // Via routing only supports "depart at" — an arrival deadline doesn't compose with per-stop minimum stays.
         path.append(.search(ConnectionSearch(from: from, to: to, via: via, date: useNow ? .now : date,
-                                     isArrival: via.isEmpty ? isArrival : false, onlyBC100: onlyBC100,
+                                     isArrival: via.isEmpty ? isArrival : false, onlyValidTicket: onlyValidTicket,
                                      products: perLeg ? legProducts[Self.startLegID] ?? all : products,
                                      maxTransfers: maxTransfers)))
     }

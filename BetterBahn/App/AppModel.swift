@@ -92,7 +92,13 @@ final class AppModel {
 
     var trainRoutePlanner: TrainRoutePlanner { TrainRoutePlanner(provider: provider, timetables: timetablesClient) }
 
-    var bc100Rules: BC100Rules { settings.bc100Rules }
+    /// Rules for the "only valid with my ticket" filters, for the ticket picked in the settings.
+    var ticketFilter: TicketFilter {
+        switch settings.ticketType {
+        case .deutschlandticket: .deutschlandticket
+        case .bahnCard100: .bahnCard100(settings.bc100Rules)
+        }
+    }
 
     /// Overlays fresher delay/platform data straight from DB onto legs. Uses the user's own
     /// credentials from Einstellungen → Erweiterte Einstellungen when set, otherwise the key
@@ -157,7 +163,7 @@ final class AppModel {
 
     /// Fetches new check-ins and their track geometry. Stops at the first already known status.
     func syncTraewelling(force: Bool = false) async {
-        guard settings.syncTraewellingToMap, !isSyncingTraewelling, await traewelling.isLoggedIn else { return }
+        guard settings.traewellingEnabled, settings.syncTraewellingToMap, !isSyncingTraewelling, await traewelling.isLoggedIn else { return }
         if !force, let last = settings.lastTraewellingSync, Date.now.timeIntervalSince(last) < 15 * 60 { return }
         isSyncingTraewelling = true
         defer { isSyncingTraewelling = false }
@@ -709,8 +715,13 @@ nonisolated enum Storage {
 
 @Observable
 final class AppSettings {
-    var onlyBC100ByDefault: Bool {
-        didSet { UserDefaults.standard.set(onlyBC100ByDefault, forKey: "onlyBC100ByDefault") }
+    /// Whether the "only valid with my ticket" filters start switched on.
+    var ticketFilterByDefault: Bool {
+        didSet { UserDefaults.standard.set(ticketFilterByDefault, forKey: "onlyBC100ByDefault") }
+    }
+    /// The ticket those filters check against.
+    var ticketType: TicketType {
+        didSet { UserDefaults.standard.set(ticketType.rawValue, forKey: "ticketType") }
     }
     var traewellingVisibility: TraewellingVisibility {
         didSet { UserDefaults.standard.set(traewellingVisibility.rawValue, forKey: "traewellingVisibility") }
@@ -732,9 +743,35 @@ final class AppSettings {
         didSet { Storage.save(quickTags, key: "quickTags") }
     }
 
+    /// Unlocks the features below; each one still has to be switched on by itself.
+    var expertMode: Bool {
+        didSet { UserDefaults.standard.set(expertMode, forKey: "expertMode") }
+    }
+    var expertTraewelling: Bool {
+        didSet { UserDefaults.standard.set(expertTraewelling, forKey: "expertTraewelling") }
+    }
+    var expertEditJourney: Bool {
+        didSet { UserDefaults.standard.set(expertEditJourney, forKey: "expertEditJourney") }
+    }
+    var expertTrainChoice: Bool {
+        didSet { UserDefaults.standard.set(expertTrainChoice, forKey: "expertTrainChoice") }
+    }
+
+    /// Träwelling check-ins, login and map import.
+    var traewellingEnabled: Bool { expertMode && expertTraewelling }
+    /// Editing a journey: changing the exit or re-planning the rest of the route.
+    var editJourneyEnabled: Bool { expertMode && expertEditJourney }
+    /// Forcing specific trains into a route or swapping a leg for another train.
+    var trainChoiceEnabled: Bool { expertMode && expertTrainChoice }
+
     init() {
         let defaults = UserDefaults.standard
-        onlyBC100ByDefault = defaults.bool(forKey: "onlyBC100ByDefault")
+        ticketFilterByDefault = defaults.bool(forKey: "onlyBC100ByDefault")
+        ticketType = defaults.string(forKey: "ticketType").flatMap(TicketType.init) ?? .deutschlandticket
+        expertMode = defaults.bool(forKey: "expertMode")
+        expertTraewelling = defaults.bool(forKey: "expertTraewelling")
+        expertEditJourney = defaults.bool(forKey: "expertEditJourney")
+        expertTrainChoice = defaults.bool(forKey: "expertTrainChoice")
         traewellingVisibility = TraewellingVisibility(rawValue: defaults.integer(forKey: "traewellingVisibility")) ?? .publicVisible
         bc100Rules = Storage.load(key: "bc100Rules") ?? .default
         syncTraewellingToMap = defaults.object(forKey: "syncTraewellingToMap") as? Bool ?? true
