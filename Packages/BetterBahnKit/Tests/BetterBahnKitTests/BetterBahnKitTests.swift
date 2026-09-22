@@ -46,6 +46,34 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(entry.platform.planned == "4")
     }
 
+    /// Real-world Transitous response for Hanau Hbf: DELFI puts some trains (ICE 12, RE50, …) at the
+    /// station's bus bay "Steig F" instead of their track, so the app showed "Gleis F" rather than
+    /// Gleis 6. A train must not take a bus bay's letter as its platform; a bus still does.
+    @Test func trainIgnoresBusBayAsPlatform() throws {
+        let json = """
+        {"stopTimes": [{
+            "place": {
+                "name": "Hanau Hauptbahnhof", "stopId": "de-DELFI_de:06435:4503:4:6", "lat": 50.12, "lon": 8.93,
+                "departure": "2026-09-22T21:35:00Z", "scheduledDeparture": "2026-09-22T21:35:00Z",
+                "track": "F", "scheduledTrack": "F", "description": "Steig F/G | Steig F"
+            },
+            "mode": "HIGHSPEED_RAIL", "realTime": true, "tripId": "ice-trip", "routeShortName": "12", "displayName": "ICE 12"
+        }, {
+            "place": {
+                "name": "Hanau Hauptbahnhof", "stopId": "de-DELFI_de:06435:4503:4:6", "lat": 50.12, "lon": 8.93,
+                "departure": "2026-09-22T21:40:00Z", "scheduledDeparture": "2026-09-22T21:40:00Z",
+                "track": "F", "scheduledTrack": "F", "description": "Steig F/G | Steig F"
+            },
+            "mode": "BUS", "realTime": true, "tripId": "bus-trip", "routeShortName": "563", "displayName": "563"
+        }]}
+        """
+        let response = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(json.utf8))
+        let entries = response.stopTimes.compactMap { $0.toEntry(kind: .departures) }
+
+        #expect(entries[0].platform.best == nil)
+        #expect(entries[1].platform.best == "F")
+    }
+
     /// Real-world Transitous geocode response for "Berlin Gesundbrunnen": the DELFI feed's entry
     /// covers every product including the U8 subway, while a second, OpenOV-fed entry ~70m away
     /// covers almost the same products but misses the subway – and its `/v5/stoptimes` happens to

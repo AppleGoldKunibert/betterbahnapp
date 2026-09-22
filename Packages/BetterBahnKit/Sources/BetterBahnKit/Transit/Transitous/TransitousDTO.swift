@@ -36,6 +36,23 @@ struct MPlace: Decodable {
             .trimmingCharacters(in: .whitespaces)
     }
 
+    /// Whether this place is a bus bay ("Steig F/G | Steig F") rather than a railway platform.
+    /// DELFI's feed puts some trains at a station's bus stop instead of their actual track - reported
+    /// for trains at Hanau Hbf showing "Gleis F" (the bus bay) instead of Gleis 6.
+    var isBusBay: Bool {
+        guard let description else { return false }
+        return description.hasPrefix("Steig") && !description.contains("Gleis")
+    }
+
+    /// The platform as `PlatformInfo`; `actual` only when `realtime` is set. For a train (`isRail`)
+    /// a bus bay's letter is dropped, so DB's own Timetables schedule can fill in the real track
+    /// instead (see `TimetablesClient.fillMissingPlatforms`) rather than showing a wrong one.
+    func platform(isRail: Bool, realtime: Bool = true) -> PlatformInfo {
+        guard !(isRail && isBusBay) else { return PlatformInfo(planned: nil, actual: nil) }
+        return PlatformInfo(planned: scheduledTrack ?? descriptionTrack,
+                            actual: realtime ? (track ?? descriptionTrack) : nil)
+    }
+
     func toStation() -> Station {
         Station(
             id: parentId ?? stopId ?? "\(lat),\(lon)", name: name,
@@ -44,8 +61,8 @@ struct MPlace: Decodable {
         )
     }
 
-    func toStopover() -> Stopover {
-        let platform = PlatformInfo(planned: scheduledTrack ?? descriptionTrack, actual: track ?? descriptionTrack)
+    func toStopover(isRail: Bool) -> Stopover {
+        let platform = platform(isRail: isRail)
         return Stopover(
             station: toStation(),
             arrival: timeInfo(planned: scheduledArrival, actual: arrival),
@@ -78,6 +95,12 @@ struct MLineInfo {
         let displayedName = (digitsInName?.isEmpty != false) ? number.map { "\(name) \($0)" } ?? name : name
         let tripNumber = tripShortName.map { String($0.filter(\.isNumber).drop(while: { $0 == "0" })) }.flatMap { $0.isEmpty ? nil : $0 }
         return Line(name: displayedName, number: number, product: product, operatorName: agencyName, tripNumber: tripNumber)
+    }
+
+    /// Whether this is a train (as opposed to bus, tram, subway, ferry, …).
+    var isRail: Bool {
+        ["HIGHSPEED_RAIL", "LONG_DISTANCE", "NIGHT_RAIL", "REGIONAL_FAST_RAIL", "REGIONAL_RAIL", "SUBURBAN", "RAIL"]
+            .contains(mode)
     }
 
     static func product(mode: String, prefix: String) -> Product {
@@ -167,13 +190,15 @@ struct MLeg: Decodable {
         let arr = TimeInfo(planned: scheduledEndTime ?? endTime, actual: realtime ? endTime : nil)
         var stopovers: [Stopover] = []
         if !isWalking {
-            stopovers = [from.toStopover()] + (intermediateStops ?? []).map { $0.toStopover() } + [to.toStopover()]
+            let isRail = lineInfo.isRail
+            stopovers = [from.toStopover(isRail: isRail)] + (intermediateStops ?? []).map { $0.toStopover(isRail: isRail) }
+                + [to.toStopover(isRail: isRail)]
         }
         return Leg(
             origin: from.toStation(), destination: to.toStation(),
             departure: dep, arrival: arr,
-            departurePlatform: PlatformInfo(planned: from.scheduledTrack ?? from.descriptionTrack, actual: from.track ?? from.descriptionTrack),
-            arrivalPlatform: PlatformInfo(planned: to.scheduledTrack ?? to.descriptionTrack, actual: to.track ?? to.descriptionTrack),
+            departurePlatform: from.platform(isRail: lineInfo.isRail),
+            arrivalPlatform: to.platform(isRail: lineInfo.isRail),
             tripId: tripId, line: isWalking ? nil : lineInfo.toLine(), direction: direction,
             isWalking: isWalking, cancelled: (cancelled ?? false) || (tripCancelled ?? false),
             stopovers: stopovers, remarks: [], source: .transitous, geometry: geometry
@@ -224,8 +249,7 @@ struct MStopTime: Decodable {
             kind: kind, tripId: tripId, station: station, line: line,
             otherEnd: otherEndName.map(Station.displayName(for:)),
             time: time,
-            platform: PlatformInfo(planned: place.scheduledTrack ?? place.descriptionTrack,
-                                   actual: realtime ? (place.track ?? place.descriptionTrack) : nil),
+            platform: place.platform(isRail: lineInfo.isRail, realtime: realtime),
             cancelled: (cancelled ?? false) || (tripCancelled ?? false),
             terminatesOrOriginatesHere: otherEnd.map { $0.toStation().isSamePlace(as: station) },
             remarks: [], access: place.access, source: .transitous
