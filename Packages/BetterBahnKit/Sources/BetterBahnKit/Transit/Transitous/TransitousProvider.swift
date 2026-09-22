@@ -79,11 +79,11 @@ public struct TransitousProvider: TransitProvider {
         // comparing raw strings would hand the exact-match bonus to whichever feed's formatting
         // happens to read like common usage – regardless of which one actually has fuller product
         // coverage – undoing `mergingNearbyDuplicates`'s completeness-based pick for that cluster.
-        let exactMatch = (isGermany || neighborRank > 0) && isExactMatch(Station.displayName(for: match.name), query: query)
+        let exactMatch = (isGermany || neighborRank > 0) && isExactMatch(Station.displayName(for: match.fullName), query: query)
         let exactTier = exactMatch ? (isGermany ? 2 : 1) : 0
 
         // Within a tier, a main station ("Hannover Hbf") outranks its siblings ("Hannover Flughafen").
-        let isMainStation = tier > 0 && Station.normalize(Station.displayName(for: match.name)).hasSuffix("hbf")
+        let isMainStation = tier > 0 && Station.normalize(Station.displayName(for: match.fullName)).hasSuffix("hbf")
 
         return (exactTier, tier, isMainStation ? 1 : 0, neighborRank, match.modes?.count ?? 0, -offset)
     }

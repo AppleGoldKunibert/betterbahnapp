@@ -112,6 +112,40 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(Station.displayName(for: "S Spandau Bhf (Berlin)") == "Berlin-Spandau")
     }
 
+    /// Real-world Transitous names that came out garbled because the Berlin-style "<stop> (<city>)"
+    /// rewrite ran on every name, plus other leftovers from the feeds' own naming.
+    @Test func displayNameCleansUpFeedNames() {
+        // Brackets outside VBB tell apart same-named towns and stay where they are.
+        #expect(Station.displayName(for: "Borna (Leipzig)") == "Borna (Leipzig)")
+        #expect(Station.displayName(for: "Böhlen (b. Leipzig)") == "Böhlen (bei Leipzig)")
+        #expect(Station.displayName(for: "Friedberg (b Augsburg)") == "Friedberg (bei Augsburg)")
+        #expect(Station.displayName(for: "Weiler (R)") == "Weiler (Rems)")
+        // Notes that say nothing about the place are dropped.
+        #expect(Station.displayName(for: "Rosenheim (DE)") == "Rosenheim")
+        #expect(Station.displayName(for: "Fulda (FlixTrain)") == "Fulda")
+        #expect(Station.displayName(for: "Frankfurt Flugh (DE)") == "Frankfurt Flughafen")
+        // No comma before Hbf.
+        #expect(Station.displayName(for: "Aachen, Hauptbahnhof") == "Aachen Hbf")
+        // VBB stations outside Berlin go by their town.
+        #expect(Station.displayName(for: "S Oranienburg Bhf") == "Oranienburg")
+        #expect(Station.displayName(for: "S Bernau Bhf") == "Bernau (bei Berlin)")
+        #expect(Station.displayName(for: "S Ostkreuz Bhf (Berlin)") == "Berlin Ostkreuz")
+        #expect(Station.displayName(for: "S Tegel (Berlin)") == "Berlin-Tegel")
+    }
+
+    /// Real-world Transitous geocode hits for "hbf": Stuttgart's and München's main stations come
+    /// without their city ("Hauptbahnhof (tief)", "Hauptbahnhof Süd") and showed up as just "Hbf"
+    /// and "Hbf Süd" - the town from the hit's areas is put in front.
+    @Test func searchPutsTheTownInFrontOfABareHauptbahnhof() {
+        func match(_ name: String, town: String) -> MGeocodeMatch {
+            MGeocodeMatch(type: "STOP", name: name, id: name, lat: 48.78, lon: 9.18, country: "DE",
+                          modes: ["REGIONAL_RAIL"], areas: [.init(name: town, adminLevel: 6, isDefault: true)])
+        }
+        #expect(match("Hauptbahnhof (tief)", town: "Stuttgart").toStation().displayName == "Stuttgart Hbf")
+        #expect(match("Hauptbahnhof Süd", town: "München").toStation().displayName == "München Hbf Süd")
+        #expect(match("Ulm Hauptbahnhof", town: "Ulm").toStation().displayName == "Ulm Hbf")
+    }
+
     /// Real-world Transitous geocode response for "Berlin Gesundbrunnen": the DELFI feed's entry
     /// covers every product including the U8 subway, while a second, OpenOV-fed entry ~70m away
     /// covers almost the same products but misses the subway – and its `/v5/stoptimes` happens to

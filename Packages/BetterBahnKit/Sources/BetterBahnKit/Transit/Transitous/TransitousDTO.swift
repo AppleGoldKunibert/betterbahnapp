@@ -323,8 +323,19 @@ struct MGeocodeMatch: Decodable {
         return areas.first { $0.isDefault == true }?.name
     }
 
+    /// The town this stop is in, e.g. "Stuttgart" or "München".
+    var town: String? { areas?.first { $0.isDefault == true }?.name }
+
+    /// `name`, with the town put in front when the feed left it out of a main station's name -
+    /// "Hauptbahnhof (tief)" in Stuttgart or "Hauptbahnhof Süd" in München showed up as just "Hbf"
+    /// and "Hbf Süd" in search, with nothing saying which city they're in.
+    var fullName: String {
+        guard let town, ["Hauptbahnhof", "Hauptbf", "Hbf"].contains(where: { name.hasPrefix($0) }) else { return name }
+        return "\(town) \(name)"
+    }
+
     func toStation() -> Station {
-        Station(id: id, name: name, coordinate: Coordinate(latitude: lat, longitude: lon), evaNumber: nil,
+        Station(id: id, name: fullName, coordinate: Coordinate(latitude: lat, longitude: lon), evaNumber: nil,
                 source: .transitous, region: region)
     }
 }

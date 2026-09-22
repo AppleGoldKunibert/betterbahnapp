@@ -79,13 +79,15 @@ public struct Station: Codable, Sendable, Hashable, Identifiable {
     ]
 
     /// Parenthesized level qualifiers of stations split across levels, e.g. Stuttgart's
-    /// "Hauptbahnhof (oben)" / "Hauptbahnhof (tief)" - not a city, so dropped instead of being
-    /// turned into "oben Hbf" by the "<stop> (<city>)" rule below.
+    /// "Hauptbahnhof (oben)" / "Hauptbahnhof (tief)" - dropped, since both are the same station.
     private static let levelQualifiers: Set<String> = ["oben", "tief", "unten"]
 
+    /// Parenthesized notes some feeds tack on that say nothing about the place itself, e.g.
+    /// "Rosenheim (DE)", "Stralsund-Grünhufe (DB)", "Fulda (FlixTrain)" - dropped.
+    private static let noiseQualifiers: Set<String> = ["de", "db", "flixtrain", "flughafen"]
+
     /// Parenthesized rivers/regions that tell apart same-named towns, e.g. "Frankfurt (Oder)",
-    /// "Halle (Saale)", "Rheinfelden (Baden)" - not a city, so kept as they are instead of being
-    /// turned into "Oder-Frankfurt" by the "<stop> (<city>)" rule below.
+    /// "Halle (Saale)", "Rheinfelden (Baden)" - never a Berlin-style city, even behind an "S ".
     private static let regionQualifiers: Set<String> = [
         "main", "neckar", "oder", "saale", "donau", "rhein", "mosel", "lahn", "elbe", "weser", "fils",
         "rems", "enz", "murr", "ruhr", "sieg", "havel", "spree", "ilm", "baden", "pfalz", "westf",
@@ -93,37 +95,56 @@ public struct Station: Codable, Sendable, Hashable, Identifiable {
     ]
 
     /// Abbreviated rivers used in Baden-Württemberg's feed, e.g. "Esslingen (N)" for "Esslingen (Neckar)".
-    private static let abbreviatedQualifiers: [String: String] = ["N": "Neckar", "F": "Fils"]
+    private static let abbreviatedQualifiers: [String: String] = ["N": "Neckar", "F": "Fils", "R": "Rems"]
 
+    /// VBB stations outside Berlin ("S Bernau Bhf") whose bare town name would be ambiguous, under
+    /// the name DB itself uses for them.
+    private static let vbbTownNames: [String: String] = ["Bernau": "Bernau (bei Berlin)"]
+
+    /// User-facing name. The "<stop> (<city>)" rewrite ("S Spandau Bhf (Berlin)" -> "Berlin-Spandau")
+    /// is only applied to VBB-style names - an "S "/"U " prefix or a "… Bhf" stop - since elsewhere
+    /// the part in brackets tells apart same-named towns ("Böhlen (b. Leipzig)", "Borna (Leipzig)")
+    /// and has to stay where it is instead of becoming "b. Leipzig-Böhlen".
     static func displayName(for rawName: String) -> String {
         var name = rawName.trimmingCharacters(in: .whitespaces)
 
-        if name.hasSuffix(")"), let openParen = name.range(of: " (", options: .backwards),
-           levelQualifiers.contains(name[openParen.upperBound..<name.index(before: name.endIndex)].lowercased()) {
+        while name.hasSuffix(")"), let openParen = name.range(of: " (", options: .backwards) {
+            let qualifier = name[openParen.upperBound..<name.index(before: name.endIndex)].lowercased()
+            guard levelQualifiers.contains(qualifier) || noiseQualifiers.contains(qualifier) else { break }
             name = String(name[name.startIndex..<openParen.lowerBound])
         }
 
+        var isVBBStyle = false
         for prefix in ["S+U ", "S ", "U ", "Bus "] where name.hasPrefix(prefix) {
             name.removeFirst(prefix.count)
+            isVBBStyle = true
             break
         }
 
         if name.hasSuffix(")"), let openParen = name.range(of: " (", options: .backwards) {
-            let city = String(name[openParen.upperBound..<name.index(before: name.endIndex)])
-            let town = String(name[name.startIndex..<openParen.lowerBound])
-            if let river = abbreviatedQualifiers[city] {
-                return "\(town) (\(river))".replacingOccurrences(of: "Hauptbahnhof", with: "Hbf")
-            }
-            if regionQualifiers.contains(city.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))) {
-                return name.replacingOccurrences(of: "Hauptbahnhof", with: "Hbf")
-            }
+            let qualifier = String(name[openParen.upperBound..<name.index(before: name.endIndex)])
             var stop = String(name[name.startIndex..<openParen.lowerBound])
-            if stop.hasSuffix(" Bhf") {
-                stop.removeLast(" Bhf".count)
+            if let river = abbreviatedQualifiers[qualifier] {
+                name = "\(stop) (\(river))"
+            } else if qualifier.hasPrefix("b "), !qualifier.hasPrefix("b. ") {
+                name = "\(stop) (bei \(qualifier.dropFirst(2)))"
+            } else if qualifier.hasPrefix("b. ") {
+                name = "\(stop) (bei \(qualifier.dropFirst(3)))"
+            } else if (isVBBStyle || stop.hasSuffix(" Bhf")),
+                      !regionQualifiers.contains(qualifier.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ".")))
+            {
+                if stop.hasSuffix(" Bhf") { stop.removeLast(" Bhf".count) }
+                name = unhyphenatedStops.contains(stop.lowercased()) ? "\(qualifier) \(stop)" : "\(qualifier)-\(stop)"
             }
-            name = unhyphenatedStops.contains(stop.lowercased()) ? "\(city) \(stop)" : "\(city)-\(stop)"
+        } else if isVBBStyle, name.hasSuffix(" Bhf") {
+            // "S Oranienburg Bhf" -> "Oranienburg": outside Berlin the town is the station's name.
+            name.removeLast(" Bhf".count)
+            name = vbbTownNames[name] ?? name
         }
 
-        return name.replacingOccurrences(of: "Hauptbahnhof", with: "Hbf")
+        if name.hasSuffix(" Flugh") { name += "afen" }
+
+        return name.replacingOccurrences(of: ", Hauptbahnhof", with: " Hauptbahnhof")
+            .replacingOccurrences(of: "Hauptbahnhof", with: "Hbf")
     }
 }
