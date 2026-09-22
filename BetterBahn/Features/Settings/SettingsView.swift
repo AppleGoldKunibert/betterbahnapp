@@ -103,7 +103,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Für Profis")
                 } footer: {
-                    Text("Zusätzliche Funktionen für Vielfahrer. Schalte nur ein, was du brauchst.")
+                    Text("Zusätzliche Funktionen für Vielfahrer.")
                 }
 
                 Section {
