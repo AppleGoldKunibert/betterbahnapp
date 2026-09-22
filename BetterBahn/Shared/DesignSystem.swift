@@ -512,6 +512,8 @@ struct ActionTileButton: View {
             Label(title, systemImage: systemImage)
                 .font(.subheadline.weight(.semibold))
                 .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .padding(.horizontal, 8)
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .foregroundStyle(tint)
                 .background(tint.opacity(0.11), in: .capsule)
