@@ -432,7 +432,7 @@ struct TravelMap: UIViewRepresentable {
         var didFit = false
         private var trainAnnotations: [String: TrainAnnotation] = [:]
 
-        /// Adds, moves and removes train markers in place so an open callout survives the 2-minute refresh.
+        /// Adds, moves and removes train markers in place so an open callout survives the periodic refresh.
         func syncTrains(_ trains: [LiveTrainPosition], on map: MKMapView) {
             let current = Dictionary(trains.map { ($0.trainName, $0) }, uniquingKeysWith: { $1 })
             for (name, annotation) in trainAnnotations where current[name] == nil {

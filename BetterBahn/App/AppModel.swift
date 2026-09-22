@@ -383,7 +383,7 @@ final class AppModel {
     // MARK: Live train positions
 
     /// How often the position of running ICEs of saved journeys is fetched.
-    static let positionRefreshInterval: Duration = .seconds(120)
+    static let positionRefreshInterval: Duration = .seconds(45)
 
     /// Latest GPS fix of every ICE on a saved journey that is running right now, keyed by train name.
     private(set) var trainPositions: [String: LiveTrainPosition] = [:]
