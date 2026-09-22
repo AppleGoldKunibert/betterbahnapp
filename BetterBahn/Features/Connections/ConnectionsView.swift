@@ -9,6 +9,8 @@ struct JourneyRoute: Hashable {
     var finalDestination: Station
     var readOnly = false
     var title = "Reiseplan"
+    /// The search this journey came from, so a re-plan can start from the same options.
+    var search: ConnectionSearch?
 }
 
 enum ConnectionsRoute: Hashable {
@@ -17,7 +19,7 @@ enum ConnectionsRoute: Hashable {
     case pastTrips
 }
 
-struct ConnectionSearch: Hashable {
+struct ConnectionSearch: Hashable, Codable {
     var from: Station
     var to: Station
     var via: [ViaWaypoint] = []
@@ -61,14 +63,6 @@ struct ConnectionsView: View {
         case from, to, via(UUID)
     }
 
-    /// UI-side row for an in-progress via point: it needs a stable identity before a station has
-    /// even been picked, which `ViaWaypoint` (identified by station id) can't provide.
-    struct ViaRow: Identifiable {
-        let id = UUID()
-        var station: Station?
-        var minStayMinutes = 0
-    }
-
     var body: some View {
         NavigationStack(path: $path) {
             ScrollViewReader { proxy in
@@ -110,7 +104,7 @@ struct ConnectionsView: View {
                     JourneyResultsView(search: search)
                 case .journey(let journey):
                     JourneyDetailView(journey: journey.journey, finalDestination: journey.finalDestination,
-                                      readOnly: journey.readOnly, title: journey.title)
+                                      readOnly: journey.readOnly, title: journey.title, search: journey.search)
                 case .pastTrips:
                     PastTripsView()
                 }
@@ -139,7 +133,7 @@ struct ConnectionsView: View {
                 routeDivider(showAdd: viaRows.isEmpty, showSwap: true)
 
                 ForEach($viaRows) { $row in
-                    ViaRowView(row: $row, focus: $focused) {
+                    ViaRowView(row: $row, focus: $focused, focusValue: .via(row.id)) {
                         withAnimation(.snappy) { viaRows.removeAll { $0.id == row.id } }
                     }
                     routeDivider(showAdd: row.id == viaRows.last?.id, showSwap: false)
@@ -254,13 +248,7 @@ struct ConnectionsView: View {
     private var transfersPicker: some View {
         VStack(alignment: .leading, spacing: 8) {
             optionLabel("Max. Umstiege", subtitle: "Weniger Umstiege, ggf. längere Fahrzeit", icon: "arrow.triangle.swap", color: .brand)
-            Picker("Max. Umstiege", selection: $maxTransfers) {
-                Text("Beliebig").tag(Int?.none)
-                Text("Direkt").tag(Int?.some(0))
-                Text("≤ 1").tag(Int?.some(1))
-                Text("≤ 2").tag(Int?.some(2))
-            }
-            .pickerStyle(.segmented)
+            MaxTransfersPicker(maxTransfers: $maxTransfers)
         }
     }
 
@@ -282,10 +270,7 @@ struct ConnectionsView: View {
     }
 
     private var productSummary: String {
-        if perLeg { return "Pro Abschnitt festgelegt" }
-        if products.count == Product.allCases.count { return "Alle" }
-        let names = Product.allCases.filter(products.contains).map(\.displayName)
-        return names.isEmpty ? "Keine ausgewählt" : names.joined(separator: ", ")
+        perLeg ? "Pro Abschnitt festgelegt" : BetterBahn.productSummary(products)
     }
 
     private var all: Set<Product> { Set(Product.allCases) }
@@ -422,99 +407,6 @@ struct ConnectionsView: View {
                                      isArrival: via.isEmpty ? isArrival : false, onlyBC100: onlyBC100,
                                      products: perLeg ? legProducts[Self.startLegID] ?? all : products,
                                      maxTransfers: maxTransfers)))
-    }
-}
-
-/// One intermediate stop in the route card: a station field plus its minimum-stay control.
-private struct ViaRowView: View {
-    @Binding var row: ConnectionsView.ViaRow
-    let focus: FocusState<ConnectionsView.Field?>.Binding
-    let onRemove: () -> Void
-
-    @State private var showStayPopover = false
-
-    var body: some View {
-        VStack(spacing: 0) {
-            StationInput(label: "Zwischenhalt", placeholder: "Über welchen Ort?", systemImage: "smallcircle.filled.circle",
-                         iconColor: .secondary, station: $row.station, focus: focus, focusValue: .via(row.id))
-
-            HStack(spacing: 10) {
-                Button {
-                    showStayPopover = true
-                } label: {
-                    Label(row.minStayMinutes > 0 ? "Mind. \(row.minStayMinutes) Min." : "Mindestaufenthalt",
-                          systemImage: "clock.badge.checkmark")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(row.minStayMinutes > 0 ? Color.brand : Color.secondary)
-                }
-                .buttonStyle(.plain)
-                .popover(isPresented: $showStayPopover) { stayPopover }
-
-                Spacer()
-
-                Button(role: .destructive, action: onRemove) {
-                    Image(systemName: "trash")
-                        .font(.caption.weight(.semibold))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("Zwischenhalt entfernen")
-            }
-            .padding(.leading, 54)
-            .padding(.trailing, 16)
-            .padding(.bottom, 12)
-        }
-    }
-
-    private var stayPopover: some View {
-        VStack(spacing: 14) {
-            Text("Mindestaufenthalt in \(row.station?.displayName ?? "diesem Ort")")
-                .font(.subheadline.weight(.semibold))
-                .multilineTextAlignment(.center)
-            Stepper("\(row.minStayMinutes) Minuten", value: $row.minStayMinutes, in: 0...120, step: 5)
-                .fixedSize()
-            Button("Fertig") { showStayPopover = false }
-                .buttonStyle(.glassProminent)
-                .tint(.brand)
-        }
-        .padding()
-        .frame(minWidth: 260)
-        .presentationCompactAdaptation(.popover)
-    }
-}
-
-/// Quick presets and toggle chips for choosing which vehicle types may be used.
-private struct ProductChips: View {
-    @Binding var products: Set<Product>
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Button("Nur Züge") { products = Set(Product.allCases.filter(\.isTrain)) }
-                Button("Nur Fernverkehr") { products = [.highSpeed, .longDistance] }
-                Button("Alle") { products = Set(Product.allCases) }
-            }
-            .font(.caption.weight(.semibold))
-            .buttonStyle(.bordered)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 8)], alignment: .leading, spacing: 8) {
-                ForEach(Product.allCases, id: \.self) { product in
-                    let isOn = products.contains(product)
-                    Button {
-                        if isOn { products.remove(product) } else { products.insert(product) }
-                    } label: {
-                        Label(product == .highSpeed ? "ICE" : product.displayName, systemImage: product.symbolName)
-                            .font(.caption.weight(.semibold))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
-                            .foregroundStyle(isOn ? Color.white : Color.primary)
-                            .background(isOn ? product.color : Color.secondary.opacity(0.15), in: .capsule)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
     }
 }
 
