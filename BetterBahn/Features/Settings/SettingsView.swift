@@ -60,16 +60,15 @@ struct SettingsView: View {
                     .onChange(of: settings.connectionWarnings) { _, enabled in
                         if enabled { Task { await ConnectionNotifier.requestAuthorization() } }
                     }
-                    Button {
-                        Task { await model.liveActivities.endAll() }
-                    } label: {
-                        IconLabel(title: "Live-Aktivitäten beenden", systemImage: "stop.circle.fill", color: .indigo)
+                    Toggle(isOn: $settings.liveActivitiesEnabled) {
+                        IconLabel(title: "Live-Aktivitäten", systemImage: "bolt.badge.clock.fill", color: .indigo)
                     }
-                    .foregroundStyle(.primary)
+                    .tint(.brand)
+                    .onChange(of: settings.liveActivitiesEnabled) { model.syncLiveActivity() }
                 } header: {
                     Text("Meine Reisen")
                 } footer: {
-                    Text("Wir sagen dir Bescheid, wenn ein Zug ausfällt oder du deinen Anschluss verpasst.")
+                    Text("Wir sagen dir Bescheid, wenn ein Zug ausfällt oder du deinen Anschluss verpasst. Live-Aktivitäten zeigen deine nächste Reise auf dem Sperrbildschirm.")
                 }
 
                 Section {

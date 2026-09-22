@@ -555,7 +555,8 @@ final class AppModel {
         } else {
             candidate = eligible.max { $0.savedAt < $1.savedAt }
         }
-        let journey = candidate?.journey
+        // Switched off in the settings: `show(nil)` ends whatever is still running.
+        let journey = settings.liveActivitiesEnabled ? candidate?.journey : nil
         Task { await liveActivities.show(journey) }
     }
 
@@ -723,6 +724,11 @@ final class AppSettings {
         didSet { Storage.save(quickTags, key: "quickTags") }
     }
 
+    /// Shows the next saved journey as a Live Activity on the Lock Screen and in the Dynamic Island.
+    var liveActivitiesEnabled: Bool {
+        didSet { UserDefaults.standard.set(liveActivitiesEnabled, forKey: "liveActivitiesEnabled") }
+    }
+
     /// Unlocks the features below; each one still has to be switched on by itself.
     var expertMode: Bool {
         didSet { UserDefaults.standard.set(expertMode, forKey: "expertMode") }
@@ -748,6 +754,7 @@ final class AppSettings {
         let defaults = UserDefaults.standard
         ticketFilterByDefault = defaults.bool(forKey: "onlyBC100ByDefault")
         ticketType = defaults.string(forKey: "ticketType").flatMap(TicketType.init) ?? .deutschlandticket
+        liveActivitiesEnabled = defaults.object(forKey: "liveActivitiesEnabled") as? Bool ?? true
         expertMode = defaults.bool(forKey: "expertMode")
         expertTraewelling = defaults.bool(forKey: "expertTraewelling")
         expertEditJourney = defaults.bool(forKey: "expertEditJourney")

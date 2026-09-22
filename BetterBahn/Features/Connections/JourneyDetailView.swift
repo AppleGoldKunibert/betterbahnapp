@@ -291,7 +291,7 @@ struct JourneyDetailView: View {
                     .accessibilityLabel("Reise bearbeiten")
                 }
             }
-            if model.isSaved(journey) {
+            if model.isSaved(journey), model.settings.liveActivitiesEnabled {
                 Label(model.liveActivities.isActive(journey)
                       ? "Läuft als Live-Aktivität"
                       : "Startet 30 Min. vor Abfahrt als Live-Aktivität",
