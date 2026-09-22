@@ -88,6 +88,8 @@ final class AppModel {
 
     var trainPicker: TrainPicker { TrainPicker(provider: provider) }
 
+    var journeyReplanner: JourneyReplanner { JourneyReplanner(provider: provider) }
+
     var trainRoutePlanner: TrainRoutePlanner { TrainRoutePlanner(provider: provider, timetables: timetablesClient) }
 
     var bc100Rules: BC100Rules { settings.bc100Rules }
@@ -333,10 +335,12 @@ final class AppModel {
         savedJourneys.contains { $0.journey.id == journey.id }
     }
 
-    func save(_ journey: Journey) {
+    /// `search` keeps the options the journey was found with (vehicle types, via stops, …) so they
+    /// can be picked up again when the route is re-planned from an earlier exit.
+    func save(_ journey: Journey, search: ConnectionSearch? = nil) {
         guard !isSaved(journey) else { return }
         if settings.connectionWarnings { Task { await ConnectionNotifier.requestAuthorization() } }
-        savedJourneys.append(SavedJourney(journey: journey))
+        savedJourneys.append(SavedJourney(journey: journey, search: search))
         savedJourneys.sort { ($0.journey.departure?.planned ?? .distantPast) < ($1.journey.departure?.planned ?? .distantPast) }
     }
 
@@ -353,14 +357,16 @@ final class AppModel {
         savedJourneys.first { $0.journey.id == journey.id }
     }
 
-    /// Replaces a saved journey with an alternative and keeps the old plan.
-    func replaceSaved(id: UUID, with journey: Journey, reason: String) {
+    /// Replaces a saved journey with an alternative and keeps the old plan. `search` updates the
+    /// stored search options when the replacement was planned with different ones.
+    func replaceSaved(id: UUID, with journey: Journey, reason: String, search: ConnectionSearch? = nil) {
         guard let index = savedJourneys.firstIndex(where: { $0.id == id }) else { return }
         var entry = savedJourneys[index]
         let old = PlanVersion(journey: entry.journey, replacedAt: .now, reason: reason)
         entry.previousVersions = [old] + (entry.previousVersions ?? [])
         entry.journey = journey
         entry.notifiedIssues = []
+        if let search { entry.search = search }
         savedJourneys[index] = entry
     }
 
@@ -471,6 +477,13 @@ final class AppModel {
     func trackManualCheckin(statusId: Int, leg: Leg) {
         trackedManualCheckins.removeAll { $0.leg.id == leg.id }
         trackedManualCheckins.append(TrackedManualCheckin(statusId: statusId, leg: leg, lastUpdate: .distantPast))
+    }
+
+    /// Keeps a tracked manual check-in pointed at the ride the user actually made after its exit
+    /// was moved, so further delay updates use the new arrival.
+    func updateTrackedCheckin(statusId: Int, leg: Leg) {
+        guard let index = trackedManualCheckins.firstIndex(where: { $0.statusId == statusId }) else { return }
+        trackedManualCheckins[index] = TrackedManualCheckin(statusId: statusId, leg: leg, lastUpdate: .distantPast)
     }
 
     /// Pushes the current delay to Träwelling every 10 minutes, plus a final update once the leg has
@@ -638,6 +651,9 @@ struct SavedJourney: Codable, Hashable, Identifiable {
     var id = UUID()
     var journey: Journey
     var savedAt = Date.now
+    /// The search this journey came from, if known – used to pre-fill a re-plan with the same
+    /// vehicle types, via stops and limits (optional so older saved data still decodes).
+    var search: ConnectionSearch?
     /// Older plans, newest first (optional so older saved data still decodes).
     var previousVersions: [PlanVersion]?
     /// Issue IDs we already sent a notification for.
