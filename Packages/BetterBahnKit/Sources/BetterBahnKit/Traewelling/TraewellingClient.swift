@@ -191,6 +191,18 @@ public actor TraewellingClient {
 
     private func api<T: Decodable & Sendable>(_ path: String, query: [URLQueryItem] = [], method: String = "GET",
                                    body: Data? = nil, as type: T.Type) async throws -> T {
+        let data = try await authorizedData(path, query: query, method: method, body: body)
+        do {
+            return try JSONDecoding.decoder.decode(T.self, from: data)
+        } catch {
+            throw TransitError.decoding(String(describing: error))
+        }
+    }
+
+    /// Sends an authorized request and hands back the raw body, which is empty for a
+    /// `204 No Content` reply (Träwelling uses one for "nothing is currently checked in").
+    func authorizedData(_ path: String, query: [URLQueryItem] = [], method: String = "GET",
+                        body: Data? = nil) async throws -> Data {
         var url = config.apiURL.appending(path: path)
         if !query.isEmpty { url = url.appending(queryItems: query) }
         var request = URLRequest(url: url, timeoutInterval: 30)
@@ -201,7 +213,7 @@ public actor TraewellingClient {
         request.setValue("Bearer \(try await validAccessToken())", forHTTPHeaderField: "Authorization")
         request.setValue(HTTPClient.identifyingUserAgent, forHTTPHeaderField: "User-Agent")
         do {
-            return try await http.send(request, as: type)
+            return try await http.sendRaw(request)
         } catch TransitError.http(let status, let body) {
             if status == 401 { logout(); throw OAuthError.notLoggedIn }
             if status == 409 { throw TraewellingError.collision }
@@ -209,9 +221,10 @@ public actor TraewellingClient {
         }
     }
 
-    /// Authorized GET used by extensions.
-    func authorized<T: Decodable & Sendable>(_ path: String, query: [URLQueryItem] = [], as type: T.Type) async throws -> T {
-        try await api(path, query: query, as: type)
+    /// Authorized request used by extensions.
+    func authorized<T: Decodable & Sendable>(_ path: String, query: [URLQueryItem] = [], method: String = "GET",
+                                             body: Data? = nil, as type: T.Type) async throws -> T {
+        try await api(path, query: query, method: method, body: body, as: type)
     }
 
     static func message(from body: String?) -> String? {
@@ -321,8 +334,16 @@ public actor TraewellingClient {
     @discardableResult
     public func updateCheckin(statusId: Int, departure: Date?, arrival: Date?) async throws -> TraewellingStatus {
         var body: [String: Any] = [:]
-        if let departure { body["manual_departure"] = JSONDecoding.isoString(departure) }
-        if let arrival { body["manual_arrival"] = JSONDecoding.isoString(arrival) }
+        if let departure {
+            let value = JSONDecoding.isoString(departure)
+            body["manualDeparture"] = value
+            body["manual_departure"] = value
+        }
+        if let arrival {
+            let value = JSONDecoding.isoString(arrival)
+            body["manualArrival"] = value
+            body["manual_arrival"] = value
+        }
         let data = try JSONSerialization.data(withJSONObject: body)
         return try await api("status/\(statusId)", method: "PUT", body: data, as: DataWrapper<TraewellingStatus>.self).data
     }

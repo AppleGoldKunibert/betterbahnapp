@@ -20,6 +20,8 @@ public struct TraewellingStatus: Decodable, Sendable, Hashable {
             public var arrival: Date?
         }
         public var trip: Int?
+        /// The trip's HAFAS ID, needed to look its stopovers up again (e.g. to move the exit).
+        public var hafasId: String?
         public var category: String?
         public var lineName: String?
         public var journeyNumber: Int?
