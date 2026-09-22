@@ -31,6 +31,7 @@ struct UpcomingTripsSection: View {
 struct SavedJourneyRow: View {
     let entry: SavedJourney
     var isNext = false
+    var readOnly = false
     @Environment(AppModel.self) private var model
 
     var body: some View {
@@ -38,6 +39,7 @@ struct SavedJourneyRow: View {
         NavigationLink(value: ConnectionsRoute.journey(JourneyRoute(
             journey: entry.journey,
             finalDestination: entry.journey.legs.last?.destination ?? entry.journey.legs[0].destination,
+            readOnly: readOnly,
             search: entry.search))) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
@@ -95,7 +97,7 @@ struct PastTripsView: View {
                     ContentUnavailableView("Keine vergangenen Fahrten", systemImage: "clock.arrow.circlepath")
                         .padding(.top, 60)
                 }
-                ForEach(model.pastJourneys) { SavedJourneyRow(entry: $0) }
+                ForEach(model.pastJourneys) { SavedJourneyRow(entry: $0, readOnly: true) }
             }
             .padding(.horizontal)
             .padding(.bottom, 24)

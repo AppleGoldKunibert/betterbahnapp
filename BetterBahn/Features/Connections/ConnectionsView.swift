@@ -215,7 +215,7 @@ struct ConnectionsView: View {
                         Label("Ankunft", systemImage: "arrow.down.right").tag(true)
                     }
                     .pickerStyle(.segmented)
-                    .frame(maxWidth: 200)
+                    .fixedSize()
                     .disabled(!viaRows.isEmpty)
 
                     Spacer()

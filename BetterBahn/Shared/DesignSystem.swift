@@ -264,15 +264,21 @@ struct TimeStack: View {
                 .monospacedDigit()
                 .strikethrough(cancelled, color: .heavyDelay)
                 .foregroundStyle(cancelled ? .secondary : liveOnTime ? delayColor(0) : .primary)
+                .minimumScaleFactor(0.7)
+                .lineLimit(1)
             if cancelled {
                 Text("Ausfall")
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(Color.heavyDelay)
+                    .minimumScaleFactor(0.7)
+                    .lineLimit(1)
             } else if let actual = time.actual, !liveOnTime {
                 Text(actual.timeString)
                     .font(.caption.weight(.semibold))
                     .monospacedDigit()
                     .foregroundStyle(delayColor(time.delayMinutes))
+                    .minimumScaleFactor(0.7)
+                    .lineLimit(1)
             }
         }
     }
