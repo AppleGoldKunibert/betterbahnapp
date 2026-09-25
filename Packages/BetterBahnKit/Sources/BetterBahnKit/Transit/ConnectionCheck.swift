@@ -116,12 +116,18 @@ public struct JourneyRefresher: Sendable {
         if trip.cancelled { leg.cancelled = true }
         // Journeys saved before `tripNumber` existed pick up the real train number here.
         if leg.line?.tripNumber == nil { leg.line?.tripNumber = trip.line?.tripNumber }
-        if let start = trip.stopovers.first(where: { $0.station.isSamePlace(as: leg.origin) }) {
+        // Ring lines (S41/S42) pass the same station several times per trip, so the stop is picked
+        // by its planned time too — not just the first/last visit, which can be hours off.
+        let startIndex = closestStop(in: trip.stopovers, at: leg.origin, plannedTime: leg.departure.planned, side: \.departure)
+        if let startIndex {
+            let start = trip.stopovers[startIndex]
             if let departure = start.departure { leg.departure = departure }
             if start.departurePlatform?.best != nil { leg.departurePlatform = start.departurePlatform }
             if start.cancelled { leg.cancelled = true }
         }
-        if let end = trip.stopovers.last(where: { $0.station.isSamePlace(as: leg.destination) }) {
+        let rest = trip.stopovers[((startIndex ?? -1) + 1)...]
+        if let endIndex = closestStop(in: rest, at: leg.destination, plannedTime: leg.arrival.planned, side: \.arrival) {
+            let end = trip.stopovers[endIndex]
             if let arrival = end.arrival { leg.arrival = arrival }
             if end.arrivalPlatform?.best != nil { leg.arrivalPlatform = end.arrivalPlatform }
             if end.cancelled { leg.cancelled = true }
@@ -138,6 +144,24 @@ public struct JourneyRefresher: Sendable {
             if live.cancelled { leg.stopovers[index].cancelled = true }
         }
         return leg
+    }
+
+    /// Index of the visit to `station` whose planned `side` time is closest to `plannedTime`.
+    static func closestStop(in stops: ArraySlice<Stopover>, at station: Station, plannedTime: Date,
+                            side: KeyPath<Stopover, TimeInfo?>) -> Int? {
+        stops.indices
+            .filter { stops[$0].station.isSamePlace(as: station) }
+            .min { distance(stops[$0], plannedTime, side) < distance(stops[$1], plannedTime, side) }
+    }
+
+    static func closestStop(in stops: [Stopover], at station: Station, plannedTime: Date,
+                            side: KeyPath<Stopover, TimeInfo?>) -> Int? {
+        closestStop(in: stops[...], at: station, plannedTime: plannedTime, side: side)
+    }
+
+    private static func distance(_ stop: Stopover, _ time: Date, _ side: KeyPath<Stopover, TimeInfo?>) -> TimeInterval {
+        guard let planned = stop[keyPath: side]?.planned else { return .infinity }
+        return abs(planned.timeIntervalSince(time))
     }
 
     static func apply(_ override: TimetablesLegOverride, to leg: Leg) -> Leg {

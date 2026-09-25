@@ -59,9 +59,9 @@ struct TripView: View {
 
     private var selectedLeg: Leg? {
         guard let trip,
-              let boarding = trip.stopovers.first(where: { $0.id == boardingID }),
-              let exit = trip.stopovers.first(where: { $0.id == exitID }) else { return nil }
-        return trip.leg(from: boarding.station, to: exit.station)
+              let boarding = trip.stopovers.firstIndex(where: { $0.id == boardingID }),
+              let exit = trip.stopovers.firstIndex(where: { $0.id == exitID }) else { return nil }
+        return trip.leg(fromIndex: boarding, toIndex: exit)
     }
 
     private func actionBar(_ leg: Leg) -> some View {

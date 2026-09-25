@@ -1275,6 +1275,29 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         guard case .transferMissed(_, _, _, let buffer) = journey.connectionIssues().first else { Issue.record("wrong issue"); return }
         #expect(buffer == 0)
     }
+
+    @Test func refreshOnRingLinePicksTheVisitAtTheSavedTime() {
+        // S41 passes Gesundbrunnen and Wedding every hour on the same trip; the saved 9:41 ride must
+        // not be moved to the trip's first 6:41 pass when refreshed.
+        func stop(_ name: String, _ minute: Double) -> Stopover {
+            let time = TimeInfo(planned: base.addingTimeInterval(minute * 60), actual: base.addingTimeInterval((minute + 2) * 60))
+            return Stopover(station: station(name, name), arrival: time, departure: time,
+                            arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+        }
+        let laps = [0.0, 60, 120, 180, 240]
+        let trip = Trip(id: "S41", line: nil, direction: nil,
+                        stopovers: laps.flatMap { [stop("Gesundbrunnen", $0), stop("Wedding", $0 + 2)] },
+                        cancelled: false, remarks: [], source: .bahnDe)
+        let saved = leg("S41", "Gesundbrunnen", "Wedding", dep: 180, arr: 182)
+        let refreshed = JourneyRefresher.apply(trip, to: saved)
+        #expect(refreshed.departure.planned == saved.departure.planned)
+        #expect(refreshed.arrival.planned == saved.arrival.planned)
+        #expect(refreshed.departure.actual == base.addingTimeInterval(182 * 60))
+
+        let fromTripView = trip.leg(fromIndex: 6, toIndex: 7)
+        #expect(fromTripView?.departure.planned == saved.departure.planned)
+        #expect(fromTripView?.arrival.planned == saved.arrival.planned)
+    }
 }
 
 // MARK: - Train route planning

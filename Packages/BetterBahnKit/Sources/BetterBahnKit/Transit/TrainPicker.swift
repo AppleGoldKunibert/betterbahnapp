@@ -6,6 +6,13 @@ public extension Trip {
         guard let startIndex = stopovers.firstIndex(where: { $0.station.isSamePlace(as: origin) }),
               let endIndex = stopovers[(startIndex + 1)...].firstIndex(where: { $0.station.isSamePlace(as: destination) })
         else { return nil }
+        return leg(fromIndex: startIndex, toIndex: endIndex)
+    }
+
+    /// Builds a leg between two specific stops of this trip. Needed on ring lines (S41/S42), where
+    /// the same station comes up more than once and picking it by station alone takes the wrong visit.
+    func leg(fromIndex startIndex: Int, toIndex endIndex: Int) -> Leg? {
+        guard stopovers.indices.contains(startIndex), stopovers.indices.contains(endIndex), startIndex < endIndex else { return nil }
         let start = stopovers[startIndex], end = stopovers[endIndex]
         guard let departure = start.departure, let arrival = end.arrival else { return nil }
         return Leg(
