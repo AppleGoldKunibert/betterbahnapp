@@ -10,6 +10,8 @@
 		1F3E56FA3903FC4520663A0A /* BetterBahnWidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 1C7052EC5FC02E5BD365EC48 /* BetterBahnWidgetsExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		5C6A34EF52ECEBB205AD6FCF /* BetterBahnKit in Frameworks */ = {isa = PBXBuildFile; productRef = B70D16E744EAA68A9A44C7FF /* BetterBahnKit */; };
 		F40744EEB5BC11DDF94971C3 /* BetterBahnKit in Frameworks */ = {isa = PBXBuildFile; productRef = BDBCCC4658689BF45E5472BF /* BetterBahnKit */; };
+		063D2D172C67FC9AC6EB7035 /* BetterBahnShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A82B86377018B7B466B6CE87 /* BetterBahnShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		CB40CF092A2950118E6C6034 /* BetterBahnKit in Frameworks */ = {isa = PBXBuildFile; productRef = 1317CD8A62CBFA9D4E6363C9 /* BetterBahnKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -19,6 +21,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = E8173D1080A28ECDFD3BF6B2;
 			remoteInfo = BetterBahnWidgetsExtension;
+		};
+		F832B348EE8824D79D9461EE /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 6C92DD629C0C1B84C2BCEE58;
+			remoteInfo = BetterBahnShareExtension;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -30,6 +39,7 @@
 			dstSubfolderSpec = 13;
 			files = (
 				1F3E56FA3903FC4520663A0A /* BetterBahnWidgetsExtension.appex in Embed Foundation Extensions */,
+				063D2D172C67FC9AC6EB7035 /* BetterBahnShareExtension.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -41,6 +51,8 @@
 		1C7052EC5FC02E5BD365EC48 /* BetterBahnWidgetsExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BetterBahnWidgetsExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		3376E011AD4FCD4BF785813D /* Config/Widgets.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config/Widgets.xcconfig; sourceTree = SOURCE_ROOT; };
 		81918909E83595C8F4212CCC /* BetterBahn.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BetterBahn.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A82B86377018B7B466B6CE87 /* BetterBahnShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BetterBahnShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		22E0D898107FA89EF25F38C9 /* Config/Share.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config/Share.xcconfig; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -52,6 +64,11 @@
 		3EEF7D8B7A3B439D41A876E3 /* BetterBahnWidgets */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = BetterBahnWidgets;
+			sourceTree = "<group>";
+		};
+		E29BB3BB325E2E336DBFC861 /* BetterBahnShare */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = BetterBahnShare;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -73,6 +90,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		5DB817E7645D32859BC918E9 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CB40CF092A2950118E6C6034 /* BetterBahnKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -81,6 +106,7 @@
 			children = (
 				81918909E83595C8F4212CCC /* BetterBahn.app */,
 				1C7052EC5FC02E5BD365EC48 /* BetterBahnWidgetsExtension.appex */,
+				A82B86377018B7B466B6CE87 /* BetterBahnShareExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -90,8 +116,10 @@
 			children = (
 				027379FA0977A33B72632DE8 /* BetterBahn */,
 				3EEF7D8B7A3B439D41A876E3 /* BetterBahnWidgets */,
+				E29BB3BB325E2E336DBFC861 /* BetterBahnShare */,
 				07CD028B06AD9AD383E4AE30 /* Config/App.xcconfig */,
 				3376E011AD4FCD4BF785813D /* Config/Widgets.xcconfig */,
+				22E0D898107FA89EF25F38C9 /* Config/Share.xcconfig */,
 				1BADDC1D73C1A20F347483E1 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -112,6 +140,7 @@
 			);
 			dependencies = (
 				551BDF5D8808EFCFB21091A6 /* PBXTargetDependency */,
+				582E3352E0B54DE653868AFB /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				027379FA0977A33B72632DE8 /* BetterBahn */,
@@ -147,6 +176,29 @@
 			productReference = 1C7052EC5FC02E5BD365EC48 /* BetterBahnWidgetsExtension.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		6C92DD629C0C1B84C2BCEE58 /* BetterBahnShareExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = ABCFC20D27AECF48FC3593D2 /* Build configuration list for PBXNativeTarget "BetterBahnShareExtension" */;
+			buildPhases = (
+				EBC1652357BA9939ECBC42EF /* Sources */,
+				5DB817E7645D32859BC918E9 /* Frameworks */,
+				9497FA6573F6A2280CA89521 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				E29BB3BB325E2E336DBFC861 /* BetterBahnShare */,
+			);
+			name = BetterBahnShareExtension;
+			packageProductDependencies = (
+				1317CD8A62CBFA9D4E6363C9 /* BetterBahnKit */,
+			);
+			productName = BetterBahnShareExtension;
+			productReference = A82B86377018B7B466B6CE87 /* BetterBahnShareExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -164,6 +216,9 @@
 						CreatedOnToolsVersion = 26.6;
 					};
 					E8173D1080A28ECDFD3BF6B2 = {
+						CreatedOnToolsVersion = 26.6;
+					};
+					6C92DD629C0C1B84C2BCEE58 = {
 						CreatedOnToolsVersion = 26.6;
 					};
 				};
@@ -187,6 +242,7 @@
 			targets = (
 				3D4C91345015A4DD0A099400 /* BetterBahn */,
 				E8173D1080A28ECDFD3BF6B2 /* BetterBahnWidgetsExtension */,
+				6C92DD629C0C1B84C2BCEE58 /* BetterBahnShareExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -200,6 +256,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		82A968CB662751220D4DFE2D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9497FA6573F6A2280CA89521 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -223,6 +286,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		EBC1652357BA9939ECBC42EF /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -230,6 +300,11 @@
 			isa = PBXTargetDependency;
 			target = E8173D1080A28ECDFD3BF6B2 /* BetterBahnWidgetsExtension */;
 			targetProxy = 431387EB7262E1CFC79B125E /* PBXContainerItemProxy */;
+		};
+		582E3352E0B54DE653868AFB /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 6C92DD629C0C1B84C2BCEE58 /* BetterBahnShareExtension */;
+			targetProxy = F832B348EE8824D79D9461EE /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -384,6 +459,52 @@
 			};
 			name = Release;
 		};
+		AC76EA0702A79A1A930B5C34 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 22E0D898107FA89EF25F38C9 /* Config/Share.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/BetterBahnShare-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = BetterBahn;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		650783DEE3BA97236E416D2A /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 22E0D898107FA89EF25F38C9 /* Config/Share.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/BetterBahnShare-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = BetterBahn;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -414,6 +535,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		ABCFC20D27AECF48FC3593D2 /* Build configuration list for PBXNativeTarget "BetterBahnShareExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AC76EA0702A79A1A930B5C34 /* Debug */,
+				650783DEE3BA97236E416D2A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -429,6 +559,10 @@
 			productName = BetterBahnKit;
 		};
 		BDBCCC4658689BF45E5472BF /* BetterBahnKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = BetterBahnKit;
+		};
+		1317CD8A62CBFA9D4E6363C9 /* BetterBahnKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = BetterBahnKit;
 		};

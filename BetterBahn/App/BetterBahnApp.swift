@@ -43,6 +43,7 @@ struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
     @State private var incomingSharedJourney: Journey?
+    @State private var incomingDBShare: DBShareText?
     @State private var showInvalidShareLinkAlert = false
 
     var body: some View {
@@ -94,13 +95,21 @@ struct RootView: View {
         }
         #endif
         .onOpenURL { url in
+            // A connection shared from the DB Navigator / bahn.de, handed over by the share extension.
+            if let text = DBShare.text(fromAppURL: url) {
+                incomingSharedJourney = nil
+                incomingDBShare = DBShareText(text: text)
+                return
+            }
             guard let journey = JourneyShareLink.journey(from: url) else {
                 showInvalidShareLinkAlert = true
                 return
             }
+            incomingDBShare = nil
             incomingSharedJourney = journey
         }
         .sheet(item: $incomingSharedJourney) { SharedJourneyPreviewView(journey: $0) }
+        .sheet(item: $incomingDBShare) { ImportedJourneyView(text: $0.text) }
         .alert("Reise-Link ungültig", isPresented: $showInvalidShareLinkAlert) {
             Button("OK", role: .cancel) {}
         } message: {

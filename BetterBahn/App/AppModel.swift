@@ -87,6 +87,8 @@ final class AppModel {
 
     var journeyReplanner: JourneyReplanner { JourneyReplanner(provider: provider) }
 
+    var dbShareImporter: DBShareImporter { DBShareImporter(provider: provider, bahnDe: provider.bahnDe ?? BahnDeClient()) }
+
     var trainRoutePlanner: TrainRoutePlanner { TrainRoutePlanner(provider: provider, timetables: timetablesClient) }
 
     /// Rules for the "only valid with my ticket" filters, for the ticket picked in the settings.

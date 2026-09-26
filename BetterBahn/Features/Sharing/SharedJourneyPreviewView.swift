@@ -1,10 +1,13 @@
 import BetterBahnKit
 import SwiftUI
 
-/// Shown when the app is opened via a `betterbahn://share` link from another user, so the
-/// received journey can be reviewed before it's added to "Meine Reisen".
+/// Shown when the app is opened via a `betterbahn://share` link from another user (or with a
+/// connection shared from the DB Navigator / bahn.de, see `ImportedJourneyView`), so the received
+/// journey can be reviewed before it's added to "Meine Reisen".
 struct SharedJourneyPreviewView: View {
     let journey: Journey
+    var note: LocalizedStringKey = "Von einem anderen Nutzer geteilt"
+    var noteIcon = "person.2.wave.2.fill"
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var saved = false
@@ -13,7 +16,7 @@ struct SharedJourneyPreviewView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    Label("Von einem anderen Nutzer geteilt", systemImage: "person.2.wave.2.fill")
+                    Label(note, systemImage: noteIcon)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.secondary)
                     JourneyCard(journey: journey)

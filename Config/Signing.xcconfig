@@ -1,4 +1,4 @@
-// Shared default signing values, used by App.xcconfig and Widgets.xcconfig.
+// Shared default signing values, used by App.xcconfig, Widgets.xcconfig and Share.xcconfig.
 //
 // To build under your own Apple Developer account (e.g. to test alongside someone else's build
 // on the same device) without touching this shared file, copy Config/Local.xcconfig.example to
