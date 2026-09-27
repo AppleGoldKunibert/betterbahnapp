@@ -7,11 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		063D2D172C67FC9AC6EB7035 /* BetterBahnShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A82B86377018B7B466B6CE87 /* BetterBahnShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		1F3E56FA3903FC4520663A0A /* BetterBahnWidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 1C7052EC5FC02E5BD365EC48 /* BetterBahnWidgetsExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		5C6A34EF52ECEBB205AD6FCF /* BetterBahnKit in Frameworks */ = {isa = PBXBuildFile; productRef = B70D16E744EAA68A9A44C7FF /* BetterBahnKit */; };
-		F40744EEB5BC11DDF94971C3 /* BetterBahnKit in Frameworks */ = {isa = PBXBuildFile; productRef = BDBCCC4658689BF45E5472BF /* BetterBahnKit */; };
-		063D2D172C67FC9AC6EB7035 /* BetterBahnShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A82B86377018B7B466B6CE87 /* BetterBahnShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		CB40CF092A2950118E6C6034 /* BetterBahnKit in Frameworks */ = {isa = PBXBuildFile; productRef = 1317CD8A62CBFA9D4E6363C9 /* BetterBahnKit */; };
+		F40744EEB5BC11DDF94971C3 /* BetterBahnKit in Frameworks */ = {isa = PBXBuildFile; productRef = BDBCCC4658689BF45E5472BF /* BetterBahnKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -49,10 +49,10 @@
 /* Begin PBXFileReference section */
 		07CD028B06AD9AD383E4AE30 /* Config/App.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config/App.xcconfig; sourceTree = SOURCE_ROOT; };
 		1C7052EC5FC02E5BD365EC48 /* BetterBahnWidgetsExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BetterBahnWidgetsExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		22E0D898107FA89EF25F38C9 /* Config/Share.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config/Share.xcconfig; sourceTree = SOURCE_ROOT; };
 		3376E011AD4FCD4BF785813D /* Config/Widgets.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config/Widgets.xcconfig; sourceTree = SOURCE_ROOT; };
 		81918909E83595C8F4212CCC /* BetterBahn.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BetterBahn.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A82B86377018B7B466B6CE87 /* BetterBahnShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BetterBahnShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		22E0D898107FA89EF25F38C9 /* Config/Share.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config/Share.xcconfig; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -82,19 +82,19 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		C2B571F11AF4AD9F122E48C3 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				F40744EEB5BC11DDF94971C3 /* BetterBahnKit in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		5DB817E7645D32859BC918E9 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				CB40CF092A2950118E6C6034 /* BetterBahnKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C2B571F11AF4AD9F122E48C3 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F40744EEB5BC11DDF94971C3 /* BetterBahnKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -153,29 +153,6 @@
 			productReference = 81918909E83595C8F4212CCC /* BetterBahn.app */;
 			productType = "com.apple.product-type.application";
 		};
-		E8173D1080A28ECDFD3BF6B2 /* BetterBahnWidgetsExtension */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 3BBB74E95767513C23C8646C /* Build configuration list for PBXNativeTarget "BetterBahnWidgetsExtension" */;
-			buildPhases = (
-				C861C1B2713F1DA729267477 /* Sources */,
-				C2B571F11AF4AD9F122E48C3 /* Frameworks */,
-				3EB9B1A63CB0AF905AC09EAB /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			fileSystemSynchronizedGroups = (
-				3EEF7D8B7A3B439D41A876E3 /* BetterBahnWidgets */,
-			);
-			name = BetterBahnWidgetsExtension;
-			packageProductDependencies = (
-				BDBCCC4658689BF45E5472BF /* BetterBahnKit */,
-			);
-			productName = BetterBahnWidgetsExtension;
-			productReference = 1C7052EC5FC02E5BD365EC48 /* BetterBahnWidgetsExtension.appex */;
-			productType = "com.apple.product-type.app-extension";
-		};
 		6C92DD629C0C1B84C2BCEE58 /* BetterBahnShareExtension */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = ABCFC20D27AECF48FC3593D2 /* Build configuration list for PBXNativeTarget "BetterBahnShareExtension" */;
@@ -199,6 +176,29 @@
 			productReference = A82B86377018B7B466B6CE87 /* BetterBahnShareExtension.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		E8173D1080A28ECDFD3BF6B2 /* BetterBahnWidgetsExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3BBB74E95767513C23C8646C /* Build configuration list for PBXNativeTarget "BetterBahnWidgetsExtension" */;
+			buildPhases = (
+				C861C1B2713F1DA729267477 /* Sources */,
+				C2B571F11AF4AD9F122E48C3 /* Frameworks */,
+				3EB9B1A63CB0AF905AC09EAB /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				3EEF7D8B7A3B439D41A876E3 /* BetterBahnWidgets */,
+			);
+			name = BetterBahnWidgetsExtension;
+			packageProductDependencies = (
+				BDBCCC4658689BF45E5472BF /* BetterBahnKit */,
+			);
+			productName = BetterBahnWidgetsExtension;
+			productReference = 1C7052EC5FC02E5BD365EC48 /* BetterBahnWidgetsExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -215,10 +215,10 @@
 					3D4C91345015A4DD0A099400 = {
 						CreatedOnToolsVersion = 26.6;
 					};
-					E8173D1080A28ECDFD3BF6B2 = {
+					6C92DD629C0C1B84C2BCEE58 = {
 						CreatedOnToolsVersion = 26.6;
 					};
-					6C92DD629C0C1B84C2BCEE58 = {
+					E8173D1080A28ECDFD3BF6B2 = {
 						CreatedOnToolsVersion = 26.6;
 					};
 				};
@@ -320,6 +320,8 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Config/BetterBahn-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = BetterBahn;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Damit bei der Bahnhofssuche Bahnhöfe in deiner Nähe zuerst angezeigt werden.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_NSSupportsLiveActivitiesFrequentUpdates = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -359,6 +361,29 @@
 			};
 			name = Debug;
 		};
+		650783DEE3BA97236E416D2A /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 22E0D898107FA89EF25F38C9 /* Config/Share.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/BetterBahnShare-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = BetterBahn;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
 		72FB3ED29B4639D83EC5DB14 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 07CD028B06AD9AD383E4AE30 /* Config/App.xcconfig */;
@@ -370,6 +395,8 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Config/BetterBahn-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = BetterBahn;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Damit bei der Bahnhofssuche Bahnhöfe in deiner Nähe zuerst angezeigt werden.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_NSSupportsLiveActivitiesFrequentUpdates = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -408,6 +435,29 @@
 				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
+		};
+		AC76EA0702A79A1A930B5C34 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 22E0D898107FA89EF25F38C9 /* Config/Share.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/BetterBahnShare-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = BetterBahn;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
 		};
 		FA9139DD8B03E3F922556BF8 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -459,52 +509,6 @@
 			};
 			name = Release;
 		};
-		AC76EA0702A79A1A930B5C34 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			baseConfigurationReference = 22E0D898107FA89EF25F38C9 /* Config/Share.xcconfig */;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "Config/BetterBahnShare-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = BetterBahn;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = 0.1;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = YES;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				TARGETED_DEVICE_FAMILY = 1;
-			};
-			name = Debug;
-		};
-		650783DEE3BA97236E416D2A /* Release */ = {
-			isa = XCBuildConfiguration;
-			baseConfigurationReference = 22E0D898107FA89EF25F38C9 /* Config/Share.xcconfig */;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "Config/BetterBahnShare-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = BetterBahn;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = 0.1;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = YES;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				TARGETED_DEVICE_FAMILY = 1;
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -526,20 +530,20 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		E3A7C415CD449FA8A1E633E1 /* Build configuration list for PBXProject "BetterBahn" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				FA9139DD8B03E3F922556BF8 /* Debug */,
-				FFE2104CCFAB79205AC64460 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
 		ABCFC20D27AECF48FC3593D2 /* Build configuration list for PBXNativeTarget "BetterBahnShareExtension" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				AC76EA0702A79A1A930B5C34 /* Debug */,
 				650783DEE3BA97236E416D2A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E3A7C415CD449FA8A1E633E1 /* Build configuration list for PBXProject "BetterBahn" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FA9139DD8B03E3F922556BF8 /* Debug */,
+				FFE2104CCFAB79205AC64460 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -554,15 +558,15 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		1317CD8A62CBFA9D4E6363C9 /* BetterBahnKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = BetterBahnKit;
+		};
 		B70D16E744EAA68A9A44C7FF /* BetterBahnKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = BetterBahnKit;
 		};
 		BDBCCC4658689BF45E5472BF /* BetterBahnKit */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = BetterBahnKit;
-		};
-		1317CD8A62CBFA9D4E6363C9 /* BetterBahnKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = BetterBahnKit;
 		};
