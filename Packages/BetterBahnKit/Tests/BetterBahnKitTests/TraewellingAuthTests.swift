@@ -144,6 +144,156 @@ import Testing
     }
 }
 
+/// Real-world case: the IC Zürich HB – Stuttgart Hbf is one run in Transitous, but Träwelling splits
+/// it at the border into a Swiss trip ending in Singen (Hohentwiel) and a German one from there, so
+/// Stuttgart was never on the trip found at Zürich and the checkin failed with `.stopNotOnTrip`.
+/// Now each part is checked in one after the other.
+@Suite struct TraewellingSplitTrainCheckinTests {
+    static func time(_ value: String) -> Date { ISO8601DateFormatter().date(from: value)! }
+
+    static let zurich = station("8503000", "Zürich HB", 47.3782, 8.5402)
+    static let schaffhausen = station("8503424", "Schaffhausen", 47.6981, 8.6325)
+    static let singen = station("8000073", "Singen (Hohentwiel)", 47.7590, 8.8403)
+    static let stuttgart = station("8000096", "Stuttgart Hbf", 48.7843, 9.1818)
+
+    static let leg: Leg = {
+        func stop(_ station: Station, arr: String?, dep: String?) -> Stopover {
+            Stopover(station: station, arrival: arr.map { TimeInfo(planned: time($0), actual: nil) },
+                     departure: dep.map { TimeInfo(planned: time($0), actual: nil) },
+                     arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+        }
+        return Leg(origin: zurich, destination: stuttgart,
+                   departure: TimeInfo(planned: time("2026-09-27T06:04:00Z"), actual: nil),
+                   arrival: TimeInfo(planned: time("2026-09-27T08:20:00Z"), actual: nil),
+                   departurePlatform: nil, arrivalPlatform: nil, tripId: "transitous-trip",
+                   line: Line(name: "IC 181", number: "181", product: .longDistance, operatorName: "DB Fernverkehr AG"),
+                   direction: "Stuttgart Hbf", isWalking: false, cancelled: false,
+                   stopovers: [stop(zurich, arr: nil, dep: "2026-09-27T06:04:00Z"),
+                               stop(schaffhausen, arr: "2026-09-27T06:40:00Z", dep: "2026-09-27T06:42:00Z"),
+                               stop(singen, arr: "2026-09-27T06:55:00Z", dep: "2026-09-27T06:58:00Z"),
+                               stop(stuttgart, arr: "2026-09-27T08:20:00Z", dep: nil)],
+                   remarks: [], source: .transitous)
+    }()
+
+    @Test func checksInEachPartOfATrainTraewellingSplitsAtTheBorder() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [SplitTrainCheckinProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let store = TokenStore(service: "BetterBahnKitTests.\(UUID().uuidString)")
+        store.save(OAuthToken(accessToken: "test-token", refreshToken: nil, expiresAt: .distantFuture))
+        let client = TraewellingClient(config: TraewellingConfig(clientID: "public-client"), http: HTTPClient(session: session), store: store)
+
+        let result = try await client.checkin(CheckinDraft(leg: Self.leg, message: "Gäubahn"))
+
+        #expect(result.statusId == 8001)
+        #expect(result.connectingStatusIds == [8002])
+        #expect(result.points == 30)
+        #expect(!result.isManualTrip)
+    }
+
+    @Test func splitStopoverIsTheIntermediateStopWhereTraewellingsTripEnds() throws {
+        let end = try JSONDecoding.decoder.decode(TraewellingTrip.Stop.self, from: Data("""
+        {"id":200,"name":"Singen(Hohentwiel)","station":{"id":200,"name":"Singen(Hohentwiel)","latitude":47.7591,"longitude":8.8401},
+         "arrivalPlanned":"2026-09-27T06:55:00Z"}
+        """.utf8))
+        let split = try #require(TraewellingClient.splitStopover(tripEnd: end, in: Self.leg.stopovers))
+        #expect(split.station == Self.singen)
+
+        let rest = try #require(TraewellingClient.remainder(of: Self.leg, from: split))
+        #expect(rest.origin == Self.singen)
+        #expect(rest.departure.planned == Self.time("2026-09-27T06:58:00Z"))
+        #expect(rest.stopovers.map(\.station) == [Self.singen, Self.stuttgart])
+
+        // Träwelling's trip ending at our own destination (or origin) is no split.
+        var atDestination = end
+        atDestination.name = "Stuttgart Hbf"
+        atDestination.station = nil
+        atDestination.arrivalPlanned = Self.time("2026-09-27T08:20:00Z")
+        #expect(TraewellingClient.splitStopover(tripEnd: atDestination, in: Self.leg.stopovers) == nil)
+    }
+}
+
+private final class SplitTrainCheckinProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let url = request.url!
+        let path = url.path
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let body = Self.body(of: request)
+        let json: String
+        switch true {
+        case path.contains("autocomplete") && path.contains("Zürich"):
+            json = #"{"data":[{"id":100,"name":"Zürich HB","latitude":47.3782,"longitude":8.5402}]}"#
+        case path.contains("autocomplete") && path.contains("Singen"):
+            json = #"{"data":[{"id":200,"name":"Singen(Hohentwiel)","latitude":47.7591,"longitude":8.8401}]}"#
+        case path == "/api/v1/station/100/departures":
+            json = """
+            {"data":[{"tripId":"ch-trip","plannedWhen":"2026-09-27T06:04:00Z",
+                      "line":{"name":"IC 181","fahrtNr":"181"},"direction":"Singen(Hohentwiel)"}]}
+            """
+        case path == "/api/v1/station/200/departures":
+            json = """
+            {"data":[{"tripId":"de-trip","plannedWhen":"2026-09-27T06:58:00Z",
+                      "line":{"name":"IC 181","fahrtNr":"181"},"direction":"Stuttgart Hbf"}]}
+            """
+        case path == "/api/v1/trains/trip" && query.contains(.init(name: "hafasTripId", value: "ch-trip")):
+            json = """
+            {"data":{"id":1,"lineName":"IC 181","stopovers":[
+                {"id":100,"name":"Zürich HB","station":{"id":100,"name":"Zürich HB"},"departurePlanned":"2026-09-27T06:04:00Z"},
+                {"id":150,"name":"Schaffhausen","station":{"id":150,"name":"Schaffhausen"},"arrivalPlanned":"2026-09-27T06:40:00Z","departurePlanned":"2026-09-27T06:42:00Z"},
+                {"id":200,"name":"Singen(Hohentwiel)","station":{"id":200,"name":"Singen(Hohentwiel)","latitude":47.7591,"longitude":8.8401},"arrivalPlanned":"2026-09-27T06:55:00Z"}
+            ]}}
+            """
+        case path == "/api/v1/trains/trip" && query.contains(.init(name: "hafasTripId", value: "de-trip")):
+            json = """
+            {"data":{"id":2,"lineName":"IC 181","stopovers":[
+                {"id":200,"name":"Singen(Hohentwiel)","station":{"id":200,"name":"Singen(Hohentwiel)"},"departurePlanned":"2026-09-27T06:58:00Z"},
+                {"id":300,"name":"Stuttgart Hbf","station":{"id":300,"name":"Stuttgart Hbf"},"arrivalPlanned":"2026-09-27T08:20:00Z"}
+            ]}}
+            """
+        case path == "/api/v1/trains/checkin" && body?["tripId"] as? String == "ch-trip":
+            #expect(body?["start"] as? Int == 100)
+            #expect(body?["destination"] as? Int == 200)
+            #expect(body?["arrival"] as? String == "2026-09-27T06:55:00Z")
+            #expect(body?["body"] as? String == "Gäubahn")
+            json = #"{"data":{"status":{"id":8001},"points":{"points":12},"alsoOnThisConnection":[]}}"#
+        case path == "/api/v1/trains/checkin" && body?["tripId"] as? String == "de-trip":
+            #expect(body?["start"] as? Int == 200)
+            #expect(body?["destination"] as? Int == 300)
+            #expect(body?["departure"] as? String == "2026-09-27T06:58:00Z")
+            #expect(body?["body"] == nil)
+            json = #"{"data":{"status":{"id":8002},"points":{"points":18},"alsoOnThisConnection":[]}}"#
+        default:
+            client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
+            return
+        }
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(json.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+
+    private static func body(of request: URLRequest) -> [String: Any]? {
+        var data = request.httpBody ?? Data()
+        if let stream = request.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                guard count > 0 else { break }
+                data.append(contentsOf: buffer.prefix(count))
+            }
+        }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+}
+
 private final class ZusatzhaltCheckinProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
