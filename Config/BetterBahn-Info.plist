@@ -6,12 +6,6 @@
 	<array>
 		<string>de.goldkunibert.BetterBahn.endLiveActivity</string>
 	</array>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Damit bei der Bahnhofssuche Bahnhöfe in deiner Nähe zuerst angezeigt werden.</string>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>fetch</string>
-	</array>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -22,6 +16,10 @@
 				<string>betterbahn</string>
 			</array>
 		</dict>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
 	</array>
 </dict>
 </plist>
