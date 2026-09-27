@@ -221,11 +221,11 @@ struct TripContent: View {
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
                         if let arrival = stop.arrival {
-                            DelayTimeText(time: arrival, cancelled: stop.cancelled, showPlanned: showPlannedTimes,
+                            DelayTimeText(time: arrival, cancelled: stop.arrivalCancelled, showPlanned: showPlannedTimes,
                                           font: isMajor ? .subheadline.weight(.semibold) : .caption.weight(.semibold))
                         }
                         if let departure = stop.departure {
-                            DelayTimeText(time: departure, cancelled: stop.cancelled, showPlanned: showPlannedTimes,
+                            DelayTimeText(time: departure, cancelled: stop.departureCancelled, showPlanned: showPlannedTimes,
                                           font: isMajor ? .headline : .subheadline)
                         }
                     }

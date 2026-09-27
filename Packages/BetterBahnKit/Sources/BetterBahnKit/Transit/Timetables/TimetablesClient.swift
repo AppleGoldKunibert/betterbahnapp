@@ -67,7 +67,9 @@ public struct TimetablesLegOverride: Sendable {
     public var departurePlatform: PlatformInfo?
     public var arrival: TimeInfo?
     public var arrivalPlatform: PlatformInfo?
-    public var cancelled: Bool
+    /// `true` when DB reports either end cancelled, `false` when DB matched both ends and both run,
+    /// `nil` when DB only knows one end (the other provider's verdict should then stand).
+    public var cancelled: Bool?
     /// Delay reasons and notices DB reports for the train at either end.
     public var messages: [TrainMessage] = []
 }
@@ -176,12 +178,15 @@ public struct TimetablesClient: Sendable {
                             side: KeyPath<TimetablesStop, TimetablesEvent?>) async -> TimetablesEvent? {
         guard let planned = try? await plan(eva: eva, around: time),
               let stop = Self.match(planned, category: category, number: number, plannedTime: time, side: side) else { return nil }
+        // Without `fchg` there's no telling whether the train is late or even cancelled – treating
+        // the bare schedule as "on time, running" would wipe out what the other provider knows.
+        guard let changes = try? await changes(eva: eva) else { return nil }
         var event = stop[keyPath: side]
-        if let changed = try? await changes(eva: eva)[stop.id] {
+        if let changed = changes[stop.id] {
             if let change = changed[keyPath: side] {
                 if let actual = change.actual { event?.actual = actual }
                 if let actualPlatform = change.actualPlatform { event?.actualPlatform = actualPlatform }
-                if change.cancelled { event?.cancelled = true }
+                event?.cancelled = change.cancelled
             }
             event?.messages = changed.messages
         }
@@ -216,7 +221,8 @@ public struct TimetablesClient: Sendable {
         var departurePlatform: PlatformInfo?
         var arrival: TimeInfo?
         var arrivalPlatform: PlatformInfo?
-        var cancelled = false
+        var departureCancelled: Bool?
+        var arrivalCancelled: Bool?
         var messages: [TimetablesMessage] = []
 
         if let eva = await eva(for: leg.origin),
@@ -224,7 +230,7 @@ public struct TimetablesClient: Sendable {
             // DB lists only changes: a matched stop without one is live and on time.
             departure = TimeInfo(planned: leg.departure.planned, actual: event.actual ?? leg.departure.actual ?? leg.departure.planned)
             departurePlatform = Self.mergedPlatform(existing: leg.departurePlatform, event: event)
-            if event.cancelled { cancelled = true }
+            departureCancelled = event.cancelled
             messages += event.messages
         }
 
@@ -232,18 +238,25 @@ public struct TimetablesClient: Sendable {
            let event = await liveEvent(eva: eva, category: category, number: number, time: leg.arrival.planned, side: \.arrival) {
             arrival = TimeInfo(planned: leg.arrival.planned, actual: event.actual ?? leg.arrival.actual ?? leg.arrival.planned)
             arrivalPlatform = Self.mergedPlatform(existing: leg.arrivalPlatform, event: event)
-            if event.cancelled { cancelled = true }
+            arrivalCancelled = event.cancelled
             messages += event.messages
         }
 
         guard departure != nil || arrival != nil else { return nil }
+        let cancelled: Bool? = if departureCancelled == true || arrivalCancelled == true {
+            true
+        } else if departureCancelled == false, arrivalCancelled == false {
+            false
+        } else {
+            nil
+        }
         return TimetablesLegOverride(departure: departure, departurePlatform: departurePlatform,
                                       arrival: arrival, arrivalPlatform: arrivalPlatform, cancelled: cancelled,
                                       messages: TimetablesMessage.resolve(messages))
     }
 
     /// `leg`'s stopovers with DB Timetables' delays laid over them: where DB knows a stop its data wins
-    /// (unchanged means on time), and a stop DB can't match keeps whatever delay it already had.
+    /// (unchanged means on time, not cancelled), and a stop DB can't match keeps whatever it already had.
     public func stopoversWithRealtime(for leg: Leg) async -> [Stopover] {
         await liveStopovers(for: leg).stopovers
     }
@@ -292,12 +305,14 @@ public struct TimetablesClient: Sendable {
                 if let arrival {
                     let known = stops[index].arrival
                     stops[index].arrival?.actual = arrival.actual ?? known?.actual ?? known?.planned
-                    if arrival.cancelled { stops[index].cancelled = true }
+                    // DB wins here too, both ways: Transitous' realtime feed only knows whole skipped
+                    // stops and has been seen flagging stops DB runs normally (RE 3318 Wittenberg–Zahna).
+                    stops[index].arrivalCancelled = arrival.cancelled
                 }
                 if let departure {
                     let known = stops[index].departure
                     stops[index].departure?.actual = departure.actual ?? known?.actual ?? known?.planned
-                    if departure.cancelled { stops[index].cancelled = true }
+                    stops[index].departureCancelled = departure.cancelled
                 }
             }
         }
@@ -513,9 +528,12 @@ enum TimetablesXMLParser {
         private static func event(from attributes: [String: String]) -> TimetablesEvent? {
             let planned = attributes["pt"].flatMap(parseTime)
             let actual = attributes["ct"].flatMap(parseTime)
-            guard planned != nil || actual != nil else { return nil }
+            let cancelled = attributes["cs"] == "c"
+            // `fchg` reports a cancellation as just `cs="c" clt="…"` (no `pt`/`ct`), so the status
+            // alone must still make an event — otherwise every DB cancellation got dropped here.
+            guard planned != nil || actual != nil || cancelled else { return nil }
             return TimetablesEvent(planned: planned, actual: actual, plannedPlatform: attributes["pp"],
-                                    actualPlatform: attributes["cp"], cancelled: attributes["cs"] == "c")
+                                    actualPlatform: attributes["cp"], cancelled: cancelled)
         }
 
         /// "YYMMDDHHmm" in German local time.

@@ -333,7 +333,7 @@ public struct TrainRoutePlanner: Sendable {
     /// it, then the stops closest to the target – getting off far away from it rarely pays off.
     func alightCandidates(trip: Trip, after boardIndex: Int, target: Station) -> [Station] {
         var rest = trip.stopovers[(boardIndex + 1)...]
-            .filter { !$0.cancelled && $0.access.allowsAlighting && $0.arrival != nil }
+            .filter { !$0.arrivalCancelled && $0.access.allowsAlighting && $0.arrival != nil }
             .map(\.station)
         var head: [Station] = []
         if let index = rest.firstIndex(where: { $0.isSamePlace(as: target) }) {

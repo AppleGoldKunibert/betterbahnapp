@@ -123,14 +123,14 @@ public struct JourneyRefresher: Sendable {
             let start = trip.stopovers[startIndex]
             if let departure = start.departure { leg.departure = departure }
             if start.departurePlatform?.best != nil { leg.departurePlatform = start.departurePlatform }
-            if start.cancelled { leg.cancelled = true }
+            if start.departureCancelled { leg.cancelled = true }
         }
         let rest = trip.stopovers[((startIndex ?? -1) + 1)...]
         if let endIndex = closestStop(in: rest, at: leg.destination, plannedTime: leg.arrival.planned, side: \.arrival) {
             let end = trip.stopovers[endIndex]
             if let arrival = end.arrival { leg.arrival = arrival }
             if end.arrivalPlatform?.best != nil { leg.arrivalPlatform = end.arrivalPlatform }
-            if end.cancelled { leg.cancelled = true }
+            if end.arrivalCancelled { leg.cancelled = true }
         }
         // Keep the intermediate stops as current as the endpoints.
         for index in leg.stopovers.indices {
@@ -141,7 +141,8 @@ public struct JourneyRefresher: Sendable {
             }) else { continue }
             if let arrival = live.arrival { leg.stopovers[index].arrival = arrival }
             if let departure = live.departure { leg.stopovers[index].departure = departure }
-            if live.cancelled { leg.stopovers[index].cancelled = true }
+            if live.arrivalCancelled { leg.stopovers[index].arrivalCancelled = true }
+            if live.departureCancelled { leg.stopovers[index].departureCancelled = true }
         }
         return leg
     }
@@ -170,7 +171,8 @@ public struct JourneyRefresher: Sendable {
         if let departurePlatform = override.departurePlatform { leg.departurePlatform = departurePlatform }
         if let arrival = override.arrival { leg.arrival = arrival }
         if let arrivalPlatform = override.arrivalPlatform { leg.arrivalPlatform = arrivalPlatform }
-        if override.cancelled { leg.cancelled = true }
+        // DB matched both ends running lifts a cancellation Transitous reported; `nil` leaves it be.
+        if let cancelled = override.cancelled { leg.cancelled = cancelled }
         // Only what DB reports right now: an earlier refresh's notices may have been lifted since.
         leg.messages = override.messages
         return leg
