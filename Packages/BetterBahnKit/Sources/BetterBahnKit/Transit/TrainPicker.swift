@@ -19,7 +19,7 @@ public extension Trip {
             origin: start.station, destination: end.station, departure: departure, arrival: arrival,
             departurePlatform: start.departurePlatform, arrivalPlatform: end.arrivalPlatform,
             tripId: id, line: line, direction: direction, isWalking: false,
-            cancelled: cancelled || start.cancelled || end.cancelled,
+            cancelled: cancelled || start.departureCancelled || end.arrivalCancelled,
             stopovers: Array(stopovers[startIndex...endIndex]), remarks: remarks, messages: messages, source: source
         )
     }

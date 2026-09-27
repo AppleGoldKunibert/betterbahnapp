@@ -1838,3 +1838,136 @@ private enum PreviewLegs {
                          remarks: [], messages: [TrainMessage(kind: .delay, text: "Bauarbeiten", timestamp: nil)],
                          source: .transitous)
 }
+
+// MARK: - Stop cancellations
+
+/// Real-world case reported for RE 3318 (Lutherstadt Wittenberg → Pasewalk) on 2026-09-27:
+/// Transitous' realtime feed flagged Wittenberg–Zahna and the Pasewalk terminus as skipped, while
+/// DB's own IRIS feed had the train running from Wittenberg and arriving in Pasewalk as planned.
+/// DB's per-side status has to win over Transitous' single per-stop flag wherever DB knows the stop.
+@Suite struct StopCancellationTests {
+    let wittenberg = station("8010222", "Lutherstadt Wittenberg Hbf")
+    let bloensdorf = station("8011210", "Blönsdorf")
+    let pasewalk = station("8010268", "Pasewalk")
+    /// 2026-09-27 19:51 Europe/Berlin (CEST).
+    let start = Date(timeIntervalSince1970: 1_790_531_460)
+
+    func trip(cancelled: Bool) -> Trip {
+        func at(_ minutes: Double) -> TimeInfo { TimeInfo(planned: start.addingTimeInterval(minutes * 60), actual: nil) }
+        let stops = [
+            Stopover(station: wittenberg, arrival: nil, departure: at(0), arrivalPlatform: nil, departurePlatform: nil, cancelled: cancelled),
+            Stopover(station: bloensdorf, arrival: at(17), departure: at(18), arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+            Stopover(station: pasewalk, arrival: at(208), departure: nil, arrivalPlatform: nil, departurePlatform: nil, cancelled: cancelled),
+        ]
+        return Trip(id: "re3318", line: Line(name: "RE 3", number: "3318", product: .regionalExpress, operatorName: nil,
+                                             tripNumber: "3318"),
+                    direction: "Pasewalk", stopovers: stops, cancelled: false, remarks: [], source: .transitous)
+    }
+
+    func client(_ protocolClass: URLProtocol.Type) -> (TimetablesClient, URLSession) {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [protocolClass]
+        let session = URLSession(configuration: config)
+        return (TimetablesClient(credentials: TimetablesCredentials(clientID: "x", apiKey: "y"), http: HTTPClient(session: session)), session)
+    }
+
+    @Test func dbRunningLiftsTransitousSkippedStops() async {
+        let (timetables, session) = client(RE3318RunningProtocol.self)
+        defer { session.invalidateAndCancel() }
+
+        let result = await timetables.tripWithRealtime(trip(cancelled: true))
+
+        #expect(result.stopovers.allSatisfy { !$0.cancelled })
+    }
+
+    /// IRIS reports a cancellation as a bare `cs="c"` with no time at all — it must still count.
+    @Test func dbCancellationWithoutTimeIsKept() async {
+        let (timetables, session) = client(RE3318CancelledProtocol.self)
+        defer { session.invalidateAndCancel() }
+
+        let result = await timetables.tripWithRealtime(trip(cancelled: false))
+
+        #expect(result.stopovers[2].arrivalCancelled)
+        #expect(result.stopovers[2].cancelled)
+        #expect(!result.stopovers[1].cancelled)
+    }
+
+    /// A train cut short keeps its arrival; only the departure is gone — not the whole stop.
+    @Test func departureOnlyCancellationKeepsTheArrival() {
+        var stop = Stopover(station: pasewalk, arrival: TimeInfo(planned: start, actual: nil),
+                            departure: TimeInfo(planned: start.addingTimeInterval(120), actual: nil),
+                            arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+        stop.departureCancelled = true
+        #expect(!stop.cancelled)
+        stop.arrivalCancelled = true
+        #expect(stop.cancelled)
+    }
+
+    /// Without `fchg` DB can't tell whether the train runs, so Transitous' verdict stands.
+    @Test func keepsTransitousCancellationWhenChangesAreUnavailable() async {
+        let (timetables, session) = client(RE3318NoChangesProtocol.self)
+        defer { session.invalidateAndCancel() }
+
+        let result = await timetables.tripWithRealtime(trip(cancelled: true))
+
+        #expect(result.stopovers[2].cancelled)
+    }
+
+    @Test func decodesStopoversSavedWithTheOldSingleFlag() throws {
+        let saved = Stopover(station: pasewalk, arrival: TimeInfo(planned: start, actual: nil), departure: nil,
+                             arrivalPlatform: nil, departurePlatform: nil, cancelled: true)
+        var old = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(saved)) as? [String: Any])
+        old["arrivalCancelled"] = nil
+        old["departureCancelled"] = nil
+        let stop = try JSONDecoder().decode(Stopover.self, from: JSONSerialization.data(withJSONObject: old))
+        #expect(stop.arrivalCancelled && stop.departureCancelled)
+
+        let roundTripped = try JSONDecoder().decode(Stopover.self, from: JSONEncoder().encode(stop))
+        #expect(roundTripped == stop)
+    }
+}
+
+/// IRIS `plan` for RE 3318 at Wittenberg (departure), Blönsdorf and Pasewalk (arrival only, the
+/// train terminates there). `fchg` is empty except for Pasewalk, which each subclass sets; `nil`
+/// makes every `fchg` request fail.
+private class RE3318Protocol: URLProtocol, @unchecked Sendable {
+    class var fchgPasewalk: String? { "<timetable></timetable>" }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let path = request.url!.path
+        var status = 200
+        let body: String
+        if path.contains("plan/8010222") {
+            body = #"<timetable><s id="3318-lw"><tl c="RE" n="3318"/><dp pt="2609271951" pp="1"/></s></timetable>"#
+        } else if path.contains("plan/8011210") {
+            body = #"<timetable><s id="3318-lbd"><tl c="RE" n="3318"/><ar pt="2609272008"/><dp pt="2609272009"/></s></timetable>"#
+        } else if path.contains("plan/8010268") {
+            body = #"<timetable><s id="3318-pw"><tl c="RE" n="3318"/><ar pt="2609272319" pp="1"/></s></timetable>"#
+        } else if path.contains("fchg/8010268") {
+            if let fchg = Self.fchgPasewalk { body = fchg } else { status = 500; body = "" }
+        } else if path.contains("fchg/"), Self.fchgPasewalk == nil {
+            status = 500; body = ""
+        } else {
+            body = "<timetable></timetable>"
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+private final class RE3318RunningProtocol: RE3318Protocol, @unchecked Sendable {}
+
+private final class RE3318CancelledProtocol: RE3318Protocol, @unchecked Sendable {
+    override class var fchgPasewalk: String? {
+        #"<timetable station='Pasewalk'><s id="3318-pw"><ar cs="c" clt="2609271500"/></s></timetable>"#
+    }
+}
+
+private final class RE3318NoChangesProtocol: RE3318Protocol, @unchecked Sendable {
+    override class var fchgPasewalk: String? { nil }
+}

@@ -115,7 +115,7 @@ public extension JourneyReplanner {
                      options: ReplanOptions, maxCandidates: Int = 6, limit: Int = 3) async -> [ExitOption] {
         guard let boardIndex = trip.stopovers.firstIndex(where: { $0.station.isSamePlace(as: boarding) }) else { return [] }
         var rest = trip.stopovers[(boardIndex + 1)...].filter { stop in
-            guard let arrival = stop.arrival, !stop.cancelled, stop.access.allowsAlighting else { return false }
+            guard let arrival = stop.arrival, !stop.arrivalCancelled, stop.access.allowsAlighting else { return false }
             return arrival.best >= now
         }
         // The destination itself is always worth trying; the other slots go to the stops closest to it.
