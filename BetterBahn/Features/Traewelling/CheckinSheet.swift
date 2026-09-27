@@ -294,7 +294,9 @@ struct CheckinSheet: View {
         if let hop = checkin.zusatzhaltHop {
             model.trackManualCheckin(statusId: hop.statusId, leg: hop.leg)
         }
-        if let statusId = checkin.statusId {
+        // A train Träwelling splits into several trips (e.g. at a border) gets one status per part,
+        // and tags like the seat apply to all of them.
+        for statusId in [checkin.statusId].compactMap(\.self) + checkin.connectingStatusIds {
             await sendTags(statusId: statusId)
         }
     }

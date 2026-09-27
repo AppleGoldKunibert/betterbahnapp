@@ -101,6 +101,9 @@ public struct CheckinResult: Sendable {
     /// `checkin(_:fromZusatzhalt:toNextRegularStop:)`) — that hop's own status id and leg, tracked
     /// separately from `statusId` so its delay keeps updating like any other manual trip.
     public var zusatzhaltHop: (statusId: Int, leg: Leg)?
+    /// Further statuses when Träwelling splits the train into several trips (e.g. at a border) and
+    /// each part needed its own checkin; `statusId` is the first part.
+    public var connectingStatusIds: [Int] = []
 }
 
 public enum TraewellingError: Error, LocalizedError, Equatable {
@@ -271,14 +274,49 @@ public actor TraewellingClient {
         guard let line = leg.line else { throw TraewellingError.tripNotFound("Fußweg") }
 
         if let match = try await findDeparture(for: leg) {
-            return try await checkin(draft, start: match.station, departure: match.departure)
+            return try await checkin(draft, departure: match.departure)
         }
         guard allowManualTrip else { throw TraewellingError.tripNotFound(line.name) }
         return try await checkinManualTrip(draft)
     }
 
-    private func checkin(_ draft: CheckinDraft, start: TraewellingStation, departure: TraewellingDeparture) async throws -> CheckinResult {
-        let leg = draft.leg
+    /// One Träwelling trip to check into, resolved before any checkin is sent.
+    private struct Segment {
+        var tripId: String
+        var lineName: String
+        var startID: Int
+        var destinationID: Int
+        var departure: Date
+        var arrival: Date
+    }
+
+    private func checkin(_ draft: CheckinDraft, departure: TraewellingDeparture) async throws -> CheckinResult {
+        // Resolve every part first so a train Träwelling only half knows doesn't leave a stray
+        // checkin for the first part behind.
+        let segments = try await segments(for: draft.leg, departure: departure)
+        var result: CheckinResult?
+        for segment in segments {
+            // The user's message/toot belong on the first part only, so a split train doesn't post
+            // the same note twice.
+            let segmentDraft = result == nil ? draft
+                : CheckinDraft(leg: draft.leg, visibility: draft.visibility, business: draft.business)
+            let part = try await sendCheckin(segmentDraft, tripId: segment.tripId, lineName: segment.lineName,
+                                             startID: segment.startID, destinationID: segment.destinationID,
+                                             departure: segment.departure, arrival: segment.arrival)
+            guard var combined = result else { result = part; continue }
+            combined.points += part.points
+            if let statusId = part.statusId { combined.connectingStatusIds.append(statusId) }
+            result = combined
+        }
+        guard let result else { throw TraewellingError.tripNotFound(draft.leg.line?.name ?? "Fußweg") }
+        return result
+    }
+
+    /// The Träwelling trips covering `leg`, starting with `departure`'s. Usually just one, but
+    /// through trains across a border (e.g. IC Zürich HB – Stuttgart Hbf) that our data has as a
+    /// single run are split by Träwelling into one trip per network, the first of which ends at the
+    /// border station. In that case this continues from wherever that trip ends with the next one.
+    private func segments(for leg: Leg, departure: TraewellingDeparture, remainingSplits: Int = 3) async throws -> [Segment] {
         guard let line = leg.line else { throw TraewellingError.tripNotFound("Fußweg") }
         let lineName = departure.line.name ?? line.name
         let trip = try await trip(tripID: departure.tripId, lineName: lineName)
@@ -287,17 +325,63 @@ public actor TraewellingClient {
         // stopovers reference) — sending an ID the trip itself doesn't recognize makes `trains/checkin`
         // fail with "Given stations are not on the trip". Resolve both ends against `trip.stopovers`,
         // the same source Träwelling validates against, instead of trusting the board lookup's ID.
-        guard let origin = Self.matchStop(trip.stopovers, station: leg.origin,
-                                          departure: departure.plannedWhen ?? leg.departure.planned) else {
+        let originDeparture = departure.plannedWhen ?? leg.departure.planned
+        guard let origin = Self.matchStop(trip.stopovers, station: leg.origin, departure: originDeparture),
+              let originIndex = trip.stopovers.firstIndex(where: {
+                  $0.stationID == origin.stationID && $0.departurePlanned == origin.departurePlanned
+              }) else {
             throw TraewellingError.stopNotOnTrip(leg.origin.name, tripStops: trip.stopovers.map(\.name))
         }
-        guard let destination = Self.matchStop(trip.stopovers, station: leg.destination, arrival: leg.arrival.planned) else {
+        let laterStops = Array(trip.stopovers[(originIndex + 1)...])
+        let departureTime = origin.departurePlanned ?? originDeparture
+
+        if let destination = Self.matchStop(laterStops, station: leg.destination, arrival: leg.arrival.planned) {
+            return [Segment(tripId: departure.tripId, lineName: lineName, startID: origin.stationID,
+                            destinationID: destination.stationID, departure: departureTime,
+                            arrival: destination.arrivalPlanned ?? leg.arrival.planned)]
+        }
+
+        // Träwelling's trip ends before our destination: check in up to its last stop, then find the
+        // train's continuation there.
+        guard remainingSplits > 0, let end = laterStops.last,
+              let split = Self.splitStopover(tripEnd: end, in: leg.stopovers),
+              let rest = Self.remainder(of: leg, from: split),
+              let next = try await findDeparture(for: rest)?.departure, next.tripId != departure.tripId else {
             throw TraewellingError.stopNotOnTrip(leg.destination.name, tripStops: trip.stopovers.map(\.name))
         }
-        return try await sendCheckin(draft, tripId: departure.tripId, lineName: lineName,
-                                     startID: origin.stationID, destinationID: destination.stationID,
-                                     departure: origin.departurePlanned ?? departure.plannedWhen ?? leg.departure.planned,
-                                     arrival: destination.arrivalPlanned ?? leg.arrival.planned)
+        let first = Segment(tripId: departure.tripId, lineName: lineName, startID: origin.stationID,
+                            destinationID: end.stationID, departure: departureTime,
+                            arrival: end.arrivalPlanned ?? split.arrival?.planned ?? rest.departure.planned)
+        return [first] + (try await segments(for: rest, departure: next, remainingSplits: remainingSplits - 1))
+    }
+
+    /// The intermediate stop of our leg where a Träwelling trip ending at `tripEnd` stops, if the
+    /// leg carries on beyond it — i.e. where a through train Träwelling splits in two changes trips.
+    static func splitStopover(tripEnd: TraewellingTrip.Stop, in stopovers: [Stopover]) -> Stopover? {
+        guard stopovers.count > 2 else { return nil }
+        let wanted = Set(stationQueries(for: tripEnd.name).map(Station.normalize))
+        return stopovers.dropFirst().dropLast().first { stopover in
+            guard stopover.departure != nil else { return false }
+            if let planned = tripEnd.arrivalPlanned, let ours = stopover.arrival?.planned ?? stopover.departure?.planned,
+               abs(planned.timeIntervalSince(ours)) > 5 * 60 {
+                return false
+            }
+            if !wanted.isDisjoint(with: stationQueries(for: stopover.station.name).map(Station.normalize)) { return true }
+            guard let coordinate = stopover.station.coordinate,
+                  let lat = tripEnd.station?.latitude, let lon = tripEnd.station?.longitude else { return false }
+            return Coordinate(latitude: lat, longitude: lon).distance(to: coordinate) < 1_500
+        }
+    }
+
+    /// The rest of `leg` from `stopover` onwards, boarding there.
+    static func remainder(of leg: Leg, from stopover: Stopover) -> Leg? {
+        guard let index = leg.stopovers.firstIndex(of: stopover), let departure = stopover.departure else { return nil }
+        var rest = leg
+        rest.origin = stopover.station
+        rest.departure = departure
+        rest.departurePlatform = stopover.departurePlatform
+        rest.stopovers = Array(leg.stopovers[index...])
+        return rest
     }
 
     /// Creates a Träwelling trip for a train its own timetable data doesn't have, then checks into it.
