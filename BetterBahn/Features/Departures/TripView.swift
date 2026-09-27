@@ -14,6 +14,9 @@ struct TripView: View {
 
     var body: some View {
         ScrollView {
+            if trip == nil, error == nil {
+                TripLoadingView()
+            }
             VStack(spacing: 16) {
                 if let error {
                     ErrorBanner(error: error)
@@ -26,9 +29,6 @@ struct TripView: View {
             .padding(.bottom, 16)
         }
         .background { AppBackground() }
-        .overlay {
-            if trip == nil, error == nil { ProgressView("Lade Fahrtverlauf …") }
-        }
         .safeAreaInset(edge: .bottom) {
             if let leg = selectedLeg {
                 actionBar(leg)
@@ -117,6 +117,15 @@ struct TripView: View {
     private func insertZusatzhalte() async {
         guard let trip, let bahnExpert = model.provider.bahnExpert, let stops = try? await bahnExpert.journeyStops(for: trip) else { return }
         self.trip?.stopovers = BahnExpertClient.inserting(stops, into: trip.stopovers)
+    }
+}
+
+/// Spinner shown while a trip loads. Sized to the scroll view's visible area rather than laid over
+/// the (still empty) scroll view, which could leave it squeezed into a corner until the trip arrived.
+private struct TripLoadingView: View {
+    var body: some View {
+        ProgressView("Lade Fahrtverlauf …")
+            .containerRelativeFrame([.horizontal, .vertical])
     }
 }
 
@@ -329,6 +338,9 @@ struct LegTripSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
+                if trip == nil, error == nil {
+                    TripLoadingView()
+                }
                 VStack(spacing: 16) {
                     if let error {
                         ErrorBanner(error: error)
@@ -343,9 +355,6 @@ struct LegTripSheet: View {
                 .padding(.bottom, 16)
             }
             .background { AppBackground() }
-            .overlay {
-                if trip == nil, error == nil { ProgressView("Lade Fahrtverlauf …") }
-            }
             .navigationTitle(leg.line?.name ?? "Zug")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
