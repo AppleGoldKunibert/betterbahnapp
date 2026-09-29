@@ -100,6 +100,34 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(Station.displayName(for: "Hauptbahnhof (tief)") == "Hbf")
     }
 
+    /// Real-world ICE 573 Hamburg–Stuttgart: its `headsign` is the bare "Hauptbahnhof (oben)", which
+    /// showed up as the destination "Hbf" on boards and as the leg's direction.
+    @Test func stuttgartHbfAsDestinationShowsAsStuttgartHbf() throws {
+        let tripTo = """
+        {"name": "Hauptbahnhof (oben)", "stopId": "de-DELFI_de:08111:6115:3:5", "parentId": "de-DELFI_de:08111:6115", "lat": 48.78, "lon": 9.18}
+        """
+        let board = """
+        {"stopTimes": [{
+            "place": {"name": "Hamburg Hbf", "stopId": "hh", "lat": 53.55, "lon": 10.0,
+                      "departure": "2026-09-30T03:29:00Z", "scheduledDeparture": "2026-09-30T03:29:00Z"},
+            "mode": "HIGHSPEED_RAIL", "realTime": false, "tripId": "ice-573", "displayName": "ICE 573",
+            "headsign": "Hauptbahnhof (oben)", "tripTo": \(tripTo)
+        }]}
+        """
+        let entries = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(board.utf8))
+            .stopTimes.compactMap { $0.toEntry(kind: .departures) }
+        #expect(entries.map(\.otherEnd) == ["Stuttgart Hbf"])
+
+        let leg = """
+        {"mode": "HIGHSPEED_RAIL", "headsign": "Hauptbahnhof (oben)", "tripTo": \(tripTo),
+         "from": {"name": "Hamburg Hbf", "lat": 53.55, "lon": 10.0},
+         "to": {"name": "Frankfurt (Main) Hauptbahnhof", "lat": 50.1, "lon": 8.66},
+         "startTime": "2026-09-30T03:29:00Z", "endTime": "2026-09-30T06:50:00Z"}
+        """
+        let decoded = try JSONDecoding.decoder.decode(MLeg.self, from: Data(leg.utf8))
+        #expect(decoded.direction == "Stuttgart Hbf")
+    }
+
     /// Real-world Transitous names where the part in brackets is a river or region telling apart
     /// same-named towns, not a city - these showed up as "N-Wendlingen" or "Oder-Frankfurt".
     @Test func riverAndRegionQualifiersAreNotTreatedAsCities() {
