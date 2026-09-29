@@ -203,45 +203,79 @@ struct LineBadge: View {
     }
 }
 
-/// ICE/IC series (e.g. "ICE 3neo") and Triebzugnummer (e.g. "Tz 9465") of a leg, loaded lazily from
-/// bahn.de's coach-sequence API since it's DB-only and needs an extra network request. Falls back to
-/// bahn.expert, which also has the planned formation for days ahead.
+/// Triebzug numbers and names of a train (e.g. "Tz 9457 „Bundesrepublik Deutschland“"). bahn.de's
+/// coach sequence first (it only has one shortly before departure); bahn.expert as fallback, which
+/// has the Tz once its data is live. Says so when bahn.de is refusing requests and nothing else helped.
 struct TrainFormationLabel: View {
-    let leg: Leg?
+    let request: BahnDeClient.FormationRequest?
+    let line: Line?
+    let date: Date
+
+    init(leg: Leg) {
+        request = BahnDeClient.formationRequest(for: leg)
+        line = leg.line
+        date = leg.departure.planned
+    }
+
+    init(trip: Trip) {
+        request = BahnDeClient.formationRequest(for: trip)
+        line = trip.line
+        date = trip.stopovers.first?.departure?.planned ?? .now
+    }
 
     @Environment(AppModel.self) private var model
     @State private var formation: TrainFormation?
-
-    private var summary: String? {
-        guard let formation else { return nil }
-        let parts = [formation.modelSummary, formation.unitSummary].compactMap { $0 }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
+    @State private var blocked = false
 
     var body: some View {
-        Group {
-            if let summary {
-                Label(summary, systemImage: "tram.fill")
+        // A ZStack rather than Group: `.task` never fires on a view that is empty, and this one is
+        // empty until the lookup it starts has finished.
+        ZStack(alignment: .leading) {
+            if let units = formation?.unitDescription {
+                Label(units, systemImage: "tram.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            } else if blocked {
+                Label("Wagenreihung gerade nicht abrufbar", systemImage: "exclamationmark.triangle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
-        .task(id: leg?.id) {
+        .task(id: "\(line?.name ?? "")|\(date)|\(request?.station.id ?? "")") {
             formation = nil
-            guard let leg else { return }
-            if let bahnDe = model.provider.bahnDe, let live = try? await bahnDe.formation(for: leg) {
-                formation = live
-            } else if let bahnExpert = model.provider.bahnExpert {
-                formation = try? await bahnExpert.trainType(for: leg)?.formation
+            blocked = false
+            if let request {
+                do {
+                    formation = try await model.formation(for: request)
+                } catch TransitError.rateLimited {
+                    blocked = true
+                } catch {}
+            }
+            if formation?.unitDescription == nil, let fallback = await model.trainType(for: line, on: date)?.formation,
+               fallback.unitDescription != nil {
+                formation = fallback
+                blocked = false
             }
         }
     }
 }
 
-/// "ICE 4" / "ICE 3neo" / "ICE L" … next to a train's name. Only shown for ICEs, once bahn.expert answers.
+/// "ICE 4" / "ICE 3neo" / "ICE L" … next to a train's name, from bahn.expert, which has DB's
+/// planned formation for days ahead.
 struct TrainSeriesTag: View {
     let line: Line?
     let date: Date
+
+    init(leg: Leg) {
+        line = leg.line
+        date = leg.departure.planned
+    }
+
+    init(trip: Trip) {
+        line = trip.line
+        date = trip.stopovers.first?.departure?.planned ?? .now
+    }
 
     @Environment(AppModel.self) private var model
     @State private var family: String?
@@ -261,7 +295,8 @@ struct TrainSeriesTag: View {
             }
         }
         .task(id: "\(line?.name ?? "")|\(date)") {
-            family = await model.trainFamily(for: line, on: date)
+            family = nil
+            family = await model.trainType(for: line, on: date)?.summary
         }
     }
 }

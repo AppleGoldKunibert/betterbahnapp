@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import BetterBahnKit
 
@@ -819,164 +820,234 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
     }
 }
 
-@Suite struct FormationTests {
-    @Test func seriesFromConstructionTypes() {
+@Suite struct BahnDeFormationTests {
+    @Test func carriageReadsCountryAndSeriesFromUICNumber() {
+        let car = Carriage(vehicleID: "93805401002-1", constructionType: "Apmzf")
+        #expect(car.uic == "938054010021")
+        #expect(car.country == 80)
+        #expect(car.model == 401)
+        #expect(Carriage(vehicleID: nil, constructionType: nil).model == nil)
+    }
+
+    @Test func detectsSeriesFromUICNumbers() {
+        let cars = { (ids: [String]) in ids.map { Carriage(vehicleID: $0, constructionType: nil) } }
+        #expect(TrainModel.detect(cars(["938054010021", "938058010034"]), category: "ICE")?.name == "ICE 1")
+        #expect(TrainModel.detect(cars(["938054030151", "938054030169"]), category: "ICE")?.series == "BR 403, 1. Serie")
+        #expect(TrainModel.detect(cars(["938054030501", "938054030519"]), category: "ICE")?.series == "BR 403, 2. Serie")
+        #expect(TrainModel.detect(cars(["938054080011", "938054080029"]), category: "ICE")?.name == "ICE 3neo")
+        #expect(TrainModel.detect(cars(["938054120011", "938058120029"]), category: "ICE")?.name == "ICE 4")
+        #expect(TrainModel.detect(cars(["938140110011", "938140110029"]), category: "ICE")?.name == "ICE T")
+        // A single matching vehicle is inconclusive.
+        #expect(TrainModel.detect(cars(["938054080011"]), category: "ICE") == nil)
+    }
+
+    @Test func detectsIntercity2FromDoubleDeckCoaches() {
+        let cars = ["508026810011", "508026810029"].map { Carriage(vehicleID: $0, constructionType: "DApza") }
+        #expect(TrainModel.detect(cars, category: "IC")?.name == "IC 2 Twindexx")
+    }
+
+    @Test func constructionTypeFallback() {
         #expect(BahnDeClient.model(constructionTypes: ["I4080", "I4081"], groupName: "ICE8033", category: "ICE") == "ICE 3neo")
         #expect(BahnDeClient.model(constructionTypes: ["I0812", "I1412", "I1812"], groupName: "ICE9465", category: "ICE") == "ICE 4")
         #expect(BahnDeClient.model(constructionTypes: ["I4010", "I8010"], groupName: "ICE0160", category: "ICE") == "ICE 1")
         #expect(BahnDeClient.model(constructionTypes: ["I4110", "I4115"], groupName: "ICE1162", category: "ICE") == "ICE T")
         #expect(BahnDeClient.model(constructionTypes: ["R8911", "R8921"], groupName: "ICE1811", category: "ICE") == "ICE L")
-        #expect(BahnDeClient.model(constructionTypes: ["E1465", "R6682"], groupName: "ICD2854", category: "IC") == "IC 2 (Twindexx)")
+        #expect(BahnDeClient.model(constructionTypes: ["E1465", "R6682"], groupName: "ICD2854", category: "IC") == "IC 2 Twindexx")
+    }
+
+    @Test func unitNumbersAndTrainsetNames() {
+        #expect(BahnDeClient.unitNumber(from: "ICE9457") == "9457")
+        #expect(BahnDeClient.unitNumber(from: "ICE0169") == "169")
+        #expect(BahnDeClient.unitNumber(from: "373-planned") == nil)
+        #expect(BahnDeClient.trainsetName(from: "ICE9457") == "Bundesrepublik Deutschland")
+        #expect(BahnDeClient.trainsetName(from: "ICE0169") == "Worms")
+        #expect(BahnDeClient.trainsetName(from: "IC 2054") == nil)
+    }
+
+    /// Double traction of ICE 4 coupled with a second half running as another train: only the
+    /// requested train's groups count, each with its own Tz and Taufname.
+    @Test func decodesSequenceAndKeepsOwnTrainsGroups() throws {
+        let json = #"""
+        {"groups": [
+            {"name": "ICE9457", "transport": {"category": "ICE", "number": 950},
+             "vehicles": [
+                {"vehicleID": "938054120011", "wagonIdentificationNumber": 1, "type": {"category": "POWERCAR", "constructionType": "I1412"}, "platformPosition": {"sector": "A"}},
+                {"vehicleID": "938058120029", "wagonIdentificationNumber": 2, "type": {"category": "PASSENGERCARRIAGE_FIRST_CLASS", "constructionType": "I1812"}}]},
+            {"name": "ICE9018", "transport": {"category": "ICE", "number": 950},
+             "vehicles": [
+                {"vehicleID": "938054120037", "type": {"category": "POWERCAR", "constructionType": "I1412"}},
+                {"vehicleID": "938058120045", "type": {"category": "PASSENGERCARRIAGE_ECONOMY_CLASS", "constructionType": "I1812"}}]},
+            {"name": "ICE8033", "transport": {"category": "ICE", "number": 940},
+             "vehicles": [
+                {"vehicleID": "938054080011", "type": {"category": "POWERCAR", "constructionType": "I4080"}},
+                {"vehicleID": "938054080029", "type": {"category": "POWERCAR", "constructionType": "I4081"}}]}
+        ]}
+        """#
+        let response = try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data(json.utf8))
+        let formation = BahnDeClient.formation(from: response, category: "ICE", number: 950)
+        #expect(formation.units == [
+            .init(model: "ICE 4", number: "9457", name: "Bundesrepublik Deutschland"),
+            .init(model: "ICE 4", number: "9018", name: "Freistaat Bayern"),
+        ])
+        #expect(formation.modelSummary == "2× ICE 4")
+        #expect(formation.unitDescription == "Tz 9457 „Bundesrepublik Deutschland“ + 9018 „Freistaat Bayern“")
+    }
+
+    /// A group without vehicles (or other missing fields) must not lose the whole formation.
+    @Test func toleratesMissingFields() throws {
+        let json = #"""
+        {"groups": [
+            {"name": "ICE9457", "transport": {"category": "ICE", "number": 950}},
+            {"vehicles": [{"vehicleID": "938054120011"}, {"vehicleID": "938058120029"}]}
+        ]}
+        """#
+        let response = try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data(json.utf8))
+        let formation = BahnDeClient.formation(from: response, category: "ICE", number: 950)
+        #expect(formation.units.first?.number == "9457")
+        #expect(formation.units.first?.name == "Bundesrepublik Deutschland")
+        let other = BahnDeClient.formation(from: response, category: "ICE", number: 1)
+        #expect(other.units.map(\.model) == [nil, "ICE 4"])
+        #expect(try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data("{}".utf8)).groups == nil)
     }
 
     @Test func formationSummary() {
         let formation = TrainFormation(units: [.init(model: "ICE 3neo", number: "8030"), .init(model: "ICE 3neo", number: "8005")])
         #expect(formation.modelSummary == "2× ICE 3neo")
         #expect(formation.unitSummary == "Tz 8030 + 8005")
+        #expect(formation.unitDescription == "Tz 8030 + 8005")
+    }
+
+    @Test func formationURLUsesUTCDayAndMilliseconds() throws {
+        // 00:30 in Berlin on the 30th is still the 29th in UTC.
+        let departure = try #require(JSONDecoding.parseISODate("2026-09-29T22:30:00Z"))
+        let request = BahnDeClient.FormationRequest(category: "ICE", number: "693", station: station("8000105", "Frankfurt (Main) Hbf"), plannedDeparture: departure)
+        let url = BahnDeClient.formationURL(request, eva: "8000105").absoluteString
+        #expect(url.hasPrefix("https://www.bahn.de/web/api/reisebegleitung/wagenreihung/vehicle-sequence?"))
+        #expect(url.contains("administrationId=80"))
+        #expect(url.contains("date=2026-09-29"))
+        #expect(url.contains("time=2026-09-29T22:30:00.000Z"))
+        #expect(url.contains("number=693"))
+    }
+
+    /// Only a stop where the train still departs, and only when that is soon enough for bahn.de.
+    @Test func formationRequestPicksNextDepartingStop() throws {
+        let now = try #require(JSONDecoding.parseISODate("2026-09-29T12:00:00Z"))
+        let line = Line(name: "ICE 693", number: "693", product: .highSpeed, operatorName: nil)
+        let at = { (minutes: Double) in TimeInfo(planned: now.addingTimeInterval(minutes * 60), actual: nil) }
+        let stops = [(station: station("1", "Gone"), departure: Optional(at(-10))),
+                     (station: station("2", "Next"), departure: Optional(at(20))),
+                     (station: station("3", "Later"), departure: Optional(at(60)))]
+        #expect(BahnDeClient.formationRequest(line: line, stops: stops, now: now)?.station.name == "Next")
+        #expect(BahnDeClient.formationRequest(line: line, stops: [(station: station("4", "Far"), departure: at(180))], now: now) == nil)
+        let regional = Line(name: "RE 5", number: "5", product: .regional, operatorName: nil)
+        #expect(BahnDeClient.formationRequest(line: regional, stops: stops, now: now) == nil)
+    }
+
+    @Test func browserHeadersLikeDBRIS() {
+        let headers = BahnDeClient.headers()
+        #expect(headers["Origin"] == "https://www.bahn.de")
+        #expect(headers["Referer"] == "https://www.bahn.de/buchung/fahrplan/suche")
+        #expect(headers["User-Agent"]?.hasPrefix("Mozilla/5.0") == true)
+        #expect(headers["User-Agent"]?.contains("XXXX") == false)
+        #expect(headers["x-correlation-id"]?.contains("_") == true)
+    }
+
+    @Test func trainReferenceOnlyForLongDistance() {
+        let line = { (name: String, number: String) in Line(name: name, number: number, product: .highSpeed, operatorName: nil) }
+        #expect(BahnDeClient.trainReference(for: line("ICE 950", "950"))?.category == "ICE")
+        #expect(BahnDeClient.trainReference(for: line("RE 5", "5")) == nil)
+        #expect(BahnDeClient.trainReference(for: nil) == nil)
+    }
+
+    @Test func berlinDayUsesLocalCalendarDay() {
+        // 23:30 UTC on the 19th is already the 20th in Berlin (CEST).
+        let date = Date(timeIntervalSince1970: 1_789_860_600)
+        #expect(BahnDeClient.berlinDay(date) == "2026-09-20")
+    }
+
+    /// A 403 (`OPS_BLOCKED`) pauses bahn.de entirely instead of retrying.
+    @Test func blockPausesFurtherRequests() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [BlockedProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let gate = BahnDeGate()
+        let bahnDe = BahnDeClient(http: HTTPClient(session: session), gate: gate)
+        let request = BahnDeClient.FormationRequest(category: "ICE", number: "693", station: station("8000105", "Frankfurt (Main) Hbf"), plannedDeparture: .now)
+
+        await #expect(throws: TransitError.rateLimited) { try await bahnDe.formation(request) }
+        #expect(await gate.isBlocked)
+        await #expect(throws: TransitError.rateLimited) { try await bahnDe.formation(request) }
+        #expect(BlockedProtocol.requests.withLock { $0 } == 1)
     }
 }
 
-@Suite struct BahnExpertTests {
+private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
+    static let requests = Mutex(0)
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.requests.withLock { $0 += 1 }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 403, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(#"{"status":"ERROR","code":"OPS_BLOCKED"}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+/// bahn.expert is only used for the train type, since it has DB's planned formation for days ahead.
+@Suite struct BahnExpertTrainTypeTests {
     @Test func familyStripsVariantAndClass() {
         #expect(TrainTypeLookup.family(of: "ICE 4 Lang (BR412)") == "ICE 4")
         #expect(TrainTypeLookup.family(of: "ICE 3neo (BR408)") == "ICE 3neo")
         #expect(TrainTypeLookup.family(of: "ICE 3") == "ICE 3")
     }
 
-    @Test func summaryDeduplicatesFamilies() {
-        let group = { (name: String) in TrainTypeLookup.Group(seriesName: name, baureihe: nil, unitNumber: nil, origin: nil, destination: nil, coachCount: 13) }
-        let lookup = TrainTypeLookup(category: "ICE", number: "373", date: "2026-09-20", administration: "80",
-                                     groups: [group("ICE 4 Lang (BR412)"), group("ICE 4 Kurz (BR412)")], status: .planned,
-                                     source: "DB-plan", retrievedAt: .now)
-        #expect(lookup.summary == "ICE 4")
-        #expect(lookup.pageURL?.absoluteString == "https://bahn.expert/details/ICE%20373/2026-09-20T12:00:00.000Z?administration=80")
+    @Test func familyPrefersBaureiheNumber() {
+        let group = { (number: String?, name: String?) in
+            TrainTypeLookup.Group(seriesName: name, baureihe: number, unitNumber: nil, origin: nil, destination: nil, coachCount: 0)
+        }
+        #expect(group("412", "ICE 4 Lang (BR412)").family == "ICE 4")
+        #expect(group("407", "ICE 3 Velaro (BR407)").family == "ICE 3")
+        #expect(group("408", "ICE 3neo (BR408)").family == "ICE 3neo")
+        #expect(group(nil, "ICE L").family == "ICE L")
+        #expect(group(nil, nil).family == nil)
     }
 
-    @Test func decodesSequenceResponse() throws {
+    @Test func summaryDeduplicatesFamiliesAndFormationAddsTaufname() {
+        let group = { (name: String, unit: String?) in
+            TrainTypeLookup.Group(seriesName: name, baureihe: nil, unitNumber: unit, origin: nil, destination: nil, coachCount: 13)
+        }
+        let lookup = TrainTypeLookup(category: "ICE", number: "373", date: "2026-09-20", administration: "80",
+                                     groups: [group("ICE 4 Lang (BR412)", "9457"), group("ICE 4 Kurz (BR412)", nil)], status: .realtime,
+                                     source: "DB", retrievedAt: .now)
+        #expect(lookup.summary == "ICE 4")
+        #expect(lookup.formation.unitDescription == "Tz 9457 „Bundesrepublik Deutschland“")
+    }
+
+    /// Real response for ICE 693 two days ahead (2026-10-01): DB's plan, no Tz yet.
+    @Test func decodesPlannedSequence() throws {
         let json = """
         {"isRealtime": false, "source": "DB-plan", "sequence": {"groups": [
-            {"name": "373-planned", "originName": "Berlin", "destinationName": "Chur",
-             "baureihe": {"identifier": "412.13", "baureihe": "412", "name": "ICE 4 Lang (BR412)"},
+            {"name": "693-planned", "journeyNumber": 693, "originName": "Berlin Gesundbrunnen",
+             "baureihe": {"identifier": "412", "baureihe": "412", "name": "ICE 4 (BR412)"},
              "coaches": [{"type": "Apmzf"}, {"type": "Bpmz"}]}]}}
         """
         let response = try JSONDecoding.decoder.decode(BahnExpertClient.SequenceResponse.self, from: Data(json.utf8))
-        #expect(response.sequence?.groups.first?.baureihe?.name == "ICE 4 Lang (BR412)")
+        #expect(!response.isRealtime)
+        #expect(response.sequence?.groups.first?.baureihe?.name == "ICE 4 (BR412)")
         #expect(response.sequence?.groups.first?.coaches?.count == 2)
     }
 
     @Test func decodesSplitTrainGroupsWithTheirOwnJourneyNumbers() throws {
         let json = #"""
         {"isRealtime": true, "sequence": {"groups": [
-            {"name": "ICE9220", "journeyNumber": 940, "destinationName": "Düsseldorf Hbf", "baureihe": {"baureihe": "412", "name": "ICE 4 Kurz (BR412)"}},
-            {"name": "ICE9227", "journeyNumber": 950, "destinationName": "Köln Hbf", "baureihe": {"baureihe": "412", "name": "ICE 4 Kurz (BR412)"}}]}}
+            {"name": "ICE9220", "journeyNumber": 940, "baureihe": {"baureihe": "412", "name": "ICE 4 Kurz (BR412)"}},
+            {"name": "ICE9227", "journeyNumber": 950, "baureihe": {"baureihe": "412", "name": "ICE 4 Kurz (BR412)"}}]}}
         """#
         let response = try JSONDecoding.decoder.decode(BahnExpertClient.SequenceResponse.self, from: Data(json.utf8))
         #expect(response.sequence?.groups.map(\.journeyNumber) == [940, 950])
-    }
-
-    @Test func decodesDetailsWithFractionalDates() throws {
-        let json = """
-        {"stops": [{"stopPlace": {"evaNumber": "8500010"}, "departure": {"scheduledTime": "2026-09-20T16:07:00.000Z"}}],
-         "train": {"category": "ICE", "journeyNumber": 373, "admin": "85"}}
-        """
-        let details = try JSONDecoding.decoder.decode(BahnExpertClient.Details.self, from: Data(json.utf8))
-        #expect(details.stops.first?.stopPlace.evaNumber == "8500010")
-        #expect(details.train?.admin == "85")
-    }
-
-    /// Real ICE 372 run (2026-09-22): it skipped Frankfurt (Main) Hbf and instead picked up an
-    /// unscheduled stop at Frankfurt (Main) Süd — bahn.expert flags exactly that pair (`cancelled` /
-    /// `additional`) in `journey/detailsByJourneyId`, which is the only source this app has for either.
-    @Test func decodesCancelledAndAdditionalStops() throws {
-        let json = #"""
-        {"stops": [
-            {"stopPlace": {"evaNumber": "8000244", "name": "Mannheim Hbf"},
-             "arrival": {"scheduledTime": "2026-09-22T10:22:00.000Z", "time": "2026-09-22T10:58:29.000Z"},
-             "departure": {"scheduledTime": "2026-09-22T10:30:00.000Z", "time": "2026-09-22T11:02:52.000Z"}},
-            {"stopPlace": {"evaNumber": "8000105", "name": "Frankfurt (Main) Hbf"},
-             "arrival": {"scheduledTime": "2026-09-22T11:09:00.000Z", "time": "2026-09-22T11:09:00.000Z", "cancelled": true},
-             "departure": {"scheduledTime": "2026-09-22T11:15:00.000Z", "time": "2026-09-22T11:15:00.000Z", "cancelled": true},
-             "cancelled": true},
-            {"stopPlace": {"evaNumber": "8002041", "name": "Frankfurt (Main) Süd"},
-             "arrival": {"scheduledTime": "2026-09-22T11:19:00.000Z", "time": "2026-09-22T11:38:28.000Z", "additional": true, "scheduledPlatform": "6", "platform": "7"},
-             "departure": {"scheduledTime": "2026-09-22T11:19:00.000Z", "time": "2026-09-22T11:58:04.000Z", "additional": true, "scheduledPlatform": "6", "platform": "7"},
-             "additional": true},
-            {"stopPlace": {"evaNumber": "8000150", "name": "Hanau Hbf"},
-             "arrival": {"scheduledTime": "2026-09-22T11:28:00.000Z", "time": "2026-09-22T12:07:20.000Z"},
-             "departure": {"scheduledTime": "2026-09-22T11:30:00.000Z", "time": "2026-09-22T12:09:01.000Z"}}
-        ]}
-        """#
-        let details = try JSONDecoding.decoder.decode(BahnExpertClient.Details.self, from: Data(json.utf8))
-        let stops = details.stops.map(JourneyStop.init)
-
-        #expect(stops[1].isCancelled)
-        #expect(stops[2].isAdditional)
-        #expect(stops[2].name == "Frankfurt (Main) Süd")
-        #expect(stops[2].departurePlatform == PlatformInfo(planned: "6", actual: "7"))
-        #expect(!stops[0].isAdditional && !stops[0].isCancelled)
-
-        let zusatzhaltStation = station("8002041", "Frankfurt (Main) Süd")
-        let match = try #require(BahnExpertClient.nextRegularStop(after: zusatzhaltStation, in: stops))
-        #expect(match.zusatzhalt.evaNumber == "8002041")
-        #expect(match.nextRegular.evaNumber == "8000150")
-
-        // A regular (non-additional) stop is never mistaken for a Zusatzhalt.
-        #expect(BahnExpertClient.nextRegularStop(after: station("8000244", "Mannheim Hbf"), in: stops) == nil)
-        // No regular stop left after the Zusatzhalt (e.g. it's also the run's last stop).
-        #expect(BahnExpertClient.nextRegularStop(after: zusatzhaltStation, in: Array(stops.prefix(3))) == nil)
-    }
-
-    /// `Trip`/`Leg` stopovers only ever come from Transitous, which never has a Zusatzhalt at all —
-    /// `inserting(_:into:)` is what splices Frankfurt (Main) Süd into the existing (already
-    /// realtime-overlaid) stop list rather than it being silently missing from the journey view.
-    @Test func insertsTheZusatzhaltAtItsRightfulPlace() throws {
-        let json = #"""
-        {"stops": [
-            {"stopPlace": {"evaNumber": "8000244", "name": "Mannheim Hbf"}},
-            {"stopPlace": {"evaNumber": "8000105", "name": "Frankfurt (Main) Hbf"}, "cancelled": true},
-            {"stopPlace": {"evaNumber": "8002041", "name": "Frankfurt (Main) Süd"}, "additional": true,
-             "departure": {"scheduledTime": "2026-09-22T11:19:00.000Z", "time": "2026-09-22T11:58:04.000Z"}},
-            {"stopPlace": {"evaNumber": "8000150", "name": "Hanau Hbf"}}
-        ]}
-        """#
-        let details = try JSONDecoding.decoder.decode(BahnExpertClient.Details.self, from: Data(json.utf8))
-        let stops = details.stops.map(JourneyStop.init)
-
-        // The already-refreshed schedule: no Zusatzhalt (Transitous never has it), but Frankfurt Hbf
-        // is already flagged cancelled by an earlier realtime overlay, which must survive the merge.
-        let existing = [
-            station("8000244", "Mannheim Hbf"),
-            station("8000105", "Frankfurt (Main) Hbf"),
-            station("8000150", "Hanau Hbf"),
-        ].enumerated().map { index, s in
-            Stopover(station: s, arrival: nil, departure: nil, arrivalPlatform: nil, departurePlatform: nil, cancelled: index == 1)
-        }
-
-        let merged = BahnExpertClient.inserting(stops, into: existing)
-
-        #expect(merged.map(\.station.name) == ["Mannheim Hbf", "Frankfurt (Main) Hbf", "Frankfurt (Main) Süd", "Hanau Hbf"])
-        #expect(merged[1].cancelled)
-        #expect(merged[2].isAdditional)
-        #expect(!merged[0].isAdditional && !merged[3].isAdditional)
-        #expect(merged[2].departure?.actual == JSONDecoding.parseISODate("2026-09-22T11:58:04.000Z"))
-
-        // Nothing to insert: the list comes back untouched (same stops, no Zusatzhalt in `stops`).
-        let withoutZusatzhalt = stops.filter { !$0.isAdditional }
-        #expect(BahnExpertClient.inserting(withoutZusatzhalt, into: existing) == existing)
-        // Stopovers never loaded for this leg/trip: stays empty rather than showing a partial list.
-        #expect(BahnExpertClient.inserting(stops, into: []).isEmpty)
-
-        // Callers (a saved journey's periodic realtime refresh, the trip sheet's own reload) re-run
-        // this against a stop list that already carries the Zusatzhalt from a previous call — it must
-        // not show up twice.
-        let mergedAgain = BahnExpertClient.inserting(stops, into: merged)
-        #expect(mergedAgain == merged)
-    }
-
-    @Test func unitNumberOnlyFromLiveGroupNames() {
-        #expect(BahnExpertClient.unitNumber(from: "ICE9465") == "9465")
-        #expect(BahnExpertClient.unitNumber(from: "ICE0160") == "160")
-        #expect(BahnExpertClient.unitNumber(from: "373-planned") == nil)
     }
 
     /// Without a Referer bahn.expert returns an empty 206 and every lookup silently fails.
@@ -987,45 +1058,191 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(request.httpMethod == "POST")
     }
 
-    @Test func decodesPosition() throws {
-        let json = #"{"longitude": 11.0772616667, "latitude": 52.45801, "time": "2026-09-19T10:48:08.000Z", "metaSource": "SENSOR", "speed": 240.21}"#
-        let wire = try JSONDecoding.decoder.decode(BahnExpertClient.PositionResponse.self, from: Data(json.utf8))
-        let position = TrainPosition(coordinate: .init(latitude: wire.latitude, longitude: wire.longitude), time: wire.time, speedKmh: wire.speed, source: wire.metaSource)
-        #expect(position.speedKmh == 240.21)
-        #expect(!position.isStale(now: wire.time.addingTimeInterval(30)))
-        #expect(position.isStale(now: wire.time.addingTimeInterval(300)))
-    }
-
-    @Test func familyPrefersBaureiheNumber() {
-        let group = { (number: String?, name: String?) in
-            TrainTypeLookup.Group(seriesName: name, baureihe: number, unitNumber: nil, origin: nil, destination: nil, coachCount: 0)
-        }
-        #expect(group("412", "ICE 4 Lang (BR412)").family == "ICE 4")
-        #expect(group("407", "ICE 3 Velaro (BR407)").family == "ICE 3")
-        #expect(group("411", "ICE T (BR411)").family == "ICE T")
-        #expect(group("408", "ICE 3neo (BR408)").family == "ICE 3neo")
-        #expect(group(nil, "ICE L").family == "ICE L")
-        #expect(group(nil, nil).family == nil)
-    }
-
-    @Test func trainReferenceOnlyForLongDistance() {
-        let line = { (name: String, number: String) in Line(name: name, number: number, product: .highSpeed, operatorName: nil) }
-        #expect(BahnExpertClient.trainReference(for: line("ICE 950", "950"))?.category == "ICE")
-        #expect(BahnExpertClient.trainReference(for: line("RE 5", "5")) == nil)
-        #expect(BahnExpertClient.trainReference(for: nil) == nil)
-    }
-
     @Test func dayValidation() {
         #expect(BahnExpertClient.isValidDay("2026-09-20"))
         #expect(!BahnExpertClient.isValidDay("2026-02-31"))
         #expect(!BahnExpertClient.isValidDay("20.09.2026"))
     }
+}
 
-    @Test func berlinDayUsesLocalCalendarDay() {
-        // 23:30 UTC on the 19th is already the 20th in Berlin (CEST).
-        let date = Date(timeIntervalSince1970: 1_789_860_600)
-        #expect(BahnExpertClient.berlinDay(date) == "2026-09-20")
+@Suite struct BahnDeJourneyTests {
+    /// Real ICE 372 run (2026-09-22): it skipped Frankfurt (Main) Hbf and instead picked up an
+    /// unscheduled stop at Frankfurt (Main) Süd. bahn.de flags that pair either directly
+    /// (`canceled` / `additional`) or through messages, which DBRIS reads the same way.
+    static let details = #"""
+    {"halte": [
+        {"id": "A=1@O=Mannheim Hbf@X=8469268@Y=49479181@L=8000244@", "extId": "8000244", "name": "Mannheim Hbf",
+         "ankunftsZeitpunkt": "2026-09-22T12:22:00", "ezAnkunftsZeitpunkt": "2026-09-22T12:58:00",
+         "abfahrtsZeitpunkt": "2026-09-22T12:30:00", "ezAbfahrtsZeitpunkt": "2026-09-22T13:02:00", "gleis": "3"},
+        {"id": "A=1@O=Frankfurt(Main)Hbf@L=8000105@", "name": "Frankfurt(Main)Hbf",
+         "abfahrt": {"sollzeit": "2026-09-22T13:15:00"},
+         "priorisierteMeldungen": [{"type": "HALT_AUSFALL", "text": "Halt entfällt"}]},
+        {"id": "A=1@O=Frankfurt(Main)Süd@X=8686303@Y=50099365@L=8002041@", "extId": "8002041", "name": "Frankfurt(Main)Süd",
+         "abfahrt": {"sollzeit": "2026-09-22T13:19:00", "echtzeit": "2026-09-22T13:58:04"}, "gleis": "6", "ezGleis": "7",
+         "priorisierteMeldungen": [{"text": "Zusatzhalt"}]},
+        {"extId": "8000150", "name": "Hanau Hbf", "canceled": false,
+         "ankunftsZeitpunkt": "2026-09-22T13:28:00", "abfahrtsZeitpunkt": "2026-09-22T13:30:00"},
+        {"extId": "8000152", "name": "Hannover Hbf", "risMeldungen": [{"key": "text.realtime.stop.cancelled", "value": "Halt entfällt"}]}
+    ]}
+    """#
+
+    static func stops() throws -> [JourneyStop] {
+        try JSONDecoding.decoder.decode(BahnDeClient.JourneyDetails.self, from: Data(details.utf8)).halte.compactMap(JourneyStop.init)
     }
+
+    @Test func decodesStopsLikeDBRIS() throws {
+        let stops = try Self.stops()
+        #expect(stops.map(\.evaNumber) == ["8000244", "8000105", "8002041", "8000150", "8000152"])
+        #expect(stops[1].isCancelled && !stops[1].isAdditional)
+        #expect(stops[2].isAdditional && !stops[2].isCancelled)
+        #expect(stops[4].isCancelled)
+        #expect(!stops[0].isAdditional && !stops[0].isCancelled && !stops[3].isCancelled)
+        // Zone-less local times are Berlin time (CEST = UTC+2).
+        #expect(stops[0].arrival?.planned == JSONDecoding.parseISODate("2026-09-22T10:22:00Z"))
+        #expect(stops[0].departure?.actual == JSONDecoding.parseISODate("2026-09-22T11:02:00Z"))
+        #expect(stops[2].departure?.actual == JSONDecoding.parseISODate("2026-09-22T11:58:04Z"))
+        #expect(stops[2].departurePlatform == PlatformInfo(planned: "6", actual: "7"))
+        let coordinate = try #require(stops[2].coordinate)
+        #expect(abs(coordinate.latitude - 50.099365) < 0.000001 && abs(coordinate.longitude - 8.686303) < 0.000001)
+    }
+
+    @Test func findsTheZusatzhaltHop() throws {
+        let stops = try Self.stops()
+        let zusatzhalt = station("8002041", "Frankfurt (Main) Süd")
+        let match = try #require(BahnDeClient.nextRegularStop(after: zusatzhalt, in: stops))
+        #expect(match.zusatzhalt.evaNumber == "8002041")
+        #expect(match.nextRegular.evaNumber == "8000150")
+        // A regular (non-additional) stop is never mistaken for a Zusatzhalt.
+        #expect(BahnDeClient.nextRegularStop(after: station("8000244", "Mannheim Hbf"), in: stops) == nil)
+        // No regular stop left after the Zusatzhalt (e.g. it's also the run's last stop).
+        #expect(BahnDeClient.nextRegularStop(after: zusatzhalt, in: Array(stops.prefix(3))) == nil)
+    }
+
+    /// `Trip`/`Leg` stopovers only ever come from Transitous, which never has a Zusatzhalt at all —
+    /// `inserting(_:into:)` splices Frankfurt (Main) Süd into the existing (already realtime-overlaid)
+    /// stop list rather than it being silently missing from the journey view.
+    @Test func insertsTheZusatzhaltAtItsRightfulPlace() throws {
+        let stops = try Self.stops()
+        let existing = [
+            station("8000244", "Mannheim Hbf"),
+            station("8000105", "Frankfurt (Main) Hbf"),
+            station("8000150", "Hanau Hbf"),
+        ].enumerated().map { index, s in
+            Stopover(station: s, arrival: nil, departure: nil, arrivalPlatform: nil, departurePlatform: nil, cancelled: index == 1)
+        }
+
+        let merged = BahnDeClient.inserting(stops, into: existing)
+
+        #expect(merged.map(\.station.name) == ["Mannheim Hbf", "Frankfurt (Main) Hbf", "Frankfurt(Main)Süd", "Hanau Hbf"])
+        #expect(merged[1].cancelled)
+        #expect(merged[2].isAdditional)
+        #expect(!merged[0].isAdditional && !merged[3].isAdditional)
+
+        // Nothing to insert: the list comes back untouched.
+        #expect(BahnDeClient.inserting(stops.filter { !$0.isAdditional }, into: existing) == existing)
+        // Stopovers never loaded for this leg/trip: stays empty rather than showing a partial list.
+        #expect(BahnDeClient.inserting(stops, into: []).isEmpty)
+        // Re-running on an already merged list doesn't duplicate the Zusatzhalt.
+        #expect(BahnDeClient.inserting(stops, into: merged) == merged)
+    }
+
+    @Test func findsJourneyIdOnBoard() throws {
+        let json = #"""
+        {"entries": [
+            {"journeyId": "2|#VN#1#ST#1|wrong-time", "zeit": "2026-09-29T15:02:00", "verkehrmittel": {"name": "ICE 693"}},
+            {"journeyId": "2|#VN#1#ST#1|other-train", "zeit": "2026-09-29T14:30:00", "verkehrmittel": {"name": "ICE 1093"}},
+            {"journeyId": "2|#VN#1#ST#1|right", "zeit": "2026-09-29T14:31:00", "verkehrmittel": {"name": "ICE 693"}}
+        ]}
+        """#
+        let board = try JSONDecoding.decoder.decode(BahnDeClient.Board.self, from: Data(json.utf8))
+        let line = Line(name: "ICE 693", number: "693", product: .highSpeed, operatorName: nil)
+        let planned = try #require(JSONDecoding.parseISODate("2026-09-29T12:30:00Z"))
+        #expect(BahnDeClient.journeyId(in: board, for: line, plannedDeparture: planned) == "2|#VN#1#ST#1|right")
+        let farOff = try #require(JSONDecoding.parseISODate("2026-09-29T06:00:00Z"))
+        #expect(BahnDeClient.journeyId(in: board, for: line, plannedDeparture: farOff) == nil)
+    }
+
+    @Test func requestURLs() throws {
+        let journey = BahnDeClient.journeyURL("2|#VN#1#ST#1759#PI#0#ZI#1#TA#0#DA#290926#").absoluteString
+        #expect(journey == "https://www.bahn.de/web/api/reiseloesung/fahrt?journeyId=2%7C%23VN%231%23ST%231759%23PI%230%23ZI%231%23TA%230%23DA%23290926%23&poly=false")
+
+        let departure = try #require(JSONDecoding.parseISODate("2026-09-29T12:30:00Z"))
+        let board = try #require(URLComponents(url: BahnDeClient.boardURL(eva: "8000105", at: departure), resolvingAgainstBaseURL: false))
+        let items = board.queryItems ?? []
+        #expect(items.first { $0.name == "datum" }?.value == "2026-09-29")
+        #expect(items.first { $0.name == "zeit" }?.value == "14:29:00")
+        #expect(items.first { $0.name == "ortExtId" }?.value == "8000105")
+        #expect(items.filter { $0.name == "verkehrsmittel[]" }.map(\.value) == ["ICE", "EC_IC"])
+    }
+}
+
+@Suite struct BahnJetztTests {
+    static let list = #"""
+    [
+      {"journeyId": "20260929-65771c12", "position": [9.1162, 48.7455], "speed": null, "name": "RE14a",
+       "details": {"origin": {"evaNumber": "8000096", "name": "Stuttgart Hbf"}, "destination": {"evaNumber": "8000322", "name": "Rottweil"},
+                   "transportAtStart": {"type": "REGIONAL_TRAIN", "journeyName": "RE14a", "journeyNumber": 17677, "category": "RE", "label": ""}}},
+      {"journeyId": "20260928-aaaa", "position": [11.0, 50.0], "speed": 120.0, "name": "ICE 693",
+       "details": {"transportAtStart": {"type": "HIGH_SPEED_TRAIN", "journeyName": "ICE 693", "journeyNumber": 693, "category": "ICE"}}},
+      {"journeyId": "20260929-bbbb", "position": [8.6632, 50.1068], "speed": 243.5, "name": "ICE 693",
+       "details": {"transportAtStart": {"type": "HIGH_SPEED_TRAIN", "journeyName": "ICE 693", "journeyNumber": 693, "category": "ICE"}}}
+    ]
+    """#
+
+    @Test func matchesByNumberAndPrefersTheLegsDay() throws {
+        let journeys = try JSONDecoding.decoder.decode([BahnJetztClient.Journey].self, from: Data(Self.list.utf8))
+        let departure = try #require(JSONDecoding.parseISODate("2026-09-29T10:00:00Z"))
+        #expect(BahnJetztClient.match(category: "ICE", number: 693, departure: departure, in: journeys)?.journeyId == "20260929-bbbb")
+        #expect(BahnJetztClient.match(category: "IC", number: 693, departure: departure, in: journeys) == nil)
+        // Just after midnight, yesterday's run still underway is the one.
+        let earlyNextDay = try #require(JSONDecoding.parseISODate("2026-09-29T22:30:00Z"))
+        #expect(BahnJetztClient.match(category: "ICE", number: 693, departure: earlyNextDay, in: journeys)?.journeyId == "20260929-bbbb")
+    }
+
+    @Test func positionFromSharedList() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [BahnJetztListProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let client = BahnJetztClient(http: HTTPClient(session: session), state: BahnJetztClient.State())
+        let departure = try #require(JSONDecoding.parseISODate("2026-09-29T10:00:00Z"))
+        let leg = Leg(origin: station("8000105", "Frankfurt (Main) Hbf"), destination: station("8000261", "München Hbf"),
+                      departure: TimeInfo(planned: departure, actual: nil), arrival: TimeInfo(planned: departure.addingTimeInterval(14_400), actual: nil),
+                      departurePlatform: nil, arrivalPlatform: nil, tripId: nil,
+                      line: Line(name: "ICE 693", number: "693", product: .highSpeed, operatorName: nil),
+                      direction: nil, isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+
+        let position = try #require(try await client.position(for: leg))
+        #expect(position.coordinate == Coordinate(latitude: 50.1068, longitude: 8.6632))
+        #expect(position.speedKmh == 243.5)
+        #expect(position.source == "bahn.jetzt")
+        // A second leg in the same refresh reuses the list instead of fetching it again.
+        _ = try await client.position(for: leg)
+        #expect(BahnJetztListProtocol.requests.withLock { $0 } == 1)
+        #expect(BahnJetztListProtocol.userAgent.withLock { $0 } == HTTPClient.identifyingUserAgent)
+    }
+
+    @Test func staleness() {
+        let position = TrainPosition(coordinate: .init(latitude: 50, longitude: 8), time: .now, speedKmh: nil, source: nil)
+        #expect(!position.isStale(now: position.time.addingTimeInterval(30)))
+        #expect(position.isStale(now: position.time.addingTimeInterval(300)))
+    }
+}
+
+private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
+    static let requests = Mutex(0)
+    static let userAgent = Mutex<String?>(nil)
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.requests.withLock { $0 += 1 }
+        Self.userAgent.withLock { $0 = request.value(forHTTPHeaderField: "User-Agent") }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(BahnJetztTests.list.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }
 
 @Suite struct GeometryTests {

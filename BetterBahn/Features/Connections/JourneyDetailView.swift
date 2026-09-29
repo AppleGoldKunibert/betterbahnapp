@@ -387,11 +387,12 @@ struct LegCard: View {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
                             Text(leg.line?.name ?? "Zug").font(.headline)
-                            TrainSeriesTag(line: leg.line, date: leg.departure.planned)
+                            TrainSeriesTag(leg: leg)
                         }
                         if let direction = leg.direction {
                             Text("Richtung \(direction)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }
+                        TrainFormationLabel(leg: leg)
                     }
                     Spacer()
                     TrainMessagesButton(messages: leg.messages)

@@ -7,9 +7,21 @@ public struct TrainFormation: Codable, Sendable, Hashable {
         public var model: String?
         /// Triebzug number, e.g. "9465".
         public var number: String?
+        /// The trainset's christened name ("Taufname"), e.g. "Bundesrepublik Deutschland".
+        public var name: String?
+
+        public init(model: String?, number: String?, name: String? = nil) {
+            self.model = model
+            self.number = number
+            self.name = name
+        }
     }
 
     public var units: [Unit]
+
+    public init(units: [Unit]) {
+        self.units = units
+    }
 
     /// "ICE 3neo" or "ICE 3neo + ICE 4".
     public var modelSummary: String? {
@@ -26,16 +38,39 @@ public struct TrainFormation: Codable, Sendable, Hashable {
         guard !numbers.isEmpty else { return nil }
         return "Tz " + numbers.joined(separator: " + ")
     }
+
+    /// "Tz 9457 „Bundesrepublik Deutschland“ + 9018"
+    public var unitDescription: String? {
+        let parts = units.compactMap { unit in unit.number.map { number in unit.name.map { "\(number) „\($0)“" } ?? number } }
+        guard !parts.isEmpty else { return nil }
+        return "Tz " + parts.joined(separator: " + ")
+    }
 }
 
-/// Endpoints of bahn.de (station search and coach sequence).
+/// Endpoints of bahn.de's web API: station search, departure boards, journey details and coach
+/// sequences — the same ones Travel::Status::DE::DBRIS uses (https://github.com/derf/Travel-Status-DE-DBRIS).
+///
+/// bahn.de only answers requests that look like they come from its own web page, so every request
+/// carries the same headers DBRIS sends (see `headers()`). Responses are cached, and a 403/429
+/// pauses every bahn.de request for `BahnDeGate.cooldown` instead of retrying.
 public struct BahnDeClient: Sendable {
     public static let baseURL = URL(string: "https://www.bahn.de/web/api")!
-    let http: HTTPClient
+    /// Deutsche Bahn's administration ID.
+    public static let dbAdministration = "80"
+    /// Categories whose coach sequence and journey details bahn.de has.
+    static let longDistanceCategories: Set<String> = ["ICE", "IC", "EC", "ECE"]
 
-    public init(http: HTTPClient = HTTPClient(timeout: 8)) {
+    let http: HTTPClient
+    let gate: BahnDeGate
+
+    public init(http: HTTPClient = HTTPClient(timeout: 8), gate: BahnDeGate = .shared) {
         self.http = http
+        self.gate = gate
     }
+
+    /// Caches are only shared on the app's real session; a client on a custom session (tests,
+    /// mocks) must never see another client's stored responses.
+    var usesSharedCaches: Bool { http.session === URLSession.shared }
 
     struct Location: Decodable {
         var extId: String?
@@ -51,7 +86,7 @@ public struct BahnDeClient: Sendable {
             .init(name: "typ", value: "ALL"),
             .init(name: "limit", value: "10"),
         ])
-        let locations = try await http.get(url, as: [Location].self)
+        let locations = try await get(url, as: [Location].self)
         return locations.compactMap { location in
             guard location.type == "ST", let eva = location.extId else { return nil }
             let coordinate = location.lat.flatMap { lat in location.lon.map { Coordinate(latitude: lat, longitude: $0) } }
@@ -85,53 +120,147 @@ public struct BahnDeClient: Sendable {
 
     struct SequenceResponse: Decodable {
         struct Group: Decodable {
+            struct Transport: Decodable { var category: String?; var number: Int? }
             struct Vehicle: Decodable {
                 struct VehicleType: Decodable { var category: String?; var constructionType: String? }
-                var type: VehicleType
+                var type: VehicleType?
+                /// UIC number, 12 digits, e.g. "938054010021" for a BR 401 power car.
                 var vehicleID: String?
             }
-            var name: String
-            var vehicles: [Vehicle]
+            /// e.g. "ICE0169" → Tz 169.
+            var name: String?
+            var transport: Transport?
+            var vehicles: [Vehicle]?
         }
-        var groups: [Group]
+        var groups: [Group]?
     }
 
-    /// Formation of a DB long-distance train at its departure from `station`.
+    /// Everything the coach-sequence request needs: the train plus a stop where it still departs.
+    public struct FormationRequest: Hashable, Sendable {
+        public var category: String
+        public var number: String
+        public var station: Station
+        /// Scheduled departure at `station`.
+        public var plannedDeparture: Date
+
+        public init(category: String, number: String, station: Station, plannedDeparture: Date) {
+            self.category = category
+            self.number = number
+            self.station = station
+            self.plannedDeparture = plannedDeparture
+        }
+    }
+
+    /// bahn.de only has the coach sequence for a departure coming up soon, so later ones aren't
+    /// asked for at all.
+    public static let formationLookahead: TimeInterval = 90 * 60
+
+    /// The request for `line`'s formation at the first of `stops` where it still departs, if that
+    /// departure is soon enough for bahn.de to know the coach sequence (see `formationLookahead`).
+    public static func formationRequest(line: Line?, stops: [(station: Station, departure: TimeInfo?)],
+                                        now: Date = .now) -> FormationRequest? {
+        guard let ref = trainReference(for: line) else { return nil }
+        guard let stop = stops.first(where: { $0.departure.map { $0.best >= now.addingTimeInterval(-60) } ?? false }),
+              let departure = stop.departure,
+              departure.planned <= now.addingTimeInterval(formationLookahead) else { return nil }
+        return FormationRequest(category: ref.category, number: ref.number, station: stop.station, plannedDeparture: departure.planned)
+    }
+
+    public static func formationRequest(for leg: Leg, now: Date = .now) -> FormationRequest? {
+        guard !leg.cancelled else { return nil }
+        let stops = [(station: leg.origin, departure: Optional(leg.departure))]
+            + leg.stopovers.filter { !$0.cancelled }.map { (station: $0.station, departure: $0.departure) }
+        return formationRequest(line: leg.line, stops: stops, now: now)
+    }
+
+    public static func formationRequest(for trip: Trip, now: Date = .now) -> FormationRequest? {
+        formationRequest(line: trip.line, stops: trip.stopovers.filter { !$0.cancelled }.map { (station: $0.station, departure: $0.departure) }, now: now)
+    }
+
+    /// Formation of a DB long-distance train at its departure from the request's station.
+    /// - Returns: nil if bahn.de has no coach sequence for it (yet).
+    /// - Throws: `TransitError.rateLimited` while bahn.de is blocking requests.
+    public func formation(_ request: FormationRequest) async throws -> TrainFormation? {
+        let key = "\(request.category) \(request.number)|\(request.station.id)|\(request.plannedDeparture.timeIntervalSince1970)"
+        guard usesSharedCaches else { return try await fetchFormation(request) }
+        return try await Self.formationCache.value(for: key, maxAge: Self.formationMaxAge) {
+            try await self.fetchFormation(request)
+        }
+    }
+
+    /// Formation of a leg's train at the first stop where it still departs.
     public func formation(for leg: Leg) async throws -> TrainFormation? {
-        guard let line = leg.line, let number = line.number,
-              let category = line.name.split(separator: " ").first.map(String.init)?.uppercased(),
-              ["ICE", "IC", "EC", "ECE"].contains(category) else { return nil }
-        guard let eva = try await evaNumber(for: leg.origin) else { return nil }
-        let planned = leg.departure.planned
-        let url = Self.baseURL.appending(path: "reisebegleitung/wagenreihung/vehicle-sequence").appending(queryItems: [
-            .init(name: "administrationId", value: "80"),
-            .init(name: "category", value: category),
-            .init(name: "date", value: planned.formatted(.iso8601.year().month().day())),
-            .init(name: "evaNumber", value: eva),
-            .init(name: "number", value: number),
-            .init(name: "time", value: JSONDecoding.isoString(planned)),
-        ])
-        let response = try await http.get(url, as: SequenceResponse.self)
-        let formation = Self.formation(from: response, category: category)
+        guard let request = Self.formationRequest(for: leg) else { return nil }
+        return try await formation(request)
+    }
+
+    private static let formationCache = ExpiringCache<TrainFormation?>()
+    /// A formation rarely changes once published; 10 minutes still catches a late swap.
+    static let formationMaxAge: TimeInterval = 10 * 60
+
+    private func fetchFormation(_ request: FormationRequest) async throws -> TrainFormation? {
+        guard let eva = try await evaNumber(for: request.station) else { return nil }
+        let response: SequenceResponse
+        do {
+            response = try await get(Self.formationURL(request, eva: eva), as: SequenceResponse.self)
+        } catch TransitError.http(let status, _) where status == 404 {
+            return nil
+        }
+        let formation = Self.formation(from: response, category: request.category, number: Int(request.number))
         return formation.units.isEmpty ? nil : formation
     }
 
-    static func formation(from response: SequenceResponse, category: String) -> TrainFormation {
+    static func formationURL(_ request: FormationRequest, eva: String) -> URL {
+        baseURL.appending(path: "reisebegleitung/wagenreihung/vehicle-sequence").appending(queryItems: [
+            .init(name: "administrationId", value: dbAdministration),
+            .init(name: "category", value: request.category),
+            .init(name: "date", value: utcDay(request.plannedDeparture)),
+            .init(name: "evaNumber", value: eva),
+            .init(name: "number", value: request.number),
+            .init(name: "time", value: utcTimestamp(request.plannedDeparture)),
+        ])
+    }
+
+    static func formation(from response: SequenceResponse, category: String, number: Int? = nil) -> TrainFormation {
+        // Split trains (e.g. ICE 950 + ICE 940 coupled up to Hamm) list every half; keep the ones that
+        // run as the requested train so the other half's trainset doesn't leak in.
+        // Every field is optional, like in DBRIS: one odd group mustn't lose the whole formation.
+        let groups = response.groups ?? []
+        let own = groups.filter { $0.transport?.number != nil && $0.transport?.number == number }
         var units: [TrainFormation.Unit] = []
-        for group in response.groups {
-            let types = group.vehicles.compactMap(\.type.constructionType)
+        for group in own.isEmpty ? groups : own {
+            let vehicles = group.vehicles ?? []
+            let name = group.name ?? ""
             // Locomotive-only groups (e.g. the Vectron of an ICE L) have a vehicle ID as name.
-            if group.vehicles.allSatisfy({ $0.type.category == "LOCOMOTIVE" }) { continue }
-            let letters = group.name.prefix { $0.isLetter }
-            let digits = group.name.dropFirst(letters.count)
-            let number = !letters.isEmpty && !digits.isEmpty && digits.allSatisfy(\.isNumber)
-                ? String(digits.drop { $0 == "0" }) : nil
-            units.append(.init(model: model(constructionTypes: types, groupName: group.name, category: category), number: number))
+            if !vehicles.isEmpty, vehicles.allSatisfy({ $0.type?.category == "LOCOMOTIVE" }) { continue }
+            let carriages = vehicles.map { Carriage(vehicleID: $0.vehicleID, constructionType: $0.type?.constructionType) }
+            let types = vehicles.compactMap { $0.type?.constructionType }
+            let model = TrainModel.detect(carriages, category: category).map(\.name)
+                ?? Self.model(constructionTypes: types, groupName: name, category: category)
+            let unit = TrainFormation.Unit(model: model, number: unitNumber(from: name), name: trainsetName(from: name))
+            if unit.model != nil || unit.number != nil { units.append(unit) }
         }
         return TrainFormation(units: units)
     }
 
-    /// Maps DB construction types (e.g. "I4081", "I1412") to series names.
+    /// Group names for live data look like "ICE9465" or "ICE0160"; anything else has no Tz.
+    static func unitNumber(from groupName: String) -> String? {
+        let letters = groupName.prefix { $0.isLetter }
+        let digits = groupName.dropFirst(letters.count)
+        guard !letters.isEmpty, !digits.isEmpty, digits.allSatisfy(\.isNumber) else { return nil }
+        let trimmed = String(digits.drop { $0 == "0" })
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Taufname of an ICE/ICD trainset, from its group name like "ICE0169".
+    static func trainsetName(from groupName: String) -> String? {
+        guard groupName.hasPrefix("ICE") || groupName.hasPrefix("ICD"),
+              let number = unitNumber(from: groupName).flatMap(Int.init) else { return nil }
+        return TrainsetNames.byUnit[number]
+    }
+
+    /// Fallback when the vehicles' UIC numbers are inconclusive: maps DB construction types
+    /// (e.g. "I4081", "I1412") to series names.
     static func model(constructionTypes: [String], groupName: String, category: String) -> String? {
         var classes = Set<String>()
         var hasTalgo = false
@@ -147,9 +276,8 @@ public struct BahnDeClient: Sendable {
         let map: [(Set<String>, String)] = [
             (["401", "801", "802", "803", "804"], "ICE 1"),
             (["402", "805", "806", "807", "808"], "ICE 2"),
-            (["403"], "ICE 3"),
-            (["406"], "ICE 3M"),
-            (["407"], "ICE 3 (BR 407)"),
+            (["403", "406"], "ICE 3"),
+            (["407"], "ICE 3 Velaro"),
             (["408"], "ICE 3neo"),
             (["411", "415"], "ICE T"),
             (["412", "812", "813"], "ICE 4"),
@@ -157,10 +285,134 @@ public struct BahnDeClient: Sendable {
         for (set, name) in map where !set.isDisjoint(with: classes) { return name }
         if hasTalgo { return "ICE L" }
         if category == "IC" || category == "EC" {
-            if groupName.hasPrefix("ICD") { return "IC 2 (Twindexx)" }
-            if constructionTypes.contains(where: { $0.contains("4110") }) { return "IC 2 (KISS)" }
+            if groupName.hasPrefix("ICD") { return "IC 2 Twindexx" }
+            if constructionTypes.contains(where: { $0.contains("4110") }) { return "IC 2 KISS" }
             return "IC 1"
         }
         return nil
+    }
+
+    // MARK: Helpers
+
+    /// "ICE 950" → ("ICE", "950"); nil for anything that is not a DB long-distance train.
+    public static func trainReference(for line: Line?) -> (category: String, number: String)? {
+        guard let line, let number = line.number,
+              let category = line.name.split(separator: " ").first.map(String.init)?.uppercased(),
+              longDistanceCategories.contains(category) else { return nil }
+        return (category, number)
+    }
+
+    static let berlin = TimeZone(identifier: "Europe/Berlin")!
+
+    /// Calendar day of `date` in Europe/Berlin as `yyyy-MM-dd`.
+    public static func berlinDay(_ date: Date) -> String {
+        date.formatted(Date.ISO8601FormatStyle(timeZone: berlin).year().month().day())
+    }
+
+    static func berlinHour(_ date: Date) -> Int {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = berlin
+        return calendar.component(.hour, from: date)
+    }
+
+    /// `yyyy-MM-dd` in UTC, as the coach-sequence request wants it.
+    static func utcDay(_ date: Date) -> String {
+        date.formatted(Date.ISO8601FormatStyle(timeZone: .gmt).year().month().day())
+    }
+
+    /// `2026-09-29T20:38:00.000Z`, as the coach-sequence request wants it.
+    static func utcTimestamp(_ date: Date) -> String {
+        date.formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true, timeZone: .gmt))
+    }
+
+    /// Browser agents Travel::Status::DE::DBRIS sends; bahn.de refuses boards and coach sequences
+    /// (`OPS_BLOCKED`) to anything that doesn't look like its own web page.
+    static let browserUserAgents = [
+        "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.XXXX.YYY Mobile Safari/537.36",
+        "Mozilla/5.0 (Linux; Android 14; SM-S928B/DS) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.XXXX.YYY Mobile Safari/537.36",
+        "Mozilla/5.0 (Linux; Android 14; Pixel 9 Pro Build/AD1A.240418.003; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/124.0.XXXX.YYY Mobile Safari/537.36",
+        "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.XXXX.YYY Mobile Safari/537.36",
+        "Mozilla/5.0 (Linux; Android 15; moto g - 2025 Build/V1VK35.22-13-2; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/132.0.XXXX.YYY Mobile Safari/537.36",
+        "Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.XXXX.YYY Safari/537.36",
+    ]
+
+    /// Like DBRIS: one agent picked per launch, with random version digits.
+    static let userAgent: String = browserUserAgents.randomElement()!
+        .replacing("XXXX", with: String(Int.random(in: 0..<1000)))
+        .replacing("YYY", with: String(Int.random(in: 0..<100)))
+
+    /// The headers DBRIS sends with every request.
+    static func headers() -> [String: String] {
+        [
+            "Accept": "application/json",
+            "Content-Type": "application/json; charset=utf-8",
+            "Origin": "https://www.bahn.de",
+            "Referer": "https://www.bahn.de/buchung/fahrplan/suche",
+            "User-Agent": userAgent,
+            "x-correlation-id": "\(UUID().uuidString.lowercased())_\(UUID().uuidString.lowercased())",
+        ]
+    }
+
+    /// GET through the shared cooldown: while bahn.de is blocking, nothing is sent at all.
+    func get<T: Decodable>(_ url: URL, as type: T.Type) async throws -> T {
+        try await gate.check()
+        do {
+            return try await http.get(url, as: type, headers: Self.headers())
+        } catch let error as TransitError {
+            await gate.report(error)
+            throw error.isBlocked ? TransitError.rateLimited : error
+        }
+    }
+}
+
+/// Pauses every bahn.de request for a while after Akamai answered 403 or 429, so the app never
+/// hammers a server that is currently refusing it.
+public actor BahnDeGate {
+    public static let shared = BahnDeGate()
+    public static let cooldown: TimeInterval = 10 * 60
+
+    private var blockedUntil: Date?
+
+    public init() {}
+
+    /// Whether bahn.de is currently being left alone after a block.
+    public var isBlocked: Bool { blockedUntil.map { $0 > .now } ?? false }
+
+    func check() throws {
+        if isBlocked { throw TransitError.rateLimited }
+    }
+
+    func report(_ error: TransitError) {
+        if error.isBlocked { blockedUntil = Date.now.addingTimeInterval(Self.cooldown) }
+    }
+}
+
+extension TransitError {
+    /// Bot protection or rate limiting rather than a real error of the request itself.
+    var isBlocked: Bool {
+        switch self {
+        case .rateLimited: true
+        case .http(let status, _): status == 403
+        default: false
+        }
+    }
+}
+
+/// Values fetched per key, kept for `maxAge`; concurrent requests for the same key share one fetch.
+/// Errors are not cached, so a failed lookup is tried again next time.
+actor ExpiringCache<Value: Sendable> {
+    struct Entry { let date: Date; let value: Value }
+    private var entries: [String: Entry] = [:]
+    private var inFlight: [String: Task<Value, Error>] = [:]
+
+    func value(for key: String, maxAge: TimeInterval, fetch: @escaping @Sendable () async throws -> Value) async throws -> Value {
+        if let entry = entries[key], Date.now.timeIntervalSince(entry.date) < maxAge { return entry.value }
+        if let task = inFlight[key] { return try await task.value }
+        let task = Task { try await fetch() }
+        inFlight[key] = task
+        defer { inFlight[key] = nil }
+        let value = try await task.value
+        entries[key] = Entry(date: .now, value: value)
+        return value
     }
 }

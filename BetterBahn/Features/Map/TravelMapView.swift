@@ -54,6 +54,7 @@ struct TravelMapView: View {
                 .toolbar(.hidden, for: .navigationBar)
                 .task(id: selection) { await load() }
                 .task { await model.syncTraewelling() }
+                .task { await model.followTrainPositions() }
                 .sheet(isPresented: $showRangeSheet) { rangeSheet }
         }
     }
