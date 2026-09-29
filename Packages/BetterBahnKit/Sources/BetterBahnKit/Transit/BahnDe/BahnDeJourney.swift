@@ -149,11 +149,16 @@ extension BahnDeClient {
     }
 
     /// The board entry running as `line` closest to its scheduled departure (within 30 minutes).
+    /// Matched by name, or by train number alone, since bahn.de can brand a train differently than
+    /// Transitous does (e.g. "RJ 171" for Transitous' "ICE 171").
     static func journeyId(in board: Board, for line: Line, plannedDeparture: Date) -> String? {
-        let target = normalizedTrainName(line.name)
+        let targets = Set([line.name, line.alternateName].compactMap { $0 }.map(normalizedTrainName))
+        let number = trainReference(for: line)?.number
         return board.entries
             .filter { entry in
-                [entry.verkehrmittel?.name, entry.verkehrmittel?.mittelText].contains { $0.map(normalizedTrainName) == target }
+                let names = [entry.verkehrmittel?.name, entry.verkehrmittel?.mittelText].compactMap { $0 }
+                return names.contains { targets.contains(normalizedTrainName($0)) }
+                    || (number != nil && names.contains { trainNumber(in: $0) == number })
             }
             .compactMap { entry in entry.zeit.flatMap(parseBerlinTime).map { (entry.journeyId, abs($0.timeIntervalSince(plannedDeparture))) } }
             .filter { $0.1 <= 30 * 60 }
@@ -163,6 +168,53 @@ extension BahnDeClient {
     /// "ICE 693" / "ICE693" → "ICE693".
     static func normalizedTrainName(_ name: String) -> String {
         name.filter { !$0.isWhitespace }.uppercased()
+    }
+
+    /// "RJ 171" → "171"; nil without a trailing number.
+    static func trainNumber(in name: String) -> String? {
+        let digits = String(name.reversed().prefix { $0.isNumber }.reversed())
+        let trimmed = String(digits.drop { $0 == "0" })
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    // MARK: Train names
+
+    /// `entries` (a departure board) with every DB long-distance train renamed to what bahn.de's own
+    /// departure board calls it. For some cross-border trains Transitous only has DB's GTFS entry,
+    /// which brands them generically, e.g. the ČD Railjet "RJ 171" Hamburg–Dresden as "ICE 171".
+    /// Unchanged if bahn.de can't be asked (blocked, offline).
+    public func correctingTrainNames(_ entries: [BoardEntry], at station: Station) async -> [BoardEntry] {
+        let times = entries.filter { $0.kind == .departures && Self.trainReference(for: $0.line) != nil }.map(\.time.planned)
+        guard let first = times.min(), let last = times.max(), let eva = try? await evaNumber(for: station) else { return entries }
+        // One bahn.de board covers about an hour; the app's boards are 90 minutes.
+        var board: [Board.Entry] = []
+        var start = first
+        for _ in 0..<3 {
+            guard let page = try? await get(Self.boardURL(eva: eva, at: start), as: Board.self) else { break }
+            board += page.entries
+            guard let latest = page.entries.compactMap({ $0.zeit.flatMap(Self.parseBerlinTime) }).max(), latest < last else { break }
+            start = latest.addingTimeInterval(60)
+        }
+        return Self.correctingTrainNames(entries, using: board)
+    }
+
+    /// Renames each departure whose train number bahn.de lists at the same scheduled time (±2 min)
+    /// under another name. The Transitous name stays available as `alternateName`.
+    static func correctingTrainNames(_ entries: [BoardEntry], using board: [Board.Entry]) -> [BoardEntry] {
+        entries.map { entry in
+            guard entry.kind == .departures, let number = trainReference(for: entry.line)?.number,
+                  let match = board.first(where: { candidate in
+                      guard let name = candidate.verkehrmittel?.name, trainNumber(in: name) == number,
+                            let time = candidate.zeit.flatMap(parseBerlinTime) else { return false }
+                      return abs(time.timeIntervalSince(entry.time.planned)) <= 120
+                  }),
+                  let name = match.verkehrmittel?.name,
+                  normalizedTrainName(name) != normalizedTrainName(entry.line.name) else { return entry }
+            var corrected = entry
+            corrected.line.alternateName = entry.line.alternateName ?? entry.line.name
+            corrected.line.name = name
+            return corrected
+        }
     }
 
     private func fetchJourneyStops(journeyId: String) async throws -> [JourneyStop] {

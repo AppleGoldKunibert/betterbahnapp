@@ -58,8 +58,8 @@ public struct BahnDeClient: Sendable {
     public static let baseURL = URL(string: "https://betterbahn2.kunibert88.workers.dev/web/api")!
     /// Deutsche Bahn's administration ID.
     public static let dbAdministration = "80"
-    /// Categories whose coach sequence and journey details bahn.de has.
-    static let longDistanceCategories: Set<String> = ["ICE", "IC", "EC", "ECE"]
+    /// Categories whose coach sequence and journey details bahn.de has (Railjets included).
+    static let longDistanceCategories: Set<String> = ["ICE", "IC", "EC", "ECE", "RJ", "RJX"]
 
     let http: HTTPClient
     let gate: BahnDeGate

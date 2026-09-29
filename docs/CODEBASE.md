@@ -71,7 +71,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   fallback (none configured), cooldown health check, `BahnDeClient`, `BahnExpertClient`, `BahnJetztClient`.
 - `Transit/BahnDe/` – bahn.de web API via the `Cloudflare/bahnde-proxy` Worker (same endpoints/headers as Travel::Status::DE::DBRIS):
   station-search fallback, coach sequence → series/Tz/Taufname (`TrainModel`, `TrainsetNames`),
-  board + `fahrt` → `JourneyStop`s for Zusatzhalte (`inserting`, `nextRegularStop`). Responses are
+  board + `fahrt` → `JourneyStop`s for Zusatzhalte (`inserting`, `nextRegularStop`), and bahn.de's
+  own train names for departure boards (`correctingTrainNames`, e.g. "RJ 171" that Transitous calls "ICE 171"). Responses are
   cached; a 403/429 pauses all bahn.de requests for 10 min (`BahnDeGate`).
 - `Transit/BahnExpert/` – bahn.expert, only as fallback for the train type (`TrainTypeLookup`) when bahn.de
   has no coach sequence: it has DB's planned formation (`DB-plan`) for days ahead; bahn.de is only asked

@@ -85,7 +85,12 @@ struct TripView: View {
 
     private func load() async {
         do {
-            let loaded = try await model.provider.trip(id: entry.tripId, source: entry.source)
+            var loaded = try await model.provider.trip(id: entry.tripId, source: entry.source)
+            // The board may have taken bahn.de's name for this train (e.g. "RJ 171" for Transitous'
+            // "ICE 171"); keep it rather than switching back to the trip's own.
+            if let name = loaded.line?.name, entry.line.alternateName == name {
+                loaded.line = entry.line
+            }
             trip = loaded
             if boardingID == nil {
                 let here = loaded.stopovers.first { $0.station.isSamePlace(as: entry.station) }?.id

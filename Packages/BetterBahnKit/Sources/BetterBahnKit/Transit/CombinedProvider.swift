@@ -121,7 +121,11 @@ public final class CombinedProvider: TransitProvider {
         let entries = try await withFallback(deadline: .seconds(8),
                                { try await $0.board(kind, at: station, date: date, duration: duration, products: products) },
                                { try await $0.board(kind, at: station, date: date, duration: duration, products: products) })
-        return entries.filter { !Self.isFlixBus($0.line) }
+        let filtered = entries.filter { !Self.isFlixBus($0.line) }
+        // bahn.de's own names beat Transitous' generic ones for cross-border trains (see
+        // `BahnDeClient.correctingTrainNames`); a slow bahn.de mustn't hold up the board for long.
+        guard kind == .departures, let bahnDe else { return filtered }
+        return (try? await Self.withDeadline(.seconds(3)) { await bahnDe.correctingTrainNames(filtered, at: station) }) ?? filtered
     }
 
     /// FlixBus results are hidden from journey planning and departure boards entirely.

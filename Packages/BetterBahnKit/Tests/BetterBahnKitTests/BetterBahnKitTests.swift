@@ -1163,6 +1163,48 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         #expect(BahnDeClient.journeyId(in: board, for: line, plannedDeparture: farOff) == nil)
     }
 
+    /// Transitous calls the ČD Railjet Hamburg–Dresden "ICE 171"; bahn.de's board has "RJ 171".
+    @Test func findsJourneyIdByNumberWhenBrandsDiffer() throws {
+        let json = #"{"entries": [{"journeyId": "rj", "zeit": "2026-09-30T05:34:00", "verkehrmittel": {"name": "RJ 171"}}]}"#
+        let board = try JSONDecoding.decoder.decode(BahnDeClient.Board.self, from: Data(json.utf8))
+        let line = Line(name: "ICE 171", number: "171", product: .highSpeed, operatorName: nil)
+        let planned = try #require(JSONDecoding.parseISODate("2026-09-30T03:34:00Z"))
+        #expect(BahnDeClient.journeyId(in: board, for: line, plannedDeparture: planned) == "rj")
+    }
+
+    @Test func takesTrainNamesFromBahnDeBoard() throws {
+        let json = #"""
+        {"entries": [
+            {"journeyId": "a", "zeit": "2026-09-30T05:34:00", "verkehrmittel": {"name": "RJ 171"}},
+            {"journeyId": "b", "zeit": "2026-09-30T05:45:00", "verkehrmittel": {"name": "ICE 515"}},
+            {"journeyId": "c", "zeit": "2026-09-30T07:34:00", "verkehrmittel": {"name": "RJ 175"}}
+        ]}
+        """#
+        let board = try JSONDecoding.decoder.decode(BahnDeClient.Board.self, from: Data(json.utf8)).entries
+        let hamburg = station("8002549", "Hamburg Hbf")
+        func departure(_ name: String, _ number: String, _ product: Product, _ utc: String) throws -> BoardEntry {
+            BoardEntry(kind: .departures, tripId: name, station: hamburg,
+                       line: Line(name: name, number: number, product: product, operatorName: nil),
+                       otherEnd: "Dresden Hbf", time: TimeInfo(planned: try #require(JSONDecoding.parseISODate(utc)), actual: nil),
+                       platform: PlatformInfo(planned: "13", actual: nil), cancelled: false,
+                       terminatesOrOriginatesHere: false, remarks: [], source: .transitous)
+        }
+        let entries = [
+            try departure("ICE 171", "171", .highSpeed, "2026-09-30T03:34:00Z"),
+            try departure("ICE 515", "515", .highSpeed, "2026-09-30T03:45:00Z"),
+            try departure("RE 5", "5", .regional, "2026-09-30T03:40:00Z"),
+            // Same number as a bahn.de entry, but hours apart: a different run.
+            try departure("ICE 175", "175", .highSpeed, "2026-09-30T03:50:00Z"),
+        ]
+
+        let corrected = BahnDeClient.correctingTrainNames(entries, using: board)
+
+        #expect(corrected.map(\.line.name) == ["RJ 171", "ICE 515", "RE 5", "ICE 175"])
+        #expect(corrected[0].line.alternateName == "ICE 171")
+        #expect(corrected[0].line.number == "171")
+        #expect(corrected[1] == entries[1])
+    }
+
     @Test func requestURLs() throws {
         let journey = BahnDeClient.journeyURL("2|#VN#1#ST#1759#PI#0#ZI#1#TA#0#DA#290926#").absoluteString
         #expect(journey == "https://betterbahn2.kunibert88.workers.dev/web/api/reiseloesung/fahrt?journeyId=2%7C%23VN%231%23ST%231759%23PI%230%23ZI%231%23TA%230%23DA%23290926%23&poly=false")
