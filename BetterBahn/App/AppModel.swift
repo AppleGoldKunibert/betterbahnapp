@@ -437,7 +437,8 @@ final class AppModel {
     @ObservationIgnored private var trainTypeCache: [String: TrainTypeLookup?] = [:]
 
     /// A train's type ("ICE 4", "ICE 3neo" …) and, for live data, its Tz, from bahn.expert, which has
-    /// DB's planned formation for days ahead. Cached per train and day; failed requests are not
+    /// DB's planned formation for days ahead. Only the fallback when bahn.de's coach sequence
+    /// (`formation(for:)`) has nothing. Cached per train and day; failed requests are not
     /// cached so they are retried.
     func trainType(for line: Line?, on date: Date) async -> TrainTypeLookup? {
         guard let ref = BahnDeClient.trainReference(for: line), let bahnExpert = provider.bahnExpert else { return nil }

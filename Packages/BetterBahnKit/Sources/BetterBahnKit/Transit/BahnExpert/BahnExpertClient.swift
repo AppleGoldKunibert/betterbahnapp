@@ -76,8 +76,9 @@ public struct TrainTypeLookup: Codable, Sendable, Hashable {
     }
 }
 
-/// bahn.expert's public API, used only for the train type: it has DB's planned formation
-/// (`DB-plan`) for days ahead, which bahn.de's coach sequence only has shortly before departure.
+/// bahn.expert's public API, used only as the fallback for the train type when bahn.de's coach
+/// sequence has nothing: it has DB's planned formation (`DB-plan`) for days ahead, which bahn.de only
+/// has for the coming hours.
 /// Given category, number and date it resolves the journey, finds the first stop and asks for the
 /// coach sequence there — what bahn.expert's own web page does.
 public struct BahnExpertClient: Sendable {

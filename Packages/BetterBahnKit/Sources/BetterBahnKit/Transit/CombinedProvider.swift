@@ -2,7 +2,7 @@ import Foundation
 
 /// Transitous is primary. A separately configured provider can supply failover.
 /// bahn.de remains a station-search fallback and the source for coach sequences and journey details;
-/// bahn.expert supplies the planned train type for days ahead; bahn.jetzt supplies live train positions.
+/// bahn.expert is the fallback for the train type when bahn.de has no coach sequence (yet); bahn.jetzt supplies live train positions.
 public final class CombinedProvider: TransitProvider {
     public var source: DataSource { primary.source }
     public let primary: any TransitProvider

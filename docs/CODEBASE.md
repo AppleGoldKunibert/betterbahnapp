@@ -20,7 +20,7 @@ comments are English.
 | `Packages/BetterBahnKit/` | Local SwiftPM package with all models, networking and logic (iOS 26 + macOS 26, everything `Sendable`). Tests live here. |
 | `Config/` | xcconfigs + Info.plists. `Signing.xcconfig` holds team ID; optional gitignored `Local.xcconfig` overrides it. |
 | `Cloudflare/` | Worker that bounces the Träwelling OAuth callback to `betterbahn://oauth` (see its README). |
-| `Cloudflare/bahnde-proxy/` | Separate Worker proxying bahn.de's web API (`/web/api/…` paths), because bahn.de blocks Apple's URL loading stack (see its README). Not used by the app yet. |
+| `Cloudflare/bahnde-proxy/` | Separate Worker (`betterbahn2`) proxying bahn.de's web API (`/web/api/…` paths), because bahn.de blocks Apple's URL loading stack (see its README). `BahnDeClient.baseURL` points at it. |
 | `docs/transit-providers.md` | Why Transitous is the primary data source and fallback options. |
 
 Targets/schemes: `BetterBahn`, `BetterBahnWidgetsExtension`, `BetterBahnShareExtension`, `BetterBahnKit`.
@@ -69,12 +69,13 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `board`, `trip`) and `JourneyQuery`.
 - `Transit/CombinedProvider.swift` – what the app uses: primary `TransitousProvider`, optional
   fallback (none configured), cooldown health check, `BahnDeClient`, `BahnExpertClient`, `BahnJetztClient`.
-- `Transit/BahnDe/` – bahn.de web API (same endpoints/headers as Travel::Status::DE::DBRIS):
+- `Transit/BahnDe/` – bahn.de web API via the `Cloudflare/bahnde-proxy` Worker (same endpoints/headers as Travel::Status::DE::DBRIS):
   station-search fallback, coach sequence → series/Tz/Taufname (`TrainModel`, `TrainsetNames`),
   board + `fahrt` → `JourneyStop`s for Zusatzhalte (`inserting`, `nextRegularStop`). Responses are
   cached; a 403/429 pauses all bahn.de requests for 10 min (`BahnDeGate`).
-- `Transit/BahnExpert/` – bahn.expert, only for the train type (`TrainTypeLookup`): it has DB's planned
-  formation (`DB-plan`) for days ahead, which bahn.de only has shortly before departure.
+- `Transit/BahnExpert/` – bahn.expert, only as fallback for the train type (`TrainTypeLookup`) when bahn.de
+  has no coach sequence: it has DB's planned formation (`DB-plan`) for days ahead; bahn.de is only asked
+  for departures within `BahnDeClient.formationLookahead` (12 h).
 - `Transit/BahnJetzt/` – live train positions from bahn.jetzt's `/api/journeys` (one shared list,
   refreshed by `AppModel.followTrainPositions()` while the map is on screen).
 - `Transit/Transitous/` – MOTIS API client + DTOs (`M*` types). Station-name cleanup and

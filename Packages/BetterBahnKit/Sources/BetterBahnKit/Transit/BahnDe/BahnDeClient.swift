@@ -50,11 +50,12 @@ public struct TrainFormation: Codable, Sendable, Hashable {
 /// Endpoints of bahn.de's web API: station search, departure boards, journey details and coach
 /// sequences — the same ones Travel::Status::DE::DBRIS uses (https://github.com/derf/Travel-Status-DE-DBRIS).
 ///
-/// bahn.de only answers requests that look like they come from its own web page, so every request
-/// carries the same headers DBRIS sends (see `headers()`). Responses are cached, and a 403/429
-/// pauses every bahn.de request for `BahnDeGate.cooldown` instead of retrying.
+/// bahn.de's bot protection blocks Apple's URL loading stack whatever headers are sent, so requests
+/// go through our Cloudflare Worker (`Cloudflare/bahnde-proxy`), which mirrors bahn.de's `/web/api/…`
+/// paths and sends the DBRIS browser headers itself. Responses are cached, and a 403/429 (passed
+/// through by the Worker) pauses every bahn.de request for `BahnDeGate.cooldown` instead of retrying.
 public struct BahnDeClient: Sendable {
-    public static let baseURL = URL(string: "https://www.bahn.de/web/api")!
+    public static let baseURL = URL(string: "https://betterbahn2.kunibert88.workers.dev/web/api")!
     /// Deutsche Bahn's administration ID.
     public static let dbAdministration = "80"
     /// Categories whose coach sequence and journey details bahn.de has.
@@ -151,9 +152,9 @@ public struct BahnDeClient: Sendable {
         }
     }
 
-    /// bahn.de only has the coach sequence for a departure coming up soon, so later ones aren't
-    /// asked for at all.
-    public static let formationLookahead: TimeInterval = 90 * 60
+    /// bahn.de only has the coach sequence for departures in the coming hours (late in the evening it
+    /// already had the next morning's), so later ones aren't asked for at all and go to bahn.expert.
+    public static let formationLookahead: TimeInterval = 12 * 3600
 
     /// The request for `line`'s formation at the first of `stops` where it still departs, if that
     /// departure is soon enough for bahn.de to know the coach sequence (see `formationLookahead`).
@@ -326,7 +327,8 @@ public struct BahnDeClient: Sendable {
     }
 
     /// Browser agents Travel::Status::DE::DBRIS sends; bahn.de refuses boards and coach sequences
-    /// (`OPS_BLOCKED`) to anything that doesn't look like its own web page.
+    /// (`OPS_BLOCKED`) to anything that doesn't look like its own web page. The Worker sends its own
+    /// copy of these headers; the app keeps sending them so pointing `baseURL` back at bahn.de works.
     static let browserUserAgents = [
         "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.XXXX.YYY Mobile Safari/537.36",
         "Mozilla/5.0 (Linux; Android 14; SM-S928B/DS) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.XXXX.YYY Mobile Safari/537.36",

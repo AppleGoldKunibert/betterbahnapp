@@ -204,7 +204,7 @@ struct LineBadge: View {
 }
 
 /// Triebzug numbers and names of a train (e.g. "Tz 9457 „Bundesrepublik Deutschland“"). bahn.de's
-/// coach sequence first (it only has one shortly before departure); bahn.expert as fallback, which
+/// coach sequence first (it only has one in the coming hours); bahn.expert as fallback, which
 /// has the Tz once its data is live. Says so when bahn.de is refusing requests and nothing else helped.
 struct TrainFormationLabel: View {
     let request: BahnDeClient.FormationRequest?
@@ -261,18 +261,22 @@ struct TrainFormationLabel: View {
     }
 }
 
-/// "ICE 4" / "ICE 3neo" / "ICE L" … next to a train's name, from bahn.expert, which has DB's
-/// planned formation for days ahead.
+/// "ICE 4" / "ICE 3neo" / "ICE L" … next to a train's name. bahn.de's coach sequence first (the same
+/// request `TrainFormationLabel` makes, so it is only sent once); bahn.expert as fallback, which has
+/// DB's planned formation for days ahead.
 struct TrainSeriesTag: View {
+    let request: BahnDeClient.FormationRequest?
     let line: Line?
     let date: Date
 
     init(leg: Leg) {
+        request = BahnDeClient.formationRequest(for: leg)
         line = leg.line
         date = leg.departure.planned
     }
 
     init(trip: Trip) {
+        request = BahnDeClient.formationRequest(for: trip)
         line = trip.line
         date = trip.stopovers.first?.departure?.planned ?? .now
     }
@@ -294,9 +298,13 @@ struct TrainSeriesTag: View {
                     .accessibilityLabel("Baureihe \(family)")
             }
         }
-        .task(id: "\(line?.name ?? "")|\(date)") {
+        .task(id: "\(line?.name ?? "")|\(date)|\(request?.station.id ?? "")") {
             family = nil
-            family = await model.trainType(for: line, on: date)?.summary
+            if let request, let live = try? await model.formation(for: request)?.modelSummary {
+                family = live
+            } else {
+                family = await model.trainType(for: line, on: date)?.summary
+            }
         }
     }
 }
