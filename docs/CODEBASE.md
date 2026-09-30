@@ -21,6 +21,7 @@ comments are English.
 | `Config/` | xcconfigs + Info.plists. `Signing.xcconfig` holds team ID; optional gitignored `Local.xcconfig` overrides it. |
 | `Cloudflare/` | Worker that bounces the Träwelling OAuth callback to `betterbahn://oauth` (see its README). |
 | `Cloudflare/bahnde-proxy/` | Separate Worker (`betterbahn2`) proxying bahn.de's web API (`/web/api/…` paths), because bahn.de blocks Apple's URL loading stack (see its README). `BahnDeClient.baseURL` points at it. |
+| `Cloudflare/pass-signer/` | Worker (`betterbahn-pass`) that signs Apple Wallet passes for DB tickets with the Pass Type ID certificate (secrets), since that can't ship in the app. `npm install && npm test` (see its README). |
 | `ci_scripts/` | Xcode Cloud: `ci_post_clone.sh` writes the gitignored `DefaultCredentials.swift` from the workflow's secret env vars `DB_CLIENT_ID` / `DB_API_KEY`. |
 | `.github/workflows/` | GitHub Actions: `pr-build.yml` (macOS: Kit tests + unsigned app build on PRs touching code), `pr-secrets.yml` (Linux: gitleaks secret scan + guard against committing `DefaultCredentials.swift`), `sync-prod.yml`. |
 | `docs/transit-providers.md` | Why Transitous is the primary data source and fallback options. |
@@ -51,6 +52,10 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   newest change per item wins, removals kept as dates); `AppSettings` syncs as one snapshot, the newer one
   wins. The Träwelling token syncs via iCloud Keychain (`TokenStore`); a 401 retries with a token another
   device refreshed before logging out.
+- `App/TicketStore.swift` – `SavedTicket` (a `DBTicket` + the `SavedJourney.id` it belongs to), stored only on
+  this device in `Application Support/BetterBahn/Tickets/` (list + PDFs, file protection, **not** synced via
+  iCloud), and the `AppModel` ticket functions (`importTickets` matches a saved journey or imports the booked
+  connection via `DBShareImporter.journey(from:)`).
 - `App/LiveActivityManager.swift` – ActivityKit wrapper; attributes in Kit `TripActivityAttributes`.
 - `Features/Connections/` – search form (`ConnectionsView`, `ConnectionSearch`, `RouteOptionsEditor`
   for via stops/products/max transfers), `JourneyResultsView` (+ `JourneyCard`, `TrainNumberSheet`),
@@ -61,6 +66,13 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 - `Features/Map/` – `TravelMapView` heatmap of past trips (`TravelMapHeatmap`, railway tile overlay),
   `LiveTrainMapView` (one train's live position on its route, opened from `LiveTrainIconTile`, the train icon on
   legs and trips bahn.jetzt has). `JourneyMapView` shows the journey's running trains too.
+- `Features/Tickets/` – `TicketLookupView` (native form; bahn.de's "Auftragssuche" runs in a hidden SwiftUI `WebView`,
+  `DBOrderPage.fillScript` types the input into bahn.de's form, `fetchScript` then fetches order + ticket PDFs
+  inside the page; the page is only shown if bahn.de asks for more, e.g. a captcha),
+  `TicketView` (full-screen barcode at full brightness, PDF, `AddToWalletButton`, "Zugbindung aufgehoben"),
+  `TicketButton` (next to "Gespeichert" in `JourneyDetailView`), `TicketsListView` (Settings → Gespeicherte Tickets),
+  `SeatReservationViews` (`ReservationRow` in `LegCard` above "Mehr", read-only). Reservations come from the journey's
+  tickets (`AppModel.reservations(for:)`) and only show on the leg whose train matches.
 - `Features/Trips/TripsView.swift` – upcoming/past saved journeys, `SaveJourneyButton`.
 - `Features/Traewelling/` – `CheckinSheet`, `TraewellingLoginButton`.
 - `Features/Sharing/` – preview of `betterbahn://share` links and imported DB shares.
@@ -101,6 +113,12 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `TrainRoutePlanner`, `ViaRoutePlanner`, `TrainPicker`, `TicketFilter`/`BC100Rules`, `BoardFilter`.
 - `Traewelling/` – OAuth PKCE (`TraewellingAuth`, `TokenStore`), `TraewellingClient`
   (check-ins, history), `QuickTag`.
+- `Tickets/` – DB tickets by order number: `DBOrder` reads bahn.de's order JSON into `DBTicket`s (one per
+  "Leistungsbündel"; partner tickets like Eurostar only noted; reservation-only bookings without a ticket become
+  `DBTicket`s with `isReservationOnly`), `DBOrderPage` (page URL, fill/error/fetch scripts, result),
+  `SeatReservation` (Wagen/Platz, matched to a leg by train name/number), `TicketBarcodeReader` (PDFKit + Vision: the Aztec's original bytes from the PDF – Vision's `payloadData` is
+  Aztec's internal encoding, the ISO-8859-1 string is the message), `WalletPassPayload` + `WalletPassClient`.
+  bahn.de's bot protection blocks the order API outside its page in a real browser (403), so there is no direct client.
 - `Sharing/` – `JourneyShareLink` (betterbahn://share encoding), `DBShare` + `DBShareImporter`
   (parse DB Navigator/bahn.de shared text, resolve via `betterbahn://import`).
 - `Geometry/` – polyline decode, `RouteGeometryService`, `SegmentHeatmap`.

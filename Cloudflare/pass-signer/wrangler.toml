@@ -1,0 +1,9 @@
+name = "betterbahn-pass"
+main = "worker.mjs"
+compatibility_date = "2026-09-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+[vars]
+# Set with `wrangler secret put …` instead: PASS_TYPE_ID, TEAM_ID, PASS_CERT, PASS_KEY, WWDR_CERT
+# (and optionally PASS_KEY_PASSWORD, PROXY_TOKEN). See README.md.

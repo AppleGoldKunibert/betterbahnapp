@@ -32,6 +32,10 @@ final class AppModel {
             syncLiveActivity()
         }
     }
+    /// Tickets fetched from bahn.de, kept on this device only (see `TicketStore`).
+    var tickets: [SavedTicket] {
+        didSet { TicketStore.save(tickets) }
+    }
     /// Saved journey to open on the Verbindungen tab (set when the Live Activity is tapped);
     /// `ConnectionsView` pushes it and clears this.
     var journeyToOpen: SavedJourney?
@@ -88,6 +92,7 @@ final class AppModel {
         recentStations = Storage.load(key: "recentStations") ?? []
         savedJourneys = Storage.load(key: "savedJourneys") ?? []
         trackedManualCheckins = Storage.load(key: "trackedManualCheckins") ?? []
+        tickets = TicketStore.load()
         manualLiveActivityJourneyID = UserDefaults.standard.string(forKey: "manualLiveActivityJourneyID").flatMap(UUID.init)
         // The check-in history holds every trip's full track geometry and can run to many
         // megabytes, so it's decoded off the main thread instead of blocking the launch.
@@ -399,7 +404,9 @@ final class AppModel {
     }
 
     func unsave(_ journey: Journey) {
+        let removed = Set(savedJourneys.filter { $0.journey.id == journey.id }.map(\.id))
         savedJourneys.removeAll { $0.journey.id == journey.id }
+        for ticket in tickets where ticket.journeyID.map(removed.contains) ?? false { removeTicket(ticket) }
     }
 
     var upcomingJourneys: [SavedJourney] {

@@ -39,7 +39,8 @@ struct JourneyDetailView: View {
                                 : { legToReplace = LegSelection(index: index, leg: leg) },
                             onReplan: readOnly || !model.settings.editJourneyEnabled ? nil
                                 : { legToReplan = LegSelection(index: index, leg: leg) },
-                            onCheckin: readOnly || !model.settings.traewellingEnabled ? nil : { checkinLeg = leg }
+                            onCheckin: readOnly || !model.settings.traewellingEnabled ? nil : { checkinLeg = leg },
+                            reservation: model.reservation(for: leg, in: journey)
                         )
                         if let info = transferInfo(after: leg) {
                             TransferRow(from: leg, to: info.next, walk: info.walk)
@@ -278,6 +279,9 @@ struct JourneyDetailView: View {
         VStack(spacing: 8) {
             HStack(spacing: 10) {
                 SaveJourneyButton(journey: journey, search: search, shortLabel: true)
+                if model.isSaved(journey) {
+                    TicketButton(journey: journey)
+                }
                 if let shareURL = journey.shareURL {
                     ShareLink(
                         item: shareURL,
@@ -384,6 +388,8 @@ struct LegCard: View {
     var onReplace: (() -> Void)?
     var onReplan: (() -> Void)?
     var onCheckin: (() -> Void)?
+    /// The seat reserved on this train (from the journey's ticket), if any.
+    var reservation: SeatReservation?
 
     @State private var showStops = false
     @State private var showDetails = false
@@ -499,6 +505,10 @@ struct LegCard: View {
                     RemarkRow(text: "Wegen Verspätung klappt dieser Umstieg nicht mehr.")
                 }
                 ForEach(leg.remarks, id: \.self) { RemarkRow(text: $0) }
+
+                if let reservation {
+                    ReservationRow(reservation: reservation)
+                }
 
                 if leg.line?.operatorName != nil || onReplace != nil || onReplan != nil || onCheckin != nil {
                     Button {

@@ -52,6 +52,12 @@ struct SavedJourneyRow: View {
                     if isNext, model.liveActivities.isActive(entry.journey) {
                         Image(systemName: "bolt.badge.clock.fill").foregroundStyle(Color.brand)
                     }
+                    let tickets = model.tickets(for: entry)
+                    if !tickets.isEmpty {
+                        let onlyReservations = tickets.allSatisfy(\.ticket.isReservationOnly)
+                        Image(systemName: onlyReservations ? "carseat.right.fill" : "ticket.fill").foregroundStyle(Color.brand)
+                            .accessibilityLabel(onlyReservations ? "Reservierung gespeichert" : "Ticket gespeichert")
+                    }
                     Spacer()
                     if let first = entry.journey.legs.first, let last = entry.journey.legs.last {
                         Text("\(first.origin.displayName) → \(last.destination.displayName)").lineLimit(1)
