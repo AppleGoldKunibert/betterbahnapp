@@ -60,6 +60,10 @@ public struct BahnDeClient: Sendable {
     public static let dbAdministration = "80"
     /// Categories whose coach sequence and journey details bahn.de has (Railjets included).
     static let longDistanceCategories: Set<String> = ["ICE", "IC", "EC", "ECE", "RJ", "RJX"]
+    /// Regional categories bahn.de takes for a coach-sequence request. It has sequences for DB Regio's
+    /// trains (other operators answer 404) and refuses unknown categories with a 403, which would
+    /// pause every bahn.de request, so any other regional name is asked for as "RB".
+    static let regionalCategories: Set<String> = ["RE", "RB", "IRE"]
 
     let http: HTTPClient
     let gate: BahnDeGate
@@ -79,9 +83,21 @@ public struct BahnDeClient: Sendable {
         var lat: Double?
         var lon: Double?
         var type: String?
+        /// e.g. ["ICE", "EC_IC", "REGIONAL", "BUS"].
+        var products: [String]?
+    }
+
+    /// A station from bahn.de's search, and whether trains call there.
+    struct Candidate {
+        var station: Station
+        var hasTrains: Bool
     }
 
     public func searchStations(_ query: String) async throws -> [Station] {
+        try await candidates(query).map(\.station)
+    }
+
+    func candidates(_ query: String) async throws -> [Candidate] {
         let url = Self.baseURL.appending(path: "reiseloesung/orte").appending(queryItems: [
             .init(name: "suchbegriff", value: query),
             .init(name: "typ", value: "ALL"),
@@ -91,14 +107,31 @@ public struct BahnDeClient: Sendable {
         return locations.compactMap { location in
             guard location.type == "ST", let eva = location.extId else { return nil }
             let coordinate = location.lat.flatMap { lat in location.lon.map { Coordinate(latitude: lat, longitude: $0) } }
-            return Station(id: eva, name: location.name, coordinate: coordinate, evaNumber: eva, source: .bahnDe)
+            let hasTrains = (location.products ?? []).contains { Self.trainProducts.contains($0) }
+            return Candidate(station: Station(id: eva, name: location.name, coordinate: coordinate, evaNumber: eva, source: .bahnDe),
+                             hasTrains: hasTrains)
         }
     }
+
+    static let trainProducts: Set<String> = ["ICE", "EC_IC", "IR", "REGIONAL", "SBAHN"]
 
     /// EVA number for a station from any source (nearest match by name).
     public func evaNumber(for station: Station) async throws -> String? {
         if let eva = station.evaNumber { return eva }
-        let candidates = try await searchStations(station.name)
+        return Self.bestEVA(for: station, among: try await candidates(station.name))
+    }
+
+    /// The candidate that is `station`'s railway station. Everything asking for an EVA number wants
+    /// the railway station (Timetables, boards, coach sequences), so stops without trains only count
+    /// when there's nothing else.
+    static func bestEVA(for station: Station, among all: [Candidate]) -> String? {
+        // bahn.de also lists meta stations that bundle a station with its bus stops (e.g. "Westerland
+        // Bahnhof/ZOB, Sylt", 709827, right next to "Westerland(Sylt)", 8006369). Their IDs aren't
+        // EVA numbers — Timetables has no platforms for them — and real ones have 7 digits.
+        let real = all.filter { $0.station.id.count == 7 }
+        let pool = real.isEmpty ? all : real
+        let withTrains = pool.filter(\.hasTrains)
+        let candidates = (withTrains.isEmpty ? pool : withTrains).map(\.station)
         // A big interchange's own search also lists its separate entrances/exits a few hundred
         // meters apart under their own EVA (e.g. Berlin Gesundbrunnen's search also returns
         // "Gesundbrunnen Bahnhof Badstr.", which has no Timetables ("IRIS") schedule of its own) -
@@ -121,19 +154,48 @@ public struct BahnDeClient: Sendable {
 
     struct SequenceResponse: Decodable {
         struct Group: Decodable {
-            struct Transport: Decodable { var category: String?; var number: Int? }
+            struct Transport: Decodable {
+                struct Destination: Decodable { var name: String? }
+                var category: String?
+                var number: Int?
+                var destination: Destination?
+            }
             struct Vehicle: Decodable {
-                struct VehicleType: Decodable { var category: String?; var constructionType: String? }
+                struct VehicleType: Decodable {
+                    var category: String?
+                    var constructionType: String?
+                    var hasFirstClass: Bool?
+                    var hasEconomyClass: Bool?
+                }
+                struct Amenity: Decodable { var type: String?; var status: String?; var amount: Int? }
+                struct Position: Decodable { var start: Double?; var end: Double?; var sector: String? }
                 var type: VehicleType?
                 /// UIC number, 12 digits, e.g. "938054010021" for a BR 401 power car.
                 var vehicleID: String?
+                /// Coach number shown to passengers, e.g. 21.
+                var wagonIdentificationNumber: Int?
+                /// "OPEN" or "CLOSED".
+                var status: String?
+                var amenities: [Amenity]?
+                var platformPosition: Position?
             }
             /// e.g. "ICE0169" → Tz 169.
             var name: String?
             var transport: Transport?
             var vehicles: [Vehicle]?
         }
+        struct Platform: Decodable {
+            struct Sector: Decodable { var name: String?; var start: Double?; var end: Double? }
+            var name: String?
+            var start: Double?
+            var end: Double?
+            var sectors: [Sector]?
+        }
         var groups: [Group]?
+        var departurePlatform: String?
+        var platform: Platform?
+        /// e.g. "DIFFERS_FROM_SCHEDULE".
+        var sequenceStatus: String?
     }
 
     /// Everything the coach-sequence request needs: the train plus a stop where it still departs.
@@ -160,7 +222,7 @@ public struct BahnDeClient: Sendable {
     /// departure is soon enough for bahn.de to know the coach sequence (see `formationLookahead`).
     public static func formationRequest(line: Line?, stops: [(station: Station, departure: TimeInfo?)],
                                         now: Date = .now) -> FormationRequest? {
-        guard let ref = trainReference(for: line) else { return nil }
+        guard let ref = sequenceReference(for: line) else { return nil }
         guard let stop = stops.first(where: { $0.departure.map { $0.best >= now.addingTimeInterval(-60) } ?? false }),
               let departure = stop.departure,
               departure.planned <= now.addingTimeInterval(formationLookahead) else { return nil }
@@ -182,11 +244,8 @@ public struct BahnDeClient: Sendable {
     /// - Returns: nil if bahn.de has no coach sequence for it (yet).
     /// - Throws: `TransitError.rateLimited` while bahn.de is blocking requests.
     public func formation(_ request: FormationRequest) async throws -> TrainFormation? {
-        let key = "\(request.category) \(request.number)|\(request.station.id)|\(request.plannedDeparture.timeIntervalSince1970)"
-        guard usesSharedCaches else { return try await fetchFormation(request) }
-        return try await Self.formationCache.value(for: key, maxAge: Self.formationMaxAge) {
-            try await self.fetchFormation(request)
-        }
+        guard let formation = try await coachSequence(request)?.formation, !formation.units.isEmpty else { return nil }
+        return formation
     }
 
     /// Formation of a leg's train at the first stop where it still departs.
@@ -195,11 +254,23 @@ public struct BahnDeClient: Sendable {
         return try await formation(request)
     }
 
-    private static let formationCache = ExpiringCache<TrainFormation?>()
+    /// Coach sequence ("Wagenreihung") of a DB long-distance train at its departure from the
+    /// request's station. The same request as `formation(_:)`, so both share one response.
+    /// - Returns: nil if bahn.de has no coach sequence for it (yet).
+    /// - Throws: `TransitError.rateLimited` while bahn.de is blocking requests.
+    public func coachSequence(_ request: FormationRequest) async throws -> CoachSequence? {
+        let key = "\(request.category) \(request.number)|\(request.station.id)|\(request.plannedDeparture.timeIntervalSince1970)"
+        guard usesSharedCaches else { return try await fetchCoachSequence(request) }
+        return try await Self.sequenceCache.value(for: key, maxAge: Self.formationMaxAge) {
+            try await self.fetchCoachSequence(request)
+        }
+    }
+
+    private static let sequenceCache = ExpiringCache<CoachSequence?>()
     /// A formation rarely changes once published; 10 minutes still catches a late swap.
     static let formationMaxAge: TimeInterval = 10 * 60
 
-    private func fetchFormation(_ request: FormationRequest) async throws -> TrainFormation? {
+    private func fetchCoachSequence(_ request: FormationRequest) async throws -> CoachSequence? {
         guard let eva = try await evaNumber(for: request.station) else { return nil }
         let response: SequenceResponse
         do {
@@ -207,8 +278,8 @@ public struct BahnDeClient: Sendable {
         } catch TransitError.http(let status, _) where status == 404 {
             return nil
         }
-        let formation = Self.formation(from: response, category: request.category, number: Int(request.number))
-        return formation.units.isEmpty ? nil : formation
+        let sequence = Self.coachSequence(from: response, category: request.category, number: Int(request.number))
+        return sequence.coaches.isEmpty && sequence.formation.units.isEmpty ? nil : sequence
     }
 
     static func formationURL(_ request: FormationRequest, eva: String) -> URL {
@@ -238,7 +309,9 @@ public struct BahnDeClient: Sendable {
             let types = vehicles.compactMap { $0.type?.constructionType }
             let model = TrainModel.detect(carriages, category: category).map(\.name)
                 ?? Self.model(constructionTypes: types, groupName: name, category: category)
-            let unit = TrainFormation.Unit(model: model, number: unitNumber(from: name), name: trainsetName(from: name))
+            let trainset = hasTrainsets(category)
+            let unit = TrainFormation.Unit(model: model, number: trainset ? unitNumber(from: name) : nil,
+                                           name: trainset ? trainsetName(from: name) : nil)
             if unit.model != nil || unit.number != nil { units.append(unit) }
         }
         return TrainFormation(units: units)
@@ -301,6 +374,28 @@ public struct BahnDeClient: Sendable {
               let category = line.name.split(separator: " ").first.map(String.init)?.uppercased(),
               longDistanceCategories.contains(category) else { return nil }
         return (category, number)
+    }
+
+    /// A regional train by its run number ("RE 5" running as 4530 → ("RE", "4530")). Transitous only
+    /// has that number as the trip's short name, so lines without it can't be looked up.
+    static func regionalReference(for line: Line?, products: Set<Product>) -> (category: String, number: String)? {
+        guard let line, products.contains(line.product), let number = line.tripNumber else { return nil }
+        let category = line.name.prefix { $0.isLetter }.uppercased()
+        return (category.isEmpty ? "RB" : category, number)
+    }
+
+    /// The train to ask bahn.de's coach sequence for: long-distance trains, and DB Regio's RE/RB by
+    /// their run number.
+    public static func sequenceReference(for line: Line?) -> (category: String, number: String)? {
+        if let ref = trainReference(for: line) { return ref }
+        guard let ref = regionalReference(for: line, products: [.regionalExpress, .regional]) else { return nil }
+        return (regionalCategories.contains(ref.category) ? ref.category : "RB", ref.number)
+    }
+
+    /// Whether a group's name is a trainset with a Tz number ("ICE9457"). Regional groups are named
+    /// after fleet or vehicle IDs ("RP8352001") that passengers never see.
+    static func hasTrainsets(_ category: String) -> Bool {
+        longDistanceCategories.contains(category)
     }
 
     static let berlin = TimeZone(identifier: "Europe/Berlin")!

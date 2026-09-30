@@ -397,7 +397,8 @@ struct LegCard: View {
             VStack(alignment: .leading, spacing: 14) {
                 // A tap gesture rather than a Button, so the warning triangle inside can be its own button.
                 HStack(spacing: 10) {
-                    IconTile(systemImage: leg.line?.product.symbolName ?? "tram.fill", color: color, size: 38)
+                    LiveTrainIconTile(route: LiveTrainRoute(leg: leg), systemImage: leg.line?.product.symbolName ?? "tram.fill",
+                                      color: color, size: 38)
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
                             Text(leg.line?.name ?? "Zug").font(.headline)
@@ -409,16 +410,21 @@ struct LegCard: View {
                         TrainFormationLabel(leg: leg)
                     }
                     Spacer()
-                    TrainMessagesButton(messages: leg.messages)
-                    if leg.cancelled {
-                        InfoChip(text: "Fällt aus", systemImage: "xmark.octagon.fill", tint: .heavyDelay)
-                    } else {
-                        DelayPill(minutes: leg.departure.delayMinutes)
-                    }
-                    if leg.tripId != nil {
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.tertiary)
+                    VStack(alignment: .trailing, spacing: 6) {
+                        HStack(spacing: 10) {
+                            TrainMessagesButton(messages: leg.messages)
+                            if leg.cancelled {
+                                InfoChip(text: "Fällt aus", systemImage: "xmark.octagon.fill", tint: .heavyDelay)
+                            } else {
+                                DelayPill(minutes: leg.departure.delayMinutes)
+                            }
+                            if leg.tripId != nil {
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        CoachSequenceButton(leg: leg)
                     }
                 }
                 .contentShape(.rect)

@@ -970,6 +970,112 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data("{}".utf8)).groups == nil)
     }
 
+    /// A real bahn.de response (ICE 117 at Frankfurt (Main) Hbf, Gleis 12): coaches from the front,
+    /// with class, amenities and platform positions.
+    @Test func decodesCoachSequence() throws {
+        let response = try fixture("bahnde-vehicle-sequence", as: BahnDeClient.SequenceResponse.self)
+        let sequence = BahnDeClient.coachSequence(from: response, category: "ICE", number: 117)
+        #expect(sequence.platform == "12")
+        #expect(sequence.platformLength == 319.05)
+        #expect(sequence.sectors.map(\.name) == ["A", "B", "C", "D", "E"])
+        #expect(sequence.coaches.map(\.number) == ["21", "22", "23", "24", "25", "26", "27"])
+        #expect(sequence.travelsTowardsPlatformEnd == true)
+        #expect(sequence.differsFromSchedule)
+        #expect(sequence.groups.first?.destination == "Graz Hbf")
+        #expect(sequence.groups.first?.trainName == "ICE 117")
+        #expect(sequence.groups.first?.unit?.number == "9226")
+        #expect(!sequence.hasOtherTrains)
+
+        let first = sequence.coaches[0]
+        #expect(first.secondClass && !first.firstClass)
+        #expect(first.sector == "D")
+        #expect(first.start == 188.1)
+        #expect(first.bikeSpaces == 8)
+        #expect(first.amenities == [.bikeSpace, .severelyDisabledSeats])
+        #expect(sequence.coaches[4].amenities.contains(.wheelchairSpace))
+        #expect(sequence.coaches[5].kind == .halfDiningCar && sequence.coaches[5].firstClass)
+        #expect(sequence.formation.units.first?.number == "9226")
+    }
+
+    /// Coupled trains: the other half keeps its own destination, and power cars have no coach number.
+    @Test func coachSequenceMarksOtherTrains() throws {
+        let json = #"""
+        {"platform": {"name": "7", "start": 10, "end": 410, "sectors": [{"name": "A", "start": 10, "end": 110}]},
+         "groups": [
+            {"name": "ICE8033", "transport": {"category": "ICE", "number": 940, "destination": {"name": "Münster (Westf) Hbf"}},
+             "vehicles": [{"wagonIdentificationNumber": 38, "type": {"category": "POWERCAR"}, "platformPosition": {"start": 20, "end": 45}}]},
+            {"name": "ICE8005", "transport": {"category": "ICE", "number": 950, "destination": {"name": "Berlin Hbf"}},
+             "vehicles": [{"wagonIdentificationNumber": 21, "status": "CLOSED", "type": {"category": "PASSENGERCARRIAGE_ECONOMY_CLASS"}, "platformPosition": {"start": 220, "end": 245}}]}
+        ]}
+        """#
+        let response = try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data(json.utf8))
+        let sequence = BahnDeClient.coachSequence(from: response, category: "ICE", number: 950)
+        #expect(sequence.groups.map(\.isRequestedTrain) == [false, true])
+        #expect(sequence.hasOtherTrains)
+        #expect(sequence.coaches.map(\.number) == [nil, "21"])
+        #expect(sequence.coaches[1].closed)
+        #expect(sequence.coaches[1].secondClass)
+        // Measured from the platform's start.
+        #expect(sequence.coaches[0].start == 10)
+        #expect(sequence.sectors.first?.end == 100)
+        #expect(sequence.platformLength == 400)
+        #expect(sequence.travelsTowardsPlatformEnd == false)
+    }
+
+    /// DB Regio's trains have coach sequences too, asked for by run number; categories bahn.de
+    /// doesn't know are sent as RB, since an unknown one is refused with a 403.
+    @Test func sequenceReferenceForRegionalTrains() {
+        let re = Line(name: "RE 50", number: "50", product: .regionalExpress, operatorName: nil, tripNumber: "4530")
+        #expect(BahnDeClient.sequenceReference(for: re)?.category == "RE")
+        #expect(BahnDeClient.sequenceReference(for: re)?.number == "4530")
+        let mex = Line(name: "MEX 12", number: "12", product: .regional, operatorName: nil, tripNumber: "19310")
+        #expect(BahnDeClient.sequenceReference(for: mex)?.category == "RB")
+        #expect(BahnDeClient.sequenceReference(for: Line(name: "RB 48", number: "48", product: .regional, operatorName: nil)) == nil)
+        #expect(BahnDeClient.sequenceReference(for: Line(name: "S 8", number: "8", product: .suburban, operatorName: nil, tripNumber: "37856")) == nil)
+    }
+
+    /// A regional train's groups are named after fleet IDs, which are no Tz.
+    @Test func regionalSequenceHasNoTrainsetNumbers() throws {
+        let json = #"""
+        {"departurePlatform": "9", "groups": [
+            {"name": "918061462605", "transport": {"category": "RE", "number": 4530, "destination": {"name": "Fulda"}},
+             "vehicles": [{"vehicleID": "918061462605", "type": {"category": "LOCOMOTIVE", "constructionType": "E1463"}, "platformPosition": {"start": 181.27, "end": 200.17}}]},
+            {"name": "RP8352001", "transport": {"category": "RE", "number": 4530, "destination": {"name": "Fulda"}},
+             "vehicles": [
+                {"type": {"category": "DOUBLEDECK_FIRST_ECONOMY_CLASS", "hasEconomyClass": true, "hasFirstClass": true}, "platformPosition": {"start": 100.87, "end": 127.67}},
+                {"type": {"category": "DOUBLEDECK_CONTROLCAR_ECONOMY_CLASS", "hasEconomyClass": true, "hasFirstClass": false},
+                 "amenities": [{"type": "BIKE_SPACE", "status": "UNDEFINED", "amount": 0}], "platformPosition": {"start": 20, "end": 47.27}}]}
+        ]}
+        """#
+        let response = try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data(json.utf8))
+        let sequence = BahnDeClient.coachSequence(from: response, category: "RE", number: 4530)
+        #expect(sequence.groups.allSatisfy { $0.unit == nil })
+        #expect(sequence.formation.unitDescription == nil)
+        #expect(sequence.coaches.map(\.kind) == [.locomotive, .passenger, .passenger])
+        #expect(sequence.coaches[1].firstClass && sequence.coaches[1].secondClass)
+        #expect(sequence.coaches[2].amenities == [.bikeSpace])
+        #expect(sequence.travelsTowardsPlatformEnd == true)
+    }
+
+    /// Transitous only knows Westerland as the combined "Westerland(Sylt) ZOB/Bahnhof" stop, and
+    /// bahn.de's nearest hit is a meta station bundling it with the bus station, whose ID has no
+    /// platforms in Timetables. The railway station itself must win.
+    @Test func evaSkipsMetaStationsAndBusStops() {
+        let make = { (id: String, name: String, lat: Double, lon: Double, trains: Bool) in
+            BahnDeClient.Candidate(station: Station(id: id, name: name, coordinate: Coordinate(latitude: lat, longitude: lon),
+                                                    evaNumber: id, source: .bahnDe), hasTrains: trains)
+        }
+        let candidates = [
+            make("709827", "Westerland Bahnhof/ZOB, Sylt", 54.906185, 8.310824, true),
+            make("8070262", "Westerland Alte Post, Sylt", 54.906900, 8.310900, false),
+            make("8006369", "Westerland(Sylt)", 54.90763, 8.309979, true),
+            make("8030918", "Westerland (Sylt) Autoverladung", 54.904736, 8.313638, true),
+        ]
+        let transitous = Station(id: "de-DELFI_de:01054:98523", name: "Westerland(Sylt) ZOB/Bahnhof",
+                                 coordinate: Coordinate(latitude: 54.906837, longitude: 8.310925), evaNumber: nil, source: .transitous)
+        #expect(BahnDeClient.bestEVA(for: transitous, among: candidates) == "8006369")
+    }
+
     @Test func formationSummary() {
         let formation = TrainFormation(units: [.init(model: "ICE 3neo", number: "8030"), .init(model: "ICE 3neo", number: "8005")])
         #expect(formation.modelSummary == "2× ICE 3neo")
@@ -1346,6 +1452,44 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         // Just after midnight, yesterday's run still underway is the one.
         let earlyNextDay = try #require(JSONDecoding.parseISODate("2026-09-29T22:30:00Z"))
         #expect(BahnJetztClient.match(category: "ICE", number: 693, departure: earlyNextDay, in: journeys)?.journeyId == "20260929-bbbb")
+    }
+
+    /// Regional trains by their run number; RE vs. RB doesn't matter, but a long-distance train with
+    /// the same number never counts.
+    @Test func matchesRegionalTrainsByRunNumber() throws {
+        let journeys = try JSONDecoding.decoder.decode([BahnJetztClient.Journey].self, from: Data(Self.list.utf8))
+        let departure = try #require(JSONDecoding.parseISODate("2026-09-29T10:00:00Z"))
+        let re = Line(name: "RE 14a", number: "14", product: .regionalExpress, operatorName: nil, tripNumber: "17677")
+        let ref = try #require(BahnJetztClient.reference(for: re))
+        #expect(ref.category == "RE" && ref.number == "17677")
+        #expect(BahnJetztClient.match(category: "RB", number: 17677, departure: departure, in: journeys)?.journeyId == "20260929-65771c12")
+        #expect(BahnJetztClient.match(category: "RB", number: 693, departure: departure, in: journeys) == nil)
+        // Without a run number the line number would match some other train.
+        #expect(!BahnJetztClient.supports(Line(name: "RE 14a", number: "14", product: .regionalExpress, operatorName: nil)))
+        #expect(BahnJetztClient.supports(Line(name: "S 1", number: "1", product: .suburban, operatorName: nil, tripNumber: "7746")))
+        #expect(!BahnJetztClient.supports(Line(name: "U 2", number: "2", product: .subway, operatorName: nil, tripNumber: "12")))
+    }
+
+    /// A regional run number can belong to a train in another country: the match must head for the
+    /// same destination or be near the route.
+    @Test func regionalMatchMustFitTheRoute() throws {
+        let json = #"""
+        {"journeyId": "20260930-x", "position": [8.54, 47.37], "name": "RB 19170",
+         "details": {"destination": {"evaNumber": "8000096", "name": "Stuttgart Hbf"},
+                     "transportAtStart": {"category": "RB", "journeyNumber": 19170}}}
+        """#
+        let journey = try JSONDecoding.decoder.decode(BahnJetztClient.Journey.self, from: Data(json.utf8))
+        let here = Coordinate(latitude: 48.70, longitude: 9.10)
+        // Zürich S11 to Aarau, around Zürich: neither destination nor route fits a train near Stuttgart.
+        let zurich = BahnJetztClient.RouteHint(destination: "Aarau", path: [Coordinate(latitude: 47.378, longitude: 8.540),
+                                                                          Coordinate(latitude: 47.392, longitude: 8.051)])
+        #expect(!BahnJetztClient.isPlausible(journey, at: here, for: zurich))
+        // Same destination (spelled as Transitous does), even far from the leg.
+        #expect(BahnJetztClient.isPlausible(journey, at: here, for: .init(destination: "Stuttgart Hauptbahnhof", path: zurich.path)))
+        // Close to the route between two stops 60 km apart.
+        let route = [Coordinate(latitude: 48.40, longitude: 9.10), Coordinate(latitude: 48.94, longitude: 9.10)]
+        #expect(BahnJetztClient.isPlausible(journey, at: here, for: .init(destination: "Heilbronn Hbf", path: route)))
+        #expect(try #require(BahnJetztClient.distance(from: here, to: route)) < 100)
     }
 
     @Test func positionFromSharedList() async throws {

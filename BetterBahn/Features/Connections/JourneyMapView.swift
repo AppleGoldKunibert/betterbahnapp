@@ -12,10 +12,11 @@ struct JourneyMapView: View {
     @State private var selectedTransfer: TransferPoint?
     @State private var alternativeConnections: [Journey] = []
     @State private var isLoadingAlternatives = false
+    @State private var trains: [LiveTrainPosition] = []
 
     var body: some View {
         NavigationStack {
-            JourneyMap(journey: journey, version: mapVersion, onMarkerTap: { selectedTransfer = $0 })
+            JourneyMap(journey: journey, version: mapVersion, trains: trains, onMarkerTap: { selectedTransfer = $0 })
                 .ignoresSafeArea(edges: .top)
                 .navigationTitle("\(journey.legs.first?.origin.displayName ?? "Reise") → \(finalDestination.displayName)")
                 .navigationBarTitleDisplayMode(.inline)
@@ -24,6 +25,9 @@ struct JourneyMapView: View {
                         Button("Fertig", systemImage: "xmark", role: .cancel) { dismiss() }
                     }
                 }
+        }
+        .task(id: journey) {
+            await model.followPositions(of: journey.legs) { trains = $0 }
         }
         .sheet(item: $selectedTransfer) { transfer in
             TransferDetailsSheet(
@@ -171,6 +175,8 @@ private func extractTransferPoints(from journey: Journey) -> [TransferPoint] {
 struct JourneyMap: UIViewRepresentable {
     let journey: Journey
     let version: Int
+    /// Running trains of the journey (from bahn.jetzt), shown as train markers.
+    var trains: [LiveTrainPosition] = []
     let onMarkerTap: (TransferPoint) -> Void
 
     func makeUIView(context: Context) -> MKMapView {
@@ -191,6 +197,13 @@ struct JourneyMap: UIViewRepresentable {
     func updateUIView(_ map: MKMapView, context: Context) {
         let coordinator = context.coordinator
         coordinator.onMarkerTap = onMarkerTap
+        coordinator.syncTrains(trains, on: map)
+
+        // Route and markers only when the journey changed, so the periodic train refresh doesn't
+        // redraw everything and zoom back out.
+        guard coordinator.renderedJourney != journey || coordinator.renderedVersion != version else { return }
+        coordinator.renderedJourney = journey
+        coordinator.renderedVersion = version
 
         map.removeOverlays(map.overlays.filter { $0 is MKPolyline })
         map.removeAnnotations(map.annotations.filter { $0 is JourneyMarkerAnnotation })
@@ -237,6 +250,28 @@ struct JourneyMap: UIViewRepresentable {
 
     final class Coordinator: NSObject, MKMapViewDelegate {
         var onMarkerTap: ((TransferPoint) -> Void)?
+        var renderedJourney: Journey?
+        var renderedVersion = -1
+        private var trainAnnotations: [String: TrainAnnotation] = [:]
+
+        /// Adds, moves and removes train markers in place so an open callout survives the refresh.
+        func syncTrains(_ trains: [LiveTrainPosition], on map: MKMapView) {
+            let current = Dictionary(trains.map { ($0.trainName, $0) }, uniquingKeysWith: { $1 })
+            for (name, annotation) in trainAnnotations where current[name] == nil {
+                map.removeAnnotation(annotation)
+                trainAnnotations[name] = nil
+            }
+            for (name, live) in current {
+                if let annotation = trainAnnotations[name] {
+                    annotation.update(live)
+                    (map.view(for: annotation) as? MKMarkerAnnotationView)?.markerTintColor = annotation.isStale ? .systemGray : UIColor(Color.brand)
+                } else {
+                    let annotation = TrainAnnotation(live)
+                    trainAnnotations[name] = annotation
+                    map.addAnnotation(annotation)
+                }
+            }
+        }
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: any MKOverlay) -> MKOverlayRenderer {
             if let polyline = overlay as? MKPolyline {
@@ -251,6 +286,17 @@ struct JourneyMap: UIViewRepresentable {
         }
 
         func mapView(_ mapView: MKMapView, viewFor annotation: any MKAnnotation) -> MKAnnotationView? {
+            if let train = annotation as? TrainAnnotation {
+                let id = "train"
+                let view = (mapView.dequeueReusableAnnotationView(withIdentifier: id) as? MKMarkerAnnotationView)
+                    ?? MKMarkerAnnotationView(annotation: train, reuseIdentifier: id)
+                view.annotation = train
+                view.glyphImage = UIImage(systemName: "tram.fill")
+                view.markerTintColor = train.isStale ? .systemGray : UIColor(Color.brand)
+                view.displayPriority = .required
+                view.canShowCallout = true
+                return view
+            }
             guard let annotation = annotation as? JourneyMarkerAnnotation else { return nil }
             
             let identifier = "TransferMarker"

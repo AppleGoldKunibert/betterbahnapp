@@ -261,6 +261,51 @@ struct TrainFormationLabel: View {
     }
 }
 
+/// "Wagenreihung" chip for a train's header, shown once bahn.de has a coach sequence for it (the
+/// same request `TrainFormationLabel` makes, so it is only sent once). Opens the Wagenreihung sheet.
+struct CoachSequenceButton: View {
+    let request: BahnDeClient.FormationRequest?
+    let trainName: String?
+
+    init(leg: Leg) {
+        request = BahnDeClient.formationRequest(for: leg)
+        trainName = leg.line?.name
+    }
+
+    init(trip: Trip) {
+        request = BahnDeClient.formationRequest(for: trip)
+        trainName = trip.line?.name
+    }
+
+    @Environment(AppModel.self) private var model
+    @State private var sequence: CoachSequence?
+    @State private var showSequence = false
+
+    var body: some View {
+        // A ZStack rather than Group: `.task` never fires on a view that is empty.
+        ZStack {
+            if let sequence, !sequence.coaches.isEmpty {
+                Button {
+                    showSequence = true
+                } label: {
+                    InfoChip(text: "Wagenreihung", systemImage: "train.side.front.car", tint: .brand)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .sheet(isPresented: $showSequence) {
+            if let request {
+                CoachSequenceView(request: request, trainName: trainName, sequence: sequence)
+            }
+        }
+        .task(id: request) {
+            sequence = nil
+            guard let request else { return }
+            sequence = try? await model.coachSequence(for: request)
+        }
+    }
+}
+
 /// "ICE 4" / "ICE 3neo" / "ICE L" … next to a train's name. bahn.de's coach sequence first (the same
 /// request `TrainFormationLabel` makes, so it is only sent once); bahn.expert as fallback, which has
 /// DB's planned formation for days ahead.
