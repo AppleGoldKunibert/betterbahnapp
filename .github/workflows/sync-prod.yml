@@ -1,5 +1,6 @@
 # Merges every push to prod into all other branches that don't contain it yet.
-# Branches that can be fast-forwarded are; others get a merge commit. Branches with
+# Branches that can be fast-forwarded are; branches with no code prod doesn't have are
+# reset to prod (so they don't show up as "ahead"); others get a merge commit. Branches with
 # merge conflicts are skipped and listed in the run summary (the run then fails so
 # GitHub notifies you).
 name: Sync prod into branches
@@ -35,6 +36,24 @@ jobs:
           for ref in $(git for-each-ref --format='%(refname:strip=3)' refs/remotes/origin); do
             [ "$ref" = "HEAD" ] || [ "$ref" = "prod" ] && continue
 
+            old=$(git rev-parse "origin/$ref")
+            if [ "$old" = "$(git rev-parse origin/prod)" ]; then
+              echo "- \`$ref\`: up to date" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+
+            # Same code as prod (e.g. only leftover merge commits): point the branch at prod so it
+            # doesn't show up as ahead.
+            if git diff --quiet origin/prod "origin/$ref"; then
+              if git push --force-with-lease="$ref:$old" origin "origin/prod:refs/heads/$ref"; then
+                echo "- \`$ref\`: reset to prod (no own changes)" >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "- \`$ref\`: ❌ reset failed (protected branch?)" >> "$GITHUB_STEP_SUMMARY"
+                failed+=("$ref")
+              fi
+              continue
+            fi
+
             if git merge-base --is-ancestor origin/prod "origin/$ref"; then
               echo "- \`$ref\`: up to date" >> "$GITHUB_STEP_SUMMARY"
               continue
@@ -42,7 +61,14 @@ jobs:
 
             git checkout -q -B "$ref" "origin/$ref"
             if git merge --no-edit origin/prod -m "Merge prod into $ref"; then
-              if git push origin "$ref"; then
+              # The branch's changes were already in prod: skip the merge commit and reset instead.
+              if git diff --quiet origin/prod HEAD; then
+                git reset -q --hard origin/prod
+                push_args=(--force-with-lease="$ref:$old")
+              else
+                push_args=()
+              fi
+              if git push "${push_args[@]}" origin "$ref"; then
                 echo "- \`$ref\`: merged prod" >> "$GITHUB_STEP_SUMMARY"
               else
                 echo "- \`$ref\`: ❌ push failed (protected branch?)" >> "$GITHUB_STEP_SUMMARY"
