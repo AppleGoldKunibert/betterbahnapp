@@ -668,10 +668,15 @@ final class AppModel {
     }
 
     /// Upcoming journeys within their Live Activity window: from 30 minutes before departure until
-    /// they finish. Only one of these is ever shown at a time (see `syncLiveActivity`).
+    /// `TripActivityAttributes.arrivedDisplayDuration` after arriving. Only one of these is ever
+    /// shown at a time (see `syncLiveActivity`).
     var liveActivityEligibleJourneys: [SavedJourney] {
         let now = Date.now
-        return upcomingJourneys.filter { !dismissedLiveActivityJourneyIDs.contains($0.id) && ($0.journey.departure?.best ?? .distantFuture).addingTimeInterval(-30 * 60) <= now }
+        return upcomingJourneys.filter {
+            !dismissedLiveActivityJourneyIDs.contains($0.id)
+                && ($0.journey.departure?.best ?? .distantFuture).addingTimeInterval(-30 * 60) <= now
+                && ($0.journey.arrival?.best ?? .distantFuture).addingTimeInterval(TripActivityAttributes.arrivedDisplayDuration) > now
+        }
     }
 
     func isLiveActivityEligible(_ journey: Journey) -> Bool {
@@ -717,9 +722,9 @@ final class AppModel {
         guard let activeID = liveActivities.activeJourneyID,
               let entry = savedJourneys.first(where: { $0.journey.id == activeID }),
               let arrival = entry.journey.arrival?.best else { return }
-        // Matches the 10-minute grace period in `SavedJourney.isFinished`, plus a small buffer so
-        // the eligibility check has already flipped by the time the task runs.
-        let finishCheck = arrival.addingTimeInterval(10 * 60 + 30)
+        // Matches the end of the Live Activity window in `liveActivityEligibleJourneys`, plus a small
+        // buffer so the eligibility check has already flipped by the time the task runs.
+        let finishCheck = arrival.addingTimeInterval(TripActivityAttributes.arrivedDisplayDuration + 30)
         guard finishCheck > .now else { return }
         let fireDate = min(finishCheck, LiveActivityRefreshSchedule.nextRefresh(for: entry.journey, after: .now))
         let request = BGAppRefreshTaskRequest(identifier: Self.liveActivityBackgroundTaskID)

@@ -45,10 +45,16 @@ public struct TripActivityAttributes: ActivityAttributes {
         public var transferPlatform: String?
         /// Wrapped in an array because a struct can't contain itself directly; see `followUp`.
         private var followUpStorage: [Self]?
+        /// Optional so activities started by older versions still decode; see `arrived`.
+        private var arrivedFlag: Bool?
+
+        /// The journey's final arrival has passed: the widget shows "Angekommen" instead of a
+        /// countdown stuck at 0:00, until the activity is removed `arrivedDisplayDuration` after arriving.
+        public var arrived: Bool { arrivedFlag == true }
 
         /// What to show once `followUpDate` has passed (e.g. the arrival after the departure), so the
         /// widget can move on by itself when the countdown ends instead of freezing at 0:00 until the
-        /// app gets to run again. Nil at the final arrival.
+        /// app gets to run again. At the final arrival it's the same state marked `arrived`.
         public var followUp: Self? { followUpStorage?.first }
 
         /// When the state moves on to `followUp`: at a departure, or a minute after an arrival (see
@@ -87,6 +93,9 @@ public struct TripActivityAttributes: ActivityAttributes {
         public var delayMinutes: Int { Int((expectedTime.timeIntervalSince(plannedTime) / 60).rounded()) }
     }
 
+    /// How long the activity stays up after the journey's final arrival before it's removed.
+    public static let arrivedDisplayDuration: TimeInterval = 5 * 60
+
     public var originName: String
     public var destinationName: String
     public var journeyID: String
@@ -102,10 +111,20 @@ public extension TripActivityAttributes.ContentState {
     /// Derives the current state from a journey: next departure before boarding, next arrival while riding.
     static func from(_ journey: Journey, now: Date = .now) -> Self? {
         guard var state = withWarning(journey, now: now) else { return nil }
-        if let next = withWarning(journey, now: state.followUpDate.addingTimeInterval(1)), next != state {
+        if isFinalArrival(state, of: journey) {
+            var arrived = state
+            arrived.arrivedFlag = true
+            if now >= state.followUpDate { return arrived }
+            state.followUpStorage = [arrived]
+        } else if let next = withWarning(journey, now: state.followUpDate.addingTimeInterval(1)), next != state {
             state.followUpStorage = [next]
         }
         return state
+    }
+
+    private static func isFinalArrival(_ state: Self, of journey: Journey) -> Bool {
+        guard !state.isDeparture, let last = journey.transitLegs.last else { return false }
+        return state.expectedTime == last.arrival.best && state.nextStopName == last.destination.displayName
     }
 
     private static func withWarning(_ journey: Journey, now: Date) -> Self? {

@@ -31,7 +31,7 @@ struct TripLiveActivity: Widget {
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     HStack(spacing: 8) {
-                        Text(state.isDeparture ? "Abfahrt" : "Ankunft")
+                        Text(state.isDeparture ? "Abfahrt" : state.arrived ? "Angekommen" : "Ankunft")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
                         if let platform = state.displayPlatform {
@@ -68,12 +68,17 @@ struct TripLiveActivity: Widget {
                         }
                         .tint(state.product.color)
                         HStack {
-                            Label {
-                                Text(timerInterval: state.countdownRange, countsDown: true)
-                                    .monospacedDigit()
-                                    .foregroundStyle(timeColor(state))
-                            } icon: {
-                                Image(systemName: "timer")
+                            if state.arrived {
+                                Label("Angekommen", systemImage: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                            } else {
+                                Label {
+                                    Text(timerInterval: state.countdownRange, countsDown: true)
+                                        .monospacedDigit()
+                                        .foregroundStyle(timeColor(state))
+                                } icon: {
+                                    Image(systemName: "timer")
+                                }
                             }
                             Spacer()
                             DelayText(state: state)
@@ -94,11 +99,15 @@ struct TripLiveActivity: Widget {
                     }
                 }
             } compactTrailing: {
-                Text(timerInterval: state.countdownRange, countsDown: true)
-                    .monospacedDigit()
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(state.delayMinutes > 0 || state.cancelled ? timeColor(state) : .white)
-                    .frame(maxWidth: 46)
+                if state.arrived {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                } else {
+                    Text(timerInterval: state.countdownRange, countsDown: true)
+                        .monospacedDigit()
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(state.delayMinutes > 0 || state.cancelled ? timeColor(state) : .white)
+                        .frame(maxWidth: 46)
+                }
             } minimal: {
                 // Shown instead of the compact layout while another Live Activity is running.
                 let minutes = state.currentDelayMinutes ?? state.delayMinutes
@@ -152,10 +161,16 @@ struct LockScreenView: View {
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.white.opacity(0.7))
                             .lineLimit(1)
-                        Text(timerInterval: state.countdownRange, countsDown: true)
-                            .font(.system(size: 26, weight: .bold, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundStyle(timeColor(state))
+                        if state.arrived {
+                            Text("Angekommen")
+                                .font(.system(size: 26, weight: .bold, design: .rounded))
+                                .foregroundStyle(.green)
+                        } else {
+                            Text(timerInterval: state.countdownRange, countsDown: true)
+                                .font(.system(size: 26, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundStyle(timeColor(state))
+                        }
                     }
                     Spacer(minLength: 8)
                     VStack(alignment: .trailing, spacing: 0) {

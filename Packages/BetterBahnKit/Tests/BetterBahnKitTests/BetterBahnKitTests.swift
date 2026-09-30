@@ -128,6 +128,13 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(decoded.direction == "Stuttgart Hbf")
     }
 
+    /// DELFI's "<town>, Bahnhof" names are shown as just the town, like DB does (#45).
+    @Test func bahnhofSuffixIsDropped() {
+        #expect(Station.displayName(for: "Rheine, Bahnhof") == "Rheine")
+        #expect(Station.displayName(for: "Friesack (Mark), Bahnhof") == "Friesack (Mark)")
+        #expect(Station.displayName(for: "Bahnhofstraße") == "Bahnhofstraße")
+    }
+
     /// Real-world Transitous names where the part in brackets is a river or region telling apart
     /// same-named towns, not a city - these showed up as "N-Wendlingen" or "Oder-Frankfurt".
     @Test func riverAndRegionQualifiersAreNotTreatedAsCities() {

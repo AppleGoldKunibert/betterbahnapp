@@ -29,6 +29,18 @@ final class LiveActivityManager {
         // Goes stale when the state itself expects to change (the next departure/arrival). The system
         // re-renders the activity then, and the widget shows `state.followUp`, so it moves on even
         // if the app doesn't get a chance to refresh it in time.
+        if state.arrived {
+            // Ends it right away, but lets the system keep "Angekommen" up until a few minutes
+            // after the arrival, since the app may not get to run again by then.
+            let dismissal = state.expectedTime.addingTimeInterval(TripActivityAttributes.arrivedDisplayDuration)
+            for activity in Activity<TripActivityAttributes>.activities
+            where activity.attributes.journeyID == journey.id && activity.activityState == .active {
+                await activity.end(ActivityContent(state: state, staleDate: nil),
+                                   dismissalPolicy: dismissal > .now ? .after(dismissal) : .immediate)
+            }
+            activeJourneyID = journey.id
+            return
+        }
         let content = ActivityContent(state: state, staleDate: state.followUpDate)
         if Activity<TripActivityAttributes>.activities.contains(where: { $0.attributes.journeyID == journey.id }) {
             for activity in Activity<TripActivityAttributes>.activities
