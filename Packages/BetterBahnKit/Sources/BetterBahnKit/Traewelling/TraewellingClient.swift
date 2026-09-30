@@ -422,7 +422,7 @@ public actor TraewellingClient {
     /// Träwelling's own timetable doesn't have — the reason the ordinary `checkin(_:allowManualTrip:)`
     /// above just failed with `.tripNotFound` even though Träwelling does know the train itself.
     /// Bridges the gap with a short manual trip from `zusatzhalt` up to `nextRegular` (the next stop
-    /// that *is* part of the train's regular schedule, from `BahnExpertClient.nextRegularStop`), then
+    /// that *is* part of the train's regular schedule, from `BahnDeClient.nextRegularStop`), then
     /// checks in normally from there to `draft.leg.destination`, since that part of the ride is
     /// exactly what Träwelling's timetable already has.
     public func checkin(_ draft: CheckinDraft, fromZusatzhalt zusatzhalt: JourneyStop, toNextRegularStop nextRegular: JourneyStop) async throws -> CheckinResult {
@@ -433,8 +433,8 @@ public actor TraewellingClient {
             throw TraewellingError.tripNotFound(line.name)
         }
         // `leg.origin` already *is* the Zusatzhalt, with whatever real `Station` (coordinate included)
-        // the app boarded the user at — no need to rebuild it from bahn.expert's bare name. The next
-        // regular stop isn't that lucky on its own (bahn.expert reports no coordinate for it), but
+        // the app boarded the user at — no need to rebuild it from bahn.de's bare name. The next
+        // regular stop isn't that lucky on its own (bahn.de's coordinate for it may be missing), but
         // Transitous' own stopovers for this leg do have it (unlike the Zusatzhalt, it's a stop
         // Transitous already knows) — looking it up there instead of a coordinate-less `Station` is
         // what lets the plain HAFAS-matched checkin below find it on Träwelling's departure board,

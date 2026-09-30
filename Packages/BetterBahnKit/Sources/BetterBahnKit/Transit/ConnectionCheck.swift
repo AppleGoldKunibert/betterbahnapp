@@ -100,15 +100,24 @@ public struct JourneyRefresher: Sendable {
                 leg.stopovers = live.stopovers
                 leg.messages = TrainMessage.merged(leg.messages + live.messages)
             }
-            // Neither Transitous nor DB Timetables above ever *inserts* a stop — only bahn.expert
-            // reports a Zusatzhalt (an unscheduled stop the train additionally picked up today) at
-            // all, so it's the only way one ends up in `leg.stopovers` for the UI to show.
-            if !leg.stopovers.isEmpty, let bahnExpert = provider.bahnExpert, let stops = try? await bahnExpert.journeyStops(for: leg) {
-                leg.stopovers = BahnExpertClient.inserting(stops, into: leg.stopovers)
+            // Neither Transitous nor DB Timetables above ever *inserts* a stop — only bahn.de's journey
+            // details report a Zusatzhalt (an unscheduled stop the train additionally picked up today)
+            // at all, so it's the only way one ends up in `leg.stopovers` for the UI to show. Only
+            // asked for legs underway or departing within 12 hours, so refreshing many saved journeys
+            // doesn't flood bahn.de.
+            if !leg.stopovers.isEmpty, Self.isRunningSoon(leg), let bahnDe = provider.bahnDe,
+               let stops = try? await bahnDe.journeyStops(for: leg) {
+                leg.stopovers = BahnDeClient.inserting(stops, into: leg.stopovers)
             }
             updated.legs[index] = leg
         }
         return updated
+    }
+
+    /// A leg departing within the next 12 hours or still underway — the only ones a Zusatzhalt
+    /// lookup is worth a bahn.de request for.
+    static func isRunningSoon(_ leg: Leg, now: Date = .now) -> Bool {
+        leg.departure.planned <= now.addingTimeInterval(12 * 3600) && leg.arrival.best >= now.addingTimeInterval(-3600)
     }
 
     static func apply(_ trip: Trip, to leg: Leg) -> Leg {

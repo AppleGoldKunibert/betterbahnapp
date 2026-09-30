@@ -74,3 +74,6 @@ CLAUDE.md
 # Local signing overrides — copy Config/Local.xcconfig.example to Config/Local.xcconfig to build
 # under your own Apple Developer account. Never commit the real file.
 Config/Local.xcconfig
+
+# Cloudflare Wrangler local state
+.wrangler/

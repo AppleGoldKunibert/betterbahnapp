@@ -85,7 +85,12 @@ struct TripView: View {
 
     private func load() async {
         do {
-            let loaded = try await model.provider.trip(id: entry.tripId, source: entry.source)
+            var loaded = try await model.provider.trip(id: entry.tripId, source: entry.source)
+            // The board may have taken bahn.de's name for this train (e.g. "RJ 171" for Transitous'
+            // "ICE 171"); keep it rather than switching back to the trip's own.
+            if let name = loaded.line?.name, entry.line.alternateName == name {
+                loaded.line = entry.line
+            }
             trip = loaded
             if boardingID == nil {
                 let here = loaded.stopovers.first { $0.station.isSamePlace(as: entry.station) }?.id
@@ -112,11 +117,11 @@ struct TripView: View {
         }
     }
 
-    /// Only bahn.expert reports a Zusatzhalt (an unscheduled stop the train additionally picked up
-    /// today) at all — Transitous and DB Timetables above only ever overlay onto stops already there.
+    /// Only bahn.de's journey details report a Zusatzhalt (an unscheduled stop the train additionally
+    /// picked up today) at all — Transitous and DB Timetables above only ever overlay onto stops already there.
     private func insertZusatzhalte() async {
-        guard let trip, let bahnExpert = model.provider.bahnExpert, let stops = try? await bahnExpert.journeyStops(for: trip) else { return }
-        self.trip?.stopovers = BahnExpertClient.inserting(stops, into: trip.stopovers)
+        guard let trip, let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: trip) else { return }
+        self.trip?.stopovers = BahnDeClient.inserting(stops, into: trip.stopovers)
     }
 }
 
@@ -156,7 +161,7 @@ struct TripContent: View {
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 8) {
                             Text(trip.line?.name ?? "Zug").font(.title3.weight(.bold))
-                            TrainSeriesTag(line: trip.line, date: trip.stopovers.first?.departure?.planned ?? .now)
+                            TrainSeriesTag(trip: trip)
                         }
                         if let origin = trip.origin, let destination = trip.destination {
                             Text("\(origin.displayName) → \(destination.displayName)")
@@ -167,6 +172,7 @@ struct TripContent: View {
                         if let op = trip.line?.operatorName {
                             Label(op, systemImage: "building.2.fill").font(.caption).foregroundStyle(.tertiary)
                         }
+                        TrainFormationLabel(trip: trip)
                     }
                     Spacer()
                     TrainMessagesButton(messages: trip.messages)
@@ -402,11 +408,11 @@ struct LegTripSheet: View {
         }
     }
 
-    /// Only bahn.expert reports a Zusatzhalt (an unscheduled stop the train additionally picked up
-    /// today) at all — Transitous and DB Timetables above only ever overlay onto stops already there.
+    /// Only bahn.de's journey details report a Zusatzhalt (an unscheduled stop the train additionally
+    /// picked up today) at all — Transitous and DB Timetables above only ever overlay onto stops already there.
     private func insertZusatzhalte() async {
-        guard let trip, let bahnExpert = model.provider.bahnExpert, let stops = try? await bahnExpert.journeyStops(for: trip) else { return }
-        self.trip?.stopovers = BahnExpertClient.inserting(stops, into: trip.stopovers)
+        guard let trip, let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: trip) else { return }
+        self.trip?.stopovers = BahnDeClient.inserting(stops, into: trip.stopovers)
     }
 }
 

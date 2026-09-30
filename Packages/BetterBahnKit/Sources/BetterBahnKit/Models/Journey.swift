@@ -119,7 +119,7 @@ public struct Stopover: Codable, Sendable, Hashable, Identifiable {
     /// Whether passengers may actually board/alight here ("Nur Einstieg" / "Nur Ausstieg").
     public var access: StopAccess
     /// An unscheduled stop the train additionally picked up today ("Zusatzhalt"), not part of its
-    /// regular timetable — only `BahnExpertClient` knows about these, see `inserting(_:into:)`.
+    /// regular timetable — only `BahnDeClient.journeyStops` knows about these, see `inserting(_:into:)`.
     public var isAdditional: Bool
 
     public init(station: Station, arrival: TimeInfo?, departure: TimeInfo?,

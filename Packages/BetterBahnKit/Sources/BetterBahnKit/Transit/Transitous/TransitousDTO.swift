@@ -71,6 +71,13 @@ struct MPlace: Decodable {
         return name
     }
 
+    /// A trip's `headsign` is only the feed's bare stop name, so for one of `namesWithoutCity` it
+    /// showed up as "Hbf" alone (e.g. ICE 573 "Hauptbahnhof (oben)"); this stop's full name instead
+    /// when `headsign` names it.
+    func resolving(_ headsign: String) -> String {
+        headsign == name ? stationName : headsign
+    }
+
     func toStation() -> Station {
         Station(
             id: parentId ?? stopId ?? "\(lat),\(lon)", name: stationName,
@@ -166,6 +173,8 @@ struct MLeg: Decodable {
     var scheduledEndTime: Date?
     var realTime: Bool?
     var headsign: String?
+    /// The trip's final stop, beyond this leg's `to`.
+    var tripTo: MPlace?
     var tripId: String?
     var routeShortName: String?
     var displayName: String?
@@ -196,7 +205,9 @@ struct MLeg: Decodable {
     /// another intermediate stop of this same leg rather than as its `to`. Prefer the leg's actual
     /// destination whenever `headsign` names a stop the train already passes through on the way there.
     var direction: String? {
-        guard let headsign else { return nil }
+        guard var headsign else { return nil }
+        headsign = to.resolving(headsign)
+        if let tripTo { headsign = tripTo.resolving(headsign) }
         let passesHeadsignAsIntermediateStop = (intermediateStops ?? [])
             .contains { Station.normalize($0.stationName) == Station.normalize(headsign) }
         return Station.displayName(for: passesHeadsignAsIntermediateStop ? to.stationName : headsign)
@@ -262,7 +273,9 @@ struct MStopTime: Decodable {
         let station = place.toStation()
         let otherEnd = kind == .departures ? tripTo : tripFrom
         let line = lineInfo.toLine()
-        let otherEndName = kind == .departures ? (headsign ?? tripTo?.stationName) : tripFrom?.stationName
+        let otherEndName = kind == .departures
+            ? (headsign.map { tripTo?.resolving($0) ?? $0 } ?? tripTo?.stationName)
+            : tripFrom?.stationName
         return BoardEntry(
             kind: kind, tripId: tripId, station: station, line: line,
             otherEnd: otherEndName.map(Station.displayName(for:)),

@@ -272,14 +272,14 @@ struct CheckinSheet: View {
         return try await model.traewelling.checkin(draft, allowManualTrip: allowManualTrip)
     }
 
-    /// If `leg` boards at a Zusatzhalt bahn.expert's realtime feed knows about, checks in the hop up
+    /// If `leg` boards at a Zusatzhalt bahn.de's journey details know about, checks in the hop up
     /// to the next regular stop as a short manual trip and then checks in normally from there. `nil`
-    /// if bahn.expert doesn't know this train, or `leg.origin` isn't actually a Zusatzhalt (some other
+    /// if bahn.de doesn't know this train, or `leg.origin` isn't actually a Zusatzhalt (some other
     /// reason Träwelling didn't recognise the departure).
     private func attemptZusatzhaltCheckin() async throws -> CheckinResult? {
-        guard let bahnExpert = model.provider.bahnExpert,
-              let stops = try await bahnExpert.journeyStops(for: leg),
-              let (zusatzhalt, nextRegular) = BahnExpertClient.nextRegularStop(after: leg.origin, in: stops)
+        guard let bahnDe = model.provider.bahnDe,
+              let stops = try await bahnDe.journeyStops(for: leg),
+              let (zusatzhalt, nextRegular) = BahnDeClient.nextRegularStop(after: leg.origin, in: stops)
         else { return nil }
         let draft = CheckinDraft(leg: leg, message: message, visibility: visibility, business: business, toot: toot)
         return try await model.traewelling.checkin(draft, fromZusatzhalt: zusatzhalt, toNextRegularStop: nextRegular)

@@ -373,6 +373,9 @@ public struct TransitousProvider: TransitProvider {
             .init(name: "time", value: JSONDecoding.isoString(date)),
             .init(name: "n", value: "150"),
             .init(name: "arriveBy", value: kind == .arrivals ? "true" : "false"),
+            // Without it, `arriveBy=true` searches backwards from `time`, so an arrivals board showed
+            // days of past arrivals instead of the coming ones.
+            .init(name: "direction", value: "LATER"),
             .init(name: "window", value: String(duration * 60)),
         ]
         if let modes, !modes.isEmpty {
