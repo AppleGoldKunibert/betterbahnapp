@@ -136,10 +136,16 @@ public actor TraewellingClient {
         self.config = config
         self.http = http
         self.store = store
+        store.migrateToSynchronizable()
         self.token = store.load()
     }
 
-    public var isLoggedIn: Bool { token != nil }
+    /// Re-reads the Keychain each time, since the token may have been added, refreshed or removed
+    /// on another device and synced in through iCloud Keychain.
+    public var isLoggedIn: Bool {
+        token = store.load()
+        return token != nil
+    }
 
     // MARK: Auth
 
@@ -180,6 +186,7 @@ public actor TraewellingClient {
     }
 
     private func validAccessToken() async throws -> String {
+        token = store.load()
         guard let token else { throw OAuthError.notLoggedIn }
         if token.isExpired, let refresh = token.refreshToken {
             try await requestToken([

@@ -13,15 +13,22 @@ final class AppModel {
     let liveActivities = LiveActivityManager()
 
     var favoriteStations: [Station] {
-        didSet { Storage.save(favoriteStations, key: "favoriteStations") }
+        didSet {
+            Storage.save(favoriteStations, key: "favoriteStations")
+            CloudSync.upload(favoriteStations, key: "favoriteStations")
+        }
     }
     var recentSearches: [RecentSearch] {
-        didSet { Storage.save(recentSearches, key: "recentSearches") }
+        didSet {
+            Storage.save(recentSearches, key: "recentSearches")
+            CloudSync.upload(recentSearches, key: "recentSearches")
+        }
     }
     /// Journeys the user saved. The next upcoming one is shown as Live Activity.
     var savedJourneys: [SavedJourney] {
         didSet {
             Storage.save(savedJourneys, key: "savedJourneys")
+            CloudSync.upload(savedJourneys, key: "savedJourneys")
             syncLiveActivity()
         }
     }
@@ -92,6 +99,39 @@ final class AppModel {
             traewellingTrips = trips
             traewellingTripsLoaded = true
         }
+        startCloudSync()
+    }
+
+    @ObservationIgnored private var cloudObserver: NSObjectProtocol?
+
+    /// Uploads what only exists locally so far (e.g. the first launch after updating) and takes
+    /// over changes made on the user's other devices.
+    private func startCloudSync() {
+        if !CloudSync.hasValue(key: "favoriteStations"), !favoriteStations.isEmpty {
+            CloudSync.upload(favoriteStations, key: "favoriteStations")
+        }
+        if !CloudSync.hasValue(key: "recentSearches"), !recentSearches.isEmpty {
+            CloudSync.upload(recentSearches, key: "recentSearches")
+        }
+        if !CloudSync.hasValue(key: "savedJourneys"), !savedJourneys.isEmpty {
+            CloudSync.upload(savedJourneys, key: "savedJourneys")
+        }
+        settings.startCloudSync()
+        cloudObserver = CloudSync.observe { [weak self] keys, change in
+            self?.applyCloudChange(keys: keys, change: change)
+        }
+    }
+
+    private func applyCloudChange(keys: [String], change: CloudSync.Change) {
+        func take<T: Identifiable & Equatable & Decodable>(_ key: String, _ local: [T]) -> [T]? {
+            guard keys.contains(key), let cloud: [T] = CloudSync.value(key: key) else { return nil }
+            let result = change == .initial ? CloudSync.merged(cloud: cloud, local: local) : cloud
+            return result == local ? nil : result
+        }
+        if let value = take("favoriteStations", favoriteStations) { favoriteStations = value }
+        if let value = take("recentSearches", recentSearches) { recentSearches = value }
+        if let value = take("savedJourneys", savedJourneys) { savedJourneys = value }
+        if keys.contains(AppSettings.cloudKey) { settings.applyCloudValue() }
     }
 
     var trainPicker: TrainPicker { TrainPicker(provider: provider) }
@@ -862,49 +902,85 @@ nonisolated enum Storage {
 final class AppSettings {
     /// Whether the "only valid with my ticket" filters start switched on.
     var ticketFilterByDefault: Bool {
-        didSet { UserDefaults.standard.set(ticketFilterByDefault, forKey: "onlyBC100ByDefault") }
+        didSet {
+            UserDefaults.standard.set(ticketFilterByDefault, forKey: "onlyBC100ByDefault")
+            uploadToCloud()
+        }
     }
     /// The ticket those filters check against.
     var ticketType: TicketType {
-        didSet { UserDefaults.standard.set(ticketType.rawValue, forKey: "ticketType") }
+        didSet {
+            UserDefaults.standard.set(ticketType.rawValue, forKey: "ticketType")
+            uploadToCloud()
+        }
     }
     var traewellingVisibility: TraewellingVisibility {
-        didSet { UserDefaults.standard.set(traewellingVisibility.rawValue, forKey: "traewellingVisibility") }
+        didSet {
+            UserDefaults.standard.set(traewellingVisibility.rawValue, forKey: "traewellingVisibility")
+            uploadToCloud()
+        }
     }
     var bc100Rules: BC100Rules {
-        didSet { Storage.save(bc100Rules, key: "bc100Rules") }
+        didSet {
+            Storage.save(bc100Rules, key: "bc100Rules")
+            uploadToCloud()
+        }
     }
     var syncTraewellingToMap: Bool {
-        didSet { UserDefaults.standard.set(syncTraewellingToMap, forKey: "syncTraewellingToMap") }
+        didSet {
+            UserDefaults.standard.set(syncTraewellingToMap, forKey: "syncTraewellingToMap")
+            uploadToCloud()
+        }
     }
     var connectionWarnings: Bool {
-        didSet { UserDefaults.standard.set(connectionWarnings, forKey: "connectionWarnings") }
+        didSet {
+            UserDefaults.standard.set(connectionWarnings, forKey: "connectionWarnings")
+            uploadToCloud()
+        }
     }
     var lastTraewellingSync: Date? {
         didSet { UserDefaults.standard.set(lastTraewellingSync, forKey: "lastTraewellingSync") }
     }
     /// Suggested tags offered as quick-add chips in the Träwelling check-in sheet.
     var quickTags: [QuickTag] {
-        didSet { Storage.save(quickTags, key: "quickTags") }
+        didSet {
+            Storage.save(quickTags, key: "quickTags")
+            uploadToCloud()
+        }
     }
 
     /// Shows the next saved journey as a Live Activity on the Lock Screen and in the Dynamic Island.
     var liveActivitiesEnabled: Bool {
-        didSet { UserDefaults.standard.set(liveActivitiesEnabled, forKey: "liveActivitiesEnabled") }
+        didSet {
+            UserDefaults.standard.set(liveActivitiesEnabled, forKey: "liveActivitiesEnabled")
+            uploadToCloud()
+        }
     }
 
     /// Unlocks the features below; each one still has to be switched on by itself.
     var expertMode: Bool {
-        didSet { UserDefaults.standard.set(expertMode, forKey: "expertMode") }
+        didSet {
+            UserDefaults.standard.set(expertMode, forKey: "expertMode")
+            uploadToCloud()
+        }
     }
     var expertTraewelling: Bool {
-        didSet { UserDefaults.standard.set(expertTraewelling, forKey: "expertTraewelling") }
+        didSet {
+            UserDefaults.standard.set(expertTraewelling, forKey: "expertTraewelling")
+            uploadToCloud()
+        }
     }
     var expertEditJourney: Bool {
-        didSet { UserDefaults.standard.set(expertEditJourney, forKey: "expertEditJourney") }
+        didSet {
+            UserDefaults.standard.set(expertEditJourney, forKey: "expertEditJourney")
+            uploadToCloud()
+        }
     }
     var expertTrainChoice: Bool {
-        didSet { UserDefaults.standard.set(expertTrainChoice, forKey: "expertTrainChoice") }
+        didSet {
+            UserDefaults.standard.set(expertTrainChoice, forKey: "expertTrainChoice")
+            uploadToCloud()
+        }
     }
 
     /// Träwelling check-ins, login and map import.
@@ -929,6 +1005,70 @@ final class AppSettings {
         lastTraewellingSync = defaults.object(forKey: "lastTraewellingSync") as? Date
         connectionWarnings = defaults.object(forKey: "connectionWarnings") as? Bool ?? true
         quickTags = Storage.load(key: "quickTags") ?? QuickTag.defaults
+    }
+
+    // MARK: iCloud
+
+    static let cloudKey = "settings"
+
+    /// The settings that sync between devices (not the per-device Träwelling sync date).
+    private struct CloudValue: Codable, Equatable {
+        var ticketFilterByDefault: Bool
+        var ticketType: TicketType
+        var traewellingVisibility: TraewellingVisibility
+        var bc100Rules: BC100Rules
+        var syncTraewellingToMap: Bool
+        var connectionWarnings: Bool
+        var quickTags: [QuickTag]
+        var liveActivitiesEnabled: Bool
+        var expertMode: Bool
+        var expertTraewelling: Bool
+        var expertEditJourney: Bool
+        var expertTrainChoice: Bool
+    }
+
+    @ObservationIgnored private var isApplyingCloudValue = false
+
+    private var cloudValue: CloudValue {
+        CloudValue(ticketFilterByDefault: ticketFilterByDefault, ticketType: ticketType,
+                   traewellingVisibility: traewellingVisibility, bc100Rules: bc100Rules,
+                   syncTraewellingToMap: syncTraewellingToMap, connectionWarnings: connectionWarnings,
+                   quickTags: quickTags, liveActivitiesEnabled: liveActivitiesEnabled, expertMode: expertMode,
+                   expertTraewelling: expertTraewelling, expertEditJourney: expertEditJourney,
+                   expertTrainChoice: expertTrainChoice)
+    }
+
+    private func uploadToCloud() {
+        guard !isApplyingCloudValue else { return }
+        CloudSync.upload(cloudValue, key: Self.cloudKey)
+    }
+
+    /// Uploads the settings once if iCloud has none yet, otherwise takes over the synced ones.
+    func startCloudSync() {
+        if CloudSync.hasValue(key: Self.cloudKey) {
+            applyCloudValue()
+        } else {
+            uploadToCloud()
+        }
+    }
+
+    /// Takes over settings changed on another device.
+    func applyCloudValue() {
+        guard let value: CloudValue = CloudSync.value(key: Self.cloudKey), value != cloudValue else { return }
+        isApplyingCloudValue = true
+        defer { isApplyingCloudValue = false }
+        ticketFilterByDefault = value.ticketFilterByDefault
+        ticketType = value.ticketType
+        traewellingVisibility = value.traewellingVisibility
+        bc100Rules = value.bc100Rules
+        syncTraewellingToMap = value.syncTraewellingToMap
+        connectionWarnings = value.connectionWarnings
+        quickTags = value.quickTags
+        liveActivitiesEnabled = value.liveActivitiesEnabled
+        expertMode = value.expertMode
+        expertTraewelling = value.expertTraewelling
+        expertEditJourney = value.expertEditJourney
+        expertTrainChoice = value.expertTrainChoice
     }
 }
 
