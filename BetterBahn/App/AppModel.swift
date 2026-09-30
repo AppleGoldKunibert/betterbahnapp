@@ -15,20 +15,20 @@ final class AppModel {
     var favoriteStations: [Station] {
         didSet {
             Storage.save(favoriteStations, key: "favoriteStations")
-            CloudSync.upload(favoriteStations, key: "favoriteStations")
+            favoriteStationsCloud.localChange(from: oldValue, to: favoriteStations)
         }
     }
     var recentSearches: [RecentSearch] {
         didSet {
             Storage.save(recentSearches, key: "recentSearches")
-            CloudSync.upload(recentSearches, key: "recentSearches")
+            recentSearchesCloud.localChange(from: oldValue, to: recentSearches)
         }
     }
     /// Journeys the user saved. The next upcoming one is shown as Live Activity.
     var savedJourneys: [SavedJourney] {
         didSet {
             Storage.save(savedJourneys, key: "savedJourneys")
-            CloudSync.upload(savedJourneys, key: "savedJourneys")
+            savedJourneysCloud.localChange(from: oldValue, to: savedJourneys)
             syncLiveActivity()
         }
     }
@@ -99,39 +99,35 @@ final class AppModel {
             traewellingTrips = trips
             traewellingTripsLoaded = true
         }
-        startCloudSync()
+        // After init, since taking over synced journeys also updates the Live Activity.
+        Task { [weak self] in self?.startCloudSync() }
     }
 
     @ObservationIgnored private var cloudObserver: NSObjectProtocol?
+    @ObservationIgnored private let favoriteStationsCloud = CloudList<Station>(key: "favoriteStations")
+    @ObservationIgnored private let recentSearchesCloud = CloudList<RecentSearch>(key: "recentSearches")
+    @ObservationIgnored private let savedJourneysCloud = CloudList<SavedJourney>(key: "savedJourneys")
 
-    /// Uploads what only exists locally so far (e.g. the first launch after updating) and takes
-    /// over changes made on the user's other devices.
+    /// Merges with what iCloud already has (uploading what only exists here, e.g. on the first
+    /// launch after updating) and takes over changes made on the user's other devices.
     private func startCloudSync() {
-        if !CloudSync.hasValue(key: "favoriteStations"), !favoriteStations.isEmpty {
-            CloudSync.upload(favoriteStations, key: "favoriteStations")
-        }
-        if !CloudSync.hasValue(key: "recentSearches"), !recentSearches.isEmpty {
-            CloudSync.upload(recentSearches, key: "recentSearches")
-        }
-        if !CloudSync.hasValue(key: "savedJourneys"), !savedJourneys.isEmpty {
-            CloudSync.upload(savedJourneys, key: "savedJourneys")
-        }
-        settings.startCloudSync()
-        cloudObserver = CloudSync.observe { [weak self] keys, change in
-            self?.applyCloudChange(keys: keys, change: change)
+        applyCloudChange(keys: ["favoriteStations", "recentSearches", "savedJourneys", AppSettings.cloudKey])
+        cloudObserver = CloudSync.observe { [weak self] keys in
+            self?.applyCloudChange(keys: keys)
         }
     }
 
-    private func applyCloudChange(keys: [String], change: CloudSync.Change) {
-        func take<T: Identifiable & Equatable & Decodable>(_ key: String, _ local: [T]) -> [T]? {
-            guard keys.contains(key), let cloud: [T] = CloudSync.value(key: key) else { return nil }
-            let result = change == .initial ? CloudSync.merged(cloud: cloud, local: local) : cloud
-            return result == local ? nil : result
+    private func applyCloudChange(keys: [String]) {
+        if keys.contains("favoriteStations") {
+            favoriteStationsCloud.receive(local: favoriteStations) { favoriteStations = $0 }
         }
-        if let value = take("favoriteStations", favoriteStations) { favoriteStations = value }
-        if let value = take("recentSearches", recentSearches) { recentSearches = value }
-        if let value = take("savedJourneys", savedJourneys) { savedJourneys = value }
-        if keys.contains(AppSettings.cloudKey) { settings.applyCloudValue() }
+        if keys.contains("recentSearches") {
+            recentSearchesCloud.receive(local: recentSearches) { recentSearches = $0 }
+        }
+        if keys.contains("savedJourneys") {
+            savedJourneysCloud.receive(local: savedJourneys) { savedJourneys = $0 }
+        }
+        if keys.contains(AppSettings.cloudKey) { settings.receiveCloudValue() }
     }
 
     var trainPicker: TrainPicker { TrainPicker(provider: provider) }
@@ -820,14 +816,14 @@ struct TrackedManualCheckin: Codable, Identifiable {
 }
 
 /// An earlier version of a saved journey, kept when an alternative was chosen.
-struct PlanVersion: Codable, Hashable, Identifiable {
+nonisolated struct PlanVersion: Codable, Hashable, Identifiable {
     var id = UUID()
     var journey: Journey
     var replacedAt: Date
     var reason: String
 }
 
-struct SavedJourney: Codable, Hashable, Identifiable {
+nonisolated struct SavedJourney: Codable, Hashable, Identifiable {
     var id = UUID()
     var journey: Journey
     var savedAt = Date.now
@@ -854,7 +850,7 @@ struct LiveTrainPosition: Identifiable, Hashable, Sendable {
     let position: TrainPosition
 }
 
-struct RecentSearch: Codable, Hashable, Identifiable {
+nonisolated struct RecentSearch: Codable, Hashable, Identifiable {
     var id: String { from.id + "→" + to.id }
     var from: Station
     var to: Station
@@ -1027,6 +1023,19 @@ final class AppSettings {
         var expertTrainChoice: Bool
     }
 
+    /// What iCloud stores: the settings and when they were last changed.
+    private struct CloudSettings: Codable {
+        var value: CloudValue
+        var changedAt: Date
+    }
+
+    private static let defaultCloudValue = CloudValue(
+        ticketFilterByDefault: false, ticketType: .deutschlandticket,
+        traewellingVisibility: TraewellingVisibility(rawValue: 0) ?? .publicVisible, bc100Rules: .default,
+        syncTraewellingToMap: true, connectionWarnings: true, quickTags: QuickTag.defaults,
+        liveActivitiesEnabled: true, expertMode: false, expertTraewelling: false, expertEditJourney: false,
+        expertTrainChoice: false)
+
     @ObservationIgnored private var isApplyingCloudValue = false
 
     private var cloudValue: CloudValue {
@@ -1038,23 +1047,34 @@ final class AppSettings {
                    expertTrainChoice: expertTrainChoice)
     }
 
+    /// When the settings were last changed on this device or taken over from iCloud. Before
+    /// syncing existed there's no date: untouched settings then lose against any synced ones,
+    /// changed ones only against settings changed since.
+    private var changedAt: Date {
+        get {
+            UserDefaults.standard.object(forKey: "settingsChangedAt") as? Date
+                ?? (cloudValue == Self.defaultCloudValue ? .distantPast : Date(timeIntervalSince1970: 0))
+        }
+        set { UserDefaults.standard.set(newValue, forKey: "settingsChangedAt") }
+    }
+
     private func uploadToCloud() {
         guard !isApplyingCloudValue else { return }
-        CloudSync.upload(cloudValue, key: Self.cloudKey)
+        changedAt = .now
+        CloudSync.upload(CloudSettings(value: cloudValue, changedAt: changedAt), key: Self.cloudKey)
     }
 
-    /// Uploads the settings once if iCloud has none yet, otherwise takes over the synced ones.
-    func startCloudSync() {
-        if CloudSync.hasValue(key: Self.cloudKey) {
-            applyCloudValue()
-        } else {
-            uploadToCloud()
+    /// Takes over the settings from iCloud if they were changed later than the ones here,
+    /// otherwise uploads these.
+    func receiveCloudValue() {
+        let local = CloudSettings(value: cloudValue, changedAt: changedAt)
+        guard let cloud: CloudSettings = CloudSync.value(key: Self.cloudKey), cloud.changedAt >= local.changedAt else {
+            CloudSync.upload(local, key: Self.cloudKey)
+            return
         }
-    }
-
-    /// Takes over settings changed on another device.
-    func applyCloudValue() {
-        guard let value: CloudValue = CloudSync.value(key: Self.cloudKey), value != cloudValue else { return }
+        changedAt = cloud.changedAt
+        guard cloud.value != local.value else { return }
+        let value = cloud.value
         isApplyingCloudValue = true
         defer { isApplyingCloudValue = false }
         ticketFilterByDefault = value.ticketFilterByDefault

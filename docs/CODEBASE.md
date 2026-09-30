@@ -47,8 +47,10 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   (migrates from old UserDefaults). `AppSettings` uses UserDefaults directly. Saved data must stay
   decodable across versions (e.g. `DataSource.dbRest` kept only for decoding).
 - `App/CloudSync.swift` – iCloud key-value store mirror (entitlement in `Config/BetterBahn.entitlements`):
-  favorites, recent searches, saved journeys and `AppSettings` (as one snapshot) sync between devices;
-  first sync merges by id, later changes replace. The Träwelling token syncs via iCloud Keychain (`TokenStore`).
+  favorites, recent searches and saved journeys sync item by item via `CloudList` (Kit `SyncedList`:
+  newest change per item wins, removals kept as dates); `AppSettings` syncs as one snapshot, the newer one
+  wins. The Träwelling token syncs via iCloud Keychain (`TokenStore`); a 401 retries with a token another
+  device refreshed before logging out.
 - `App/LiveActivityManager.swift` – ActivityKit wrapper; attributes in Kit `TripActivityAttributes`.
 - `Features/Connections/` – search form (`ConnectionsView`, `ConnectionSearch`, `RouteOptionsEditor`
   for via stops/products/max transfers), `JourneyResultsView` (+ `JourneyCard`, `TrainNumberSheet`),

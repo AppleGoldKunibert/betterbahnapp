@@ -436,3 +436,70 @@ private final class StatusUpdateRequestProtocol: URLProtocol, @unchecked Sendabl
 
     override func stopLoading() {}
 }
+
+/// The token syncs through iCloud Keychain, so a 401 may just mean another device refreshed it
+/// meanwhile – that must not delete the (newer) token for every device.
+@Suite(.serialized) struct TraewellingSyncedTokenTests {
+    @Test func retriesWithATokenRefreshedOnAnotherDevice() async throws {
+        let store = TokenStore(service: "BetterBahnKitTests.\(UUID().uuidString)")
+        defer { store.clear() }
+        store.save(OAuthToken(accessToken: "old", refreshToken: nil, expiresAt: .distantFuture))
+        RotatedTokenProtocol.store = store
+        RotatedTokenProtocol.requests = []
+        let client = client(store)
+
+        _ = try await client.authorizedData("user")
+
+        #expect(RotatedTokenProtocol.requests == ["Bearer old", "Bearer new"])
+        #expect(store.load()?.accessToken == "new")
+    }
+
+    @Test func logsOutWhenTheStoredTokenIsRejected() async throws {
+        let store = TokenStore(service: "BetterBahnKitTests.\(UUID().uuidString)")
+        defer { store.clear() }
+        store.save(OAuthToken(accessToken: "revoked", refreshToken: nil, expiresAt: .distantFuture))
+        RotatedTokenProtocol.store = nil
+        RotatedTokenProtocol.requests = []
+        let client = client(store)
+
+        await #expect(throws: OAuthError.notLoggedIn) { try await client.authorizedData("user") }
+        #expect(RotatedTokenProtocol.requests == ["Bearer revoked"])
+        #expect(store.load() == nil)
+    }
+
+    private func client(_ store: TokenStore) -> TraewellingClient {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RotatedTokenProtocol.self]
+        return TraewellingClient(config: TraewellingConfig(clientID: "public-client"),
+                                 http: HTTPClient(session: URLSession(configuration: configuration)), store: store)
+    }
+}
+
+/// Rejects "Bearer old"/"Bearer revoked" with 401; for "old" it first puts a "new" token into the
+/// store, as if another device had refreshed it and iCloud Keychain synced it in.
+private final class RotatedTokenProtocol: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var store: TokenStore?
+    nonisolated(unsafe) static var requests: [String] = []
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let auth = request.value(forHTTPHeaderField: "Authorization") ?? ""
+        Self.requests.append(auth)
+        let status = auth == "Bearer new" ? 200 : 401
+        if auth == "Bearer old" {
+            Self.store?.save(OAuthToken(accessToken: "new", refreshToken: nil, expiresAt: .distantFuture))
+        }
+        guard let url = request.url,
+              let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil) else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data("{}".utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}

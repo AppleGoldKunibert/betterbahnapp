@@ -19,7 +19,7 @@ enum ConnectionsRoute: Hashable {
     case pastTrips
 }
 
-struct ConnectionSearch: Hashable, Codable {
+nonisolated struct ConnectionSearch: Hashable, Codable {
     var from: Station
     var to: Station
     var via: [ViaWaypoint] = []
