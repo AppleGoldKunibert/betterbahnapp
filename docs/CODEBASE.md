@@ -50,7 +50,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   for via stops/products/max transfers), `JourneyResultsView` (+ `JourneyCard`, `TrainNumberSheet`),
   `JourneyDetailView` (+ `LegCard`, `TransferRow`, alternatives sheets), `JourneyMapView` (MapKit),
   `JourneyReplanSheet` (replan from mid-journey).
-- `Features/Departures/` – `StationBoardView`/`BoardRow`, `TripView` (single train's stops).
+- `Features/Departures/` – `StationBoardView`/`BoardRow`, `TripView` (single train's stops),
+  `CoachSequenceView` (Wagenreihung sheet, opened from `TrainFormationLabel`).
 - `Features/Map/` – `TravelMapView` heatmap of past trips (`TravelMapHeatmap`, railway tile overlay).
 - `Features/Trips/TripsView.swift` – upcoming/past saved journeys, `SaveJourneyButton`.
 - `Features/Traewelling/` – `CheckinSheet`, `TraewellingLoginButton`.
@@ -72,7 +73,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 - `Transit/CombinedProvider.swift` – what the app uses: primary `TransitousProvider`, optional
   fallback (none configured), cooldown health check, `BahnDeClient`, `BahnExpertClient`, `BahnJetztClient`.
 - `Transit/BahnDe/` – bahn.de web API via the `Cloudflare/bahnde-proxy` Worker (same endpoints/headers as Travel::Status::DE::DBRIS):
-  station-search fallback, coach sequence → series/Tz/Taufname (`TrainModel`, `TrainsetNames`),
+  station-search fallback, coach sequence → series/Tz/Taufname (`TrainModel`, `TrainsetNames`) and the
+  full Wagenreihung (`CoachSequence`: coaches, classes, amenities, sectors, direction; also DB Regio RE/RB via
+  `sequenceReference`),
   board + `fahrt` → `JourneyStop`s for Zusatzhalte (`inserting`, `nextRegularStop`), and bahn.de's
   own train names for boards (departures and arrivals) and journey legs (`correctingTrainNames`, e.g. "RJ 171" that Transitous calls "ICE 171"). Responses are
   cached; a 403/429 pauses all bahn.de requests for 10 min (`BahnDeGate`).

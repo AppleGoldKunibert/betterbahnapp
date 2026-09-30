@@ -434,6 +434,13 @@ final class AppModel {
         return try await bahnDe.formation(request)
     }
 
+    /// The train's coach sequence ("Wagenreihung") at the request's station. Shares bahn.de's
+    /// response with `formation(for:)`.
+    func coachSequence(for request: BahnDeClient.FormationRequest) async throws -> CoachSequence? {
+        guard let bahnDe = provider.bahnDe else { return nil }
+        return try await bahnDe.coachSequence(request)
+    }
+
     @ObservationIgnored private var trainTypeCache: [String: TrainTypeLookup?] = [:]
 
     /// A train's type ("ICE 4", "ICE 3neo" …) and, for live data, its Tz, from bahn.expert, which has

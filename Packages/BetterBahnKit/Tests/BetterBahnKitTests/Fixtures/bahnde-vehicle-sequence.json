@@ -1,0 +1,284 @@
+{
+ "departureID": "8000105_D_1",
+ "departurePlatform": "12",
+ "departurePlatformSchedule": "12",
+ "groups": [
+  {
+   "name": "ICE9226",
+   "transport": {
+    "category": "ICE",
+    "destination": {
+     "name": "Graz Hbf"
+    },
+    "journeyID": "20260930-bb576484-bec2-31bb-aa4a-bab18b92a673",
+    "line": "",
+    "number": 117,
+    "type": "HIGH_SPEED_TRAIN"
+   },
+   "vehicles": [
+    {
+     "amenities": [
+      {
+       "amount": 0,
+       "status": "UNDEFINED",
+       "type": "SEATS_SEVERELY_DISABLED"
+      },
+      {
+       "amount": 0,
+       "status": "UNDEFINED",
+       "type": "AIR_CONDITION"
+      },
+      {
+       "amount": 8,
+       "status": "AVAILABLE",
+       "type": "BIKE_SPACE"
+      }
+     ],
+     "orientation": "FORWARDS",
+     "platformPosition": {
+      "start": 188.1,
+      "end": 216.7,
+      "sector": "D"
+     },
+     "status": "OPEN",
+     "type": {
+      "category": "CONTROLCAR_ECONOMY_CLASS",
+      "constructionType": "I7812",
+      "hasEconomyClass": true,
+      "hasFirstClass": false
+     },
+     "vehicleID": "938078122265",
+     "wagonIdentificationNumber": 21
+    },
+    {
+     "amenities": [
+      {
+       "amount": 0,
+       "status": "UNDEFINED",
+       "type": "AIR_CONDITION"
+      },
+      {
+       "amount": 0,
+       "status": "UNDEFINED",
+       "type": "ZONE_QUIET"
+      }
+     ],
+     "orientation": "FORWARDS",
+     "platformPosition": {
+      "start": 160.2,
+      "end": 188.1,
+      "sector": "C"
+     },
+     "status": "OPEN",
+     "type": {
+      "category": "PASSENGERCARRIAGE_ECONOMY_CLASS",
+      "constructionType": "I3412",
+      "hasEconomyClass": true,
+      "hasFirstClass": false
+     },
+     "vehicleID": "938034127267",
+     "wagonIdentificationNumber": 22
+    },
+    {
+     "amenities": [
+      {
+       "amount": 0,
+       "status": "UNDEFINED",
+       "type": "SEATS_BAHN_COMFORT"
+      },
+      {
+       "amount": 0,
+       "status": "UNDEFINED",
+       "type": "AIR_CONDITION"
+      }
+     ],
+     "orientation": "FORWARDS",
+     "platformPosition": {
+      "start": 132.3,
+      "end": 160.2,
+      "sector": "C"
+     },
+     "status": "OPEN",
+     "type": {
+      "category": "PASSENGERCARRIAGE_ECONOMY_CLASS",
+      "constructionType": "I3812",
+      "hasEconomyClass": true,
+      "hasFirstClass": false
+     },
+     "vehicleID": "938038122264",
+     "wagonIdentificationNumber": 23
+    },
+    {
+     "amenities": [
+      {
+       "amount": 0,
+       "status": "UNDEFINED",
+       "type": "AIR_CONDITION"
+      }
+     ],
+     "orientation": "FORWARDS",
+     "platformPosition": {
+      "start": 104.4,
+      "end": 132.3,
+      "sector": "B"
+     },
+     "status": "OPEN",
+     "type": {
+      "category": "PASSENGERCARRIAGE_ECONOMY_CLASS",
+      "constructionType": "I3412",
+      "hasEconomyClass": true,
+      "hasFirstClass": false
+     },
+     "vehicleID": "938034122268",
+     "wagonIdentificationNumber": 24
+    },
+    {
+     "amenities": [
+      {
+       "amount": 0,
+       "status": "UNDEFINED",
+       "type": "SEATS_SEVERELY_DISABLED"
+      },
+      {
+       "amount": 0,
+       "status": "UNDEFINED",
+       "type": "ZONE_FAMILY"
+      },
+      {
+       "amount": 0,
+       "status": "UNDEFINED",
+       "type": "INFO"
+      },
+      {
+       "amount": 0,
+       "status": "UNDEFINED",
+       "type": "CABIN_INFANT"
+      },
+      {
+       "amount": 0,
+       "status": "UNDEFINED",
+       "type": "AIR_CONDITION"
+      },
+      {
+       "amount": 0,
+       "status": "UNDEFINED",
+       "type": "TOILET_WHEELCHAIR"
+      },
+      {
+       "amount": 2,
+       "status": "AVAILABLE",
+       "type": "WHEELCHAIR_SPACE"
+      }
+     ],
+     "orientation": "FORWARDS",
+     "platformPosition": {
+      "start": 76.5,
+      "end": 104.4,
+      "sector": "B"
+     },
+     "status": "OPEN",
+     "type": {
+      "category": "PASSENGERCARRIAGE_ECONOMY_CLASS",
+      "constructionType": "I7412",
+      "hasEconomyClass": true,
+      "hasFirstClass": false
+     },
+     "vehicleID": "938074122269",
+     "wagonIdentificationNumber": 25
+    },
+    {
+     "amenities": [
+      {
+       "amount": 0,
+       "status": "UNDEFINED",
+       "type": "SEATS_BAHN_COMFORT"
+      },
+      {
+       "amount": 0,
+       "status": "UNDEFINED",
+       "type": "SEATS_SEVERELY_DISABLED"
+      }
+     ],
+     "orientation": "BACKWARDS",
+     "platformPosition": {
+      "start": 48.6,
+      "end": 76.5,
+      "sector": "A"
+     },
+     "status": "OPEN",
+     "type": {
+      "category": "HALFDININGCAR_FIRST_CLASS",
+      "constructionType": "I8812",
+      "hasEconomyClass": false,
+      "hasFirstClass": true
+     },
+     "vehicleID": "938088122263",
+     "wagonIdentificationNumber": 26
+    },
+    {
+     "amenities": [
+      {
+       "amount": 0,
+       "status": "UNDEFINED",
+       "type": "AIR_CONDITION"
+      },
+      {
+       "amount": 0,
+       "status": "UNDEFINED",
+       "type": "ZONE_QUIET"
+      }
+     ],
+     "orientation": "BACKWARDS",
+     "platformPosition": {
+      "start": 20,
+      "end": 48.6,
+      "sector": "A"
+     },
+     "status": "OPEN",
+     "type": {
+      "category": "CONTROLCAR_FIRST_CLASS",
+      "constructionType": "I6812",
+      "hasEconomyClass": false,
+      "hasFirstClass": true
+     },
+     "vehicleID": "938068122267",
+     "wagonIdentificationNumber": 27
+    }
+   ]
+  }
+ ],
+ "journeyID": "20260930-bb576484-bec2-31bb-aa4a-bab18b92a673",
+ "platform": {
+  "end": 319.05,
+  "name": "12",
+  "sectors": [
+   {
+    "name": "A",
+    "start": 0,
+    "end": 79.6
+   },
+   {
+    "name": "B",
+    "start": 79.6,
+    "end": 135.4
+   },
+   {
+    "name": "C",
+    "start": 135.4,
+    "end": 199.75
+   },
+   {
+    "name": "D",
+    "start": 199.75,
+    "end": 258.375
+   },
+   {
+    "name": "E",
+    "start": 258.375,
+    "end": 319.05
+   }
+  ],
+  "start": 0
+ },
+ "sequenceStatus": "DIFFERS_FROM_SCHEDULE"
+}

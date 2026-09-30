@@ -205,7 +205,8 @@ struct LineBadge: View {
 
 /// Triebzug numbers and names of a train (e.g. "Tz 9457 „Bundesrepublik Deutschland“"). bahn.de's
 /// coach sequence first (it only has one in the coming hours); bahn.expert as fallback, which
-/// has the Tz once its data is live. Says so when bahn.de is refusing requests and nothing else helped.
+/// has the Tz once its data is live. With bahn.de's coach sequence, a button opens the
+/// Wagenreihung. Says so when bahn.de is refusing requests and nothing else helped.
 struct TrainFormationLabel: View {
     let request: BahnDeClient.FormationRequest?
     let line: Line?
@@ -225,29 +226,49 @@ struct TrainFormationLabel: View {
 
     @Environment(AppModel.self) private var model
     @State private var formation: TrainFormation?
+    @State private var sequence: CoachSequence?
     @State private var blocked = false
+    @State private var showSequence = false
 
     var body: some View {
         // A ZStack rather than Group: `.task` never fires on a view that is empty, and this one is
         // empty until the lookup it starts has finished.
         ZStack(alignment: .leading) {
-            if let units = formation?.unitDescription {
-                Label(units, systemImage: "tram.fill")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            } else if blocked {
-                Label("Wagenreihung gerade nicht abrufbar", systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                if let units = formation?.unitDescription {
+                    Label(units, systemImage: "tram.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                } else if blocked {
+                    Label("Wagenreihung gerade nicht abrufbar", systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let sequence, !sequence.coaches.isEmpty {
+                    Button {
+                        showSequence = true
+                    } label: {
+                        InfoChip(text: sequence.platform.map { "Wagenreihung · Gleis \($0)" } ?? "Wagenreihung",
+                                 systemImage: "train.side.front.car", tint: .brand)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .sheet(isPresented: $showSequence) {
+            if let sequence, let request {
+                CoachSequenceView(sequence: sequence, station: request.station, trainName: line?.name)
             }
         }
         .task(id: "\(line?.name ?? "")|\(date)|\(request?.station.id ?? "")") {
             formation = nil
+            sequence = nil
             blocked = false
             if let request {
                 do {
-                    formation = try await model.formation(for: request)
+                    sequence = try await model.coachSequence(for: request)
+                    formation = sequence?.formation
                 } catch TransitError.rateLimited {
                     blocked = true
                 } catch {}
