@@ -83,9 +83,21 @@ public struct BahnDeClient: Sendable {
         var lat: Double?
         var lon: Double?
         var type: String?
+        /// e.g. ["ICE", "EC_IC", "REGIONAL", "BUS"].
+        var products: [String]?
+    }
+
+    /// A station from bahn.de's search, and whether trains call there.
+    struct Candidate {
+        var station: Station
+        var hasTrains: Bool
     }
 
     public func searchStations(_ query: String) async throws -> [Station] {
+        try await candidates(query).map(\.station)
+    }
+
+    func candidates(_ query: String) async throws -> [Candidate] {
         let url = Self.baseURL.appending(path: "reiseloesung/orte").appending(queryItems: [
             .init(name: "suchbegriff", value: query),
             .init(name: "typ", value: "ALL"),
@@ -95,14 +107,31 @@ public struct BahnDeClient: Sendable {
         return locations.compactMap { location in
             guard location.type == "ST", let eva = location.extId else { return nil }
             let coordinate = location.lat.flatMap { lat in location.lon.map { Coordinate(latitude: lat, longitude: $0) } }
-            return Station(id: eva, name: location.name, coordinate: coordinate, evaNumber: eva, source: .bahnDe)
+            let hasTrains = (location.products ?? []).contains { Self.trainProducts.contains($0) }
+            return Candidate(station: Station(id: eva, name: location.name, coordinate: coordinate, evaNumber: eva, source: .bahnDe),
+                             hasTrains: hasTrains)
         }
     }
+
+    static let trainProducts: Set<String> = ["ICE", "EC_IC", "IR", "REGIONAL", "SBAHN"]
 
     /// EVA number for a station from any source (nearest match by name).
     public func evaNumber(for station: Station) async throws -> String? {
         if let eva = station.evaNumber { return eva }
-        let candidates = try await searchStations(station.name)
+        return Self.bestEVA(for: station, among: try await candidates(station.name))
+    }
+
+    /// The candidate that is `station`'s railway station. Everything asking for an EVA number wants
+    /// the railway station (Timetables, boards, coach sequences), so stops without trains only count
+    /// when there's nothing else.
+    static func bestEVA(for station: Station, among all: [Candidate]) -> String? {
+        // bahn.de also lists meta stations that bundle a station with its bus stops (e.g. "Westerland
+        // Bahnhof/ZOB, Sylt", 709827, right next to "Westerland(Sylt)", 8006369). Their IDs aren't
+        // EVA numbers — Timetables has no platforms for them — and real ones have 7 digits.
+        let real = all.filter { $0.station.id.count == 7 }
+        let pool = real.isEmpty ? all : real
+        let withTrains = pool.filter(\.hasTrains)
+        let candidates = (withTrains.isEmpty ? pool : withTrains).map(\.station)
         // A big interchange's own search also lists its separate entrances/exits a few hundred
         // meters apart under their own EVA (e.g. Berlin Gesundbrunnen's search also returns
         // "Gesundbrunnen Bahnhof Badstr.", which has no Timetables ("IRIS") schedule of its own) -

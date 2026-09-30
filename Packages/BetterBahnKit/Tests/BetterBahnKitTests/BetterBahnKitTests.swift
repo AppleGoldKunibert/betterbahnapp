@@ -1057,6 +1057,25 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(sequence.travelsTowardsPlatformEnd == true)
     }
 
+    /// Transitous only knows Westerland as the combined "Westerland(Sylt) ZOB/Bahnhof" stop, and
+    /// bahn.de's nearest hit is a meta station bundling it with the bus station, whose ID has no
+    /// platforms in Timetables. The railway station itself must win.
+    @Test func evaSkipsMetaStationsAndBusStops() {
+        let make = { (id: String, name: String, lat: Double, lon: Double, trains: Bool) in
+            BahnDeClient.Candidate(station: Station(id: id, name: name, coordinate: Coordinate(latitude: lat, longitude: lon),
+                                                    evaNumber: id, source: .bahnDe), hasTrains: trains)
+        }
+        let candidates = [
+            make("709827", "Westerland Bahnhof/ZOB, Sylt", 54.906185, 8.310824, true),
+            make("8070262", "Westerland Alte Post, Sylt", 54.906900, 8.310900, false),
+            make("8006369", "Westerland(Sylt)", 54.90763, 8.309979, true),
+            make("8030918", "Westerland (Sylt) Autoverladung", 54.904736, 8.313638, true),
+        ]
+        let transitous = Station(id: "de-DELFI_de:01054:98523", name: "Westerland(Sylt) ZOB/Bahnhof",
+                                 coordinate: Coordinate(latitude: 54.906837, longitude: 8.310925), evaNumber: nil, source: .transitous)
+        #expect(BahnDeClient.bestEVA(for: transitous, among: candidates) == "8006369")
+    }
+
     @Test func formationSummary() {
         let formation = TrainFormation(units: [.init(model: "ICE 3neo", number: "8030"), .init(model: "ICE 3neo", number: "8005")])
         #expect(formation.modelSummary == "2× ICE 3neo")
