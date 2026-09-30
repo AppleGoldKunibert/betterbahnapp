@@ -90,7 +90,7 @@ struct RootView: View {
         #if DEBUG
         .task {
             model.seedBrokenTripIfRequested()
-            model.seedStressTripsIfRequested()
+            await model.seedStressTripsIfRequested()
             await model.seedDemoTripsIfRequested()
         }
         #endif
