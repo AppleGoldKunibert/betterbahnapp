@@ -1,6 +1,7 @@
 import BackgroundTasks
 import BetterBahnKit
 import Foundation
+import Network
 import Observation
 import UserNotifications
 
@@ -370,29 +371,34 @@ final class AppModel {
 
     // MARK: Live train positions
 
-    /// How often the position of running ICEs of saved journeys is fetched.
-    static let positionRefreshInterval: Duration = .seconds(45)
+    /// How often the positions of running trains of saved journeys are fetched from bahn.jetzt.
+    static let positionRefreshInterval: Duration = .seconds(15)
+    /// The same on mobile data or in Low Data Mode: bahn.jetzt only offers the full, uncompressed
+    /// list of every running train (~250 KB), with no way to ask for fewer.
+    static let positionRefreshIntervalSavingData: Duration = .seconds(60)
 
-    /// Latest GPS fix of every ICE on a saved journey that is running right now, keyed by train name.
+    /// Latest position of every long-distance train on a saved journey that is running right now, keyed by train name.
     private(set) var trainPositions: [String: LiveTrainPosition] = [:]
 
-    @ObservationIgnored private var positionLoop: Task<Void, Never>?
-    @ObservationIgnored private var familyCache: [String: String?] = [:]
-
-    /// Fetches the position of each ICE leg of an unfinished saved journey that is underway
-    /// (plus 10 minutes either side, since departures and arrivals shift).
+    /// Fetches the position of each long-distance leg of an unfinished saved journey that is underway
+    /// (plus 10 minutes either side, since departures and arrivals shift). All legs share one
+    /// bahn.jetzt request, and nothing is requested while no train is running.
     func refreshTrainPositions() async {
-        guard let bahnExpert = provider.bahnExpert else { return }
+        guard let bahnJetzt = provider.bahnJetzt else { return }
         let now = Date.now
         let legs = upcomingJourneys.flatMap(\.journey.transitLegs).filter { leg in
-            BahnExpertClient.trainReference(for: leg.line)?.category == "ICE" && !leg.cancelled
+            BahnDeClient.trainReference(for: leg.line) != nil && !leg.cancelled
                 && leg.departure.best.addingTimeInterval(-600) <= now && now <= leg.arrival.best.addingTimeInterval(600)
+        }
+        guard !legs.isEmpty else {
+            trainPositions = [:]
+            return
         }
         var found: [String: LiveTrainPosition] = [:]
         await withTaskGroup(of: LiveTrainPosition?.self) { group in
             for leg in legs {
                 group.addTask {
-                    guard let name = leg.line?.name, let position = try? await bahnExpert.position(for: leg) else { return nil }
+                    guard let name = leg.line?.name, let position = try? await bahnJetzt.position(for: leg) else { return nil }
                     return LiveTrainPosition(trainName: name, position: position)
                 }
             }
@@ -400,21 +406,48 @@ final class AppModel {
                 if let live { found[live.trainName] = live }
             }
         }
+        // A failed refresh (offline, bahn.jetzt pausing) keeps the last positions; they turn stale on the map.
+        for (name, live) in trainPositions where found[name] == nil && legs.contains(where: { $0.line?.name == name }) {
+            found[name] = live
+        }
         trainPositions = found
     }
 
-    /// "ICE 4", "ICE 3neo", "ICE L" … for an ICE, from bahn.expert. Cached per train and day;
-    /// failed requests are not cached so they are retried.
-    func trainFamily(for line: Line?, on date: Date) async -> String? {
-        guard let ref = BahnExpertClient.trainReference(for: line), ref.category == "ICE",
-              let bahnExpert = provider.bahnExpert else { return nil }
-        let day = BahnExpertClient.berlinDay(date)
+    /// Keeps `trainPositions` fresh for as long as the calling task runs — the map, the only place
+    /// positions are shown, runs this while it is on screen, so nothing is downloaded otherwise.
+    func followTrainPositions() async {
+        let monitor = NWPathMonitor()
+        monitor.start(queue: .global(qos: .utility))
+        defer { monitor.cancel() }
+        while !Task.isCancelled {
+            await refreshTrainPositions()
+            let path = monitor.currentPath
+            let interval = path.isExpensive || path.isConstrained ? Self.positionRefreshIntervalSavingData : Self.positionRefreshInterval
+            try? await Task.sleep(for: interval)
+        }
+    }
+
+    /// Series, Triebzug numbers and names of a train from bahn.de's coach sequence. bahn.de caches
+    /// and throttles these itself; nil while there's no coach sequence (yet).
+    func formation(for request: BahnDeClient.FormationRequest) async throws -> TrainFormation? {
+        guard let bahnDe = provider.bahnDe else { return nil }
+        return try await bahnDe.formation(request)
+    }
+
+    @ObservationIgnored private var trainTypeCache: [String: TrainTypeLookup?] = [:]
+
+    /// A train's type ("ICE 4", "ICE 3neo" …) and, for live data, its Tz, from bahn.expert, which has
+    /// DB's planned formation for days ahead. Only the fallback when bahn.de's coach sequence
+    /// (`formation(for:)`) has nothing. Cached per train and day; failed requests are not
+    /// cached so they are retried.
+    func trainType(for line: Line?, on date: Date) async -> TrainTypeLookup? {
+        guard let ref = BahnDeClient.trainReference(for: line), let bahnExpert = provider.bahnExpert else { return nil }
+        let day = BahnDeClient.berlinDay(date)
         let key = "\(ref.category) \(ref.number)|\(day)"
-        if let cached = familyCache[key] { return cached }
+        if let cached = trainTypeCache[key] { return cached }
         guard let lookup = try? await bahnExpert.trainType(category: ref.category, number: ref.number, date: day) else { return nil }
-        let family = lookup.summary
-        familyCache[key] = .some(family)
-        return family
+        trainTypeCache[key] = .some(lookup)
+        return lookup
     }
 
     @ObservationIgnored private var refreshLoop: Task<Void, Never>?
@@ -428,14 +461,6 @@ final class AppModel {
                     await self?.refreshSavedJourneys()
                     await self?.refreshManualCheckins()
                     try? await Task.sleep(for: .seconds(300))
-                }
-            }
-        }
-        if positionLoop == nil {
-            positionLoop = Task { [weak self] in
-                while !Task.isCancelled {
-                    await self?.refreshTrainPositions()
-                    try? await Task.sleep(for: Self.positionRefreshInterval)
                 }
             }
         }
@@ -454,8 +479,6 @@ final class AppModel {
     func stopRefreshing() {
         refreshLoop?.cancel()
         refreshLoop = nil
-        positionLoop?.cancel()
-        positionLoop = nil
         liveActivitySyncLoop?.cancel()
         liveActivitySyncLoop = nil
     }
@@ -664,7 +687,7 @@ struct SavedJourney: Codable, Hashable, Identifiable {
     }
 }
 
-/// Where a saved journey's ICE is right now.
+/// Where a saved journey's train is right now.
 struct LiveTrainPosition: Identifiable, Hashable, Sendable {
     var id: String { trainName }
     let trainName: String

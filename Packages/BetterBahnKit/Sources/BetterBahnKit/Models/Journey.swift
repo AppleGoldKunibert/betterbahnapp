@@ -112,11 +112,14 @@ public struct Stopover: Codable, Sendable, Hashable, Identifiable {
     public var departure: TimeInfo?
     public var arrivalPlatform: PlatformInfo?
     public var departurePlatform: PlatformInfo?
-    public var cancelled: Bool
+    /// Kept apart because DB cancels either side on its own — a train cut short ends with an
+    /// arrival that still happens but a cancelled departure, and one starting late the other way round.
+    public var arrivalCancelled: Bool
+    public var departureCancelled: Bool
     /// Whether passengers may actually board/alight here ("Nur Einstieg" / "Nur Ausstieg").
     public var access: StopAccess
     /// An unscheduled stop the train additionally picked up today ("Zusatzhalt"), not part of its
-    /// regular timetable — only `BahnExpertClient` knows about these, see `inserting(_:into:)`.
+    /// regular timetable — only `BahnDeClient.journeyStops` knows about these, see `inserting(_:into:)`.
     public var isAdditional: Bool
 
     public init(station: Station, arrival: TimeInfo?, departure: TimeInfo?,
@@ -127,17 +130,32 @@ public struct Stopover: Codable, Sendable, Hashable, Identifiable {
         self.departure = departure
         self.arrivalPlatform = arrivalPlatform
         self.departurePlatform = departurePlatform
-        self.cancelled = cancelled
+        self.arrivalCancelled = cancelled
+        self.departureCancelled = cancelled
         self.access = access
         self.isAdditional = isAdditional
     }
 
-    enum CodingKeys: String, CodingKey {
-        case station, arrival, departure, arrivalPlatform, departurePlatform, cancelled, access, isAdditional
+    /// The whole stop is out: every side it actually has (arrival and/or departure) is cancelled.
+    /// Setting it cancels (or restores) both sides.
+    public var cancelled: Bool {
+        get {
+            guard arrival != nil || departure != nil else { return arrivalCancelled && departureCancelled }
+            return (arrival == nil || arrivalCancelled) && (departure == nil || departureCancelled)
+        }
+        set {
+            arrivalCancelled = newValue
+            departureCancelled = newValue
+        }
     }
 
-    /// Custom-decoded so journeys cached to disk before `access`/`isAdditional` existed still load,
-    /// defaulting to `.normal`/`false`.
+    enum CodingKeys: String, CodingKey {
+        case station, arrival, departure, arrivalPlatform, departurePlatform, cancelled, arrivalCancelled,
+             departureCancelled, access, isAdditional
+    }
+
+    /// Custom-decoded so journeys cached to disk before `access`/`isAdditional`/the per-side
+    /// cancellation existed still load, defaulting to `.normal`/`false`/the old single `cancelled`.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         station = try c.decode(Station.self, forKey: .station)
@@ -145,9 +163,26 @@ public struct Stopover: Codable, Sendable, Hashable, Identifiable {
         departure = try c.decodeIfPresent(TimeInfo.self, forKey: .departure)
         arrivalPlatform = try c.decodeIfPresent(PlatformInfo.self, forKey: .arrivalPlatform)
         departurePlatform = try c.decodeIfPresent(PlatformInfo.self, forKey: .departurePlatform)
-        cancelled = try c.decode(Bool.self, forKey: .cancelled)
+        let cancelled = try c.decodeIfPresent(Bool.self, forKey: .cancelled) ?? false
+        arrivalCancelled = try c.decodeIfPresent(Bool.self, forKey: .arrivalCancelled) ?? cancelled
+        departureCancelled = try c.decodeIfPresent(Bool.self, forKey: .departureCancelled) ?? cancelled
         access = try c.decodeIfPresent(StopAccess.self, forKey: .access) ?? .normal
         isAdditional = try c.decodeIfPresent(Bool.self, forKey: .isAdditional) ?? false
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(station, forKey: .station)
+        try c.encodeIfPresent(arrival, forKey: .arrival)
+        try c.encodeIfPresent(departure, forKey: .departure)
+        try c.encodeIfPresent(arrivalPlatform, forKey: .arrivalPlatform)
+        try c.encodeIfPresent(departurePlatform, forKey: .departurePlatform)
+        // Still written so an older build reading the same file keeps decoding it.
+        try c.encode(cancelled, forKey: .cancelled)
+        try c.encode(arrivalCancelled, forKey: .arrivalCancelled)
+        try c.encode(departureCancelled, forKey: .departureCancelled)
+        try c.encode(access, forKey: .access)
+        try c.encode(isAdditional, forKey: .isAdditional)
     }
 }
 

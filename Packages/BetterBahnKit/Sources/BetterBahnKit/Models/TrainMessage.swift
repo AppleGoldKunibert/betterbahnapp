@@ -40,8 +40,8 @@ public extension Collection<TrainMessage> {
     var containsDelayReason: Bool { contains { $0.kind == .delay } }
 }
 
-/// Texts for the numeric message codes in DB's IRIS feed (the same list DB Navigator and bahn.expert
-/// use). Codes below 70 and 99 are delay reasons, 70–98 are quality notices.
+/// Texts for the numeric message codes in DB's IRIS feed (the same list DB Navigator
+/// uses). Codes below 70 and 99 are delay reasons, 70–98 are quality notices.
 enum TrainMessageCodes {
     /// Codes that only say an earlier notice no longer applies, so they clear rather than show.
     static let clearing: [Int: Set<Int>] = [

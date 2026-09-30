@@ -20,6 +20,8 @@ comments are English.
 | `Packages/BetterBahnKit/` | Local SwiftPM package with all models, networking and logic (iOS 26 + macOS 26, everything `Sendable`). Tests live here. |
 | `Config/` | xcconfigs + Info.plists. `Signing.xcconfig` holds team ID; optional gitignored `Local.xcconfig` overrides it. |
 | `Cloudflare/` | Worker that bounces the Träwelling OAuth callback to `betterbahn://oauth` (see its README). |
+| `Cloudflare/bahnde-proxy/` | Separate Worker (`betterbahn2`) proxying bahn.de's web API (`/web/api/…` paths), because bahn.de blocks Apple's URL loading stack (see its README). `BahnDeClient.baseURL` points at it. |
+| `ci_scripts/` | Xcode Cloud: `ci_post_clone.sh` writes the gitignored `DefaultCredentials.swift` from the workflow's secret env vars `DB_CLIENT_ID` / `DB_API_KEY`. |
 | `docs/transit-providers.md` | Why Transitous is the primary data source and fallback options. |
 
 Targets/schemes: `BetterBahn`, `BetterBahnWidgetsExtension`, `BetterBahnShareExtension`, `BetterBahnKit`.
@@ -36,7 +38,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   Owns `CombinedProvider`, `TraewellingClient`, helpers (`TrainPicker`, `JourneyReplanner`,
   `DBShareImporter`, `TrainRoutePlanner`, `TicketFilter`, `TimetablesClient`, `JourneyRefresher`),
   persisted lists (favorites, recents, `savedJourneys`, `traewellingTrips`, tracked manual check-ins),
-  realtime refresh loops (journeys every 300 s, train positions every 45 s), delay notifications,
+  realtime refresh loops (journeys every 300 s; train positions only while the map is shown, every 15 s or 60 s on mobile data/Low Data Mode), delay notifications,
   geometry/heatmap caches, Live Activity selection. Also defines `SavedJourney`, `PlanVersion`,
   `ImportedTrip`, `RecentSearch`, `Storage`, `AppSettings`, `ConnectionNotifier`.
 - **Persistence:** `Storage.save/load(key:)` writes JSON to `Application Support/BetterBahn/<key>.json`
@@ -67,8 +69,17 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 - `Transit/TransitProvider.swift` – `TransitProvider` protocol (`searchStations`, `journeys`,
   `board`, `trip`) and `JourneyQuery`.
 - `Transit/CombinedProvider.swift` – what the app uses: primary `TransitousProvider`, optional
-  fallback (none configured), cooldown health check, `BahnDeClient` (station-search fallback +
-  coach formation), `BahnExpertClient` (train types/formation/positions).
+  fallback (none configured), cooldown health check, `BahnDeClient`, `BahnExpertClient`, `BahnJetztClient`.
+- `Transit/BahnDe/` – bahn.de web API via the `Cloudflare/bahnde-proxy` Worker (same endpoints/headers as Travel::Status::DE::DBRIS):
+  station-search fallback, coach sequence → series/Tz/Taufname (`TrainModel`, `TrainsetNames`),
+  board + `fahrt` → `JourneyStop`s for Zusatzhalte (`inserting`, `nextRegularStop`), and bahn.de's
+  own train names for boards (departures and arrivals) and journey legs (`correctingTrainNames`, e.g. "RJ 171" that Transitous calls "ICE 171"). Responses are
+  cached; a 403/429 pauses all bahn.de requests for 10 min (`BahnDeGate`).
+- `Transit/BahnExpert/` – bahn.expert, only as fallback for the train type (`TrainTypeLookup`) when bahn.de
+  has no coach sequence: it has DB's planned formation (`DB-plan`) for days ahead; bahn.de is only asked
+  for departures within `BahnDeClient.formationLookahead` (12 h).
+- `Transit/BahnJetzt/` – live train positions from bahn.jetzt's `/api/journeys` (one shared list,
+  refreshed by `AppModel.followTrainPositions()` while the map is on screen).
 - `Transit/Transitous/` – MOTIS API client + DTOs (`M*` types). Station-name cleanup and
   deduplication of boards happen here.
 - `Transit/Timetables/` – official DB Timetables XML client (realtime overrides, messages).

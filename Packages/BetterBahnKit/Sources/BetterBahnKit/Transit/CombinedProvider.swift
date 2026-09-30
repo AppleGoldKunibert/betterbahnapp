@@ -1,22 +1,26 @@
 import Foundation
 
 /// Transitous is primary. A separately configured provider can supply failover.
-/// bahn.de remains a station-search fallback and coach-sequence helper.
+/// bahn.de remains a station-search fallback and the source for coach sequences and journey details;
+/// bahn.expert is the fallback for the train type when bahn.de has no coach sequence (yet); bahn.jetzt supplies live train positions.
 public final class CombinedProvider: TransitProvider {
     public var source: DataSource { primary.source }
     public let primary: any TransitProvider
     public let fallback: (any TransitProvider)?
     public let bahnDe: BahnDeClient?
     public let bahnExpert: BahnExpertClient?
+    public let bahnJetzt: BahnJetztClient?
     private let health: Health
 
     public init(primary: any TransitProvider = TransitousProvider(),
                 fallback: (any TransitProvider)? = nil,
                 bahnDe: BahnDeClient? = BahnDeClient(),
                 bahnExpert: BahnExpertClient? = BahnExpertClient(),
+                bahnJetzt: BahnJetztClient? = BahnJetztClient(),
                 cooldown: TimeInterval = 120) {
         self.bahnDe = bahnDe
         self.bahnExpert = bahnExpert
+        self.bahnJetzt = bahnJetzt
         self.primary = primary
         self.fallback = fallback
         self.health = Health(cooldown: cooldown)
@@ -110,6 +114,11 @@ public final class CombinedProvider: TransitProvider {
         page.laterCursor = page.laterCursor.map { "\(page.source.rawValue):\($0)" }
         page.journeys = page.journeys.filter(query.allows)
         page.journeys = page.journeys.filter { journey in !journey.transitLegs.contains { Self.isFlixBus($0.line) } }
+        // bahn.de's own names beat Transitous' generic ones for cross-border trains, like on boards.
+        if let bahnDe {
+            let journeys = page.journeys
+            page.journeys = (try? await Self.withDeadline(.seconds(3)) { await bahnDe.correctingTrainNames(in: journeys) }) ?? journeys
+        }
         return page
     }
 
@@ -117,7 +126,11 @@ public final class CombinedProvider: TransitProvider {
         let entries = try await withFallback(deadline: .seconds(8),
                                { try await $0.board(kind, at: station, date: date, duration: duration, products: products) },
                                { try await $0.board(kind, at: station, date: date, duration: duration, products: products) })
-        return entries.filter { !Self.isFlixBus($0.line) }
+        let filtered = entries.filter { !Self.isFlixBus($0.line) }
+        // bahn.de's own names beat Transitous' generic ones for cross-border trains (see
+        // `BahnDeClient.correctingTrainNames`); a slow bahn.de mustn't hold up the board for long.
+        guard let bahnDe else { return filtered }
+        return (try? await Self.withDeadline(.seconds(3)) { await bahnDe.correctingTrainNames(filtered, at: station) }) ?? filtered
     }
 
     /// FlixBus results are hidden from journey planning and departure boards entirely.

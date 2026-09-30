@@ -438,9 +438,30 @@ struct JourneyResultsView: View {
                 laterCursor = page?.laterCursor
             }
             error = nil
+            await fillMissingPlatforms(in: result)
         } catch is CancellationError {
         } catch {
             self.error = error
+        }
+    }
+
+    /// Transitous leaves some trains' Gleis out (whole regional feeds, but now and then ICEs and RJs
+    /// too); fills those in from DB's own schedule once the results are already on screen.
+    private func fillMissingPlatforms(in loaded: [Journey]) async {
+        guard let timetables = model.timetablesClient else { return }
+        await withTaskGroup(of: Journey?.self) { group in
+            for journey in loaded where journey.transitLegs.contains(where: {
+                $0.departurePlatform?.best == nil || $0.arrivalPlatform?.best == nil
+            }) {
+                group.addTask {
+                    let filled = await timetables.fillMissingPlatforms(in: journey)
+                    return filled == journey ? nil : filled
+                }
+            }
+            for await filled in group {
+                guard let filled, let index = journeys.firstIndex(where: { $0.id == filled.id }) else { continue }
+                journeys[index] = filled
+            }
         }
     }
 }

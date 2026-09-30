@@ -120,18 +120,14 @@ import Testing
                      remarks: [], source: .transitous)
         let draft = CheckinDraft(leg: leg, message: "unterwegs", visibility: .publicVisible, business: .privateTrip, toot: false)
 
-        let json = """
-        {"stops": [
-            {"stopPlace": {"evaNumber": "8002041", "name": "Frankfurt (Main) Süd"},
-             "departure": {"scheduledTime": "2026-09-22T11:19:00Z", "time": "2026-09-22T11:58:04Z", "additional": true},
-             "additional": true},
-            {"stopPlace": {"evaNumber": "8000150", "name": "Hanau Hbf"},
-             "arrival": {"scheduledTime": "2026-09-22T11:28:00Z", "time": "2026-09-22T12:07:20Z"},
-             "departure": {"scheduledTime": "2026-09-22T11:30:00Z", "time": "2026-09-22T12:09:01Z"}}
-        ]}
-        """
-        let details = try JSONDecoding.decoder.decode(BahnExpertClient.Details.self, from: Data(json.utf8))
-        let stops = details.stops.map(JourneyStop.init)
+        let iso = { (s: String) in JSONDecoding.parseISODate(s)! }
+        let stops = [
+            JourneyStop(evaNumber: "8002041", name: "Frankfurt (Main) Süd",
+                        departure: TimeInfo(planned: iso("2026-09-22T11:19:00Z"), actual: iso("2026-09-22T11:58:04Z")), isAdditional: true),
+            JourneyStop(evaNumber: "8000150", name: "Hanau Hbf",
+                        arrival: TimeInfo(planned: iso("2026-09-22T11:28:00Z"), actual: iso("2026-09-22T12:07:20Z")),
+                        departure: TimeInfo(planned: iso("2026-09-22T11:30:00Z"), actual: iso("2026-09-22T12:09:01Z"))),
+        ]
 
         let result = try await client.checkin(draft, fromZusatzhalt: stops[0], toNextRegularStop: stops[1])
 
