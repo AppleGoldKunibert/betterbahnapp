@@ -25,6 +25,9 @@ final class AppModel {
             syncLiveActivity()
         }
     }
+    /// Saved journey to open on the Verbindungen tab (set when the Live Activity is tapped);
+    /// `ConnectionsView` pushes it and clears this.
+    var journeyToOpen: SavedJourney?
     /// Recently picked stations, newest first (used as suggestions).
     var recentStations: [Station] {
         didSet { Storage.save(recentStations, key: "recentStations") }

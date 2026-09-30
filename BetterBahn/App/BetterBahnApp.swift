@@ -45,6 +45,11 @@ struct RootView: View {
     @State private var incomingSharedJourney: Journey?
     @State private var incomingDBShare: DBShareText?
     @State private var showInvalidShareLinkAlert = false
+    @State private var selectedTab = RootTab.connections
+
+    enum RootTab: Hashable {
+        case connections, map, departures, settings
+    }
 
     var body: some View {
         #if DEBUG
@@ -59,17 +64,17 @@ struct RootView: View {
     }
 
     private var tabs: some View {
-        TabView {
-            Tab("Verbindungen", systemImage: "arrow.triangle.swap") {
+        TabView(selection: $selectedTab) {
+            Tab("Verbindungen", systemImage: "arrow.triangle.swap", value: .connections) {
                 ConnectionsView()
             }
-            Tab("Karte", systemImage: "map.fill") {
+            Tab("Karte", systemImage: "map.fill", value: .map) {
                 TravelMapView()
             }
-            Tab("Abfahrten", systemImage: "clock.arrow.2.circlepath") {
+            Tab("Abfahrten", systemImage: "clock.arrow.2.circlepath", value: .departures) {
                 StationBoardView()
             }
-            Tab("Einstellungen", systemImage: "gearshape") {
+            Tab("Einstellungen", systemImage: "gearshape", value: .settings) {
                 SettingsView()
             }
         }
@@ -95,6 +100,16 @@ struct RootView: View {
         }
         #endif
         .onOpenURL { url in
+            // The Live Activity was tapped: show its journey (if it's still saved).
+            if let journeyID = LiveActivityLink.journeyID(from: url) {
+                if let entry = model.savedJourneys.first(where: { $0.journey.id == journeyID }) {
+                    incomingSharedJourney = nil
+                    incomingDBShare = nil
+                    selectedTab = .connections
+                    model.journeyToOpen = entry
+                }
+                return
+            }
             // A connection shared from the DB Navigator / bahn.de, handed over by the share extension.
             if let text = DBShare.text(fromAppURL: url) {
                 incomingSharedJourney = nil

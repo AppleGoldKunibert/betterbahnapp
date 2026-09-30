@@ -118,6 +118,11 @@ struct ConnectionsView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .onAppear { onlyValidTicket = model.settings.ticketFilterByDefault }
+            .onChange(of: model.journeyToOpen, initial: true) { _, entry in
+                guard let entry else { return }
+                path = [.journey(entry.route())]
+                model.journeyToOpen = nil
+            }
         }
         .toolbar(showsJourney ? .hidden : .automatic, for: .tabBar)
     }

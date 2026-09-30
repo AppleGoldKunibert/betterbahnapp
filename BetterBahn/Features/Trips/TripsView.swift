@@ -28,6 +28,14 @@ struct UpcomingTripsSection: View {
     }
 }
 
+extension SavedJourney {
+    func route(readOnly: Bool = false) -> JourneyRoute {
+        JourneyRoute(journey: journey,
+                     finalDestination: journey.legs.last?.destination ?? journey.legs[0].destination,
+                     readOnly: readOnly, search: search)
+    }
+}
+
 struct SavedJourneyRow: View {
     let entry: SavedJourney
     var isNext = false
@@ -36,11 +44,7 @@ struct SavedJourneyRow: View {
 
     var body: some View {
         let blocking = entry.issues.first(where: \.isBlocking)
-        NavigationLink(value: ConnectionsRoute.journey(JourneyRoute(
-            journey: entry.journey,
-            finalDestination: entry.journey.legs.last?.destination ?? entry.journey.legs[0].destination,
-            readOnly: readOnly,
-            search: entry.search))) {
+        NavigationLink(value: ConnectionsRoute.journey(entry.route(readOnly: readOnly))) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
                     Image(systemName: "calendar")
