@@ -2,3 +2,6 @@
 
 DEVELOPMENT_TEAM = $(LOCAL_DEVELOPMENT_TEAM)
 PRODUCT_BUNDLE_IDENTIFIER = de.goldkunibert.BetterBahn$(LOCAL_BUNDLE_ID_SUFFIX)
+
+// iCloud key-value store for syncing settings, favourites and saved journeys (CloudSync).
+CODE_SIGN_ENTITLEMENTS = Config/BetterBahn.entitlements

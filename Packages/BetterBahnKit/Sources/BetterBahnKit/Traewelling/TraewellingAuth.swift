@@ -123,7 +123,8 @@ public enum OAuthError: Error, LocalizedError, Equatable {
     }
 }
 
-/// Stores the token in the Keychain.
+/// Stores the token in the Keychain, synced through iCloud Keychain so the Träwelling login
+/// carries over to the user's other devices.
 public struct TokenStore: Sendable {
     let service: String
     let account: String
@@ -133,10 +134,12 @@ public struct TokenStore: Sendable {
         self.account = account
     }
 
+    /// Matches the item whether or not it syncs (older versions saved it device-only).
     private var baseQuery: [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
          kSecAttrService as String: service,
-         kSecAttrAccount as String: account]
+         kSecAttrAccount as String: account,
+         kSecAttrSynchronizable as String: kSecAttrSynchronizableAny]
     }
 
     public func load() -> OAuthToken? {
@@ -155,7 +158,21 @@ public struct TokenStore: Sendable {
         var query = baseQuery
         query[kSecValueData as String] = data
         query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        SecItemAdd(query as CFDictionary, nil)
+        query[kSecAttrSynchronizable as String] = kCFBooleanTrue
+        if SecItemAdd(query as CFDictionary, nil) != errSecSuccess {
+            // No iCloud Keychain available (e.g. unsigned test runs): keep it on this device.
+            query[kSecAttrSynchronizable as String] = kCFBooleanFalse
+            SecItemAdd(query as CFDictionary, nil)
+        }
+    }
+
+    /// Re-saves a token older versions kept device-only so it syncs from now on.
+    public func migrateToSynchronizable() {
+        var query = baseQuery
+        query[kSecAttrSynchronizable as String] = kCFBooleanFalse
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        guard SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess, let token = load() else { return }
+        save(token)
     }
 
     public func clear() {

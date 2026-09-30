@@ -136,10 +136,16 @@ public actor TraewellingClient {
         self.config = config
         self.http = http
         self.store = store
+        store.migrateToSynchronizable()
         self.token = store.load()
     }
 
-    public var isLoggedIn: Bool { token != nil }
+    /// Re-reads the Keychain each time, since the token may have been added, refreshed or removed
+    /// on another device and synced in through iCloud Keychain.
+    public var isLoggedIn: Bool {
+        token = store.load()
+        return token != nil
+    }
 
     // MARK: Auth
 
@@ -180,6 +186,7 @@ public actor TraewellingClient {
     }
 
     private func validAccessToken() async throws -> String {
+        token = store.load()
         guard let token else { throw OAuthError.notLoggedIn }
         if token.isExpired, let refresh = token.refreshToken {
             try await requestToken([
@@ -210,7 +217,7 @@ public actor TraewellingClient {
     /// Sends an authorized request and hands back the raw body, which is empty for a
     /// `204 No Content` reply (Träwelling uses one for "nothing is currently checked in").
     func authorizedData(_ path: String, query: [URLQueryItem] = [], method: String = "GET",
-                        body: Data? = nil) async throws -> Data {
+                        body: Data? = nil, isRetry: Bool = false) async throws -> Data {
         var url = config.apiURL.appending(path: path)
         if !query.isEmpty { url = url.appending(queryItems: query) }
         var request = URLRequest(url: url, timeoutInterval: 30)
@@ -218,14 +225,23 @@ public actor TraewellingClient {
         request.httpBody = body
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
-        request.setValue("Bearer \(try await validAccessToken())", forHTTPHeaderField: "Authorization")
+        let accessToken = try await validAccessToken()
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue(HTTPClient.identifyingUserAgent, forHTTPHeaderField: "User-Agent")
         do {
             return try await http.sendRaw(request)
-        } catch TransitError.http(let status, let body) {
-            if status == 401 { logout(); throw OAuthError.notLoggedIn }
+        } catch TransitError.http(let status, let responseBody) {
+            if status == 401 {
+                // Another device may have refreshed the token meanwhile (it syncs via iCloud
+                // Keychain): retry with that one instead of deleting it for every device.
+                if !isRetry, let stored = store.load(), stored.accessToken != accessToken {
+                    return try await authorizedData(path, query: query, method: method, body: body, isRetry: true)
+                }
+                logout()
+                throw OAuthError.notLoggedIn
+            }
             if status == 409 { throw TraewellingError.collision }
-            throw TraewellingError.api(status: status, message: Self.message(from: body))
+            throw TraewellingError.api(status: status, message: Self.message(from: responseBody))
         }
     }
 
