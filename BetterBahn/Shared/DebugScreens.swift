@@ -20,7 +20,8 @@ extension AppModel {
 
 extension AppModel {
     /// Launch with `-seedStressTrips <count>` to fill the map with a large synthetic trip history (perf testing only).
-    func seedStressTripsIfRequested() {
+    func seedStressTripsIfRequested() async {
+        await loadTraewellingTrips()
         let count = UserDefaults.standard.integer(forKey: "seedStressTrips")
         guard count > 0, traewellingTrips.count < count else { return }
         func station(_ id: String, _ name: String, _ lat: Double, _ lon: Double) -> Station {

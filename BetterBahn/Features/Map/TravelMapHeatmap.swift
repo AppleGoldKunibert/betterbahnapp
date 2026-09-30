@@ -97,6 +97,8 @@ extension AppModel {
     func mapHeatmap(for selection: TravelMapSelection, progressively: Bool = true,
                     onProgress: (Int, Int) -> Void = { _, _ in },
                     onPartial: ([SegmentHeatmap.Run]) -> Void = { _ in }) async -> MapHeatmap? {
+        // Otherwise a map opened right after launch would be built (and cached) without them.
+        await loadTraewellingTrips()
         let key = mapHeatmapKey(for: selection)
         if let cached = await cachedMapHeatmap(for: key) { return cached }
 

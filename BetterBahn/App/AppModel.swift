@@ -70,18 +70,25 @@ final class AppModel {
     init() {
         provider = CombinedProvider()
         traewelling = TraewellingClient(config: TraewellingConfig())
+        // Older versions stored everything in UserDefaults; move the raw bytes into files once
+        // (re-encoding everything on every launch is what used to slow the start down).
+        Storage.migrateFromUserDefaults(keys: ["savedJourneys", "favoriteStations", "recentSearches", "recentStations"])
         favoriteStations = Storage.load(key: "favoriteStations") ?? []
         recentSearches = Storage.load(key: "recentSearches") ?? []
         recentStations = Storage.load(key: "recentStations") ?? []
         savedJourneys = Storage.load(key: "savedJourneys") ?? []
-        traewellingTrips = Storage.load(key: "traewellingTrips") ?? []
         trackedManualCheckins = Storage.load(key: "trackedManualCheckins") ?? []
         manualLiveActivityJourneyID = UserDefaults.standard.string(forKey: "manualLiveActivityJourneyID").flatMap(UUID.init)
-        // Move data from UserDefaults (older versions) into files.
-        Storage.save(savedJourneys, key: "savedJourneys")
-        Storage.save(favoriteStations, key: "favoriteStations")
-        Storage.save(recentSearches, key: "recentSearches")
-        Storage.save(recentStations, key: "recentStations")
+        // The check-in history holds every trip's full track geometry and can run to many
+        // megabytes, so it's decoded off the main thread instead of blocking the launch.
+        traewellingTripsLoadTask = Task { [weak self] in
+            let trips = await Task.detached(priority: .userInitiated) { () -> [ImportedTrip] in
+                Storage.load(key: "traewellingTrips") ?? []
+            }.value
+            guard let self else { return }
+            traewellingTrips = trips
+            traewellingTripsLoaded = true
+        }
     }
 
     var trainPicker: TrainPicker { TrainPicker(provider: provider) }
@@ -137,15 +144,34 @@ final class AppModel {
 
     // MARK: Träwelling sync
 
-    /// Check-ins imported from Träwelling (newest first), shown on the travel map.
-    var traewellingTrips: [ImportedTrip] {
-        didSet { Storage.save(traewellingTrips, key: "traewellingTrips") }
+    /// Check-ins imported from Träwelling (newest first), shown on the travel map. Empty until
+    /// loaded from disk after launch; `loadTraewellingTrips()` waits for that.
+    var traewellingTrips: [ImportedTrip] = [] {
+        didSet {
+            guard traewellingTripsLoaded else { return }
+            // Encoded and written in the background (it's large); chained so saves land in order.
+            let trips = traewellingTrips, previous = traewellingTripsSaveTask
+            traewellingTripsSaveTask = Task.detached(priority: .utility) {
+                await previous?.value
+                Storage.save(trips, key: "traewellingTrips")
+            }
+        }
+    }
+    @ObservationIgnored private var traewellingTripsLoaded = false
+    @ObservationIgnored private var traewellingTripsLoadTask: Task<Void, Never>?
+    @ObservationIgnored private var traewellingTripsSaveTask: Task<Void, Never>?
+
+    /// Waits until the check-in history has been read from disk.
+    func loadTraewellingTrips() async {
+        await traewellingTripsLoadTask?.value
     }
     private(set) var isSyncingTraewelling = false
     private(set) var traewellingSyncError: String?
 
     /// Fetches new check-ins and their track geometry. Stops at the first already known status.
     func syncTraewelling(force: Bool = false) async {
+        // Without the stored history every check-in would look new and be imported again.
+        await loadTraewellingTrips()
         guard settings.traewellingEnabled, settings.syncTraewellingToMap, !isSyncingTraewelling, await traewelling.isLoggedIn else { return }
         if !force, let last = settings.lastTraewellingSync, Date.now.timeIntervalSince(last) < 15 * 60 { return }
         isSyncingTraewelling = true
@@ -756,6 +782,17 @@ nonisolated enum Storage {
         guard let data = try? JSONEncoder().encode(value) else { return }
         try? data.write(to: file(key), options: .atomic)
         UserDefaults.standard.removeObject(forKey: key)
+    }
+
+    /// Moves values older versions kept in UserDefaults into files, as is, without decoding them.
+    static func migrateFromUserDefaults(keys: [String]) {
+        for key in keys {
+            guard let data = UserDefaults.standard.data(forKey: key) else { continue }
+            if !FileManager.default.fileExists(atPath: file(key).path()) {
+                guard (try? data.write(to: file(key), options: .atomic)) != nil else { continue }
+            }
+            UserDefaults.standard.removeObject(forKey: key)
+        }
     }
 
     static func load<T: Decodable>(key: String) -> T? {
