@@ -43,6 +43,17 @@ public struct TripActivityAttributes: ActivityAttributes {
         public var currentDelayMinutes: Int?
         /// Platform of the next train to board, set only shortly before arriving at the transfer stop.
         public var transferPlatform: String?
+        /// Wrapped in an array because a struct can't contain itself directly; see `followUp`.
+        private var followUpStorage: [Self]?
+
+        /// What to show once `followUpDate` has passed (e.g. the arrival after the departure), so the
+        /// widget can move on by itself when the countdown ends instead of freezing at 0:00 until the
+        /// app gets to run again. Nil at the final arrival.
+        public var followUp: Self? { followUpStorage?.first }
+
+        /// When the state moves on to `followUp`: at a departure, or a minute after an arrival (see
+        /// the hold in `base`). Used as the activity's stale date.
+        public var followUpDate: Date { isDeparture ? expectedTime : expectedTime.addingTimeInterval(60) }
 
         public init(lineName: String, nextStopName: String, plannedTime: Date, expectedTime: Date,
                     platform: String?, isDeparture: Bool, cancelled: Bool,
@@ -90,6 +101,14 @@ public struct TripActivityAttributes: ActivityAttributes {
 public extension TripActivityAttributes.ContentState {
     /// Derives the current state from a journey: next departure before boarding, next arrival while riding.
     static func from(_ journey: Journey, now: Date = .now) -> Self? {
+        guard var state = withWarning(journey, now: now) else { return nil }
+        if let next = withWarning(journey, now: state.followUpDate.addingTimeInterval(1)), next != state {
+            state.followUpStorage = [next]
+        }
+        return state
+    }
+
+    private static func withWarning(_ journey: Journey, now: Date) -> Self? {
         var state = base(journey, now: now)
         state?.warning = journey.connectionIssues().first(where: \.isBlocking)?.title
         return state

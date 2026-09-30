@@ -19,11 +19,11 @@ private func timeColor(_ state: TripActivityAttributes.ContentState) -> Color {
 struct TripLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: TripActivityAttributes.self) { context in
-            LockScreenView(attributes: context.attributes, state: context.state)
+            LockScreenView(attributes: context.attributes, state: context.shownState)
                 .activityBackgroundTint(Color.black.opacity(0.55))
                 .activitySystemActionForegroundColor(.white)
         } dynamicIsland: { context in
-            let state = context.state
+            let state = context.shownState
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     StopDelayLabel(state: state)
@@ -314,6 +314,14 @@ private struct TransferSideView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: alignment == .trailing ? .trailing : .leading)
+    }
+}
+
+extension ActivityViewContext where Attributes == TripActivityAttributes {
+    /// Once the content is stale its departure/arrival has passed without the app updating it, so
+    /// show what comes next rather than a countdown stuck at 0:00.
+    var shownState: TripActivityAttributes.ContentState {
+        isStale ? (state.followUp ?? state) : state
     }
 }
 

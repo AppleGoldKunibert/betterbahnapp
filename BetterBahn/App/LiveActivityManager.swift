@@ -26,10 +26,10 @@ final class LiveActivityManager {
         for activity in Activity<TripActivityAttributes>.activities where activity.attributes.journeyID != journey.id {
             await activity.end(nil, dismissalPolicy: .immediate)
         }
-        // Marks the content stale a minute after the moment it itself expects to change (the next
-        // departure/arrival), so the system flags a frozen activity instead of leaving it looking
-        // live if the app never gets a chance to refresh it in time.
-        let content = ActivityContent(state: state, staleDate: state.expectedTime.addingTimeInterval(60))
+        // Goes stale when the state itself expects to change (the next departure/arrival). The system
+        // re-renders the activity then, and the widget shows `state.followUp`, so it moves on even
+        // if the app doesn't get a chance to refresh it in time.
+        let content = ActivityContent(state: state, staleDate: state.followUpDate)
         if Activity<TripActivityAttributes>.activities.contains(where: { $0.attributes.journeyID == journey.id }) {
             for activity in Activity<TripActivityAttributes>.activities
             where activity.attributes.journeyID == journey.id && activity.content.state != state {
