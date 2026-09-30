@@ -64,14 +64,31 @@ public struct BahnJetztClient: Sendable {
 
     // MARK: Lookup
 
-    /// Live position of a leg's train. Only DB long-distance trains, since only those can be matched
-    /// by train number (a regional line's number in Transitous isn't the train number).
+    /// The train to look up in bahn.jetzt's list: long-distance trains by their number, regional
+    /// trains and S-Bahns by their run number (a regional line's number in Transitous isn't the
+    /// train number, so only lines with a run number can be matched).
+    public static func reference(for line: Line?) -> (category: String, number: String)? {
+        BahnDeClient.trainReference(for: line)
+            ?? BahnDeClient.regionalReference(for: line, products: [.regionalExpress, .regional, .suburban])
+    }
+
+    /// Whether bahn.jetzt could know this train at all.
+    public static func supports(_ line: Line?) -> Bool { reference(for: line) != nil }
+
+    /// Live position of a leg's train.
     /// - Returns: nil while the train isn't in bahn.jetzt's list of running trains.
     /// - Throws: `TransitError.rateLimited` while bahn.jetzt is refusing requests.
     public func position(for leg: Leg) async throws -> TrainPosition? {
-        guard let ref = BahnDeClient.trainReference(for: leg.line), let number = Int(ref.number) else { return nil }
+        try await position(of: leg.line, plannedDeparture: leg.departure.planned)
+    }
+
+    /// Live position of `line`'s run that departs (somewhere along its route) at `plannedDeparture`.
+    /// - Returns: nil while the train isn't in bahn.jetzt's list of running trains.
+    /// - Throws: `TransitError.rateLimited` while bahn.jetzt is refusing requests.
+    public func position(of line: Line?, plannedDeparture: Date) async throws -> TrainPosition? {
+        guard let ref = Self.reference(for: line), let number = Int(ref.number) else { return nil }
         let snapshot = try await snapshot()
-        guard let journey = Self.match(category: ref.category, number: number, departure: leg.departure.planned, in: snapshot.journeys),
+        guard let journey = Self.match(category: ref.category, number: number, departure: plannedDeparture, in: snapshot.journeys),
               let position = journey.position, position.count == 2 else { return nil }
         return TrainPosition(coordinate: Coordinate(latitude: position[1], longitude: position[0]),
                              time: snapshot.fetchedAt, speedKmh: journey.speed, source: "bahn.jetzt")
@@ -79,10 +96,14 @@ public struct BahnJetztClient: Sendable {
 
     /// The running journey for a train number. A number can appear twice around midnight (yesterday's
     /// late run still underway), so the run that started on the leg's day wins, then the day before.
+    /// Long-distance trains must match their category; regional ones only need to be regional too,
+    /// since feeds disagree on RE vs. RB (bahn.jetzt lists the "RE 22" Eifel-Express as RB).
     static func match(category: String, number: Int, departure: Date, in journeys: [Journey]) -> Journey? {
+        let longDistance = BahnDeClient.longDistanceCategories.contains(category.uppercased())
         let candidates = journeys.filter {
-            $0.details?.transportAtStart?.journeyNumber == number
-                && $0.details?.transportAtStart?.category?.uppercased() == category.uppercased()
+            guard $0.details?.transportAtStart?.journeyNumber == number,
+                  let other = $0.details?.transportAtStart?.category?.uppercased() else { return false }
+            return longDistance ? other == category.uppercased() : !BahnDeClient.longDistanceCategories.contains(other)
         }
         guard candidates.count > 1 else { return candidates.first }
         let days = [departure, departure.addingTimeInterval(-86_400)].map { BahnDeClient.berlinDay($0).replacing("-", with: "") }

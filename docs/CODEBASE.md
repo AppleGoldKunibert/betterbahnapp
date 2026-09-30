@@ -52,7 +52,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `JourneyReplanSheet` (replan from mid-journey).
 - `Features/Departures/` – `StationBoardView`/`BoardRow`, `TripView` (single train's stops),
   `CoachSequenceView` (Wagenreihung sheet, opened from `TrainFormationLabel`).
-- `Features/Map/` – `TravelMapView` heatmap of past trips (`TravelMapHeatmap`, railway tile overlay).
+- `Features/Map/` – `TravelMapView` heatmap of past trips (`TravelMapHeatmap`, railway tile overlay),
+  `LiveTrainMapView` (one train's live position on its route; `LiveTrainMapButton` shows up on legs and trips bahn.jetzt has).
 - `Features/Trips/TripsView.swift` – upcoming/past saved journeys, `SaveJourneyButton`.
 - `Features/Traewelling/` – `CheckinSheet`, `TraewellingLoginButton`.
 - `Features/Sharing/` – preview of `betterbahn://share` links and imported DB shares.
@@ -83,7 +84,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   has no coach sequence: it has DB's planned formation (`DB-plan`) for days ahead; bahn.de is only asked
   for departures within `BahnDeClient.formationLookahead` (12 h).
 - `Transit/BahnJetzt/` – live train positions from bahn.jetzt's `/api/journeys` (one shared list,
-  refreshed by `AppModel.followTrainPositions()` while the map is on screen).
+  refreshed by `AppModel.followTrainPositions()` while the map is on screen). Long-distance trains by
+  number, regional/S-Bahn by run number (`Line.tripNumber`).
 - `Transit/Transitous/` – MOTIS API client + DTOs (`M*` types). Station-name cleanup and
   deduplication of boards happen here.
 - `Transit/Timetables/` – official DB Timetables XML client (realtime overrides, messages).

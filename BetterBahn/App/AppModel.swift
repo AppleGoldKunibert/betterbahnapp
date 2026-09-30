@@ -377,17 +377,17 @@ final class AppModel {
     /// list of every running train (~250 KB), with no way to ask for fewer.
     static let positionRefreshIntervalSavingData: Duration = .seconds(60)
 
-    /// Latest position of every long-distance train on a saved journey that is running right now, keyed by train name.
+    /// Latest position of every train on a saved journey that is running right now, keyed by train name.
     private(set) var trainPositions: [String: LiveTrainPosition] = [:]
 
-    /// Fetches the position of each long-distance leg of an unfinished saved journey that is underway
+    /// Fetches the position of each train leg of an unfinished saved journey that is underway
     /// (plus 10 minutes either side, since departures and arrivals shift). All legs share one
     /// bahn.jetzt request, and nothing is requested while no train is running.
     func refreshTrainPositions() async {
         guard let bahnJetzt = provider.bahnJetzt else { return }
         let now = Date.now
         let legs = upcomingJourneys.flatMap(\.journey.transitLegs).filter { leg in
-            BahnDeClient.trainReference(for: leg.line) != nil && !leg.cancelled
+            BahnJetztClient.supports(leg.line) && !leg.cancelled
                 && leg.departure.best.addingTimeInterval(-600) <= now && now <= leg.arrival.best.addingTimeInterval(600)
         }
         guard !legs.isEmpty else {
@@ -416,14 +416,36 @@ final class AppModel {
     /// Keeps `trainPositions` fresh for as long as the calling task runs — the map, the only place
     /// positions are shown, runs this while it is on screen, so nothing is downloaded otherwise.
     func followTrainPositions() async {
+        await repeatingAtPositionInterval { await self.refreshTrainPositions() }
+    }
+
+    /// Runs `body` every `positionRefreshInterval` (or the data-saving interval on mobile data or in
+    /// Low Data Mode) until the calling task is cancelled.
+    private func repeatingAtPositionInterval(_ body: () async -> Void) async {
         let monitor = NWPathMonitor()
         monitor.start(queue: .global(qos: .utility))
         defer { monitor.cancel() }
         while !Task.isCancelled {
-            await refreshTrainPositions()
+            await body()
             let path = monitor.currentPath
             let interval = path.isExpensive || path.isConstrained ? Self.positionRefreshIntervalSavingData : Self.positionRefreshInterval
             try? await Task.sleep(for: interval)
+        }
+    }
+
+    /// Where one train is right now, from bahn.jetzt; nil while it isn't running (or not in its list).
+    func livePosition(of line: Line?, plannedDeparture: Date) async throws -> TrainPosition? {
+        guard let bahnJetzt = provider.bahnJetzt else { return nil }
+        return try await bahnJetzt.position(of: line, plannedDeparture: plannedDeparture)
+    }
+
+    /// Keeps reporting one train's position for as long as the calling task runs (the live map of a
+    /// single train). A failed refresh reports nothing, so the last position stays and turns stale.
+    func followPosition(of line: Line?, plannedDeparture: Date, update: (TrainPosition?) -> Void) async {
+        await repeatingAtPositionInterval {
+            do {
+                update(try await livePosition(of: line, plannedDeparture: plannedDeparture))
+            } catch {}
         }
     }
 

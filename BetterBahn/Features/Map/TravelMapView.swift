@@ -383,7 +383,7 @@ struct TravelMap: UIViewRepresentable {
     let runs: [SegmentHeatmap.Run]
     let version: Int
     let showRailwayLayer: Bool
-    /// Running ICEs of saved journeys, shown as train markers with speed and fix time in the callout.
+    /// Running trains of saved journeys, shown as train markers with speed and fix time in the callout.
     var trains: [LiveTrainPosition] = []
 
     func makeUIView(context: Context) -> MKMapView {

@@ -407,6 +407,7 @@ struct LegCard: View {
                             Text("Richtung \(direction)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }
                         TrainFormationLabel(leg: leg)
+                        LiveTrainMapButton(route: LiveTrainRoute(leg: leg))
                     }
                     Spacer()
                     TrainMessagesButton(messages: leg.messages)

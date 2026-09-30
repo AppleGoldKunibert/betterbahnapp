@@ -173,6 +173,7 @@ struct TripContent: View {
                             Label(op, systemImage: "building.2.fill").font(.caption).foregroundStyle(.tertiary)
                         }
                         TrainFormationLabel(trip: trip)
+                        LiveTrainMapButton(route: LiveTrainRoute(trip: trip))
                     }
                     Spacer()
                     TrainMessagesButton(messages: trip.messages)

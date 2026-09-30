@@ -1435,6 +1435,22 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         #expect(BahnJetztClient.match(category: "ICE", number: 693, departure: earlyNextDay, in: journeys)?.journeyId == "20260929-bbbb")
     }
 
+    /// Regional trains by their run number; RE vs. RB doesn't matter, but a long-distance train with
+    /// the same number never counts.
+    @Test func matchesRegionalTrainsByRunNumber() throws {
+        let journeys = try JSONDecoding.decoder.decode([BahnJetztClient.Journey].self, from: Data(Self.list.utf8))
+        let departure = try #require(JSONDecoding.parseISODate("2026-09-29T10:00:00Z"))
+        let re = Line(name: "RE 14a", number: "14", product: .regionalExpress, operatorName: nil, tripNumber: "17677")
+        let ref = try #require(BahnJetztClient.reference(for: re))
+        #expect(ref.category == "RE" && ref.number == "17677")
+        #expect(BahnJetztClient.match(category: "RB", number: 17677, departure: departure, in: journeys)?.journeyId == "20260929-65771c12")
+        #expect(BahnJetztClient.match(category: "RB", number: 693, departure: departure, in: journeys) == nil)
+        // Without a run number the line number would match some other train.
+        #expect(!BahnJetztClient.supports(Line(name: "RE 14a", number: "14", product: .regionalExpress, operatorName: nil)))
+        #expect(BahnJetztClient.supports(Line(name: "S 1", number: "1", product: .suburban, operatorName: nil, tripNumber: "7746")))
+        #expect(!BahnJetztClient.supports(Line(name: "U 2", number: "2", product: .subway, operatorName: nil, tripNumber: "12")))
+    }
+
     @Test func positionFromSharedList() async throws {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [BahnJetztListProtocol.self]
