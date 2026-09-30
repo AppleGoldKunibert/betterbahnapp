@@ -114,6 +114,11 @@ public final class CombinedProvider: TransitProvider {
         page.laterCursor = page.laterCursor.map { "\(page.source.rawValue):\($0)" }
         page.journeys = page.journeys.filter(query.allows)
         page.journeys = page.journeys.filter { journey in !journey.transitLegs.contains { Self.isFlixBus($0.line) } }
+        // bahn.de's own names beat Transitous' generic ones for cross-border trains, like on boards.
+        if let bahnDe {
+            let journeys = page.journeys
+            page.journeys = (try? await Self.withDeadline(.seconds(3)) { await bahnDe.correctingTrainNames(in: journeys) }) ?? journeys
+        }
         return page
     }
 
@@ -124,7 +129,7 @@ public final class CombinedProvider: TransitProvider {
         let filtered = entries.filter { !Self.isFlixBus($0.line) }
         // bahn.de's own names beat Transitous' generic ones for cross-border trains (see
         // `BahnDeClient.correctingTrainNames`); a slow bahn.de mustn't hold up the board for long.
-        guard kind == .departures, let bahnDe else { return filtered }
+        guard let bahnDe else { return filtered }
         return (try? await Self.withDeadline(.seconds(3)) { await bahnDe.correctingTrainNames(filtered, at: station) }) ?? filtered
     }
 

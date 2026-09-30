@@ -59,6 +59,18 @@ struct TimetablesStop {
     var arrival: TimetablesEvent?
     var departure: TimetablesEvent?
     var messages: [TimetablesMessage] = []
+    /// The line as passengers see it (`<ar>`/`<dp>`'s `l`, e.g. "RE1"). For private operators this
+    /// differs from `category`, which is then the operator's code instead (National Express's RE1 is
+    /// `c="NX"`, Arverio's RE9 `c="ARV"`, metronom's RE3 `c="ME"`).
+    var lineName: String?
+
+    /// Whether `category` (as taken from another provider's line name, e.g. "RE") names this train,
+    /// either as DB's own category or as the letters of its line name.
+    func isCategory(_ category: String) -> Bool {
+        let category = category.uppercased()
+        return self.category?.uppercased() == category
+            || lineName.flatMap(TimetablesClient.category(from:)) == category
+    }
 }
 
 /// Overlay to apply onto a `Leg` once a matching `TimetablesStop` was found.
@@ -174,13 +186,18 @@ public struct TimetablesClient: Sendable {
     /// planned time within `matchTolerance` of `time`. Starts from the scheduled `plan` entry (which
     /// always carries the planned platform, even when nothing has changed) and overlays whatever
     /// `fchg` (Gleisänderungen, delays, cancellations) currently reports for that same stop.
+    ///
+    /// `scheduleSuffices` is for callers after the platform only: then a failed `fchg` (a big
+    /// station's full change list is large and can time out) still returns the scheduled event, so
+    /// the planned Gleis shows instead of none at all.
     private func liveEvent(eva: String, category: String, number: String, time: Date,
-                            side: KeyPath<TimetablesStop, TimetablesEvent?>) async -> TimetablesEvent? {
+                            side: KeyPath<TimetablesStop, TimetablesEvent?>,
+                            scheduleSuffices: Bool = false) async -> TimetablesEvent? {
         guard let planned = try? await plan(eva: eva, around: time),
               let stop = Self.match(planned, category: category, number: number, plannedTime: time, side: side) else { return nil }
         // Without `fchg` there's no telling whether the train is late or even cancelled – treating
         // the bare schedule as "on time, running" would wipe out what the other provider knows.
-        guard let changes = try? await changes(eva: eva) else { return nil }
+        guard let changes = try? await changes(eva: eva) else { return scheduleSuffices ? stop[keyPath: side] : nil }
         var event = stop[keyPath: side]
         if let changed = changes[stop.id] {
             if let change = changed[keyPath: side] {
@@ -354,11 +371,11 @@ public struct TimetablesClient: Sendable {
                     var arrivalPlatform: PlatformInfo?
                     var departurePlatform: PlatformInfo?
                     if needsArrival, let time = stop.arrival?.planned,
-                       let event = await self.liveEvent(eva: eva, category: category, number: number, time: time, side: \.arrival) {
+                       let event = await self.liveEvent(eva: eva, category: category, number: number, time: time, side: \.arrival, scheduleSuffices: true) {
                         arrivalPlatform = Self.mergedPlatform(existing: stop.arrivalPlatform, event: event)
                     }
                     if needsDeparture, let time = stop.departure?.planned,
-                       let event = await self.liveEvent(eva: eva, category: category, number: number, time: time, side: \.departure) {
+                       let event = await self.liveEvent(eva: eva, category: category, number: number, time: time, side: \.departure, scheduleSuffices: true) {
                         departurePlatform = Self.mergedPlatform(existing: stop.departurePlatform, event: event)
                     }
                     return (index, arrivalPlatform, departurePlatform)
@@ -370,6 +387,44 @@ public struct TimetablesClient: Sendable {
             }
         }
         return trip
+    }
+
+    /// Fills in the departure/arrival platform of any of `journey`'s train legs that Transitous left
+    /// without one – whole feeds carry no track at all (e.g. every DB Regio NRW and National Express
+    /// train at Aachen Hbf) and others only now and then, for ICEs and RJs as much as regional trains –
+    /// using DB's own Timetables ("IRIS") schedule, as DB Navigator shows it.
+    public func fillMissingPlatforms(in journey: Journey) async -> Journey {
+        guard credentials.isConfigured else { return journey }
+        var journey = journey
+        await withTaskGroup(of: (Int, PlatformInfo?, PlatformInfo?).self) { group in
+            for index in journey.legs.indices {
+                let leg = journey.legs[index]
+                let needsDeparture = leg.departurePlatform?.best == nil
+                let needsArrival = leg.arrivalPlatform?.best == nil
+                guard needsDeparture || needsArrival, !leg.isWalking, let line = leg.line,
+                      let number = line.dispatchNumber, let category = Self.category(from: line.name) else { continue }
+                group.addTask {
+                    var departurePlatform: PlatformInfo?
+                    var arrivalPlatform: PlatformInfo?
+                    if needsDeparture, let eva = await self.eva(for: leg.origin),
+                       let event = await self.liveEvent(eva: eva, category: category, number: number, time: leg.departure.planned,
+                                                        side: \.departure, scheduleSuffices: true) {
+                        departurePlatform = Self.mergedPlatform(existing: leg.departurePlatform, event: event)
+                    }
+                    if needsArrival, let eva = await self.eva(for: leg.destination),
+                       let event = await self.liveEvent(eva: eva, category: category, number: number, time: leg.arrival.planned,
+                                                        side: \.arrival, scheduleSuffices: true) {
+                        arrivalPlatform = Self.mergedPlatform(existing: leg.arrivalPlatform, event: event)
+                    }
+                    return (index, departurePlatform, arrivalPlatform)
+                }
+            }
+            for await (index, departurePlatform, arrivalPlatform) in group {
+                if let departurePlatform { journey.legs[index].departurePlatform = departurePlatform }
+                if let arrivalPlatform { journey.legs[index].arrivalPlatform = arrivalPlatform }
+            }
+        }
+        return journey
     }
 
     /// Fills in a missing platform for any of `entries` – e.g. reported for Berlin Gesundbrunnen,
@@ -387,8 +442,8 @@ public struct TimetablesClient: Sendable {
                       let category = Self.category(from: entry.line.name) else { continue }
                 group.addTask {
                     let event = entry.kind == .arrivals
-                        ? await self.liveEvent(eva: eva, category: category, number: number, time: entry.time.planned, side: \.arrival)
-                        : await self.liveEvent(eva: eva, category: category, number: number, time: entry.time.planned, side: \.departure)
+                        ? await self.liveEvent(eva: eva, category: category, number: number, time: entry.time.planned, side: \.arrival, scheduleSuffices: true)
+                        : await self.liveEvent(eva: eva, category: category, number: number, time: entry.time.planned, side: \.departure, scheduleSuffices: true)
                     guard let event else { return (index, nil) }
                     return (index, Self.mergedPlatform(existing: entry.platform, event: event))
                 }
@@ -433,10 +488,9 @@ public struct TimetablesClient: Sendable {
             return all
         }
 
-        let wantedCategory = category?.uppercased()
         return stops
             .filter { stop in
-                (wantedCategory == nil || stop.category?.uppercased() == wantedCategory)
+                (category.map(stop.isCategory) ?? true)
                     && stop.number.map { Self.sameNumber($0, number) } == true
             }
             .compactMap { ($0.departure ?? $0.arrival)?.planned }
@@ -453,10 +507,22 @@ public struct TimetablesClient: Sendable {
         return letters.isEmpty ? nil : letters.uppercased()
     }
 
+    /// The stop in `stops` for train `category`+`number` whose planned `side` time is closest to
+    /// `plannedTime` (and within `matchTolerance`). A train whose category matches neither DB's own
+    /// category nor its line name still counts when its number and time do – the same number at the
+    /// same station within minutes is that train, however each feed brands it (e.g. an ÖBB "RJ" that
+    /// Transitous calls "ICE"). Before this, every private operator's train (NX, ARV, HLB, ME, VIA, …)
+    /// failed the lookup, so boards, trips and journeys showed no Gleis where Transitous had none.
     static func match(_ stops: [TimetablesStop], category: String, number: String, plannedTime: Date,
                        side: KeyPath<TimetablesStop, TimetablesEvent?>) -> TimetablesStop? {
+        let sameNumber = stops.filter { $0.number.map { Self.sameNumber($0, number) } == true }
+        let sameCategory = sameNumber.filter { $0.isCategory(category) }
+        return closest(sameCategory, to: plannedTime, side: side) ?? closest(sameNumber, to: plannedTime, side: side)
+    }
+
+    private static func closest(_ stops: [TimetablesStop], to plannedTime: Date,
+                                side: KeyPath<TimetablesStop, TimetablesEvent?>) -> TimetablesStop? {
         stops
-            .filter { ($0.category?.uppercased() == category) && $0.number.map { Self.sameNumber($0, number) } == true }
             .compactMap { stop -> (TimetablesStop, TimeInterval)? in
                 guard let planned = stop[keyPath: side]?.planned else { return nil }
                 return (stop, abs(planned.timeIntervalSince(plannedTime)))
@@ -495,19 +561,22 @@ enum TimetablesXMLParser {
         private var arrival: TimetablesEvent?
         private var departure: TimetablesEvent?
         private var messages: [TimetablesMessage] = []
+        private var lineName: String?
 
         func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?,
                     qualifiedName: String?, attributes: [String: String] = [:]) {
             switch elementName {
             case "s":
-                id = attributes["id"]; category = nil; number = nil; arrival = nil; departure = nil; messages = []
+                id = attributes["id"]; category = nil; number = nil; arrival = nil; departure = nil; messages = []; lineName = nil
             case "tl":
                 category = attributes["c"]
                 number = attributes["n"]
             case "ar":
                 arrival = Self.event(from: attributes)
+                lineName = lineName ?? attributes["l"]
             case "dp":
                 departure = Self.event(from: attributes)
+                lineName = lineName ?? attributes["l"]
             case "m":
                 guard id != nil, attributes["t"] == "d" || attributes["t"] == "q", attributes["del"] != "1",
                       let code = attributes["c"].flatMap({ Int($0) }) else { break }
@@ -522,7 +591,7 @@ enum TimetablesXMLParser {
             defer { self.id = nil }
             guard arrival != nil || departure != nil || !messages.isEmpty else { return }
             stops.append(TimetablesStop(id: id, category: category, number: number, arrival: arrival,
-                                        departure: departure, messages: messages))
+                                        departure: departure, messages: messages, lineName: lineName))
         }
 
         private static func event(from attributes: [String: String]) -> TimetablesEvent? {

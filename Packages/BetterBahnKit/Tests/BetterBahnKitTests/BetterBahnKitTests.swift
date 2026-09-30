@@ -513,6 +513,38 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         // (same tripId) must not show up twice.
         #expect(entries.filter { $0.tripId == "shared-trip" }.count == 1)
     }
+
+    /// Real-world Dresden Hbf: `arriveBy=true` alone makes Transitous search backwards from `time`,
+    /// so the arrivals board showed days of past arrivals instead of the next 90 minutes.
+    @Test func arrivalsBoardAsksForLaterArrivals() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [RecordingStopTimesProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let provider = TransitousProvider(http: HTTPClient(session: session))
+        let dresden = station("dd", "Dresden Hbf", source: .transitous)
+
+        _ = try await provider.board(.arrivals, at: dresden, date: .now, duration: 90, products: [.highSpeed])
+
+        let items = try #require(RecordingStopTimesProtocol.lastQuery.withLock { $0 })
+        #expect(items.first { $0.name == "arriveBy" }?.value == "true")
+        #expect(items.first { $0.name == "direction" }?.value == "LATER")
+    }
+}
+
+private final class RecordingStopTimesProtocol: URLProtocol, @unchecked Sendable {
+    static let lastQuery = Mutex<[URLQueryItem]?>(nil)
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let items = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
+        Self.lastQuery.withLock { $0 = items }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(#"{"stopTimes": []}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }
 
 /// Serves two different `/v5/stoptimes` fixtures depending on whether a `mode` query parameter
@@ -1231,6 +1263,52 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         #expect(corrected[0].line.alternateName == "ICE 171")
         #expect(corrected[0].line.number == "171")
         #expect(corrected[1] == entries[1])
+    }
+
+    /// Arrivals are matched against bahn.de's arrivals board, by arrival time.
+    @Test func takesTrainNamesFromBahnDeArrivalsBoard() throws {
+        let json = #"{"entries": [{"journeyId": "a", "zeit": "2026-09-30T09:07:00", "verkehrmittel": {"name": "RJ 171"}}]}"#
+        let board = try JSONDecoding.decoder.decode(BahnDeClient.Board.self, from: Data(json.utf8)).entries
+        let arrival = BoardEntry(kind: .arrivals, tripId: "ice-171", station: station("8010085", "Dresden Hbf"),
+                                 line: Line(name: "ICE 171", number: "171", product: .highSpeed, operatorName: nil),
+                                 otherEnd: "Hamburg Hbf", time: TimeInfo(planned: try #require(JSONDecoding.parseISODate("2026-09-30T07:07:00Z")), actual: nil),
+                                 platform: PlatformInfo(planned: "9", actual: nil), cancelled: false,
+                                 terminatesOrOriginatesHere: true, remarks: [], source: .transitous)
+
+        #expect(BahnDeClient.correctingTrainNames([arrival], using: board, kind: .arrivals).map(\.line.name) == ["RJ 171"])
+        // A departures board never renames arrivals.
+        #expect(BahnDeClient.correctingTrainNames([arrival], using: board).map(\.line.name) == ["ICE 171"])
+
+        let departure = try #require(JSONDecoding.parseISODate("2026-09-30T07:07:00Z"))
+        #expect(BahnDeClient.boardURL(eva: "8010085", at: departure, kind: .arrivals).path().hasSuffix("/reiseloesung/ankuenfte"))
+    }
+
+    /// Journey search legs get bahn.de's name too, from its board at the leg's origin.
+    @Test func takesTrainNamesFromBahnDeBoardForJourneyLegs() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HamburgBoardProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let bahnDe = BahnDeClient(http: HTTPClient(session: session), gate: BahnDeGate())
+
+        let departure = try #require(JSONDecoding.parseISODate("2026-09-30T03:34:00Z"))
+        func leg(_ name: String, _ number: String, product: Product = .highSpeed) -> Leg {
+            Leg(origin: station("8002549", "Hamburg Hbf"), destination: station("8010085", "Dresden Hbf"),
+                departure: TimeInfo(planned: departure, actual: nil),
+                arrival: TimeInfo(planned: departure.addingTimeInterval(4 * 3600), actual: nil),
+                departurePlatform: nil, arrivalPlatform: nil, tripId: name,
+                line: Line(name: name, number: number, product: product, operatorName: nil),
+                direction: "Dresden Hbf", isWalking: false, cancelled: false, stopovers: [], remarks: [],
+                source: .transitous)
+        }
+        let journeys = [Journey(legs: [leg("ICE 171", "171")], source: .transitous),
+                        Journey(legs: [leg("RE 5", "5", product: .regional)], source: .transitous)]
+
+        let corrected = await bahnDe.correctingTrainNames(in: journeys)
+
+        #expect(corrected[0].legs[0].line?.name == "RJ 171")
+        #expect(corrected[0].legs[0].line?.alternateName == "ICE 171")
+        #expect(corrected[1] == journeys[1])
     }
 
     @Test func requestURLs() throws {
@@ -2061,6 +2139,37 @@ private final class GesundbrunnenSearchProtocol: URLProtocol, @unchecked Sendabl
     override func stopLoading() {}
 }
 
+@Suite struct TimetablesMatchTests {
+    /// DB files private operators' trains under the operator's code (National Express's RE1 is
+    /// `c="NX"`), and an ÖBB Railjet can be "RJ" in DB's feed but "ICE" in Transitous'.
+    static let plan = TimetablesXMLParser.parse(Data("""
+    <timetable station="Aachen Hbf">
+      <s id="nx"><tl t="p" o="NXRE" c="NX" n="26836"/><ar pt="2609301507" pp="2" l="RE1"/></s>
+      <s id="rj"><tl t="p" o="81" c="RJ" n="171"/><dp pt="2609301530" pp="6"/></s>
+      <s id="re"><tl t="p" o="800" c="RE" n="171"/><dp pt="2609301800" pp="3" l="RE9"/></s>
+    </timetable>
+    """.utf8))
+
+    static func time(_ hour: Int, _ minute: Int) -> Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimetablesClient.berlin
+        return calendar.date(from: DateComponents(year: 2026, month: 9, day: 30, hour: hour, minute: minute))!
+    }
+
+    @Test func matchesPrivateOperatorByLineName() {
+        let stop = TimetablesClient.match(Self.plan, category: "RE", number: "26836", plannedTime: Self.time(15, 7), side: \.arrival)
+        #expect(stop?.id == "nx")
+        #expect(stop?.arrival?.plannedPlatform == "2")
+    }
+
+    @Test func matchesDifferentlyBrandedTrainByNumberAndTime() {
+        let stop = TimetablesClient.match(Self.plan, category: "ICE", number: "171", plannedTime: Self.time(15, 30), side: \.departure)
+        #expect(stop?.id == "rj")
+        #expect(TimetablesClient.match(Self.plan, category: "ICE", number: "172", plannedTime: Self.time(15, 30), side: \.departure) == nil)
+        #expect(TimetablesClient.match(Self.plan, category: "ICE", number: "171", plannedTime: Self.time(16, 30), side: \.departure) == nil)
+    }
+}
+
 @Suite struct TimetablesMessageTests {
     /// A `fchg` stop with a delay reason, a quality notice and a deleted message, as DB Navigator
     /// shows them under "Aktuelle Informationen".
@@ -2258,4 +2367,17 @@ private final class RE3318CancelledProtocol: RE3318Protocol, @unchecked Sendable
 
 private final class RE3318NoChangesProtocol: RE3318Protocol, @unchecked Sendable {
     override class var fchgPasewalk: String? { nil }
+}
+
+private final class HamburgBoardProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let body = Data(#"{"entries": [{"journeyId": "rj", "zeit": "2026-09-30T05:34:00", "verkehrmittel": {"name": "RJ 171"}}]}"#.utf8)
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }

@@ -134,10 +134,11 @@ extension BahnDeClient {
         return id
     }
 
-    static func boardURL(eva: String, at date: Date) -> URL {
+    static func boardURL(eva: String, at date: Date, kind: BoardKind = .departures) -> URL {
         // Starting a minute early so the train itself is on the board even at a full minute.
         let start = date.addingTimeInterval(-60)
-        return baseURL.appending(path: "reiseloesung/abfahrten").appending(queryItems: [
+        let path = kind == .departures ? "reiseloesung/abfahrten" : "reiseloesung/ankuenfte"
+        return baseURL.appending(path: path).appending(queryItems: [
             .init(name: "datum", value: berlinDay(start)),
             .init(name: "zeit", value: berlinTime(start)),
             .init(name: "ortExtId", value: eva),
@@ -179,43 +180,109 @@ extension BahnDeClient {
 
     // MARK: Train names
 
-    /// `entries` (a departure board) with every DB long-distance train renamed to what bahn.de's own
-    /// departure board calls it. For some cross-border trains Transitous only has DB's GTFS entry,
+    /// `entries` (a departure or arrival board) with every DB long-distance train renamed to what
+    /// bahn.de's own board of the same kind calls it. For some cross-border trains Transitous only has DB's GTFS entry,
     /// which brands them generically, e.g. the ČD Railjet "RJ 171" Hamburg–Dresden as "ICE 171".
     /// Unchanged if bahn.de can't be asked (blocked, offline).
     public func correctingTrainNames(_ entries: [BoardEntry], at station: Station) async -> [BoardEntry] {
-        let times = entries.filter { $0.kind == .departures && Self.trainReference(for: $0.line) != nil }.map(\.time.planned)
+        // A board is all departures or all arrivals; bahn.de's matching board has the same kind.
+        guard let kind = entries.first?.kind else { return entries }
+        let times = entries.filter { $0.kind == kind && Self.trainReference(for: $0.line) != nil }.map(\.time.planned)
         guard let first = times.min(), let last = times.max(), let eva = try? await evaNumber(for: station) else { return entries }
         // One bahn.de board covers about an hour; the app's boards are 90 minutes.
         var board: [Board.Entry] = []
         var start = first
         for _ in 0..<3 {
-            guard let page = try? await get(Self.boardURL(eva: eva, at: start), as: Board.self) else { break }
+            guard let page = try? await get(Self.boardURL(eva: eva, at: start, kind: kind), as: Board.self) else { break }
             board += page.entries
             guard let latest = page.entries.compactMap({ $0.zeit.flatMap(Self.parseBerlinTime) }).max(), latest < last else { break }
             start = latest.addingTimeInterval(60)
         }
-        return Self.correctingTrainNames(entries, using: board)
+        return Self.correctingTrainNames(entries, using: board, kind: kind)
     }
 
-    /// Renames each departure whose train number bahn.de lists at the same scheduled time (±2 min)
-    /// under another name. The Transitous name stays available as `alternateName`.
-    static func correctingTrainNames(_ entries: [BoardEntry], using board: [Board.Entry]) -> [BoardEntry] {
+    /// Renames each entry of `kind` whose train number bahn.de's board of the same kind lists at the
+    /// same scheduled time (±2 min) under another name. The Transitous name stays available as
+    /// `alternateName`.
+    static func correctingTrainNames(_ entries: [BoardEntry], using board: [Board.Entry], kind: BoardKind = .departures) -> [BoardEntry] {
         entries.map { entry in
-            guard entry.kind == .departures, let number = trainReference(for: entry.line)?.number,
-                  let match = board.first(where: { candidate in
-                      guard let name = candidate.verkehrmittel?.name, trainNumber(in: name) == number,
-                            let time = candidate.zeit.flatMap(parseBerlinTime) else { return false }
-                      return abs(time.timeIntervalSince(entry.time.planned)) <= 120
-                  }),
-                  let name = match.verkehrmittel?.name,
-                  normalizedTrainName(name) != normalizedTrainName(entry.line.name) else { return entry }
+            guard entry.kind == kind,
+                  let name = bahnDeName(for: entry.line, plannedDeparture: entry.time.planned, in: board) else { return entry }
             var corrected = entry
-            corrected.line.alternateName = entry.line.alternateName ?? entry.line.name
-            corrected.line.name = name
+            corrected.line = renamed(entry.line, to: name)
             return corrected
         }
     }
+
+    /// bahn.de's name for `line` departing (or, on an arrivals board, arriving) at `plannedDeparture`
+    /// (±2 min) on `board`, if it differs.
+    static func bahnDeName(for line: Line?, plannedDeparture: Date, in board: [Board.Entry]) -> String? {
+        guard let line, let number = trainReference(for: line)?.number,
+              let match = board.first(where: { candidate in
+                  guard let name = candidate.verkehrmittel?.name, trainNumber(in: name) == number,
+                        let time = candidate.zeit.flatMap(parseBerlinTime) else { return false }
+                  return abs(time.timeIntervalSince(plannedDeparture)) <= 120
+              }),
+              let name = match.verkehrmittel?.name,
+              normalizedTrainName(name) != normalizedTrainName(line.name) else { return nil }
+        return name
+    }
+
+    static func renamed(_ line: Line, to name: String) -> Line {
+        var line = line
+        line.alternateName = line.alternateName ?? line.name
+        line.name = name
+        return line
+    }
+
+    /// `journeys` with every DB long-distance leg renamed to what bahn.de's departure board at the
+    /// leg's origin calls the train (see `correctingTrainNames(_:at:)`). One board request per
+    /// distinct train and origin, cached for the day; unchanged legs if bahn.de can't be asked.
+    public func correctingTrainNames(in journeys: [Journey]) async -> [Journey] {
+        struct Key: Hashable { let station: Station; let planned: Date; let line: Line }
+        var keys = Set<Key>()
+        for leg in journeys.flatMap(\.legs) where !leg.isWalking && !leg.cancelled {
+            if let line = leg.line, Self.trainReference(for: line) != nil {
+                keys.insert(Key(station: leg.origin, planned: leg.departure.planned, line: line))
+            }
+        }
+        guard !keys.isEmpty else { return journeys }
+        var names: [Key: String] = [:]
+        await withTaskGroup(of: (Key, String?).self) { group in
+            for key in keys {
+                group.addTask { (key, await self.bahnDeName(for: key.line, at: key.station, plannedDeparture: key.planned)) }
+            }
+            for await (key, name) in group { if let name { names[key] = name } }
+        }
+        guard !names.isEmpty else { return journeys }
+        return journeys.map { journey in
+            var journey = journey
+            journey.legs = journey.legs.map { leg in
+                guard let line = leg.line, let name = names[Key(station: leg.origin, planned: leg.departure.planned, line: line)] else { return leg }
+                var leg = leg
+                leg.line = Self.renamed(line, to: name)
+                return leg
+            }
+            return journey
+        }
+    }
+
+    private func bahnDeName(for line: Line, at station: Station, plannedDeparture: Date) async -> String? {
+        let fetch: @Sendable () async throws -> String? = {
+            guard let eva = try await self.evaNumber(for: station) else { return nil }
+            let board = try await self.get(Self.boardURL(eva: eva, at: plannedDeparture), as: Board.self)
+            // "" for "same name" so that answer is cached too.
+            return Self.bahnDeName(for: line, plannedDeparture: plannedDeparture, in: board.entries) ?? ""
+        }
+        let key = "\(line.name)|\(station.id)|\(plannedDeparture.timeIntervalSince1970)"
+        let name = usesSharedCaches
+            ? try? await Self.trainNameCache.value(for: key, maxAge: 12 * 3600, fetch: fetch)
+            : try? await fetch()
+        guard let name, !name.isEmpty else { return nil }
+        return name
+    }
+
+    private static let trainNameCache = ExpiringCache<String?>()
 
     private func fetchJourneyStops(journeyId: String) async throws -> [JourneyStop] {
         try await get(Self.journeyURL(journeyId), as: JourneyDetails.self).halte.compactMap(JourneyStop.init)
