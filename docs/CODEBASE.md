@@ -33,7 +33,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 - `App/BetterBahnApp.swift` – `@main`, `AppDelegate` (registers BG task for ending Live
   Activities), `RootView` with 4 tabs: Verbindungen (`ConnectionsView`), Karte (`TravelMapView`),
   Abfahrten (`StationBoardView`), Einstellungen (`SettingsView`). Handles `onOpenURL`
-  (`DBShare.text(fromAppURL:)` → `ImportedJourneyView`, `JourneyShareLink` → `SharedJourneyPreviewView`)
+  (`DBShare.text(fromAppURL:)` → `ImportedJourneyView`, `JourneyShareLink` → `SharedJourneyPreviewView`, `LiveActivityLink` from tapping the Live Activity → that saved
+  journey via `AppModel.journeyToOpen` on the Verbindungen tab)
   and scene-phase refresh start/stop.
 - `App/AppModel.swift` – the single `@Observable` app state, injected via `.environment(model)`.
   Owns `CombinedProvider`, `TraewellingClient`, helpers (`TrainPicker`, `JourneyReplanner`,

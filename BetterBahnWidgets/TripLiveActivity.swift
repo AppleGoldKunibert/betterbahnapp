@@ -22,6 +22,7 @@ struct TripLiveActivity: Widget {
             LockScreenView(attributes: context.attributes, state: context.shownState)
                 .activityBackgroundTint(Color.black.opacity(0.55))
                 .activitySystemActionForegroundColor(.white)
+                .widgetURL(LiveActivityLink.url(journeyID: context.attributes.journeyID))
         } dynamicIsland: { context in
             let state = context.shownState
             return DynamicIsland {
@@ -120,6 +121,7 @@ struct TripLiveActivity: Widget {
                 }
             }
             .keylineTint(state.product.color)
+            .widgetURL(LiveActivityLink.url(journeyID: context.attributes.journeyID))
         }
     }
 }
