@@ -22,6 +22,7 @@ comments are English.
 | `Cloudflare/` | Worker that bounces the Träwelling OAuth callback to `betterbahn://oauth` (see its README). |
 | `Cloudflare/bahnde-proxy/` | Separate Worker (`betterbahn2`) proxying bahn.de's web API (`/web/api/…` paths), because bahn.de blocks Apple's URL loading stack (see its README). `BahnDeClient.baseURL` points at it. |
 | `ci_scripts/` | Xcode Cloud: `ci_post_clone.sh` writes the gitignored `DefaultCredentials.swift` from the workflow's secret env vars `DB_CLIENT_ID` / `DB_API_KEY`. |
+| `.github/workflows/` | GitHub Actions: `pr-build.yml` (macOS: Kit tests + unsigned app build on PRs touching code), `pr-secrets.yml` (Linux: gitleaks secret scan + guard against committing `DefaultCredentials.swift`), `sync-prod.yml`. |
 | `docs/transit-providers.md` | Why Transitous is the primary data source and fallback options. |
 
 Targets/schemes: `BetterBahn`, `BetterBahnWidgetsExtension`, `BetterBahnShareExtension`, `BetterBahnKit`.

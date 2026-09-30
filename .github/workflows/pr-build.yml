@@ -1,0 +1,49 @@
+# Builds the app (with widget and share extensions) and runs the BetterBahnKit tests on every PR.
+# macOS minutes count 10x against the free Actions quota of private repos, so this only runs when
+# code or project files change, cancels superseded runs and is capped by a timeout.
+name: Build & test
+
+on:
+  pull_request:
+    paths:
+      - "BetterBahn/**"
+      - "BetterBahnWidgets/**"
+      - "BetterBahnShare/**"
+      - "Packages/**"
+      - "Config/**"
+      - "BetterBahn.xcodeproj/**"
+      - ".github/workflows/pr-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # DefaultCredentials.swift is gitignored; the template compiles without DB Timetables keys.
+      - name: Use credentials template
+        run: |
+          dir=Packages/BetterBahnKit/Sources/BetterBahnKit/Transit/Timetables
+          cp "$dir/DefaultCredentials.swift.template" "$dir/DefaultCredentials.swift"
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Kit tests
+        run: swift test --package-path Packages/BetterBahnKit
+
+      - name: Build app
+        run: |
+          xcodebuild -project BetterBahn.xcodeproj -scheme BetterBahn \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build -quiet
