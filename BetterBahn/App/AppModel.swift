@@ -434,9 +434,9 @@ final class AppModel {
     }
 
     /// Where one train is right now, from bahn.jetzt; nil while it isn't running (or not in its list).
-    func livePosition(of line: Line?, plannedDeparture: Date) async throws -> TrainPosition? {
+    func livePosition(of route: LiveTrainRoute) async throws -> TrainPosition? {
         guard let bahnJetzt = provider.bahnJetzt else { return nil }
-        return try await bahnJetzt.position(of: line, plannedDeparture: plannedDeparture)
+        return try await bahnJetzt.position(of: route.line, plannedDeparture: route.plannedDeparture, route: route.hint)
     }
 
     /// Keeps reporting the positions of a journey's running trains for as long as the calling task
@@ -446,12 +446,11 @@ final class AppModel {
         let legs = legs.filter { !$0.isWalking && !$0.cancelled && BahnJetztClient.supports($0.line) }
         guard !legs.isEmpty else { return }
         await repeatingAtPositionInterval {
-            let running = legs.filter { LiveTrainRoute(leg: $0).mayBeRunning() }
+            let running = legs.map(LiveTrainRoute.init(leg:)).filter { $0.mayBeRunning() }
             guard !running.isEmpty else { return update([]) }
             var found: [LiveTrainPosition] = []
-            for leg in running {
-                guard let name = leg.line?.name,
-                      let position = try? await livePosition(of: leg.line, plannedDeparture: leg.departure.planned) else { continue }
+            for route in running {
+                guard let name = route.line?.name, let position = try? await livePosition(of: route) else { continue }
                 found.append(LiveTrainPosition(trainName: name, position: position))
             }
             update(found)
@@ -460,10 +459,10 @@ final class AppModel {
 
     /// Keeps reporting one train's position for as long as the calling task runs (the live map of a
     /// single train). A failed refresh reports nothing, so the last position stays and turns stale.
-    func followPosition(of line: Line?, plannedDeparture: Date, update: (TrainPosition?) -> Void) async {
+    func followPosition(of route: LiveTrainRoute, update: (TrainPosition?) -> Void) async {
         await repeatingAtPositionInterval {
             do {
-                update(try await livePosition(of: line, plannedDeparture: plannedDeparture))
+                update(try await livePosition(of: route))
             } catch {}
         }
     }

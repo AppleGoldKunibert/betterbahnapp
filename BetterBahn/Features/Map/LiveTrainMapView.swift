@@ -11,6 +11,8 @@ struct LiveTrainRoute: Hashable {
     var stops: [Stopover]
     /// Track geometry if known, else the stops joined by straight lines.
     var path: [Coordinate]
+    /// The train's final destination, to tell it from a foreign train with the same run number.
+    var destination: String?
     /// When the train can be running at all: nothing is asked for outside of it.
     var start: Date
     var end: Date
@@ -25,6 +27,7 @@ struct LiveTrainRoute: Hashable {
                         departurePlatform: nil, cancelled: false)]
             : leg.stopovers
         path = leg.geometry.flatMap { $0.isEmpty ? nil : $0 } ?? stops.compactMap(\.station.coordinate)
+        destination = leg.direction
         // The train is usually already underway before the leg starts, which is when it's most
         // interesting where it is.
         start = leg.departure.best.addingTimeInterval(-2 * 3600)
@@ -36,11 +39,14 @@ struct LiveTrainRoute: Hashable {
         stops = trip.stopovers
         plannedDeparture = trip.stopovers.lazy.compactMap(\.departure).first?.planned ?? .now
         path = trip.stopovers.compactMap(\.station.coordinate)
+        destination = trip.stopovers.last?.station.name
         start = (trip.stopovers.lazy.compactMap(\.departure).first?.best ?? .distantPast).addingTimeInterval(-10 * 60)
         end = (trip.stopovers.last?.arrival?.best ?? .distantFuture).addingTimeInterval(10 * 60)
     }
 
     var isSupported: Bool { BahnJetztClient.supports(line) }
+
+    var hint: BahnJetztClient.RouteHint { .init(destination: destination, path: path) }
 
     func mayBeRunning(at date: Date = .now) -> Bool { start <= date && date <= end }
 
@@ -95,7 +101,7 @@ struct LiveTrainIconTile: View {
             // Checked again now and then: a train only shows up in bahn.jetzt's list once it runs.
             while !Task.isCancelled {
                 if route.mayBeRunning() {
-                    available = (try? await model.livePosition(of: route.line, plannedDeparture: route.plannedDeparture)) != nil
+                    available = (try? await model.livePosition(of: route)) != nil
                     if available { return }
                 } else if Date.now > route.end {
                     return
@@ -179,7 +185,7 @@ struct LiveTrainMapView: View {
             }
         }
         .task(id: route) {
-            await model.followPosition(of: route.line, plannedDeparture: route.plannedDeparture) { new in
+            await model.followPosition(of: route) { new in
                 position = new
                 if following { center() }
             }

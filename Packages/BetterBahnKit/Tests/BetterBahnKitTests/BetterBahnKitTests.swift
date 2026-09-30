@@ -1470,6 +1470,28 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         #expect(!BahnJetztClient.supports(Line(name: "U 2", number: "2", product: .subway, operatorName: nil, tripNumber: "12")))
     }
 
+    /// A regional run number can belong to a train in another country: the match must head for the
+    /// same destination or be near the route.
+    @Test func regionalMatchMustFitTheRoute() throws {
+        let json = #"""
+        {"journeyId": "20260930-x", "position": [8.54, 47.37], "name": "RB 19170",
+         "details": {"destination": {"evaNumber": "8000096", "name": "Stuttgart Hbf"},
+                     "transportAtStart": {"category": "RB", "journeyNumber": 19170}}}
+        """#
+        let journey = try JSONDecoding.decoder.decode(BahnJetztClient.Journey.self, from: Data(json.utf8))
+        let here = Coordinate(latitude: 48.70, longitude: 9.10)
+        // Zürich S11 to Aarau, around Zürich: neither destination nor route fits a train near Stuttgart.
+        let zurich = BahnJetztClient.RouteHint(destination: "Aarau", path: [Coordinate(latitude: 47.378, longitude: 8.540),
+                                                                          Coordinate(latitude: 47.392, longitude: 8.051)])
+        #expect(!BahnJetztClient.isPlausible(journey, at: here, for: zurich))
+        // Same destination (spelled as Transitous does), even far from the leg.
+        #expect(BahnJetztClient.isPlausible(journey, at: here, for: .init(destination: "Stuttgart Hauptbahnhof", path: zurich.path)))
+        // Close to the route between two stops 60 km apart.
+        let route = [Coordinate(latitude: 48.40, longitude: 9.10), Coordinate(latitude: 48.94, longitude: 9.10)]
+        #expect(BahnJetztClient.isPlausible(journey, at: here, for: .init(destination: "Heilbronn Hbf", path: route)))
+        #expect(try #require(BahnJetztClient.distance(from: here, to: route)) < 100)
+    }
+
     @Test func positionFromSharedList() async throws {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [BahnJetztListProtocol.self]
