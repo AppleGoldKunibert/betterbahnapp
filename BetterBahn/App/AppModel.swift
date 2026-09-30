@@ -439,6 +439,25 @@ final class AppModel {
         return try await bahnJetzt.position(of: line, plannedDeparture: plannedDeparture)
     }
 
+    /// Keeps reporting the positions of a journey's running trains for as long as the calling task
+    /// runs (the journey map). All legs share one bahn.jetzt list, and nothing is fetched while none
+    /// of them may be running.
+    func followPositions(of legs: [Leg], update: ([LiveTrainPosition]) -> Void) async {
+        let legs = legs.filter { !$0.isWalking && !$0.cancelled && BahnJetztClient.supports($0.line) }
+        guard !legs.isEmpty else { return }
+        await repeatingAtPositionInterval {
+            let running = legs.filter { LiveTrainRoute(leg: $0).mayBeRunning() }
+            guard !running.isEmpty else { return update([]) }
+            var found: [LiveTrainPosition] = []
+            for leg in running {
+                guard let name = leg.line?.name,
+                      let position = try? await livePosition(of: leg.line, plannedDeparture: leg.departure.planned) else { continue }
+                found.append(LiveTrainPosition(trainName: name, position: position))
+            }
+            update(found)
+        }
+    }
+
     /// Keeps reporting one train's position for as long as the calling task runs (the live map of a
     /// single train). A failed refresh reports nothing, so the last position stays and turns stale.
     func followPosition(of line: Line?, plannedDeparture: Date, update: (TrainPosition?) -> Void) async {

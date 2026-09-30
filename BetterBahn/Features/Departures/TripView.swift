@@ -150,6 +150,7 @@ struct TripContent: View {
     var onSelectStop: ((Stopover) -> Void)?
     /// Tapping any stop time flips every stop between real-time and scheduled times — app-wide, and remembered.
     @AppStorage("showPlannedTimes") private var showPlannedTimes = false
+    @State private var sequenceRequest: BahnDeClient.FormationRequest?
 
     private var color: Color { trip.line?.product.color ?? .gray }
 
@@ -157,7 +158,8 @@ struct TripContent: View {
         VStack(spacing: 16) {
             Card {
                 HStack(spacing: 12) {
-                    IconTile(systemImage: trip.line?.product.symbolName ?? "tram.fill", color: color, size: 46)
+                    LiveTrainIconTile(route: LiveTrainRoute(trip: trip), systemImage: trip.line?.product.symbolName ?? "tram.fill",
+                                      color: color, size: 46)
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 8) {
                             Text(trip.line?.name ?? "Zug").font(.title3.weight(.bold))
@@ -173,10 +175,12 @@ struct TripContent: View {
                             Label(op, systemImage: "building.2.fill").font(.caption).foregroundStyle(.tertiary)
                         }
                         TrainFormationLabel(trip: trip)
-                        LiveTrainMapButton(route: LiveTrainRoute(trip: trip))
                     }
                     Spacer()
-                    TrainMessagesButton(messages: trip.messages)
+                    VStack(alignment: .trailing, spacing: 6) {
+                        TrainMessagesButton(messages: trip.messages)
+                        CoachSequenceButton(trip: trip)
+                    }
                 }
             }
 
@@ -201,6 +205,11 @@ struct TripContent: View {
             }
 
             ForEach(trip.remarks, id: \.self) { RemarkRow(text: $0) }
+        }
+        .sheet(isPresented: Binding(get: { sequenceRequest != nil }, set: { if !$0 { sequenceRequest = nil } })) {
+            if let sequenceRequest {
+                CoachSequenceView(request: sequenceRequest, trainName: trip.line?.name)
+            }
         }
     }
 
@@ -262,14 +271,39 @@ struct TripContent: View {
                             }
                         }
                         Spacer()
-                        PlatformBadge(platform: stop.departurePlatform?.best != nil ? stop.departurePlatform : stop.arrivalPlatform)
                     }
                     .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
                 .disabled(!interactive)
+
+                platformButton(stop)
             }
         }
+    }
+
+    /// The stop's platform; tapping it opens the Wagenreihung at that stop when bahn.de can have one.
+    @ViewBuilder
+    private func platformButton(_ stop: Stopover) -> some View {
+        let badge = PlatformBadge(platform: stop.departurePlatform?.best != nil ? stop.departurePlatform : stop.arrivalPlatform)
+        if let request = coachSequenceRequest(at: stop) {
+            Button {
+                sequenceRequest = request
+            } label: {
+                badge.contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Zeigt die Wagenreihung an diesem Halt")
+        } else {
+            badge
+        }
+    }
+
+    private func coachSequenceRequest(at stop: Stopover) -> BahnDeClient.FormationRequest? {
+        guard let ref = BahnDeClient.sequenceReference(for: trip.line), !stop.cancelled,
+              let time = (stop.departure ?? stop.arrival)?.planned,
+              (stop.departurePlatform ?? stop.arrivalPlatform)?.best != nil else { return nil }
+        return BahnDeClient.FormationRequest(category: ref.category, number: ref.number, station: stop.station, plannedDeparture: time)
     }
 
     private func select(_ index: Int) {

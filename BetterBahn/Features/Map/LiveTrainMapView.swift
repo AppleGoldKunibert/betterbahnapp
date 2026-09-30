@@ -50,43 +50,63 @@ struct LiveTrainRoute: Hashable {
     }
 }
 
-/// "Live-Karte" chip for a train bahn.jetzt currently has a position for. Stays hidden otherwise,
-/// and only asks while the train may be running.
-struct LiveTrainMapButton: View {
+/// A train's icon tile that doubles as the way into its live map: once bahn.jetzt has a position
+/// for the train, a small location badge sits on the tile and tapping it opens the map. Only asks
+/// while the train may be running.
+struct LiveTrainIconTile: View {
     let route: LiveTrainRoute
+    let systemImage: String
+    let color: Color
+    var size: CGFloat = 38
 
     @Environment(AppModel.self) private var model
     @State private var available = false
     @State private var showMap = false
 
     var body: some View {
-        // A ZStack rather than Group: `.task` never fires on a view that is empty.
-        ZStack(alignment: .leading) {
+        ZStack(alignment: .bottomTrailing) {
             if available {
                 Button {
                     showMap = true
                 } label: {
-                    InfoChip(text: "Live-Karte", systemImage: "location.fill", tint: .brand)
+                    tile
+                        .overlay(alignment: .bottomTrailing) {
+                            Image(systemName: "location.fill")
+                                .font(.system(size: size * 0.24, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: size * 0.46, height: size * 0.46)
+                                .background(Color.brand, in: .circle)
+                                .overlay { Circle().stroke(Color.card, lineWidth: 2) }
+                                .offset(x: size * 0.16, y: size * 0.16)
+                        }
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Live-Karte")
+            } else {
+                tile
             }
         }
         .sheet(isPresented: $showMap) {
             LiveTrainMapView(route: route)
         }
         .task(id: route) {
+            available = false
             guard route.isSupported else { return }
             // Checked again now and then: a train only shows up in bahn.jetzt's list once it runs.
-            while !Task.isCancelled, !available {
+            while !Task.isCancelled {
                 if route.mayBeRunning() {
                     available = (try? await model.livePosition(of: route.line, plannedDeparture: route.plannedDeparture)) != nil
+                    if available { return }
                 } else if Date.now > route.end {
                     return
                 }
-                if available { return }
                 try? await Task.sleep(for: .seconds(120))
             }
         }
+    }
+
+    private var tile: some View {
+        IconTile(systemImage: systemImage, color: color, size: size)
     }
 }
 
@@ -211,9 +231,6 @@ struct LiveTrainMapView: View {
                     }
                     .font(.caption)
                 }
-                Text("Position: bahn.jetzt")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

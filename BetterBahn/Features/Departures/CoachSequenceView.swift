@@ -4,21 +4,45 @@ import SwiftUI
 /// A train's coach sequence ("Wagenreihung") drawn along the platform: sectors on the left, coaches
 /// to scale with number, class and amenities, and the direction the train leaves in.
 struct CoachSequenceView: View {
-    let sequence: CoachSequence
-    let station: Station
+    let request: BahnDeClient.FormationRequest
     let trainName: String?
+    @State private var sequence: CoachSequence?
+
+    /// - Parameter sequence: already loaded by the caller; fetched here otherwise (e.g. from a stop's platform).
+    init(request: BahnDeClient.FormationRequest, trainName: String?, sequence: CoachSequence? = nil) {
+        self.request = request
+        self.trainName = trainName
+        _sequence = State(initialValue: sequence)
+    }
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppModel.self) private var model
+    @State private var loading = false
+    @State private var blocked = false
+
+    private var station: Station { request.station }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    header
-                    CoachSequenceDiagram(sequence: sequence)
-                    legend
+                if let sequence {
+                    VStack(alignment: .leading, spacing: 16) {
+                        header(sequence)
+                        CoachSequenceDiagram(sequence: sequence)
+                        legend(sequence)
+                    }
+                    .padding()
+                } else if loading {
+                    ProgressView().padding(.top, 60)
+                } else {
+                    ContentUnavailableView(
+                        "Keine Wagenreihung",
+                        systemImage: "train.side.front.car",
+                        description: Text(blocked ? "bahn.de ist gerade nicht erreichbar."
+                                                  : "Für diesen Halt gibt es (noch) keine Wagenreihung.")
+                    )
+                    .padding(.top, 40)
                 }
-                .padding()
             }
             .background(AppBackground())
             .navigationTitle("Wagenreihung")
@@ -29,16 +53,26 @@ struct CoachSequenceView: View {
                 }
             }
         }
+        .task {
+            guard sequence == nil else { return }
+            loading = true
+            defer { loading = false }
+            do {
+                sequence = try await model.coachSequence(for: request)
+            } catch TransitError.rateLimited {
+                blocked = true
+            } catch {}
+        }
     }
 
-    private var destination: String? {
+    private func destination(_ sequence: CoachSequence) -> String? {
         sequence.groups.first { $0.isRequestedTrain }?.destination
     }
 
-    private var header: some View {
+    private func header(_ sequence: CoachSequence) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             if let trainName {
-                Text([trainName, destination].compactMap(\.self).joined(separator: " → "))
+                Text([trainName, destination(sequence)].compactMap(\.self).joined(separator: " → "))
                     .font(.headline)
             }
             Text([station.displayName, sequence.platform.map { "Gleis \($0)" }].compactMap(\.self).joined(separator: " · "))
@@ -59,7 +93,7 @@ struct CoachSequenceView: View {
     }
 
     @ViewBuilder
-    private var legend: some View {
+    private func legend(_ sequence: CoachSequence) -> some View {
         let amenities = CoachSequence.Coach.Amenity.allCases.filter { amenity in
             sequence.coaches.contains { $0.amenities.contains(amenity) }
         }

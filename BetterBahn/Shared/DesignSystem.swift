@@ -205,8 +205,7 @@ struct LineBadge: View {
 
 /// Triebzug numbers and names of a train (e.g. "Tz 9457 „Bundesrepublik Deutschland“"). bahn.de's
 /// coach sequence first (it only has one in the coming hours); bahn.expert as fallback, which
-/// has the Tz once its data is live. With bahn.de's coach sequence, a button opens the
-/// Wagenreihung. Says so when bahn.de is refusing requests and nothing else helped.
+/// has the Tz once its data is live. Says so when bahn.de is refusing requests and nothing else helped.
 struct TrainFormationLabel: View {
     let request: BahnDeClient.FormationRequest?
     let line: Line?
@@ -226,49 +225,29 @@ struct TrainFormationLabel: View {
 
     @Environment(AppModel.self) private var model
     @State private var formation: TrainFormation?
-    @State private var sequence: CoachSequence?
     @State private var blocked = false
-    @State private var showSequence = false
 
     var body: some View {
         // A ZStack rather than Group: `.task` never fires on a view that is empty, and this one is
         // empty until the lookup it starts has finished.
         ZStack(alignment: .leading) {
-            VStack(alignment: .leading, spacing: 4) {
-                if let units = formation?.unitDescription {
-                    Label(units, systemImage: "tram.fill")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                } else if blocked {
-                    Label("Wagenreihung gerade nicht abrufbar", systemImage: "exclamationmark.triangle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                if let sequence, !sequence.coaches.isEmpty {
-                    Button {
-                        showSequence = true
-                    } label: {
-                        InfoChip(text: sequence.platform.map { "Wagenreihung · Gleis \($0)" } ?? "Wagenreihung",
-                                 systemImage: "train.side.front.car", tint: .brand)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-        .sheet(isPresented: $showSequence) {
-            if let sequence, let request {
-                CoachSequenceView(sequence: sequence, station: request.station, trainName: line?.name)
+            if let units = formation?.unitDescription {
+                Label(units, systemImage: "tram.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            } else if blocked {
+                Label("Wagenreihung gerade nicht abrufbar", systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .task(id: "\(line?.name ?? "")|\(date)|\(request?.station.id ?? "")") {
             formation = nil
-            sequence = nil
             blocked = false
             if let request {
                 do {
-                    sequence = try await model.coachSequence(for: request)
-                    formation = sequence?.formation
+                    formation = try await model.formation(for: request)
                 } catch TransitError.rateLimited {
                     blocked = true
                 } catch {}
@@ -278,6 +257,51 @@ struct TrainFormationLabel: View {
                 formation = fallback
                 blocked = false
             }
+        }
+    }
+}
+
+/// "Wagenreihung" chip for a train's header, shown once bahn.de has a coach sequence for it (the
+/// same request `TrainFormationLabel` makes, so it is only sent once). Opens the Wagenreihung sheet.
+struct CoachSequenceButton: View {
+    let request: BahnDeClient.FormationRequest?
+    let trainName: String?
+
+    init(leg: Leg) {
+        request = BahnDeClient.formationRequest(for: leg)
+        trainName = leg.line?.name
+    }
+
+    init(trip: Trip) {
+        request = BahnDeClient.formationRequest(for: trip)
+        trainName = trip.line?.name
+    }
+
+    @Environment(AppModel.self) private var model
+    @State private var sequence: CoachSequence?
+    @State private var showSequence = false
+
+    var body: some View {
+        // A ZStack rather than Group: `.task` never fires on a view that is empty.
+        ZStack {
+            if let sequence, !sequence.coaches.isEmpty {
+                Button {
+                    showSequence = true
+                } label: {
+                    InfoChip(text: "Wagenreihung", systemImage: "train.side.front.car", tint: .brand)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .sheet(isPresented: $showSequence) {
+            if let request {
+                CoachSequenceView(request: request, trainName: trainName, sequence: sequence)
+            }
+        }
+        .task(id: request) {
+            sequence = nil
+            guard let request else { return }
+            sequence = try? await model.coachSequence(for: request)
         }
     }
 }

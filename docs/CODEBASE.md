@@ -51,9 +51,10 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `JourneyDetailView` (+ `LegCard`, `TransferRow`, alternatives sheets), `JourneyMapView` (MapKit),
   `JourneyReplanSheet` (replan from mid-journey).
 - `Features/Departures/` – `StationBoardView`/`BoardRow`, `TripView` (single train's stops),
-  `CoachSequenceView` (Wagenreihung sheet, opened from `TrainFormationLabel`).
+  `CoachSequenceView` (Wagenreihung sheet, opened from `CoachSequenceButton` in train headers or a stop's platform in `TripContent`).
 - `Features/Map/` – `TravelMapView` heatmap of past trips (`TravelMapHeatmap`, railway tile overlay),
-  `LiveTrainMapView` (one train's live position on its route; `LiveTrainMapButton` shows up on legs and trips bahn.jetzt has).
+  `LiveTrainMapView` (one train's live position on its route, opened from `LiveTrainIconTile`, the train icon on
+  legs and trips bahn.jetzt has). `JourneyMapView` shows the journey's running trains too.
 - `Features/Trips/TripsView.swift` – upcoming/past saved journeys, `SaveJourneyButton`.
 - `Features/Traewelling/` – `CheckinSheet`, `TraewellingLoginButton`.
 - `Features/Sharing/` – preview of `betterbahn://share` links and imported DB shares.
