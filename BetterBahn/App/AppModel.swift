@@ -452,8 +452,19 @@ final class AppModel {
 
     @ObservationIgnored private var refreshLoop: Task<Void, Never>?
     @ObservationIgnored private var liveActivitySyncLoop: Task<Void, Never>?
+    @ObservationIgnored private var liveJourneyRefreshLoop: Task<Void, Never>?
 
-    /// Refreshes upcoming journeys and manual Träwelling check-ins every 5 minutes while the app is active.
+    /// When the journey in the Live Activity should be refreshed next (see
+    /// `LiveActivityRefreshSchedule`: every 2 minutes, around each arrival, every minute while
+    /// transferring). Nil if no journey is live.
+    var nextLiveJourneyRefresh: Date? {
+        guard let activeID = liveActivities.activeJourneyID,
+              let entry = upcomingJourneys.first(where: { $0.journey.id == activeID }) else { return nil }
+        return LiveActivityRefreshSchedule.nextRefresh(for: entry.journey, after: .now)
+    }
+
+    /// Refreshes upcoming journeys and manual Träwelling check-ins every 5 minutes while the app is
+    /// active, and the Live Activity's journey on its own, tighter schedule.
     func startRefreshing() {
         if refreshLoop == nil {
             refreshLoop = Task { [weak self] in
@@ -461,6 +472,17 @@ final class AppModel {
                     await self?.refreshSavedJourneys()
                     await self?.refreshManualCheckins()
                     try? await Task.sleep(for: .seconds(300))
+                }
+            }
+        }
+        if liveJourneyRefreshLoop == nil {
+            liveJourneyRefreshLoop = Task { [weak self] in
+                while !Task.isCancelled {
+                    let next = self?.nextLiveJourneyRefresh ?? .now.addingTimeInterval(LiveActivityRefreshSchedule.ridingInterval)
+                    try? await Task.sleep(for: .seconds(max(1, next.timeIntervalSinceNow)))
+                    guard !Task.isCancelled else { return }
+                    await self?.refreshLiveJourney()
+                    self?.syncLiveActivity()
                 }
             }
         }
@@ -479,6 +501,8 @@ final class AppModel {
     func stopRefreshing() {
         refreshLoop?.cancel()
         refreshLoop = nil
+        liveJourneyRefreshLoop?.cancel()
+        liveJourneyRefreshLoop = nil
         liveActivitySyncLoop?.cancel()
         liveActivitySyncLoop = nil
     }
@@ -529,30 +553,42 @@ final class AppModel {
         let refresher = journeyRefresher
         let horizon = Date.now.addingTimeInterval(24 * 3600)
         for entry in upcomingJourneys where (entry.journey.departure?.best ?? .distantFuture) < horizon {
-            let refreshed = await refresher.refresh(entry.journey)
-            guard let index = savedJourneys.firstIndex(where: { $0.id == entry.id }) else { continue }
-            var updated = savedJourneys[index]
-            updated.journey = refreshed
-            if settings.connectionWarnings {
-                let known = Set(updated.notifiedIssues ?? [])
-                let newIssues = refreshed.connectionIssues().filter { !known.contains($0.id) }
-                for issue in newIssues {
-                    await ConnectionNotifier.notify(issue, journey: refreshed)
-                }
-                // New delay reasons from DB ("Reparatur an einem Signal") get a notification too;
-                // plain notices (no WLAN, missing coach) only show as the yellow triangle.
-                let newReasons = refreshed.transitLegs.flatMap { leg in
-                    leg.messages.filter { $0.kind == .delay }.map { (id: "reason|\(leg.id)|\($0.text)", leg: leg, message: $0) }
-                }.filter { !known.contains($0.id) }
-                for reason in newReasons {
-                    await ConnectionNotifier.notify(reason.message, leg: reason.leg, id: reason.id)
-                }
-                updated.notifiedIssues = Array(known.union(newIssues.map(\.id)).union(newReasons.map(\.id)))
-            }
-            if updated != savedJourneys[index] { savedJourneys[index] = updated }
+            await refresh(entry, using: refresher)
         }
     }
 
+    /// Refreshes only the journey currently shown in the Live Activity (if any), so its realtime
+    /// data can be kept fresher than the other saved journeys' without refetching all of them.
+    func refreshLiveJourney() async {
+        guard let activeID = liveActivities.activeJourneyID,
+              let entry = upcomingJourneys.first(where: { $0.journey.id == activeID }) else { return }
+        await refresh(entry, using: journeyRefresher)
+    }
+
+    /// Fetches realtime data for one saved journey, stores it and sends notifications for new issues.
+    private func refresh(_ entry: SavedJourney, using refresher: JourneyRefresher) async {
+        let refreshed = await refresher.refresh(entry.journey)
+        guard let index = savedJourneys.firstIndex(where: { $0.id == entry.id }) else { return }
+        var updated = savedJourneys[index]
+        updated.journey = refreshed
+        if settings.connectionWarnings {
+            let known = Set(updated.notifiedIssues ?? [])
+            let newIssues = refreshed.connectionIssues().filter { !known.contains($0.id) }
+            for issue in newIssues {
+                await ConnectionNotifier.notify(issue, journey: refreshed)
+            }
+            // New delay reasons from DB ("Reparatur an einem Signal") get a notification too;
+            // plain notices (no WLAN, missing coach) only show as the yellow triangle.
+            let newReasons = refreshed.transitLegs.flatMap { leg in
+                leg.messages.filter { $0.kind == .delay }.map { (id: "reason|\(leg.id)|\($0.text)", leg: leg, message: $0) }
+            }.filter { !known.contains($0.id) }
+            for reason in newReasons {
+                await ConnectionNotifier.notify(reason.message, leg: reason.leg, id: reason.id)
+            }
+            updated.notifiedIssues = Array(known.union(newIssues.map(\.id)).union(newReasons.map(\.id)))
+        }
+        if updated != savedJourneys[index] { savedJourneys[index] = updated }
+    }
 
     var pastJourneys: [SavedJourney] {
         savedJourneys.filter(\.isFinished).reversed()
@@ -593,14 +629,16 @@ final class AppModel {
         Task { await liveActivities.show(journey) }
     }
 
-    /// Identifier for the background refresh task that ends the Live Activity once its journey
-    /// finishes while the app is backgrounded (see `scheduleLiveActivityBackgroundCheck`). Must
-    /// match an entry in `BGTaskSchedulerPermittedIdentifiers` in Info.plist.
+    /// Identifier for the background refresh task that keeps the Live Activity's journey up to date
+    /// and ends the activity once it finishes while the app is backgrounded (see
+    /// `scheduleLiveActivityBackgroundCheck`). Must match an entry in
+    /// `BGTaskSchedulerPermittedIdentifiers` in Info.plist.
     static let liveActivityBackgroundTaskID = "de.goldkunibert.BetterBahn.endLiveActivity"
 
-    /// Schedules a background wake-up for shortly after the currently live journey is expected to
-    /// finish, since `liveActivitySyncLoop` (which normally detects that) only runs in the
-    /// foreground. No-op if no journey is currently live. Called when the app backgrounds.
+    /// Schedules a background wake-up for the live journey's next refresh (or for shortly after it
+    /// is expected to finish, if that's sooner), since the refresh loops only
+    /// run in the foreground. iOS decides when the task actually runs, so this is a lower bound.
+    /// No-op if no journey is currently live. Called when the app backgrounds.
     func scheduleLiveActivityBackgroundCheck() {
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.liveActivityBackgroundTaskID)
         guard let activeID = liveActivities.activeJourneyID,
@@ -608,8 +646,9 @@ final class AppModel {
               let arrival = entry.journey.arrival?.best else { return }
         // Matches the 10-minute grace period in `SavedJourney.isFinished`, plus a small buffer so
         // the eligibility check has already flipped by the time the task runs.
-        let fireDate = arrival.addingTimeInterval(10 * 60 + 30)
-        guard fireDate > .now else { return }
+        let finishCheck = arrival.addingTimeInterval(10 * 60 + 30)
+        guard finishCheck > .now else { return }
+        let fireDate = min(finishCheck, LiveActivityRefreshSchedule.nextRefresh(for: entry.journey, after: .now))
         let request = BGAppRefreshTaskRequest(identifier: Self.liveActivityBackgroundTaskID)
         request.earliestBeginDate = fireDate
         try? BGTaskScheduler.shared.submit(request)
@@ -624,7 +663,7 @@ final class AppModel {
     /// afterwards — e.g. if realtime data pushed the arrival back, or another journey took over.
     func handleLiveActivityBackgroundTask(_ task: BGAppRefreshTask) {
         let work = Task {
-            await refreshSavedJourneys()
+            await refreshLiveJourney()
             syncLiveActivity()
             scheduleLiveActivityBackgroundCheck()
             task.setTaskCompleted(success: true)
