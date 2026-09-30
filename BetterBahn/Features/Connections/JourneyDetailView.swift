@@ -57,6 +57,8 @@ struct JourneyDetailView: View {
         }
         .task {
             await fillMissingPlatforms()
+            // Live data right away on opening, instead of only after the first pull-to-refresh.
+            await refreshRealtime()
             // Keep a saved journey's delays current while it's open.
             while !Task.isCancelled {
                 try? await Task.sleep(for: AppModel.realtimeRefreshInterval)

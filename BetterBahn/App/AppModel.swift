@@ -86,7 +86,7 @@ final class AppModel {
 
     var trainPicker: TrainPicker { TrainPicker(provider: provider) }
 
-    var journeyReplanner: JourneyReplanner { JourneyReplanner(provider: provider) }
+    var journeyReplanner: JourneyReplanner { JourneyReplanner(provider: provider, timetables: timetablesClient) }
 
     var dbShareImporter: DBShareImporter { DBShareImporter(provider: provider, bahnDe: provider.bahnDe ?? BahnDeClient()) }
 

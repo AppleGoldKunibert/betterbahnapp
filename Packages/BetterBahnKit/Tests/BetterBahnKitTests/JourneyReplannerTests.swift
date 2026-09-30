@@ -60,6 +60,21 @@ import Testing
         #expect(rebuilt.arrival?.planned == time(150))
     }
 
+    /// A route whose transfer today's delays already broke must not be offered.
+    @Test func continuationsDropTransfersBrokenByDelays() async throws {
+        var late = leg("RE 3", from: "X", to: "Y", depart: 70, arrive: 90)
+        late.arrival = TimeInfo(planned: time(90), actual: time(105))
+        let broken = Journey(legs: [late, leg("RB 4", from: "Y", to: "C", depart: 100, arrive: 130)], source: .bahnDe)
+        let fine = Journey(legs: [leg("RE 5", from: "X", to: "C", depart: 80, arrive: 140)], source: .bahnDe)
+        let mock = RoutingMockProvider()
+        mock.routes["X -> C"] = [broken, fine]
+
+        let found = try await JourneyReplanner(provider: mock).continuations(
+            from: station("X", "X"), arriving: time(60), options: ReplanOptions(destination: station("C", "C")))
+
+        #expect(found.map { $0.legs.first?.line?.name } == ["RE 5"])
+    }
+
     @Test func legEndingAtAnEarlierStopIsBuiltFromTheTripsStops() throws {
         let stops = ["A", "B", "C"].enumerated().map { index, name in
             Stopover(station: station(name, name),

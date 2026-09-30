@@ -28,13 +28,18 @@ public struct ReplanOptions: Sendable, Hashable {
 /// destination is searched with its own filters.
 public struct JourneyReplanner: Sendable {
     public let provider: any TransitProvider
+    /// DB's own live delays, laid over the routes found – Transitous' realtime for DB trains can lag
+    /// or be missing, which would otherwise suggest transfers that today's delays already broke.
+    public let timetables: TimetablesClient?
 
-    public init(provider: any TransitProvider) {
+    public init(provider: any TransitProvider, timetables: TimetablesClient? = nil) {
         self.provider = provider
+        self.timetables = timetables
     }
 
     /// Ways onwards from `origin` for someone arriving there at `arrival`, fastest first.
-    /// Routes that depart before the arrival (or are cancelled) are dropped.
+    /// Times are live (see `timetables`); routes that depart before the arrival, are cancelled or
+    /// contain a transfer the current delays make impossible are dropped.
     public func continuations(from origin: Station, arriving arrival: Date, options: ReplanOptions,
                               limit: Int = 8) async throws -> [Journey] {
         let departAfter = arrival.addingTimeInterval(TimeInterval(options.minTransferMinutes * 60))
@@ -52,8 +57,34 @@ public struct JourneyReplanner: Sendable {
                 results = results.filter { $0.transfers <= maxTransfers }
             }
         }
-        results = results.filter { ($0.departure?.best ?? .distantPast) >= arrival && !$0.isCancelled }
+        results = await withRealtime(results)
+        results = results.filter { journey in
+            (journey.departure?.best ?? .distantPast) >= arrival && !journey.isCancelled
+                && !journey.connectionIssues().contains(where: \.isBlocking)
+        }
         return Array(results.prefix(limit))
+    }
+
+    /// `journeys` with DB Timetables' live times, platforms and cancellations laid over each train,
+    /// in the same order. Unchanged without Timetables credentials.
+    public func withRealtime(_ journeys: [Journey]) async -> [Journey] {
+        guard let timetables else { return journeys }
+        return await withTaskGroup(of: (Int, Journey).self) { group in
+            for (index, journey) in journeys.enumerated() {
+                group.addTask {
+                    var updated = journey
+                    for (legIndex, leg) in journey.legs.enumerated() {
+                        if let override = await timetables.realtime(for: leg) {
+                            updated.legs[legIndex] = JourneyRefresher.apply(override, to: leg)
+                        }
+                    }
+                    return (index, updated)
+                }
+            }
+            var updated = journeys
+            for await (index, journey) in group { updated[index] = journey }
+            return updated
+        }
     }
 
     /// Puts a re-planned journey back together: everything before `legIndex` stays untouched, the
