@@ -857,7 +857,10 @@ struct JourneyReplanSheet: View {
                     requirements, from: exitStation, to: destination, date: departAfter)
                 resolvedTrainNames = plan.resolvedNames
                 breaksBoardingRules = plan.breaksBoardingRules
-                found = plan.journeys.filter { ($0.departure?.best ?? .distantPast) >= exitArrival }
+                found = await model.journeyReplanner.withRealtime(plan.journeys).filter { journey in
+                    (journey.departure?.best ?? .distantPast) >= exitArrival
+                        && !journey.connectionIssues().contains(where: \.isBlocking)
+                }
                 if onlyValidTicket {
                     // Don't leave the user with nothing if the pinned train itself isn't valid with the ticket.
                     let valid = found.filter(model.ticketFilter.isValid)
