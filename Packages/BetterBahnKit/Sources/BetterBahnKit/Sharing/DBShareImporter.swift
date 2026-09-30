@@ -38,7 +38,12 @@ public struct DBShareImporter: Sendable {
         var connection: SharedConnection?
         if let vbid { connection = try? await bahnDe.sharedConnection(vbid: vbid) }
         guard let found = connection ?? textConnection else { throw DBShareError.unreadable }
-        let shared = await locatingStations(of: found)
+        return try await journey(from: found)
+    }
+
+    /// Finds a connection known from elsewhere (e.g. a ticket's booked trains, see `DBTicket`).
+    public func journey(from connection: SharedConnection) async throws -> Journey {
+        let shared = await locatingStations(of: connection)
 
         if let journey = try? await searched(shared) { return journey }
         if !shared.legs.isEmpty, let journey = try? await rebuilt(shared) { return journey }
@@ -123,13 +128,19 @@ public struct DBShareImporter: Sendable {
     private func locatingStations(of shared: SharedConnection) async -> SharedConnection {
         var cache: [String: Station] = [:]
         func located(_ station: Station) async -> Station {
-            guard station.coordinate == nil, station.evaNumber == nil else { return station }
+            guard station.coordinate == nil else { return station }
             if let known = cache[station.name] { return known }
+            let fromDB = (try? await bahnDe.searchStations(station.name)) ?? []
+            // Known by EVA number (e.g. from a ticket): only the coordinates are missing.
+            if let eva = station.evaNumber {
+                let found = fromDB.first { $0.evaNumber == eva } ?? station
+                cache[station.name] = found
+                return found
+            }
             let target = Station.normalize(station.name)
             func exact(_ results: [Station]) -> Station? {
                 results.first { Station.normalize($0.name) == target || Station.normalize($0.displayName) == target }
             }
-            let fromDB = (try? await bahnDe.searchStations(station.name)) ?? []
             let results = exact(fromDB) == nil ? (try? await provider.searchStations(station.name)) ?? [] : []
             let found = exact(fromDB) ?? exact(results) ?? fromDB.first ?? results.first ?? station
             cache[station.name] = found

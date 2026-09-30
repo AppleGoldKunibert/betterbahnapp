@@ -44,6 +44,11 @@ struct SettingsView: View {
                             IconLabel(title: "Ausgeschlossene Anbieter", systemImage: "nosign", color: .orange)
                         }
                     }
+                    NavigationLink {
+                        TicketsListView()
+                    } label: {
+                        IconLabel(title: "Gespeicherte Tickets", systemImage: "ticket.fill", color: .brand)
+                    }
                 } header: {
                     Text("Ticket")
                 } footer: {

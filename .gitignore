@@ -77,3 +77,6 @@ Config/Local.xcconfig
 
 # Cloudflare Wrangler local state
 .wrangler/
+
+# Cloudflare Worker dependencies
+node_modules/

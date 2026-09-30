@@ -1,0 +1,21 @@
+{"gesamtreiseId":"00000000-0000-0000-0000-000000000021","status":"ABGESCHLOSSEN","email":"max@example.com","hauptadresse":{"vorname":"Max","nachname":"Mustermann"},
+"gesamtangebot":{"hinfahrt":{
+"angebote":[],
+"sitzplatzAngebote":[{
+ "angebot":{"angebotsTyp":"RESERVIERUNGSENTGELT","klasse":"KLASSE_1","konditionsAnzeigen":[{"textKurz":"3 Plätze","prioritaet":1},{"textKurz":"Stornierung ausgeschlossen","prioritaet":2}],"kontextTyp":"ENTGELT_KONTINGENT","name":"Reservierung aus Kontingent","reisende":[{"anzahl":3,"ermaessigungen":[{"art":"KEINE_ERMAESSIGUNG","klasse":"KLASSENLOS"}],"typ":"KIND"}]},
+ "ausReservierungsKontingent":true,"reservierungInklusive":false,"reservierungVerfuegbar":true,"reservierungspflicht":false,
+ "abschnitte":[
+  {"angebot":{"angebotsTyp":"RESERVIERUNGSANGEBOT","gueltigkeitsstrecke":{"abgangsbahnhofName":"Berlin Hbf","zielbahnhofName":"Hamburg-Altona"},"isStorniert":false,"klasse":"KLASSE_1","konditionsAnzeigen":[{"textKurz":"Sitzplatzreservierung","prioritaet":1},{"textKurz":"Stornierung ausgeschlossen","prioritaet":2}],"leistungsbuendelId":"RS1T2345","materialisierungsKanalNames":["WEB"],"name":"Sitzplatzreservierung","reisende":[{"anzahl":3,"ermaessigungen":[{"art":"KEINE_ERMAESSIGUNG","klasse":"KLASSENLOS"}],"typ":"FAMILIENKIND"}]},
+   "reservierung":{"abfahrtsBahnhof":"Berlin Hbf","platzeigenschaften":"Ruhebereich","wagen":[{"plaetze":[{"bisPlatz":"106","vonPlatz":"106"},{"bisPlatz":"103","vonPlatz":"103"},{"bisPlatz":"105","vonPlatz":"105"}],"wagennummer":"14"}],"zugname":"ICE 804","zugnummer":"804","zugtyp":"ICE"}},
+  {"angebot":{"angebotsTyp":"RESERVIERUNGSANGEBOT","gueltigkeitsstrecke":{"abgangsbahnhofName":"Hamburg-Altona","zielbahnhofName":"Berlin Hbf"},"isStorniert":false,"klasse":"KLASSE_1","konditionsAnzeigen":[{"textKurz":"Sitzplatzreservierung","prioritaet":1}],"leistungsbuendelId":"RS1T2345","materialisierungsKanalNames":["WEB"],"name":"Sitzplatzreservierung","reisende":[{"anzahl":3,"typ":"FAMILIENKIND"}]},
+   "reservierung":{"abfahrtsBahnhof":"Hamburg-Altona","platzeigenschaften":"3 Fenster, Großraum, WiFi","wagen":[{"plaetze":[{"bisPlatz":"101","vonPlatz":"101"},{"bisPlatz":"102","vonPlatz":"102"},{"bisPlatz":"105","vonPlatz":"105"}],"wagennummer":"262"}],"zugname":"RJ 179","zugnummer":"179","zugtyp":"RJ"}}
+ ]}],
+"stellplatzAngebote":[],"storniertStatus":"NICHT_STORNIERT",
+"verbindung":{"verbindungsAbschnitte":[
+ {"abfahrtsOrt":"Berlin Hbf","startHalt":{"extId":"8098160","name":"Berlin Hbf"},"zielHalt":{"extId":"8002553","name":"Hamburg-Altona"},"ankunftsOrt":"Hamburg-Altona","abfahrt":{"sollzeit":"2026-10-10T10:09:00"},"ankunft":{"sollzeit":"2026-10-10T12:23:00"},"halte":[{"name":"Berlin Hbf","extId":"8098160","gleis":"7"},{"name":"Hamburg-Altona","extId":"8002553"}],"verkehrsmittel":{"name":"ICE 804","nummer":"804","mittelText":"ICE 804","typ":"PUBLICTRANSPORT"}},
+ {"abfahrtsOrt":"Hamburg-Altona","startHalt":{"extId":"8002553","name":"Hamburg-Altona"},"zielHalt":{"extId":"8098160","name":"Berlin Hbf"},"ankunftsOrt":"Berlin Hbf","abfahrt":{"sollzeit":"2026-10-10T17:18:00"},"ankunft":{"sollzeit":"2026-10-10T19:23:00"},"halte":[{"name":"Hamburg-Altona","extId":"8002553","gleis":"12"},{"name":"Berlin Hbf","extId":"8098160"}],"verkehrsmittel":{"name":"RJ 179","nummer":"179","mittelText":"RJ 179","typ":"PUBLICTRANSPORT"}}
+]},
+"zeitlicheGueltigkeit":{"ersterGeltungszeitpunkt":"2026-10-10T08:09:00Z","letzterGeltungszeitpunkt":"2026-10-10T17:23:00Z"}},
+"leistungstyp":"REISEANGEBOT"},
+"ticketMaterialisierungsInfos":[{"leistungsbuendelId":"RS1T2345","materialisierungsArtId":"9"}],
+"dokumentAnzeige":[{"auftragsnummer":"123456789013","leistungsbuendelId":"RS1T2345","fahrtrichtung":"HINFAHRT","haltIntervall":{"abfahrtHalt":"Berlin Hbf","ankunftHalt":"Hamburg-Altona"}}]}

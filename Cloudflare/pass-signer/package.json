@@ -1,0 +1,12 @@
+{
+  "name": "betterbahn-pass-signer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test worker.test.mjs",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "node-forge": "^1.4.0"
+  }
+}
