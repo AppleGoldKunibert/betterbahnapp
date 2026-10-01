@@ -21,6 +21,7 @@ nonisolated enum TicketStore {
     }
 
     private static var listFile: URL { directory.appending(path: "tickets.json") }
+    private static var passesFile: URL { directory.appending(path: "passes.json") }
 
     private static func pdfFile(_ id: String) -> URL {
         directory.appending(path: id.filter { $0.isLetter || $0.isNumber || $0 == "-" } + ".pdf")
@@ -34,6 +35,16 @@ nonisolated enum TicketStore {
     static func save(_ tickets: [SavedTicket]) {
         guard let data = try? JSONEncoder().encode(tickets) else { return }
         try? data.write(to: listFile, options: [.atomic, .completeFileProtection])
+    }
+
+    static func loadPasses() -> [TravelPass] {
+        guard let data = try? Data(contentsOf: passesFile) else { return [] }
+        return (try? JSONDecoder().decode([TravelPass].self, from: data)) ?? []
+    }
+
+    static func savePasses(_ passes: [TravelPass]) {
+        guard let data = try? JSONEncoder().encode(passes) else { return }
+        try? data.write(to: passesFile, options: [.atomic, .completeFileProtection])
     }
 
     static func savePDF(_ data: Data, for id: String) {
@@ -116,5 +127,23 @@ extension AppModel {
     func removeTicket(_ ticket: SavedTicket) {
         tickets.removeAll { $0.id == ticket.id }
         TicketStore.removePDF(for: ticket.id)
+    }
+
+    // MARK: Passes
+
+    /// Reads a pass (e.g. the Deutschland-Ticket) from a screenshot of its barcode. The same pass
+    /// added again replaces the old one.
+    func addTravelPass(fromImage data: Data) async throws -> TravelPass {
+        // Scanning a full-size screenshot takes a moment, so it runs off the main thread.
+        let pass = try await Task.detached(priority: .userInitiated) {
+            guard let barcode = TicketBarcodeReader.barcode(inImage: data) else { throw TravelPass.ImportError.noBarcode }
+            return try TravelPass(barcode: barcode)
+        }.value
+        travelPasses = travelPasses.filter { !$0.isSamePass(as: pass) } + [pass]
+        return pass
+    }
+
+    func removeTravelPass(_ pass: TravelPass) {
+        travelPasses.removeAll { $0.id == pass.id }
     }
 }

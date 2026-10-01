@@ -36,6 +36,10 @@ final class AppModel {
     var tickets: [SavedTicket] {
         didSet { TicketStore.save(tickets) }
     }
+    /// Passes such as the Deutschland-Ticket, kept on this device only like `tickets`.
+    var travelPasses: [TravelPass] {
+        didSet { TicketStore.savePasses(travelPasses) }
+    }
     /// Saved journey to open on the Verbindungen tab (set when the Live Activity is tapped);
     /// `ConnectionsView` pushes it and clears this.
     var journeyToOpen: SavedJourney?
@@ -93,6 +97,7 @@ final class AppModel {
         savedJourneys = Storage.load(key: "savedJourneys") ?? []
         trackedManualCheckins = Storage.load(key: "trackedManualCheckins") ?? []
         tickets = TicketStore.load()
+        travelPasses = TicketStore.loadPasses()
         manualLiveActivityJourneyID = UserDefaults.standard.string(forKey: "manualLiveActivityJourneyID").flatMap(UUID.init)
         // The check-in history holds every trip's full track geometry and can run to many
         // megabytes, so it's decoded off the main thread instead of blocking the launch.
