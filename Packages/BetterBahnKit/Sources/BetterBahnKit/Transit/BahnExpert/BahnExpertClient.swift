@@ -179,7 +179,7 @@ public struct BahnExpertClient: Sendable {
         let own = sequence.groups.filter { $0.journeyNumber == journeyNumber }
         let groups = (own.isEmpty ? sequence.groups : own).map { group in
             TrainTypeLookup.Group(
-                seriesName: group.baureihe?.name, baureihe: group.baureihe?.baureihe,
+                seriesName: Self.seriesName(of: group, category: category), baureihe: group.baureihe?.baureihe,
                 unitNumber: sequenceResponse.isRealtime ? group.name.flatMap(BahnDeClient.unitNumber(from:)) : nil,
                 origin: group.originName, destination: group.destinationName, coachCount: group.coaches?.count ?? 0)
         }
@@ -195,6 +195,14 @@ public struct BahnExpertClient: Sendable {
     }
 
     // MARK: Helpers
+
+    /// bahn.expert's series name; for IC 2 Twindexx sets ("ICD2868") it has none, only the group name
+    /// says what it is (as in bahn.de's `model(constructionTypes:groupName:category:)`).
+    static func seriesName(of group: SequenceResponse.Sequence.Group, category: String) -> String? {
+        if let name = group.baureihe?.name { return name }
+        if category == "IC" || category == "EC", group.name?.hasPrefix("ICD") == true { return "IC 2 Twindexx" }
+        return nil
+    }
 
     /// Rejects malformed dates and impossible ones like 2026-02-31.
     static func isValidDay(_ day: String) -> Bool {
