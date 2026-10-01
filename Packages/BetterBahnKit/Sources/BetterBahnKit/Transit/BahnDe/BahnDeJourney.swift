@@ -90,8 +90,9 @@ extension BahnDeClient {
     /// stop it skipped — data Transitous doesn't carry at all (see `TimetablesClient` for the same gap
     /// on delays/platforms) since it only ever has the planned schedule. `nil` if `leg`'s train isn't a
     /// DB long-distance category; throws `TransitError.notFound` if bahn.de doesn't list it.
-    public func journeyStops(for leg: Leg) async throws -> [JourneyStop]? {
-        try await journeyStops(line: leg.line, station: leg.origin, plannedDeparture: leg.departure.planned)
+    /// `maxAge` is how old a cached answer may be; legs days ahead can do with an hourly look.
+    public func journeyStops(for leg: Leg, maxAge: TimeInterval = BahnDeClient.journeyStopsMaxAge) async throws -> [JourneyStop]? {
+        try await journeyStops(line: leg.line, station: leg.origin, plannedDeparture: leg.departure.planned, maxAge: maxAge)
     }
 
     /// The realtime stop sequence for `trip`'s train (see `journeyStops(for:)` above); `nil` under the
@@ -101,7 +102,8 @@ extension BahnDeClient {
         return try await journeyStops(line: trip.line, station: first.station, plannedDeparture: departure.planned)
     }
 
-    private func journeyStops(line: Line?, station: Station, plannedDeparture: Date) async throws -> [JourneyStop]? {
+    private func journeyStops(line: Line?, station: Station, plannedDeparture: Date,
+                              maxAge: TimeInterval = BahnDeClient.journeyStopsMaxAge) async throws -> [JourneyStop]? {
         guard let ref = Self.trainReference(for: line), let line else { return nil }
         let journeyKey = "\(ref.category) \(ref.number)|\(station.id)|\(plannedDeparture.timeIntervalSince1970)"
         guard usesSharedCaches else {
@@ -113,7 +115,7 @@ extension BahnDeClient {
         let id = try await Self.journeyIdCache.value(for: journeyKey, maxAge: 12 * 3600) {
             try await self.findJourneyId(line: line, station: station, plannedDeparture: plannedDeparture)
         }
-        return try await Self.journeyStopsCache.value(for: id, maxAge: Self.journeyStopsMaxAge) {
+        return try await Self.journeyStopsCache.value(for: id, maxAge: maxAge) {
             try await self.fetchJourneyStops(journeyId: id)
         }
     }
@@ -122,7 +124,7 @@ extension BahnDeClient {
     private static let journeyStopsCache = ExpiringCache<[JourneyStop]>()
     /// Matches `TimetablesClient.changesMaxAge`: short enough that a realtime refresh still sees
     /// changes soon, long enough that reopening the same view right after doesn't wait again.
-    static let journeyStopsMaxAge: TimeInterval = 4 * 60
+    public static let journeyStopsMaxAge: TimeInterval = 4 * 60
 
     /// bahn.de's journey ID for `line`, found on the departure board of `station` at its scheduled time.
     func findJourneyId(line: Line, station: Station, plannedDeparture: Date) async throws -> String {
@@ -296,6 +298,56 @@ extension BahnDeClient {
         let id = journeyId.addingPercentEncoding(withAllowedCharacters: allowed) ?? journeyId
         components.percentEncodedQuery = "journeyId=\(id)&poly=false"
         return components.url!
+    }
+
+    // MARK: Platforms
+
+    /// `leg` with every platform it lacks – at its start, its end and its stops – taken from bahn.de's
+    /// journey details. DB's feed in Transitous has none at all at some stations (e.g. Hamburg Hbf and
+    /// Hamburg-Altona) and DB Timetables only knows the next hours, while bahn.de has them days ahead.
+    /// A stop is matched by its planned time and place, so a station passed twice can't mix them up.
+    public static func fillingMissingPlatforms(in leg: Leg, from stops: [JourneyStop]) -> Leg {
+        var leg = leg
+        if leg.departurePlatform?.best == nil,
+           let stop = stop(in: stops, at: leg.origin, planned: leg.departure.planned, side: \.departure) {
+            leg.departurePlatform = stop.departurePlatform
+        }
+        if leg.arrivalPlatform?.best == nil,
+           let stop = stop(in: stops, at: leg.destination, planned: leg.arrival.planned, side: \.arrival) {
+            leg.arrivalPlatform = stop.arrivalPlatform
+        }
+        for index in leg.stopovers.indices {
+            let stopover = leg.stopovers[index]
+            if stopover.arrivalPlatform?.best == nil, let planned = stopover.arrival?.planned,
+               let stop = stop(in: stops, at: stopover.station, planned: planned, side: \.arrival) {
+                leg.stopovers[index].arrivalPlatform = stop.arrivalPlatform
+            }
+            if stopover.departurePlatform?.best == nil, let planned = stopover.departure?.planned,
+               let stop = stop(in: stops, at: stopover.station, planned: planned, side: \.departure) {
+                leg.stopovers[index].departurePlatform = stop.departurePlatform
+            }
+        }
+        return leg
+    }
+
+    /// Whether `leg` lacks a platform at its start, its end or any of its stops.
+    public static func lacksPlatforms(_ leg: Leg) -> Bool {
+        leg.departurePlatform?.best == nil || leg.arrivalPlatform?.best == nil
+            || leg.stopovers.contains { ($0.arrival != nil && $0.arrivalPlatform?.best == nil)
+                || ($0.departure != nil && $0.departurePlatform?.best == nil) }
+    }
+
+    /// The stop of `stops` at `station` whose `side` is planned at `planned`. Transitous and bahn.de
+    /// name stations differently ("S Spandau Bhf (Berlin)" / "Berlin-Spandau"), so being within 1 km
+    /// counts as the same place too – at the very same planned time that can only be this stop.
+    private static func stop(in stops: [JourneyStop], at station: Station, planned: Date,
+                             side: KeyPath<JourneyStop, TimeInfo?>) -> JourneyStop? {
+        stops.first { stop in
+            guard let time = stop[keyPath: side], abs(time.planned.timeIntervalSince(planned)) < 60 else { return false }
+            if matches(stop, station) || Station.normalize(stop.name) == Station.normalize(station.displayName) { return true }
+            guard let a = stop.coordinate, let b = station.coordinate else { return false }
+            return a.distance(to: b) < 1_000
+        }
     }
 
     // MARK: Zusatzhalt merging
