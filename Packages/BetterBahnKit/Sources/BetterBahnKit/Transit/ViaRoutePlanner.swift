@@ -19,7 +19,8 @@ public struct ViaWaypoint: Codable, Sendable, Hashable, Identifiable {
 }
 
 /// Routes a journey through up to a handful of waypoints by searching each leg separately and
-/// chaining them, enforcing every waypoint's minimum stay. Keeps a small beam of candidates per
+/// chaining them, enforcing every waypoint's minimum stay. Where a waypoint has no minimum stay and
+/// the same train continues through it, the two halves are shown as one leg. Keeps a small beam of candidates per
 /// leg (rather than always just the next departure) so the combined route approximates the
 /// overall fastest way through all the points, not merely the first possible one.
 public struct ViaRoutePlanner: Sendable {
@@ -85,8 +86,53 @@ public struct ViaRoutePlanner: Sendable {
         }
 
         let combined = beam.map { candidate in
-            Journey(legs: candidate.legs.flatMap(\.legs), source: candidate.legs.first?.source ?? .transitous)
+            var legs: [Leg] = []
+            for (index, part) in candidate.legs.enumerated() {
+                legs = index > 0 && via[index - 1].minStayMinutes == 0
+                    ? Self.joiningThroughTrain(legs, part.legs)
+                    : legs + part.legs
+            }
+            return Journey(legs: legs, source: candidate.legs.first?.source ?? .transitous)
         }
         return Array(combined.sorted { ($0.arrival?.best ?? .distantFuture) < ($1.arrival?.best ?? .distantFuture) }.prefix(limit))
+    }
+
+    /// Appends `next` to `legs`, folding the two legs at the seam into one when the same train simply
+    /// runs on through the via stop: without a minimum stay there there's no reason to get off, so
+    /// "Train 1 A → B, Train 1 B → C" becomes "Train 1 A → C" with B as an intermediate stop.
+    static func joiningThroughTrain(_ legs: [Leg], _ next: [Leg]) -> [Leg] {
+        guard let last = legs.last, let first = next.first, isThroughTrain(last, first) else { return legs + next }
+        var merged = last
+        merged.destination = first.destination
+        merged.arrival = first.arrival
+        merged.arrivalPlatform = first.arrivalPlatform
+        merged.direction = first.direction ?? last.direction
+        merged.cancelled = last.cancelled || first.cancelled
+        if var seam = last.stopovers.last, let onward = first.stopovers.first {
+            // The via stop keeps its arrival from the first half and gets its departure from the second.
+            seam.departure = onward.departure
+            seam.departurePlatform = onward.departurePlatform
+            seam.departureCancelled = onward.departureCancelled
+            merged.stopovers = last.stopovers.dropLast() + [seam] + first.stopovers.dropFirst()
+        } else {
+            merged.stopovers = []
+        }
+        merged.remarks = last.remarks + first.remarks.filter { !last.remarks.contains($0) }
+        merged.messages = last.messages + first.messages.filter { !last.messages.contains($0) }
+        switch (last.geometry, first.geometry) {
+        case let (a?, b?): merged.geometry = a + b
+        default: merged.geometry = nil
+        }
+        return legs.dropLast() + [merged] + next.dropFirst()
+    }
+
+    /// Whether `second` is the very train of `first` continuing from where `first` ends.
+    static func isThroughTrain(_ first: Leg, _ second: Leg) -> Bool {
+        guard !first.isWalking, !second.isWalking, first.destination.isSamePlace(as: second.origin) else { return false }
+        let dwell = second.departure.planned.timeIntervalSince(first.arrival.planned)
+        guard dwell >= 0, dwell <= 30 * 60 else { return false }
+        if let a = first.tripId, let b = second.tripId, a == b { return true }
+        guard let line = first.line, let other = second.line, let number = line.number else { return false }
+        return line.product == other.product && number == other.number
     }
 }

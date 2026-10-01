@@ -43,6 +43,9 @@ public struct TripActivityAttributes: ActivityAttributes {
         public var currentDelayMinutes: Int?
         /// Platform of the next train to board, set only shortly before arriving at the transfer stop.
         public var transferPlatform: String?
+        /// The planned platform when the one to go to (`platform` before boarding, `transferPlatform`
+        /// while riding) was changed to another track, shown struck through next to the new one.
+        public var replacedPlatform: String?
         /// Wrapped in an array because a struct can't contain itself directly; see `followUp`.
         private var followUpStorage: [Self]?
         /// Optional so activities started by older versions still decode; see `arrived`.
@@ -65,8 +68,9 @@ public struct TripActivityAttributes: ActivityAttributes {
                     platform: String?, isDeparture: Bool, cancelled: Bool,
                     progressStart: Date, progressEnd: Date, product: Product, warning: String? = nil,
                     transfer: TransferDetails? = nil, currentDelayMinutes: Int? = nil,
-                    transferPlatform: String? = nil) {
+                    transferPlatform: String? = nil, replacedPlatform: String? = nil) {
             self.transferPlatform = transferPlatform
+            self.replacedPlatform = replacedPlatform
             self.currentDelayMinutes = currentDelayMinutes
             self.warning = warning
             self.progressStart = progressStart
@@ -154,7 +158,8 @@ public extension TripActivityAttributes.ContentState {
                             expectedTime: leg.departure.best, platform: leg.departurePlatform?.best,
                             isDeparture: true, cancelled: leg.cancelled,
                             progressStart: previousArrival, progressEnd: leg.departure.best, product: product,
-                            transfer: transfer, currentDelayMinutes: leg.departure.delayMinutes ?? 0)
+                            transfer: transfer, currentDelayMinutes: leg.departure.delayMinutes ?? 0,
+                            replacedPlatform: Self.replacedPlatform(leg.departurePlatform))
             }
             // Stays on this leg for a minute after arrival: if the delay grows in that time we're
             // still on the train, so the state jumps back instead of already moving on. Never
@@ -162,13 +167,14 @@ public extension TripActivityAttributes.ContentState {
             var holdUntil = leg.arrival.best.addingTimeInterval(60)
             if index + 1 < legs.count { holdUntil = min(holdUntil, max(leg.arrival.best, legs[index + 1].departure.best)) }
             if now < holdUntil {
+                let showsTransfer = index + 1 < legs.count && leg.arrival.best.timeIntervalSince(now) <= 10 * 60
                 return Self(lineName: line, nextStopName: leg.destination.displayName, plannedTime: leg.arrival.planned,
                             expectedTime: leg.arrival.best, platform: leg.arrivalPlatform?.best,
                             isDeparture: false, cancelled: leg.cancelled,
                             progressStart: leg.departure.best, progressEnd: leg.arrival.best, product: product,
                             currentDelayMinutes: nextStopDelay(of: leg, now: now),
-                            transferPlatform: index + 1 < legs.count && leg.arrival.best.timeIntervalSince(now) <= 10 * 60
-                                ? legs[index + 1].departurePlatform?.best : nil)
+                            transferPlatform: showsTransfer ? legs[index + 1].departurePlatform?.best : nil,
+                            replacedPlatform: showsTransfer ? Self.replacedPlatform(legs[index + 1].departurePlatform) : nil)
             }
             previousArrival = leg.arrival.best
             previousLeg = leg
@@ -182,6 +188,12 @@ public extension TripActivityAttributes.ContentState {
     }
 
     /// Delay at the next stop the train has yet to reach; falls back to the leg's arrival.
+    /// The planned platform if the train now leaves from another track (not just another sector).
+    static func replacedPlatform(_ platform: PlatformInfo?) -> String? {
+        guard let platform, PlatformInfo.isDifferentTrack(platform.planned, platform.actual) else { return nil }
+        return platform.planned
+    }
+
     private static func nextStopDelay(of leg: Leg, now: Date) -> Int {
         let next = leg.stopovers.dropFirst().first { ($0.arrival?.best ?? .distantPast) >= now }
         return (next?.arrival ?? leg.arrival).delayMinutes ?? 0

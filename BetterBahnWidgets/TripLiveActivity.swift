@@ -36,7 +36,7 @@ struct TripLiveActivity: Widget {
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
                         if let platform = state.displayPlatform {
-                            PlatformChip(platform: platform)
+                            PlatformChip(platform: platform, replaced: state.replacedPlatform)
                         }
                     }
                     .padding(.trailing, 4)
@@ -146,7 +146,7 @@ struct LockScreenView: View {
                     }
                     Spacer(minLength: 4)
                     if let platform = state.displayPlatform {
-                        PlatformChip(platform: platform)
+                        PlatformChip(platform: platform, replaced: state.replacedPlatform)
                     }
                 }
             }
@@ -255,16 +255,24 @@ struct StopDelayLabel: View {
 
 struct PlatformChip: View {
     let platform: String
+    /// The planned platform after a change of track, struck through before the new one.
+    var replaced: String?
 
     var body: some View {
         HStack(spacing: 4) {
             Text("Gleis").font(.caption2.weight(.semibold)).opacity(0.75)
+            if let replaced {
+                Text(replaced).font(.caption2.weight(.semibold)).strikethrough().opacity(0.6).monospacedDigit()
+            }
             Text(platform).font(.caption.weight(.bold)).monospacedDigit()
+                .foregroundStyle(replaced == nil ? Color.white : Color.yellow)
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
         .background(.white.opacity(0.18), in: .capsule)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(replaced.map { "Gleis \(platform), statt \($0)" } ?? "Gleis \(platform)")
     }
 }
 

@@ -70,7 +70,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `DBOrderPage.fillScript` types the input into bahn.de's form, `fetchScript` then fetches order + ticket PDFs
   inside the page; the page is only shown if bahn.de asks for more, e.g. a captcha),
   `TicketView` (full-screen barcode at full brightness, PDF, `AddToWalletButton`, "Zugbindung aufgehoben"),
-  `TicketButton` (next to "Gespeichert" in `JourneyDetailView`), `TicketsListView` (Settings → Gespeicherte Tickets),
+  `TicketButton` (next to "Gespeichert" in `JourneyDetailView`, only once the journey has tickets), `AddTicketButton` ("Via Ticket hinzufügen" icon next to "Verbindungen suchen", opens `TicketLookupView`), `TicketsListView` (Settings → Gespeicherte Tickets, list + delete only),
   `SeatReservationViews` (`ReservationRow` in `LegCard` above "Mehr", read-only). Reservations come from the journey's
   tickets (`AppModel.reservations(for:)`) and only show on the leg whose train matches.
 - `Features/Trips/TripsView.swift` – upcoming/past saved journeys, `SaveJourneyButton`.
@@ -109,8 +109,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   deduplication of boards happen here.
 - `Transit/Timetables/` – official DB Timetables XML client (realtime overrides, messages).
   `DefaultCredentials.swift` is **gitignored**; copy from `.template`.
-- Logic: `JourneyReplanner`, `ConnectionCheck` (`ConnectionIssue`, `JourneyRefresher`),
-  `TrainRoutePlanner`, `ViaRoutePlanner`, `TrainPicker`, `TicketFilter`/`BC100Rules`, `BoardFilter`.
+- Logic: `JourneyReplanner`, `ConnectionCheck` (`ConnectionIssue`, `JourneyRefresher`), `PlatformChange`
+  (platform changes since the last refresh → push, ignores sectors/bus bays), `TrainRoutePlanner`,
+  `ViaRoutePlanner` (vias without minimum stay keep a through train as one leg), `TrainPicker`, `TicketFilter`/`BC100Rules`, `BoardFilter`.
 - `Traewelling/` – OAuth PKCE (`TraewellingAuth`, `TokenStore`), `TraewellingClient`
   (check-ins, history), `QuickTag`.
 - `Tickets/` – DB tickets by order number: `DBOrder` reads bahn.de's order JSON into `DBTicket`s (one per

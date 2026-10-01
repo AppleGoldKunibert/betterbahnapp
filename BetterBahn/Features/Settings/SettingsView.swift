@@ -73,7 +73,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Meine Reisen")
                 } footer: {
-                    Text("Wir sagen dir Bescheid, wenn ein Zug ausfällt oder du deinen Anschluss verpasst. Live-Aktivitäten zeigen deine nächste Reise auf dem Sperrbildschirm.")
+                    Text("Wir sagen dir Bescheid, wenn ein Zug ausfällt, das Gleis wechselt oder du deinen Anschluss verpasst. Live-Aktivitäten zeigen deine nächste Reise auf dem Sperrbildschirm.")
                 }
 
                 Section {

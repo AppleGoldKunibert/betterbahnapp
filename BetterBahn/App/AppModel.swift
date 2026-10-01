@@ -689,6 +689,7 @@ final class AppModel {
         let refreshed = await refresher.refresh(entry.journey)
         guard let index = savedJourneys.firstIndex(where: { $0.id == entry.id }) else { return }
         var updated = savedJourneys[index]
+        let previous = updated.journey
         updated.journey = refreshed
         if settings.connectionWarnings {
             let known = Set(updated.notifiedIssues ?? [])
@@ -704,7 +705,13 @@ final class AppModel {
             for reason in newReasons {
                 await ConnectionNotifier.notify(reason.message, leg: reason.leg, id: reason.id)
             }
-            updated.notifiedIssues = Array(known.union(newIssues.map(\.id)).union(newReasons.map(\.id)))
+            // Platform changes for departures and arrivals within the next two hours, incl. transfers.
+            let newPlatforms = refreshed.platformChanges(since: previous).filter { !known.contains($0.id) }
+            for change in newPlatforms {
+                await ConnectionNotifier.notify(change, journey: refreshed)
+            }
+            updated.notifiedIssues = Array(known.union(newIssues.map(\.id)).union(newReasons.map(\.id))
+                .union(newPlatforms.map(\.id)))
         }
         if updated != savedJourneys[index] { savedJourneys[index] = updated }
     }
@@ -1099,7 +1106,7 @@ final class AppSettings {
     }
 }
 
-/// Local notifications for broken connections and new delay reasons.
+/// Local notifications for broken connections, new delay reasons and platform changes.
 enum ConnectionNotifier {
     static func requestAuthorization() async {
         _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
@@ -1113,6 +1120,16 @@ enum ConnectionNotifier {
         content.sound = issue.isBlocking ? .defaultCritical : .default
         content.interruptionLevel = issue.isBlocking ? .timeSensitive : .active
         let request = UNNotificationRequest(identifier: issue.id + journey.id, content: content, trigger: nil)
+        try? await UNUserNotificationCenter.current().add(request)
+    }
+
+    static func notify(_ change: PlatformChange, journey: Journey) async {
+        let content = UNMutableNotificationContent()
+        content.title = change.title
+        content.body = change.message
+        content.sound = .default
+        content.interruptionLevel = change.isTight ? .timeSensitive : .active
+        let request = UNNotificationRequest(identifier: change.id + journey.id, content: content, trigger: nil)
         try? await UNUserNotificationCenter.current().add(request)
     }
 
