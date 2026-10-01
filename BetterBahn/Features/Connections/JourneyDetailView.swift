@@ -369,14 +369,24 @@ struct TransferRow: View {
 
             if from.arrivalPlatform?.best != nil || to.departurePlatform?.best != nil {
                 HStack(spacing: 6) {
-                    PlatformBadge(platform: from.arrivalPlatform)
+                    endpoint(platform: from.arrivalPlatform, of: from)
                     Image(systemName: "arrow.right").font(.caption2.weight(.bold)).foregroundStyle(.tertiary)
-                    PlatformBadge(platform: to.departurePlatform)
+                    endpoint(platform: to.departurePlatform, of: to)
                 }
             }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 4)
+    }
+
+    /// The platform, or the line (e.g. "Bus 825") when that leg has none, so the arrow never points at nothing.
+    @ViewBuilder
+    private func endpoint(platform: PlatformInfo?, of leg: Leg) -> some View {
+        if platform?.best != nil {
+            PlatformBadge(platform: platform)
+        } else {
+            LineBadge(line: leg.line, size: .small)
+        }
     }
 }
 

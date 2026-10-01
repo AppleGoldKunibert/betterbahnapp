@@ -102,16 +102,30 @@ public struct JourneyRefresher: Sendable {
             }
             // Neither Transitous nor DB Timetables above ever *inserts* a stop — only bahn.de's journey
             // details report a Zusatzhalt (an unscheduled stop the train additionally picked up today)
-            // at all, so it's the only way one ends up in `leg.stopovers` for the UI to show. Only
-            // asked for legs underway or departing within 12 hours, so refreshing many saved journeys
-            // doesn't flood bahn.de.
-            if !leg.stopovers.isEmpty, Self.isRunningSoon(leg), let bahnDe = provider.bahnDe,
-               let stops = try? await bahnDe.journeyStops(for: leg) {
-                leg.stopovers = BahnDeClient.inserting(stops, into: leg.stopovers)
+            // at all, so it's the only way one ends up in `leg.stopovers` for the UI to show. They also
+            // carry the platforms Transitous lacks at some stations (e.g. Hamburg Hbf), days before DB
+            // Timetables knows them. Asked for legs underway or departing within 12 hours, and hourly
+            // for legs up to a week ahead that miss a platform, so many saved journeys don't flood bahn.de.
+            let runningSoon = Self.isRunningSoon(leg)
+            if let bahnDe = provider.bahnDe, runningSoon || Self.needsPlatforms(leg),
+               let stops = try? await bahnDe.journeyStops(for: leg, maxAge: runningSoon ? BahnDeClient.journeyStopsMaxAge : 3600) {
+                if runningSoon, !leg.stopovers.isEmpty { leg.stopovers = BahnDeClient.inserting(stops, into: leg.stopovers) }
+                leg = BahnDeClient.fillingMissingPlatforms(in: leg, from: stops)
             }
             updated.legs[index] = leg
         }
+        // Journeys saved from results where bahn.de didn't answer in time keep Transitous' generic
+        // names (e.g. "ICE 175" for the Railjet "RJ 175"); bahn.de's answers are cached for the day.
+        if let bahnDe = provider.bahnDe, let named = await bahnDe.correctingTrainNames(in: [updated]).first {
+            updated = named
+        }
         return updated
+    }
+
+    /// A leg within the next week missing a platform somewhere, which bahn.de may know (see `refresh`).
+    static func needsPlatforms(_ leg: Leg, now: Date = .now) -> Bool {
+        !leg.isWalking && leg.departure.planned <= now.addingTimeInterval(7 * 24 * 3600) && leg.arrival.best >= now
+            && BahnDeClient.trainReference(for: leg.line) != nil && BahnDeClient.lacksPlatforms(leg)
     }
 
     /// A leg departing within the next 12 hours or still underway — the only ones a Zusatzhalt

@@ -86,7 +86,7 @@ private struct TicketPage: View {
                     .buttonStyle(.glass)
                     .controlSize(.large)
                 }
-                AddToWalletButton(ticket: ticket)
+                AddToWalletButton(payload: WalletPassPayload(ticket: ticket))
             }
         }
         .sheet(isPresented: $showPDF) {
@@ -112,7 +112,7 @@ private struct TicketPage: View {
     }
 
     @ViewBuilder private var barcode: some View {
-        if let image = Self.barcodeImage(ticket.barcode) {
+        if let image = ticket.barcode?.uiImage {
             Image(uiImage: image)
                 .interpolation(.none)
                 .resizable()
@@ -173,10 +173,14 @@ private struct TicketPage: View {
         .font(.subheadline)
     }
 
-    /// The code as cut out of DB's PDF; if only its bytes are known, the same bytes drawn again.
-    static func barcodeImage(_ barcode: DBTicket.Barcode?) -> UIImage? {
-        if let data = barcode?.image, let image = UIImage(data: data) { return image }
-        guard let payload = barcode?.payload else { return nil }
+}
+
+extension DBTicket.Barcode {
+    /// The code as cut out of DB's PDF or a screenshot; if only its bytes are known, the same bytes
+    /// drawn again.
+    var uiImage: UIImage? {
+        if let image, let uiImage = UIImage(data: image) { return uiImage }
+        guard let payload else { return nil }
         let filter = CIFilter.aztecCodeGenerator()
         filter.message = payload
         guard let output = filter.outputImage?.transformed(by: CGAffineTransform(scaleX: 10, y: 10)),
@@ -185,17 +189,16 @@ private struct TicketPage: View {
     }
 }
 
-/// Adds a ticket to Apple Wallet. The pass is signed by the `Cloudflare/pass-signer` Worker and
-/// carries the ticket's original barcode bytes.
+/// Adds a ticket or pass to Apple Wallet. The pass is signed by the `Cloudflare/pass-signer` Worker
+/// and carries the original barcode bytes; nil (no readable barcode) shows nothing.
 struct AddToWalletButton: View {
-    let ticket: DBTicket
+    let payload: WalletPassPayload?
     @State private var pass: PKPass?
     @State private var isLoading = false
     @State private var error: Error?
 
     var body: some View {
-        if PKAddPassesViewController.canAddPasses(),
-           let payload = WalletPassPayload(ticket: ticket) {
+        if PKAddPassesViewController.canAddPasses(), let payload {
             VStack(spacing: 8) {
                 WalletButton { Task { await add(payload) } }
                     .frame(height: 50)

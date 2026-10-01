@@ -1,6 +1,7 @@
+import CryptoKit
 import Foundation
 
-/// The `pass.json` of an Apple Wallet pass for a DB ticket. The `Cloudflare/pass-signer` Worker adds
+/// The `pass.json` of an Apple Wallet pass for a DB ticket or a pass like the Deutschland-Ticket. The `Cloudflare/pass-signer` Worker adds
 /// the pass type and team, the images and the signature – it never touches the barcode.
 public struct WalletPassPayload: Encodable, Sendable, Hashable {
     public struct Barcode: Encodable, Sendable, Hashable {
@@ -91,6 +92,45 @@ public struct WalletPassPayload: Encodable, Sendable, Hashable {
         boardingPass = pass
     }
 
+    /// A pass for a `TravelPass` such as the Deutschland-Ticket. Wallet draws the code from the
+    /// barcode's bytes alone, so nothing else from the screenshot ends up on the pass. The serial
+    /// number comes from those bytes: adding the same pass again replaces it in Wallet.
+    public init?(pass: TravelPass) {
+        guard let payload = pass.barcode.payload, !payload.isEmpty,
+              let message = String(data: payload, encoding: .isoLatin1) else { return nil }
+        serialNumber = "pass-" + SHA256.hash(data: payload).prefix(12).map { String(format: "%02x", $0) }.joined()
+        description = pass.name
+        // No text under the code: the barcode area shows the code only.
+        barcodes = [Barcode(message: message, altText: nil)]
+        expirationDate = pass.validUntil.map(JSONDecoding.isoString)
+
+        var fields = BoardingPass()
+        if let kind = pass.kindDescription {
+            fields.headerFields = [Field(key: "kind", label: "Art", value: kind)]
+        }
+        // Validity as the "route": from → until.
+        fields.primaryFields = [
+            Field(key: "from", label: pass.validFrom.map { "Ab " + $0.formatted(Self.berlinTime) } ?? "Ab",
+                  value: pass.validFrom.map { $0.formatted(Self.dateStyle) } ?? "–"),
+            Field(key: "until", label: pass.validUntil.map { "Bis " + $0.formatted(Self.berlinTime) } ?? "Bis",
+                  value: pass.validUntil.map { $0.formatted(Self.dateStyle) } ?? "–"),
+        ]
+        fields.secondaryFields = [Field(key: "offer", label: "Ticket", value: pass.name)]
+        if let travelClass = pass.classDescription {
+            fields.secondaryFields.append(Field(key: "class", label: "Klasse", value: travelClass))
+        }
+        if let holder = pass.holder?.name, !holder.isEmpty {
+            fields.auxiliaryFields = [Field(key: "holder", label: "Inhaber", value: holder)]
+        }
+        fields.backFields = [
+            Field(key: "birthDate", label: "Geburtsdatum", value: pass.holder?.birthDateDescription ?? ""),
+            Field(key: "issuer", label: "Ausgestellt von", value: pass.issuer ?? ""),
+            Field(key: "note", label: "Hinweis",
+                  value: "Der Barcode stammt unverändert aus deinem Ticket. Bei der Kontrolle gilt die Karte in der App, in der du sie gekauft hast."),
+        ].filter { !$0.value.isEmpty }
+        boardingPass = fields
+    }
+
     public func json() throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -99,6 +139,11 @@ public struct WalletPassPayload: Encodable, Sendable, Hashable {
 
     private static var dateStyle: Date.FormatStyle {
         Date.FormatStyle(date: .abbreviated, time: .omitted, locale: Locale(identifier: "de_DE"),
+                         timeZone: TimeZone(identifier: "Europe/Berlin")!)
+    }
+
+    private static var berlinTime: Date.FormatStyle {
+        Date.FormatStyle(date: .omitted, time: .shortened, locale: Locale(identifier: "de_DE"),
                          timeZone: TimeZone(identifier: "Europe/Berlin")!)
     }
 

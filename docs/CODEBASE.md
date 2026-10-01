@@ -70,7 +70,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `DBOrderPage.fillScript` types the input into bahn.de's form, `fetchScript` then fetches order + ticket PDFs
   inside the page; the page is only shown if bahn.de asks for more, e.g. a captcha),
   `TicketView` (full-screen barcode at full brightness, PDF, `AddToWalletButton`, "Zugbindung aufgehoben"),
-  `TicketButton` (next to "Gespeichert" in `JourneyDetailView`, only once the journey has tickets), `AddTicketButton` ("Via Ticket hinzufügen" icon next to "Verbindungen suchen", opens `TicketLookupView`), `TicketsListView` (Settings → Gespeicherte Tickets, list + delete only),
+  `TicketButton` (next to "Gespeichert" in `JourneyDetailView`, only once the journey has tickets), `AddTicketButton` ("Via Ticket hinzufügen" icon next to "Verbindungen suchen", opens `TicketLookupView`), `TicketsListView` (Settings → Gespeicherte Tickets, list + delete; also "Zeitkarten": passes like the Deutschland-Ticket added from a screenshot via `PhotosPicker`, shown in `TravelPassView` with `AddToWalletButton`),
   `SeatReservationViews` (`ReservationRow` in `LegCard` above "Mehr", read-only). Reservations come from the journey's
   tickets (`AppModel.reservations(for:)`) and only show on the leg whose train matches.
 - `Features/Trips/TripsView.swift` – upcoming/past saved journeys, `SaveJourneyButton`.
@@ -96,7 +96,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   station-search fallback, coach sequence → series/Tz/Taufname (`TrainModel`, `TrainsetNames`) and the
   full Wagenreihung (`CoachSequence`: coaches, classes, amenities, sectors, direction; also DB Regio RE/RB via
   `sequenceReference`),
-  board + `fahrt` → `JourneyStop`s for Zusatzhalte (`inserting`, `nextRegularStop`), and bahn.de's
+  board + `fahrt` → `JourneyStop`s for Zusatzhalte (`inserting`, `nextRegularStop`) and platforms Transitous lacks
+  (`fillingMissingPlatforms`, e.g. Hamburg Hbf; saved journeys via `JourneyRefresher`, which also applies the names below), and bahn.de's
   own train names for boards (departures and arrivals) and journey legs (`correctingTrainNames`, e.g. "RJ 171" that Transitous calls "ICE 171"). Responses are
   cached; a 403/429 pauses all bahn.de requests for 10 min (`BahnDeGate`).
 - `Transit/BahnExpert/` – bahn.expert, only as fallback for the train type (`TrainTypeLookup`) when bahn.de
@@ -118,7 +119,10 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   "Leistungsbündel"; partner tickets like Eurostar only noted; reservation-only bookings without a ticket become
   `DBTicket`s with `isReservationOnly`), `DBOrderPage` (page URL, fill/error/fetch scripts, result),
   `SeatReservation` (Wagen/Platz, matched to a leg by train name/number), `TicketBarcodeReader` (PDFKit + Vision: the Aztec's original bytes from the PDF – Vision's `payloadData` is
-  Aztec's internal encoding, the ISO-8859-1 string is the message), `WalletPassPayload` + `WalletPassClient`.
+  Aztec's internal encoding, the ISO-8859-1 string is the message), `WalletPassPayload` + `WalletPassClient`,
+  `UICBarcode` (UIC "#UT" barcode → FCB 3 via a minimal unaligned-PER reader: issuing date, travellers, first
+  open ticket/pass and its validity), `TravelPass` ("Zeitkarte" read from such a barcode, only its bytes are kept; a Deutschland-Ticket valid
+  longer than a month counts as a BahnCard 100's; `WalletPassPayload(pass:)` shows the validity as from → until). Passes are stored like tickets (`TicketStore`, `passes.json`).
   bahn.de's bot protection blocks the order API outside its page in a real browser (403), so there is no direct client.
 - `Sharing/` – `JourneyShareLink` (betterbahn://share encoding), `DBShare` + `DBShareImporter`
   (parse DB Navigator/bahn.de shared text, resolve via `betterbahn://import`).

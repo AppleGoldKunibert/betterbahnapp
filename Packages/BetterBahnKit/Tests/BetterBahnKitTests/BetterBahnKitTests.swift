@@ -1482,6 +1482,50 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         #expect(BahnDeClient.inserting(stops, into: merged) == merged)
     }
 
+    /// DB's feed in Transitous has no platforms at Hamburg Hbf and Hamburg-Altona at all; bahn.de's
+    /// journey details fill them in, matched by planned time and place even under another name.
+    @Test func fillsMissingPlatformsFromBahnDeJourney() throws {
+        let start = try #require(JSONDecoding.parseISODate("2026-10-02T07:16:00Z"))
+        func at(_ minutes: Double) -> TimeInfo { TimeInfo(planned: start.addingTimeInterval(minutes * 60), actual: nil) }
+        let altona = Station(id: "de-DELFI_de:02000:80953", name: "Hamburg-Altona", coordinate: Coordinate(latitude: 53.5527, longitude: 9.9352),
+                             evaNumber: nil, source: .transitous)
+        let hbf = Station(id: "de-DELFI_de:02000:10950", name: "Hamburg Hbf", coordinate: nil, evaNumber: nil, source: .transitous)
+        let spandau = Station(id: "de-DELFI_spandau", name: "S Spandau Bhf (Berlin)", coordinate: Coordinate(latitude: 52.5343, longitude: 13.1975),
+                              evaNumber: nil, source: .transitous)
+        let leg = Leg(origin: altona, destination: spandau, departure: at(0), arrival: at(100),
+                      departurePlatform: PlatformInfo(planned: nil, actual: nil), arrivalPlatform: PlatformInfo(planned: "5", actual: nil),
+                      tripId: "rj", line: Line(name: "RJ 175", number: "175", product: .highSpeed, operatorName: nil),
+                      direction: nil, isWalking: false, cancelled: false,
+                      stopovers: [Stopover(station: altona, arrival: nil, departure: at(0), arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+                                  Stopover(station: hbf, arrival: at(16), departure: at(18), arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+                                  Stopover(station: spandau, arrival: at(100), departure: nil, arrivalPlatform: PlatformInfo(planned: "5", actual: nil),
+                                           departurePlatform: nil, cancelled: false)],
+                      remarks: [], source: .transitous)
+        let stops = [
+            JourneyStop(evaNumber: "8002553", name: "Hamburg-Altona", coordinate: Coordinate(latitude: 53.5526, longitude: 9.9351),
+                        departure: at(0), departurePlatform: PlatformInfo(planned: "9", actual: nil)),
+            JourneyStop(evaNumber: "8002549", name: "Hamburg Hbf", arrival: at(16), departure: at(18),
+                        arrivalPlatform: PlatformInfo(planned: "8", actual: "7"), departurePlatform: PlatformInfo(planned: "8", actual: "7")),
+            JourneyStop(evaNumber: "8010404", name: "Berlin-Spandau", coordinate: Coordinate(latitude: 52.5344, longitude: 13.1974),
+                        arrival: at(100), arrivalPlatform: PlatformInfo(planned: "4", actual: nil)),
+        ]
+
+        let filled = BahnDeClient.fillingMissingPlatforms(in: leg, from: stops)
+
+        #expect(filled.departurePlatform?.best == "9")
+        #expect(filled.stopovers[0].departurePlatform?.best == "9")
+        #expect(filled.stopovers[1].arrivalPlatform?.best == "7")
+        #expect(filled.stopovers[1].departurePlatform?.best == "7")
+        // Platforms Transitous already has stay.
+        #expect(filled.arrivalPlatform?.best == "5")
+        #expect(filled.stopovers[2].arrivalPlatform?.best == "5")
+        #expect(BahnDeClient.lacksPlatforms(leg))
+        #expect(!BahnDeClient.lacksPlatforms(filled))
+        // Another time at the same station isn't this stop.
+        let later = stops.map { var stop = $0; stop.departure = stop.departure.map { TimeInfo(planned: $0.planned.addingTimeInterval(3600), actual: nil) }; return stop }
+        #expect(BahnDeClient.fillingMissingPlatforms(in: leg, from: later).departurePlatform?.best == nil)
+    }
+
     @Test func findsJourneyIdOnBoard() throws {
         let json = #"""
         {"entries": [

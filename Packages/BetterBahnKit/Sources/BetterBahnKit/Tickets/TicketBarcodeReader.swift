@@ -24,6 +24,13 @@ public enum TicketBarcodeReader {
         return nil
     }
 
+    /// The code on a photo or screenshot, e.g. of a Deutschland-Ticket in DB Navigator.
+    public static func barcode(inImage data: Data) -> DBTicket.Barcode? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
+        return barcode(in: image)
+    }
+
     static func barcode(in image: CGImage) -> DBTicket.Barcode? {
         let request = VNDetectBarcodesRequest()
         request.symbologies = [.aztec]
