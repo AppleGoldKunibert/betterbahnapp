@@ -2,6 +2,9 @@ import BetterBahnKit
 import SwiftUI
 
 struct SettingsView: View {
+    /// Served by the `Cloudflare/worker.mjs` Worker; also the privacy policy URL in App Store Connect.
+    static let privacyPolicyURL = URL(string: "https://betterbahn.kunibert88.workers.dev/datenschutz")!
+
     @Environment(AppModel.self) private var model
     @State private var user: TraewellingUser?
     @State private var isLoggedIn = false
@@ -113,8 +116,12 @@ struct SettingsView: View {
 
                 Section {
                     LabeledContent("Fahrplandaten", value: "Transitous")
+                    Link(destination: Self.privacyPolicyURL) {
+                        IconLabel(title: "Datenschutz", systemImage: "hand.raised.fill", color: .blue)
+                    }
+                    .foregroundStyle(.primary)
                 } footer: {
-                    Text("[Quellen](https://transitous.org/sources/) · [© OpenStreetMap](https://www.openstreetmap.org/copyright)")
+                    Text("[Quellen](https://transitous.org/sources/) · [© OpenStreetMap](https://www.openstreetmap.org/copyright)\n\nBetterBahn ist ein privates Projekt und steht in keiner Verbindung zur Deutschen Bahn AG.")
                 }
             }
             .navigationTitle("Einstellungen")

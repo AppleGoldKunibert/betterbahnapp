@@ -66,9 +66,10 @@ fastlane/test_output
 Packages/BetterBahnKit/Package.resolved
 .DS_Store
 
-# Local API credentials — copy DefaultCredentials.swift.template to DefaultCredentials.swift
-# and fill in your own key. Never commit the real file.
+# The DB Timetables key used to live in DefaultCredentials.swift; it's now a secret of the
+# bahn.de proxy Worker. Keep any old copy out of the repo.
 Packages/BetterBahnKit/Sources/BetterBahnKit/Transit/Timetables/DefaultCredentials.swift
+Config/DefaultCredentials.swift.old
 CLAUDE.md
 
 # Local signing overrides — copy Config/Local.xcconfig.example to Config/Local.xcconfig to build

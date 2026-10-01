@@ -156,11 +156,12 @@ final class AppModel {
         }
     }
 
-    /// Overlays fresher delay/platform data straight from DB onto legs, using the key BetterBahn
-    /// ships with (`TimetablesCredentials.shipped`); `nil` when the build has none configured.
+    /// Overlays fresher delay/platform data straight from DB onto legs, through BetterBahn's proxy
+    /// (which holds the API key). `nil` where the app can't prove it's genuine (no App Attest, e.g.
+    /// in the Simulator), since the proxy refuses those requests.
     var timetablesClient: TimetablesClient? {
-        guard TimetablesCredentials.shipped.isConfigured else { return nil }
-        return TimetablesClient(credentials: .shipped)
+        guard WorkerAuth.shared.isSupported else { return nil }
+        return TimetablesClient()
     }
 
     var journeyRefresher: JourneyRefresher { JourneyRefresher(provider: provider, timetables: timetablesClient) }

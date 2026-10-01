@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import forge from "node-forge";
-import { buildPass, crc32, handleRequest, isValidPayload, MAX_BODY_BYTES } from "./worker.mjs";
+import { TOKEN_HEADER, signToken } from "../shared/appattest.mjs";
+import { buildPass, crc32, handleRequest, isValidPayload, MAX_BODY_BYTES, ORGANIZATION_NAME } from "./worker.mjs";
 
 const base = "https://betterbahn-pass.example.workers.dev";
 
@@ -29,6 +30,8 @@ function testEnv() {
         PASS_CERT: forge.pki.certificateToPem(cert),
         PASS_KEY: forge.pki.privateKeyToPem(pass.privateKey),
         WWDR_CERT: forge.pki.certificateToPem(wwdr),
+        // Most tests run like the rollout, without App Attest tokens.
+        ALLOW_UNATTESTED: "true",
     };
 }
 const env = testEnv();
@@ -103,10 +106,12 @@ test("signs a pass with manifest, images and a detached signature", async () => 
 });
 
 test("keeps only known pass keys", async () => {
-    const response = await handleRequest(post(payload({ webServiceURL: "https://evil.example", passTypeIdentifier: "x" })), env);
+    const extra = { webServiceURL: "https://evil.example", passTypeIdentifier: "x", organizationName: "Deutsche Bahn" };
+    const response = await handleRequest(post(payload(extra)), env);
     const pass = JSON.parse(new TextDecoder().decode(unzip(new Uint8Array(await response.arrayBuffer())).get("pass.json")));
     assert.equal(pass.webServiceURL, undefined);
     assert.equal(pass.passTypeIdentifier, env.PASS_TYPE_ID);
+    assert.equal(pass.organizationName, ORGANIZATION_NAME);
 });
 
 test("rejects bad requests", async () => {
@@ -115,13 +120,15 @@ test("rejects bad requests", async () => {
     assert.equal((await handleRequest(post("{nope"), env)).status, 400);
     assert.equal((await handleRequest(post({ serialNumber: "1" }), env)).status, 400);
     assert.equal((await handleRequest(post("x".repeat(MAX_BODY_BYTES + 1)), env)).status, 413);
-    assert.equal((await handleRequest(post(payload()), {})).status, 503);
+    assert.equal((await handleRequest(post(payload()), { ALLOW_UNATTESTED: "true" })).status, 503);
 });
 
-test("checks the shared token when one is set", async () => {
-    const withToken = { ...env, PROXY_TOKEN: "secret" };
-    assert.equal((await handleRequest(post(payload()), withToken)).status, 401);
-    assert.equal((await handleRequest(post(payload(), { "X-BetterBahn-Token": "secret" }), withToken)).status, 200);
+test("requires an App Attest token", async () => {
+    const strict = { ...env, ALLOW_UNATTESTED: undefined, TOKEN_SECRET: "secret" };
+    const token = secret => signToken({ t: "a", kid: "key", exp: Math.floor(Date.now() / 1000) + 60 }, secret);
+    assert.equal((await handleRequest(post(payload()), strict)).status, 401);
+    assert.equal((await handleRequest(post(payload(), { [TOKEN_HEADER]: await token("other") }), strict)).status, 401);
+    assert.equal((await handleRequest(post(payload(), { [TOKEN_HEADER]: await token("secret") }), strict)).status, 200);
 });
 
 test("validates the payload shape", () => {

@@ -247,7 +247,7 @@ extension BahnDeClient {
     /// Every leg of the connection behind a "Verbindung ansehen" link's `vbid`.
     public func sharedConnection(vbid: String) async throws -> SharedConnection {
         let url = Self.baseURL.appending(path: "angebote/verbindung/\(vbid)")
-        let response = try await http.get(url, as: SharedConnectionResponse.self)
+        let response = try await get(url, as: SharedConnectionResponse.self)
         guard let legs = DBShare.legs(fromRecon: response.hinfahrtRecon),
               let first = legs.first, let last = legs.last
         else { throw TransitError.decoding("Verbindung \(vbid)") }

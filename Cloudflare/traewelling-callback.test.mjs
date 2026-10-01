@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import worker, { handleTraewellingCallback } from "./worker.mjs";
+import worker, { handlePrivacyPolicy, handleTraewellingCallback } from "./worker.mjs";
 
 const endpoint = "https://betterbahn.kunibert88.workers.dev/oauth/traewelling/callback";
 
@@ -41,7 +41,7 @@ test("rejects missing, ambiguous, and duplicated parameters", () => {
     }
 });
 
-test("leaves the existing association file and other routes alone", () => {
+test("leaves other routes alone", () => {
     for (const path of ["/.well-known/apple-app-site-association", "/apple-app-site-association", "/"]) {
         assert.equal(handleTraewellingCallback(new Request(new URL(path, endpoint))), null);
     }
@@ -53,17 +53,19 @@ test("rejects non-GET callbacks", () => {
     assert.equal(response.headers.get("Allow"), "GET");
 });
 
-test("Worker preserves the existing association response and fallback", async () => {
-    const response = await worker.fetch(new Request(new URL("/.well-known/apple-app-site-association", endpoint)));
-    assert.equal(response.status, 200);
-    assert.equal(response.headers.get("Content-Type"), "application/json");
-    assert.equal(response.headers.get("Cache-Control"), "public, max-age=300");
-    assert.deepEqual(await response.json(), {
-        applinks: { apps: [], details: [{
-            appID: "V65NR77D7S.de.goldkunibert.BetterBahn",
-            paths: ["/oauth/traewelling/callback"],
-        }] },
-    });
+test("Worker serves the privacy policy, the callback and a 404 fallback", async () => {
+    const privacy = await worker.fetch(new Request(new URL("/datenschutz", endpoint)));
+    assert.equal(privacy.status, 200);
+    assert.equal(privacy.headers.get("Content-Type"), "text/html; charset=utf-8");
+    assert.match(await privacy.text(), /keiner Verbindung zur Deutschen Bahn AG/);
+    // The association file was never used (the login goes through betterbahn://) and is gone.
+    assert.equal((await worker.fetch(new Request(new URL("/.well-known/apple-app-site-association", endpoint)))).status, 404);
     assert.equal((await worker.fetch(new Request(new URL("/unknown", endpoint)))).status, 404);
     assert.equal((await worker.fetch(new Request(endpoint + "?code=test&state=test"))).status, 302);
+});
+
+test("privacy policy answers GET and HEAD only", () => {
+    assert.equal(handlePrivacyPolicy(new Request(new URL("/datenschutz", endpoint), { method: "POST" })).status, 405);
+    assert.equal(handlePrivacyPolicy(new Request(new URL("/datenschutz", endpoint), { method: "HEAD" })).status, 200);
+    assert.equal(handlePrivacyPolicy(new Request(endpoint)), null);
 });

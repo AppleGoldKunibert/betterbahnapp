@@ -1,19 +1,5 @@
 import Foundation
 
-/// Credentials for the official DB "Timetables" API (developers.deutschebahn.com, API Marketplace,
-/// free plan), the classic IRIS-based feed also used by e.g. bahn.de's own delay data.
-public struct TimetablesCredentials: Codable, Sendable, Equatable {
-    public var clientID: String
-    public var apiKey: String
-
-    public init(clientID: String, apiKey: String) {
-        self.clientID = clientID
-        self.apiKey = apiKey
-    }
-
-    public var isConfigured: Bool { !clientID.isEmpty && !apiKey.isEmpty }
-}
-
 /// One `<ar>`/`<dp>` (arrival/departure) side of a stop, from either a `plan` response (planned
 /// time/platform) or a `fchg` response (actual time/platform, cancellation).
 struct TimetablesEvent {
@@ -95,19 +81,22 @@ public struct TimetablesLegOverride: Sendable {
 /// looks up that same `id` in `fchg` for whatever changed. Used to overlay onto legs that already
 /// came from another provider, not as a replacement for routing.
 public struct TimetablesClient: Sendable {
-    public static let baseURL = URL(string: "https://apis.deutschebahn.com/db-api-marketplace/apis/timetables/v1")!
+    /// DB's Timetables API (API Marketplace) through the `Cloudflare/bahnde-proxy` Worker, which adds
+    /// the API key (a Worker secret, never in the app) and only answers the genuine app (`WorkerAuth`).
+    public static let baseURL = URL(string: "https://betterbahn2.kunibert88.workers.dev/timetables/v1")!
     /// A stop only counts as a match when its planned time is this close to the leg's.
     static let matchTolerance: TimeInterval = 180
     static let berlin = TimeZone(identifier: "Europe/Berlin")!
 
     let http: HTTPClient
-    let credentials: TimetablesCredentials
     let bahnDe: BahnDeClient
+    let auth: WorkerAuth?
 
-    public init(credentials: TimetablesCredentials, http: HTTPClient = HTTPClient(timeout: 6), bahnDe: BahnDeClient = BahnDeClient()) {
-        self.credentials = credentials
+    /// `auth` defaults to `WorkerAuth.shared` on the app's real session and none on others (tests).
+    public init(http: HTTPClient = HTTPClient(timeout: 6), bahnDe: BahnDeClient = BahnDeClient(), auth: WorkerAuth? = nil) {
         self.http = http
         self.bahnDe = bahnDe
+        self.auth = http.workerAuth(auth)
     }
 
     /// Shared by every `TimetablesClient` (the app makes a fresh one per use), so the journey
@@ -154,10 +143,8 @@ public struct TimetablesClient: Sendable {
     private func fetch(path: String) async throws -> [TimetablesStop] {
         let url = Self.baseURL.appending(path: path)
         var request = URLRequest(url: url, timeoutInterval: http.timeout)
-        request.setValue(credentials.clientID, forHTTPHeaderField: "DB-Client-Id")
-        request.setValue(credentials.apiKey, forHTTPHeaderField: "DB-Api-Key")
         request.setValue("application/xml", forHTTPHeaderField: "Accept")
-        let data = try await http.sendRaw(request)
+        let data = try await http.sendRaw(request, auth: auth)
         return TimetablesXMLParser.parse(data)
     }
 
@@ -211,19 +198,19 @@ public struct TimetablesClient: Sendable {
     }
 
     /// Whether DB's own dispatching feed reports the departure of `category`+`number` at `station`
-    /// (planned `time`) as cancelled. `nil` when it can't tell (no credentials, train not found, or
+    /// (planned `time`) as cancelled. `nil` when it can't tell (train not found, or
     /// the request failed), so callers can keep trusting whatever another provider said.
     public func departureCancelled(category: String, number: String, at station: Station, plannedTime: Date) async -> Bool? {
-        guard credentials.isConfigured, let eva = await eva(for: station),
+        guard let eva = await eva(for: station),
               let event = await liveEvent(eva: eva, category: category, number: number, time: plannedTime, side: \.departure)
         else { return nil }
         return event.cancelled
     }
 
-    /// Whether `realtime(for:)` can even try to look `leg` up (credentials set, a train with a
+    /// Whether `realtime(for:)` can even try to look `leg` up (a train with a
     /// category and number).
     public func canLookUp(_ leg: Leg) -> Bool {
-        credentials.isConfigured && !leg.isWalking && leg.line?.dispatchNumber != nil
+        !leg.isWalking && leg.line?.dispatchNumber != nil
             && leg.line.flatMap { Self.category(from: $0.name) } != nil
     }
 
@@ -231,7 +218,7 @@ public struct TimetablesClient: Sendable {
     /// time. Returns `nil` when nothing changed is known yet at either station, so callers should
     /// keep whatever schedule they already have.
     public func realtime(for leg: Leg) async -> TimetablesLegOverride? {
-        guard credentials.isConfigured, !leg.isWalking, let line = leg.line, let number = line.dispatchNumber,
+        guard !leg.isWalking, let line = leg.line, let number = line.dispatchNumber,
               let category = Self.category(from: line.name) else { return nil }
 
         var departure: TimeInfo?
@@ -287,9 +274,9 @@ public struct TimetablesClient: Sendable {
     }
 
     /// `trip` with DB Timetables delays laid over it (see `stopoversWithRealtime(for:)`);
-    /// returned unchanged when there are no credentials or the train has no category/number.
+    /// returned unchanged when the train has no category/number.
     public func tripWithRealtime(_ trip: Trip) async -> Trip {
-        guard credentials.isConfigured, let line = trip.line else { return trip }
+        guard let line = trip.line else { return trip }
         var trip = trip
         let (stopovers, messages) = await stopoversWithRealtime(trip.stopovers, line: line)
         trip.stopovers = stopovers
@@ -357,7 +344,7 @@ public struct TimetablesClient: Sendable {
     /// platform, so a long route doesn't fire a lookup per stop; a stopover that already has one is
     /// left untouched (see `realtime(for:)` for overlaying live Gleisänderungen onto an existing leg).
     public func fillMissingPlatforms(in trip: Trip) async -> Trip {
-        guard credentials.isConfigured, let line = trip.line, let number = line.dispatchNumber,
+        guard let line = trip.line, let number = line.dispatchNumber,
               let category = Self.category(from: line.name) else { return trip }
         var trip = trip
         await withTaskGroup(of: (Int, PlatformInfo?, PlatformInfo?).self) { group in
@@ -394,7 +381,6 @@ public struct TimetablesClient: Sendable {
     /// train at Aachen Hbf) and others only now and then, for ICEs and RJs as much as regional trains –
     /// using DB's own Timetables ("IRIS") schedule, as DB Navigator shows it.
     public func fillMissingPlatforms(in journey: Journey) async -> Journey {
-        guard credentials.isConfigured else { return journey }
         var journey = journey
         await withTaskGroup(of: (Int, PlatformInfo?, PlatformInfo?).self) { group in
             for index in journey.legs.indices {
@@ -433,7 +419,7 @@ public struct TimetablesClient: Sendable {
     /// hits – using DB's own Timetables ("IRIS") schedule. Only queried for entries actually missing a
     /// platform, and only one `eva` lookup for the whole board since every entry shares `station`.
     public func fillMissingPlatforms(in entries: [BoardEntry], at station: Station) async -> [BoardEntry] {
-        guard credentials.isConfigured, let eva = await eva(for: station) else { return entries }
+        guard let eva = await eva(for: station) else { return entries }
         var entries = entries
         await withTaskGroup(of: (Int, PlatformInfo?).self) { group in
             for index in entries.indices {
@@ -466,7 +452,7 @@ public struct TimetablesClient: Sendable {
     /// best-effort supplement to another provider's board, never the primary source.
     public func scheduledTimes(category: String?, number: String, at station: Station,
                                from: Date, duration: Int) async -> [Date] {
-        guard credentials.isConfigured, let eva = await eva(for: station) else { return [] }
+        guard let eva = await eva(for: station) else { return [] }
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = Self.berlin
         let end = from.addingTimeInterval(TimeInterval(duration * 60))

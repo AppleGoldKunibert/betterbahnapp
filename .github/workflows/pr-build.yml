@@ -29,12 +29,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # DefaultCredentials.swift is gitignored; the template compiles without DB Timetables keys.
-      - name: Use credentials template
-        run: |
-          dir=Packages/BetterBahnKit/Sources/BetterBahnKit/Transit/Timetables
-          cp "$dir/DefaultCredentials.swift.template" "$dir/DefaultCredentials.swift"
-
       - name: Show Xcode version
         run: xcodebuild -version
 

@@ -158,6 +158,10 @@ import Testing
         #expect(DBOrderPage.orderNumber(in: URL(string: "https://www.bahn.de/buchung/reise?auftragsnummer=123456789012&gesamtreise-id=x")) == "123456789012")
         #expect(DBOrderPage.orderNumber(in: URL(string: "https://www.bahn.de/buchung/meine-reisen")) == nil)
         #expect(DBOrderPage.orderNumber(in: URL(string: "https://example.com/buchung/reise?auftragsnummer=1")) == nil)
+        // Only bahn.de itself: the fetch script would otherwise run on (and import from) another site.
+        #expect(DBOrderPage.orderNumber(in: URL(string: "https://evilbahn.de/buchung/reise?auftragsnummer=1")) == nil)
+        #expect(DBOrderPage.orderNumber(in: URL(string: "https://bahn.de.evil.example/buchung/reise?auftragsnummer=1")) == nil)
+        #expect(DBOrderPage.orderNumber(in: URL(string: "http://www.bahn.de/buchung/reise?auftragsnummer=1")) == nil)
     }
 
     @Test func readsPageResult() throws {

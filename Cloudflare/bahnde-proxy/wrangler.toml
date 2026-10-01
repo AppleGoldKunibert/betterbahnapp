@@ -2,3 +2,10 @@ name = "betterbahn2"
 main = "worker.mjs"
 compatibility_date = "2026-09-01"
 workers_dev = true
+
+[vars]
+# App IDs (team ID + bundle ID) whose App Attest keys get tokens; comma-separated. Add yours if you
+# build with Config/Local.xcconfig under another team or bundle ID.
+APP_IDS = "9NXP66M9UL.de.goldkunibert.BetterBahn"
+# Secrets (`npx wrangler secret put …`): TOKEN_SECRET (same value in betterbahn-pass), DB_CLIENT_ID,
+# DB_API_KEY. ALLOW_UNATTESTED = "true" lets requests without a token through during a rollout.

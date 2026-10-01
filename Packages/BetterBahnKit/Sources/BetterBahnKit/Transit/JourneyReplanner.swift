@@ -66,7 +66,7 @@ public struct JourneyReplanner: Sendable {
     }
 
     /// `journeys` with DB Timetables' live times, platforms and cancellations laid over each train,
-    /// in the same order. Unchanged without Timetables credentials.
+    /// in the same order. Unchanged without a Timetables client.
     public func withRealtime(_ journeys: [Journey]) async -> [Journey] {
         guard let timetables else { return journeys }
         return await withTaskGroup(of: (Int, Journey).self) { group in

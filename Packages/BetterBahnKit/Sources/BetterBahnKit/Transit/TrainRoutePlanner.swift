@@ -43,7 +43,7 @@ public struct TrainRoutePlanner: Sendable {
     public let provider: CombinedProvider
     /// DB's own dispatching plan, consulted when a named train can't be matched on `provider`'s own
     /// board – its coverage or branding can miss a train that genuinely exists. Optional: without
-    /// credentials configured, the planner still works, just without that rescue.
+    /// a Timetables client, the planner still works, just without that rescue.
     public let timetables: TimetablesClient?
     /// How many partial routes to carry from one requirement to the next.
     public var beamWidth: Int

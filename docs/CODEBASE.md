@@ -14,17 +14,18 @@ comments are English.
 
 | Path | Contents |
 | --- | --- |
-| `BetterBahn/` | App target (UI + app state). Default actor isolation is **MainActor** (hence `nonisolated` on some types). |
+| `BetterBahn/` | App target (UI + app state). Default actor isolation is **MainActor** (hence `nonisolated` on some types). `PrivacyInfo.xcprivacy` declares the required-reason APIs (UserDefaults); keep it current when using new ones. |
 | `BetterBahnWidgets/` | Widget extension: `TripLiveActivity` (Lock Screen / Dynamic Island). |
 | `BetterBahnShare/` | Share extension: `ShareViewController` takes shared DB text/URL and opens `betterbahn://import?...`. |
 | `Packages/BetterBahnKit/` | Local SwiftPM package with all models, networking and logic (iOS 26 + macOS 26, everything `Sendable`). Tests live here. |
 | `Config/` | xcconfigs + Info.plists. `Signing.xcconfig` holds team ID; optional gitignored `Local.xcconfig` overrides it. |
-| `Cloudflare/` | Worker that bounces the Träwelling OAuth callback to `betterbahn://oauth` (see its README). |
-| `Cloudflare/bahnde-proxy/` | Separate Worker (`betterbahn2`) proxying bahn.de's web API (`/web/api/…` paths), because bahn.de blocks Apple's URL loading stack (see its README). `BahnDeClient.baseURL` points at it. |
-| `Cloudflare/pass-signer/` | Worker (`betterbahn-pass`) that signs Apple Wallet passes for DB tickets with the Pass Type ID certificate (secrets), since that can't ship in the app. `npm install && npm test` (see its README). |
-| `ci_scripts/` | Xcode Cloud: `ci_post_clone.sh` writes the gitignored `DefaultCredentials.swift` from the workflow's secret env vars `DB_CLIENT_ID` / `DB_API_KEY`. |
+| `Cloudflare/` | Worker (`betterbahn`) that bounces the Träwelling OAuth callback to `betterbahn://oauth` and serves the privacy policy at `/datenschutz` (linked in Settings; see its README). |
+| `Cloudflare/bahnde-proxy/` | Separate Worker (`betterbahn2`) proxying bahn.de's web API (`/web/api/…` paths), because bahn.de blocks Apple's URL loading stack, and DB Timetables (`/timetables/v1/…`, API key as Worker secret). Also hands out the App Attest tokens (`/auth/…`). See its README. `BahnDeClient.baseURL`, `TimetablesClient.baseURL` point at it. |
+| `Cloudflare/pass-signer/` | Worker (`betterbahn-pass`) that signs Apple Wallet passes for DB tickets with the Pass Type ID certificate (secrets), since that can't ship in the app. Needs an App Attest token. `npm install && npm test` (see its README). |
+| `Cloudflare/shared/` | `appattest.mjs`: App Attest verification and the signed tokens both Workers check (`X-BetterBahn-Token`); `node --test Cloudflare/shared/appattest.test.mjs`. |
 | `.github/workflows/` | GitHub Actions: `pr-build.yml` (macOS: Kit tests + unsigned app build on PRs touching code), `pr-secrets.yml` (Linux: gitleaks secret scan + guard against committing `DefaultCredentials.swift`), `sync-prod.yml`. |
 | `docs/transit-providers.md` | Why Transitous is the primary data source and fallback options. |
+| `docs/app-review-notes.md` | App Store submission checklist (privacy URL, App Privacy, demo access) and review notes. |
 
 Targets/schemes: `BetterBahn`, `BetterBahnWidgetsExtension`, `BetterBahnShareExtension`, `BetterBahnKit`.
 Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterbahn://`.
@@ -76,7 +77,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 - `Features/Trips/TripsView.swift` – upcoming/past saved journeys, `SaveJourneyButton`.
 - `Features/Traewelling/` – `CheckinSheet`, `TraewellingLoginButton`.
 - `Features/Sharing/` – preview of `betterbahn://share` links and imported DB shares.
-- `Features/Settings/` – settings, `BC100RulesView`, quick tags.
+- `Features/Settings/` – settings (incl. privacy policy link and "not affiliated with DB" note), `BC100RulesView`, quick tags.
 - `Shared/DesignSystem.swift` – reusable UI pieces (`Card`, `SectionHeader`, `LineBadge`, `TimeStack`,
   `DelayPill`, `PlatformBadge`, `InfoChip`, `Color.brand`, …). Reuse these instead of new styling.
 - `Shared/StationPicker.swift` (`StationInput`, `TimeSelector`), `LocationService`, `PreviewData`.
@@ -108,8 +109,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   number, regional/S-Bahn by run number (`Line.tripNumber`).
 - `Transit/Transitous/` – MOTIS API client + DTOs (`M*` types). Station-name cleanup and
   deduplication of boards happen here.
-- `Transit/Timetables/` – official DB Timetables XML client (realtime overrides, messages).
-  `DefaultCredentials.swift` is **gitignored**; copy from `.template`.
+- `Transit/Timetables/` – official DB Timetables XML client (realtime overrides, messages), through the
+  `bahnde-proxy` Worker, which holds the API key. The app only uses it where App Attest works.
 - Logic: `JourneyReplanner`, `ConnectionCheck` (`ConnectionIssue`, `JourneyRefresher`), `PlatformChange`
   (platform changes since the last refresh → push, ignores sectors/bus bays), `TrainRoutePlanner`,
   `ViaRoutePlanner` (vias without minimum stay keep a through train as one leg), `TrainPicker`, `TicketFilter`/`BC100Rules`, `BoardFilter`.
@@ -128,6 +129,10 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   (parse DB Navigator/bahn.de shared text, resolve via `betterbahn://import`).
 - `Geometry/` – polyline decode, `RouteGeometryService`, `SegmentHeatmap`.
 - `Support/HTTPClient.swift` – shared HTTP + `TransitError`, `JSONDecoding`. `ProductStyle` colors.
+- `Support/WorkerAuth.swift` – App Attest for BetterBahn's own Workers: attests the device key once, then
+  gets hourly access tokens (`X-BetterBahn-Token`); `HTTPClient.sendRaw(_:auth:)` adds the token and retries
+  once after a 401. Clients use `WorkerAuth.shared` only on the real `URLSession.shared` (tests' mocked
+  sessions get none). Server side: `Cloudflare/shared/appattest.mjs`.
 
 ## Build & test
 
@@ -141,7 +146,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   ```bash
   xcodebuild -project BetterBahn.xcodeproj -scheme BetterBahn -destination 'generic/platform=iOS Simulator' build -quiet
   ```
-- New Swift files must be added to the right target in `project.pbxproj`.
+- `BetterBahn/`, `BetterBahnWidgets/` and `BetterBahnShare/` are synchronized folders in `project.pbxproj`:
+  new files there join their target automatically.
 
 ## Conventions
 

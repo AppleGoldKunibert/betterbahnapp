@@ -52,8 +52,9 @@ public struct TrainFormation: Codable, Sendable, Hashable {
 ///
 /// bahn.de's bot protection blocks Apple's URL loading stack whatever headers are sent, so requests
 /// go through our Cloudflare Worker (`Cloudflare/bahnde-proxy`), which mirrors bahn.de's `/web/api/…`
-/// paths and sends the DBRIS browser headers itself. Responses are cached, and a 403/429 (passed
-/// through by the Worker) pauses every bahn.de request for `BahnDeGate.cooldown` instead of retrying.
+/// paths and sends the DBRIS browser headers itself. Requests carry the app's App Attest token
+/// (`WorkerAuth`). Responses are cached, and a 403/429 (passed through by the Worker) pauses every
+/// bahn.de request for `BahnDeGate.cooldown` instead of retrying.
 public struct BahnDeClient: Sendable {
     public static let baseURL = URL(string: "https://betterbahn2.kunibert88.workers.dev/web/api")!
     /// Deutsche Bahn's administration ID.
@@ -67,10 +68,13 @@ public struct BahnDeClient: Sendable {
 
     let http: HTTPClient
     let gate: BahnDeGate
+    let auth: WorkerAuth?
 
-    public init(http: HTTPClient = HTTPClient(timeout: 8), gate: BahnDeGate = .shared) {
+    /// `auth` defaults to `WorkerAuth.shared` on the app's real session and none on others (tests).
+    public init(http: HTTPClient = HTTPClient(timeout: 8), gate: BahnDeGate = .shared, auth: WorkerAuth? = nil) {
         self.http = http
         self.gate = gate
+        self.auth = http.workerAuth(auth)
     }
 
     /// Caches are only shared on the app's real session; a client on a custom session (tests,
@@ -454,7 +458,7 @@ public struct BahnDeClient: Sendable {
     func get<T: Decodable>(_ url: URL, as type: T.Type) async throws -> T {
         try await gate.check()
         do {
-            return try await http.get(url, as: type, headers: Self.headers())
+            return try await http.get(url, as: type, headers: Self.headers(), auth: auth)
         } catch let error as TransitError {
             await gate.report(error)
             throw error.isBlocked ? TransitError.rateLimited : error

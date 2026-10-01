@@ -23,9 +23,31 @@ public enum JourneyShareLink {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               components.scheme == scheme, components.host == host,
               let encoded = components.queryItems?.first(where: { $0.name == "data" })?.value,
+              encoded.count <= maxEncodedLength,
               let compressed = base64URLDecode(encoded),
-              let json = try? (compressed as NSData).decompressed(using: .zlib) as Data? else { return nil }
+              let json = inflate(compressed) else { return nil }
         return try? JSONDecoder().decode(Journey.self, from: json)
+    }
+
+    /// Any website can open a share link, so its size is capped: a small payload that inflates
+    /// to gigabytes must not take the app down. Real journeys stay far below both.
+    static let maxEncodedLength = 64 * 1024
+    static let maxJSONSize = 1024 * 1024
+
+    /// Raw-deflate data (what `NSData.compressed(using: .zlib)` writes), or nil if it would inflate
+    /// to more than `maxJSONSize`.
+    static func inflate(_ data: Data) -> Data? {
+        guard !data.isEmpty else { return nil }
+        let capacity = maxJSONSize + 1
+        var output = Data(count: capacity)
+        let size = output.withUnsafeMutableBytes { out in
+            data.withUnsafeBytes { input in
+                compression_decode_buffer(out.bindMemory(to: UInt8.self).baseAddress!, capacity,
+                                          input.bindMemory(to: UInt8.self).baseAddress!, data.count, nil, COMPRESSION_ZLIB)
+            }
+        }
+        guard size > 0, size <= maxJSONSize else { return nil }
+        return output.prefix(size)
     }
 
     private static func base64URLEncode(_ data: Data) -> String {

@@ -34,16 +34,18 @@ public struct HTTPClient: Sendable {
         self.timeout = timeout
     }
 
-    public func get<T: Decodable>(_ url: URL, as type: T.Type, headers: [String: String] = [:]) async throws -> T {
+    /// `auth` adds BetterBahn's App Attest token, for requests to its own Workers.
+    public func get<T: Decodable>(_ url: URL, as type: T.Type, headers: [String: String] = [:],
+                                  auth: WorkerAuth? = nil) async throws -> T {
         var request = URLRequest(url: url, timeoutInterval: timeout)
         request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
-        return try await send(request, as: type)
+        return try await send(request, as: type, auth: auth)
     }
 
-    public func send<T: Decodable>(_ request: URLRequest, as type: T.Type) async throws -> T {
-        let data = try await sendRaw(request)
+    public func send<T: Decodable>(_ request: URLRequest, as type: T.Type, auth: WorkerAuth? = nil) async throws -> T {
+        let data = try await sendRaw(request, auth: auth)
         do {
             return try JSONDecoding.decoder.decode(T.self, from: data)
         } catch {

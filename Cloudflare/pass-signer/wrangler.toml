@@ -5,5 +5,5 @@ compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
 [vars]
-# Set with `wrangler secret put …` instead: PASS_TYPE_ID, TEAM_ID, PASS_CERT, PASS_KEY, WWDR_CERT
-# (and optionally PASS_KEY_PASSWORD, PROXY_TOKEN). See README.md.
+# Set with `wrangler secret put …` instead: PASS_TYPE_ID, TEAM_ID, PASS_CERT, PASS_KEY, WWDR_CERT,
+# TOKEN_SECRET (same value as in betterbahn2), optionally PASS_KEY_PASSWORD. See README.md.

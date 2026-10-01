@@ -2217,8 +2217,7 @@ final class RoutingMockProvider: TransitProvider, @unchecked Sendable {
         config.protocolClasses = [TimetablesPlanProtocol.self]
         let session = URLSession(configuration: config)
         defer { session.invalidateAndCancel() }
-        let timetables = TimetablesClient(credentials: TimetablesCredentials(clientID: "x", apiKey: "y"),
-                                          http: HTTPClient(session: session))
+        let timetables = TimetablesClient(http: HTTPClient(session: session))
         let planner = TrainRoutePlanner(provider: CombinedProvider(primary: mock, fallback: nil, bahnDe: nil), timetables: timetables)
 
         let plan = try await planner.plan([TrainRequirement(trainName: "ICE 423", boarding: koeln)],
@@ -2314,8 +2313,7 @@ private final class TimetablesPlanProtocol: URLProtocol, @unchecked Sendable {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [protocolClass]
         let session = URLSession(configuration: config)
-        let client = TimetablesClient(credentials: TimetablesCredentials(clientID: "x", apiKey: "y"),
-                                      http: HTTPClient(session: session))
+        let client = TimetablesClient(http: HTTPClient(session: session))
         return (client, session)
     }
 
@@ -2417,8 +2415,7 @@ private final class ChangedS15Protocol: URLProtocol, @unchecked Sendable {
         config.protocolClasses = [GesundbrunnenBoardProtocol.self]
         let session = URLSession(configuration: config)
         defer { session.invalidateAndCancel() }
-        let timetables = TimetablesClient(credentials: TimetablesCredentials(clientID: "x", apiKey: "y"),
-                                          http: HTTPClient(session: session))
+        let timetables = TimetablesClient(http: HTTPClient(session: session))
 
         let u8 = entry(line: Line(name: "U8", number: "8", product: .subway, operatorName: nil),
                         platform: PlatformInfo(planned: "2", actual: nil))
@@ -2622,7 +2619,7 @@ private enum PreviewLegs {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [protocolClass]
         let session = URLSession(configuration: config)
-        return (TimetablesClient(credentials: TimetablesCredentials(clientID: "x", apiKey: "y"), http: HTTPClient(session: session)), session)
+        return (TimetablesClient(http: HTTPClient(session: session)), session)
     }
 
     @Test func dbRunningLiftsTransitousSkippedStops() async {

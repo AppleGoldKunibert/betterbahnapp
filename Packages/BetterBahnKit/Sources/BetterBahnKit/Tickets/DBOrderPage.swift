@@ -14,7 +14,8 @@ public enum DBOrderPage {
 
     /// The order number once the page shows an order (`/buchung/reise?auftragsnummer=…`).
     public static func orderNumber(in url: URL?) -> String? {
-        guard let url, url.host()?.hasSuffix("bahn.de") == true, url.path().hasPrefix("/buchung/reise"),
+        guard let url, url.scheme == "https", let host = url.host()?.lowercased(),
+              host == "bahn.de" || host.hasSuffix(".bahn.de"), url.path().hasPrefix("/buchung/reise"),
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let number = components.queryItems?.first(where: { $0.name == "auftragsnummer" })?.value,
               !number.isEmpty else { return nil }

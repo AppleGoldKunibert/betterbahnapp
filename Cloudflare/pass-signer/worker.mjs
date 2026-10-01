@@ -3,13 +3,15 @@
 // signed .pkpass back. The barcode is passed through untouched: it is DB's own signed ticket code.
 
 import forge from "node-forge";
+import { isAuthorized, unauthorized } from "../shared/appattest.mjs";
 import { IMAGES } from "./images.mjs";
 
 export const MAX_BODY_BYTES = 16 * 1024;
 
-// Only these pass.json keys are taken from the app; identity, format and images come from here.
+// Only these pass.json keys are taken from the app; identity, issuer name, format and images come from here.
+export const ORGANIZATION_NAME = "BetterBahn";
 const ALLOWED_KEYS = [
-    "serialNumber", "description", "organizationName", "foregroundColor", "labelColor", "backgroundColor",
+    "serialNumber", "description", "foregroundColor", "labelColor", "backgroundColor",
     "relevantDate", "expirationDate", "barcodes", "boardingPass",
 ];
 
@@ -26,10 +28,9 @@ export async function handleRequest(request, env = {}) {
     if (url.pathname !== "/pass") return json(404, { error: "not_found" });
     if (request.method !== "POST") return json(405, { error: "method_not_allowed" }, { Allow: "POST" });
 
-    // Optional shared secret (`wrangler secret put PROXY_TOKEN`), same as the bahn.de proxy.
-    if (env.PROXY_TOKEN && request.headers.get("X-BetterBahn-Token") !== env.PROXY_TOKEN) {
-        return json(401, { error: "unauthorized" });
-    }
+    // Only the genuine app may sign with our certificate: an App Attest token from the bahn.de proxy's
+    // `/auth` routes (same TOKEN_SECRET), see ../shared/appattest.mjs.
+    if (!(await isAuthorized(request, env))) return unauthorized();
     if (!env.PASS_TYPE_ID || !env.TEAM_ID || !env.PASS_CERT || !env.PASS_KEY || !env.WWDR_CERT) {
         return json(503, { error: "not_configured" });
     }
@@ -44,7 +45,9 @@ export async function handleRequest(request, env = {}) {
     }
     if (!isValidPayload(payload)) return json(400, { error: "invalid_pass" });
 
-    const pass = { formatVersion: 1, passTypeIdentifier: env.PASS_TYPE_ID, teamIdentifier: env.TEAM_ID };
+    const pass = {
+        formatVersion: 1, passTypeIdentifier: env.PASS_TYPE_ID, teamIdentifier: env.TEAM_ID, organizationName: ORGANIZATION_NAME,
+    };
     for (const key of ALLOWED_KEYS) if (key in payload) pass[key] = payload[key];
 
     let pkpass;

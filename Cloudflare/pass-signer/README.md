@@ -6,9 +6,12 @@ DB ticket here and gets the signed `.pkpass` back.
 
 `POST /pass` with the pass.json (max 16 KB):
 
+- Only the genuine app may use it: requests need an App Attest access token (`X-BetterBahn-Token`)
+  from the bahn.de proxy's `/auth` routes, checked with the shared `TOKEN_SECRET`
+  (`../shared/appattest.mjs`). Without it the certificate would sign anybody's passes.
 - Only the known keys are taken from the app (`serialNumber`, `description`, colours, dates,
-  `barcodes`, `boardingPass`, …). `formatVersion`, `passTypeIdentifier` and `teamIdentifier` come
-  from the Worker; anything else (e.g. `webServiceURL`) is dropped.
+  `barcodes`, `boardingPass`, …). `formatVersion`, `passTypeIdentifier`, `teamIdentifier` and
+  `organizationName` ("BetterBahn") come from the Worker; anything else (e.g. `webServiceURL`) is dropped.
 - The barcode is passed through unchanged: it is DB's own signed ticket code, read from the ticket
   PDF. The Worker never creates or changes a barcode.
 - Adds the icon Wallet requires (`images.mjs`, the app icon resized; no logo, so the pass front stays plain), writes `manifest.json` (SHA-1 of every
@@ -16,7 +19,7 @@ DB ticket here and gets the signed `.pkpass` back.
 - Answers `application/vnd.apple.pkpass` with `Cache-Control: no-store`. Nothing is stored or
   logged. `GET /health` answers without signing.
 
-Errors: `400` invalid JSON or pass, `401` wrong token, `405` not POST, `413` too large,
+Errors: `400` invalid JSON or pass, `401` missing or invalid token, `405` not POST, `413` too large,
 `503` secrets missing, `500` signing failed.
 
 ## Setup
@@ -44,7 +47,8 @@ Errors: `400` invalid JSON or pass, `401` wrong token, `405` not POST, `413` too
    npx wrangler secret put PASS_CERT < pass-cert.pem
    npx wrangler secret put PASS_KEY < pass-key.pem
    npx wrangler secret put WWDR_CERT < wwdr.pem
-   # optional: PASS_KEY_PASSWORD if the key is encrypted, PROXY_TOKEN to require X-BetterBahn-Token
+   npx wrangler secret put TOKEN_SECRET   # the same value as in ../bahnde-proxy
+   # optional: PASS_KEY_PASSWORD if the key is encrypted
    npx wrangler deploy
    ```
 
@@ -54,6 +58,7 @@ The Worker is `betterbahn-pass` (`https://betterbahn-pass.kunibert88.workers.dev
 ## Verify
 
 Unit tests (with a throwaway test certificate): `cd Cloudflare/pass-signer && npm install && npm test`.
+During a rollout, `ALLOW_UNATTESTED = "true"` lets builds without App Attest through (see the proxy's README).
 
 After deploying, add a ticket to Wallet from the app's ticket screen. If Wallet refuses the pass,
 check the secrets: the pass type ID and team ID must match the certificate exactly.

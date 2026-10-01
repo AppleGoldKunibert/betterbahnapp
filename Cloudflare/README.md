@@ -1,4 +1,9 @@
-# Träwelling callback for free Apple signing
+# Träwelling callback and privacy policy
+
+`worker.mjs` (Worker `betterbahn`) also serves the privacy policy at
+`https://betterbahn.kunibert88.workers.dev/datenschutz` (linked in the app's settings; use it as the
+privacy policy URL in App Store Connect). Fill in the `[Name eintragen]` placeholder in
+`PRIVACY_HTML` before deploying, and update the page whenever the app sends data somewhere new.
 
 Keep the registered Träwelling redirect URI exactly:
 
@@ -12,14 +17,13 @@ does not exchange or store tokens and needs no Client Secret.
 
 ## Update the existing Worker
 
-`worker.mjs` is a complete replacement for the Worker source supplied in this
-conversation. It preserves the existing association-file response and 404
-fallback, and replaces the callback page with a fixed redirect to the app.
+`worker.mjs` is the complete Worker source: the privacy policy, the callback
+(a fixed redirect to the app) and a 404 fallback. The old
+`apple-app-site-association` response is gone; the login never used it.
 
 In the Cloudflare dashboard, open `betterbahn`, choose **Edit code**, replace the
 entry module's contents with `worker.mjs`, and deploy. No dependencies, secrets,
-or new bindings are required. The Apple Team ID remains only in the Worker;
-the free-signing login does not use the association file.
+or new bindings are required.
 
 Deploy the updated Worker before testing login. Avoid logging callback query
 strings because they contain authorization codes.

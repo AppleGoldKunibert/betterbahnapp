@@ -204,6 +204,10 @@ struct AddToWalletButton: View {
                     .frame(height: 50)
                     .disabled(isLoading)
                     .overlay { if isLoading { ProgressView() } }
+                Text("Für Apple Wallet wird der Pass auf dem BetterBahn-Server signiert. Dabei wird nichts gespeichert.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 if let error { ErrorBanner(error: error) }
             }
             .sheet(item: $pass) { AddPassSheet(pass: $0).ignoresSafeArea() }

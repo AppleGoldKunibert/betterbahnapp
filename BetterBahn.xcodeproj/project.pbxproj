@@ -346,7 +346,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Config/BetterBahnWidgets-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = BetterBahnWidgets;
+				INFOPLIST_KEY_CFBundleDisplayName = BetterBahn;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -421,7 +421,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Config/BetterBahnWidgets-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = BetterBahnWidgets;
+				INFOPLIST_KEY_CFBundleDisplayName = BetterBahn;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

@@ -155,15 +155,17 @@ public struct WalletPassPayload: Encodable, Sendable, Hashable {
 }
 
 /// Has the `Cloudflare/pass-signer` Worker sign a pass (the certificate must never ship in the app).
+/// Only the genuine app may use it, so requests carry the App Attest token (`WorkerAuth`).
 public struct WalletPassClient: Sendable {
     public static let baseURL = URL(string: "https://betterbahn-pass.kunibert88.workers.dev")!
 
     let http: HTTPClient
-    let token: String?
+    let auth: WorkerAuth?
 
-    public init(http: HTTPClient = HTTPClient(timeout: 20), token: String? = nil) {
+    /// `auth` defaults to `WorkerAuth.shared` on the app's real session and none on others (tests).
+    public init(http: HTTPClient = HTTPClient(timeout: 20), auth: WorkerAuth? = nil) {
         self.http = http
-        self.token = token
+        self.auth = http.workerAuth(auth)
     }
 
     /// The signed `.pkpass`.
@@ -172,8 +174,7 @@ public struct WalletPassClient: Sendable {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/vnd.apple.pkpass", forHTTPHeaderField: "Accept")
-        if let token { request.setValue(token, forHTTPHeaderField: "X-BetterBahn-Token") }
         request.httpBody = try payload.json()
-        return try await http.sendRaw(request)
+        return try await http.sendRaw(request, auth: auth)
     }
 }
