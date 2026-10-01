@@ -16,7 +16,12 @@ struct SettingsView: View {
             Form {
                 Section {
                     HStack(spacing: 14) {
-                        IconTile(systemImage: "tram.fill", color: .brand, size: 56)
+                        // The app icon itself (AppLogo is the icon scaled to 56 pt).
+                        Image("AppLogo")
+                            .resizable()
+                            .frame(width: 56, height: 56)
+                            .clipShape(.rect(cornerRadius: 56 * 0.2237, style: .continuous))
+                            .accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("BetterBahn").font(.title3.weight(.bold))
                             Text("Bahnfahren, aber besser.").font(.subheadline).foregroundStyle(.secondary)

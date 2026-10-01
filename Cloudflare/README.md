@@ -2,8 +2,8 @@
 
 `worker.mjs` (Worker `betterbahn`) also serves the privacy policy at
 `https://betterbahn.betterbahn.workers.dev/datenschutz` (linked in the app's settings; use it as the
-privacy policy URL in App Store Connect). Fill in the `[Name eintragen]` placeholder in
-`PRIVACY_HTML` before deploying, and update the page whenever the app sends data somewhere new.
+privacy policy URL in App Store Connect), and a support page at `/support` (the support URL in App Store
+Connect). Update the privacy page (`PRIVACY_HTML`) whenever the app sends data somewhere new.
 
 Keep the registered Träwelling redirect URI exactly:
 
