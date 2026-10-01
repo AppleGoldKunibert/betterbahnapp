@@ -406,7 +406,7 @@ struct LegCard: View {
                     LiveTrainIconTile(route: LiveTrainRoute(leg: leg), systemImage: leg.line?.product.symbolName ?? "tram.fill",
                                       color: color, size: 38)
                     VStack(alignment: .leading, spacing: 2) {
-                        TrainNameRow(name: leg.line?.name ?? "Zug") { TrainSeriesTag(leg: leg) }
+                        TrainNameRow(name: leg.line?.name ?? "Zug", wrapsTag: false) { TrainSeriesTag(leg: leg) }
                         if let direction = leg.direction {
                             Text("Richtung \(direction)").font(.caption).foregroundStyle(.secondary).fullTextPopup("Richtung \(direction)")
                         }

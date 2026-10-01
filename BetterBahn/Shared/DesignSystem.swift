@@ -806,17 +806,19 @@ extension View {
 }
 
 /// A train's name with its series tag next to it. The name is never cut for the tag: if both don't
-/// fit side by side, the tag moves below the name.
+/// fit side by side, the tag moves below the name, or with `wrapsTag` off stays beside it and is
+/// shortened instead.
 struct TrainNameRow<Tag: View>: View {
     let name: String
     var font: Font = .headline
     var spacing: CGFloat = 6
+    var wrapsTag = true
     @ViewBuilder let tag: Tag
 
     var body: some View {
         // A layout rather than `ViewThatFits`: that one holds the tag once per branch, so switching
         // branches when the tag appears recreated it empty, and the lookup started over for good.
-        NameTagLayout(spacing: spacing) {
+        NameTagLayout(spacing: spacing, wraps: wrapsTag) {
             Text(name).font(font).lineLimit(1).fullTextPopup(name)
             tag
         }
@@ -824,9 +826,10 @@ struct TrainNameRow<Tag: View>: View {
 }
 
 /// Places the second subview (the tag) beside the first (the name) if both fit at their ideal
-/// width, otherwise below it.
+/// width, otherwise below it – or, without `wraps`, still beside it in the width that is left.
 private struct NameTagLayout: Layout {
     var spacing: CGFloat
+    var wraps: Bool
     var lineSpacing: CGFloat = 3
 
     private func sizes(_ proposal: ProposedViewSize, _ subviews: Subviews) -> (name: CGSize, tag: CGSize, beside: Bool) {
@@ -838,6 +841,11 @@ private struct NameTagLayout: Layout {
         }
         if idealName.width + spacing + idealTag.width <= width {
             return (idealName, idealTag, true)
+        }
+        if !wraps {
+            let name = subviews[0].sizeThatFits(ProposedViewSize(width: width, height: nil))
+            let tag = subviews[1].sizeThatFits(ProposedViewSize(width: max(0, width - name.width - spacing), height: nil))
+            return (name, tag, true)
         }
         let constrained = ProposedViewSize(width: width, height: nil)
         return (subviews[0].sizeThatFits(constrained), subviews[1].sizeThatFits(constrained), false)
