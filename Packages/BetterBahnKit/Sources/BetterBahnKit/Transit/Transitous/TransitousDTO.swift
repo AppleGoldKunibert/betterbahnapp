@@ -316,6 +316,9 @@ struct MGeocodeMatch: Decodable {
     var country: String?
     var modes: [String]?
     var areas: [Area]?
+    /// How busy the stop is, roughly its share of all departures: about 0.02 for Frankfurt (M) Hbf,
+    /// 0.003 for Frankfurt (Oder), well under 0.001 for small stations and bus stops.
+    var importance: Double? = nil
 
     /// Higher is better: train stations in Germany first.
     var relevance: Int {
@@ -338,6 +341,14 @@ struct MGeocodeMatch: Decodable {
 
     /// The town this stop is in, e.g. "Stuttgart" or "München".
     var town: String? { areas?.first { $0.isDefault == true }?.name }
+
+    /// The town and the parts of it the stop is in ("Berlin", "Spandau"), not the wider areas above
+    /// the town – otherwise every stop in the state of Brandenburg would match "Brandenburg".
+    var localAreaNames: [String] {
+        guard let areas, let town = areas.first(where: { $0.isDefault == true }) else { return [] }
+        let townLevel = town.adminLevel ?? 0
+        return areas.filter { $0.isDefault == true || ($0.adminLevel ?? 0) > townLevel }.map(\.name)
+    }
 
     /// `name`, with the town put in front when the feed left it out of a main station's name -
     /// "Hauptbahnhof (tief)" in Stuttgart or "Hauptbahnhof Süd" in München showed up as just "Hbf"
