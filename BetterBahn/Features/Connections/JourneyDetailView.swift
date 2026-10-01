@@ -406,12 +406,9 @@ struct LegCard: View {
                     LiveTrainIconTile(route: LiveTrainRoute(leg: leg), systemImage: leg.line?.product.symbolName ?? "tram.fill",
                                       color: color, size: 38)
                     VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 6) {
-                            Text(leg.line?.name ?? "Zug").font(.headline)
-                            TrainSeriesTag(leg: leg)
-                        }
+                        TrainNameRow(name: leg.line?.name ?? "Zug") { TrainSeriesTag(leg: leg) }
                         if let direction = leg.direction {
-                            Text("Richtung \(direction)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            Text("Richtung \(direction)").font(.caption).foregroundStyle(.secondary).fullTextPopup("Richtung \(direction)")
                         }
                         TrainFormationLabel(leg: leg)
                     }
@@ -462,7 +459,7 @@ struct LegCard: View {
                             ForEach(intermediate) { stop in
                                 TimelineNode(kind: .minor, color: color, lineAbove: color, lineBelow: color) {
                                     HStack {
-                                        Text(stop.station.displayName).font(.caption).lineLimit(1)
+                                        Text(stop.station.displayName).font(.caption).expandsOnTap()
                                         if stop.isAdditional {
                                             InfoChip(text: "Zusatzhalt", systemImage: "plus.circle.fill", tint: .brand)
                                         }
@@ -561,7 +558,7 @@ struct LegCard: View {
                 .frame(width: 54, alignment: .leading)
             Text(name)
                 .font(.headline)
-                .lineLimit(2)
+                .fullTextPopup(name, lines: 2)
             Spacer()
             PlatformBadge(platform: platform)
         }

@@ -235,7 +235,7 @@ struct TrainFormationLabel: View {
                 Label(units, systemImage: "tram.fill")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .fullTextPopup(units, lines: 2)
             } else if blocked {
                 Label("Wagenreihung gerade nicht abrufbar", systemImage: "exclamationmark.triangle")
                     .font(.caption)
@@ -336,6 +336,7 @@ struct TrainSeriesTag: View {
             if let family {
                 Text(family)
                     .font(.caption2.weight(.bold))
+                    .lineLimit(1)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 3)
                     .foregroundStyle(.secondary)
@@ -693,5 +694,105 @@ extension View {
     /// Keeps the last content clear of the floating tab bar.
     func tabBarSafePadding() -> some View {
         safeAreaPadding(.bottom, 24)
+    }
+}
+
+// MARK: - Full text popup
+
+private struct FullTextPopup: ViewModifier {
+    let text: String
+    let lines: Int
+    @State private var shown = false
+
+    func body(content: Content) -> some View {
+        content
+            .lineLimit(lines)
+            .contentShape(.rect)
+            .onTapGesture { shown = true }
+            .fullScreenCover(isPresented: $shown) {
+                ZStack {
+                    Color.black.opacity(0.35).ignoresSafeArea()
+                    Text(text)
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                        .padding(20)
+                        .frame(maxWidth: 320)
+                        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+                        .shadow(radius: 20)
+                }
+                .contentShape(.rect)
+                .onTapGesture { shown = false }
+                .presentationBackground(.clear)
+            }
+    }
+}
+
+extension View {
+    /// Shortens the text to `lines` lines; tapping it shows the full `text` in a small pop-up in
+    /// the middle of the screen, tapping again closes it. Don't use inside a `Button`.
+    func fullTextPopup(_ text: String, lines: Int = 1) -> some View {
+        modifier(FullTextPopup(text: text, lines: lines))
+    }
+}
+
+// MARK: - Tap to expand
+
+/// Tapping a shortened ("Frankfurt (Main) Hb…") text shows it in full for 10 s; neighbouring text
+/// gives up its space meanwhile. Tapping again collapses it earlier.
+private struct ExpandOnTap: ViewModifier {
+    let collapsedLines: Int
+    @State private var expanded = false
+    @State private var collapseTask: Task<Void, Never>?
+
+    func body(content: Content) -> some View {
+        content
+            .lineLimit(expanded ? nil : collapsedLines)
+            .layoutPriority(expanded ? 1 : 0)
+            .fixedSize(horizontal: false, vertical: expanded)
+            .contentShape(.rect)
+            .onTapGesture {
+                collapseTask?.cancel()
+                withAnimation(.snappy) { expanded.toggle() }
+                guard expanded else { return }
+                collapseTask = Task {
+                    try? await Task.sleep(for: .seconds(10))
+                    guard !Task.isCancelled else { return }
+                    withAnimation(.snappy) { expanded = false }
+                }
+            }
+            .onDisappear { collapseTask?.cancel() }
+    }
+}
+
+extension View {
+    /// See `ExpandOnTap`. Don't use inside a `Button`, the tap would no longer reach it.
+    func expandsOnTap(collapsedLines: Int = 1) -> some View {
+        modifier(ExpandOnTap(collapsedLines: collapsedLines))
+    }
+}
+
+/// A train's name with its series tag next to it. The name is never cut for the tag: if both don't
+/// fit side by side, the tag moves below the name, and only then is the tag itself shortened.
+struct TrainNameRow<Tag: View>: View {
+    let name: String
+    var font: Font = .headline
+    var spacing: CGFloat = 6
+    @ViewBuilder let tag: Tag
+
+    private var title: some View {
+        Text(name).font(font).lineLimit(1).fullTextPopup(name)
+    }
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: spacing) {
+                title.fixedSize(horizontal: true, vertical: false)
+                tag.fixedSize(horizontal: true, vertical: false)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                title
+                tag
+            }
+        }
     }
 }

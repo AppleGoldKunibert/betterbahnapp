@@ -67,9 +67,9 @@ struct TripView: View {
     private func actionBar(_ leg: Leg) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
-                Text(leg.origin.displayName).lineLimit(1)
+                Text(leg.origin.displayName).fullTextPopup(leg.origin.displayName)
                 Image(systemName: "arrow.right").font(.caption.weight(.bold))
-                Text(leg.destination.displayName).lineLimit(1)
+                Text(leg.destination.displayName).fullTextPopup(leg.destination.displayName)
                 Spacer()
                 Text(leg.arrival.best.timeIntervalSince(leg.departure.best).compactDuration)
                     .foregroundStyle(.secondary)
@@ -161,15 +161,14 @@ struct TripContent: View {
                     LiveTrainIconTile(route: LiveTrainRoute(trip: trip), systemImage: trip.line?.product.symbolName ?? "tram.fill",
                                       color: color, size: 46)
                     VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 8) {
-                            Text(trip.line?.name ?? "Zug").font(.title3.weight(.bold))
+                        TrainNameRow(name: trip.line?.name ?? "Zug", font: .title3.weight(.bold), spacing: 8) {
                             TrainSeriesTag(trip: trip)
                         }
                         if let origin = trip.origin, let destination = trip.destination {
                             Text("\(origin.displayName) → \(destination.displayName)")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
-                                .lineLimit(2)
+                                .fullTextPopup("\(origin.displayName) → \(destination.displayName)", lines: 2)
                         }
                         if let op = trip.line?.operatorName {
                             Label(op, systemImage: "building.2.fill").font(.caption).foregroundStyle(.tertiary)
