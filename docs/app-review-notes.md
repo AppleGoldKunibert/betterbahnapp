@@ -9,6 +9,7 @@ features or data flows change (and update the privacy policy in `Cloudflare/work
   `DB_CLIENT_ID`/`DB_API_KEY` in `betterbahn2`, and `ALLOW_UNATTESTED` removed once no old builds
   are left. The privacy policy Worker (`betterbahn`) has the controller's name filled in.
 - **Privacy policy URL:** `https://betterbahn.betterbahn.workers.dev/datenschutz`.
+- **Support URL:** `https://betterbahn.betterbahn.workers.dev/support`.
 - **App Privacy:** nothing is collected in Apple's sense — data either stays on the device / in the
   user's iCloud, or is only passed through BetterBahn's Workers to answer the request right away
   (timetable lookups, Wallet pass signing) and not kept. Check this against the current code before

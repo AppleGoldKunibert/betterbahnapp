@@ -1,23 +1,26 @@
 export default {
     async fetch(request) {
-        return handlePrivacyPolicy(request)
+        return handlePage(request)
             ?? handleTraewellingCallback(request)
             ?? new Response("Not Found", { status: 404 });
     },
 };
 
-// MARK: - Privacy policy (linked in the app's settings and in App Store Connect)
+// MARK: - Pages (privacy policy and support, linked in the app's settings and in App Store Connect)
 
 export const PRIVACY_PATH = "/datenschutz";
+export const SUPPORT_PATH = "/support";
 
 // null means the request is for a different route.
-export function handlePrivacyPolicy(request) {
+export function handlePage(request) {
     const url = new URL(request.url);
-    if (url.pathname !== PRIVACY_PATH && url.pathname !== PRIVACY_PATH + "/") return null;
+    const path = url.pathname.length > 1 ? url.pathname.replace(/\/$/, "") : url.pathname;
+    const html = { [PRIVACY_PATH]: PRIVACY_HTML, [SUPPORT_PATH]: SUPPORT_HTML }[path];
+    if (!html) return null;
     if (request.method !== "GET" && request.method !== "HEAD") {
         return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
     }
-    return new Response(request.method === "HEAD" ? null : PRIVACY_HTML, {
+    return new Response(request.method === "HEAD" ? null : html, {
         status: 200,
         headers: {
             "Content-Type": "text/html; charset=utf-8",
@@ -29,13 +32,7 @@ export function handlePrivacyPolicy(request) {
     });
 }
 
-export const PRIVACY_HTML = `<!doctype html>
-<html lang="de">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Datenschutz – BetterBahn</title>
-<style>
+const PAGE_STYLE = `<style>
 :root { color-scheme: light dark; --text: #1d1d1f; --muted: #6e6e73; --bg: #ffffff; --accent: #c8102e; }
 @media (prefers-color-scheme: dark) { :root { --text: #f5f5f7; --muted: #a1a1a6; --bg: #000000; --accent: #ff6b7f; } }
 body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
@@ -45,7 +42,15 @@ h2 { font-size: 1.2rem; margin: 2rem 0 .5rem; }
 p, li { margin: .5rem 0; }
 .muted { color: var(--muted); }
 a { color: var(--accent); }
-</style>
+</style>`;
+
+export const PRIVACY_HTML = `<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Datenschutz – BetterBahn</title>
+${PAGE_STYLE}
 </head>
 <body>
 <main>
@@ -120,6 +125,50 @@ Push-Mitteilungen über einen Server.</p>
 DSGVO), und den Dienst vor Missbrauch zu schützen (Art. 6 Abs. 1 lit. f DSGVO). Du hast das Recht auf Auskunft,
 Berichtigung, Löschung, Einschränkung der Verarbeitung, Datenübertragbarkeit und Widerspruch sowie das Recht,
 dich bei einer Datenschutz-Aufsichtsbehörde zu beschweren. Schreib mir dazu einfach eine E-Mail.</p>
+</main>
+</body>
+</html>
+`;
+
+export const SUPPORT_HTML = `<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hilfe – BetterBahn</title>
+${PAGE_STYLE}
+</head>
+<body>
+<main>
+<h1>Hilfe &amp; Kontakt</h1>
+<p class="muted">BetterBahn für iPhone</p>
+
+<h2>Kontakt</h2>
+<p>Fragen, Fehler oder Wünsche? Schreib mir an
+<a href="mailto:goldkunibert@gmail.com">goldkunibert@gmail.com</a>. Bei Fehlern helfen Zug, Bahnhof und Uhrzeit.</p>
+
+<h2>Warum fehlt die Wagenreihung?</h2>
+<p>Die Deutsche Bahn veröffentlicht sie meist erst einige Stunden vor der Abfahrt, und nicht für jeden Zug.
+Für Züge, die später fahren, zeigt BetterBahn den geplanten Zugtyp.</p>
+
+<h2>Mein Ticket lässt sich nicht abrufen</h2>
+<p>Du brauchst die Auftragsnummer (in der Buchungsbestätigung und unter dem Barcode) und den Nachnamen der
+reisenden Person. Möchte bahn.de die Suche bestätigen, schließ das auf der angezeigten Seite ab.</p>
+
+<h2>Wallet lehnt meinen Pass ab</h2>
+<p>BetterBahn legt nur Barcodes in Apple Wallet, die eine gültige Signatur des Ausstellers tragen. Bei der
+Kontrolle gilt immer das Ticket in der App, in der du es gekauft hast.</p>
+
+<h2>Wie verbinde ich Träwelling?</h2>
+<p>Einstellungen → Für Profis → Expertenmodus einschalten → Träwelling einschalten, dann
+„Mit Träwelling anmelden“.</p>
+
+<h2>Wie lösche ich meine Daten?</h2>
+<p>Den Suchverlauf löschst du in den Einstellungen, gespeicherte Reisen, Favoriten und Tickets direkt in der App.
+Wenn du die App löschst, sind auch alle Daten auf dem Gerät weg.</p>
+
+<p class="muted"><a href="/datenschutz">Datenschutz</a> · BetterBahn ist ein privates Projekt und steht in keiner
+Verbindung zur Deutschen Bahn AG.</p>
 </main>
 </body>
 </html>
