@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import worker, { handlePrivacyPolicy, handleTraewellingCallback } from "./worker.mjs";
+import worker, { handlePage, handleTraewellingCallback } from "./worker.mjs";
 
 const endpoint = "https://betterbahn.betterbahn.workers.dev/oauth/traewelling/callback";
 
@@ -64,8 +64,17 @@ test("Worker serves the privacy policy, the callback and a 404 fallback", async 
     assert.equal((await worker.fetch(new Request(endpoint + "?code=test&state=test"))).status, 302);
 });
 
-test("privacy policy answers GET and HEAD only", () => {
-    assert.equal(handlePrivacyPolicy(new Request(new URL("/datenschutz", endpoint), { method: "POST" })).status, 405);
-    assert.equal(handlePrivacyPolicy(new Request(new URL("/datenschutz", endpoint), { method: "HEAD" })).status, 200);
-    assert.equal(handlePrivacyPolicy(new Request(endpoint)), null);
+test("pages answer GET and HEAD only", () => {
+    assert.equal(handlePage(new Request(new URL("/datenschutz", endpoint), { method: "POST" })).status, 405);
+    assert.equal(handlePage(new Request(new URL("/datenschutz", endpoint), { method: "HEAD" })).status, 200);
+    assert.equal(handlePage(new Request(endpoint)), null);
+});
+
+test("serves the support page with contact and a link to the privacy policy", async () => {
+    const response = await worker.fetch(new Request(new URL("/support/", endpoint)));
+    assert.equal(response.status, 200);
+    const html = await response.text();
+    assert.match(html, /mailto:goldkunibert@gmail\.com/);
+    assert.match(html, /href="\/datenschutz"/);
+    assert.doesNotMatch(html, /\$\{/);
 });

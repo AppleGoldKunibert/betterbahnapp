@@ -19,7 +19,7 @@ comments are English.
 | `BetterBahnShare/` | Share extension: `ShareViewController` takes shared DB text/URL and opens `betterbahn://import?...`. |
 | `Packages/BetterBahnKit/` | Local SwiftPM package with all models, networking and logic (iOS 26 + macOS 26, everything `Sendable`). Tests live here. |
 | `Config/` | xcconfigs + Info.plists. `Signing.xcconfig` holds team ID; optional gitignored `Local.xcconfig` overrides it. |
-| `Cloudflare/` | Worker (`betterbahn`) that bounces the Träwelling OAuth callback to `betterbahn://oauth` and serves the privacy policy at `/datenschutz` (linked in Settings; see its README). |
+| `Cloudflare/` | Worker (`betterbahn`) that bounces the Träwelling OAuth callback to `betterbahn://oauth` and serves the privacy policy at `/datenschutz` (linked in Settings) and the support page at `/support` (see its README). |
 | `Cloudflare/bahnde-proxy/` | Separate Worker (`betterbahn2`) proxying bahn.de's web API (`/web/api/…` paths), because bahn.de blocks Apple's URL loading stack, and DB Timetables (`/timetables/v1/…`, API key as Worker secret). Also hands out the App Attest tokens (`/auth/…`). See its README. `BahnDeClient.baseURL`, `TimetablesClient.baseURL` point at it. |
 | `Cloudflare/pass-signer/` | Worker (`betterbahn-pass`) that signs Apple Wallet passes for DB tickets with the Pass Type ID certificate (secrets), since that can't ship in the app. Needs an App Attest token, and only signs UIC (`#UT`) barcodes whose issuer signature verifies against UIC's public key list (`uicsignature.mjs`). `npm install && npm test` (see its README). |
 | `Cloudflare/shared/` | `appattest.mjs`: App Attest verification and the signed tokens both Workers check (`X-BetterBahn-Token`); `node --test Cloudflare/shared/appattest.test.mjs`. |

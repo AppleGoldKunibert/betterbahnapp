@@ -276,21 +276,37 @@ public struct BahnDeClient: Sendable {
 
     private func fetchCoachSequence(_ request: FormationRequest) async throws -> CoachSequence? {
         guard let eva = try await evaNumber(for: request.station) else { return nil }
-        let response: SequenceResponse
+        for candidate in [eva, Self.otherLevel(of: eva)].compactMap(\.self) {
+            guard let response = try await sequenceResponse(request, eva: candidate) else { continue }
+            let sequence = Self.coachSequence(from: response, category: request.category, number: Int(request.number))
+            return sequence.coaches.isEmpty && sequence.formation.units.isEmpty ? nil : sequence
+        }
+        return nil
+    }
+
+    /// nil when bahn.de has no coach sequence for the train at `eva` (404).
+    private func sequenceResponse(_ request: FormationRequest, eva: String) async throws -> SequenceResponse? {
         do {
-            response = try await get(Self.formationURL(request, eva: eva), as: SequenceResponse.self)
+            return try await get(Self.formationURL(request, eva: eva), as: SequenceResponse.self)
         } catch TransitError.http(let status, _) where status == 404 {
             return nil
         }
-        let sequence = Self.coachSequence(from: response, category: request.category, number: Int(request.number))
-        return sequence.coaches.isEmpty && sequence.formation.units.isEmpty ? nil : sequence
     }
+
+    /// bahn.de keeps the lower level of Berlin Hbf as a station of its own ("Berlin Hbf (tief)", platforms
+    /// 1–8) and only has a coach sequence under the level the train stops at, while station search (and
+    /// so `evaNumber(for:)`) only ever finds the upper one. A 404 at one level is retried at the other.
+    static let levelTwins = ["8011160": "8098160", "8098160": "8011160"]
+
+    static func otherLevel(of eva: String) -> String? { levelTwins[eva] }
 
     static func formationURL(_ request: FormationRequest, eva: String) -> URL {
         baseURL.appending(path: "reisebegleitung/wagenreihung/vehicle-sequence").appending(queryItems: [
             .init(name: "administrationId", value: dbAdministration),
             .init(name: "category", value: request.category),
-            .init(name: "date", value: utcDay(request.plannedDeparture)),
+            // The departure's day in Germany: a train leaving Brandenburg at 00:41 is asked for under the
+            // new day, although it's still the old one in UTC (bahn.de answers 404 then).
+            .init(name: "date", value: berlinDay(request.plannedDeparture)),
             .init(name: "evaNumber", value: eva),
             .init(name: "number", value: request.number),
             .init(name: "time", value: utcTimestamp(request.plannedDeparture)),
@@ -415,10 +431,6 @@ public struct BahnDeClient: Sendable {
         return calendar.component(.hour, from: date)
     }
 
-    /// `yyyy-MM-dd` in UTC, as the coach-sequence request wants it.
-    static func utcDay(_ date: Date) -> String {
-        date.formatted(Date.ISO8601FormatStyle(timeZone: .gmt).year().month().day())
-    }
 
     /// `2026-09-29T20:38:00.000Z`, as the coach-sequence request wants it.
     static func utcTimestamp(_ date: Date) -> String {

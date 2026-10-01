@@ -1238,16 +1238,36 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(formation.unitDescription == "Tz 8030 + 8005")
     }
 
-    @Test func formationURLUsesUTCDayAndMilliseconds() throws {
-        // 00:30 in Berlin on the 30th is still the 29th in UTC.
+    @Test func formationURLUsesGermanDayAndUTCMilliseconds() throws {
+        // 00:30 in Berlin on the 30th is still the 29th in UTC; bahn.de wants the German day (it
+        // answers 404 for the 29th, e.g. ICE 1540 leaving Brandenburg Hbf at 00:41).
         let departure = try #require(JSONDecoding.parseISODate("2026-09-29T22:30:00Z"))
         let request = BahnDeClient.FormationRequest(category: "ICE", number: "693", station: station("8000105", "Frankfurt (Main) Hbf"), plannedDeparture: departure)
         let url = BahnDeClient.formationURL(request, eva: "8000105").absoluteString
         #expect(url.hasPrefix("https://betterbahn2.betterbahn.workers.dev/web/api/reisebegleitung/wagenreihung/vehicle-sequence?"))
         #expect(url.contains("administrationId=80"))
-        #expect(url.contains("date=2026-09-29"))
+        #expect(url.contains("date=2026-09-30"))
         #expect(url.contains("time=2026-09-29T22:30:00.000Z"))
         #expect(url.contains("number=693"))
+    }
+
+    /// bahn.de only has Berlin Hbf's lower-level trains under "Berlin Hbf (tief)" (8098160), which station
+    /// search never returns: a 404 at 8011160 is asked again there.
+    @Test func coachSequenceTriesBerlinHbfLowerLevel() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [LowerLevelSequenceProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let bahnDe = BahnDeClient(http: HTTPClient(session: session), gate: BahnDeGate())
+        let departure = try #require(JSONDecoding.parseISODate("2026-10-01T21:51:00Z"))
+        let request = BahnDeClient.FormationRequest(category: "ICE", number: "117", station: station("8011160", "Berlin Hbf"),
+                                                    plannedDeparture: departure)
+
+        let sequence = try await bahnDe.coachSequence(request)
+
+        #expect(sequence?.coaches.isEmpty == false)
+        #expect(LowerLevelSequenceProtocol.requestedEVAs.withLock { $0 } == ["8011160", "8098160"])
+        #expect(BahnDeClient.otherLevel(of: "8000105") == nil)
     }
 
     /// Only a stop where the train still departs, and only when that is soon enough for bahn.de.
@@ -2753,4 +2773,27 @@ private final class MainStationGeocodeProtocol: URLProtocol, @unchecked Sendable
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
+}
+
+/// 404 for Berlin Hbf's upper level, the fixture's coach sequence for its lower level.
+private final class LowerLevelSequenceProtocol: URLProtocol, @unchecked Sendable {
+    static let requestedEVAs = Mutex<[String]>([])
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+
+    override func startLoading() {
+        let eva = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+            .queryItems?.first(where: { $0.name == "evaNumber" })?.value ?? ""
+        Self.requestedEVAs.withLock { $0.append(eva) }
+        let found = eva == "8098160"
+        let body = found
+            ? (try? Data(contentsOf: Bundle.module.url(forResource: "bahnde-vehicle-sequence", withExtension: "json", subdirectory: "Fixtures")!)) ?? Data()
+            : Data(#"{"code":"WEB_RBL_NOTFOUND","status":"ERROR"}"#.utf8)
+        let response = HTTPURLResponse(url: request.url!, statusCode: found ? 200 : 404, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
 }
