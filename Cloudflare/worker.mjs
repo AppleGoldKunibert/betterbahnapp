@@ -57,7 +57,7 @@ keine Benutzerkonten, keine Werbung, kein Tracking und keine Analyse-Werkzeuge. 
 bleibt auf deinem Gerät oder in deinem eigenen iCloud-Konto.</p>
 
 <h2>Verantwortlich</h2>
-<p>[Name eintragen]<br>E-Mail: <a href="mailto:goldkunibert@gmail.com">goldkunibert@gmail.com</a></p>
+<p>Alfred Lach<br>E-Mail: <a href="mailto:goldkunibert@gmail.com">goldkunibert@gmail.com</a></p>
 
 <h2>Auf deinem Gerät</h2>
 <p>Gespeicherte Reisen, Favoriten, der Suchverlauf, Einstellungen sowie Tickets und Zeitkarten werden nur auf
