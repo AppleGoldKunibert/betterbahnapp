@@ -81,3 +81,15 @@ Config/Local.xcconfig
 
 # Cloudflare Worker dependencies
 node_modules/
+AppStoreScreenshots/01-suche.png
+AppStoreScreenshots/02-ergebnisse.png
+AppStoreScreenshots/03-reiseplan.png
+AppStoreScreenshots/04-abfahrten.png
+AppStoreScreenshots/05-zugansicht.png
+AppStoreScreenshots/06-live-aktivitaet.png
+AppStoreScreenshots/6.5-Zoll/01-suche.png
+AppStoreScreenshots/6.5-Zoll/02-ergebnisse.png
+AppStoreScreenshots/6.5-Zoll/03-reiseplan.png
+AppStoreScreenshots/6.5-Zoll/04-abfahrten.png
+AppStoreScreenshots/6.5-Zoll/05-zugansicht.png
+AppStoreScreenshots/6.5-Zoll/06-live-aktivitaet.png
