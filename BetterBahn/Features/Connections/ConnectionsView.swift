@@ -77,7 +77,10 @@ struct ConnectionsView: View {
                 VStack(spacing: 20) {
                     routeCard
                     optionsCard
-                    searchButton
+                    HStack(spacing: 10) {
+                        searchButton
+                        AddTicketButton()
+                    }
                     UpcomingTripsSection()
                     if !model.recentSearches.isEmpty {
                         recentSection

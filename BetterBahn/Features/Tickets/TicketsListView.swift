@@ -2,7 +2,7 @@ import BetterBahnKit
 import SwiftUI
 
 /// Round button next to "Gespeichert" on a saved journey that has tickets: shows them.
-/// Tickets are fetched in Settings → Gespeicherte Tickets.
+/// Tickets are added with `AddTicketButton` next to "Verbindungen suchen".
 struct TicketButton: View {
     let tickets: [SavedTicket]
     let journey: Journey
@@ -26,39 +26,25 @@ struct TicketButton: View {
     }
 }
 
-/// Settings → Tickets: every stored ticket, and fetching new ones.
-struct TicketsListView: View {
-    @Environment(AppModel.self) private var model
+/// Icon next to "Verbindungen suchen": fetches a ticket by order number and links it to its journey.
+struct AddTicketButton: View {
     @State private var showLookup = false
-    @State private var shownTickets: [SavedTicket]?
     @State private var notMatched = false
     @State private var lookupFoundNoJourney = false
 
     var body: some View {
-        List {
-            Section {
-                Button {
-                    showLookup = true
-                } label: {
-                    IconLabel(title: "Ticket per Auftragsnummer abrufen", systemImage: "plus.circle.fill", color: .brand)
-                }
-            } footer: {
-                Text("Tickets werden nur auf diesem Gerät gespeichert, nicht in iCloud.")
-            }
-
-            if !model.tickets.isEmpty {
-                Section("Gespeicherte Tickets") {
-                    ForEach(sortedTickets) { saved in
-                        Button { shownTickets = [saved] } label: { row(saved) }
-                            .buttonStyle(.plain)
-                    }
-                    .onDelete { offsets in
-                        for index in offsets { model.removeTicket(sortedTickets[index]) }
-                    }
-                }
-            }
+        Button {
+            showLookup = true
+        } label: {
+            // Same font and padding as the search button so both are the same height.
+            Label("Via Ticket hinzufügen", systemImage: "ticket")
+                .labelStyle(.iconOnly)
+                .font(.headline)
+                .padding(.vertical, 6)
         }
-        .navigationTitle("Tickets")
+        .buttonStyle(.glass)
+        .tint(.brand)
+        .controlSize(.large)
         .sheet(isPresented: $showLookup, onDismiss: {
             notMatched = lookupFoundNoJourney
             lookupFoundNoJourney = false
@@ -67,13 +53,40 @@ struct TicketsListView: View {
                 lookupFoundNoJourney = imported.contains { $0.journeyID == nil }
             }
         }
-        .sheet(item: Binding(get: { shownTickets.map(TicketSelection.init) }, set: { shownTickets = $0?.tickets })) { selection in
-            TicketView(tickets: selection.tickets, journey: journey(for: selection.tickets.first))
-        }
         .alert("Verbindung nicht gefunden", isPresented: $notMatched) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("Das Ticket ist gespeichert, aber die gebuchte Verbindung wurde in den Fahrplandaten nicht gefunden. Du findest es hier unter „Gespeicherte Tickets“.")
+            Text("Das Ticket ist gespeichert, aber die gebuchte Verbindung wurde in den Fahrplandaten nicht gefunden. Du findest es in den Einstellungen unter „Gespeicherte Tickets“.")
+        }
+    }
+}
+
+/// Settings → Tickets: every stored ticket. New ones are fetched from the search page.
+struct TicketsListView: View {
+    @Environment(AppModel.self) private var model
+    @State private var shownTickets: [SavedTicket]?
+
+    var body: some View {
+        List {
+            Section {
+                if model.tickets.isEmpty {
+                    Text("Noch keine Tickets. Füge sie unter „Verbindungen“ mit „Via Ticket hinzufügen“ hinzu.")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(sortedTickets) { saved in
+                    Button { shownTickets = [saved] } label: { row(saved) }
+                        .buttonStyle(.plain)
+                }
+                .onDelete { offsets in
+                    for index in offsets { model.removeTicket(sortedTickets[index]) }
+                }
+            } footer: {
+                Text("Tickets werden nur auf diesem Gerät gespeichert, nicht in iCloud.")
+            }
+        }
+        .navigationTitle("Tickets")
+        .sheet(item: Binding(get: { shownTickets.map(TicketSelection.init) }, set: { shownTickets = $0?.tickets })) { selection in
+            TicketView(tickets: selection.tickets, journey: journey(for: selection.tickets.first))
         }
     }
 
