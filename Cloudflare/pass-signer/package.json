@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test worker.test.mjs",
+    "test": "node --test worker.test.mjs uicsignature.test.mjs ../shared/appattest.test.mjs",
     "deploy": "wrangler deploy"
   },
   "dependencies": {

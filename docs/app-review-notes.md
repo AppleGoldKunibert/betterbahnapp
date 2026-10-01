@@ -31,7 +31,8 @@ features or data flows change (and update the privacy policy in `Cloudflare/work
 >
 > Tickets: "Ticket abrufen" opens bahn.de's own order search inside the app; the traveller's order
 > number and last name go only to bahn.de and the ticket is stored only on the device. "Zu Apple
-> Wallet hinzufügen" creates a Wallet pass that carries the ticket's original barcode unchanged.
+> Wallet hinzufügen" creates a Wallet pass that carries the ticket's original barcode unchanged; our
+> server only signs passes whose barcode carries a valid signature of the ticket's issuer.
 >
 > Demo Träwelling account: [user] / [password]
 > DB booking for ticket import: order number [ … ], last name [ … ]
@@ -42,4 +43,6 @@ features or data flows change (and update the privacy policy in `Cloudflare/work
   proxy also sends browser user agents. Ask DB / the operators for permission if App Review asks.
 - The share extension opens the app through the responder chain (`ShareViewController.openApp`),
   which Apple only officially allows for widgets. Common practice, but a possible review question.
-- Zeitkarten from screenshots can be added to Wallet (see `TravelPassView`).
+- Zeitkarten from screenshots can be added to Wallet (see `TravelPassView`). The pass signer only
+  signs them when the barcode's issuer signature verifies, so forged codes are refused; a genuine
+  ticket of someone else still works (the Deutschland-Ticket is personal and checked with ID).

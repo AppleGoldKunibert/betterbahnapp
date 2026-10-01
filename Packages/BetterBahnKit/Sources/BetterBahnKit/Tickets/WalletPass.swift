@@ -154,8 +154,21 @@ public struct WalletPassPayload: Encodable, Sendable, Hashable {
     }
 }
 
+public enum WalletPassError: Error, Sendable, Equatable, LocalizedError {
+    /// The UIC barcode's issuer signature didn't verify: the code was made up or altered.
+    case unverifiedBarcode
+
+    public var errorDescription: String? {
+        switch self {
+        case .unverifiedBarcode:
+            "Der Barcode trägt keine gültige Signatur des Ausstellers. Daraus kann BetterBahn keinen Wallet-Pass machen."
+        }
+    }
+}
+
 /// Has the `Cloudflare/pass-signer` Worker sign a pass (the certificate must never ship in the app).
-/// Only the genuine app may use it, so requests carry the App Attest token (`WorkerAuth`).
+/// Only the genuine app may use it, so requests carry the App Attest token (`WorkerAuth`), and it
+/// refuses UIC barcodes whose issuer signature doesn't verify (`WalletPassError.unverifiedBarcode`).
 public struct WalletPassClient: Sendable {
     public static let baseURL = URL(string: "https://betterbahn-pass.kunibert88.workers.dev")!
 
@@ -175,6 +188,10 @@ public struct WalletPassClient: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/vnd.apple.pkpass", forHTTPHeaderField: "Accept")
         request.httpBody = try payload.json()
-        return try await http.sendRaw(request, auth: auth)
+        do {
+            return try await http.sendRaw(request, auth: auth)
+        } catch TransitError.http(status: 422, body: _) {
+            throw WalletPassError.unverifiedBarcode
+        }
     }
 }

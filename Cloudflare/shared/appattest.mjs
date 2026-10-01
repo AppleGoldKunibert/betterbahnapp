@@ -364,7 +364,7 @@ export function children(node) {
     return out;
 }
 
-function decodeOID(bytes) {
+export function decodeOID(bytes) {
     if (bytes.length === 0) return "";
     const parts = [Math.floor(bytes[0] / 40), bytes[0] % 40];
     let value = 0;

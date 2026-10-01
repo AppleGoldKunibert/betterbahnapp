@@ -13,14 +13,22 @@ DB ticket here and gets the signed `.pkpass` back.
   `barcodes`, `boardingPass`, …). `formatVersion`, `passTypeIdentifier`, `teamIdentifier` and
   `organizationName` ("BetterBahn") come from the Worker; anything else (e.g. `webServiceURL`) is dropped.
 - The barcode is passed through unchanged: it is DB's own signed ticket code, read from the ticket
-  PDF. The Worker never creates or changes a barcode.
+  PDF or a screenshot. The Worker never creates or changes a barcode.
+- UIC ticket barcodes (`#UT`, e.g. every Deutschland-Ticket added from a screenshot) are only signed
+  when their issuer's signature verifies (`uicsignature.mjs`): the barcode names the issuer (RICS code)
+  and key ID, whose public key comes from UIC's list (`https://railpublickey.uic.org/download.php`,
+  cached for a day, the last copy kept if UIC is down). DSA (1024/SHA-1, 2048/SHA-224/SHA-256) is
+  checked with BigInt since WebCrypto has none, ECDSA through WebCrypto. A made-up or altered code gets
+  `422 unverified_barcode`. Other barcode formats can only come from tickets the app fetched from
+  bahn.de itself and pass as they are.
 - Adds the icon Wallet requires (`images.mjs`, the app icon resized; no logo, so the pass front stays plain), writes `manifest.json` (SHA-1 of every
   file), a detached PKCS#7 `signature` (SHA-256, Apple's WWDR certificate included) and zips it.
 - Answers `application/vnd.apple.pkpass` with `Cache-Control: no-store`. Nothing is stored or
   logged. `GET /health` answers without signing.
 
 Errors: `400` invalid JSON or pass, `401` missing or invalid token, `405` not POST, `413` too large,
-`503` secrets missing, `500` signing failed.
+`422` UIC barcode signature doesn't verify, `503` secrets missing or UIC's key list unreachable,
+`500` signing failed.
 
 ## Setup
 
@@ -57,7 +65,8 @@ The Worker is `betterbahn-pass` (`https://betterbahn-pass.kunibert88.workers.dev
 
 ## Verify
 
-Unit tests (with a throwaway test certificate): `cd Cloudflare/pass-signer && npm install && npm test`.
+Unit tests (with a throwaway test certificate, generated DSA/ECDSA keys and a sample DB barcode):
+`cd Cloudflare/pass-signer && npm install && npm test`.
 During a rollout, `ALLOW_UNATTESTED = "true"` lets builds without App Attest through (see the proxy's README).
 
 After deploying, add a ticket to Wallet from the app's ticket screen. If Wallet refuses the pass,

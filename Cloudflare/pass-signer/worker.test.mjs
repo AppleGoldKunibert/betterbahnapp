@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import test from "node:test";
 import forge from "node-forge";
 import { TOKEN_HEADER, signToken } from "../shared/appattest.mjs";
 import { buildPass, crc32, handleRequest, isValidPayload, MAX_BODY_BYTES, ORGANIZATION_NAME } from "./worker.mjs";
+import { resetKeyListMemory } from "./uicsignature.mjs";
 
 const base = "https://betterbahn-pass.example.workers.dev";
 
@@ -129,6 +130,34 @@ test("requires an App Attest token", async () => {
     assert.equal((await handleRequest(post(payload()), strict)).status, 401);
     assert.equal((await handleRequest(post(payload(), { [TOKEN_HEADER]: await token("other") }), strict)).status, 401);
     assert.equal((await handleRequest(post(payload(), { [TOKEN_HEADER]: await token("secret") }), strict)).status, 200);
+});
+
+test("signs UIC ticket barcodes only with a valid issuer signature", async () => {
+    const { publicKey, privateKey } = generateKeyPairSync("dsa", { modulusLength: 2048, divisorLength: 256 });
+    const keys = new Map([["1080/12", [{
+        algorithm: "SHA256withDSA(2048,256)", publicKey: publicKey.export({ type: "spki", format: "der" }).toString("base64"),
+    }]]]);
+    const data = Buffer.from("x\u009c compressed ticket", "latin1");
+    const uic = signature => {
+        const field = Buffer.alloc(64);
+        signature.copy(field);
+        const bytes = Buffer.concat([Buffer.from("#UT02108000012", "latin1"), field,
+            Buffer.from(String(data.length).padStart(4, "0")), data]);
+        return payload({ barcodes: [{ format: "PKBarcodeFormatAztec", message: bytes.toString("latin1"), messageEncoding: "iso-8859-1" }] });
+    };
+    const genuine = sign("sha256", data, { key: privateKey, dsaEncoding: "ieee-p1363" });
+    assert.equal((await handleRequest(post(uic(genuine)), env, { keys })).status, 200);
+
+    const forged = Buffer.from(genuine);
+    forged[3] ^= 1;
+    const refused = await handleRequest(post(uic(forged)), env, { keys });
+    assert.equal(refused.status, 422);
+    assert.deepEqual(await refused.json(), { error: "unverified_barcode" });
+
+    // Without UIC's key list nothing with a UIC barcode is signed.
+    resetKeyListMemory();
+    const offline = await handleRequest(post(uic(genuine)), env, { fetch: async () => new Response("", { status: 500 }), cache: null });
+    assert.equal(offline.status, 503);
 });
 
 test("validates the payload shape", () => {

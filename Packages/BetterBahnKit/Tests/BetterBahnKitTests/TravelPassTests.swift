@@ -103,6 +103,21 @@ import Testing
         #expect(WalletPassPayload(pass: monthly)?.serialNumber != wallet.serialNumber)
     }
 
+    /// The pass signer refuses UIC barcodes whose signature doesn't verify (like the fixtures' zeroed
+    /// one) with a 422, which the app explains instead of showing a bare server error.
+    @Test func explainsARefusedBarcode() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [UnverifiedBarcodeProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let pass = try TravelPass(barcode: DBTicket.Barcode(payload: payload("uic-dticket-month"), image: nil))
+        let wallet = try #require(WalletPassPayload(pass: pass))
+
+        await #expect(throws: WalletPassError.unverifiedBarcode) {
+            try await WalletPassClient(http: HTTPClient(session: session)).signedPass(wallet)
+        }
+    }
+
     /// A phone-sized PNG with `payload` as an Aztec code on white, like a DB Navigator screenshot.
     static func screenshot(withAztec payload: Data) -> Data? {
         let filter = CIFilter(name: "CIAztecCodeGenerator")!
@@ -116,5 +131,18 @@ import Testing
         context.fill(CGRect(x: 0, y: 0, width: 1179, height: 2556))
         context.draw(code, in: CGRect(x: 70, y: 1100, width: 1040, height: 1040))
         return context.makeImage().flatMap(TicketBarcodeReader.png)
+    }
+}
+
+private final class UnverifiedBarcodeProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+
+    override func startLoading() {
+        let response = HTTPURLResponse(url: request.url!, statusCode: 422, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(#"{"error":"unverified_barcode"}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
     }
 }

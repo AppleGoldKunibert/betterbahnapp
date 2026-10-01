@@ -1,10 +1,12 @@
 // Signs Apple Wallet passes for BetterBahn's DB tickets. A pass must be signed with a Pass Type ID
 // certificate, which can't ship inside the app, so the app sends its pass.json here and gets the
-// signed .pkpass back. The barcode is passed through untouched: it is DB's own signed ticket code.
+// signed .pkpass back. The barcode is passed through untouched: it is DB's own signed ticket code,
+// and a UIC ticket barcode ("#UT") is only accepted when its issuer's signature verifies.
 
 import forge from "node-forge";
 import { isAuthorized, unauthorized } from "../shared/appattest.mjs";
 import { IMAGES } from "./images.mjs";
+import { loadKeyList, messageBytes, verifyUICBarcode } from "./uicsignature.mjs";
 
 export const MAX_BODY_BYTES = 16 * 1024;
 
@@ -22,7 +24,8 @@ function json(status, body, extra = {}) {
     });
 }
 
-export async function handleRequest(request, env = {}) {
+/// `deps` lets tests replace the key list download and the edge cache.
+export async function handleRequest(request, env = {}, deps = {}) {
     const url = new URL(request.url);
     if (url.pathname === "/health") return json(200, { ok: true });
     if (url.pathname !== "/pass") return json(404, { error: "not_found" });
@@ -44,6 +47,25 @@ export async function handleRequest(request, env = {}) {
         return json(400, { error: "invalid_json" });
     }
     if (!isValidPayload(payload)) return json(400, { error: "invalid_pass" });
+
+    // UIC ticket barcodes – every pass added from a screenshot has one – must carry a valid signature of
+    // their issuer, so a made-up or altered code never ends up in a pass signed by us. Other codes can
+    // only come from tickets the app fetched from bahn.de itself, and pass as they are.
+    const uic = payload.barcodes.filter(barcode => barcode.message.startsWith("#UT"));
+    if (uic.length > 0) {
+        let keys;
+        try {
+            keys = deps.keys ?? await loadKeyList({
+                fetch: deps.fetch, cache: deps.cache ?? (typeof caches === "undefined" ? null : caches.default),
+            });
+        } catch {
+            return json(503, { error: "keys_unavailable" });
+        }
+        for (const barcode of uic) {
+            const bytes = messageBytes(barcode.message);
+            if (!bytes || !(await verifyUICBarcode(bytes, keys))) return json(422, { error: "unverified_barcode" });
+        }
+    }
 
     const pass = {
         formatVersion: 1, passTypeIdentifier: env.PASS_TYPE_ID, teamIdentifier: env.TEAM_ID, organizationName: ORGANIZATION_NAME,
