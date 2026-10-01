@@ -96,7 +96,7 @@ struct TicketsListView: View {
             } header: {
                 Text("Zeitkarten")
             } footer: {
-                Text("Wähl einen Screenshot deines Deutschland-Tickets QR Codes aus. Bitte beachte das nicht alle Anbieter unterstützt werden.")
+                Text("Wähl einen Screenshot des QR-Codes deines Deutschland-Tickets aus. Bitte beachte, dass nicht alle Anbieter unterstützt werden.")
             }
 
             Section {
