@@ -1,13 +1,13 @@
 # Träwelling callback and privacy policy
 
 `worker.mjs` (Worker `betterbahn`) also serves the privacy policy at
-`https://betterbahn.kunibert88.workers.dev/datenschutz` (linked in the app's settings; use it as the
+`https://betterbahn.betterbahn.workers.dev/datenschutz` (linked in the app's settings; use it as the
 privacy policy URL in App Store Connect). Fill in the `[Name eintragen]` placeholder in
 `PRIVACY_HTML` before deploying, and update the page whenever the app sends data somewhere new.
 
 Keep the registered Träwelling redirect URI exactly:
 
-    https://betterbahn.kunibert88.workers.dev/oauth/traewelling/callback
+    https://betterbahn.betterbahn.workers.dev/oauth/traewelling/callback
 
 The authorization request and token exchange both use that HTTPS URI. The Worker
 forwards the response to `betterbahn://oauth`, which the active
@@ -35,7 +35,7 @@ After deploying, this synthetic request should return HTTP 302 with
 `Location: betterbahn://oauth?code=test-code&state=test-state`:
 
 ```sh
-curl -i 'https://betterbahn.kunibert88.workers.dev/oauth/traewelling/callback?code=test-code&state=test-state'
+curl -i 'https://betterbahn.betterbahn.workers.dev/oauth/traewelling/callback?code=test-code&state=test-state'
 ```
 
 Do not follow this test redirect or use real authorization codes in shell commands.

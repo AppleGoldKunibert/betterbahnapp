@@ -170,7 +170,7 @@ public enum WalletPassError: Error, Sendable, Equatable, LocalizedError {
 /// Only the genuine app may use it, so requests carry the App Attest token (`WorkerAuth`), and it
 /// refuses UIC barcodes whose issuer signature doesn't verify (`WalletPassError.unverifiedBarcode`).
 public struct WalletPassClient: Sendable {
-    public static let baseURL = URL(string: "https://betterbahn-pass.kunibert88.workers.dev")!
+    public static let baseURL = URL(string: "https://betterbahn-pass.betterbahn.workers.dev")!
 
     let http: HTTPClient
     let auth: WorkerAuth?

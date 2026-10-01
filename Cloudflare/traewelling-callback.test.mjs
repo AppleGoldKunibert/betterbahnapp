@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import worker, { handlePrivacyPolicy, handleTraewellingCallback } from "./worker.mjs";
 
-const endpoint = "https://betterbahn.kunibert88.workers.dev/oauth/traewelling/callback";
+const endpoint = "https://betterbahn.betterbahn.workers.dev/oauth/traewelling/callback";
 
 test("forwards code and state without changing their values", () => {
     const url = new URL(endpoint);

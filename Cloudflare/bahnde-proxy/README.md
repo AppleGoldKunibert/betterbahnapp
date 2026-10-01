@@ -74,7 +74,7 @@ departure bahn.de already has a coach sequence for (the next morning worked late
 before), with `ALLOW_UNATTESTED` set (or a token from the app as `-H 'X-BetterBahn-Token: …'`):
 
 ```sh
-curl -i 'https://betterbahn2.kunibert88.workers.dev/web/api/reisebegleitung/wagenreihung/vehicle-sequence?administrationId=80&category=ICE&date=2026-09-30&evaNumber=8000105&number=117&time=2026-09-30T06:10:00.000Z'
+curl -i 'https://betterbahn2.betterbahn.workers.dev/web/api/reisebegleitung/wagenreihung/vehicle-sequence?administrationId=80&category=ICE&date=2026-09-30&evaNumber=8000105&number=117&time=2026-09-30T06:10:00.000Z'
 ```
 
 `200` with a `groups` array (e.g. `"name":"ICE9226"`) means Cloudflare gets through; `403` with

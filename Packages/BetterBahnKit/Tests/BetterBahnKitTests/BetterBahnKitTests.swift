@@ -1243,7 +1243,7 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         let departure = try #require(JSONDecoding.parseISODate("2026-09-29T22:30:00Z"))
         let request = BahnDeClient.FormationRequest(category: "ICE", number: "693", station: station("8000105", "Frankfurt (Main) Hbf"), plannedDeparture: departure)
         let url = BahnDeClient.formationURL(request, eva: "8000105").absoluteString
-        #expect(url.hasPrefix("https://betterbahn2.kunibert88.workers.dev/web/api/reisebegleitung/wagenreihung/vehicle-sequence?"))
+        #expect(url.hasPrefix("https://betterbahn2.betterbahn.workers.dev/web/api/reisebegleitung/wagenreihung/vehicle-sequence?"))
         #expect(url.contains("administrationId=80"))
         #expect(url.contains("date=2026-09-29"))
         #expect(url.contains("time=2026-09-29T22:30:00.000Z"))
@@ -1632,7 +1632,7 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
 
     @Test func requestURLs() throws {
         let journey = BahnDeClient.journeyURL("2|#VN#1#ST#1759#PI#0#ZI#1#TA#0#DA#290926#").absoluteString
-        #expect(journey == "https://betterbahn2.kunibert88.workers.dev/web/api/reiseloesung/fahrt?journeyId=2%7C%23VN%231%23ST%231759%23PI%230%23ZI%231%23TA%230%23DA%23290926%23&poly=false")
+        #expect(journey == "https://betterbahn2.betterbahn.workers.dev/web/api/reiseloesung/fahrt?journeyId=2%7C%23VN%231%23ST%231759%23PI%230%23ZI%231%23TA%230%23DA%23290926%23&poly=false")
 
         let departure = try #require(JSONDecoding.parseISODate("2026-09-29T12:30:00Z"))
         let board = try #require(URLComponents(url: BahnDeClient.boardURL(eva: "8000105", at: departure), resolvingAgainstBaseURL: false))

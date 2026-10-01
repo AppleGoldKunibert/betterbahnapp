@@ -83,7 +83,7 @@ public struct TimetablesLegOverride: Sendable {
 public struct TimetablesClient: Sendable {
     /// DB's Timetables API (API Marketplace) through the `Cloudflare/bahnde-proxy` Worker, which adds
     /// the API key (a Worker secret, never in the app) and only answers the genuine app (`WorkerAuth`).
-    public static let baseURL = URL(string: "https://betterbahn2.kunibert88.workers.dev/timetables/v1")!
+    public static let baseURL = URL(string: "https://betterbahn2.betterbahn.workers.dev/timetables/v1")!
     /// A stop only counts as a match when its planned time is this close to the leg's.
     static let matchTolerance: TimeInterval = 180
     static let berlin = TimeZone(identifier: "Europe/Berlin")!

@@ -60,7 +60,7 @@ Errors: `400` invalid JSON or pass, `401` missing or invalid token, `405` not PO
    npx wrangler deploy
    ```
 
-The Worker is `betterbahn-pass` (`https://betterbahn-pass.kunibert88.workers.dev`, see
+The Worker is `betterbahn-pass` (`https://betterbahn-pass.betterbahn.workers.dev`, see
 `WalletPassClient.baseURL`), separate from the bahn.de proxy and the Träwelling callback.
 
 ## Verify

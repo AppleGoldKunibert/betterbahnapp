@@ -3,12 +3,12 @@ import Testing
 @testable import BetterBahnKit
 
 @Suite struct TraewellingAuthTests {
-    private let redirectURI = "https://betterbahn.kunibert88.workers.dev/oauth/traewelling/callback"
+    private let redirectURI = "https://betterbahn.betterbahn.workers.dev/oauth/traewelling/callback"
 
     @Test func defaultHTTPSCallback() {
         let config = TraewellingConfig(clientID: "public-client")
         #expect(config.redirectURI == redirectURI)
-        #expect(config.callbackHost == "betterbahn.kunibert88.workers.dev")
+        #expect(config.callbackHost == "betterbahn.betterbahn.workers.dev")
         #expect(config.callbackPath == "/oauth/traewelling/callback")
         #expect(config.callbackScheme == "betterbahn")
     }
@@ -378,7 +378,7 @@ private final class OAuthTokenRequestProtocol: URLProtocol, @unchecked Sendable 
         #expect(parameters == [
             "grant_type": "authorization_code",
             "client_id": "public-client",
-            "redirect_uri": "https://betterbahn.kunibert88.workers.dev/oauth/traewelling/callback",
+            "redirect_uri": "https://betterbahn.betterbahn.workers.dev/oauth/traewelling/callback",
             "code_verifier": "test-verifier",
             "code": "test-code",
         ])

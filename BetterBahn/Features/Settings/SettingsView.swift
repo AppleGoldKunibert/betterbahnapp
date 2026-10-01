@@ -3,7 +3,7 @@ import SwiftUI
 
 struct SettingsView: View {
     /// Served by the `Cloudflare/worker.mjs` Worker; also the privacy policy URL in App Store Connect.
-    static let privacyPolicyURL = URL(string: "https://betterbahn.kunibert88.workers.dev/datenschutz")!
+    static let privacyPolicyURL = URL(string: "https://betterbahn.betterbahn.workers.dev/datenschutz")!
 
     @Environment(AppModel.self) private var model
     @State private var user: TraewellingUser?

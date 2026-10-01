@@ -38,7 +38,7 @@ public struct DeviceAppAttest: AppAttesting {
 /// token, which the Workers only accept while `ALLOW_UNATTESTED` is set.
 public actor WorkerAuth {
     public static let shared = WorkerAuth()
-    public static let baseURL = URL(string: "https://betterbahn2.kunibert88.workers.dev/auth")!
+    public static let baseURL = URL(string: "https://betterbahn2.betterbahn.workers.dev/auth")!
     public static let header = "X-BetterBahn-Token"
     /// After a failed attempt (no network, Apple's service down) the next one waits this long, so
     /// requests don't each start a new attestation.

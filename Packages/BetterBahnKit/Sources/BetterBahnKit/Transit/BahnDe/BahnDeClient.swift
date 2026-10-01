@@ -56,7 +56,7 @@ public struct TrainFormation: Codable, Sendable, Hashable {
 /// (`WorkerAuth`). Responses are cached, and a 403/429 (passed through by the Worker) pauses every
 /// bahn.de request for `BahnDeGate.cooldown` instead of retrying.
 public struct BahnDeClient: Sendable {
-    public static let baseURL = URL(string: "https://betterbahn2.kunibert88.workers.dev/web/api")!
+    public static let baseURL = URL(string: "https://betterbahn2.betterbahn.workers.dev/web/api")!
     /// Deutsche Bahn's administration ID.
     public static let dbAdministration = "80"
     /// Categories whose coach sequence and journey details bahn.de has (Railjets included).
