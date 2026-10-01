@@ -1348,6 +1348,20 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         #expect(lookup.formation.unitDescription == "Tz 9457 „Bundesrepublik Deutschland“")
     }
 
+    /// Real response for IC 2271 (2026-10-01): bahn.expert has no Baureihe for IC 2 Twindexx sets.
+    @Test func twindexxSeriesFromGroupName() throws {
+        let json = """
+        {"isRealtime": true, "source": "DB-risTransports", "sequence": {"groups": [
+            {"name": "ICD2868", "journeyNumber": 2271, "baureihe": null, "coaches": []}]}}
+        """
+        let response = try JSONDecoding.decoder.decode(BahnExpertClient.SequenceResponse.self, from: Data(json.utf8))
+        let group = try #require(response.sequence?.groups.first)
+        #expect(BahnExpertClient.seriesName(of: group, category: "IC") == "IC 2 Twindexx")
+        #expect(BahnExpertClient.seriesName(of: group, category: "ICE") == nil)
+        #expect(TrainTypeLookup.Group(seriesName: "IC 2 Twindexx", baureihe: nil, unitNumber: "2868", origin: nil,
+                                      destination: nil, coachCount: 0).family == "IC 2 Twindexx")
+    }
+
     /// Real response for ICE 693 two days ahead (2026-10-01): DB's plan, no Tz yet.
     @Test func decodesPlannedSequence() throws {
         let json = """

@@ -313,17 +313,25 @@ struct TrainSeriesTag: View {
     let request: BahnDeClient.FormationRequest?
     let line: Line?
     let date: Date
+    /// The leg's whole train, asked for when the leg itself has no stop left that bahn.de would
+    /// answer for (it is over) and bahn.expert knows no series, as the train may still be running.
+    let tripId: String?
+    let source: DataSource?
 
     init(leg: Leg) {
         request = BahnDeClient.formationRequest(for: leg)
         line = leg.line
         date = leg.departure.planned
+        tripId = leg.tripId
+        source = leg.source
     }
 
     init(trip: Trip) {
         request = BahnDeClient.formationRequest(for: trip)
         line = trip.line
-        date = trip.stopovers.first?.departure?.planned ?? .now
+        date = trip.stopovers.lazy.compactMap { $0.departure?.planned ?? $0.arrival?.planned }.first ?? .now
+        tripId = nil
+        source = nil
     }
 
     @Environment(AppModel.self) private var model
@@ -344,12 +352,16 @@ struct TrainSeriesTag: View {
                     .accessibilityLabel("Baureihe \(family)")
             }
         }
-        .task(id: "\(line?.name ?? "")|\(date)|\(request?.station.id ?? "")") {
+        .task(id: "\(line?.name ?? "")|\(Int(date.timeIntervalSince1970 / 60))|\(request?.station.id ?? "")") {
             family = nil
             if let request, let live = try? await model.formation(for: request)?.modelSummary {
                 family = live
-            } else {
-                family = await model.trainType(for: line, on: date)?.summary
+            } else if let planned = await model.trainType(for: line, on: date)?.summary {
+                family = planned
+            } else if request == nil, let tripId, let source,
+                      let trip = try? await model.provider.trip(id: tripId, source: source),
+                      let later = BahnDeClient.formationRequest(for: trip) {
+                family = try? await model.formation(for: later)?.modelSummary
             }
         }
     }
@@ -699,16 +711,38 @@ extension View {
 
 // MARK: - Full text popup
 
+private struct TextHeightsKey: PreferenceKey {
+    static let defaultValue: [Bool: CGFloat] = [:]
+    static func reduce(value: inout [Bool: CGFloat], nextValue: () -> [Bool: CGFloat]) {
+        value.merge(nextValue()) { $1 }
+    }
+}
+
 private struct FullTextPopup: ViewModifier {
     let text: String
     let lines: Int
     @State private var shown = false
+    @State private var truncated = false
 
     func body(content: Content) -> some View {
         content
             .lineLimit(lines)
+            .background(GeometryReader { Color.clear.preference(key: TextHeightsKey.self, value: [false: $0.size.height]) })
+            // Hidden copy without a line limit, to tell whether the visible one is cut.
+            .background {
+                content
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .hidden()
+                    .background(GeometryReader { Color.clear.preference(key: TextHeightsKey.self, value: [true: $0.size.height]) })
+            }
+            .onPreferenceChange(TextHeightsKey.self) { heights in
+                guard let full = heights[true], let shownHeight = heights[false] else { return }
+                truncated = full > shownHeight + 1
+            }
             .contentShape(.rect)
             .onTapGesture { shown = true }
+            .allowsHitTesting(truncated)
             .fullScreenCover(isPresented: $shown) {
                 ZStack {
                     Color.black.opacity(0.35).ignoresSafeArea()
@@ -772,27 +806,65 @@ extension View {
 }
 
 /// A train's name with its series tag next to it. The name is never cut for the tag: if both don't
-/// fit side by side, the tag moves below the name, and only then is the tag itself shortened.
+/// fit side by side, the tag moves below the name.
 struct TrainNameRow<Tag: View>: View {
     let name: String
     var font: Font = .headline
     var spacing: CGFloat = 6
     @ViewBuilder let tag: Tag
 
-    private var title: some View {
-        Text(name).font(font).lineLimit(1).fullTextPopup(name)
+    var body: some View {
+        // A layout rather than `ViewThatFits`: that one holds the tag once per branch, so switching
+        // branches when the tag appears recreated it empty, and the lookup started over for good.
+        NameTagLayout(spacing: spacing) {
+            Text(name).font(font).lineLimit(1).fullTextPopup(name)
+            tag
+        }
+    }
+}
+
+/// Places the second subview (the tag) beside the first (the name) if both fit at their ideal
+/// width, otherwise below it.
+private struct NameTagLayout: Layout {
+    var spacing: CGFloat
+    var lineSpacing: CGFloat = 3
+
+    private func sizes(_ proposal: ProposedViewSize, _ subviews: Subviews) -> (name: CGSize, tag: CGSize, beside: Bool) {
+        let width = proposal.width ?? .infinity
+        let idealName = subviews[0].sizeThatFits(.unspecified)
+        let idealTag = subviews.count > 1 ? subviews[1].sizeThatFits(.unspecified) : .zero
+        if idealTag.width == 0 {
+            return (subviews[0].sizeThatFits(ProposedViewSize(width: width, height: nil)), .zero, true)
+        }
+        if idealName.width + spacing + idealTag.width <= width {
+            return (idealName, idealTag, true)
+        }
+        let constrained = ProposedViewSize(width: width, height: nil)
+        return (subviews[0].sizeThatFits(constrained), subviews[1].sizeThatFits(constrained), false)
     }
 
-    var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: spacing) {
-                title.fixedSize(horizontal: true, vertical: false)
-                tag.fixedSize(horizontal: true, vertical: false)
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard !subviews.isEmpty else { return .zero }
+        let (name, tag, beside) = sizes(proposal, subviews)
+        if tag == .zero { return name }
+        return beside
+            ? CGSize(width: name.width + spacing + tag.width, height: max(name.height, tag.height))
+            : CGSize(width: max(name.width, tag.width), height: name.height + lineSpacing + tag.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard !subviews.isEmpty else { return }
+        let (name, tag, beside) = sizes(ProposedViewSize(width: bounds.width, height: nil), subviews)
+        if beside {
+            subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading, proposal: ProposedViewSize(name))
+            if subviews.count > 1 {
+                subviews[1].place(at: CGPoint(x: bounds.minX + name.width + spacing, y: bounds.midY),
+                                  anchor: .leading, proposal: ProposedViewSize(tag))
             }
-            VStack(alignment: .leading, spacing: 3) {
-                title
-                tag
-            }
+        } else {
+            subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.minY), proposal: ProposedViewSize(name))
+            subviews[1].place(at: CGPoint(x: bounds.minX, y: bounds.minY + name.height + lineSpacing),
+                              proposal: ProposedViewSize(tag))
         }
     }
 }
