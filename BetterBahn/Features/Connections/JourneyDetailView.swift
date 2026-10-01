@@ -279,8 +279,8 @@ struct JourneyDetailView: View {
         VStack(spacing: 8) {
             HStack(spacing: 10) {
                 SaveJourneyButton(journey: journey, search: search, shortLabel: true)
-                if model.isSaved(journey) {
-                    TicketButton(journey: journey)
+                if !model.tickets(for: journey).isEmpty {
+                    TicketButton(tickets: model.tickets(for: journey), journey: journey)
                 }
                 if let shareURL = journey.shareURL {
                     ShareLink(

@@ -1,36 +1,27 @@
 import BetterBahnKit
 import SwiftUI
 
-/// Round button next to "Gespeichert" on a saved journey: shows its ticket, or fetches one.
+/// Round button next to "Gespeichert" on a saved journey that has tickets: shows them.
+/// Tickets are fetched in Settings → Gespeicherte Tickets.
 struct TicketButton: View {
+    let tickets: [SavedTicket]
     let journey: Journey
-    @Environment(AppModel.self) private var model
     @State private var showTickets = false
-    @State private var showLookup = false
-    /// Set by the lookup; the tickets open once its sheet is gone.
-    @State private var openAfterLookup = false
 
     var body: some View {
-        let tickets = model.tickets(for: journey)
         Button {
-            if tickets.isEmpty { showLookup = true } else { showTickets = true }
+            showTickets = true
         } label: {
-            Image(systemName: tickets.isEmpty ? "ticket" : "ticket.fill")
+            Image(systemName: "ticket.fill")
                 .font(.subheadline.weight(.semibold))
                 .frame(width: 40, height: 40)
         }
         .buttonStyle(.plain)
         .glassEffect(.regular, in: .circle)
         .tint(.brand)
-        .accessibilityLabel(tickets.isEmpty ? "Ticket abrufen" : "Ticket anzeigen")
+        .accessibilityLabel("Ticket anzeigen")
         .sheet(isPresented: $showTickets) {
-            TicketView(tickets: model.tickets(for: journey), journey: journey)
-        }
-        .sheet(isPresented: $showLookup, onDismiss: {
-            if openAfterLookup { showTickets = !model.tickets(for: journey).isEmpty }
-            openAfterLookup = false
-        }) {
-            TicketLookupView { _ in openAfterLookup = true }
+            TicketView(tickets: tickets, journey: journey)
         }
     }
 }

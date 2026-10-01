@@ -70,7 +70,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `DBOrderPage.fillScript` types the input into bahn.de's form, `fetchScript` then fetches order + ticket PDFs
   inside the page; the page is only shown if bahn.de asks for more, e.g. a captcha),
   `TicketView` (full-screen barcode at full brightness, PDF, `AddToWalletButton`, "Zugbindung aufgehoben"),
-  `TicketButton` (next to "Gespeichert" in `JourneyDetailView`), `TicketsListView` (Settings → Gespeicherte Tickets),
+  `TicketButton` (next to "Gespeichert" in `JourneyDetailView`, only once the journey has tickets), `TicketsListView` (Settings → Gespeicherte Tickets),
   `SeatReservationViews` (`ReservationRow` in `LegCard` above "Mehr", read-only). Reservations come from the journey's
   tickets (`AppModel.reservations(for:)`) and only show on the leg whose train matches.
 - `Features/Trips/TripsView.swift` – upcoming/past saved journeys, `SaveJourneyButton`.
