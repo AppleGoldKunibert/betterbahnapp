@@ -287,7 +287,8 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         let exactDeBus = match("exactDeBus", name: "Berlin Hbf", country: "DE", modes: ["BUS"])
         let exactAtTrain = match("exactAtTrain", name: "Berlin Hbf", country: "AT", modes: ["REGIONAL_RAIL"])
         let exactFrTrain = match("exactFrTrain", name: "Berlin Hbf", country: "FR", modes: ["REGIONAL_RAIL"])
-        let plainDeTrain = match("plainDeTrain", name: "Berlin Ostkreuz", country: "DE", modes: ["REGIONAL_RAIL"])
+        // Matches every typed word too, just not the whole name.
+        let plainDeTrain = match("plainDeTrain", name: "Berlin Hbf Europaplatz", country: "DE", modes: ["REGIONAL_RAIL"])
 
         let shuffled = [exactFrTrain, plainDeTrain, exactAtTrain, exactDeBus]
         let ranked = shuffled.enumerated()
@@ -321,6 +322,150 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(ranked == [complete.id, partial.id])
     }
 
+    /// Real-world hits (issue #57): what was typed – the town included – counts before the kind of
+    /// station, so a tram or bus stop matching every word beats a train station matching only one,
+    /// and the stop in the town that was typed beats same-named stops elsewhere.
+    @Test func searchRankPrefersHitsMatchingEveryTypedWord() {
+        func area(_ name: String, _ level: Double, town: Bool = false) -> MGeocodeMatch.Area {
+            .init(name: name, adminLevel: level, isDefault: town)
+        }
+        func match(_ id: String, _ name: String, modes: [String], areas: [MGeocodeMatch.Area]) -> MGeocodeMatch {
+            MGeocodeMatch(type: "STOP", name: name, id: id, lat: 0, lon: 0, country: "DE", modes: modes, areas: areas)
+        }
+        func ranked(_ query: String, _ matches: [MGeocodeMatch]) -> [String] {
+            matches.enumerated()
+                .sorted { TransitousProvider.searchRank($0.element, query: query, offset: $0.offset)
+                        > TransitousProvider.searchRank($1.element, query: query, offset: $1.offset) }
+                .map(\.element.id)
+        }
+
+        let leipzig = [area("Deutschland", 2), area("Sachsen", 4), area("Leipzig", 6, town: true)]
+        let leipzigHbf = match("leipzigHbf", "Leipzig Hbf", modes: ["HIGHSPEED_RAIL", "REGIONAL_RAIL", "TRAM"], areas: leipzig)
+        let augustusplatz = match("augustusplatz", "Leipzig, Augustusplatz", modes: ["TRAM", "BUS"], areas: leipzig)
+        #expect(ranked("Leipzig Augustusplatz", [leipzigHbf, augustusplatz]) == ["augustusplatz", "leipzigHbf"])
+        #expect(ranked("Leipzig Augustusp", [leipzigHbf, augustusplatz]) == ["augustusplatz", "leipzigHbf"])
+
+        let spandau = [area("Deutschland", 2), area("Berlin", 4, town: true), area("Spandau", 9), area("Spandau", 10)]
+        let rathausSpandau = match("rathausSpandau", "S+U Rathaus Spandau (Berlin)", modes: ["SUBWAY", "BUS"], areas: spandau)
+        let berlinSpandau = match("berlinSpandau", "S Spandau Bhf (Berlin)", modes: ["LONG_DISTANCE", "SUBURBAN"], areas: spandau)
+        let kasselRathaus = match("kasselRathaus", "Kassel Rathaus", modes: ["SUBURBAN", "TRAM"],
+                                  areas: [area("Hessen", 4), area("Kassel", 6, town: true)])
+        #expect(ranked("Rathaus Spandau", [berlinSpandau, kasselRathaus, rathausSpandau]).first == "rathausSpandau")
+
+        // The town is only in the stop's areas, not its name.
+        let bernau = [area("Deutschland", 2), area("Brandenburg", 4), area("Barnim", 6), area("Bernau", 8, town: true)]
+        let bernauStop = match("bernauStop", "Bahnhofstraße", modes: ["BUS"], areas: bernau)
+        let orlamuende = match("orlamuende", "Orlamünde, Bahnhofstraße", modes: ["REGIONAL_RAIL", "BUS"],
+                               areas: [area("Thüringen", 4), area("Orlamünde", 8, town: true)])
+        let bernauTrain = match("bernauTrain", "S Bernau Bhf", modes: ["REGIONAL_RAIL", "SUBURBAN"], areas: bernau)
+        #expect(ranked("Bahnhofstraße Bernau", [orlamuende, bernauTrain, bernauStop]).first == "bernauStop")
+        #expect(ranked("Bernau Bahnhofstr.", [orlamuende, bernauTrain, bernauStop]).first == "bernauStop")
+        // Areas above the town don't count: not every stop in Brandenburg is "Brandenburg".
+        #expect(TransitousProvider.textMatchScore(bernauStop, query: "Brandenburg") == 0)
+        #expect(TransitousProvider.textMatchScore(bernauStop, query: "Barnim") == 0)
+    }
+
+    /// Real-world hits for "München": the village station "München (Bad Berka)" (in Thuringia) came
+    /// before Munich's own stations, being a train station with exactly that name, and nearer from Berlin.
+    @Test func searchRankPutsTheTypedTownBeforeSameNamedPlaces() {
+        func area(_ name: String, _ level: Double, town: Bool = false) -> MGeocodeMatch.Area {
+            .init(name: name, adminLevel: level, isDefault: town)
+        }
+        let munich = [area("Bayern", 4), area("München", 6, town: true)]
+        let hbf = MGeocodeMatch(type: "STOP", name: "München Hbf", id: "hbf", lat: 48.140, lon: 11.558, country: "DE",
+                                modes: ["HIGHSPEED_RAIL", "REGIONAL_RAIL"], areas: munich, importance: 0.0259)
+        let pasing = MGeocodeMatch(type: "STOP", name: "München Pasing", id: "pasing", lat: 48.150, lon: 11.462, country: "DE",
+                                   modes: ["HIGHSPEED_RAIL", "REGIONAL_RAIL"], areas: munich, importance: 0.00005)
+        let marienplatz = MGeocodeMatch(type: "STOP", name: "Marienplatz", id: "marienplatz", lat: 48.137, lon: 11.575,
+                                        country: "DE", modes: ["SUBWAY", "BUS"], areas: munich, importance: 0.003)
+        let berka = MGeocodeMatch(type: "STOP", name: "München (Bad Berka)", id: "berka", lat: 50.870, lon: 11.255, country: "DE",
+                                  modes: ["REGIONAL_RAIL"],
+                                  areas: [area("Thüringen", 4), area("Bad Berka", 8, town: true), area("München", 11)],
+                                  importance: 0.00026)
+        let hits = [berka, marienplatz, pasing, hbf]
+        let typedTown = hits.contains { TransitousProvider.isInTown(named: "München", $0) }
+        #expect(typedTown)
+        for location in [nil, Coordinate(latitude: 52.52, longitude: 13.40)] {
+            let ranked = hits.enumerated()
+                .sorted { TransitousProvider.searchRank($0.element, query: "München", offset: $0.offset, near: location, typedTown: typedTown)
+                        > TransitousProvider.searchRank($1.element, query: "München", offset: $1.offset, near: location, typedTown: typedTown) }
+                .map(\.element.id)
+            #expect(ranked.last == "berka")
+            #expect(ranked.first == "hbf")
+        }
+        #expect(TransitousProvider.isInTown(named: "Muench", pasing))
+        #expect(!TransitousProvider.isInTown(named: "Pasing", pasing))
+    }
+
+    @Test func textMatchScoreHandlesSpellingsAndAbbreviations() {
+        func match(_ name: String) -> MGeocodeMatch {
+            MGeocodeMatch(type: "STOP", name: name, id: name, lat: 0, lon: 0, country: "DE", modes: ["REGIONAL_RAIL"])
+        }
+        #expect(TransitousProvider.textMatchScore(match("Köln Hbf"), query: "Koeln Hauptbahnhof") == 4)
+        #expect(TransitousProvider.textMatchScore(match("MUENCHEN HBF"), query: "München") == 2)
+        #expect(TransitousProvider.textMatchScore(match("Berlin, Hauptstr."), query: "Hauptstraße") == 2)
+        // A whole word beats a word that only starts with what was typed.
+        #expect(TransitousProvider.textMatchScore(match("Bonn Hbf"), query: "Bonn") == 2)
+        #expect(TransitousProvider.textMatchScore(match("Bönningstedt"), query: "Bonn") == 1)
+        #expect(TransitousProvider.textMatchScore(match("Bernhausen Hauptstraße"), query: "Bernau") == 0)
+    }
+
+    /// From Berlin, "Frankfurt" used to list the small stations around Frankfurt (Oder) before
+    /// Frankfurt (M) Hbf, being in a nearer distance band. Busy stations count as nearer now.
+    @Test func searchRankLetsBusyStationsCountAsNearer() {
+        let berlin = Coordinate(latitude: 52.52, longitude: 13.40)
+        let mainHbf = MGeocodeMatch(type: "STOP", name: "Frankfurt (M) Hbf", id: "main", lat: 50.107, lon: 8.663,
+                                    country: "DE", modes: ["HIGHSPEED_RAIL", "REGIONAL_RAIL"], importance: 0.0215)
+        let oder = MGeocodeMatch(type: "STOP", name: "Frankfurt (Oder)", id: "oder", lat: 52.336, lon: 14.546,
+                                 country: "DE", modes: ["LONG_DISTANCE", "REGIONAL_RAIL"], importance: 0.0028)
+        let border = MGeocodeMatch(type: "STOP", name: "Frankfurt(Oder), Grenze", id: "border", lat: 52.34, lon: 14.56,
+                                   country: "PL", modes: ["REGIONAL_RAIL"], importance: 0.00043)
+        let small = MGeocodeMatch(type: "STOP", name: "Frankfurt(Oder)-Rosengarten", id: "small", lat: 52.31, lon: 14.46,
+                                  country: "DE", modes: ["REGIONAL_RAIL"], importance: 0.0001)
+        let ranked = [small, border, oder, mainHbf].enumerated()
+            .sorted { TransitousProvider.searchRank($0.element, query: "Frankfurt", offset: $0.offset, near: berlin)
+                    > TransitousProvider.searchRank($1.element, query: "Frankfurt", offset: $1.offset, near: berlin) }
+            .map(\.element.id)
+        #expect(ranked == ["main", "oder", "small", "border"])
+
+        // A coach stop named just "Bonn" in Bonn doesn't count as an exact match for "Bonn".
+        let bonnArea = [MGeocodeMatch.Area(name: "Bonn", adminLevel: 6, isDefault: true)]
+        let bonnCoach = MGeocodeMatch(type: "STOP", name: "Bonn", id: "coach", lat: 50.73, lon: 7.10,
+                                      country: "DE", modes: ["COACH"], areas: bonnArea)
+        let bonnHbf = MGeocodeMatch(type: "STOP", name: "Bonn Hbf", id: "bonnHbf", lat: 50.732, lon: 7.097,
+                                    country: "DE", modes: ["LONG_DISTANCE", "REGIONAL_RAIL"], areas: bonnArea, importance: 0.0026)
+        let bonn = [bonnCoach, bonnHbf].enumerated()
+            .sorted { TransitousProvider.searchRank($0.element, query: "Bonn", offset: $0.offset, near: berlin)
+                    > TransitousProvider.searchRank($1.element, query: "Bonn", offset: $1.offset, near: berlin) }
+            .map(\.element.id)
+        #expect(bonn == ["bonnHbf", "coach"])
+        #expect(TransitousProvider.bandShift(forImportance: nil) == 0)
+        #expect(TransitousProvider.bandShift(forImportance: 0.0005) == 0)
+        #expect(TransitousProvider.bandShift(forImportance: 0.5) == 4)
+    }
+
+    @Test func mainStationQueryOnlyForATownName() {
+        #expect(TransitousProvider.mainStationQuery(for: "Potsdam ") == "Potsdam Hbf")
+        #expect(TransitousProvider.mainStationQuery(for: "Potsdam Hbf") == nil)
+        #expect(TransitousProvider.mainStationQuery(for: "Hauptbahnhof") == nil)
+        #expect(TransitousProvider.mainStationQuery(for: "Leipzig Augustusplatz") == nil)
+        #expect(TransitousProvider.mainStationQuery(for: "Ber") == nil)
+    }
+
+    /// For "Potsdam", none of the geocoder's hits is Potsdam Hbf; it's asked for "Potsdam Hbf" too,
+    /// and of those hits only the ones in Potsdam are kept.
+    @Test func searchStationsAddsTheTownsMainStation() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MainStationGeocodeProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let provider = TransitousProvider(http: HTTPClient(session: session))
+
+        let stations = try await provider.searchStations("Potsdam")
+
+        #expect(stations.map(\.id) == ["potsdamHbf", "golm"])
+    }
+
     /// Some feeds (e.g. European rail interoperability reference data) carry an all-caps, umlaut-free
     /// alias for a station alongside its properly written local name, and the geocoder can echo back
     /// either one depending on which alias matched the query text – confirmed live for "München Hbf"
@@ -334,6 +479,9 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         // Unrelated names never get swapped just because one happens to be prettier.
         #expect(!TransitousProvider.isBetterName("Frankfurt Hbf", than: "Berlin Hbf"))
         #expect(!TransitousProvider.isBetterName("Berlin Hbf", than: "Berlin Hbf"))
+        // The main station's name wins over the bus station in front of it.
+        #expect(TransitousProvider.isBetterName("Brandenburg, Hauptbahnhof", than: "Brandenburg, ZOB"))
+        #expect(!TransitousProvider.isBetterName("Brandenburg, ZOB", than: "Brandenburg, Hauptbahnhof"))
     }
 
     /// A cross-border ICE/Railjet (Munich–Bologna) is listed twice: Deutsche Bahn's own feed only
@@ -2528,6 +2676,25 @@ private final class HamburgBoardProtocol: URLProtocol, @unchecked Sendable {
         let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+private final class MainStationGeocodeProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let text = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+            .queryItems?.first { $0.name == "text" }?.value
+        let potsdam = #"[{"name":"Deutschland","adminLevel":2},{"name":"Brandenburg","adminLevel":4},{"name":"Potsdam","adminLevel":6,"default":true}]"#
+        let body = text == "Potsdam Hbf"
+            ? #"[{"type":"STOP","id":"potsdamHbf","name":"S Potsdam Hauptbahnhof","lat":52.391,"lon":13.067,"country":"DE","modes":["LONG_DISTANCE","REGIONAL_RAIL","SUBURBAN"],"importance":0.0038,"areas":\#(potsdam)},"#
+                + #"{"type":"STOP","id":"erfurtHbf","name":"Erfurt, Hauptbahnhof","lat":50.972,"lon":11.038,"country":"DE","modes":["LONG_DISTANCE","REGIONAL_RAIL"],"importance":0.0059}]"#
+            : #"[{"type":"STOP","id":"golm","name":"Potsdam, Golm Bhf","lat":52.409,"lon":12.970,"country":"DE","modes":["REGIONAL_RAIL","BUS"],"importance":0.0008,"areas":\#(potsdam)}]"#
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
