@@ -82,7 +82,8 @@ struct TicketsListView: View {
                 .onDelete { offsets in
                     for index in offsets { model.removeTravelPass(sortedPasses[index]) }
                 }
-                PhotosPicker(selection: $pickedImage, matching: .images) {
+                // The label closure isn't main-actor isolated, so it gets a copy of the state.
+                PhotosPicker(selection: $pickedImage, matching: .images) { [isImporting] in
                     HStack {
                         Label("Zeitkarte hinzufügen", systemImage: "plus.circle.fill")
                         if isImporting {
@@ -95,7 +96,7 @@ struct TicketsListView: View {
             } header: {
                 Text("Zeitkarten")
             } footer: {
-                Text("Wähl einen Screenshot deines Deutschland-Tickets aus dem DB Navigator. Gilt es mehrere Monate, wird es als Ticket zur BahnCard 100 erkannt.")
+                Text("Wähl einen Screenshot deines Deutschland-Tickets QR Codes aus. Bitte beachte das nicht alle Anbieter unterstützt werden.")
             }
 
             Section {
