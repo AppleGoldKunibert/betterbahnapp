@@ -109,8 +109,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   deduplication of boards happen here.
 - `Transit/Timetables/` – official DB Timetables XML client (realtime overrides, messages).
   `DefaultCredentials.swift` is **gitignored**; copy from `.template`.
-- Logic: `JourneyReplanner`, `ConnectionCheck` (`ConnectionIssue`, `JourneyRefresher`),
-  `TrainRoutePlanner`, `ViaRoutePlanner`, `TrainPicker`, `TicketFilter`/`BC100Rules`, `BoardFilter`.
+- Logic: `JourneyReplanner`, `ConnectionCheck` (`ConnectionIssue`, `JourneyRefresher`), `TrainRoutePlanner`,
+  `ViaRoutePlanner` (vias without minimum stay keep a through train as one leg), `TrainPicker`, `TicketFilter`/`BC100Rules`, `BoardFilter`.
 - `Traewelling/` – OAuth PKCE (`TraewellingAuth`, `TokenStore`), `TraewellingClient`
   (check-ins, history), `QuickTag`.
 - `Tickets/` – DB tickets by order number: `DBOrder` reads bahn.de's order JSON into `DBTicket`s (one per
