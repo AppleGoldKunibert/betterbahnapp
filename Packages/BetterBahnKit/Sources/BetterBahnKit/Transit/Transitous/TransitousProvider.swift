@@ -244,6 +244,15 @@ public struct TransitousProvider: TransitProvider {
         return trimmed + " Hbf"
     }
 
+    /// "Be" → "Be Hbf": the geocoder answers nothing for under 3 letters, but for this it lists main
+    /// stations starting with them (Berlin Hbf, Bern), which beats falling back to bahn.de's
+    /// unordered hits ("Busswil BE", "Murnau-Seeleiten-Be."). Nil from 3 letters on.
+    static func shortQuery(for query: String) -> String? {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.count < 3, trimmed.allSatisfy(\.isLetter) else { return nil }
+        return trimmed + " Hbf"
+    }
+
     /// Short names the geocoder doesn't know: for "ber" none of its 50 hits is Flughafen BER, only
     /// "Flughafen BER" finds it. Asked for as well, like the main station.
     static let aliases = ["ber": "Flughafen BER"]
@@ -320,8 +329,8 @@ public struct TransitousProvider: TransitProvider {
         return kept
     }
 
-    /// With `addingMainStation`, also asks for the town's main station (see `mainStationQuery(for:)`),
-    /// a known short name (`aliasQuery(for:)`) and, `near` a location, stations in the user's town
+    /// With `addingMainStation`, also asks for the town's main station (see `mainStationQuery(for:)`,
+    /// `shortQuery(for:)`), a known short name (`aliasQuery(for:)`) and, `near` a location, stations in the user's town
     /// (`nearbyTownQuery(for:near:)`), and keeps those hits only if they match `query`.
     private func geocode(_ query: String, addingMainStation: Bool = false, near location: Coordinate? = nil)
         async throws -> [MGeocodeMatch]
@@ -331,7 +340,7 @@ public struct TransitousProvider: TransitProvider {
         if umlauts != query { queries.append(umlauts) }
         let required = queries.count
         if addingMainStation {
-            let extras = [Self.mainStationQuery(for: query), Self.aliasQuery(for: query),
+            let extras = [Self.mainStationQuery(for: query), Self.shortQuery(for: query), Self.aliasQuery(for: query),
                           Self.nearbyTownQuery(for: query, near: location)]
             queries += extras.compactMap { $0 }
         }

@@ -560,6 +560,12 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         let ber = try await provider.searchStations("ber", near: berlin)
         #expect(ber.map(\.id) == ["ber", "bern"])
         #expect(!NearbyGeocodeProtocol.requestedTexts.withLock { $0 }.contains("Berlin ber"))
+
+        // Two letters: the geocoder finds nothing, but main stations starting with them.
+        let be = try await provider.searchStations("Be", near: berlin)
+        #expect(be.map(\.id) == ["berlinHbf"])
+        #expect(TransitousProvider.shortQuery(for: "ber") == nil)
+        #expect(TransitousProvider.shortQuery(for: "Be ") == "Be Hbf")
     }
 
     /// Some feeds (e.g. European rail interoperability reference data) carry an all-caps, umlaut-free
@@ -3284,6 +3290,9 @@ private final class NearbyGeocodeProtocol: URLProtocol, @unchecked Sendable {
         case "Flughafen BER":
             #"[{"type":"STOP","id":"ber","name":"Flughafen BER","lat":52.365,"lon":13.510,"country":"DE","modes":["LONG_DISTANCE","REGIONAL_RAIL","SUBURBAN"],"importance":0.0033},"#
                 + #"{"type":"STOP","id":"zrh","name":"Zürich Flughafen","lat":47.450,"lon":8.562,"country":"CH","modes":["LONG_DISTANCE"],"importance":0.019}]"#
+        case "Be Hbf":
+            #"[{"type":"STOP","id":"berlinHbf","name":"Berlin Hauptbahnhof","lat":52.525,"lon":13.369,"country":"DE","modes":["LONG_DISTANCE","REGIONAL_RAIL"],"importance":0.02},"#
+                + #"{"type":"STOP","id":"erfurtHbf","name":"Erfurt, Hauptbahnhof","lat":50.972,"lon":11.038,"country":"DE","modes":["LONG_DISTANCE","REGIONAL_RAIL"],"importance":0.0059}]"#
         default:
             "[]"
         }
