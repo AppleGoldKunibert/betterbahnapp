@@ -2041,6 +2041,29 @@ private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
         #expect(fromTripView?.departure.planned == saved.departure.planned)
         #expect(fromTripView?.arrival.planned == saved.arrival.planned)
     }
+
+    /// Issue #68: a Berlin–Amsterdam ICE's journey leg names only where the German feed stops
+    /// modelling it ("Hengelo"); the trip runs through to Amsterdam, and the refresh adopts that.
+    @Test func refreshTakesTheDirectionOfTheWholeTrip() {
+        func stop(_ name: String, _ minute: Double) -> Stopover {
+            let time = TimeInfo(planned: base.addingTimeInterval(minute * 60), actual: nil)
+            return Stopover(station: station(name, name), arrival: time, departure: time,
+                            arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+        }
+        let trip = Trip(id: "ICE 144", line: nil, direction: "Amsterdam Centraal",
+                        stopovers: [stop("Berlin", 0), stop("Osnabrück", 180), stop("Hengelo", 240), stop("Amsterdam Centraal", 360)],
+                        cancelled: false, remarks: [], source: .bahnDe)
+        var saved = leg("ICE 144", "Berlin", "Osnabrück", dep: 0, arr: 180)
+        saved.direction = "Hengelo"
+        #expect(JourneyRefresher.apply(trip, to: saved).direction == "Amsterdam Centraal")
+
+        // A trip cut short at the border doesn't reach a leg merged across it: keep the leg's direction.
+        let cutShort = Trip(id: "ICE 144", line: nil, direction: "Hengelo",
+                            stopovers: [stop("Berlin", 0), stop("Hengelo", 240)], cancelled: false, remarks: [], source: .bahnDe)
+        var merged = leg("ICE 144", "Berlin", "Amsterdam Centraal", dep: 0, arr: 360)
+        merged.direction = "Amsterdam Centraal"
+        #expect(JourneyRefresher.apply(cutShort, to: merged).direction == "Amsterdam Centraal")
+    }
 }
 
 // MARK: - Train route planning

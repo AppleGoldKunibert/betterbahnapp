@@ -154,6 +154,11 @@ public struct JourneyRefresher: Sendable {
             if let arrival = end.arrival { leg.arrival = arrival }
             if end.arrivalPlatform?.best != nil { leg.arrivalPlatform = end.arrivalPlatform }
             if end.arrivalCancelled { leg.cancelled = true }
+            // A journey leg's headsign is only where its own feed stops modelling the train (e.g.
+            // "Hengelo" for a Berlin–Amsterdam ICE), while the trip runs through to the real end.
+            // Only taken from a trip that covers the whole leg, so a trip cut short at a border can't
+            // undo the direction of a leg merged across it.
+            if let direction = trip.direction, !direction.isEmpty { leg.direction = direction }
         }
         // Keep the intermediate stops as current as the endpoints.
         for index in leg.stopovers.indices {
