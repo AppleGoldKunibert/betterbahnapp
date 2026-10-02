@@ -2,7 +2,7 @@
 # Branches that can be fast-forwarded are; branches with no code prod doesn't have are
 # reset to prod (so they don't show up as "ahead"); others get a merge commit. Branches with
 # merge conflicts are skipped and listed in the run summary (the run then fails so
-# GitHub notifies you).
+# GitHub notifies you). Branches in `skip` (e.g. the App Store release branch) are left alone.
 name: Sync prod into branches
 
 on:
@@ -30,11 +30,16 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          skip=(appstorerelease)
           failed=()
           echo "## Sync prod → branches" >> "$GITHUB_STEP_SUMMARY"
 
           for ref in $(git for-each-ref --format='%(refname:strip=3)' refs/remotes/origin); do
             [ "$ref" = "HEAD" ] || [ "$ref" = "prod" ] && continue
+            if [[ " ${skip[*]} " == *" $ref "* ]]; then
+              echo "- \`$ref\`: skipped" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
 
             old=$(git rev-parse "origin/$ref")
             if [ "$old" = "$(git rev-parse origin/prod)" ]; then
