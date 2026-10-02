@@ -61,7 +61,7 @@ public struct TrainTypeLookup: Codable, Sendable, Hashable {
     /// Adapter for the formation UI; adds the Taufname for live Tz numbers.
     public var formation: TrainFormation {
         TrainFormation(units: groups.map { group in
-            .init(model: group.family, number: group.unitNumber,
+            .init(model: TrainModel.name(group.family, unit: group.unitNumber), number: group.unitNumber,
                   name: group.unitNumber.flatMap(Int.init).flatMap { TrainsetNames.byUnit[$0] })
         })
     }

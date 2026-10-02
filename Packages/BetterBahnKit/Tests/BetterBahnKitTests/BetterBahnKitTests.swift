@@ -1070,6 +1070,15 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(BahnDeClient.model(constructionTypes: ["E1465", "R6682"], groupName: "ICD2854", category: "IC") == "IC 2 Twindexx")
     }
 
+    @Test func marksRedesignedICE3neo() {
+        #expect(TrainModel.name("ICE 3neo", unit: "8016") == "ICE 3neo")
+        #expect(TrainModel.name("ICE 3neo", unit: "8017") == "ICE 3neo Redesign")
+        #expect(TrainModel.name("ICE 3neo", unit: "8045") == "ICE 3neo Redesign")
+        #expect(TrainModel.name("ICE 3neo", unit: nil) == "ICE 3neo")
+        #expect(TrainModel.name("ICE 4", unit: "9465") == "ICE 4")
+        #expect(TrainModel.name(nil, unit: "8030") == nil)
+    }
+
     @Test func unitNumbersAndTrainsetNames() {
         #expect(BahnDeClient.unitNumber(from: "ICE9457") == "9457")
         #expect(BahnDeClient.unitNumber(from: "ICE0169") == "169")
