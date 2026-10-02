@@ -497,8 +497,13 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         let basel = match("basel", "Basel SBB", 47.547, 7.590, "CH", ["LONG_DISTANCE", "REGIONAL_RAIL"], 0.03)
         let freiburg = Coordinate(latitude: 47.997, longitude: 7.842)
         let text = TransitousProvider.textMatch(basel, query: "bas")
-        #expect(!TransitousProvider.isFarForeign(basel, query: "bas", text: text, exactTier: 0, near: freiburg))
-        #expect(TransitousProvider.isFarForeign(basel, query: "bas", text: text, exactTier: 0, near: berlin))
+        #expect(!TransitousProvider.isFarForeign(basel, query: "bas", text: text, exactTier: 0, isTrain: true, near: freiburg))
+        #expect(TransitousProvider.isFarForeign(basel, query: "bas", text: text, exactTier: 0, isTrain: true, near: berlin))
+        // In full, a train station abroad counts from anywhere, a far bus stop doesn't.
+        let fullBasel = TransitousProvider.textMatch(basel, query: "basel")
+        #expect(!TransitousProvider.isFarForeign(basel, query: "basel", text: fullBasel, exactTier: 0, isTrain: true, near: berlin))
+        let fullDilBer = TransitousProvider.textMatch(dilBer, query: "ber")
+        #expect(TransitousProvider.isFarForeign(dilBer, query: "ber", text: fullDilBer, exactTier: 0, isTrain: false, near: berlin))
 
         let ostbf = match("ostbf", "Berlin Ostbf", 52.510, 13.435, "DE", ["HIGHSPEED_RAIL", "REGIONAL_RAIL", "SUBURBAN"], 0.0057)
         let ostkreuz = match("ostkreuz", "S Ostkreuz Bhf (Berlin)", 52.503, 13.469, "DE", ["REGIONAL_RAIL", "SUBURBAN"], 0.0089)

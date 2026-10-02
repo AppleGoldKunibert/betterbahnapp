@@ -173,7 +173,8 @@ public struct TransitousProvider: TransitProvider {
             let nearbyScore = text.whole * 2 + nearness + size
                 + (Self.isInTown(named: query, match, wholeWords: true) ? 5 : 0)
             textRank = (text.matched * 10 + exactTier) * 100 + nearbyScore
-                - (Self.isFarForeign(match, query: query, text: text, exactTier: exactTier, near: location) ? 100_000 : 0)
+                - (Self.isFarForeign(match, query: query, text: text, exactTier: exactTier, isTrain: tier >= 5, near: location)
+                    ? 100_000 : 0)
         } else {
             let elsewhere = typedTown && match.town != nil && !Self.isInTown(named: query, match)
             textRank = (text.matched + text.whole) * 10 + (elsewhere ? 0 : 5) + exactTier
@@ -187,13 +188,14 @@ public struct TransitousProvider: TransitProvider {
 
     /// A station abroad, farther than `foreignNearby`, whose name wasn't typed in full: it comes after
     /// every other hit, so "be" in Berlin doesn't list Bern while "bern" (or "wien", near the border
-    /// "basel b") still does.
+    /// "basel b") still does. Only train stations in Germany's neighbours count when typed in full;
+    /// a bus stop in Ethiopia called "Dil Ber" doesn't come before Bern for "ber".
     static func isFarForeign(_ match: MGeocodeMatch, query: String, text: (matched: Int, whole: Int),
-                             exactTier: Int, near location: Coordinate) -> Bool
+                             exactTier: Int, isTrain: Bool, near location: Coordinate) -> Bool
     {
         guard let country = match.country, country != "DE", exactTier == 0 else { return false }
         let typedWords = searchWords(query).count
-        if typedWords > 0, text.whole == typedWords { return false }
+        if isTrain, typedWords > 0, text.whole == typedWords { return false }
         return location.distance(to: Coordinate(latitude: match.lat, longitude: match.lon)) >= foreignNearby
     }
 
