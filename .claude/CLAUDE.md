@@ -5,6 +5,7 @@
 - Arbeite für jedes Issue bzw. jedes Feature/jeden Bugfix in einem eigenen Branch.
 - Der Branch-Name beschreibt, was gebaut oder gefixt wird: kurz, aber verständlich, kleingeschrieben, ohne Leerzeichen.
   Beispiele: `ice3neoredesign`, `livezugaktualisierung`.
+- Keine Präfixe wie `claude/`, `feature/` oder `fix/`, nur der einfache Name.
 - Hat das Issue kein Label, vergib selbst ein passendes, wenn es eindeutig ist:
   `bug` für Fehler, `enhancement` für neue Features oder Verbesserungen.
   Passt keins davon, lass das Issue ohne Label.
