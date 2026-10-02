@@ -1036,6 +1036,32 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
 }
 
 @Suite struct BahnDeFormationTests {
+    /// A saved journey keeps the Tz once seen; formations without one, or unchanged ones, change nothing.
+    @Test func remembersFormationsNamingATz() {
+        let tz = TrainFormation(units: [TrainFormation.Unit(model: "ICE 4", number: "9457", name: "Bundesrepublik Deutschland")])
+        let modelOnly = TrainFormation(units: [TrainFormation.Unit(model: "ICE 4", number: nil)])
+        let stored = TrainFormation.remembering(tz, for: "a", in: nil)
+        #expect(stored == ["a": tz])
+        #expect(TrainFormation.remembering(tz, for: "a", in: stored) == nil)
+        #expect(TrainFormation.remembering(modelOnly, for: "a", in: stored) == nil)
+        let swapped = TrainFormation(units: [TrainFormation.Unit(model: "ICE 4", number: "9018")])
+        #expect(TrainFormation.remembering(swapped, for: "a", in: stored) == ["a": swapped])
+        #expect(TrainFormation.remembering(swapped, for: "b", in: stored) == ["a": tz, "b": swapped])
+    }
+
+    /// The key survives a refresh renaming the train or changing its trip.
+    @Test func formationKeyIgnoresTrainNameAndTrip() {
+        let at = { (minutes: Double) in TimeInfo(planned: Date(timeIntervalSince1970: 1_800_000_000 + minutes * 60), actual: nil) }
+        func leg(_ name: String, tripId: String, departure: Double) -> Leg {
+            Leg(origin: station("8002549", "Hamburg Hbf"), destination: station("8010085", "Dresden Hbf"),
+                departure: at(departure), arrival: at(150), departurePlatform: nil, arrivalPlatform: nil, tripId: tripId,
+                line: Line(name: name, number: "171", product: .highSpeed, operatorName: nil), direction: nil,
+                isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+        }
+        #expect(leg("ICE 171", tripId: "x", departure: 0).formationKey == leg("RJ 171", tripId: "y", departure: 0).formationKey)
+        #expect(leg("ICE 171", tripId: "x", departure: 0).formationKey != leg("ICE 171", tripId: "x", departure: 60).formationKey)
+    }
+
     @Test func carriageReadsCountryAndSeriesFromUICNumber() {
         let car = Carriage(vehicleID: "93805401002-1", constructionType: "Apmzf")
         #expect(car.uic == "938054010021")

@@ -45,6 +45,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   realtime refresh loops (journeys every 300 s, the Live Activity's journey per `LiveActivityRefreshSchedule` – 2 min, ±1 min around arrivals, 1 min while transferring; train positions only while a map is shown, at the interval picked in Settings → Live-Karte, Kit `TrainPositionRefresh`: automatic = 15 s, 60 s on mobile data/Low Data Mode; "Aus" loads once), delay notifications,
   geometry/heatmap caches, Live Activity selection. Also defines `SavedJourney`, `PlanVersion`,
   `ImportedTrip`, `RecentSearch`, `Storage`, `AppSettings`, `ConnectionNotifier`.
+  `SavedJourney.formations` remembers the Tz/Taufname seen per leg (`Leg.formationKey`), so they stay
+  known (and synced) after the journey (`rememberFormation`, used by `TrainFormationLabel`/`TrainSeriesTag`).
 - **Persistence:** `Storage.save/load(key:)` writes JSON to `Application Support/BetterBahn/<key>.json`
   (migrates from old UserDefaults). `AppSettings` uses UserDefaults directly. Saved data must stay
   decodable across versions (e.g. `DataSource.dbRest` kept only for decoding).

@@ -206,21 +206,25 @@ struct LineBadge: View {
 /// Triebzug numbers and names of a train (e.g. "Tz 9457 „Bundesrepublik Deutschland“"). bahn.de's
 /// coach sequence first (it only has one in the coming hours); bahn.expert as fallback, which
 /// has the Tz once its data is live. Says so when bahn.de is refusing requests and nothing else helped.
+/// A saved journey's leg remembers what was found, so it still shows once neither source answers.
 struct TrainFormationLabel: View {
     let request: BahnDeClient.FormationRequest?
     let line: Line?
     let date: Date
+    let leg: Leg?
 
     init(leg: Leg) {
         request = BahnDeClient.formationRequest(for: leg)
         line = leg.line
         date = leg.departure.planned
+        self.leg = leg
     }
 
     init(trip: Trip) {
         request = BahnDeClient.formationRequest(for: trip)
         line = trip.line
         date = trip.stopovers.first?.departure?.planned ?? .now
+        leg = nil
     }
 
     @Environment(AppModel.self) private var model
@@ -243,19 +247,25 @@ struct TrainFormationLabel: View {
             }
         }
         .task(id: "\(line?.name ?? "")|\(date)|\(request?.station.id ?? "")") {
-            formation = nil
+            let remembered = leg.flatMap(model.rememberedFormation(for:))
+            formation = remembered
             blocked = false
+            var found: TrainFormation?
             if let request {
                 do {
-                    formation = try await model.formation(for: request)
+                    found = try await model.formation(for: request)
                 } catch TransitError.rateLimited {
-                    blocked = true
+                    blocked = remembered == nil
                 } catch {}
             }
-            if formation?.unitDescription == nil, let fallback = await model.trainType(for: line, on: date)?.formation,
+            if found?.unitDescription == nil, let fallback = await model.trainType(for: line, on: date)?.formation,
                fallback.unitDescription != nil {
-                formation = fallback
+                found = fallback
+            }
+            if let found, found.unitDescription != nil {
+                formation = found
                 blocked = false
+                if let leg { model.rememberFormation(found, for: leg) }
             }
         }
     }
@@ -317,6 +327,8 @@ struct TrainSeriesTag: View {
     /// answer for (it is over) and bahn.expert knows no series, as the train may still be running.
     let tripId: String?
     let source: DataSource?
+    /// A saved journey's leg, whose remembered formation is shown when nothing answers any more.
+    let leg: Leg?
 
     init(leg: Leg) {
         request = BahnDeClient.formationRequest(for: leg)
@@ -324,6 +336,7 @@ struct TrainSeriesTag: View {
         date = leg.departure.planned
         tripId = leg.tripId
         source = leg.source
+        self.leg = leg
     }
 
     init(trip: Trip) {
@@ -332,6 +345,7 @@ struct TrainSeriesTag: View {
         date = trip.stopovers.lazy.compactMap { $0.departure?.planned ?? $0.arrival?.planned }.first ?? .now
         tripId = nil
         source = nil
+        leg = nil
     }
 
     @Environment(AppModel.self) private var model
@@ -362,6 +376,9 @@ struct TrainSeriesTag: View {
                       let trip = try? await model.provider.trip(id: tripId, source: source),
                       let later = BahnDeClient.formationRequest(for: trip) {
                 family = try? await model.formation(for: later)?.modelSummary
+            }
+            if family == nil, let leg {
+                family = model.rememberedFormation(for: leg)?.modelSummary
             }
         }
     }
