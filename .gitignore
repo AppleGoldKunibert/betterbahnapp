@@ -70,7 +70,7 @@ Packages/BetterBahnKit/Package.resolved
 # bahn.de proxy Worker. Keep any old copy out of the repo.
 Packages/BetterBahnKit/Sources/BetterBahnKit/Transit/Timetables/DefaultCredentials.swift
 Config/DefaultCredentials.swift.old
-CLAUDE.md
+/CLAUDE.md
 
 # Local signing overrides — copy Config/Local.xcconfig.example to Config/Local.xcconfig to build
 # under your own Apple Developer account. Never commit the real file.
