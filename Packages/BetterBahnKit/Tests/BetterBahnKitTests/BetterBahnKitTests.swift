@@ -532,7 +532,7 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
                         > TransitousProvider.searchRank($1.element, query: query, offset: $1.offset, near: berlin) }
                 .map(\.element.id)
         }
-        let sBahn = MGeocodeMatch(type: "STOP", name: "Neukölln", id: "sBahn", lat: 52.469, lon: 13.443, country: "DE",
+        let sBahn = MGeocodeMatch(type: "STOP", name: "Neue Mühle", id: "sBahn", lat: 52.40, lon: 13.55, country: "DE",
                                   modes: ["SUBURBAN", "SUBWAY", "BUS"], importance: 0.008)
         let regional = MGeocodeMatch(type: "STOP", name: "Neuenhagen", id: "regional", lat: 52.529, lon: 13.69, country: "DE",
                                      modes: ["REGIONAL_RAIL", "SUBURBAN"], importance: 0.004)
@@ -596,7 +596,7 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(StationHints.names(matching: "be", near: berlin, excluding: "Berlin", in: hints) == ["S Bernau Bhf"])
         // Stations in the user's town still count when what was typed matches more than the town.
         #expect(StationHints.names(matching: "po", near: berlin, excluding: "Berlin", in: hints)
-            == ["S Potsdam Hauptbahnhof", "S+U Potsdamer Platz Bhf (Berlin)"])
+            == ["S+U Potsdamer Platz Bhf (Berlin)", "S Potsdam Hauptbahnhof"])
         // The bundled list loads.
         #expect(StationHints.all.count > 1000)
         #expect(TransitousProvider.nearbyStationQueries(for: "bernau bei", near: berlin).isEmpty)

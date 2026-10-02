@@ -150,19 +150,18 @@ public struct TransitousProvider: TransitProvider {
         // Trains in Germany and its neighbours share one group, ordered by distance band, when the
         // user's location is known; otherwise `group` is just `tier` and the order is as above.
         var group = tier * 100
-        // How near a train station is, from `distanceBands.count` (under 50 km) down to 0; only with
-        // a location.
+        // How near a train station is (`nearness(forMeters:)`); only with a location.
         var nearness = 0
         if let location, tier >= 5 {
             let distance = location.distance(to: Coordinate(latitude: match.lat, longitude: match.lon))
             let band = Self.distanceBand(forMeters: distance)
             group = 600 - (band - Self.bandShift(forImportance: match.importance))
-            nearness = Self.distanceBands.count - band
+            nearness = Self.nearness(forMeters: distance)
         }
         // A preferred station stays ahead of its tier and every distance band.
         if isPreferred {
             group = tier * 100 + 50
-            nearness = Self.distanceBands.count + 1
+            nearness = Self.distanceBands.count + 3
         }
 
         let text = Self.textMatch(match, query: query)
@@ -345,6 +344,14 @@ public struct TransitousProvider: TransitProvider {
     /// Upper bounds (km) of the distance bands search results are grouped into; anything farther
     /// is in one last band.
     static let distanceBands: [Double] = [50, 100, 200, 300, 500, 750, 1000]
+
+    /// Points for how near a station is: `distanceBands.count` under 50 km, one less per band farther
+    /// out, down to 0 from 1000 km; plus 1 under 25 km and 2 under 10 km, so the stations around the
+    /// user come before those at the edge of the region.
+    static func nearness(forMeters meters: Double) -> Int {
+        let closeBonus = meters < 10_000 ? 2 : meters < 25_000 ? 1 : 0
+        return distanceBands.count - distanceBand(forMeters: meters) + closeBonus
+    }
 
     /// 0 for the nearest band (under 50 km), counting up to `distanceBands.count` for 1000 km and more.
     static func distanceBand(forMeters meters: Double) -> Int {

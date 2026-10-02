@@ -47,9 +47,8 @@ enum StationHints {
                 guard let word, let key = word.min() else { return nil }
                 matched.append(key)
             }
-            let nearness = TransitousProvider.distanceBands.count - TransitousProvider.distanceBand(forMeters: distance)
             return (hint.name, matched.joined(separator: " "),
-                    nearness + TransitousProvider.sizeScore(forImportance: hint.importance))
+                    TransitousProvider.nearness(forMeters: distance) + TransitousProvider.sizeScore(forImportance: hint.importance))
         }
         var keys: Set<String> = []
         if let excludedPlace, let town = TransitousProvider.searchWords(excludedPlace).first?.min() { keys.insert(town) }
