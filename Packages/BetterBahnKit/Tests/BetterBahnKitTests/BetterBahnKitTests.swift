@@ -2389,6 +2389,57 @@ private final class TimetablesPlanProtocol: URLProtocol, @unchecked Sendable {
     }
 }
 
+/// Issue #76: an S4 ending at München Hbf showed its arrival on time while running 3 minutes late.
+/// DB's Timetables only lists the S-Bahn under "München Hbf (tief)", which station search never finds.
+@Suite struct TimetablesLowerLevelTests {
+    @Test func findsTheSBahnUnderTheStationsLowerLevel() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [LowerLevelS4Protocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let timetables = TimetablesClient(http: HTTPClient(session: session))
+        // 2027-01-15 08:00 UTC == 09:00 Europe/Berlin (CET).
+        let departure = Date(timeIntervalSince1970: 1_800_000_000)
+        let leg = Leg(origin: station("8004158", "München-Pasing", 48.150, 11.461, source: .bahnDe),
+                      destination: station("8000261", "München Hbf", 48.140, 11.558, source: .bahnDe),
+                      departure: TimeInfo(planned: departure, actual: nil),
+                      arrival: TimeInfo(planned: departure.addingTimeInterval(600), actual: departure.addingTimeInterval(600)),
+                      departurePlatform: nil, arrivalPlatform: nil, tripId: "s4",
+                      line: Line(name: "S4", number: "4", product: .suburban, operatorName: nil, tripNumber: "6467"),
+                      direction: nil, isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+
+        let override = await timetables.realtime(for: leg)
+
+        #expect(override?.arrival?.actual == departure.addingTimeInterval(13 * 60))
+    }
+}
+
+/// München Hbf's own `/plan` doesn't have the S4; its lower level (8098263) does, 3 minutes late.
+private final class LowerLevelS4Protocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let path = request.url!.path
+        let body: Data
+        if path.contains("plan/8098263/") {
+            body = Data("""
+            <timetable station='München Hbf (tief)'><s id="7"><tl c="S" n="6467"/><ar pt="2701150910" pp="1" l="4"/></s></timetable>
+            """.utf8)
+        } else if path.contains("fchg/8098263") {
+            body = Data("""
+            <timetable station='München Hbf (tief)'><s id="7"><ar ct="2701150913"/></s></timetable>
+            """.utf8)
+        } else {
+            body = Data("<timetable></timetable>".utf8)
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
 /// `/plan` has a scheduled platform for the S15 at Berlin Hbf, but `/fchg` reports no Gleisänderung
 /// (or anything else) yet. `/fchg` for Gesundbrunnen (the arrival side, not under test) is likewise
 /// empty for every request, matched here by responding the same way regardless of path.

@@ -180,8 +180,8 @@ public struct TimetablesClient: Sendable {
     private func liveEvent(eva: String, category: String, number: String, time: Date,
                             side: KeyPath<TimetablesStop, TimetablesEvent?>,
                             scheduleSuffices: Bool = false) async -> TimetablesEvent? {
-        guard let planned = try? await plan(eva: eva, around: time),
-              let stop = Self.match(planned, category: category, number: number, plannedTime: time, side: side) else { return nil }
+        guard let (eva, stop) = await scheduledStop(eva: eva, category: category, number: number, time: time, side: side)
+        else { return nil }
         // Without `fchg` there's no telling whether the train is late or even cancelled – treating
         // the bare schedule as "on time, running" would wipe out what the other provider knows.
         guard let changes = try? await changes(eva: eva) else { return scheduleSuffices ? stop[keyPath: side] : nil }
@@ -196,6 +196,32 @@ public struct TimetablesClient: Sendable {
         }
         return event
     }
+
+    /// The `plan` entry for `category`+`number` at `eva`, or else at one of its `lowerLevels`, along with
+    /// the EVA number it was found under (its changes are listed there too).
+    private func scheduledStop(eva: String, category: String, number: String, time: Date,
+                               side: KeyPath<TimetablesStop, TimetablesEvent?>) async -> (String, TimetablesStop)? {
+        for candidate in [eva] + (Self.lowerLevels[eva] ?? []) {
+            if let planned = try? await plan(eva: candidate, around: time),
+               let stop = Self.match(planned, category: category, number: number, plannedTime: time, side: side) {
+                return (candidate, stop)
+            }
+        }
+        return nil
+    }
+
+    /// Big stations whose S-Bahn platforms Timetables lists as a station of their own, which station
+    /// search (and so `eva(for:)`) never returns. Without them an S-Bahn ending there got no DB delay
+    /// at all and kept Transitous' forecast, which often drops back to "on time" for stops further
+    /// ahead (issue #76: S4 running 3 minutes late, its arrival shown on time).
+    static let lowerLevels: [String: [String]] = [
+        "8000261": ["8098263"], // München Hbf (tief)
+        "8000096": ["8098096"], // Stuttgart Hbf (tief)
+        "8000105": ["8098105"], // Frankfurt (Main) Hbf (tief)
+        "8002549": ["8098549"], // Hamburg Hbf (S-Bahn)
+        "8010205": ["8098205"], // Leipzig Hbf (tief)
+        "8011160": ["8098160", "8089021"], // Berlin Hbf (tief), Berlin Hbf (S-Bahn)
+    ]
 
     /// Whether DB's own dispatching feed reports the departure of `category`+`number` at `station`
     /// (planned `time`) as cancelled. `nil` when it can't tell (train not found, or
