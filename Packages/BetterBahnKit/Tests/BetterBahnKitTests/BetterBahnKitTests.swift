@@ -1377,6 +1377,20 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         #expect(lookup.formation.unitDescription == "Tz 9457 „Bundesrepublik Deutschland“")
     }
 
+    @Test func summaryMarksRedesignedICE3neo() {
+        let group = { (unit: String?) in
+            TrainTypeLookup.Group(seriesName: "ICE 3neo (BR408)", baureihe: "408", unitNumber: unit, origin: nil, destination: nil, coachCount: 8)
+        }
+        let lookup = { (groups: [TrainTypeLookup.Group]) in
+            TrainTypeLookup(category: "ICE", number: "144", date: "2026-10-02", administration: "80", groups: groups,
+                            status: .realtime, source: "DB", retrievedAt: .now)
+        }
+        #expect(lookup([group("8020")]).summary == "ICE 3neo Redesign")
+        #expect(lookup([group("8020")]).formation.modelSummary == "ICE 3neo Redesign")
+        #expect(lookup([group("8020"), group("8005")]).summary == "ICE 3neo Redesign + ICE 3neo")
+        #expect(lookup([group(nil)]).summary == "ICE 3neo")
+    }
+
     /// Real response for IC 2271 (2026-10-01): bahn.expert has no Baureihe for IC 2 Twindexx sets.
     @Test func twindexxSeriesFromGroupName() throws {
         let json = """
