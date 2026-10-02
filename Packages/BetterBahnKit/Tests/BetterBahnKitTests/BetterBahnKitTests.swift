@@ -2459,6 +2459,73 @@ private final class HamburgSBahnLevelProtocol: URLProtocol, @unchecked Sendable 
     }
 }
 
+/// Issue #76 as seen in a saved journey: S7 Bergedorf 12:58 → Hamburg Hbf 13:19 running 3 minutes late.
+/// Transitous had no realtime for it (its stops then carry the plan as "actual"), so only DB's
+/// Timetables can tell, and the refreshed leg must end with DB's +3 like the trip view does.
+@Suite struct JourneyRefresherSBahnLevelTests {
+    @Test func refreshedLegEndsWithDBsDelayAtTheSBahnLevel() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [BergedorfS7Protocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let timetables = TimetablesClient(http: HTTPClient(session: session))
+
+        let bergedorf = station("8000148", "Hamburg-Bergedorf", 53.490, 10.206, source: .bahnDe)
+        let hauptbahnhof = station("8002549", "Hamburg Hbf", 53.553, 10.007, source: .bahnDe)
+        let departure = try #require(ISO8601DateFormatter().date(from: "2026-10-02T10:58:00Z"))
+        let arrival = departure.addingTimeInterval(21 * 60)
+        let line = Line(name: "S7", number: "7", product: .suburban, operatorName: nil, tripNumber: "47124")
+        let stops = [
+            Stopover(station: bergedorf, arrival: TimeInfo(planned: departure.addingTimeInterval(-60), actual: departure.addingTimeInterval(-60)),
+                     departure: TimeInfo(planned: departure, actual: departure), arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+            Stopover(station: hauptbahnhof, arrival: TimeInfo(planned: arrival, actual: arrival),
+                     departure: TimeInfo(planned: arrival.addingTimeInterval(60), actual: arrival.addingTimeInterval(60)),
+                     arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+        ]
+        let mock = MockProvider(source: .transitous)
+        mock.trips["s7"] = Trip(id: "s7", line: line, direction: "Altona", stopovers: stops, cancelled: false, remarks: [], source: .transitous)
+        let leg = Leg(origin: bergedorf, destination: hauptbahnhof,
+                      departure: TimeInfo(planned: departure, actual: nil), arrival: TimeInfo(planned: arrival, actual: nil),
+                      departurePlatform: nil, arrivalPlatform: nil, tripId: "s7", line: line, direction: "Altona",
+                      isWalking: false, cancelled: false, stopovers: stops, remarks: [], source: .transitous)
+        let refresher = JourneyRefresher(provider: CombinedProvider(primary: mock, fallback: nil, bahnDe: nil), timetables: timetables)
+
+        let refreshed = await refresher.refresh(Journey(legs: [leg], source: .transitous))
+
+        #expect(refreshed.legs[0].departure.actual == departure.addingTimeInterval(180))
+        #expect(refreshed.legs[0].arrival.actual == arrival.addingTimeInterval(180))
+        #expect(refreshed.legs[0].stopovers.last?.arrival?.actual == arrival.addingTimeInterval(180))
+    }
+}
+
+/// IRIS for S 47124 on 2026-10-02 (real ids/times): Bergedorf lists it, Hamburg Hbf (8002549) doesn't,
+/// "Hamburg Hbf (S-Bahn)" (8098549) does, 3 minutes late.
+private final class BergedorfS7Protocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+
+    override func startLoading() {
+        let path = request.url!.path
+        let body = switch path {
+        case _ where path.contains("plan/8000148/"):
+            #"<timetable station='Hamburg-Bergedorf'><s id="b"><tl c="S" n="47124"/><ar pt="2610021257" pp="5"/><dp pt="2610021258" pp="5"/></s></timetable>"#
+        case _ where path.hasSuffix("fchg/8000148"):
+            #"<timetable station='Hamburg-Bergedorf'><s id="b" eva="8000148"><ar ct="2610021259"/><dp ct="2610021301"/></s></timetable>"#
+        case _ where path.contains("plan/8098549/"):
+            #"<timetable station='Hamburg Hbf (S-Bahn)'><s id="-7201046121150801590-2610021248-12"><tl c="S" n="47124"/><ar pt="2610021319" pp="1" l="S7"/><dp pt="2610021320" pp="1" l="S7"/></s></timetable>"#
+        case _ where path.hasSuffix("fchg/8098549"):
+            #"<timetable station='Hamburg Hbf (S-Bahn)'><s id="-7201046121150801590-2610021248-12" eva="8098549"><ar ct="2610021322" l="S7"/><dp ct="2610021324" l="S7"/></s></timetable>"#
+        default:
+            "<timetable></timetable>"
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+}
+
 /// Issue #76: an S4 ending at München Hbf showed its arrival on time while running 3 minutes late.
 /// DB's Timetables only lists the S-Bahn under "München Hbf (tief)", which station search never finds.
 @Suite struct TimetablesLowerLevelTests {
