@@ -128,12 +128,13 @@ struct JourneyDetailView: View {
     }
 
     /// A saved journey is only refreshed until 10 minutes after it arrives, so its end keeps whatever
-    /// delay DB reported last, often before the train got there. Opened within 3 hours of arriving
-    /// (DB's change list still has the train then; later it would only be Transitous' plan), it's
-    /// refreshed once more and stored, so it shows the real arrival like the trip view does.
+    /// delay DB reported last, often before the train got there. Opened within 5 hours of arriving
+    /// (DB's change list still has the train then: #76's S7 was there 4 hours after it arrived;
+    /// later it would only be Transitous' plan), it's refreshed once more and stored, so it shows
+    /// the real arrival like the trip view does.
     private func refreshRecentlyFinished() async {
         guard readOnly, let entry = model.pastJourneys.first(where: { $0.journey == journey }),
-              let arrival = journey.arrival?.best, arrival.addingTimeInterval(3 * 3600) > .now else { return }
+              let arrival = journey.arrival?.planned, arrival.addingTimeInterval(5 * 3600) > .now else { return }
         let refreshed = await model.journeyRefresher.refresh(journey)
         guard refreshed != journey else { return }
         model.updateSavedJourneyData(id: entry.id, journey: refreshed)
