@@ -998,6 +998,36 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         let replaced = try await picker.replacing(legAt: 0, in: journey, with: newLeg, finalDestination: berlin)
         #expect(replaced.legs.map(\.tripId) == ["ice423"])
     }
+
+    func transferPicker() throws -> (TrainPicker, Leg, Journey) {
+        let fast = trip("ice1", "ICE 1", [stop(koeln, arr: nil, dep: 0), stop(berlin, arr: 240, dep: nil)])
+        let toDuesseldorf = trip("re5", "RE 5", [stop(koeln, arr: nil, dep: 15), stop(duesseldorf, arr: 40, dep: nil)])
+        let onwards = trip("ice10", "ICE 10", [stop(duesseldorf, arr: nil, dep: 50), stop(berlin, arr: 300, dep: nil)])
+        let late = trip("ice12", "ICE 12", [stop(duesseldorf, arr: nil, dep: 400), stop(berlin, arr: 640, dep: nil)])
+        let lateFeeder = trip("re7", "RE 7", [stop(koeln, arr: nil, dep: 360), stop(duesseldorf, arr: 385, dep: nil)])
+        let withTransfer = Journey(legs: [try #require(toDuesseldorf.leg(from: koeln, to: duesseldorf)),
+                                          try #require(onwards.leg(from: duesseldorf, to: berlin))], source: .bahnDe)
+        let tooLate = Journey(legs: [try #require(lateFeeder.leg(from: koeln, to: duesseldorf)),
+                                     try #require(late.leg(from: duesseldorf, to: berlin))], source: .bahnDe)
+        let direct = Journey(legs: [try #require(fast.leg(from: koeln, to: berlin))], source: .bahnDe)
+        let primary = MockProvider(source: .bahnDe)
+        primary.journeyPages = [JourneyPage(journeys: [direct, withTransfer, tooLate], earlierCursor: nil, laterCursor: nil, source: .bahnDe)]
+        let provider = CombinedProvider(primary: primary, fallback: MockProvider(source: .transitous), bahnDe: nil)
+        return (TrainPicker(provider: provider), try #require(fast.leg(from: koeln, to: berlin)), withTransfer)
+    }
+
+    @Test func connectionsWithTransfersSkipDirectAndOutOfWindow() async throws {
+        let (picker, leg, withTransfer) = try transferPicker()
+        let connections = try await picker.connections(for: leg)
+        #expect(connections.map(\.id) == [withTransfer.id])
+    }
+
+    @Test func replaceLegWithConnection() async throws {
+        let (picker, leg, withTransfer) = try transferPicker()
+        let journey = Journey(legs: [leg], source: .bahnDe)
+        let replaced = try await picker.replacing(legAt: 0, in: journey, with: withTransfer.legs, finalDestination: berlin)
+        #expect(replaced.legs.map(\.tripId) == ["re5", "ice10"])
+    }
 }
 
 @Suite struct AccessAndDeadlineTests {
