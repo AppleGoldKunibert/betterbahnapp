@@ -529,6 +529,26 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(TransitousProvider.sizeScore(forImportance: 1) == 8)
     }
 
+    /// "Be" in Berlin: at most three Berlin stations first, then Bern, the rest of Berlin after.
+    /// The Swiss canton in "Brügg BE" isn't a whole-word match for "Be".
+    @Test func shortSearchesSpreadOverTowns() {
+        func match(_ id: String, town: String) -> MGeocodeMatch {
+            MGeocodeMatch(type: "STOP", name: id, id: id, lat: 0, lon: 0, country: "DE", modes: ["REGIONAL_RAIL"],
+                          areas: [.init(name: town, adminLevel: 4, isDefault: true)])
+        }
+        let berlin = ["hbf", "suedkreuz", "ostbf", "spandau", "gesundbrunnen"].map { match($0, town: "Berlin") }
+        let bern = match("bern", town: "Bern")
+        let spread = TransitousProvider.spreadingTowns(berlin + [bern], query: "Be")
+        #expect(spread.map(\.id) == ["hbf", "suedkreuz", "ostbf", "bern", "spandau", "gesundbrunnen"])
+        // Typing the town keeps its stations together.
+        #expect(TransitousProvider.spreadingTowns(berlin + [bern], query: "Berlin").map(\.id).last == "bern")
+
+        let bruegg = MGeocodeMatch(type: "STOP", name: "Brügg BE, Bahnhof", id: "bruegg", lat: 47.12, lon: 7.28,
+                                   country: "CH", modes: ["REGIONAL_RAIL"])
+        #expect(TransitousProvider.textMatch(bruegg, query: "Be").whole == 0)
+        #expect(TransitousProvider.textMatch(bruegg, query: "Be").matched == 1)
+    }
+
     @Test func extraQueriesForAliasesAndTheNearbyTown() {
         let berlin = Coordinate(latitude: 52.52, longitude: 13.405)
         #expect(TransitousProvider.aliasQuery(for: "BER ") == "Flughafen BER")
@@ -538,6 +558,8 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(TransitousProvider.nearbyTownQuery(for: "ost", near: Coordinate(latitude: 48.10, longitude: 11.50)) == "München ost")
         // What was typed could be (the start of) the town itself.
         #expect(TransitousProvider.nearbyTownQuery(for: "ber", near: berlin) == nil)
+        // One or two letters ask for the town itself: the geocoder finds nothing for them.
+        #expect(TransitousProvider.nearbyTownQuery(for: "Be", near: berlin) == "Berlin")
         #expect(TransitousProvider.nearbyTownQuery(for: "Berlin Hbf", near: berlin) == nil)
         // No location, or no larger town nearby (Perleberg in the Prignitz).
         #expect(TransitousProvider.nearbyTownQuery(for: "ost", near: nil) == nil)
@@ -564,8 +586,8 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         // Two letters: the geocoder finds nothing, but main stations starting with them.
         let be = try await provider.searchStations("Be", near: berlin)
         #expect(be.map(\.id) == ["berlinHbf"])
-        #expect(TransitousProvider.shortQuery(for: "ber") == nil)
-        #expect(TransitousProvider.shortQuery(for: "Be ") == "Be Hbf")
+        #expect(TransitousProvider.shortQueries(for: "ber").isEmpty)
+        #expect(TransitousProvider.shortQueries(for: "Be ") == ["Be Hbf", "Be Bahnhof"])
     }
 
     /// Some feeds (e.g. European rail interoperability reference data) carry an all-caps, umlaut-free
