@@ -211,9 +211,9 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
                 .map(\.element.id)
         }
 
-        // Bernau bei Berlin is preferred and stays first; then ~80 km and ~120 km, Berlin Hbf
-        // (~500 km) after, the nearby bus stop last.
-        #expect(ranked(near: munich) == ["bernau-berlin", "bernau-chiemsee", "salzburg", "far", "bus"])
+        // Bernau bei Berlin is preferred and stays first; then ~80 km, Berlin Hbf (~500 km) after,
+        // the nearby bus stop, and Salzburg (~120 km, abroad, not typed) last.
+        #expect(ranked(near: munich) == ["bernau-berlin", "bernau-chiemsee", "far", "bus", "salzburg"])
         // Without a location: Bernau bei Berlin, then German trains (main stations first), then Austria.
         #expect(ranked(near: nil) == ["bernau-berlin", "far", "bernau-chiemsee", "salzburg", "bus"])
 
@@ -490,15 +490,22 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         let ber = match("ber", "Flughafen BER", 52.365, 13.510, "DE", ["LONG_DISTANCE", "REGIONAL_RAIL", "SUBURBAN"], 0.0033)
         let berHits = [bern, beroun, dilBer, ber]
         #expect(ranked("ber", berHits, near: berlin) == ["ber", "bern", "beroun", "dilBer"])
-        #expect(ranked("ber", berHits, near: munich) == ["bern", "ber", "beroun", "dilBer"])
+        // Stations abroad only count in full ("bern") or nearby: from Munich too, BER comes first.
+        #expect(ranked("ber", berHits, near: munich) == ["ber", "bern", "beroun", "dilBer"])
         #expect(ranked("ber", berHits, near: nil).first == "ber")
+        // Near the border, stations abroad count from the first letters: Basel from Freiburg.
+        let basel = match("basel", "Basel SBB", 47.547, 7.590, "CH", ["LONG_DISTANCE", "REGIONAL_RAIL"], 0.03)
+        let freiburg = Coordinate(latitude: 47.997, longitude: 7.842)
+        let text = TransitousProvider.textMatch(basel, query: "bas")
+        #expect(!TransitousProvider.isFarForeign(basel, query: "bas", text: text, exactTier: 0, near: freiburg))
+        #expect(TransitousProvider.isFarForeign(basel, query: "bas", text: text, exactTier: 0, near: berlin))
 
         let ostbf = match("ostbf", "Berlin Ostbf", 52.510, 13.435, "DE", ["HIGHSPEED_RAIL", "REGIONAL_RAIL", "SUBURBAN"], 0.0057)
         let ostkreuz = match("ostkreuz", "S Ostkreuz Bhf (Berlin)", 52.503, 13.469, "DE", ["REGIONAL_RAIL", "SUBURBAN"], 0.0089)
         let ulmOst = match("ulmOst", "Ulm Ost", 48.407, 9.995, "DE", ["REGIONAL_RAIL"], 0.00025)
         let ostra = match("ostra", "Ostrá", 50.188, 14.891, "CZ", ["REGIONAL_RAIL"], 0.0012)
         let ostHits = [ulmOst, ostra, ostbf, ostkreuz]
-        #expect(ranked("ost", ostHits, near: berlin) == ["ostkreuz", "ostbf", "ostra", "ulmOst"])
+        #expect(ranked("ost", ostHits, near: berlin) == ["ostkreuz", "ostbf", "ulmOst", "ostra"])
         #expect(ranked("ost", ostHits, near: nil).first == "ulmOst")
 
         let bernau = match("bernau-berlin", "S Bernau Bhf", 52.68, 13.59, "DE", ["REGIONAL_RAIL", "SUBURBAN"], 0.0012)

@@ -166,19 +166,35 @@ public struct TransitousProvider: TransitProvider {
 
         let text = Self.textMatch(match, query: query)
         let textRank: Int
-        if location != nil {
+        if let location {
             // `nearbyScore` stays well under 100, so it only decides between equal text matches.
             let discount = Self.isSuburbanOnly(modes) ? Self.suburbanDiscount : 0
             let size = max(0, Self.sizeScore(forImportance: match.importance) - discount)
             let nearbyScore = text.whole * 2 + nearness + size
                 + (Self.isInTown(named: query, match, wholeWords: true) ? 5 : 0)
             textRank = (text.matched * 10 + exactTier) * 100 + nearbyScore
+                - (Self.isFarForeign(match, query: query, text: text, exactTier: exactTier, near: location) ? 100_000 : 0)
         } else {
             let elsewhere = typedTown && match.town != nil && !Self.isInTown(named: query, match)
             textRank = (text.matched + text.whole) * 10 + (elsewhere ? 0 : 5) + exactTier
         }
         return (textRank, group, tier * 100 + (isMainStation ? 10 : 0) + neighborRank,
                 match.importance ?? 0, match.modes?.count ?? 0, -offset)
+    }
+
+    /// Stations abroad within this distance count like German ones.
+    static let foreignNearby: Double = 100_000
+
+    /// A station abroad, farther than `foreignNearby`, whose name wasn't typed in full: it comes after
+    /// every other hit, so "be" in Berlin doesn't list Bern while "bern" (or "wien", near the border
+    /// "basel b") still does.
+    static func isFarForeign(_ match: MGeocodeMatch, query: String, text: (matched: Int, whole: Int),
+                             exactTier: Int, near location: Coordinate) -> Bool
+    {
+        guard let country = match.country, country != "DE", exactTier == 0 else { return false }
+        let typedWords = searchWords(query).count
+        if typedWords > 0, text.whole == typedWords { return false }
+        return location.distance(to: Coordinate(latitude: match.lat, longitude: match.lon)) >= foreignNearby
     }
 
     /// How well a hit covers what was typed: per typed word 2 if it's a whole word of the stop's name
