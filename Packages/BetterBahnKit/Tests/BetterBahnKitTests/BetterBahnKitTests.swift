@@ -523,6 +523,22 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
                 .map(\.element.id)
         }
         #expect(ranked("neu") == ["smallTown", "village", "far"])
+
+        // An S-Bahn-only halt counts a quarter of its departures: behind a regional station with fewer,
+        // but still ahead of a village station.
+        func rankedHits(_ query: String, _ matches: [MGeocodeMatch]) -> [String] {
+            matches.enumerated()
+                .sorted { TransitousProvider.searchRank($0.element, query: query, offset: $0.offset, near: berlin)
+                        > TransitousProvider.searchRank($1.element, query: query, offset: $1.offset, near: berlin) }
+                .map(\.element.id)
+        }
+        let sBahn = MGeocodeMatch(type: "STOP", name: "Neukölln", id: "sBahn", lat: 52.469, lon: 13.443, country: "DE",
+                                  modes: ["SUBURBAN", "SUBWAY", "BUS"], importance: 0.008)
+        let regional = MGeocodeMatch(type: "STOP", name: "Neuenhagen", id: "regional", lat: 52.529, lon: 13.69, country: "DE",
+                                     modes: ["REGIONAL_RAIL", "SUBURBAN"], importance: 0.004)
+        #expect(rankedHits("neu", [village, sBahn, regional]) == ["regional", "sBahn", "village"])
+        #expect(TransitousProvider.isSuburbanOnly(["SUBURBAN", "BUS"]))
+        #expect(!TransitousProvider.isSuburbanOnly(["SUBURBAN", "REGIONAL_RAIL"]))
         #expect(ranked("Neudorf").first == "village")
         #expect(TransitousProvider.sizeScore(forImportance: nil) == 0)
         #expect(TransitousProvider.sizeScore(forImportance: 0.0015) == 3)

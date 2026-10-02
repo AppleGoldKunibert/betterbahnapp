@@ -62,19 +62,31 @@ def main():
         lat += 1
 
     # The same station comes from several feeds, under several names: keep the busiest stop
-    # within 300 m.
+    # within 300 m, with the trains of all of them.
     found.sort(key=lambda s: -(s.get("importance") or 0))
-    kept = []
+    clusters = []
     grid = {}
     for stop in found:
         cell = (round(stop["lat"] * 100), round(stop["lon"] * 100))
-        neighbours = [k for dy in (-1, 0, 1) for dx in (-1, 0, 1) for k in grid.get((cell[0] + dy, cell[1] + dx), [])]
-        if any(abs(k[1] - stop["lat"]) < 0.0027 and abs(k[2] - stop["lon"]) < 0.0045 for k in neighbours):
+        neighbours = [c for dy in (-1, 0, 1) for dx in (-1, 0, 1) for c in grid.get((cell[0] + dy, cell[1] + dx), [])]
+        near = next((c for c in neighbours
+                     if abs(c["lat"] - stop["lat"]) < 0.0027 and abs(c["lon"] - stop["lon"]) < 0.0045), None)
+        if near:
+            near["modes"] |= set(stop.get("modes") or [])
             continue
-        entry = [stop["name"].strip(), round(stop["lat"], 3), round(stop["lon"], 3),
-                 float(f"{stop.get('importance') or 0:.2g}")]
-        grid.setdefault(cell, []).append(entry)
-        kept.append(entry)
+        cluster = {"name": stop["name"].strip(), "lat": stop["lat"], "lon": stop["lon"],
+                   "importance": stop.get("importance") or 0, "modes": set(stop.get("modes") or [])}
+        grid.setdefault(cell, []).append(cluster)
+        clusters.append(cluster)
+
+    kept = []
+    for c in clusters:
+        importance = c["importance"]
+        # S-Bahn trains run so often that an S-Bahn-only halt looks as busy as a town's station:
+        # count a quarter (TransitousProvider.suburbanDiscount).
+        if "SUBURBAN" in c["modes"] and not (c["modes"] & (TRAIN - {"SUBURBAN"})):
+            importance /= 4
+        kept.append([c["name"], round(c["lat"], 3), round(c["lon"], 3), float(f"{importance:.2g}")])
     kept.sort(key=lambda e: e[0])
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(kept, ensure_ascii=False, separators=(",", ":")) + "\n")

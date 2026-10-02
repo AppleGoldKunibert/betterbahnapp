@@ -169,7 +169,9 @@ public struct TransitousProvider: TransitProvider {
         let textRank: Int
         if location != nil {
             // `nearbyScore` stays well under 100, so it only decides between equal text matches.
-            let nearbyScore = text.whole * 2 + nearness + Self.sizeScore(forImportance: match.importance)
+            let discount = Self.isSuburbanOnly(modes) ? Self.suburbanDiscount : 0
+            let size = max(0, Self.sizeScore(forImportance: match.importance) - discount)
+            let nearbyScore = text.whole * 2 + nearness + size
                 + (Self.isInTown(named: query, match, wholeWords: true) ? 5 : 0)
             textRank = (text.matched * 10 + exactTier) * 100 + nearbyScore
         } else {
@@ -257,6 +259,16 @@ public struct TransitousProvider: TransitProvider {
     static func sizeScore(forImportance importance: Double?) -> Int {
         guard let importance, importance > 0.0001 else { return 0 }
         return min(8, Int(log2(importance / 0.0001)))
+    }
+
+    /// How many `sizeScore` points a station only served by the S-Bahn loses (a quarter of its
+    /// departures): S-Bahn trains run so often that a suburban halt looks as busy as a town's station
+    /// with regional and long-distance trains. Still counted, so busy S-Bahn stations stay findable.
+    static let suburbanDiscount = 2
+
+    /// True for an S-Bahn station without regional or long-distance trains (buses, trams aside).
+    static func isSuburbanOnly(_ modes: Set<String>) -> Bool {
+        modes.contains("SUBURBAN") && modes.isDisjoint(with: trainModes.subtracting(["SUBURBAN"]))
     }
 
     /// "Potsdam" → "Potsdam Hbf": for just a town's name the geocoder can leave its main station
