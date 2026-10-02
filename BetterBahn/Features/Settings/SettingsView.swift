@@ -85,6 +85,18 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Picker(selection: $settings.trainPositionRefresh) {
+                        ForEach(TrainPositionRefresh.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                    } label: {
+                        IconLabel(title: "Aktualisierung", systemImage: "location.fill", color: .brand)
+                    }
+                } header: {
+                    Text("Live-Karte")
+                } footer: {
+                    Text(trainPositionRefreshFooter)
+                }
+
+                Section {
                     Button(role: .destructive) {
                         showClearHistoryConfirmation = true
                     } label: {
@@ -142,6 +154,17 @@ struct SettingsView: View {
             } message: {
                 Text("Favoriten, gespeicherte Reisen und deine Anmeldung bleiben erhalten.")
             }
+        }
+    }
+
+    private var trainPositionRefreshFooter: String {
+        switch model.settings.trainPositionRefresh {
+        case .off:
+            "Karten laden die Positionen der Züge nur einmal beim Öffnen."
+        case .automatic:
+            "Wie oft Karten die Positionen fahrender Züge neu laden: alle 15 Sekunden, mit mobilen Daten oder im Datensparmodus jede Minute. Häufigeres Aktualisieren kann mehr Daten verbrauchen."
+        default:
+            "Wie oft Karten die Positionen fahrender Züge neu laden. Häufigeres Aktualisieren kann mehr Daten verbrauchen, vor allem mit mobilen Daten."
         }
     }
 

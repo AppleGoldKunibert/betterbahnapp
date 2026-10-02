@@ -42,9 +42,11 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   Owns `CombinedProvider`, `TraewellingClient`, helpers (`TrainPicker`, `JourneyReplanner`,
   `DBShareImporter`, `TrainRoutePlanner`, `TicketFilter`, `TimetablesClient`, `JourneyRefresher`),
   persisted lists (favorites, recents, `savedJourneys`, `traewellingTrips`, tracked manual check-ins),
-  realtime refresh loops (journeys every 300 s, the Live Activity's journey per `LiveActivityRefreshSchedule` – 2 min, ±1 min around arrivals, 1 min while transferring; train positions only while the map is shown, every 15 s or 60 s on mobile data/Low Data Mode), delay notifications,
+  realtime refresh loops (journeys every 300 s, the Live Activity's journey per `LiveActivityRefreshSchedule` – 2 min, ±1 min around arrivals, 1 min while transferring; train positions only while a map is shown, at the interval picked in Settings → Live-Karte, Kit `TrainPositionRefresh`: automatic = 15 s, 60 s on mobile data/Low Data Mode; "Aus" loads once), delay notifications,
   geometry/heatmap caches, Live Activity selection. Also defines `SavedJourney`, `PlanVersion`,
   `ImportedTrip`, `RecentSearch`, `Storage`, `AppSettings`, `ConnectionNotifier`.
+  `SavedJourney.formations` remembers the Tz/Taufname seen per leg (`Leg.formationKey`), so they stay
+  known (and synced) after the journey (`rememberFormation`, used by `TrainFormationLabel`/`TrainSeriesTag`).
 - **Persistence:** `Storage.save/load(key:)` writes JSON to `Application Support/BetterBahn/<key>.json`
   (migrates from old UserDefaults). `AppSettings` uses UserDefaults directly. Saved data must stay
   decodable across versions (e.g. `DataSource.dbRest` kept only for decoding).
@@ -110,7 +112,10 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 - `Transit/Transitous/` – MOTIS API client + DTOs (`M*` types). Station-name cleanup and
   deduplication of boards happen here.
 - `Transit/Timetables/` – official DB Timetables XML client (realtime overrides, messages), through the
-  `bahnde-proxy` Worker, which holds the API key. The app only uses it where App Attest works.
+  `bahnde-proxy` Worker, which holds the API key. The app only uses it where App Attest works. A train not
+  found at a station's EVA is looked for at its other levels (`/station` `meta`, e.g. "Hamburg Hbf (S-Bahn)").
+  Trains that ran over 4 hours ago aren't asked about (`changesMemory`): DB has dropped their changes and
+  would report them on time. Without live data a time has no `actual`, so no delay shows (not "+0").
 - Logic: `JourneyReplanner`, `ConnectionCheck` (`ConnectionIssue`, `JourneyRefresher`), `PlatformChange`
   (platform changes since the last refresh → push, ignores sectors/bus bays), `TrainRoutePlanner`,
   `ViaRoutePlanner` (vias without minimum stay keep a through train as one leg), `TrainPicker`, `TicketFilter`/`BC100Rules`, `BoardFilter`.

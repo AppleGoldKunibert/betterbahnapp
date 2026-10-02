@@ -70,7 +70,7 @@ struct SavedJourneyRow: View {
                 JourneyCard(journey: entry.journey)
                     .overlay {
                         RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .strokeBorder(blocking != nil ? Color.heavyDelay : (isNext ? Color.brand : .clear), lineWidth: 2)
+                            .strokeBorder(blocking != nil ? Color.heavyDelay : (highlightsAsNext ? Color.brand : .clear), lineWidth: 2)
                     }
 
                 if let blocking {
@@ -87,6 +87,13 @@ struct SavedJourneyRow: View {
                 withAnimation { model.unsave(entry.journey) }
             }
         }
+    }
+
+    /// The next journey is only framed once it departs within the next 24 hours (or is already
+    /// underway), so a trip days away doesn't look as urgent as a broken connection.
+    private var highlightsAsNext: Bool {
+        guard isNext, let departure = entry.journey.departure?.best else { return false }
+        return departure <= Date.now.addingTimeInterval(24 * 3600)
     }
 
     private var dayLabel: String {

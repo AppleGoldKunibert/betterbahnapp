@@ -82,7 +82,7 @@ public struct JourneyRefresher: Sendable {
         self.timetables = timetables
     }
 
-    public func refresh(_ journey: Journey) async -> Journey {
+    public func refresh(_ journey: Journey, now: Date = .now) async -> Journey {
         var updated = journey
         for (index, originalLeg) in journey.legs.enumerated() {
             var leg = originalLeg
@@ -90,15 +90,18 @@ public struct JourneyRefresher: Sendable {
                let trip = try? await provider.trip(id: tripId, source: leg.source) {
                 leg = Self.apply(trip, to: leg)
             }
+            let timetables = TimetablesClient.knowsChanges(until: leg.arrival.planned, now: now) ? self.timetables : nil
             // DB Timetables wins wherever it knows the stop; the trip data above only fills in
             // what DB can't match (regional operators, far-off stops).
             if let timetables, let override = await timetables.realtime(for: leg) {
                 leg = Self.apply(override, to: leg)
             }
             if let timetables, timetables.canLookUp(leg) {
+                leg = Self.syncingEnds(of: leg, toStopovers: true)
                 let live = await timetables.liveStopovers(for: leg)
                 leg.stopovers = live.stopovers
                 leg.messages = TrainMessage.merged(leg.messages + live.messages)
+                leg = Self.syncingEnds(of: leg, toStopovers: false)
             }
             // Neither Transitous nor DB Timetables above ever *inserts* a stop — only bahn.de's journey
             // details report a Zusatzhalt (an unscheduled stop the train additionally picked up today)
@@ -120,6 +123,27 @@ public struct JourneyRefresher: Sendable {
             updated = named
         }
         return updated
+    }
+
+    /// Copies the leg's departure/arrival onto its first/last stopover (`toStopovers`) or back, when
+    /// those stopovers are its origin and destination at the same planned times. The DB lookups for
+    /// the leg's ends and for its stops are separate requests; one of them can fail (a big station's
+    /// `fchg` is large and can time out) while the other gets through. Synced both ways, the leg's
+    /// ends keep whichever delay DB reported, as the trip view does (#76: an S7 to Hamburg Hbf
+    /// ended "+0" while its stops and the trip view had +3).
+    static func syncingEnds(of leg: Leg, toStopovers: Bool) -> Leg {
+        var leg = leg
+        if let first = leg.stopovers.indices.first, leg.stopovers[first].station.isSamePlace(as: leg.origin),
+           leg.stopovers[first].departure?.planned == leg.departure.planned {
+            if toStopovers { leg.stopovers[first].departure = leg.departure }
+            else if let departure = leg.stopovers[first].departure { leg.departure = departure }
+        }
+        if let last = leg.stopovers.indices.last, leg.stopovers[last].station.isSamePlace(as: leg.destination),
+           leg.stopovers[last].arrival?.planned == leg.arrival.planned {
+            if toStopovers { leg.stopovers[last].arrival = leg.arrival }
+            else if let arrival = leg.stopovers[last].arrival { leg.arrival = arrival }
+        }
+        return leg
     }
 
     /// A leg within the next week missing a platform somewhere, which bahn.de may know (see `refresh`).
@@ -144,16 +168,21 @@ public struct JourneyRefresher: Sendable {
         let startIndex = closestStop(in: trip.stopovers, at: leg.origin, plannedTime: leg.departure.planned, side: \.departure)
         if let startIndex {
             let start = trip.stopovers[startIndex]
-            if let departure = start.departure { leg.departure = departure }
+            if let departure = start.departure { leg.departure = Self.keepingActual(departure, from: leg.departure) }
             if start.departurePlatform?.best != nil { leg.departurePlatform = start.departurePlatform }
             if start.departureCancelled { leg.cancelled = true }
         }
         let rest = trip.stopovers[((startIndex ?? -1) + 1)...]
         if let endIndex = closestStop(in: rest, at: leg.destination, plannedTime: leg.arrival.planned, side: \.arrival) {
             let end = trip.stopovers[endIndex]
-            if let arrival = end.arrival { leg.arrival = arrival }
+            if let arrival = end.arrival { leg.arrival = Self.keepingActual(arrival, from: leg.arrival) }
             if end.arrivalPlatform?.best != nil { leg.arrivalPlatform = end.arrivalPlatform }
             if end.arrivalCancelled { leg.cancelled = true }
+            // A journey leg's headsign is only where its own feed stops modelling the train (e.g.
+            // "Hengelo" for a Berlin–Amsterdam ICE), while the trip runs through to the real end.
+            // Only taken from a trip that covers the whole leg, so a trip cut short at a border can't
+            // undo the direction of a leg merged across it.
+            if let direction = trip.direction, !direction.isEmpty { leg.direction = direction }
         }
         // Keep the intermediate stops as current as the endpoints.
         for index in leg.stopovers.indices {
@@ -162,12 +191,20 @@ public struct JourneyRefresher: Sendable {
                 $0.station.isSamePlace(as: stop.station)
                     && $0.arrival?.planned == stop.arrival?.planned && $0.departure?.planned == stop.departure?.planned
             }) else { continue }
-            if let arrival = live.arrival { leg.stopovers[index].arrival = arrival }
-            if let departure = live.departure { leg.stopovers[index].departure = departure }
+            if let arrival = live.arrival { leg.stopovers[index].arrival = Self.keepingActual(arrival, from: stop.arrival) }
+            if let departure = live.departure { leg.stopovers[index].departure = Self.keepingActual(departure, from: stop.departure) }
             if live.arrivalCancelled { leg.stopovers[index].arrivalCancelled = true }
             if live.departureCancelled { leg.stopovers[index].departureCancelled = true }
         }
         return leg
+    }
+
+    /// `new`, but with `old`'s actual time when `new` has none for the same planned time: a trip
+    /// without realtime (Transitous drops it some time after the train ran) mustn't wipe a delay
+    /// already known.
+    static func keepingActual(_ new: TimeInfo, from old: TimeInfo?) -> TimeInfo {
+        guard new.actual == nil, let old, old.planned == new.planned else { return new }
+        return old
     }
 
     /// Index of the visit to `station` whose planned `side` time is closest to `plannedTime`.

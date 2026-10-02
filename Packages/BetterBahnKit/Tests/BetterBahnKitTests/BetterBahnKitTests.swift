@@ -998,6 +998,36 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         let replaced = try await picker.replacing(legAt: 0, in: journey, with: newLeg, finalDestination: berlin)
         #expect(replaced.legs.map(\.tripId) == ["ice423"])
     }
+
+    func transferPicker() throws -> (TrainPicker, Leg, Journey) {
+        let fast = trip("ice1", "ICE 1", [stop(koeln, arr: nil, dep: 0), stop(berlin, arr: 240, dep: nil)])
+        let toDuesseldorf = trip("re5", "RE 5", [stop(koeln, arr: nil, dep: 15), stop(duesseldorf, arr: 40, dep: nil)])
+        let onwards = trip("ice10", "ICE 10", [stop(duesseldorf, arr: nil, dep: 50), stop(berlin, arr: 300, dep: nil)])
+        let late = trip("ice12", "ICE 12", [stop(duesseldorf, arr: nil, dep: 400), stop(berlin, arr: 640, dep: nil)])
+        let lateFeeder = trip("re7", "RE 7", [stop(koeln, arr: nil, dep: 360), stop(duesseldorf, arr: 385, dep: nil)])
+        let withTransfer = Journey(legs: [try #require(toDuesseldorf.leg(from: koeln, to: duesseldorf)),
+                                          try #require(onwards.leg(from: duesseldorf, to: berlin))], source: .bahnDe)
+        let tooLate = Journey(legs: [try #require(lateFeeder.leg(from: koeln, to: duesseldorf)),
+                                     try #require(late.leg(from: duesseldorf, to: berlin))], source: .bahnDe)
+        let direct = Journey(legs: [try #require(fast.leg(from: koeln, to: berlin))], source: .bahnDe)
+        let primary = MockProvider(source: .bahnDe)
+        primary.journeyPages = [JourneyPage(journeys: [direct, withTransfer, tooLate], earlierCursor: nil, laterCursor: nil, source: .bahnDe)]
+        let provider = CombinedProvider(primary: primary, fallback: MockProvider(source: .transitous), bahnDe: nil)
+        return (TrainPicker(provider: provider), try #require(fast.leg(from: koeln, to: berlin)), withTransfer)
+    }
+
+    @Test func connectionsWithTransfersSkipDirectAndOutOfWindow() async throws {
+        let (picker, leg, withTransfer) = try transferPicker()
+        let connections = try await picker.connections(for: leg)
+        #expect(connections.map(\.id) == [withTransfer.id])
+    }
+
+    @Test func replaceLegWithConnection() async throws {
+        let (picker, leg, withTransfer) = try transferPicker()
+        let journey = Journey(legs: [leg], source: .bahnDe)
+        let replaced = try await picker.replacing(legAt: 0, in: journey, with: withTransfer.legs, finalDestination: berlin)
+        #expect(replaced.legs.map(\.tripId) == ["re5", "ice10"])
+    }
 }
 
 @Suite struct AccessAndDeadlineTests {
@@ -1036,6 +1066,32 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
 }
 
 @Suite struct BahnDeFormationTests {
+    /// A saved journey keeps the Tz once seen; formations without one, or unchanged ones, change nothing.
+    @Test func remembersFormationsNamingATz() {
+        let tz = TrainFormation(units: [TrainFormation.Unit(model: "ICE 4", number: "9457", name: "Bundesrepublik Deutschland")])
+        let modelOnly = TrainFormation(units: [TrainFormation.Unit(model: "ICE 4", number: nil)])
+        let stored = TrainFormation.remembering(tz, for: "a", in: nil)
+        #expect(stored == ["a": tz])
+        #expect(TrainFormation.remembering(tz, for: "a", in: stored) == nil)
+        #expect(TrainFormation.remembering(modelOnly, for: "a", in: stored) == nil)
+        let swapped = TrainFormation(units: [TrainFormation.Unit(model: "ICE 4", number: "9018")])
+        #expect(TrainFormation.remembering(swapped, for: "a", in: stored) == ["a": swapped])
+        #expect(TrainFormation.remembering(swapped, for: "b", in: stored) == ["a": tz, "b": swapped])
+    }
+
+    /// The key survives a refresh renaming the train or changing its trip.
+    @Test func formationKeyIgnoresTrainNameAndTrip() {
+        let at = { (minutes: Double) in TimeInfo(planned: Date(timeIntervalSince1970: 1_800_000_000 + minutes * 60), actual: nil) }
+        func leg(_ name: String, tripId: String, departure: Double) -> Leg {
+            Leg(origin: station("8002549", "Hamburg Hbf"), destination: station("8010085", "Dresden Hbf"),
+                departure: at(departure), arrival: at(150), departurePlatform: nil, arrivalPlatform: nil, tripId: tripId,
+                line: Line(name: name, number: "171", product: .highSpeed, operatorName: nil), direction: nil,
+                isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+        }
+        #expect(leg("ICE 171", tripId: "x", departure: 0).formationKey == leg("RJ 171", tripId: "y", departure: 0).formationKey)
+        #expect(leg("ICE 171", tripId: "x", departure: 0).formationKey != leg("ICE 171", tripId: "x", departure: 60).formationKey)
+    }
+
     @Test func carriageReadsCountryAndSeriesFromUICNumber() {
         let car = Carriage(vehicleID: "93805401002-1", constructionType: "Apmzf")
         #expect(car.uic == "938054010021")
@@ -1068,6 +1124,15 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(BahnDeClient.model(constructionTypes: ["I4110", "I4115"], groupName: "ICE1162", category: "ICE") == "ICE T")
         #expect(BahnDeClient.model(constructionTypes: ["R8911", "R8921"], groupName: "ICE1811", category: "ICE") == "ICE L")
         #expect(BahnDeClient.model(constructionTypes: ["E1465", "R6682"], groupName: "ICD2854", category: "IC") == "IC 2 Twindexx")
+    }
+
+    @Test func marksRedesignedICE3neo() {
+        #expect(TrainModel.name("ICE 3neo", unit: "8016") == "ICE 3neo")
+        #expect(TrainModel.name("ICE 3neo", unit: "8017") == "ICE 3neo Redesign")
+        #expect(TrainModel.name("ICE 3neo", unit: "8045") == "ICE 3neo Redesign")
+        #expect(TrainModel.name("ICE 3neo", unit: nil) == "ICE 3neo")
+        #expect(TrainModel.name("ICE 4", unit: "9465") == "ICE 4")
+        #expect(TrainModel.name(nil, unit: "8030") == nil)
     }
 
     @Test func unitNumbersAndTrainsetNames() {
@@ -1366,6 +1431,20 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
                                      source: "DB", retrievedAt: .now)
         #expect(lookup.summary == "ICE 4")
         #expect(lookup.formation.unitDescription == "Tz 9457 „Bundesrepublik Deutschland“")
+    }
+
+    @Test func summaryMarksRedesignedICE3neo() {
+        let group = { (unit: String?) in
+            TrainTypeLookup.Group(seriesName: "ICE 3neo (BR408)", baureihe: "408", unitNumber: unit, origin: nil, destination: nil, coachCount: 8)
+        }
+        let lookup = { (groups: [TrainTypeLookup.Group]) in
+            TrainTypeLookup(category: "ICE", number: "144", date: "2026-10-02", administration: "80", groups: groups,
+                            status: .realtime, source: "DB", retrievedAt: .now)
+        }
+        #expect(lookup([group("8020")]).summary == "ICE 3neo Redesign")
+        #expect(lookup([group("8020")]).formation.modelSummary == "ICE 3neo Redesign")
+        #expect(lookup([group("8020"), group("8005")]).summary == "ICE 3neo Redesign + ICE 3neo")
+        #expect(lookup([group(nil)]).summary == "ICE 3neo")
     }
 
     /// Real response for IC 2271 (2026-10-01): bahn.expert has no Baureihe for IC 2 Twindexx sets.
@@ -2041,6 +2120,29 @@ private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
         #expect(fromTripView?.departure.planned == saved.departure.planned)
         #expect(fromTripView?.arrival.planned == saved.arrival.planned)
     }
+
+    /// Issue #68: a Berlin–Amsterdam ICE's journey leg names only where the German feed stops
+    /// modelling it ("Hengelo"); the trip runs through to Amsterdam, and the refresh adopts that.
+    @Test func refreshTakesTheDirectionOfTheWholeTrip() {
+        func stop(_ name: String, _ minute: Double) -> Stopover {
+            let time = TimeInfo(planned: base.addingTimeInterval(minute * 60), actual: nil)
+            return Stopover(station: station(name, name), arrival: time, departure: time,
+                            arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+        }
+        let trip = Trip(id: "ICE 144", line: nil, direction: "Amsterdam Centraal",
+                        stopovers: [stop("Berlin", 0), stop("Osnabrück", 180), stop("Hengelo", 240), stop("Amsterdam Centraal", 360)],
+                        cancelled: false, remarks: [], source: .bahnDe)
+        var saved = leg("ICE 144", "Berlin", "Osnabrück", dep: 0, arr: 180)
+        saved.direction = "Hengelo"
+        #expect(JourneyRefresher.apply(trip, to: saved).direction == "Amsterdam Centraal")
+
+        // A trip cut short at the border doesn't reach a leg merged across it: keep the leg's direction.
+        let cutShort = Trip(id: "ICE 144", line: nil, direction: "Hengelo",
+                            stopovers: [stop("Berlin", 0), stop("Hengelo", 240)], cancelled: false, remarks: [], source: .bahnDe)
+        var merged = leg("ICE 144", "Berlin", "Amsterdam Centraal", dep: 0, arr: 360)
+        merged.direction = "Amsterdam Centraal"
+        #expect(JourneyRefresher.apply(cutShort, to: merged).direction == "Amsterdam Centraal")
+    }
 }
 
 // MARK: - Train route planning
@@ -2366,6 +2468,293 @@ private final class TimetablesPlanProtocol: URLProtocol, @unchecked Sendable {
     }
 }
 
+/// Issue #76, for a station not in `lowerLevels`: station search only finds "Hamburg-Altona" (8002553),
+/// whose `plan` has none of the S-Bahn; DB lists those under "Hamburg-Altona(S)" (8098553), named in
+/// 8002553's `/station` `meta` (real data from 2026-10-02).
+@Suite struct TimetablesOtherLevelTests {
+    let dammtor = station("8002548", "Hamburg Dammtor", 53.560, 9.990, source: .bahnDe)
+    let altona = station("8002553", "Hamburg-Altona", 53.552, 9.935, source: .bahnDe)
+    // 2027-01-15 08:00 UTC == 09:00 Europe/Berlin (CET) -> IRIS "2701150900".
+    let departure = Date(timeIntervalSince1970: 1_800_000_000)
+
+    var leg: Leg {
+        Leg(origin: dammtor, destination: altona,
+            departure: TimeInfo(planned: departure, actual: nil),
+            arrival: TimeInfo(planned: departure.addingTimeInterval(180), actual: departure.addingTimeInterval(180)),
+            departurePlatform: nil, arrivalPlatform: nil, tripId: "s7",
+            line: Line(name: "S7", number: "7", product: .suburban, operatorName: nil, tripNumber: "47137"),
+            direction: "Altona", isWalking: false, cancelled: false, stopovers: [], remarks: [],
+            source: .transitous)
+    }
+
+    @Test func findsTheSBahnAtTheStationsOtherLevel() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HamburgSBahnLevelProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let timetables = TimetablesClient(http: HTTPClient(session: session))
+
+        let override = try #require(await timetables.realtime(for: leg))
+
+        #expect(override.arrival?.actual == departure.addingTimeInterval(360))
+        #expect(override.arrivalPlatform == PlatformInfo(planned: "4", actual: nil))
+        #expect(override.departure?.actual == departure.addingTimeInterval(180))
+        let requested = HamburgSBahnLevelProtocol.requestedPaths.withLock { $0 }
+        // Bus stops and other non-EVA ids in `meta` are never asked for.
+        #expect(!requested.contains { $0.contains("140269") || $0.contains("692757") })
+    }
+}
+
+private final class HamburgSBahnLevelProtocol: URLProtocol, @unchecked Sendable {
+    static let requestedPaths = Mutex<[String]>([])
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+
+    override func startLoading() {
+        let path = request.url!.path
+        Self.requestedPaths.withLock { $0.append(path) }
+        let body = switch path {
+        case _ where path.hasSuffix("plan/8002548/270115/09"):
+            #"<timetable station='Hamburg Dammtor'><s id="d"><tl c="S" n="47137"/><ar pt="2701150859"/><dp pt="2701150900" pp="3"/></s></timetable>"#
+        case _ where path.hasSuffix("fchg/8002548"):
+            #"<timetable station='Hamburg Dammtor'><s id="d" eva="8002548"><ar ct="2701150902"/><dp ct="2701150903"/></s></timetable>"#
+        case _ where path.hasSuffix("plan/8002553/270115/09"):
+            #"<timetable station='Hamburg-Altona'><s id="re"><tl c="RE" n="21007"/><ar pt="2701150903" pp="9"/></s></timetable>"#
+        case _ where path.hasSuffix("station/8002553"):
+            #"<stations><station meta="140269|210426|510421|692757|8098553" name="Hamburg-Altona" eva="8002553"/></stations>"#
+        case _ where path.hasSuffix("plan/8098553/270115/09"):
+            #"<timetable station='Hamburg-Altona(S)'><s id="a"><tl c="S" n="47137"/><ar pt="2701150903" pp="4"/></s></timetable>"#
+        case _ where path.hasSuffix("fchg/8098553"):
+            #"<timetable station='Hamburg-Altona(S)'><s id="a" eva="8098553"><ar ct="2701150906"/></s></timetable>"#
+        default:
+            "<timetable></timetable>"
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+}
+
+/// Issue #76 as seen in a saved journey: S7 Bergedorf 12:58 → Hamburg Hbf 13:19 running 3 minutes late.
+/// Transitous had no realtime for it (its stops then carry the plan as "actual"), so only DB's
+/// Timetables can tell, and the refreshed leg must end with DB's +3 like the trip view does.
+@Suite(.serialized) struct JourneyRefresherSBahnLevelTests {
+    @Test func refreshedLegEndsWithDBsDelayAtTheSBahnLevel() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [BergedorfS7Protocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let timetables = TimetablesClient(http: HTTPClient(session: session))
+
+        let bergedorf = station("8000148", "Hamburg-Bergedorf", 53.490, 10.206, source: .bahnDe)
+        let hauptbahnhof = station("8002549", "Hamburg Hbf", 53.553, 10.007, source: .bahnDe)
+        let departure = try #require(ISO8601DateFormatter().date(from: "2026-10-02T10:58:00Z"))
+        let arrival = departure.addingTimeInterval(21 * 60)
+        let line = Line(name: "S7", number: "7", product: .suburban, operatorName: nil, tripNumber: "47124")
+        let stops = [
+            Stopover(station: bergedorf, arrival: TimeInfo(planned: departure.addingTimeInterval(-60), actual: departure.addingTimeInterval(-60)),
+                     departure: TimeInfo(planned: departure, actual: departure), arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+            Stopover(station: hauptbahnhof, arrival: TimeInfo(planned: arrival, actual: arrival),
+                     departure: TimeInfo(planned: arrival.addingTimeInterval(60), actual: arrival.addingTimeInterval(60)),
+                     arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+        ]
+        let mock = MockProvider(source: .transitous)
+        mock.trips["s7"] = Trip(id: "s7", line: line, direction: "Altona", stopovers: stops, cancelled: false, remarks: [], source: .transitous)
+        let leg = Leg(origin: bergedorf, destination: hauptbahnhof,
+                      departure: TimeInfo(planned: departure, actual: nil), arrival: TimeInfo(planned: arrival, actual: nil),
+                      departurePlatform: nil, arrivalPlatform: nil, tripId: "s7", line: line, direction: "Altona",
+                      isWalking: false, cancelled: false, stopovers: stops, remarks: [], source: .transitous)
+        let refresher = JourneyRefresher(provider: CombinedProvider(primary: mock, fallback: nil, bahnDe: nil), timetables: timetables)
+
+        let refreshed = await refresher.refresh(Journey(legs: [leg], source: .transitous), now: departure)
+
+        #expect(refreshed.legs[0].departure.actual == departure.addingTimeInterval(180))
+        #expect(refreshed.legs[0].arrival.actual == arrival.addingTimeInterval(180))
+        #expect(refreshed.legs[0].stopovers.last?.arrival?.actual == arrival.addingTimeInterval(180))
+    }
+
+    /// The first request for Hamburg Hbf's (large) `fchg` fails, as a timeout would; the stops'
+    /// lookup right after gets through. The leg's end must still show DB's +3, not Transitous' "+0".
+    @Test func legEndKeepsTheStopsDelayWhenItsOwnLookupFailed() async throws {
+        BergedorfS7Protocol.failHbfChangesOnce.withLock { $0 = true }
+        defer { BergedorfS7Protocol.failHbfChangesOnce.withLock { $0 = false } }
+        try await refreshedLegEndsWithDBsDelayAtTheSBahnLevel()
+    }
+
+    /// Hours after the ride neither source has live data any more: Transitous sends the bare schedule
+    /// and DB has dropped the train from `fchg`. The delay saved while it ran must stay, not become "+0".
+    @Test func finishedLegKeepsItsDelayOnceLiveDataIsGone() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [BergedorfS7Protocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let timetables = TimetablesClient(http: HTTPClient(session: session))
+
+        let bergedorf = station("8000148", "Hamburg-Bergedorf", 53.490, 10.206, source: .bahnDe)
+        let hauptbahnhof = station("8002549", "Hamburg Hbf", 53.553, 10.007, source: .bahnDe)
+        let departure = try #require(ISO8601DateFormatter().date(from: "2026-10-02T10:58:00Z"))
+        let arrival = departure.addingTimeInterval(21 * 60)
+        let line = Line(name: "S7", number: "7", product: .suburban, operatorName: nil, tripNumber: "47124")
+        let scheduled = [
+            Stopover(station: bergedorf, arrival: nil, departure: TimeInfo(planned: departure, actual: nil),
+                     arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+            Stopover(station: hauptbahnhof, arrival: TimeInfo(planned: arrival, actual: nil), departure: nil,
+                     arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+        ]
+        var known = scheduled
+        known[0].departure?.actual = departure.addingTimeInterval(120)
+        known[1].arrival?.actual = arrival.addingTimeInterval(300)
+        let mock = MockProvider(source: .transitous)
+        mock.trips["s7"] = Trip(id: "s7", line: line, direction: "Altona", stopovers: scheduled, cancelled: false, remarks: [], source: .transitous)
+        let leg = Leg(origin: bergedorf, destination: hauptbahnhof,
+                      departure: TimeInfo(planned: departure, actual: departure.addingTimeInterval(120)),
+                      arrival: TimeInfo(planned: arrival, actual: arrival.addingTimeInterval(300)),
+                      departurePlatform: nil, arrivalPlatform: nil, tripId: "s7", line: line, direction: "Altona",
+                      isWalking: false, cancelled: false, stopovers: known, remarks: [], source: .transitous)
+        let refresher = JourneyRefresher(provider: CombinedProvider(primary: mock, fallback: nil, bahnDe: nil), timetables: timetables)
+
+        let refreshed = await refresher.refresh(Journey(legs: [leg], source: .transitous), now: arrival.addingTimeInterval(6 * 3600))
+
+        #expect(refreshed.legs[0].departure.actual == departure.addingTimeInterval(120))
+        #expect(refreshed.legs[0].arrival.actual == arrival.addingTimeInterval(300))
+        #expect(refreshed.legs[0].stopovers.last?.arrival?.actual == arrival.addingTimeInterval(300))
+    }
+
+    /// A journey finished over 24 hours ago shows no delay at all, neither "+0" nor a real one.
+    @Test func droppingActualTimesShowsTheJourneyAsPlanned() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let a = station("a", "A"), b = station("b", "B"), c = station("c", "C")
+        let stops = [
+            Stopover(station: a, arrival: nil, departure: TimeInfo(planned: start, actual: start),
+                     arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+            Stopover(station: b, arrival: TimeInfo(planned: start.addingTimeInterval(60), actual: start.addingTimeInterval(240)),
+                     departure: nil, arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+            Stopover(station: c, arrival: TimeInfo(planned: start.addingTimeInterval(120), actual: start.addingTimeInterval(300)),
+                     departure: nil, arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+        ]
+        let leg = Leg(origin: a, destination: c, departure: TimeInfo(planned: start, actual: start),
+                      arrival: TimeInfo(planned: start.addingTimeInterval(120), actual: start.addingTimeInterval(300)),
+                      departurePlatform: nil, arrivalPlatform: nil, tripId: "ic", line: nil, direction: nil,
+                      isWalking: false, cancelled: false, stopovers: stops, remarks: [], source: .transitous)
+
+        let cleaned = Journey(legs: [leg], source: .transitous).droppingActualTimes().legs[0]
+
+        #expect(cleaned.departure == TimeInfo(planned: start, actual: nil))
+        #expect(cleaned.arrival == TimeInfo(planned: start.addingTimeInterval(120), actual: nil))
+        #expect(cleaned.stopovers.allSatisfy { $0.arrival?.actual == nil && $0.departure?.actual == nil })
+        #expect(cleaned.stopovers[1].arrival?.planned == start.addingTimeInterval(60))
+    }
+
+    /// MOTIS repeats the schedule as a stop's time when it has no realtime; that's not a live "+0".
+    @Test func transitousStopsWithoutRealtimeHaveNoActualTime() throws {
+        let json = """
+        {"mode": "SUBURBAN", "realTime": false, "tripId": "s7", "displayName": "S7",
+         "from": {"name": "Hamburg-Bergedorf", "lat": 53.49, "lon": 10.2,
+                  "departure": "2026-10-02T10:58:00Z", "scheduledDeparture": "2026-10-02T10:58:00Z"},
+         "to": {"name": "Hamburg Hbf", "lat": 53.55, "lon": 10.0,
+                "arrival": "2026-10-02T11:19:00Z", "scheduledArrival": "2026-10-02T11:19:00Z"},
+         "startTime": "2026-10-02T10:58:00Z", "endTime": "2026-10-02T11:19:00Z"}
+        """
+        let leg = try JSONDecoding.decoder.decode(MLeg.self, from: Data(json.utf8)).toLeg()
+
+        #expect(leg.stopovers.count == 2)
+        #expect(leg.stopovers.allSatisfy { $0.arrival?.actual == nil && $0.departure?.actual == nil })
+        #expect(leg.stopovers.last?.arrival?.planned == leg.arrival.planned)
+        #expect(leg.arrival.delayMinutes == nil)
+    }
+}
+
+/// IRIS for S 47124 on 2026-10-02 (real ids/times): Bergedorf lists it, Hamburg Hbf (8002549) doesn't,
+/// "Hamburg Hbf (S-Bahn)" (8098549) does, 3 minutes late.
+private final class BergedorfS7Protocol: URLProtocol, @unchecked Sendable {
+    static let failHbfChangesOnce = Mutex(false)
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+
+    override func startLoading() {
+        let path = request.url!.path
+        if path.hasSuffix("fchg/8098549"), Self.failHbfChangesOnce.withLock({ fail in defer { fail = false }; return fail }) {
+            let response = HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: nil, headerFields: nil)!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Data())
+            client?.urlProtocolDidFinishLoading(self)
+            return
+        }
+        let body = switch path {
+        case _ where path.contains("plan/8000148/"):
+            #"<timetable station='Hamburg-Bergedorf'><s id="b"><tl c="S" n="47124"/><ar pt="2610021257" pp="5"/><dp pt="2610021258" pp="5"/></s></timetable>"#
+        case _ where path.hasSuffix("fchg/8000148"):
+            #"<timetable station='Hamburg-Bergedorf'><s id="b" eva="8000148"><ar ct="2610021259"/><dp ct="2610021301"/></s></timetable>"#
+        case _ where path.contains("plan/8098549/"):
+            #"<timetable station='Hamburg Hbf (S-Bahn)'><s id="-7201046121150801590-2610021248-12"><tl c="S" n="47124"/><ar pt="2610021319" pp="1" l="S7"/><dp pt="2610021320" pp="1" l="S7"/></s></timetable>"#
+        case _ where path.hasSuffix("fchg/8098549"):
+            #"<timetable station='Hamburg Hbf (S-Bahn)'><s id="-7201046121150801590-2610021248-12" eva="8098549"><ar ct="2610021322" l="S7"/><dp ct="2610021324" l="S7"/></s></timetable>"#
+        default:
+            "<timetable></timetable>"
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+}
+
+/// Issue #76: an S4 ending at München Hbf showed its arrival on time while running 3 minutes late.
+/// DB's Timetables only lists the S-Bahn under "München Hbf (tief)", which station search never finds.
+@Suite struct TimetablesLowerLevelTests {
+    @Test func findsTheSBahnUnderTheStationsLowerLevel() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [LowerLevelS4Protocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let timetables = TimetablesClient(http: HTTPClient(session: session))
+        // 2027-01-15 08:00 UTC == 09:00 Europe/Berlin (CET).
+        let departure = Date(timeIntervalSince1970: 1_800_000_000)
+        let leg = Leg(origin: station("8004158", "München-Pasing", 48.150, 11.461, source: .bahnDe),
+                      destination: station("8000261", "München Hbf", 48.140, 11.558, source: .bahnDe),
+                      departure: TimeInfo(planned: departure, actual: nil),
+                      arrival: TimeInfo(planned: departure.addingTimeInterval(600), actual: departure.addingTimeInterval(600)),
+                      departurePlatform: nil, arrivalPlatform: nil, tripId: "s4",
+                      line: Line(name: "S4", number: "4", product: .suburban, operatorName: nil, tripNumber: "6467"),
+                      direction: nil, isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+
+        let override = await timetables.realtime(for: leg)
+
+        #expect(override?.arrival?.actual == departure.addingTimeInterval(13 * 60))
+    }
+}
+
+/// München Hbf's own `/plan` doesn't have the S4; its lower level (8098263) does, 3 minutes late.
+private final class LowerLevelS4Protocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let path = request.url!.path
+        let body: Data
+        if path.contains("plan/8098263/") {
+            body = Data("""
+            <timetable station='München Hbf (tief)'><s id="7"><tl c="S" n="6467"/><ar pt="2701150910" pp="1" l="4"/></s></timetable>
+            """.utf8)
+        } else if path.contains("fchg/8098263") {
+            body = Data("""
+            <timetable station='München Hbf (tief)'><s id="7"><ar ct="2701150913"/></s></timetable>
+            """.utf8)
+        } else {
+            body = Data("<timetable></timetable>".utf8)
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
 /// `/plan` has a scheduled platform for the S15 at Berlin Hbf, but `/fchg` reports no Gleisänderung
 /// (or anything else) yet. `/fchg` for Gesundbrunnen (the arrival side, not under test) is likewise
 /// empty for every request, matched here by responding the same way regardless of path.
@@ -2646,7 +3035,7 @@ private enum PreviewLegs {
         let (timetables, session) = client(RE3318RunningProtocol.self)
         defer { session.invalidateAndCancel() }
 
-        let result = await timetables.tripWithRealtime(trip(cancelled: true))
+        let result = await timetables.tripWithRealtime(trip(cancelled: true), now: start)
 
         #expect(result.stopovers.allSatisfy { !$0.cancelled })
     }
@@ -2656,7 +3045,7 @@ private enum PreviewLegs {
         let (timetables, session) = client(RE3318CancelledProtocol.self)
         defer { session.invalidateAndCancel() }
 
-        let result = await timetables.tripWithRealtime(trip(cancelled: false))
+        let result = await timetables.tripWithRealtime(trip(cancelled: false), now: start)
 
         #expect(result.stopovers[2].arrivalCancelled)
         #expect(result.stopovers[2].cancelled)
@@ -2679,7 +3068,7 @@ private enum PreviewLegs {
         let (timetables, session) = client(RE3318NoChangesProtocol.self)
         defer { session.invalidateAndCancel() }
 
-        let result = await timetables.tripWithRealtime(trip(cancelled: true))
+        let result = await timetables.tripWithRealtime(trip(cancelled: true), now: start)
 
         #expect(result.stopovers[2].cancelled)
     }
