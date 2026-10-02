@@ -57,6 +57,7 @@ struct JourneyDetailView: View {
             await refreshRealtime()
         }
         .task {
+            await refreshRecentlyFinished()
             await fillMissingPlatforms()
             // Live data right away on opening, instead of only after the first pull-to-refresh.
             await refreshRealtime()
@@ -123,6 +124,19 @@ struct JourneyDetailView: View {
         if let entry = model.savedEntry(for: journey) {
             model.updateSavedJourneyData(id: entry.id, journey: refreshed)
         }
+        withAnimation { journey = refreshed }
+    }
+
+    /// A saved journey is only refreshed until 10 minutes after it arrives, so its end keeps whatever
+    /// delay DB reported last, often before the train got there. Opened within 24 hours of arriving,
+    /// it's refreshed once more and stored, so it shows the real arrival like the trip view does.
+    /// Once neither source has live data any more, the refresh keeps the delays it already had.
+    private func refreshRecentlyFinished() async {
+        guard readOnly, let entry = model.pastJourneys.first(where: { $0.journey == journey }),
+              let arrival = journey.arrival?.planned, arrival.addingTimeInterval(SavedJourney.liveDataLifetime) > .now else { return }
+        let refreshed = await model.journeyRefresher.refresh(journey)
+        guard refreshed != journey else { return }
+        model.updateSavedJourneyData(id: entry.id, journey: refreshed)
         withAnimation { journey = refreshed }
     }
 

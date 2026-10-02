@@ -48,7 +48,7 @@ test("rejects unknown paths and non-GET requests", async () => {
     const fetch = fakeFetch();
     const paths = ["/", "/web/api/", "/web/api/angebote/fahrplan", "/web/api/../x", "/other", "/web/api/constructor",
         "/web/api/angebote/verbindung/not-a-uuid", "/web/api/angebote/verbindung/../../buchung/auftrag/X",
-        "/timetables/v1/plan/8000105", "/timetables/v1/fchg/8000105/../x"];
+        "/timetables/v1/plan/8000105", "/timetables/v1/fchg/8000105/../x", "/timetables/v1/station/Hamburg"];
     for (const path of paths) {
         const response = await handleRequest(new Request(base + path), open, { fetch, cache: null });
         assert.equal(response.status, 404, path);
@@ -90,6 +90,9 @@ test("forwards Timetables with the API key from the secrets, only with a token",
     assert.equal(fetch.calls[0].url, "https://apis.deutschebahn.com/db-api-marketplace/apis/timetables/v1/plan/8000105/261001/14");
     assert.equal(fetch.calls[0].init.headers["DB-Api-Key"], "key");
     assert.equal(fetch.calls[0].init.headers["DB-Client-Id"], "client");
+    const station = new Request(`${base}/timetables/v1/station/8002549`, { headers: { [TOKEN_HEADER]: await accessToken("secret") } });
+    assert.equal((await handleRequest(station, env, { fetch, cache: null })).status, 200);
+    assert.equal(fetch.calls[1].url, "https://apis.deutschebahn.com/db-api-marketplace/apis/timetables/v1/station/8002549");
     const missing = await handleRequest(new Request(url, { headers: { [TOKEN_HEADER]: await accessToken("secret") } }),
         { TOKEN_SECRET: "secret" }, { fetch, cache: null });
     assert.equal(missing.status, 503);

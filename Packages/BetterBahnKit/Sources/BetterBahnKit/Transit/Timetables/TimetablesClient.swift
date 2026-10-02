@@ -102,31 +102,41 @@ public struct TimetablesClient: Sendable {
     /// Shared by every `TimetablesClient` (the app makes a fresh one per use), so the journey
     /// refresh and the trip views reuse each other's responses instead of hitting the API again.
     /// Concurrent requests for the same path are merged into one.
-    private actor Cache {
-        struct Entry { let date: Date; let stops: [TimetablesStop] }
+    private actor Cache<Value: Sendable> {
+        struct Entry { let date: Date; let value: Value }
         var entries: [String: Entry] = [:]
-        var inFlight: [String: Task<[TimetablesStop], Error>] = [:]
+        var inFlight: [String: Task<Value, Error>] = [:]
 
-        func stops(for path: String, maxAge: TimeInterval,
-                   fetch: @escaping @Sendable () async throws -> [TimetablesStop]) async throws -> [TimetablesStop] {
-            if let entry = entries[path], Date.now.timeIntervalSince(entry.date) < maxAge { return entry.stops }
+        func value(for path: String, maxAge: TimeInterval,
+                   fetch: @escaping @Sendable () async throws -> Value) async throws -> Value {
+            if let entry = entries[path], Date.now.timeIntervalSince(entry.date) < maxAge { return entry.value }
             if let task = inFlight[path] { return try await task.value }
             let task = Task { try await fetch() }
             inFlight[path] = task
             defer { inFlight[path] = nil }
-            let stops = try await task.value
-            entries[path] = Entry(date: .now, stops: stops)
-            return stops
+            let value = try await task.value
+            entries[path] = Entry(date: .now, value: value)
+            return value
         }
 
         func clear(prefix: String) {
             entries = entries.filter { !$0.key.hasPrefix(prefix) }
         }
     }
-    private static let cache = Cache()
+    private static let cache = Cache<[TimetablesStop]>()
+    private static let levelsCache = Cache<[String]>()
     /// The schedule (`plan`) barely changes; live changes (`fchg`) are re-fetched at most this often.
     static let planMaxAge: TimeInterval = 30 * 60
     static let changesMaxAge: TimeInterval = 4 * 60
+
+    /// DB's change list (`fchg`) drops a train a few hours after it ran (#76's S7 was still there
+    /// 4 hours after arriving, gone after 6). Later DB only finds the schedule and would call the
+    /// train on time, a made-up "+0", so a train whose last stop is longer ago isn't asked about.
+    static let changesMemory: TimeInterval = 4 * 3600
+
+    static func knowsChanges(until lastPlanned: Date, now: Date) -> Bool {
+        lastPlanned.addingTimeInterval(changesMemory) > now
+    }
 
     /// Drops cached delays so the next lookup asks DB again (e.g. on pull-to-refresh).
     public static func invalidateDelays() async {
@@ -137,16 +147,42 @@ public struct TimetablesClient: Sendable {
         // Only the app's real session shares the cache; a client on a custom session (tests, mocks)
         // must never see another client's stored responses for the same path.
         guard http.session === URLSession.shared else { return try await fetch(path: path) }
-        return try await Self.cache.stops(for: path, maxAge: maxAge) { try await self.fetch(path: path) }
+        return try await Self.cache.value(for: path, maxAge: maxAge) { try await self.fetch(path: path) }
     }
 
     private func fetch(path: String) async throws -> [TimetablesStop] {
+        TimetablesXMLParser.parse(try await fetchData(path: path))
+    }
+
+    private func fetchData(path: String) async throws -> Data {
         let url = Self.baseURL.appending(path: path)
         var request = URLRequest(url: url, timeoutInterval: http.timeout)
         request.setValue("application/xml", forHTTPHeaderField: "Accept")
-        let data = try await http.sendRaw(request, auth: auth)
-        return TimetablesXMLParser.parse(data)
+        return try await http.sendRaw(request, auth: auth)
     }
+
+    /// The EVAs of `eva`'s other levels, from its `/station` entry's `meta` list. DB keeps the S-Bahn
+    /// of many big stations as a station of its own: Hamburg Hbf (8002549) has none of its S-Bahn
+    /// trains, "Hamburg Hbf (S-Bahn)" (8098549) all of them, likewise "Stuttgart Hbf (tief)",
+    /// "München Hbf (tief)" or "Berlin Gesundbrunnen(S)". Station search only finds the main one.
+    /// `meta` also lists bus stops and other non-EVA ids; only 7-digit German EVAs are kept.
+    private func otherLevels(of eva: String) async -> [String] {
+        let path = "station/\(eva)"
+        let fetch: @Sendable () async throws -> [String] = {
+            TimetablesXMLParser.metaStations(in: try await self.fetchData(path: path))
+        }
+        // Same rule as `get`: only the app's real session shares the cache.
+        let meta: [String]?
+        if http.session === URLSession.shared {
+            meta = try? await Self.levelsCache.value(for: path, maxAge: Self.levelsMaxAge, fetch: fetch)
+        } else {
+            meta = try? await fetch()
+        }
+        return (meta ?? []).filter { $0 != eva && $0.count == 7 && $0.hasPrefix("80") }
+    }
+
+    /// A station's other levels don't change; asked again at most once a day.
+    static let levelsMaxAge: TimeInterval = 24 * 3600
 
     /// The hour-bucketed schedule (never carries delays) for `eva` around `time`.
     private func plan(eva: String, around time: Date) async throws -> [TimetablesStop] {
@@ -180,11 +216,12 @@ public struct TimetablesClient: Sendable {
     private func liveEvent(eva: String, category: String, number: String, time: Date,
                             side: KeyPath<TimetablesStop, TimetablesEvent?>,
                             scheduleSuffices: Bool = false) async -> TimetablesEvent? {
-        guard let (eva, stop) = await scheduledStop(eva: eva, category: category, number: number, time: time, side: side)
+        guard let found = await scheduledStop(eva: eva, category: category, number: number, time: time, side: side)
         else { return nil }
+        let stop = found.stop
         // Without `fchg` there's no telling whether the train is late or even cancelled – treating
         // the bare schedule as "on time, running" would wipe out what the other provider knows.
-        guard let changes = try? await changes(eva: eva) else { return scheduleSuffices ? stop[keyPath: side] : nil }
+        guard let changes = try? await changes(eva: found.eva) else { return scheduleSuffices ? stop[keyPath: side] : nil }
         var event = stop[keyPath: side]
         if let changed = changes[stop.id] {
             if let change = changed[keyPath: side] {
@@ -197,14 +234,23 @@ public struct TimetablesClient: Sendable {
         return event
     }
 
-    /// The `plan` entry for `category`+`number` at `eva`, or else at one of its `lowerLevels`, along with
-    /// the EVA number it was found under (its changes are listed there too).
+    /// The `plan` entry for `category`+`number` at `eva`, or else at one of its `lowerLevels` or other
+    /// levels DB names (see `otherLevels(of:)`), with the EVA it was found at, since `fchg` must be
+    /// asked there too. Without this, an S-Bahn ending at "Hamburg Hbf" was never found there, so its
+    /// arrival kept Transitous' forecast, which for S-Bahn lines can be several minutes off DB's own (#76).
     private func scheduledStop(eva: String, category: String, number: String, time: Date,
-                               side: KeyPath<TimetablesStop, TimetablesEvent?>) async -> (String, TimetablesStop)? {
-        for candidate in [eva] + (Self.lowerLevels[eva] ?? []) {
+                               side: KeyPath<TimetablesStop, TimetablesEvent?>) async -> (eva: String, stop: TimetablesStop)? {
+        let known = [eva] + (Self.lowerLevels[eva] ?? [])
+        for candidate in known {
             if let planned = try? await plan(eva: candidate, around: time),
                let stop = Self.match(planned, category: category, number: number, plannedTime: time, side: side) {
                 return (candidate, stop)
+            }
+        }
+        for level in await otherLevels(of: eva) where !known.contains(level) {
+            if let planned = try? await plan(eva: level, around: time),
+               let stop = Self.match(planned, category: category, number: number, plannedTime: time, side: side) {
+                return (level, stop)
             }
         }
         return nil
@@ -213,7 +259,8 @@ public struct TimetablesClient: Sendable {
     /// Big stations whose S-Bahn platforms Timetables lists as a station of their own, which station
     /// search (and so `eva(for:)`) never returns. Without them an S-Bahn ending there got no DB delay
     /// at all and kept Transitous' forecast, which often drops back to "on time" for stops further
-    /// ahead (issue #76: S4 running 3 minutes late, its arrival shown on time).
+    /// ahead (issue #76: S4 running 3 minutes late, its arrival shown on time). Tried before asking
+    /// `/station`, so these work without it; any other station's levels come from there.
     static let lowerLevels: [String: [String]] = [
         "8000261": ["8098263"], // München Hbf (tief)
         "8000096": ["8098096"], // Stuttgart Hbf (tief)
@@ -300,9 +347,11 @@ public struct TimetablesClient: Sendable {
     }
 
     /// `trip` with DB Timetables delays laid over it (see `stopoversWithRealtime(for:)`);
-    /// returned unchanged when the train has no category/number.
-    public func tripWithRealtime(_ trip: Trip) async -> Trip {
+    /// returned unchanged when the train has no category/number or ran too long ago (`changesMemory`).
+    public func tripWithRealtime(_ trip: Trip, now: Date = .now) async -> Trip {
         guard let line = trip.line else { return trip }
+        if let last = trip.stopovers.last.flatMap({ $0.arrival?.planned ?? $0.departure?.planned }),
+           !Self.knowsChanges(until: last, now: now) { return trip }
         var trip = trip
         let (stopovers, messages) = await stopoversWithRealtime(trip.stopovers, line: line)
         trip.stopovers = stopovers
@@ -563,6 +612,25 @@ enum TimetablesXMLParser {
         parser.delegate = delegate
         parser.parse()
         return delegate.stops
+    }
+
+    /// The `meta` ids of every `<station>` in a `/station` response (`meta="8076116|8098549"`).
+    static func metaStations(in data: Data) -> [String] {
+        let delegate = StationDelegate()
+        let parser = XMLParser(data: data)
+        parser.delegate = delegate
+        parser.parse()
+        return delegate.meta
+    }
+
+    private final class StationDelegate: NSObject, XMLParserDelegate {
+        var meta: [String] = []
+
+        func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?,
+                    qualifiedName: String?, attributes: [String: String] = [:]) {
+            guard elementName == "station", let ids = attributes["meta"] else { return }
+            meta += ids.split(separator: "|").map(String.init)
+        }
     }
 
     private final class Delegate: NSObject, XMLParserDelegate {
