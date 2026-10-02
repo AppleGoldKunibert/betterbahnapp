@@ -88,7 +88,7 @@ struct SettingsView: View {
                     Picker(selection: $settings.trainPositionRefresh) {
                         ForEach(TrainPositionRefresh.allCases, id: \.self) { Text($0.displayName).tag($0) }
                     } label: {
-                        IconLabel(title: "Zugpositionen aktualisieren", systemImage: "location.fill", color: .brand)
+                        IconLabel(title: "Aktualisierung", systemImage: "location.fill", color: .brand)
                     }
                 } header: {
                     Text("Live-Karte")
