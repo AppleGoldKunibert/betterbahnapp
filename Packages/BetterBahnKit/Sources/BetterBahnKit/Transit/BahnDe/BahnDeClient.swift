@@ -330,7 +330,8 @@ public struct BahnDeClient: Sendable {
             let model = TrainModel.detect(carriages, category: category).map(\.name)
                 ?? Self.model(constructionTypes: types, groupName: name, category: category)
             let trainset = hasTrainsets(category)
-            let unit = TrainFormation.Unit(model: model, number: trainset ? unitNumber(from: name) : nil,
+            let number = trainset ? unitNumber(from: name) : nil
+            let unit = TrainFormation.Unit(model: TrainModel.name(model, unit: number), number: number,
                                            name: trainset ? trainsetName(from: name) : nil)
             if unit.model != nil || unit.number != nil { units.append(unit) }
         }

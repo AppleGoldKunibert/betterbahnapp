@@ -1070,6 +1070,15 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(BahnDeClient.model(constructionTypes: ["E1465", "R6682"], groupName: "ICD2854", category: "IC") == "IC 2 Twindexx")
     }
 
+    @Test func marksRedesignedICE3neo() {
+        #expect(TrainModel.name("ICE 3neo", unit: "8016") == "ICE 3neo")
+        #expect(TrainModel.name("ICE 3neo", unit: "8017") == "ICE 3neo Redesign")
+        #expect(TrainModel.name("ICE 3neo", unit: "8045") == "ICE 3neo Redesign")
+        #expect(TrainModel.name("ICE 3neo", unit: nil) == "ICE 3neo")
+        #expect(TrainModel.name("ICE 4", unit: "9465") == "ICE 4")
+        #expect(TrainModel.name(nil, unit: "8030") == nil)
+    }
+
     @Test func unitNumbersAndTrainsetNames() {
         #expect(BahnDeClient.unitNumber(from: "ICE9457") == "9457")
         #expect(BahnDeClient.unitNumber(from: "ICE0169") == "169")
@@ -1366,6 +1375,20 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
                                      source: "DB", retrievedAt: .now)
         #expect(lookup.summary == "ICE 4")
         #expect(lookup.formation.unitDescription == "Tz 9457 „Bundesrepublik Deutschland“")
+    }
+
+    @Test func summaryMarksRedesignedICE3neo() {
+        let group = { (unit: String?) in
+            TrainTypeLookup.Group(seriesName: "ICE 3neo (BR408)", baureihe: "408", unitNumber: unit, origin: nil, destination: nil, coachCount: 8)
+        }
+        let lookup = { (groups: [TrainTypeLookup.Group]) in
+            TrainTypeLookup(category: "ICE", number: "144", date: "2026-10-02", administration: "80", groups: groups,
+                            status: .realtime, source: "DB", retrievedAt: .now)
+        }
+        #expect(lookup([group("8020")]).summary == "ICE 3neo Redesign")
+        #expect(lookup([group("8020")]).formation.modelSummary == "ICE 3neo Redesign")
+        #expect(lookup([group("8020"), group("8005")]).summary == "ICE 3neo Redesign + ICE 3neo")
+        #expect(lookup([group(nil)]).summary == "ICE 3neo")
     }
 
     /// Real response for IC 2271 (2026-10-01): bahn.expert has no Baureihe for IC 2 Twindexx sets.
