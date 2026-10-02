@@ -2389,22 +2389,22 @@ private final class TimetablesPlanProtocol: URLProtocol, @unchecked Sendable {
     }
 }
 
-/// Issue #76: an S7 arriving at Hamburg Hbf 3 minutes late showed "+0" at the leg's end. Station search
-/// only finds "Hamburg Hbf" (8002549), whose `plan` has none of the S-Bahn; DB lists those under
-/// "Hamburg Hbf (S-Bahn)" (8098549), named in 8002549's `/station` `meta` (real data from 2026-10-02).
+/// Issue #76, for a station not in `lowerLevels`: station search only finds "Hamburg-Altona" (8002553),
+/// whose `plan` has none of the S-Bahn; DB lists those under "Hamburg-Altona(S)" (8098553), named in
+/// 8002553's `/station` `meta` (real data from 2026-10-02).
 @Suite struct TimetablesOtherLevelTests {
     let dammtor = station("8002548", "Hamburg Dammtor", 53.560, 9.990, source: .bahnDe)
-    let hauptbahnhof = station("8002549", "Hamburg Hbf", 53.553, 10.007, source: .bahnDe)
+    let altona = station("8002553", "Hamburg-Altona", 53.552, 9.935, source: .bahnDe)
     // 2027-01-15 08:00 UTC == 09:00 Europe/Berlin (CET) -> IRIS "2701150900".
     let departure = Date(timeIntervalSince1970: 1_800_000_000)
 
     var leg: Leg {
-        Leg(origin: dammtor, destination: hauptbahnhof,
+        Leg(origin: dammtor, destination: altona,
             departure: TimeInfo(planned: departure, actual: nil),
             arrival: TimeInfo(planned: departure.addingTimeInterval(180), actual: departure.addingTimeInterval(180)),
             departurePlatform: nil, arrivalPlatform: nil, tripId: "s7",
             line: Line(name: "S7", number: "7", product: .suburban, operatorName: nil, tripNumber: "47137"),
-            direction: "Aumühle", isWalking: false, cancelled: false, stopovers: [], remarks: [],
+            direction: "Altona", isWalking: false, cancelled: false, stopovers: [], remarks: [],
             source: .transitous)
     }
 
@@ -2422,7 +2422,7 @@ private final class TimetablesPlanProtocol: URLProtocol, @unchecked Sendable {
         #expect(override.departure?.actual == departure.addingTimeInterval(180))
         let requested = HamburgSBahnLevelProtocol.requestedPaths.withLock { $0 }
         // Bus stops and other non-EVA ids in `meta` are never asked for.
-        #expect(!requested.contains { $0.contains("222501") || $0.contains("694887") })
+        #expect(!requested.contains { $0.contains("140269") || $0.contains("692757") })
     }
 }
 
@@ -2441,14 +2441,14 @@ private final class HamburgSBahnLevelProtocol: URLProtocol, @unchecked Sendable 
             #"<timetable station='Hamburg Dammtor'><s id="d"><tl c="S" n="47137"/><ar pt="2701150859"/><dp pt="2701150900" pp="3"/></s></timetable>"#
         case _ where path.hasSuffix("fchg/8002548"):
             #"<timetable station='Hamburg Dammtor'><s id="d" eva="8002548"><ar ct="2701150902"/><dp ct="2701150903"/></s></timetable>"#
-        case _ where path.hasSuffix("plan/8002549/270115/09"):
-            #"<timetable station='Hamburg Hbf'><s id="me"><tl c="ME" n="81624"/><ar pt="2701150903" pp="13"/></s></timetable>"#
-        case _ where path.hasSuffix("station/8002549"):
-            #"<stations><station meta="222501|694887|8076116|8098549" name="Hamburg Hbf" eva="8002549"/></stations>"#
-        case _ where path.hasSuffix("plan/8098549/270115/09"):
-            #"<timetable station='Hamburg Hbf (S-Bahn)'><s id="h"><tl c="S" n="47137"/><ar pt="2701150903" pp="4"/><dp pt="2701150904" pp="4"/></s></timetable>"#
-        case _ where path.hasSuffix("fchg/8098549"):
-            #"<timetable station='Hamburg Hbf (S-Bahn)'><s id="h" eva="8098549"><ar ct="2701150906"/><dp ct="2701150906"/></s></timetable>"#
+        case _ where path.hasSuffix("plan/8002553/270115/09"):
+            #"<timetable station='Hamburg-Altona'><s id="re"><tl c="RE" n="21007"/><ar pt="2701150903" pp="9"/></s></timetable>"#
+        case _ where path.hasSuffix("station/8002553"):
+            #"<stations><station meta="140269|210426|510421|692757|8098553" name="Hamburg-Altona" eva="8002553"/></stations>"#
+        case _ where path.hasSuffix("plan/8098553/270115/09"):
+            #"<timetable station='Hamburg-Altona(S)'><s id="a"><tl c="S" n="47137"/><ar pt="2701150903" pp="4"/></s></timetable>"#
+        case _ where path.hasSuffix("fchg/8098553"):
+            #"<timetable station='Hamburg-Altona(S)'><s id="a" eva="8098553"><ar ct="2701150906"/></s></timetable>"#
         default:
             "<timetable></timetable>"
         }
@@ -2457,6 +2457,57 @@ private final class HamburgSBahnLevelProtocol: URLProtocol, @unchecked Sendable 
         client?.urlProtocol(self, didLoad: Data(body.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
+}
+
+/// Issue #76: an S4 ending at München Hbf showed its arrival on time while running 3 minutes late.
+/// DB's Timetables only lists the S-Bahn under "München Hbf (tief)", which station search never finds.
+@Suite struct TimetablesLowerLevelTests {
+    @Test func findsTheSBahnUnderTheStationsLowerLevel() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [LowerLevelS4Protocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let timetables = TimetablesClient(http: HTTPClient(session: session))
+        // 2027-01-15 08:00 UTC == 09:00 Europe/Berlin (CET).
+        let departure = Date(timeIntervalSince1970: 1_800_000_000)
+        let leg = Leg(origin: station("8004158", "München-Pasing", 48.150, 11.461, source: .bahnDe),
+                      destination: station("8000261", "München Hbf", 48.140, 11.558, source: .bahnDe),
+                      departure: TimeInfo(planned: departure, actual: nil),
+                      arrival: TimeInfo(planned: departure.addingTimeInterval(600), actual: departure.addingTimeInterval(600)),
+                      departurePlatform: nil, arrivalPlatform: nil, tripId: "s4",
+                      line: Line(name: "S4", number: "4", product: .suburban, operatorName: nil, tripNumber: "6467"),
+                      direction: nil, isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+
+        let override = await timetables.realtime(for: leg)
+
+        #expect(override?.arrival?.actual == departure.addingTimeInterval(13 * 60))
+    }
+}
+
+/// München Hbf's own `/plan` doesn't have the S4; its lower level (8098263) does, 3 minutes late.
+private final class LowerLevelS4Protocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let path = request.url!.path
+        let body: Data
+        if path.contains("plan/8098263/") {
+            body = Data("""
+            <timetable station='München Hbf (tief)'><s id="7"><tl c="S" n="6467"/><ar pt="2701150910" pp="1" l="4"/></s></timetable>
+            """.utf8)
+        } else if path.contains("fchg/8098263") {
+            body = Data("""
+            <timetable station='München Hbf (tief)'><s id="7"><ar ct="2701150913"/></s></timetable>
+            """.utf8)
+        } else {
+            body = Data("<timetable></timetable>".utf8)
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }
 
 /// `/plan` has a scheduled platform for the S15 at Berlin Hbf, but `/fchg` reports no Gleisänderung

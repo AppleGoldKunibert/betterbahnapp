@@ -225,17 +225,20 @@ public struct TimetablesClient: Sendable {
         return event
     }
 
-    /// The `plan` entry for `category`+`number` at `eva`, or else at one of its other levels (see
-    /// `otherLevels(of:)`), with the EVA it was found at, since `fchg` must be asked there too.
-    /// Without this, an S-Bahn ending at "Hamburg Hbf" was never found there, so its arrival kept
-    /// Transitous' forecast, which for S-Bahn lines can be several minutes off DB's own (#76).
+    /// The `plan` entry for `category`+`number` at `eva`, or else at one of its `lowerLevels` or other
+    /// levels DB names (see `otherLevels(of:)`), with the EVA it was found at, since `fchg` must be
+    /// asked there too. Without this, an S-Bahn ending at "Hamburg Hbf" was never found there, so its
+    /// arrival kept Transitous' forecast, which for S-Bahn lines can be several minutes off DB's own (#76).
     private func scheduledStop(eva: String, category: String, number: String, time: Date,
                                side: KeyPath<TimetablesStop, TimetablesEvent?>) async -> (eva: String, stop: TimetablesStop)? {
-        if let planned = try? await plan(eva: eva, around: time),
-           let stop = Self.match(planned, category: category, number: number, plannedTime: time, side: side) {
-            return (eva, stop)
+        let known = [eva] + (Self.lowerLevels[eva] ?? [])
+        for candidate in known {
+            if let planned = try? await plan(eva: candidate, around: time),
+               let stop = Self.match(planned, category: category, number: number, plannedTime: time, side: side) {
+                return (candidate, stop)
+            }
         }
-        for level in await otherLevels(of: eva) {
+        for level in await otherLevels(of: eva) where !known.contains(level) {
             if let planned = try? await plan(eva: level, around: time),
                let stop = Self.match(planned, category: category, number: number, plannedTime: time, side: side) {
                 return (level, stop)
@@ -243,6 +246,20 @@ public struct TimetablesClient: Sendable {
         }
         return nil
     }
+
+    /// Big stations whose S-Bahn platforms Timetables lists as a station of their own, which station
+    /// search (and so `eva(for:)`) never returns. Without them an S-Bahn ending there got no DB delay
+    /// at all and kept Transitous' forecast, which often drops back to "on time" for stops further
+    /// ahead (issue #76: S4 running 3 minutes late, its arrival shown on time). Tried before asking
+    /// `/station`, so these work without it; any other station's levels come from there.
+    static let lowerLevels: [String: [String]] = [
+        "8000261": ["8098263"], // München Hbf (tief)
+        "8000096": ["8098096"], // Stuttgart Hbf (tief)
+        "8000105": ["8098105"], // Frankfurt (Main) Hbf (tief)
+        "8002549": ["8098549"], // Hamburg Hbf (S-Bahn)
+        "8010205": ["8098205"], // Leipzig Hbf (tief)
+        "8011160": ["8098160", "8089021"], // Berlin Hbf (tief), Berlin Hbf (S-Bahn)
+    ]
 
     /// Whether DB's own dispatching feed reports the departure of `category`+`number` at `station`
     /// (planned `time`) as cancelled. `nil` when it can't tell (train not found, or
