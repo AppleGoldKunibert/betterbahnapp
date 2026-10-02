@@ -398,8 +398,11 @@ public struct TransitousProvider: TransitProvider {
             for (index, text) in texts.enumerated() {
                 group.addTask {
                     guard index >= required else { return (index, try await geocodeRequest(text)) }
-                    // Only an extra: if it fails, the search still works without it.
-                    let found = (try? await geocodeRequest(text)) ?? []
+                    // Only an extra: if it fails or is slow, the search still works without it. Waiting
+                    // for it longer would run into `CombinedProvider`'s deadline and lose every hit.
+                    let found = (try? await CombinedProvider.withDeadline(Self.extraQueryDeadline) {
+                        try await geocodeRequest(text)
+                    }) ?? []
                     return (index, found.filter { Self.textMatchScore($0, query: query) > 0 })
                 }
             }
@@ -424,6 +427,10 @@ public struct TransitousProvider: TransitProvider {
         }
         return matches
     }
+
+    /// How long the extra geocoder queries (main station, nearby town and stations, …) may take,
+    /// well within `CombinedProvider`'s 2.5 s for the whole station search.
+    static let extraQueryDeadline: Duration = .milliseconds(1800)
 
     private func geocodeRequest(_ text: String) async throws -> [MGeocodeMatch] {
         try await http.get(url("v1/geocode", [

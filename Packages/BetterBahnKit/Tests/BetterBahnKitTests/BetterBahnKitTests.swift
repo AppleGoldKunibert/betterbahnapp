@@ -529,6 +529,23 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(TransitousProvider.sizeScore(forImportance: 1) == 8)
     }
 
+    /// A slow extra query ("Po Bahnhof") is dropped after `extraQueryDeadline` instead of holding up
+    /// the whole search until `CombinedProvider` gives up on it and falls back to bahn.de's noise.
+    @Test func slowExtraQueriesDontHoldUpTheSearch() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [SlowExtraGeocodeProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let provider = TransitousProvider(http: HTTPClient(session: session))
+
+        let start = Date.now
+        let stations = try await provider.searchStations("Po")
+        #expect(stations.map(\.id) == ["potsdamHbf"])
+        #expect(Date.now.timeIntervalSince(start) < 2.4)
+        #expect(CombinedProvider.isShortQuery("Po "))
+        #expect(!CombinedProvider.isShortQuery("Pot"))
+    }
+
     /// "Be" in Berlin: at most three Berlin stations first, then Bern, the rest of Berlin after.
     /// The Swiss canton in "Brügg BE" isn't a whole-word match for "Be".
     @Test func shortSearchesSpreadOverTowns() {
@@ -3307,6 +3324,34 @@ private final class MainStationGeocodeProtocol: URLProtocol, @unchecked Sendable
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
+}
+
+/// "Po Hbf" answers at once, "Po Bahnhof" only after 5 s, everything else with nothing.
+private final class SlowExtraGeocodeProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    private let stopped = Mutex(false)
+    override func stopLoading() { stopped.withLock { $0 = true } }
+
+    override func startLoading() {
+        let text = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+            .queryItems?.first { $0.name == "text" }?.value ?? ""
+        let body = text == "Po Hbf"
+            ? #"[{"type":"STOP","id":"potsdamHbf","name":"S Potsdam Hauptbahnhof","lat":52.391,"lon":13.067,"country":"DE","modes":["LONG_DISTANCE","REGIONAL_RAIL"],"importance":0.0038}]"#
+            : "[]"
+        let finish: @Sendable () -> Void = { [self] in
+            guard !stopped.withLock({ $0 }) else { return }
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Data(body.utf8))
+            client?.urlProtocolDidFinishLoading(self)
+        }
+        if text == "Po Bahnhof" {
+            DispatchQueue.global().asyncAfter(deadline: .now() + 5, execute: finish)
+        } else {
+            finish()
+        }
+    }
 }
 
 /// Geocode answers for `searchStationsAsksForStationsInTheNearbyTownAndAliases`.
