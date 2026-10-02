@@ -553,13 +553,17 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
     /// too far away to be hinted.
     @Test func stationHintsFindNearbyStationsByTheirFirstLetters() throws {
         let json = #"[["Berlin Hbf",52.525,13.369,0.02],["Berlin Südkreuz",52.475,13.365,0.0097],"#
-            + #"["S Bernau Bhf",52.676,13.592,0.0012],["Bern",46.949,7.439,0.05],["Bebra",50.97,9.79,0.002]]"#
+            + #"["S Bernau Bhf",52.676,13.592,0.0012],["Bern",46.949,7.439,0.05],["Bebra",50.97,9.79,0.002],"#
+            + #"["S+U Potsdamer Platz Bhf (Berlin)",52.509,13.376,0.0063],["S Potsdam Hauptbahnhof",52.391,13.067,0.0038]]"#
         let hints = try JSONDecoder().decode([StationHints.Hint].self, from: Data(json.utf8))
         let berlin = Coordinate(latitude: 52.52, longitude: 13.405)
         #expect(StationHints.names(matching: "be", near: berlin, in: hints) == ["Berlin Hbf", "S Bernau Bhf"])
         #expect(StationHints.names(matching: "bern", near: berlin, in: hints) == ["S Bernau Bhf"])
         #expect(StationHints.names(matching: "x", near: berlin, in: hints).isEmpty)
         #expect(StationHints.names(matching: "be", near: berlin, excluding: "Berlin", in: hints) == ["S Bernau Bhf"])
+        // Stations in the user's town still count when what was typed matches more than the town.
+        #expect(StationHints.names(matching: "po", near: berlin, excluding: "Berlin", in: hints)
+            == ["S Potsdam Hauptbahnhof", "S+U Potsdamer Platz Bhf (Berlin)"])
         // The bundled list loads.
         #expect(StationHints.all.count > 1000)
         #expect(TransitousProvider.nearbyStationQueries(for: "bernau bei", near: berlin).isEmpty)

@@ -310,9 +310,10 @@ public struct TransitousProvider: TransitProvider {
     static let hintedQueryLength = 4
 
     /// "be" near Berlin → "S Bernau Bhf", …: nearby stations starting with what was typed, which the
-    /// geocoder wouldn't list for so few letters. Only their names go out, not the location. Leaves
-    /// out the user's own town: `nearbyTownQuery(for:near:)` covers it, and "ber" in Berlin should
-    /// still find Flughafen BER first, not Berlin Hbf.
+    /// geocoder wouldn't list for so few letters ("po" → Potsdamer Platz). Only their names go out,
+    /// not the location. Leaves out stations matching just by the user's own town's name:
+    /// `nearbyTownQuery(for:near:)` covers those, and "ber" in Berlin should still find Flughafen BER
+    /// first, not Berlin Hbf.
     static func nearbyStationQueries(for query: String, near location: Coordinate?) -> [String] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let location, !trimmed.isEmpty, trimmed.count <= hintedQueryLength else { return [] }

@@ -28,30 +28,34 @@ enum StationHints {
     static let radius: Double = 150_000
 
     /// Names of the stations near `location` with a word starting with each typed word, nearest and
-    /// busiest first (scored like `TransitousProvider.searchRank`'s nearness and size), one per
-    /// place: "be" in Berlin gives Berlin Hbf and Bernau, not five Berlin stations. Not for the place
-    /// `excluding` (the user's own town, which is asked for separately).
+    /// busiest first (scored like `TransitousProvider.searchRank`'s nearness and size), one per word
+    /// that matched: "be" in Berlin gives Berlin Hbf and Bernau, not five Berlin stations, while "po"
+    /// gives Potsdamer Platz and Potsdam Hbf. Not those matching only by the place `excluding` (the
+    /// user's own town, asked for separately), so "ber" in Berlin finds Bernau rather than Berlin Hbf.
     static func names(matching query: String, near location: Coordinate, excluding excludedPlace: String? = nil,
                       limit: Int = 3, in hints: [Hint] = all) -> [String]
     {
         let typed = TransitousProvider.searchWords(query)
         guard !typed.isEmpty else { return [] }
-        let scored: [(name: String, place: String, score: Int)] = hints.compactMap { hint in
+        let scored: [(name: String, key: String, score: Int)] = hints.compactMap { hint in
             let distance = location.distance(to: hint.coordinate)
             guard distance < radius else { return nil }
             let words = TransitousProvider.searchWords(Station.displayName(for: hint.name))
-            let matches = typed.allSatisfy { spellings in
-                words.contains { word in word.contains { candidate in spellings.contains { candidate.hasPrefix($0) } } }
+            var matched: [String] = []
+            for spellings in typed {
+                let word = words.first { word in word.contains { candidate in spellings.contains { candidate.hasPrefix($0) } } }
+                guard let word, let key = word.min() else { return nil }
+                matched.append(key)
             }
-            guard matches, let place = words.first?.min() else { return nil }
             let nearness = TransitousProvider.distanceBands.count - TransitousProvider.distanceBand(forMeters: distance)
-            return (hint.name, place, nearness + TransitousProvider.sizeScore(forImportance: hint.importance))
+            return (hint.name, matched.joined(separator: " "),
+                    nearness + TransitousProvider.sizeScore(forImportance: hint.importance))
         }
-        var places: Set<String> = []
-        if let excludedPlace { places.formUnion(TransitousProvider.searchWords(excludedPlace).first ?? []) }
+        var keys: Set<String> = []
+        if let excludedPlace, let town = TransitousProvider.searchWords(excludedPlace).first?.min() { keys.insert(town) }
         return scored
             .sorted { $0.score != $1.score ? $0.score > $1.score : $0.name < $1.name }
-            .filter { places.insert($0.place).inserted }
+            .filter { keys.insert($0.key).inserted }
             .prefix(limit)
             .map(\.name)
     }
