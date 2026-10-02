@@ -14,6 +14,7 @@ Paths mirror `https://www.bahn.de/web/api/…`, so the app only swaps `BahnDeCli
 | `/web/api/angebote/verbindung/<vbid>` (shared connections, UUID only) | 1 h |
 | `/timetables/v1/plan/<eva>/<yymmdd>/<hh>` (DB Timetables) | 30 min |
 | `/timetables/v1/fchg/<eva>` (DB Timetables) | 30 s |
+| `/timetables/v1/station/<eva>` (DB Timetables) | 1 day |
 
 Query strings are forwarded unchanged (not for Timetables). Only these GET paths are allowed;
 everything else is 404. bahn.de errors (including 403/429 blocks) are passed through uncached, so
