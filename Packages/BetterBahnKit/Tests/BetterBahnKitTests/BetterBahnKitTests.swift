@@ -549,6 +549,22 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(TransitousProvider.textMatch(bruegg, query: "Be").matched == 1)
     }
 
+    /// "be" near Berlin asks for Berlin Hbf and Bernau (one station per place); Bern and Bebra are
+    /// too far away to be hinted.
+    @Test func stationHintsFindNearbyStationsByTheirFirstLetters() throws {
+        let json = #"[["Berlin Hbf",52.525,13.369,0.02],["Berlin Südkreuz",52.475,13.365,0.0097],"#
+            + #"["S Bernau Bhf",52.676,13.592,0.0012],["Bern",46.949,7.439,0.05],["Bebra",50.97,9.79,0.002]]"#
+        let hints = try JSONDecoder().decode([StationHints.Hint].self, from: Data(json.utf8))
+        let berlin = Coordinate(latitude: 52.52, longitude: 13.405)
+        #expect(StationHints.names(matching: "be", near: berlin, in: hints) == ["Berlin Hbf", "S Bernau Bhf"])
+        #expect(StationHints.names(matching: "bern", near: berlin, in: hints) == ["S Bernau Bhf"])
+        #expect(StationHints.names(matching: "x", near: berlin, in: hints).isEmpty)
+        #expect(StationHints.names(matching: "be", near: berlin, excluding: "Berlin", in: hints) == ["S Bernau Bhf"])
+        // The bundled list loads.
+        #expect(StationHints.all.count > 1000)
+        #expect(TransitousProvider.nearbyStationQueries(for: "bernau bei", near: berlin).isEmpty)
+    }
+
     @Test func extraQueriesForAliasesAndTheNearbyTown() {
         let berlin = Coordinate(latitude: 52.52, longitude: 13.405)
         #expect(TransitousProvider.aliasQuery(for: "BER ") == "Flughafen BER")

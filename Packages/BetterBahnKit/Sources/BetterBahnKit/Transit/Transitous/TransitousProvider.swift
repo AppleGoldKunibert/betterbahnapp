@@ -305,6 +305,20 @@ public struct TransitousProvider: TransitProvider {
         return trimmed.count < 3 && startsTown ? town : nil
     }
 
+    /// Up to how many letters nearby stations from `StationHints` are looked up: longer names the
+    /// geocoder finds by itself.
+    static let hintedQueryLength = 4
+
+    /// "be" near Berlin → "S Bernau Bhf", …: nearby stations starting with what was typed, which the
+    /// geocoder wouldn't list for so few letters. Only their names go out, not the location. Leaves
+    /// out the user's own town: `nearbyTownQuery(for:near:)` covers it, and "ber" in Berlin should
+    /// still find Flughafen BER first, not Berlin Hbf.
+    static func nearbyStationQueries(for query: String, near location: Coordinate?) -> [String] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let location, !trimmed.isEmpty, trimmed.count <= hintedQueryLength else { return [] }
+        return StationHints.names(matching: trimmed, near: location, excluding: NearbyTowns.town(near: location))
+    }
+
     /// Stations that come first among same-named ones even when another is nearer, e.g.
     /// "Bernau (bei Berlin)" before "Bernau am Chiemsee".
     static let preferredStations: Set<String> = ["Bernau (bei Berlin)"]
@@ -360,8 +374,9 @@ public struct TransitousProvider: TransitProvider {
     }
 
     /// With `addingMainStation`, also asks for the town's main station (see `mainStationQuery(for:)`,
-    /// `shortQueries(for:)`), a known short name (`aliasQuery(for:)`) and, `near` a location, stations in the user's town
-    /// (`nearbyTownQuery(for:near:)`), and keeps those hits only if they match `query`.
+    /// `shortQueries(for:)`), a known short name (`aliasQuery(for:)`) and, `near` a location, stations
+    /// in the user's town (`nearbyTownQuery(for:near:)`) and nearby ones
+    /// (`nearbyStationQueries(for:near:)`), and keeps those hits only if they match `query`.
     private func geocode(_ query: String, addingMainStation: Bool = false, near location: Coordinate? = nil)
         async throws -> [MGeocodeMatch]
     {
@@ -373,6 +388,8 @@ public struct TransitousProvider: TransitProvider {
             let extras = [Self.mainStationQuery(for: query), Self.aliasQuery(for: query),
                           Self.nearbyTownQuery(for: query, near: location)]
             queries += Self.shortQueries(for: query) + extras.compactMap { $0 }
+            let known = queries
+            queries += Self.nearbyStationQueries(for: query, near: location).filter { !known.contains($0) }
         }
 
         let texts = queries
