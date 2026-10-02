@@ -271,6 +271,24 @@ public struct Journey: Codable, Sendable, Hashable, Identifiable {
     public var transitLegs: [Leg] { legs.filter { !$0.isWalking } }
     public var departure: TimeInfo? { legs.first?.departure }
     public var arrival: TimeInfo? { legs.last?.arrival }
+
+    /// This journey as planned, with every actual time removed, so no delay shows at all: what a
+    /// long-finished journey had saved is no longer live data (and older saves carry a made-up "+0").
+    public func droppingActualTimes() -> Journey {
+        func dropped(_ time: TimeInfo) -> TimeInfo { TimeInfo(planned: time.planned, actual: nil) }
+        var journey = self
+        for index in journey.legs.indices {
+            var leg = journey.legs[index]
+            leg.departure = dropped(leg.departure)
+            leg.arrival = dropped(leg.arrival)
+            for stop in leg.stopovers.indices {
+                leg.stopovers[stop].arrival = leg.stopovers[stop].arrival.map(dropped)
+                leg.stopovers[stop].departure = leg.stopovers[stop].departure.map(dropped)
+            }
+            journey.legs[index] = leg
+        }
+        return journey
+    }
     public var transfers: Int { max(0, transitLegs.count - 1) }
     public var duration: TimeInterval? {
         guard let d = departure, let a = arrival else { return nil }
