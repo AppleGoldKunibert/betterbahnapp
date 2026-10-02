@@ -86,12 +86,14 @@ struct MPlace: Decodable {
         )
     }
 
-    func toStopover(isRail: Bool) -> Stopover {
+    /// `actual` times only when `realtime` is set: without it MOTIS repeats the schedule there, which
+    /// would read as a live "+0".
+    func toStopover(isRail: Bool, realtime: Bool) -> Stopover {
         let platform = platform(isRail: isRail)
         return Stopover(
             station: toStation(),
-            arrival: timeInfo(planned: scheduledArrival, actual: arrival),
-            departure: timeInfo(planned: scheduledDeparture, actual: departure),
+            arrival: timeInfo(planned: scheduledArrival ?? arrival, actual: realtime ? arrival : nil),
+            departure: timeInfo(planned: scheduledDeparture ?? departure, actual: realtime ? departure : nil),
             arrivalPlatform: platform,
             departurePlatform: platform,
             cancelled: cancelled ?? false,
@@ -220,8 +222,9 @@ struct MLeg: Decodable {
         var stopovers: [Stopover] = []
         if !isWalking {
             let isRail = lineInfo.isRail
-            stopovers = [from.toStopover(isRail: isRail)] + (intermediateStops ?? []).map { $0.toStopover(isRail: isRail) }
-                + [to.toStopover(isRail: isRail)]
+            stopovers = [from.toStopover(isRail: isRail, realtime: realtime)]
+                + (intermediateStops ?? []).map { $0.toStopover(isRail: isRail, realtime: realtime) }
+                + [to.toStopover(isRail: isRail, realtime: realtime)]
         }
         return Leg(
             origin: from.toStation(), destination: to.toStation(),

@@ -2490,7 +2490,7 @@ private final class HamburgSBahnLevelProtocol: URLProtocol, @unchecked Sendable 
                       isWalking: false, cancelled: false, stopovers: stops, remarks: [], source: .transitous)
         let refresher = JourneyRefresher(provider: CombinedProvider(primary: mock, fallback: nil, bahnDe: nil), timetables: timetables)
 
-        let refreshed = await refresher.refresh(Journey(legs: [leg], source: .transitous))
+        let refreshed = await refresher.refresh(Journey(legs: [leg], source: .transitous), now: departure)
 
         #expect(refreshed.legs[0].departure.actual == departure.addingTimeInterval(180))
         #expect(refreshed.legs[0].arrival.actual == arrival.addingTimeInterval(180))
@@ -2503,6 +2503,63 @@ private final class HamburgSBahnLevelProtocol: URLProtocol, @unchecked Sendable 
         BergedorfS7Protocol.failHbfChangesOnce.withLock { $0 = true }
         defer { BergedorfS7Protocol.failHbfChangesOnce.withLock { $0 = false } }
         try await refreshedLegEndsWithDBsDelayAtTheSBahnLevel()
+    }
+
+    /// Hours after the ride neither source has live data any more: Transitous sends the bare schedule
+    /// and DB has dropped the train from `fchg`. The delay saved while it ran must stay, not become "+0".
+    @Test func finishedLegKeepsItsDelayOnceLiveDataIsGone() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [BergedorfS7Protocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let timetables = TimetablesClient(http: HTTPClient(session: session))
+
+        let bergedorf = station("8000148", "Hamburg-Bergedorf", 53.490, 10.206, source: .bahnDe)
+        let hauptbahnhof = station("8002549", "Hamburg Hbf", 53.553, 10.007, source: .bahnDe)
+        let departure = try #require(ISO8601DateFormatter().date(from: "2026-10-02T10:58:00Z"))
+        let arrival = departure.addingTimeInterval(21 * 60)
+        let line = Line(name: "S7", number: "7", product: .suburban, operatorName: nil, tripNumber: "47124")
+        let scheduled = [
+            Stopover(station: bergedorf, arrival: nil, departure: TimeInfo(planned: departure, actual: nil),
+                     arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+            Stopover(station: hauptbahnhof, arrival: TimeInfo(planned: arrival, actual: nil), departure: nil,
+                     arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+        ]
+        var known = scheduled
+        known[0].departure?.actual = departure.addingTimeInterval(120)
+        known[1].arrival?.actual = arrival.addingTimeInterval(300)
+        let mock = MockProvider(source: .transitous)
+        mock.trips["s7"] = Trip(id: "s7", line: line, direction: "Altona", stopovers: scheduled, cancelled: false, remarks: [], source: .transitous)
+        let leg = Leg(origin: bergedorf, destination: hauptbahnhof,
+                      departure: TimeInfo(planned: departure, actual: departure.addingTimeInterval(120)),
+                      arrival: TimeInfo(planned: arrival, actual: arrival.addingTimeInterval(300)),
+                      departurePlatform: nil, arrivalPlatform: nil, tripId: "s7", line: line, direction: "Altona",
+                      isWalking: false, cancelled: false, stopovers: known, remarks: [], source: .transitous)
+        let refresher = JourneyRefresher(provider: CombinedProvider(primary: mock, fallback: nil, bahnDe: nil), timetables: timetables)
+
+        let refreshed = await refresher.refresh(Journey(legs: [leg], source: .transitous), now: arrival.addingTimeInterval(6 * 3600))
+
+        #expect(refreshed.legs[0].departure.actual == departure.addingTimeInterval(120))
+        #expect(refreshed.legs[0].arrival.actual == arrival.addingTimeInterval(300))
+        #expect(refreshed.legs[0].stopovers.last?.arrival?.actual == arrival.addingTimeInterval(300))
+    }
+
+    /// MOTIS repeats the schedule as a stop's time when it has no realtime; that's not a live "+0".
+    @Test func transitousStopsWithoutRealtimeHaveNoActualTime() throws {
+        let json = """
+        {"mode": "SUBURBAN", "realTime": false, "tripId": "s7", "displayName": "S7",
+         "from": {"name": "Hamburg-Bergedorf", "lat": 53.49, "lon": 10.2,
+                  "departure": "2026-10-02T10:58:00Z", "scheduledDeparture": "2026-10-02T10:58:00Z"},
+         "to": {"name": "Hamburg Hbf", "lat": 53.55, "lon": 10.0,
+                "arrival": "2026-10-02T11:19:00Z", "scheduledArrival": "2026-10-02T11:19:00Z"},
+         "startTime": "2026-10-02T10:58:00Z", "endTime": "2026-10-02T11:19:00Z"}
+        """
+        let leg = try JSONDecoding.decoder.decode(MLeg.self, from: Data(json.utf8)).toLeg()
+
+        #expect(leg.stopovers.count == 2)
+        #expect(leg.stopovers.allSatisfy { $0.arrival?.actual == nil && $0.departure?.actual == nil })
+        #expect(leg.stopovers.last?.arrival?.planned == leg.arrival.planned)
+        #expect(leg.arrival.delayMinutes == nil)
     }
 }
 
@@ -2874,7 +2931,7 @@ private enum PreviewLegs {
         let (timetables, session) = client(RE3318RunningProtocol.self)
         defer { session.invalidateAndCancel() }
 
-        let result = await timetables.tripWithRealtime(trip(cancelled: true))
+        let result = await timetables.tripWithRealtime(trip(cancelled: true), now: start)
 
         #expect(result.stopovers.allSatisfy { !$0.cancelled })
     }
@@ -2884,7 +2941,7 @@ private enum PreviewLegs {
         let (timetables, session) = client(RE3318CancelledProtocol.self)
         defer { session.invalidateAndCancel() }
 
-        let result = await timetables.tripWithRealtime(trip(cancelled: false))
+        let result = await timetables.tripWithRealtime(trip(cancelled: false), now: start)
 
         #expect(result.stopovers[2].arrivalCancelled)
         #expect(result.stopovers[2].cancelled)
@@ -2907,7 +2964,7 @@ private enum PreviewLegs {
         let (timetables, session) = client(RE3318NoChangesProtocol.self)
         defer { session.invalidateAndCancel() }
 
-        let result = await timetables.tripWithRealtime(trip(cancelled: true))
+        let result = await timetables.tripWithRealtime(trip(cancelled: true), now: start)
 
         #expect(result.stopovers[2].cancelled)
     }

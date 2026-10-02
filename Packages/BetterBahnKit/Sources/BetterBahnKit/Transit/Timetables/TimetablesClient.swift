@@ -129,6 +129,15 @@ public struct TimetablesClient: Sendable {
     static let planMaxAge: TimeInterval = 30 * 60
     static let changesMaxAge: TimeInterval = 4 * 60
 
+    /// DB's change list (`fchg`) drops a train a few hours after it ran (#76's S7 was still there
+    /// 4 hours after arriving, gone after 6). Later DB only finds the schedule and would call the
+    /// train on time, a made-up "+0", so a train whose last stop is longer ago isn't asked about.
+    static let changesMemory: TimeInterval = 4 * 3600
+
+    static func knowsChanges(until lastPlanned: Date, now: Date) -> Bool {
+        lastPlanned.addingTimeInterval(changesMemory) > now
+    }
+
     /// Drops cached delays so the next lookup asks DB again (e.g. on pull-to-refresh).
     public static func invalidateDelays() async {
         await cache.clear(prefix: "fchg/")
@@ -338,9 +347,11 @@ public struct TimetablesClient: Sendable {
     }
 
     /// `trip` with DB Timetables delays laid over it (see `stopoversWithRealtime(for:)`);
-    /// returned unchanged when the train has no category/number.
-    public func tripWithRealtime(_ trip: Trip) async -> Trip {
+    /// returned unchanged when the train has no category/number or ran too long ago (`changesMemory`).
+    public func tripWithRealtime(_ trip: Trip, now: Date = .now) async -> Trip {
         guard let line = trip.line else { return trip }
+        if let last = trip.stopovers.last.flatMap({ $0.arrival?.planned ?? $0.departure?.planned }),
+           !Self.knowsChanges(until: last, now: now) { return trip }
         var trip = trip
         let (stopovers, messages) = await stopoversWithRealtime(trip.stopovers, line: line)
         trip.stopovers = stopovers

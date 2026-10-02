@@ -82,7 +82,7 @@ public struct JourneyRefresher: Sendable {
         self.timetables = timetables
     }
 
-    public func refresh(_ journey: Journey) async -> Journey {
+    public func refresh(_ journey: Journey, now: Date = .now) async -> Journey {
         var updated = journey
         for (index, originalLeg) in journey.legs.enumerated() {
             var leg = originalLeg
@@ -90,6 +90,7 @@ public struct JourneyRefresher: Sendable {
                let trip = try? await provider.trip(id: tripId, source: leg.source) {
                 leg = Self.apply(trip, to: leg)
             }
+            let timetables = TimetablesClient.knowsChanges(until: leg.arrival.planned, now: now) ? self.timetables : nil
             // DB Timetables wins wherever it knows the stop; the trip data above only fills in
             // what DB can't match (regional operators, far-off stops).
             if let timetables, let override = await timetables.realtime(for: leg) {
@@ -167,14 +168,14 @@ public struct JourneyRefresher: Sendable {
         let startIndex = closestStop(in: trip.stopovers, at: leg.origin, plannedTime: leg.departure.planned, side: \.departure)
         if let startIndex {
             let start = trip.stopovers[startIndex]
-            if let departure = start.departure { leg.departure = departure }
+            if let departure = start.departure { leg.departure = Self.keepingActual(departure, from: leg.departure) }
             if start.departurePlatform?.best != nil { leg.departurePlatform = start.departurePlatform }
             if start.departureCancelled { leg.cancelled = true }
         }
         let rest = trip.stopovers[((startIndex ?? -1) + 1)...]
         if let endIndex = closestStop(in: rest, at: leg.destination, plannedTime: leg.arrival.planned, side: \.arrival) {
             let end = trip.stopovers[endIndex]
-            if let arrival = end.arrival { leg.arrival = arrival }
+            if let arrival = end.arrival { leg.arrival = Self.keepingActual(arrival, from: leg.arrival) }
             if end.arrivalPlatform?.best != nil { leg.arrivalPlatform = end.arrivalPlatform }
             if end.arrivalCancelled { leg.cancelled = true }
             // A journey leg's headsign is only where its own feed stops modelling the train (e.g.
@@ -190,12 +191,20 @@ public struct JourneyRefresher: Sendable {
                 $0.station.isSamePlace(as: stop.station)
                     && $0.arrival?.planned == stop.arrival?.planned && $0.departure?.planned == stop.departure?.planned
             }) else { continue }
-            if let arrival = live.arrival { leg.stopovers[index].arrival = arrival }
-            if let departure = live.departure { leg.stopovers[index].departure = departure }
+            if let arrival = live.arrival { leg.stopovers[index].arrival = Self.keepingActual(arrival, from: stop.arrival) }
+            if let departure = live.departure { leg.stopovers[index].departure = Self.keepingActual(departure, from: stop.departure) }
             if live.arrivalCancelled { leg.stopovers[index].arrivalCancelled = true }
             if live.departureCancelled { leg.stopovers[index].departureCancelled = true }
         }
         return leg
+    }
+
+    /// `new`, but with `old`'s actual time when `new` has none for the same planned time: a trip
+    /// without realtime (Transitous drops it some time after the train ran) mustn't wipe a delay
+    /// already known.
+    static func keepingActual(_ new: TimeInfo, from old: TimeInfo?) -> TimeInfo {
+        guard new.actual == nil, let old, old.planned == new.planned else { return new }
+        return old
     }
 
     /// Index of the visit to `station` whose planned `side` time is closest to `plannedTime`.
