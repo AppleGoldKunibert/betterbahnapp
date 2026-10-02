@@ -560,6 +560,27 @@ final class AppModel {
         return try await bahnDe.coachSequence(request)
     }
 
+    /// The formation remembered for a saved journey's leg, if any.
+    func rememberedFormation(for leg: Leg) -> TrainFormation? {
+        let key = leg.formationKey
+        return savedJourneys.lazy.compactMap { $0.formations?[key] }.first
+    }
+
+    /// Keeps a leg's formation in every saved journey riding it, so its Tz and Taufname stay known
+    /// (and sync through iCloud) once the train has run.
+    func rememberFormation(_ formation: TrainFormation, for leg: Leg) {
+        let key = leg.formationKey
+        var updated = savedJourneys
+        var changed = false
+        for index in updated.indices where updated[index].journey.legs.contains(where: { $0.formationKey == key }) {
+            if let formations = TrainFormation.remembering(formation, for: key, in: updated[index].formations) {
+                updated[index].formations = formations
+                changed = true
+            }
+        }
+        if changed { savedJourneys = updated }
+    }
+
     @ObservationIgnored private var trainTypeCache: [String: TrainTypeLookup?] = [:]
 
     /// A train's type ("ICE 4", "ICE 3neo" …) and, for live data, its Tz, from bahn.expert, which has
@@ -855,6 +876,9 @@ nonisolated struct SavedJourney: Codable, Hashable, Identifiable {
     var previousVersions: [PlanVersion]?
     /// Issue IDs we already sent a notification for.
     var notifiedIssues: [String]?
+    /// Trainsets (Tz, Taufname) seen on the legs' trains, keyed by `Leg.formationKey`, kept and
+    /// synced so they stay known after the journey (optional so older saved data still decodes).
+    var formations: [String: TrainFormation]?
 
     var issues: [ConnectionIssue] { journey.connectionIssues() }
 
