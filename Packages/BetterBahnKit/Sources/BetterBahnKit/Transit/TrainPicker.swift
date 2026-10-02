@@ -58,6 +58,34 @@ public struct TrainPicker: Sendable {
         return legs.sorted { $0.departure.planned < $1.departure.planned }
     }
 
+    /// Connections with transfers from `leg.origin` to `leg.destination` in the same time window, for
+    /// when no other train goes there directly or changing trains is faster. Direct ones are left out:
+    /// `alternatives(for:)` already lists them.
+    public func connections(for leg: Leg, minutesBefore: Int = 30, minutesAfter: Int = 180,
+                            ticketFilter: TicketFilter? = nil) async throws -> [Journey] {
+        let start = leg.departure.planned.addingTimeInterval(TimeInterval(-minutesBefore * 60))
+        let end = leg.departure.planned.addingTimeInterval(TimeInterval(minutesAfter * 60))
+        var query = JourneyQuery(from: leg.origin, to: leg.destination, date: start)
+        var found: [Journey] = []
+        // A page often covers only an hour or two; one more page fills the rest of the window.
+        for _ in 0..<2 {
+            let page = try await provider.journeys(query)
+            found += page.journeys
+            guard let cursor = page.laterCursor,
+                  let last = page.journeys.compactMap(\.departure?.planned).max(), last < end else { break }
+            query.cursor = cursor
+        }
+        var seen = Set<String>()
+        return found
+            .filter { journey in
+                guard journey.transitLegs.count > 1, !journey.isCancelled,
+                      let departure = journey.departure?.planned, departure >= start, departure <= end else { return false }
+                return ticketFilter?.isValid(journey) ?? true
+            }
+            .filter { seen.insert($0.id).inserted }
+            .sorted { ($0.departure?.planned ?? .distantFuture) < ($1.departure?.planned ?? .distantFuture) }
+    }
+
     /// Finds a train by name (e.g. "ICE 423") departing `origin` within the next hours that reaches `destination`.
     /// Boarding/alighting restrictions ("Nur Einstieg" / "Nur Ausstieg") at either station are ignored when
     /// matching – the ride is built regardless – but flagged on the result, with a rule-respecting
@@ -98,10 +126,18 @@ public struct TrainPicker: Sendable {
 
     /// Replaces the leg at `index` and replans everything after it.
     public func replacing(legAt index: Int, in journey: Journey, with newLeg: Leg, finalDestination: Station) async throws -> Journey {
+        try await replacing(legAt: index, in: journey, with: [newLeg], finalDestination: finalDestination)
+    }
+
+    /// Replaces the leg at `index` with several legs (a connection with transfers) and replans everything after it.
+    public func replacing(legAt index: Int, in journey: Journey, with newLegs: [Leg], finalDestination: Station) async throws -> Journey {
+        guard let firstLeg = newLegs.first, let newLeg = newLegs.last else {
+            throw TransitError.invalidInput("Keine Verbindung ausgewählt.")
+        }
         var legs = Array(journey.legs.prefix(index))
         // Drop a walking leg right before the replaced leg if it no longer fits.
-        if let last = legs.last, last.isWalking, !last.destination.isSamePlace(as: newLeg.origin) { legs.removeLast() }
-        legs.append(newLeg)
+        if let last = legs.last, last.isWalking, !last.destination.isSamePlace(as: firstLeg.origin) { legs.removeLast() }
+        legs += newLegs
         if newLeg.destination.isSamePlace(as: finalDestination) {
             return Journey(legs: legs, source: journey.source)
         }

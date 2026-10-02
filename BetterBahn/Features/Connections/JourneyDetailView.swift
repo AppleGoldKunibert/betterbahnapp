@@ -73,9 +73,9 @@ struct JourneyDetailView: View {
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $legToReplace) { selection in
-            AlternativeTrainsSheet(leg: selection.leg) { newLeg in
+            AlternativeTrainsSheet(leg: selection.leg) { newLegs in
                 let updated = try await model.trainPicker.replacing(
-                    legAt: selection.index, in: journey, with: newLeg, finalDestination: finalDestination)
+                    legAt: selection.index, in: journey, with: newLegs, finalDestination: finalDestination)
                 withAnimation {
                     if let entry = model.savedEntry(for: journey) {
                         model.replaceSaved(id: entry.id, with: updated, reason: "Anderer Zug gewählt")
@@ -591,11 +591,13 @@ struct LegCard: View {
 
 struct AlternativeTrainsSheet: View {
     let leg: Leg
-    let onSelect: (Leg) async throws -> Void
+    /// The legs replacing `leg`: one for a direct train, several for a connection with transfers.
+    let onSelect: ([Leg]) async throws -> Void
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var alternatives: [Leg] = []
+    @State private var connections: [Journey] = []
     @State private var isLoading = true
     @State private var applyingID: String?
     @State private var onlyValidTicket = false
@@ -639,9 +641,27 @@ struct AlternativeTrainsSheet: View {
 
                     ForEach(alternatives) { alternative in
                         Button {
-                            apply(alternative)
+                            apply([alternative], id: alternative.id)
                         } label: {
                             AlternativeRow(leg: alternative, current: leg, isApplying: applyingID == alternative.id)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(applyingID != nil)
+                    }
+
+                    if !connections.isEmpty {
+                        SectionHeader(title: "Mit Umstieg", systemImage: "arrow.triangle.swap")
+                            .padding(.top, 6)
+                    }
+
+                    ForEach(connections) { connection in
+                        Button {
+                            apply(connection.legs, id: connection.id)
+                        } label: {
+                            JourneyCard(journey: connection)
+                                .overlay(alignment: .topTrailing) {
+                                    if applyingID == connection.id { ProgressView().padding(14) }
+                                }
                         }
                         .buttonStyle(.plain)
                         .disabled(applyingID != nil)
@@ -653,9 +673,9 @@ struct AlternativeTrainsSheet: View {
             .overlay {
                 if isLoading {
                     ProgressView("Suche Züge …")
-                } else if alternatives.isEmpty, error == nil {
+                } else if alternatives.isEmpty, connections.isEmpty, error == nil {
                     ContentUnavailableView("Keine anderen Züge", systemImage: "tram.fill",
-                                           description: Text("Gerade fährt kein anderer Zug direkt von \(leg.origin.displayName) nach \(leg.destination.displayName)."))
+                                           description: Text("Gerade fährt kein anderer Zug von \(leg.origin.displayName) nach \(leg.destination.displayName)."))
                 }
             }
             .navigationTitle("Anderen Zug wählen")
@@ -673,22 +693,27 @@ struct AlternativeTrainsSheet: View {
     private func load() async {
         isLoading = true
         defer { isLoading = false }
-        do {
-            alternatives = try await model.trainPicker.alternatives(
-                for: leg, ticketFilter: onlyValidTicket ? model.ticketFilter : nil)
-            error = nil
-        } catch is CancellationError {
-        } catch {
-            self.error = error
-        }
+        let filter = onlyValidTicket ? model.ticketFilter : nil
+        let picker = model.trainPicker, leg = leg
+        // Both lists load together; one failing still shows the other.
+        async let direct = picker.alternatives(for: leg, ticketFilter: filter)
+        async let withTransfers = picker.connections(for: leg, ticketFilter: filter)
+        var failure: Error?
+        var foundDirect: [Leg] = [], foundWithTransfers: [Journey] = []
+        do { foundDirect = try await direct } catch { failure = error }
+        do { foundWithTransfers = try await withTransfers } catch { failure = failure ?? error }
+        guard !Task.isCancelled, !(failure is CancellationError) else { return }
+        alternatives = foundDirect
+        connections = foundWithTransfers
+        error = foundDirect.isEmpty && foundWithTransfers.isEmpty ? failure : nil
     }
 
-    private func apply(_ alternative: Leg) {
-        applyingID = alternative.id
+    private func apply(_ legs: [Leg], id: String) {
+        applyingID = id
         Task {
             defer { applyingID = nil }
             do {
-                try await onSelect(alternative)
+                try await onSelect(legs)
                 dismiss()
             } catch {
                 self.error = error
