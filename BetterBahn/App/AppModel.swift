@@ -722,14 +722,14 @@ final class AppModel {
         if updated != savedJourneys[index] { savedJourneys[index] = updated }
     }
 
-    /// Past journeys; once their live data is gone (`SavedJourney.liveDataLifetime`) without a delay,
-    /// with no delay shown rather than "+0".
+    /// Past journeys; once their live data is gone (`SavedJourney.liveDataLifetime`) shown as planned,
+    /// without any delay.
     var pastJourneys: [SavedJourney] {
         savedJourneys.filter(\.isFinished).reversed().map { entry in
             guard let arrival = entry.journey.arrival?.planned,
                   arrival.addingTimeInterval(SavedJourney.liveDataLifetime) < .now else { return entry }
             var entry = entry
-            entry.journey = entry.journey.droppingOnTimeActuals()
+            entry.journey = entry.journey.droppingActualTimes()
             return entry
         }
     }

@@ -2574,8 +2574,8 @@ private final class HamburgSBahnLevelProtocol: URLProtocol, @unchecked Sendable 
         #expect(refreshed.legs[0].stopovers.last?.arrival?.actual == arrival.addingTimeInterval(300))
     }
 
-    /// An old saved journey's made-up "+0" goes, its real delays stay.
-    @Test func droppingOnTimeActualsKeepsRealDelays() {
+    /// A journey finished over 24 hours ago shows no delay at all, neither "+0" nor a real one.
+    @Test func droppingActualTimesShowsTheJourneyAsPlanned() {
         let start = Date(timeIntervalSince1970: 1_800_000_000)
         let a = station("a", "A"), b = station("b", "B"), c = station("c", "C")
         let stops = [
@@ -2583,22 +2583,20 @@ private final class HamburgSBahnLevelProtocol: URLProtocol, @unchecked Sendable 
                      arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
             Stopover(station: b, arrival: TimeInfo(planned: start.addingTimeInterval(60), actual: start.addingTimeInterval(240)),
                      departure: nil, arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
-            Stopover(station: c, arrival: TimeInfo(planned: start.addingTimeInterval(120), actual: start.addingTimeInterval(120)),
+            Stopover(station: c, arrival: TimeInfo(planned: start.addingTimeInterval(120), actual: start.addingTimeInterval(300)),
                      departure: nil, arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
         ]
         let leg = Leg(origin: a, destination: c, departure: TimeInfo(planned: start, actual: start),
                       arrival: TimeInfo(planned: start.addingTimeInterval(120), actual: start.addingTimeInterval(300)),
-                      departurePlatform: nil, arrivalPlatform: nil, tripId: "bus", line: nil, direction: nil,
+                      departurePlatform: nil, arrivalPlatform: nil, tripId: "ic", line: nil, direction: nil,
                       isWalking: false, cancelled: false, stopovers: stops, remarks: [], source: .transitous)
 
-        let cleaned = Journey(legs: [leg], source: .transitous).droppingOnTimeActuals().legs[0]
+        let cleaned = Journey(legs: [leg], source: .transitous).droppingActualTimes().legs[0]
 
-        #expect(cleaned.departure.actual == nil)
-        #expect(cleaned.arrival.actual == start.addingTimeInterval(300))
-        #expect(cleaned.stopovers[0].departure?.actual == nil)
-        #expect(cleaned.stopovers[1].arrival?.actual == start.addingTimeInterval(240))
-        #expect(cleaned.stopovers[2].arrival?.actual == nil)
-        #expect(cleaned.stopovers[2].arrival?.planned == start.addingTimeInterval(120))
+        #expect(cleaned.departure == TimeInfo(planned: start, actual: nil))
+        #expect(cleaned.arrival == TimeInfo(planned: start.addingTimeInterval(120), actual: nil))
+        #expect(cleaned.stopovers.allSatisfy { $0.arrival?.actual == nil && $0.departure?.actual == nil })
+        #expect(cleaned.stopovers[1].arrival?.planned == start.addingTimeInterval(60))
     }
 
     /// MOTIS repeats the schedule as a stop's time when it has no realtime; that's not a live "+0".

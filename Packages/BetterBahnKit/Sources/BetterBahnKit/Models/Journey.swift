@@ -272,13 +272,10 @@ public struct Journey: Codable, Sendable, Hashable, Identifiable {
     public var departure: TimeInfo? { legs.first?.departure }
     public var arrival: TimeInfo? { legs.last?.arrival }
 
-    /// This journey with every "on time" actual (actual == planned) removed, keeping real delays.
-    /// Journeys saved before stops without live data were left blank carry a made-up "+0" there,
-    /// which can no longer be told apart from a confirmed one once the live data is gone.
-    public func droppingOnTimeActuals() -> Journey {
-        func dropped(_ time: TimeInfo) -> TimeInfo {
-            time.actual == time.planned ? TimeInfo(planned: time.planned, actual: nil) : time
-        }
+    /// This journey as planned, with every actual time removed, so no delay shows at all: what a
+    /// long-finished journey had saved is no longer live data (and older saves carry a made-up "+0").
+    public func droppingActualTimes() -> Journey {
+        func dropped(_ time: TimeInfo) -> TimeInfo { TimeInfo(planned: time.planned, actual: nil) }
         var journey = self
         for index in journey.legs.indices {
             var leg = journey.legs[index]
