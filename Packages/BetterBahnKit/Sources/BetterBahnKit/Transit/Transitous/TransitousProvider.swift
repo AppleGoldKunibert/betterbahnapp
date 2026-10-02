@@ -74,9 +74,10 @@ public struct TransitousProvider: TransitProvider {
     ///
     /// With a `location`, what was typed also counts less strictly (issue #91): first only how many
     /// typed words a hit matches at all (and exact names, as above), then a balance (`nearbyScore`)
-    /// of whole words matched, nearness and being in the town that was typed. So from Berlin "ber"
-    /// finds Flughafen BER before Bern and "ost" Berlin Ostbahnhof before Ulm Ost, while far big
-    /// stations ("Frankfurt", "München") and full names ("Bern") stay on top.
+    /// of whole words matched, nearness, how busy the station is (`sizeScore`) and being in the town
+    /// that was typed. So from Berlin "ber" finds Flughafen BER before Bern and "ost" Berlin
+    /// Ostbahnhof before Ulm Ost, a village station doesn't beat a small town's a bit farther away,
+    /// while far big stations ("Frankfurt", "München") and full names ("Bern") stay on top.
     static func searchRank(_ match: MGeocodeMatch, query: String, offset: Int, near location: Coordinate? = nil,
                            typedTown: Bool = false) -> (Int, Int, Int, Double, Int, Int)
     {
@@ -127,14 +128,14 @@ public struct TransitousProvider: TransitProvider {
         // Trains in Germany and its neighbours share one group, ordered by distance band, when the
         // user's location is known; otherwise `group` is just `tier` and the order is as above.
         var group = tier * 100
-        // How near a train station counts, from `distanceBands.count` (under 50 km, or a busy station
-        // a little farther) down to 0; only with a location.
+        // How near a train station is, from `distanceBands.count` (under 50 km) down to 0; only with
+        // a location.
         var nearness = 0
         if let location, tier >= 5 {
             let distance = location.distance(to: Coordinate(latitude: match.lat, longitude: match.lon))
-            let band = Self.distanceBand(forMeters: distance) - Self.bandShift(forImportance: match.importance)
-            group = 600 - band
-            nearness = Self.distanceBands.count - max(0, band)
+            let band = Self.distanceBand(forMeters: distance)
+            group = 600 - (band - Self.bandShift(forImportance: match.importance))
+            nearness = Self.distanceBands.count - band
         }
         // A preferred station stays ahead of its tier and every distance band.
         if isPreferred {
@@ -146,7 +147,8 @@ public struct TransitousProvider: TransitProvider {
         let textRank: Int
         if location != nil {
             // `nearbyScore` stays well under 100, so it only decides between equal text matches.
-            let nearbyScore = text.whole * 2 + nearness + (Self.isInTown(named: query, match, wholeWords: true) ? 5 : 0)
+            let nearbyScore = text.whole * 2 + nearness + Self.sizeScore(forImportance: match.importance)
+                + (Self.isInTown(named: query, match, wholeWords: true) ? 5 : 0)
             textRank = (text.matched * 10 + exactTier) * 100 + nearbyScore
         } else {
             let elsewhere = typedTown && match.town != nil && !Self.isInTown(named: query, match)
@@ -220,6 +222,15 @@ public struct TransitousProvider: TransitProvider {
     static func bandShift(forImportance importance: Double?) -> Int {
         guard let importance, importance > 0.001 else { return 0 }
         return min(4, Int(log2(importance / 0.001)))
+    }
+
+    /// How busy a station is, one point per doubling of its `importance` above 0.0001 (a village
+    /// station), at most 8 (a big Hbf, ~0.025): a small town's station (~0.0015) gets 3, a village's
+    /// 0–1. Worth about as much as a distance band each, so busier stations a little farther away
+    /// come first, while a village nearby still beats a busy station far away.
+    static func sizeScore(forImportance importance: Double?) -> Int {
+        guard let importance, importance > 0.0001 else { return 0 }
+        return min(8, Int(log2(importance / 0.0001)))
     }
 
     /// "Potsdam" → "Potsdam Hbf": for just a town's name the geocoder can leave its main station

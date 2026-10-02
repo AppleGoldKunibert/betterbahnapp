@@ -426,7 +426,7 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
             .sorted { TransitousProvider.searchRank($0.element, query: "Frankfurt", offset: $0.offset, near: berlin)
                     > TransitousProvider.searchRank($1.element, query: "Frankfurt", offset: $1.offset, near: berlin) }
             .map(\.element.id)
-        #expect(ranked == ["main", "oder", "small", "border"])
+        #expect(ranked == ["main", "oder", "border", "small"])
 
         // A coach stop named just "Bonn" in Bonn doesn't count as an exact match for "Bonn".
         let bonnArea = [MGeocodeMatch.Area(name: "Bonn", adminLevel: 6, isDefault: true)]
@@ -503,6 +503,30 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
 
         let bernau = match("bernau-berlin", "S Bernau Bhf", 52.68, 13.59, "DE", ["REGIONAL_RAIL", "SUBURBAN"], 0.0012)
         #expect(ranked("bern", [bernau, beroun, bern], near: berlin).first == "bern")
+    }
+
+    /// A small town's station a bit farther away comes before a village station nearby, and a busy
+    /// one far away after both; the village is still found, and first once its name is typed in full.
+    @Test func searchRankPrefersBusierStationsButKeepsVillages() {
+        let berlin = Coordinate(latitude: 52.52, longitude: 13.405)
+        func match(_ id: String, _ name: String, _ lat: Double, _ lon: Double, _ importance: Double) -> MGeocodeMatch {
+            MGeocodeMatch(type: "STOP", name: name, id: id, lat: lat, lon: lon, country: "DE", modes: ["REGIONAL_RAIL"],
+                          importance: importance)
+        }
+        let village = match("village", "Neudorf", 52.65, 13.80, 0.0002)
+        let smallTown = match("smallTown", "Neustadt (Dosse)", 52.85, 12.45, 0.0015)
+        let far = match("far", "Neustadt (Weinstr) Hbf", 49.0, 8.4, 0.004)
+        func ranked(_ query: String) -> [String] {
+            [far, village, smallTown].enumerated()
+                .sorted { TransitousProvider.searchRank($0.element, query: query, offset: $0.offset, near: berlin)
+                        > TransitousProvider.searchRank($1.element, query: query, offset: $1.offset, near: berlin) }
+                .map(\.element.id)
+        }
+        #expect(ranked("neu") == ["smallTown", "village", "far"])
+        #expect(ranked("Neudorf").first == "village")
+        #expect(TransitousProvider.sizeScore(forImportance: nil) == 0)
+        #expect(TransitousProvider.sizeScore(forImportance: 0.0015) == 3)
+        #expect(TransitousProvider.sizeScore(forImportance: 1) == 8)
     }
 
     @Test func extraQueriesForAliasesAndTheNearbyTown() {
