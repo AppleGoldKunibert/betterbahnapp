@@ -449,12 +449,6 @@ final class AppModel {
 
     // MARK: Live train positions
 
-    /// How often the positions of running trains of saved journeys are fetched from bahn.jetzt.
-    static let positionRefreshInterval: Duration = .seconds(15)
-    /// The same on mobile data or in Low Data Mode: bahn.jetzt only offers the full, uncompressed
-    /// list of every running train (~250 KB), with no way to ask for fewer.
-    static let positionRefreshIntervalSavingData: Duration = .seconds(60)
-
     /// Latest position of every train on a saved journey that is running right now, keyed by train name.
     private(set) var trainPositions: [String: LiveTrainPosition] = [:]
 
@@ -497,16 +491,23 @@ final class AppModel {
         await repeatingAtPositionInterval { await self.refreshTrainPositions() }
     }
 
-    /// Runs `body` every `positionRefreshInterval` (or the data-saving interval on mobile data or in
-    /// Low Data Mode) until the calling task is cancelled.
+    /// Runs `body` at the interval picked in the settings (`TrainPositionRefresh`, which may depend on
+    /// mobile data or Low Data Mode) until the calling task is cancelled. With refreshing switched off,
+    /// `body` runs once and again only after it is switched back on.
     private func repeatingAtPositionInterval(_ body: () async -> Void) async {
         let monitor = NWPathMonitor()
         monitor.start(queue: .global(qos: .utility))
         defer { monitor.cancel() }
+        var fetchesNext = true
         while !Task.isCancelled {
-            await body()
+            if fetchesNext { await body() }
             let path = monitor.currentPath
-            let interval = path.isExpensive || path.isConstrained ? Self.positionRefreshIntervalSavingData : Self.positionRefreshInterval
+            guard let interval = settings.trainPositionRefresh.interval(savingData: path.isExpensive || path.isConstrained) else {
+                fetchesNext = false
+                try? await Task.sleep(for: .seconds(5))
+                continue
+            }
+            fetchesNext = true
             try? await Task.sleep(for: interval)
         }
     }
@@ -557,6 +558,27 @@ final class AppModel {
     func coachSequence(for request: BahnDeClient.FormationRequest) async throws -> CoachSequence? {
         guard let bahnDe = provider.bahnDe else { return nil }
         return try await bahnDe.coachSequence(request)
+    }
+
+    /// The formation remembered for a saved journey's leg, if any.
+    func rememberedFormation(for leg: Leg) -> TrainFormation? {
+        let key = leg.formationKey
+        return savedJourneys.lazy.compactMap { $0.formations?[key] }.first
+    }
+
+    /// Keeps a leg's formation in every saved journey riding it, so its Tz and Taufname stay known
+    /// (and sync through iCloud) once the train has run.
+    func rememberFormation(_ formation: TrainFormation, for leg: Leg) {
+        let key = leg.formationKey
+        var updated = savedJourneys
+        var changed = false
+        for index in updated.indices where updated[index].journey.legs.contains(where: { $0.formationKey == key }) {
+            if let formations = TrainFormation.remembering(formation, for: key, in: updated[index].formations) {
+                updated[index].formations = formations
+                changed = true
+            }
+        }
+        if changed { savedJourneys = updated }
     }
 
     @ObservationIgnored private var trainTypeCache: [String: TrainTypeLookup?] = [:]
@@ -854,6 +876,9 @@ nonisolated struct SavedJourney: Codable, Hashable, Identifiable {
     var previousVersions: [PlanVersion]?
     /// Issue IDs we already sent a notification for.
     var notifiedIssues: [String]?
+    /// Trainsets (Tz, Taufname) seen on the legs' trains, keyed by `Leg.formationKey`, kept and
+    /// synced so they stay known after the journey (optional so older saved data still decodes).
+    var formations: [String: TrainFormation]?
 
     var issues: [ConnectionIssue] { journey.connectionIssues() }
 
@@ -973,6 +998,12 @@ final class AppSettings {
         }
     }
 
+    /// How often maps refresh the positions of running trains. Stays on this device, since the
+    /// data it costs depends on the device's connection.
+    var trainPositionRefresh: TrainPositionRefresh {
+        didSet { UserDefaults.standard.set(trainPositionRefresh.rawValue, forKey: "trainPositionRefresh") }
+    }
+
     /// Unlocks the features below; each one still has to be switched on by itself.
     var expertMode: Bool {
         didSet {
@@ -1011,6 +1042,7 @@ final class AppSettings {
         ticketFilterByDefault = defaults.bool(forKey: "onlyBC100ByDefault")
         ticketType = defaults.string(forKey: "ticketType").flatMap(TicketType.init) ?? .deutschlandticket
         liveActivitiesEnabled = defaults.object(forKey: "liveActivitiesEnabled") as? Bool ?? true
+        trainPositionRefresh = defaults.string(forKey: "trainPositionRefresh").flatMap(TrainPositionRefresh.init) ?? .automatic
         expertMode = defaults.bool(forKey: "expertMode")
         expertTraewelling = defaults.bool(forKey: "expertTraewelling")
         expertEditJourney = defaults.bool(forKey: "expertEditJourney")
