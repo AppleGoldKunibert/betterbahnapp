@@ -96,9 +96,11 @@ public struct JourneyRefresher: Sendable {
                 leg = Self.apply(override, to: leg)
             }
             if let timetables, timetables.canLookUp(leg) {
+                leg = Self.syncingEnds(of: leg, toStopovers: true)
                 let live = await timetables.liveStopovers(for: leg)
                 leg.stopovers = live.stopovers
                 leg.messages = TrainMessage.merged(leg.messages + live.messages)
+                leg = Self.syncingEnds(of: leg, toStopovers: false)
             }
             // Neither Transitous nor DB Timetables above ever *inserts* a stop — only bahn.de's journey
             // details report a Zusatzhalt (an unscheduled stop the train additionally picked up today)
@@ -120,6 +122,27 @@ public struct JourneyRefresher: Sendable {
             updated = named
         }
         return updated
+    }
+
+    /// Copies the leg's departure/arrival onto its first/last stopover (`toStopovers`) or back, when
+    /// those stopovers are its origin and destination at the same planned times. The DB lookups for
+    /// the leg's ends and for its stops are separate requests; one of them can fail (a big station's
+    /// `fchg` is large and can time out) while the other gets through. Synced both ways, the leg's
+    /// ends keep whichever delay DB reported, as the trip view does (#76: an S7 to Hamburg Hbf
+    /// ended "+0" while its stops and the trip view had +3).
+    static func syncingEnds(of leg: Leg, toStopovers: Bool) -> Leg {
+        var leg = leg
+        if let first = leg.stopovers.indices.first, leg.stopovers[first].station.isSamePlace(as: leg.origin),
+           leg.stopovers[first].departure?.planned == leg.departure.planned {
+            if toStopovers { leg.stopovers[first].departure = leg.departure }
+            else if let departure = leg.stopovers[first].departure { leg.departure = departure }
+        }
+        if let last = leg.stopovers.indices.last, leg.stopovers[last].station.isSamePlace(as: leg.destination),
+           leg.stopovers[last].arrival?.planned == leg.arrival.planned {
+            if toStopovers { leg.stopovers[last].arrival = leg.arrival }
+            else if let arrival = leg.stopovers[last].arrival { leg.arrival = arrival }
+        }
+        return leg
     }
 
     /// A leg within the next week missing a platform somewhere, which bahn.de may know (see `refresh`).

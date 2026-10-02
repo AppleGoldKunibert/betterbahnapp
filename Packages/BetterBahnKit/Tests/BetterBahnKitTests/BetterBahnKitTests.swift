@@ -2462,7 +2462,7 @@ private final class HamburgSBahnLevelProtocol: URLProtocol, @unchecked Sendable 
 /// Issue #76 as seen in a saved journey: S7 Bergedorf 12:58 → Hamburg Hbf 13:19 running 3 minutes late.
 /// Transitous had no realtime for it (its stops then carry the plan as "actual"), so only DB's
 /// Timetables can tell, and the refreshed leg must end with DB's +3 like the trip view does.
-@Suite struct JourneyRefresherSBahnLevelTests {
+@Suite(.serialized) struct JourneyRefresherSBahnLevelTests {
     @Test func refreshedLegEndsWithDBsDelayAtTheSBahnLevel() async throws {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [BergedorfS7Protocol.self]
@@ -2496,17 +2496,34 @@ private final class HamburgSBahnLevelProtocol: URLProtocol, @unchecked Sendable 
         #expect(refreshed.legs[0].arrival.actual == arrival.addingTimeInterval(180))
         #expect(refreshed.legs[0].stopovers.last?.arrival?.actual == arrival.addingTimeInterval(180))
     }
+
+    /// The first request for Hamburg Hbf's (large) `fchg` fails, as a timeout would; the stops'
+    /// lookup right after gets through. The leg's end must still show DB's +3, not Transitous' "+0".
+    @Test func legEndKeepsTheStopsDelayWhenItsOwnLookupFailed() async throws {
+        BergedorfS7Protocol.failHbfChangesOnce.withLock { $0 = true }
+        defer { BergedorfS7Protocol.failHbfChangesOnce.withLock { $0 = false } }
+        try await refreshedLegEndsWithDBsDelayAtTheSBahnLevel()
+    }
 }
 
 /// IRIS for S 47124 on 2026-10-02 (real ids/times): Bergedorf lists it, Hamburg Hbf (8002549) doesn't,
 /// "Hamburg Hbf (S-Bahn)" (8098549) does, 3 minutes late.
 private final class BergedorfS7Protocol: URLProtocol, @unchecked Sendable {
+    static let failHbfChangesOnce = Mutex(false)
+
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func stopLoading() {}
 
     override func startLoading() {
         let path = request.url!.path
+        if path.hasSuffix("fchg/8098549"), Self.failHbfChangesOnce.withLock({ fail in defer { fail = false }; return fail }) {
+            let response = HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: nil, headerFields: nil)!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Data())
+            client?.urlProtocolDidFinishLoading(self)
+            return
+        }
         let body = switch path {
         case _ where path.contains("plan/8000148/"):
             #"<timetable station='Hamburg-Bergedorf'><s id="b"><tl c="S" n="47124"/><ar pt="2610021257" pp="5"/><dp pt="2610021258" pp="5"/></s></timetable>"#
