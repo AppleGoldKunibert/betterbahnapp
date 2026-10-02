@@ -599,9 +599,10 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(ber.map(\.id) == ["ber", "bern"])
         #expect(!NearbyGeocodeProtocol.requestedTexts.withLock { $0 }.contains("Berlin ber"))
 
-        // Two letters: the geocoder finds nothing, but main stations starting with them.
+        // Two letters: the geocoder finds nothing, but main stations starting with them, and nearby
+        // stations from the bundled list (Flughafen BER).
         let be = try await provider.searchStations("Be", near: berlin)
-        #expect(be.map(\.id) == ["berlinHbf"])
+        #expect(be.map(\.id) == ["berlinHbf", "ber"])
         #expect(TransitousProvider.shortQueries(for: "ber").isEmpty)
         #expect(TransitousProvider.shortQueries(for: "Be ") == ["Be Hbf", "Be Bahnhof"])
     }
