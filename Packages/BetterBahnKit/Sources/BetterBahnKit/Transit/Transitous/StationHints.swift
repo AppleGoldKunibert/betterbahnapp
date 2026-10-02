@@ -33,7 +33,7 @@ enum StationHints {
     /// gives Potsdamer Platz and Potsdam Hbf. Not those matching only by the place `excluding` (the
     /// user's own town, asked for separately), so "ber" in Berlin finds Bernau rather than Berlin Hbf.
     static func names(matching query: String, near location: Coordinate, excluding excludedPlace: String? = nil,
-                      limit: Int = 3, in hints: [Hint] = all) -> [String]
+                      limit: Int = 5, in hints: [Hint] = all) -> [String]
     {
         let typed = TransitousProvider.searchWords(query)
         guard !typed.isEmpty else { return [] }
