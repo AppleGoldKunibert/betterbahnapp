@@ -722,8 +722,16 @@ final class AppModel {
         if updated != savedJourneys[index] { savedJourneys[index] = updated }
     }
 
+    /// Past journeys; once their live data is gone (`SavedJourney.liveDataLifetime`) without a delay,
+    /// with no delay shown rather than "+0".
     var pastJourneys: [SavedJourney] {
-        savedJourneys.filter(\.isFinished).reversed()
+        savedJourneys.filter(\.isFinished).reversed().map { entry in
+            guard let arrival = entry.journey.arrival?.planned,
+                  arrival.addingTimeInterval(SavedJourney.liveDataLifetime) < .now else { return entry }
+            var entry = entry
+            entry.journey = entry.journey.droppingOnTimeActuals()
+            return entry
+        }
     }
 
     /// Upcoming journeys within their Live Activity window: from 30 minutes before departure until
@@ -856,6 +864,9 @@ nonisolated struct SavedJourney: Codable, Hashable, Identifiable {
     var notifiedIssues: [String]?
 
     var issues: [ConnectionIssue] { journey.connectionIssues() }
+
+    /// How long after arriving a finished journey is still refreshed when opened.
+    static let liveDataLifetime: TimeInterval = 24 * 3600
 
     /// Finished 10 minutes after the (realtime) arrival.
     var isFinished: Bool {

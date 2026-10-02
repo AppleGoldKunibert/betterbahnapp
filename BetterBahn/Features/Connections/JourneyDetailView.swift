@@ -133,7 +133,7 @@ struct JourneyDetailView: View {
     /// Once neither source has live data any more, the refresh keeps the delays it already had.
     private func refreshRecentlyFinished() async {
         guard readOnly, let entry = model.pastJourneys.first(where: { $0.journey == journey }),
-              let arrival = journey.arrival?.planned, arrival.addingTimeInterval(24 * 3600) > .now else { return }
+              let arrival = journey.arrival?.planned, arrival.addingTimeInterval(SavedJourney.liveDataLifetime) > .now else { return }
         let refreshed = await model.journeyRefresher.refresh(journey)
         guard refreshed != journey else { return }
         model.updateSavedJourneyData(id: entry.id, journey: refreshed)
