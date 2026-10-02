@@ -449,12 +449,6 @@ final class AppModel {
 
     // MARK: Live train positions
 
-    /// How often the positions of running trains of saved journeys are fetched from bahn.jetzt.
-    static let positionRefreshInterval: Duration = .seconds(15)
-    /// The same on mobile data or in Low Data Mode: bahn.jetzt only offers the full, uncompressed
-    /// list of every running train (~250 KB), with no way to ask for fewer.
-    static let positionRefreshIntervalSavingData: Duration = .seconds(60)
-
     /// Latest position of every train on a saved journey that is running right now, keyed by train name.
     private(set) var trainPositions: [String: LiveTrainPosition] = [:]
 
@@ -497,16 +491,23 @@ final class AppModel {
         await repeatingAtPositionInterval { await self.refreshTrainPositions() }
     }
 
-    /// Runs `body` every `positionRefreshInterval` (or the data-saving interval on mobile data or in
-    /// Low Data Mode) until the calling task is cancelled.
+    /// Runs `body` at the interval picked in the settings (`TrainPositionRefresh`, which may depend on
+    /// mobile data or Low Data Mode) until the calling task is cancelled. With refreshing switched off,
+    /// `body` runs once and again only after it is switched back on.
     private func repeatingAtPositionInterval(_ body: () async -> Void) async {
         let monitor = NWPathMonitor()
         monitor.start(queue: .global(qos: .utility))
         defer { monitor.cancel() }
+        var fetchesNext = true
         while !Task.isCancelled {
-            await body()
+            if fetchesNext { await body() }
             let path = monitor.currentPath
-            let interval = path.isExpensive || path.isConstrained ? Self.positionRefreshIntervalSavingData : Self.positionRefreshInterval
+            guard let interval = settings.trainPositionRefresh.interval(savingData: path.isExpensive || path.isConstrained) else {
+                fetchesNext = false
+                try? await Task.sleep(for: .seconds(5))
+                continue
+            }
+            fetchesNext = true
             try? await Task.sleep(for: interval)
         }
     }
@@ -973,6 +974,12 @@ final class AppSettings {
         }
     }
 
+    /// How often maps refresh the positions of running trains. Stays on this device, since the
+    /// data it costs depends on the device's connection.
+    var trainPositionRefresh: TrainPositionRefresh {
+        didSet { UserDefaults.standard.set(trainPositionRefresh.rawValue, forKey: "trainPositionRefresh") }
+    }
+
     /// Unlocks the features below; each one still has to be switched on by itself.
     var expertMode: Bool {
         didSet {
@@ -1011,6 +1018,7 @@ final class AppSettings {
         ticketFilterByDefault = defaults.bool(forKey: "onlyBC100ByDefault")
         ticketType = defaults.string(forKey: "ticketType").flatMap(TicketType.init) ?? .deutschlandticket
         liveActivitiesEnabled = defaults.object(forKey: "liveActivitiesEnabled") as? Bool ?? true
+        trainPositionRefresh = defaults.string(forKey: "trainPositionRefresh").flatMap(TrainPositionRefresh.init) ?? .automatic
         expertMode = defaults.bool(forKey: "expertMode")
         expertTraewelling = defaults.bool(forKey: "expertTraewelling")
         expertEditJourney = defaults.bool(forKey: "expertEditJourney")
