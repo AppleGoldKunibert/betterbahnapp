@@ -110,7 +110,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   refreshed by `AppModel.followTrainPositions()` while the map is on screen). Long-distance trains by
   number, regional/S-Bahn by run number (`Line.tripNumber`).
 - `Transit/Transitous/` – MOTIS API client + DTOs (`M*` types). Station-name cleanup and
-  deduplication of boards happen here.
+  deduplication of boards happen here. Station search ranking is `searchRank`; with the user's location
+  it balances text match against nearness and also asks for "<nearby town> <query>" (`NearbyTowns`,
+  an offline list, so coordinates never leave the device) and aliases like "ber" → "Flughafen BER".
 - `Transit/Timetables/` – official DB Timetables XML client (realtime overrides, messages), through the
   `bahnde-proxy` Worker, which holds the API key. The app only uses it where App Attest works. A train not
   found at a station's EVA is looked for at its other levels (`/station` `meta`, e.g. "Hamburg Hbf (S-Bahn)").

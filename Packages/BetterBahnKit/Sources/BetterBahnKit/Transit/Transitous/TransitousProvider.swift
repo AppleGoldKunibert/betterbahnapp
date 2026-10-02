@@ -22,7 +22,7 @@ public struct TransitousProvider: TransitProvider {
     }
 
     public func searchStations(_ query: String, near location: Coordinate?) async throws -> [Station] {
-        let matches = try await geocode(query, addingMainStation: true)
+        let matches = try await geocode(query, addingMainStation: true, near: location)
         let typedTown = matches.contains { Self.isInTown(named: query, $0) }
         // Stable sort by search ranking (then completeness) keeps the API's text ranking within each group.
         let ranked = matches.enumerated()
@@ -71,6 +71,12 @@ public struct TransitousProvider: TransitProvider {
     /// station 50–100 km away comes before one 200–300 km away, whatever country it's in, while
     /// stations within the same band keep the order above. Busy stations count as a few bands nearer
     /// (`bandShift`), so small stations nearby don't push a big one like Frankfurt (M) Hbf down the list.
+    ///
+    /// With a `location`, what was typed also counts less strictly (issue #91): first only how many
+    /// typed words a hit matches at all (and exact names, as above), then a balance (`nearbyScore`)
+    /// of whole words matched, nearness and being in the town that was typed. So from Berlin "ber"
+    /// finds Flughafen BER before Bern and "ost" Berlin Ostbahnhof before Ulm Ost, while far big
+    /// stations ("Frankfurt", "München") and full names ("Bern") stay on top.
     static func searchRank(_ match: MGeocodeMatch, query: String, offset: Int, near location: Coordinate? = nil,
                            typedTown: Bool = false) -> (Int, Int, Int, Double, Int, Int)
     {
@@ -121,18 +127,32 @@ public struct TransitousProvider: TransitProvider {
         // Trains in Germany and its neighbours share one group, ordered by distance band, when the
         // user's location is known; otherwise `group` is just `tier` and the order is as above.
         var group = tier * 100
+        // How near a train station counts, from `distanceBands.count` (under 50 km, or a busy station
+        // a little farther) down to 0; only with a location.
+        var nearness = 0
         if let location, tier >= 5 {
             let distance = location.distance(to: Coordinate(latitude: match.lat, longitude: match.lon))
-            group = 600 - (Self.distanceBand(forMeters: distance) - Self.bandShift(forImportance: match.importance))
+            let band = Self.distanceBand(forMeters: distance) - Self.bandShift(forImportance: match.importance)
+            group = 600 - band
+            nearness = Self.distanceBands.count - max(0, band)
         }
         // A preferred station stays ahead of its tier and every distance band.
         if isPreferred {
             group = tier * 100 + 50
+            nearness = Self.distanceBands.count + 1
         }
 
-        let textScore = Self.textMatchScore(match, query: query)
-        let elsewhere = typedTown && match.town != nil && !Self.isInTown(named: query, match)
-        return (textScore * 10 + (elsewhere ? 0 : 5) + exactTier, group, tier * 100 + (isMainStation ? 10 : 0) + neighborRank,
+        let text = Self.textMatch(match, query: query)
+        let textRank: Int
+        if location != nil {
+            // `nearbyScore` stays well under 100, so it only decides between equal text matches.
+            let nearbyScore = text.whole * 2 + nearness + (Self.isInTown(named: query, match, wholeWords: true) ? 5 : 0)
+            textRank = (text.matched * 10 + exactTier) * 100 + nearbyScore
+        } else {
+            let elsewhere = typedTown && match.town != nil && !Self.isInTown(named: query, match)
+            textRank = (text.matched + text.whole) * 10 + (elsewhere ? 0 : 5) + exactTier
+        }
+        return (textRank, group, tier * 100 + (isMainStation ? 10 : 0) + neighborRank,
                 match.importance ?? 0, match.modes?.count ?? 0, -offset)
     }
 
@@ -141,12 +161,21 @@ public struct TransitousProvider: TransitProvider {
     /// "Bahnhofstraße" in Bernau), 1 if a word only starts with it ("Augustusp", "Bonn" in
     /// "Bönningstedt"), 0 otherwise.
     static func textMatchScore(_ match: MGeocodeMatch, query: String) -> Int {
+        let text = textMatch(match, query: query)
+        return text.matched + text.whole
+    }
+
+    /// How many typed words a hit matches at all (as a whole word or the start of one), and how many
+    /// of those as whole words.
+    static func textMatch(_ match: MGeocodeMatch, query: String) -> (matched: Int, whole: Int) {
         let names = [match.fullName, Station.displayName(for: match.fullName)] + match.localAreaNames
         let words = Set(names.flatMap { searchWords($0).flatMap { $0 } })
-        return searchWords(query).reduce(0) { score, spellings in
-            if !spellings.isDisjoint(with: words) { return score + 2 }
-            if words.contains(where: { word in spellings.contains { word.hasPrefix($0) } }) { return score + 1 }
-            return score
+        return searchWords(query).reduce((matched: 0, whole: 0)) { counts, spellings in
+            if !spellings.isDisjoint(with: words) { return (counts.matched + 1, counts.whole + 1) }
+            if words.contains(where: { word in spellings.contains { word.hasPrefix($0) } }) {
+                return (counts.matched + 1, counts.whole)
+            }
+            return counts
         }
     }
 
@@ -173,12 +202,13 @@ public struct TransitousProvider: TransitProvider {
 
     /// True if `query` is the name (or the start of the name) of the town `match` is in: "München"
     /// for München Ost, not for the station "München (Bad Berka)" in the town of Bad Berka.
-    static func isInTown(named query: String, _ match: MGeocodeMatch) -> Bool {
+    /// With `wholeWords`, only the full name counts ("Ost" isn't the town of Ostrava).
+    static func isInTown(named query: String, _ match: MGeocodeMatch, wholeWords: Bool = false) -> Bool {
         guard let town = match.town else { return false }
         let townWords = searchWords(town).flatMap { $0 }
         let typed = searchWords(query)
         return !typed.isEmpty && typed.allSatisfy { spellings in
-            townWords.contains { word in spellings.contains { word.hasPrefix($0) } }
+            townWords.contains { word in spellings.contains { wholeWords ? word == $0 : word.hasPrefix($0) } }
         }
     }
 
@@ -201,6 +231,28 @@ public struct TransitousProvider: TransitProvider {
         let spellings = searchWords(trimmed).flatMap { $0 }
         guard !spellings.contains(where: { $0.hasSuffix("bahnhof") }) else { return nil }
         return trimmed + " Hbf"
+    }
+
+    /// Short names the geocoder doesn't know: for "ber" none of its 50 hits is Flughafen BER, only
+    /// "Flughafen BER" finds it. Asked for as well, like the main station.
+    static let aliases = ["ber": "Flughafen BER"]
+
+    static func aliasQuery(for query: String) -> String? {
+        aliases[query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()]
+    }
+
+    /// "ost" in Berlin → "Berlin ost", so stations in the user's town are among the candidates (see
+    /// `NearbyTowns`). Nil without a location or town nearby, and when what was typed already names
+    /// the town or might be the start of it ("ber" in Berlin).
+    static func nearbyTownQuery(for query: String, near location: Coordinate?) -> String? {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let location, !trimmed.isEmpty, let town = NearbyTowns.town(near: location) else { return nil }
+        let townWords = searchWords(town).flatMap { $0 }
+        let typedWords = searchWords(trimmed).flatMap { $0 }
+        let namesTown = typedWords.contains { typed in
+            townWords.contains { $0.hasPrefix(typed) || typed.hasPrefix($0) }
+        }
+        return namesTown ? nil : "\(town) \(trimmed)"
     }
 
     /// Stations that come first among same-named ones even when another is nearer, e.g.
@@ -257,14 +309,21 @@ public struct TransitousProvider: TransitProvider {
         return kept
     }
 
-    /// With `addingMainStation`, also asks for the town's main station (see `mainStationQuery(for:)`)
-    /// and keeps those hits only if they match `query`.
-    private func geocode(_ query: String, addingMainStation: Bool = false) async throws -> [MGeocodeMatch] {
+    /// With `addingMainStation`, also asks for the town's main station (see `mainStationQuery(for:)`),
+    /// a known short name (`aliasQuery(for:)`) and, `near` a location, stations in the user's town
+    /// (`nearbyTownQuery(for:near:)`), and keeps those hits only if they match `query`.
+    private func geocode(_ query: String, addingMainStation: Bool = false, near location: Coordinate? = nil)
+        async throws -> [MGeocodeMatch]
+    {
         var queries = [query]
         let umlauts = Self.withUmlauts(query)
         if umlauts != query { queries.append(umlauts) }
         let required = queries.count
-        if addingMainStation, let mainStation = Self.mainStationQuery(for: query) { queries.append(mainStation) }
+        if addingMainStation {
+            let extras = [Self.mainStationQuery(for: query), Self.aliasQuery(for: query),
+                          Self.nearbyTownQuery(for: query, near: location)]
+            queries += extras.compactMap { $0 }
+        }
 
         let texts = queries
         let results = try await withThrowingTaskGroup(of: (Int, [MGeocodeMatch]).self) { group in
