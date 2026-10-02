@@ -1066,6 +1066,32 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
 }
 
 @Suite struct BahnDeFormationTests {
+    /// A saved journey keeps the Tz once seen; formations without one, or unchanged ones, change nothing.
+    @Test func remembersFormationsNamingATz() {
+        let tz = TrainFormation(units: [TrainFormation.Unit(model: "ICE 4", number: "9457", name: "Bundesrepublik Deutschland")])
+        let modelOnly = TrainFormation(units: [TrainFormation.Unit(model: "ICE 4", number: nil)])
+        let stored = TrainFormation.remembering(tz, for: "a", in: nil)
+        #expect(stored == ["a": tz])
+        #expect(TrainFormation.remembering(tz, for: "a", in: stored) == nil)
+        #expect(TrainFormation.remembering(modelOnly, for: "a", in: stored) == nil)
+        let swapped = TrainFormation(units: [TrainFormation.Unit(model: "ICE 4", number: "9018")])
+        #expect(TrainFormation.remembering(swapped, for: "a", in: stored) == ["a": swapped])
+        #expect(TrainFormation.remembering(swapped, for: "b", in: stored) == ["a": tz, "b": swapped])
+    }
+
+    /// The key survives a refresh renaming the train or changing its trip.
+    @Test func formationKeyIgnoresTrainNameAndTrip() {
+        let at = { (minutes: Double) in TimeInfo(planned: Date(timeIntervalSince1970: 1_800_000_000 + minutes * 60), actual: nil) }
+        func leg(_ name: String, tripId: String, departure: Double) -> Leg {
+            Leg(origin: station("8002549", "Hamburg Hbf"), destination: station("8010085", "Dresden Hbf"),
+                departure: at(departure), arrival: at(150), departurePlatform: nil, arrivalPlatform: nil, tripId: tripId,
+                line: Line(name: name, number: "171", product: .highSpeed, operatorName: nil), direction: nil,
+                isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+        }
+        #expect(leg("ICE 171", tripId: "x", departure: 0).formationKey == leg("RJ 171", tripId: "y", departure: 0).formationKey)
+        #expect(leg("ICE 171", tripId: "x", departure: 0).formationKey != leg("ICE 171", tripId: "x", departure: 60).formationKey)
+    }
+
     @Test func carriageReadsCountryAndSeriesFromUICNumber() {
         let car = Carriage(vehicleID: "93805401002-1", constructionType: "Apmzf")
         #expect(car.uic == "938054010021")
@@ -1098,6 +1124,15 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(BahnDeClient.model(constructionTypes: ["I4110", "I4115"], groupName: "ICE1162", category: "ICE") == "ICE T")
         #expect(BahnDeClient.model(constructionTypes: ["R8911", "R8921"], groupName: "ICE1811", category: "ICE") == "ICE L")
         #expect(BahnDeClient.model(constructionTypes: ["E1465", "R6682"], groupName: "ICD2854", category: "IC") == "IC 2 Twindexx")
+    }
+
+    @Test func marksRedesignedICE3neo() {
+        #expect(TrainModel.name("ICE 3neo", unit: "8016") == "ICE 3neo")
+        #expect(TrainModel.name("ICE 3neo", unit: "8017") == "ICE 3neo Redesign")
+        #expect(TrainModel.name("ICE 3neo", unit: "8045") == "ICE 3neo Redesign")
+        #expect(TrainModel.name("ICE 3neo", unit: nil) == "ICE 3neo")
+        #expect(TrainModel.name("ICE 4", unit: "9465") == "ICE 4")
+        #expect(TrainModel.name(nil, unit: "8030") == nil)
     }
 
     @Test func unitNumbersAndTrainsetNames() {
@@ -1396,6 +1431,20 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
                                      source: "DB", retrievedAt: .now)
         #expect(lookup.summary == "ICE 4")
         #expect(lookup.formation.unitDescription == "Tz 9457 „Bundesrepublik Deutschland“")
+    }
+
+    @Test func summaryMarksRedesignedICE3neo() {
+        let group = { (unit: String?) in
+            TrainTypeLookup.Group(seriesName: "ICE 3neo (BR408)", baureihe: "408", unitNumber: unit, origin: nil, destination: nil, coachCount: 8)
+        }
+        let lookup = { (groups: [TrainTypeLookup.Group]) in
+            TrainTypeLookup(category: "ICE", number: "144", date: "2026-10-02", administration: "80", groups: groups,
+                            status: .realtime, source: "DB", retrievedAt: .now)
+        }
+        #expect(lookup([group("8020")]).summary == "ICE 3neo Redesign")
+        #expect(lookup([group("8020")]).formation.modelSummary == "ICE 3neo Redesign")
+        #expect(lookup([group("8020"), group("8005")]).summary == "ICE 3neo Redesign + ICE 3neo")
+        #expect(lookup([group(nil)]).summary == "ICE 3neo")
     }
 
     /// Real response for IC 2271 (2026-10-01): bahn.expert has no Baureihe for IC 2 Twindexx sets.

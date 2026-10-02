@@ -45,6 +45,25 @@ public struct TrainFormation: Codable, Sendable, Hashable {
         guard !parts.isEmpty else { return nil }
         return "Tz " + parts.joined(separator: " + ")
     }
+
+    /// `stored` with `formation` kept for `key` (see `Leg.formationKey`), so a saved journey still
+    /// shows which trainsets ran once bahn.de and bahn.expert no longer answer for the train. Only a
+    /// formation naming a Tz is kept; nil when there is nothing to change.
+    public static func remembering(_ formation: TrainFormation, for key: String,
+                                   in stored: [String: TrainFormation]?) -> [String: TrainFormation]? {
+        guard formation.unitDescription != nil, stored?[key] != formation else { return nil }
+        var updated = stored ?? [:]
+        updated[key] = formation
+        return updated
+    }
+}
+
+extension Leg {
+    /// Identifies the leg's train run for its remembered formation: the planned departure and arrival,
+    /// which stay the same when a refresh renames the train or changes its trip ID.
+    public var formationKey: String {
+        "\(Int(departure.planned.timeIntervalSince1970))-\(Int(arrival.planned.timeIntervalSince1970))"
+    }
 }
 
 /// Endpoints of bahn.de's web API: station search, departure boards, journey details and coach
@@ -330,7 +349,8 @@ public struct BahnDeClient: Sendable {
             let model = TrainModel.detect(carriages, category: category).map(\.name)
                 ?? Self.model(constructionTypes: types, groupName: name, category: category)
             let trainset = hasTrainsets(category)
-            let unit = TrainFormation.Unit(model: model, number: trainset ? unitNumber(from: name) : nil,
+            let number = trainset ? unitNumber(from: name) : nil
+            let unit = TrainFormation.Unit(model: TrainModel.name(model, unit: number), number: number,
                                            name: trainset ? trainsetName(from: name) : nil)
             if unit.model != nil || unit.number != nil { units.append(unit) }
         }

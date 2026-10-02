@@ -47,9 +47,10 @@ public struct TrainTypeLookup: Codable, Sendable, Hashable {
     public var retrievedAt: Date
 
     /// Distinct marketing families in order, e.g. ["ICE 4"] — "ICE 4 Lang (BR412)" collapses to "ICE 4".
+    /// Live Tz numbers mark redesigned ICE 3neo ("ICE 3neo Redesign").
     public var families: [String] {
         var result: [String] = []
-        for family in groups.compactMap(\.family) where !result.contains(family) {
+        for family in groups.compactMap({ TrainModel.name($0.family, unit: $0.unitNumber) }) where !result.contains(family) {
             result.append(family)
         }
         return result
@@ -61,7 +62,7 @@ public struct TrainTypeLookup: Codable, Sendable, Hashable {
     /// Adapter for the formation UI; adds the Taufname for live Tz numbers.
     public var formation: TrainFormation {
         TrainFormation(units: groups.map { group in
-            .init(model: group.family, number: group.unitNumber,
+            .init(model: TrainModel.name(group.family, unit: group.unitNumber), number: group.unitNumber,
                   name: group.unitNumber.flatMap(Int.init).flatMap { TrainsetNames.byUnit[$0] })
         })
     }
