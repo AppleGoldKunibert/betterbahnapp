@@ -77,14 +77,24 @@ for line in lines {
         }
     }
     let seconds = Date().timeIntervalSince(start)
+    // "Wroclaw Glowny" is "Wrocław Główny", "Tønder" also "Toender".
+    func folded(_ text: String) -> String {
+        var text = text.precomposedStringWithCanonicalMapping.lowercased()
+        for (letter, spelled) in [("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ø", "oe"), ("æ", "ae"), ("å", "aa"), ("ß", "ss"),
+                                  ("ł", "l"), ("đ", "d")] {
+            text = text.replacingOccurrences(of: letter, with: spelled)
+        }
+        return text.folding(options: .diacriticInsensitive, locale: nil)
+    }
+    func has(_ name: String, _ want: String) -> Bool { folded(name).contains(folded(want)) }
     let missing = expected.filter { want in
         // "=Bern" wants exactly that name, "Bern" any name containing it.
         want.hasPrefix("=") ? !names.prefix(top).contains(String(want.dropFirst()))
-            : !names.prefix(top).contains { $0.localizedCaseInsensitiveContains(want) }
+            : !names.prefix(top).contains { has($0, want) }
     }
     // Top 0 turns it around: none of the expected names may be among the first 5.
     let ok = errorText == nil && (top == 0
-        ? !names.prefix(5).contains { name in expected.contains { name.localizedCaseInsensitiveContains($0) } }
+        ? !names.prefix(5).contains { name in expected.contains { has(name, $0) } }
         : missing.isEmpty)
     if !ok { failures += 1 }
     print("\(ok ? "PASS" : "FAIL") [\(parts[0])] \"\(parts[1])\" want \(expected) in top \(top)\(errorText.map { " ERROR \($0)" } ?? "") (\(String(format: "%.1f", seconds)) s)")

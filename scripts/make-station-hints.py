@@ -7,6 +7,7 @@ picked names up live, so the list doesn't go stale with Transitous' stop IDs. Re
 then (new stations): python3 scripts/make-station-hints.py
 """
 import json
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -15,9 +16,13 @@ from pathlib import Path
 
 API = "https://api.transitous.org/api/v1/map/stops"
 OUT = Path(__file__).resolve().parent.parent / "Packages/BetterBahnKit/Sources/BetterBahnKit/Resources/StationHints.json"
-# Germany with a margin into its neighbours.
-BOUNDS = (47.2, 5.8, 55.1, 15.1)
+# Germany and its neighbours as far as StationHints.radius (150 km) reaches from it: Liège from Aachen,
+# Wrocław from Görlitz.
+BOUNDS = (46.2, 3.8, 56.4, 17.3)
 TRAIN = {"HIGHSPEED_RAIL", "LONG_DISTANCE", "NIGHT_RAIL", "REGIONAL_RAIL", "REGIONAL_FAST_RAIL", "SUBURBAN", "RAIL"}
+# Border and tariff points ("Kehl(Gr)", "Toender [Grenze]", "Aachen, Süd Grenze"): trains pass,
+# nobody gets on (TransitousProvider.isBorderPoint). "Ahlbeck Grenze" is a station.
+BORDER_POINT = re.compile(r"(\(Gr\)|\[Grenze\])\s*$|,[^,]*\bGrenze\b|^Grenze\b|Grænse|Tarifpunkt")
 
 
 def stops(lat1, lon1, lat2, lon2):
@@ -45,9 +50,20 @@ def collect(lat1, lon1, lat2, lon2, found):
             collect(a, b, c, d, found)
         return
     for stop in result:
-        if TRAIN & set(stop.get("modes") or []):
+        if TRAIN & set(stop.get("modes") or []) and not BORDER_POINT.search(stop["name"]):
             found.append(stop)
     print(f"{lat1:.2f},{lon1:.2f}: {len(found)} train stops", flush=True)
+
+
+def readable(name):
+    """A station's name as people know it: "Dortmund Hbf" for FlixTrain's "Dortmund Central Station
+    (FlixTrain)", "Karlsruhe Hbf" for "KARLSRUHE HBF"."""
+    if name.endswith(" Central Station (FlixTrain)"):
+        return name[: -len(" Central Station (FlixTrain)")] + " Hbf"
+    if name.isupper():
+        keep = {"HBF": "Hbf", "BF": "Bf", "SBB": "SBB", "HB": "HB"}
+        return " ".join(keep.get(word, word.capitalize() if "." not in word else word.title()) for word in name.split(" "))
+    return name
 
 
 def main():
@@ -86,7 +102,7 @@ def main():
         # count a quarter (TransitousProvider.suburbanDiscount).
         if "SUBURBAN" in c["modes"] and not (c["modes"] & (TRAIN - {"SUBURBAN"})):
             importance /= 4
-        kept.append([c["name"], round(c["lat"], 3), round(c["lon"], 3), float(f"{importance:.2g}")])
+        kept.append([readable(c["name"]), round(c["lat"], 3), round(c["lon"], 3), float(f"{importance:.2g}")])
     kept.sort(key=lambda e: e[0])
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(kept, ensure_ascii=False, separators=(",", ":")) + "\n")
