@@ -279,7 +279,7 @@ public struct TransitousProvider: TransitProvider {
         // "stuttgart flughafen": Flughafen/Messe, near Stuttgart (`nearbyBigTown`).
         if allTyped.count > 1, let bigTown = nearbyBigTown(of: match),
            searchWords(bigTown).first.map({ !$0.isDisjoint(with: typed) }) == true,
-           textMatch(match, query: query).matched == allTyped.count {
+           textMatch(match, query: query).matched == typedWords(query).count {
             return true
         }
         let displayName = Station.displayName(for: match.fullName)
@@ -381,7 +381,10 @@ public struct TransitousProvider: TransitProvider {
             while let word = words.last, words.count > 1, lines.contains(word) || !word.isDisjoint(with: stationSuffixes) {
                 words.removeLast()
             }
-            return words
+            // "Köln Mülheim Bf Mülheim" (VRS) is called "mülheim" too.
+            let named = words.filter { $0.isDisjoint(with: stationSuffixes) }
+            if !named.isEmpty { words = named }
+            return words.enumerated().filter { $0.offset == 0 || $0.element != words[$0.offset - 1] }.map(\.element)
         }
         let name = stationWords(Station.displayName(for: match.fullName))
         let typed = stationWords(query)
@@ -449,7 +452,9 @@ public struct TransitousProvider: TransitProvider {
             let isWhole = isWord && (!spellings.isDisjoint(with: nameWords) || !spellings.isDisjoint(with: townWords))
             // The start of a German name abroad counts as the start of the local one ("kopenh").
             let starts = typedWord.starts.union(localWord(startingGermanName: spellings).map { [$0] } ?? [])
+            // A short word of the town counts next to others: "st" in "st ingbert" for every stop there.
             let isStart = nameWords.contains { word in starts.contains { word.hasPrefix($0) } }
+                || typed.count > 1 && !spellings.isDisjoint(with: townWords)
             let isDistrict = isWord && !spellings.isDisjoint(with: districtWords)
             let isBigTown = isWord && !spellings.isDisjoint(with: bigTownWords)
             return (spellings: spellings, isWhole: isWhole, isStart: isStart, isDistrict: isDistrict, isBigTown: isBigTown)
@@ -475,17 +480,28 @@ public struct TransitousProvider: TransitProvider {
     static func typedWords(_ query: String) -> [TypedWord] {
         let spellings = searchWords(query)
         let typed = query.precomposedStringWithCanonicalMapping.lowercased().split { !$0.isLetter && !$0.isNumber }
-        guard typed.count == spellings.count else {
-            return spellings.map { TypedWord(spellings: $0, starts: $0, isWord: $0.contains { $0.count >= 3 }) }
+        let all: [TypedWord]
+        if typed.count == spellings.count {
+            all = zip(typed, spellings).map { word, spellings in
+                let plainVowel = word.contains { "äöü".contains($0) } ? words(String(word)).first : nil
+                // "st" doesn't start every "Sankt …", nor "sankt" every "St…".
+                let otherSpelling: String? = word == "st" ? "sankt" : word == "sankt" ? "st" : nil
+                let starts = spellings.subtracting([plainVowel, otherSpelling].compactMap { $0 })
+                return TypedWord(spellings: spellings, starts: starts, isWord: word.count >= 3)
+            }
+        } else {
+            all = spellings.map { TypedWord(spellings: $0, starts: $0, isWord: $0.contains { $0.count >= 3 }) }
         }
-        return zip(typed, spellings).map { word, spellings in
-            let plainVowel = word.contains { "äöü".contains($0) } ? words(String(word)).first : nil
-            // "st" doesn't start every "Sankt …", nor "sankt" every "St…".
-            let otherSpelling: String? = word == "st" ? "sankt" : word == "sankt" ? "st" : nil
-            let starts = spellings.subtracting([plainVowel, otherSpelling].compactMap { $0 })
-            return TypedWord(spellings: spellings, starts: starts, isWord: word.count >= 3)
-        }
+        // "an der" in "halle an der saale" only joins the town's name: "Halle (Saale), An der Feuerwache"
+        // doesn't match it better than Halle (Saale) Hbf. Still typed last, it's the start of a word
+        // ("berlin an" for Anhalter Bahnhof).
+        return all.enumerated()
+            .filter { $0.offset == all.count - 1 || $0.element.spellings.isDisjoint(with: joiningWords) }
+            .map(\.element)
     }
+
+    /// Words joining a town's name and its qualifier ("Frankfurt am Main", "Halle a. d. Saale").
+    static let joiningWords = placePrepositions.union(["der", "die", "das", "dem", "den", "des", "a", "d"])
 
     /// The big town (`NearbyTowns`) `match` is near, unless that's its own: Stuttgart for Flughafen/Messe
     /// in Leinfelden-Echterdingen, Hannover for Langenhagen Flughafen.

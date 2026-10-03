@@ -583,6 +583,17 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(TransitousProvider.textMatch(dortmund, query: "dortmund west") == (matched: 2, whole: 1))
         let nordbahnhof = stop("Berlin-Nordbahnhof", town: "Berlin")
         #expect(TransitousProvider.textMatch(nordbahnhof, query: "nord") == (matched: 1, whole: 1))
+        // "an" is the town's word for every stop in Brandenburg an der Havel, not just Am Anger's.
+        let brandenburgHbf = stop("Brandenburg, Hauptbahnhof", town: "Brandenburg an der Havel")
+        let amAnger = stop("Brandenburg, Am Anger", town: "Brandenburg an der Havel")
+        #expect(TransitousProvider.textMatch(brandenburgHbf, query: "brandenburg an der havel")
+            == TransitousProvider.textMatch(amAnger, query: "brandenburg an der havel"))
+        let halleHbf = stop("Halle (Saale) Hbf", town: "Halle (Saale)")
+        let feuerwache = stop("Halle (Saale), An der Feuerwache", town: "Halle (Saale)")
+        #expect(TransitousProvider.textMatch(halleHbf, query: "halle an der saale") == (matched: 2, whole: 2))
+        #expect(TransitousProvider.textMatch(feuerwache, query: "halle an der saale") == (matched: 2, whole: 2))
+        // Typed last, "an" is still the start of a word: Anhalter Bahnhof.
+        #expect(TransitousProvider.typedWords("berlin an").count == 2)
     }
 
     /// ø, æ and ł aren't accented letters in Unicode, but typed as o, ae and l they still match, and
@@ -666,6 +677,12 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         let oberpfalz = match("oberpfalz", "Neumarkt (Oberpf)", 49.28, 11.46, "DE", ["REGIONAL_RAIL"], 0.0015,
                               town: "Neumarkt in der Oberpfalz")
         #expect(ranked("neumarkt", [oberpfalz, neumarkt], near: cologne, town: "Köln").first == "neumarkt")
+        // VRS names Köln-Mülheim "Köln Mülheim Bf Mülheim".
+        let koelnMuelheim = match("koelnMuelheim", "Köln Mülheim Bf Mülheim", 50.958, 7.013, "DE",
+                                  ["REGIONAL_RAIL", "SUBURBAN", "TRAM", "BUS"], 0.00226, town: "Köln")
+        let ruhr = match("ruhr", "Mülheim Hbf", 51.431, 6.887, "DE", ["LONG_DISTANCE", "REGIONAL_RAIL"], 0.0023,
+                         town: "Mülheim an der Ruhr")
+        #expect(ranked("mülheim", [ruhr, koelnMuelheim], near: cologne, town: "Köln").first == "koelnMuelheim")
 
         // Just "hbf" is the station nearby: Stralsund Hbf, not Berlin Hbf.
         let stralsund = Coordinate(latitude: 54.309, longitude: 13.077)
