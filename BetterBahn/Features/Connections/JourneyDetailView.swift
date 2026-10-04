@@ -284,11 +284,6 @@ struct JourneyDetailView: View {
         return "\(origin) → \(destination)"
     }
 
-    private var shareIcon: Image {
-        guard let icon = UIImage.appIcon else { return Image(systemName: "train.side.front.car") }
-        return Image(uiImage: icon)
-    }
-
     private var liveActivityButton: some View {
         VStack(spacing: 8) {
             HStack(spacing: 10) {
@@ -296,19 +291,7 @@ struct JourneyDetailView: View {
                 if !model.tickets(for: journey).isEmpty {
                     TicketButton(tickets: model.tickets(for: journey), journey: journey)
                 }
-                if let shareURL = journey.shareURL {
-                    ShareLink(
-                        item: shareURL,
-                        preview: SharePreview(shareTitle, image: shareIcon)
-                    ) {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(width: 40, height: 40)
-                    }
-                    .buttonStyle(.plain)
-                    .glassEffect(.regular, in: .circle)
-                    .accessibilityLabel("Reise teilen")
-                }
+                JourneyShareButton(journey: journey, title: shareTitle)
                 if model.settings.editJourneyEnabled {
                     Button {
                         showJourneyEditor = true

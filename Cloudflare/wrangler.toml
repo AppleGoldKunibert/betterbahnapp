@@ -1,0 +1,30 @@
+name = "betterbahn"
+main = "worker.mjs"
+compatibility_date = "2026-09-01"
+workers_dev = true
+
+# Shared journeys (`/share`, `/s/<id>`), each with a 30-day TTL. Create the namespace once with
+# `npx wrangler kv namespace create SHARES` and put its id here.
+[[kv_namespaces]]
+binding = "SHARES"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# Per app install (App Attest key): 10 new links per minute. Reads per IP: 60 per minute.
+# namespace_id is any number unique within the account.
+[[ratelimits]]
+name = "SHARE_CREATE_LIMITER"
+namespace_id = "1101"
+simple = { limit = 10, period = 60 }
+
+[[ratelimits]]
+name = "SHARE_READ_LIMITER"
+namespace_id = "1102"
+simple = { limit = 60, period = 60 }
+
+[vars]
+# App IDs (team ID + bundle ID) that may open `/s/…` links (apple-app-site-association); comma-separated.
+APP_IDS = "9NXP66M9UL.de.goldkunibert.BetterBahn"
+# App Store link on the fallback page; leave empty until the app is in the store.
+APP_STORE_URL = ""
+# Secrets (`npx wrangler secret put …`): TOKEN_SECRET (same value as in betterbahn2 and betterbahn-pass).
+# ALLOW_UNATTESTED = "true" lets apps without App Attest (Simulator) create links.
