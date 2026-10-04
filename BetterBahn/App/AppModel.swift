@@ -86,7 +86,7 @@ final class AppModel {
     }
 
     init() {
-        provider = CombinedProvider()
+        provider = CombinedProvider(vagonweb: VagonwebClient(browserLoader: { url in try await VagonwebBrowser.shared.html(at: url) }))
         traewelling = TraewellingClient(config: TraewellingConfig())
         // Older versions stored everything in UserDefaults; move the raw bytes into files once
         // (re-encoding everything on every launch is what used to slow the start down).
@@ -583,18 +583,30 @@ final class AppModel {
 
     @ObservationIgnored private var trainTypeCache: [String: TrainTypeLookup?] = [:]
 
-    /// A train's type ("ICE 4", "ICE 3neo" …) and, for live data, its Tz, from bahn.expert, which has
-    /// DB's planned formation for days ahead. Only the fallback when bahn.de's coach sequence
-    /// (`formation(for:)`) has nothing. Cached per train and day; failed requests are not
-    /// cached so they are retried.
+    /// A train's type ("ICE 4", "ICE 3neo" …) from its planned formation: vagonweb.cz's scheduled
+    /// composition first, bahn.expert (which also has the Tz once DB assigns one) when vagonweb has
+    /// nothing. Only the fallback when bahn.de's coach sequence (`formation(for:)`) has nothing.
+    /// Cached per train and day; failed requests are not cached so they are retried.
     func trainType(for line: Line?, on date: Date) async -> TrainTypeLookup? {
-        guard let ref = BahnDeClient.trainReference(for: line), let bahnExpert = provider.bahnExpert else { return nil }
+        guard let ref = BahnDeClient.trainReference(for: line) else { return nil }
         let day = BahnDeClient.berlinDay(date)
         let key = "\(ref.category) \(ref.number)|\(day)"
         if let cached = trainTypeCache[key] { return cached }
-        guard let lookup = try? await bahnExpert.trainType(category: ref.category, number: ref.number, date: day) else { return nil }
+        if let vagonweb = provider.vagonweb,
+           let lookup = try? await vagonweb.trainType(category: ref.category, number: ref.number, on: date) {
+            trainTypeCache[key] = .some(lookup)
+            return lookup
+        }
+        guard let bahnExpert = provider.bahnExpert,
+              let lookup = try? await bahnExpert.trainType(category: ref.category, number: ref.number, date: day) else { return nil }
         trainTypeCache[key] = .some(lookup)
         return lookup
+    }
+
+    /// The planned Wagenreihung from vagonweb.cz, for when bahn.de has no coach sequence (yet), e.g.
+    /// days ahead. Without platform positions; vagonweb caches its pages itself.
+    func plannedCoachSequence(for request: BahnDeClient.FormationRequest) async -> CoachSequence? {
+        try? await provider.vagonweb?.coachSequence(for: request)
     }
 
     @ObservationIgnored private var refreshLoop: Task<Void, Never>?

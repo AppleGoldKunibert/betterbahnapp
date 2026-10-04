@@ -272,7 +272,8 @@ struct TrainFormationLabel: View {
 }
 
 /// "Wagenreihung" chip for a train's header, shown once bahn.de has a coach sequence for it (the
-/// same request `TrainFormationLabel` makes, so it is only sent once). Opens the Wagenreihung sheet.
+/// same request `TrainFormationLabel` makes, so it is only sent once), or else vagonweb.cz has the
+/// planned one ("Plan-Wagenreihung"). Opens the Wagenreihung sheet.
 struct CoachSequenceButton: View {
     let request: BahnDeClient.FormationRequest?
     let trainName: String?
@@ -298,7 +299,8 @@ struct CoachSequenceButton: View {
                 Button {
                     showSequence = true
                 } label: {
-                    InfoChip(text: "Wagenreihung", systemImage: "train.side.front.car", tint: .brand)
+                    InfoChip(text: sequence.source == .bahnDe ? "Wagenreihung" : "Plan-Wagenreihung",
+                             systemImage: "train.side.front.car", tint: .brand)
                 }
                 .buttonStyle(.plain)
             }
@@ -311,14 +313,18 @@ struct CoachSequenceButton: View {
         .task(id: request) {
             sequence = nil
             guard let request else { return }
-            sequence = try? await model.coachSequence(for: request)
+            if let live = try? await model.coachSequence(for: request), !live.coaches.isEmpty {
+                sequence = live
+            } else {
+                sequence = await model.plannedCoachSequence(for: request)
+            }
         }
     }
 }
 
 /// "ICE 4" / "ICE 3neo" / "ICE L" … next to a train's name. bahn.de's coach sequence first (the same
-/// request `TrainFormationLabel` makes, so it is only sent once); bahn.expert as fallback, which has
-/// DB's planned formation for days ahead.
+/// request `TrainFormationLabel` makes, so it is only sent once); then the planned formation for days
+/// ahead from vagonweb.cz, or bahn.expert when vagonweb has none (`AppModel.trainType`).
 struct TrainSeriesTag: View {
     let request: BahnDeClient.FormationRequest?
     let line: Line?

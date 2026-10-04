@@ -62,6 +62,10 @@ struct CoachSequenceView: View {
             } catch TransitError.rateLimited {
                 blocked = true
             } catch {}
+            if sequence?.coaches.isEmpty ?? true, let planned = await model.plannedCoachSequence(for: request) {
+                sequence = planned
+                blocked = false
+            }
         }
     }
 
@@ -78,6 +82,9 @@ struct CoachSequenceView: View {
             Text([station.displayName, sequence.platform.map { "Gleis \($0)" }].compactMap(\.self).joined(separator: " · "))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+            if case .vagonweb(let from, let until) = sequence.source {
+                plannedNote(from: from, until: until)
+            }
             if let units = sequence.formation.unitDescription ?? sequence.formation.modelSummary {
                 Label(units, systemImage: "tram.fill")
                     .font(.caption)
@@ -89,6 +96,21 @@ struct CoachSequenceView: View {
             if sequence.hasOtherTrains {
                 InfoChip(text: "Zugteile mit anderem Ziel – auf den Wagen achten", systemImage: "arrow.triangle.branch", tint: .slightDelay)
             }
+        }
+    }
+
+    /// vagonweb's plan is for the whole train, not this stop: no platform positions, and the real
+    /// train can differ (bahn.de has the actual one in the hours before departure).
+    private func plannedNote(from: Date?, until: Date?) -> some View {
+        let validity: String? = switch (from, until) {
+        case let (from?, until?): "gilt \(from.formatted(.dateTime.day().month(.twoDigits).year())) – \(until.formatted(.dateTime.day().month(.twoDigits).year()))"
+        default: nil
+        }
+        return VStack(alignment: .leading, spacing: 4) {
+            InfoChip(text: "Plan-Wagenreihung – kann abweichen", systemImage: "calendar", tint: .secondary)
+            Text(["Ohne Gleisabschnitte", validity, "Daten: vagonweb.cz"].compactMap(\.self).joined(separator: " · "))
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
