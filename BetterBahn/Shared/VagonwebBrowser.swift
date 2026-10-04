@@ -51,9 +51,21 @@ final class VagonwebBrowser {
         """
 
     /// The page's HTML once vagonweb's own page has loaded (it has the `stred0` content column,
-    /// Cloudflare's check doesn't).
+    /// Cloudflare's check doesn't). On a first visit vagonweb shows only an "anzeigen" link; then the
+    /// scheduled compositions are fetched inside the page, as its own "all planned" button does
+    /// (`VagonwebClient.plannedCompositionsRequest`).
     private static let htmlScript = """
-        return document.readyState === 'complete' && document.getElementById('stred0')
-            ? document.documentElement.outerHTML : null
+        if (document.readyState !== 'complete' || !document.getElementById('stred0')) return null;
+        if (document.getElementById('planovane_razeni')) return document.documentElement.outerHTML;
+        const query = new URLSearchParams(location.search);
+        const year = query.get('rok') || '';
+        const form = new URLSearchParams({rok: year, zeme: query.get('zeme') || 'DB', cislo: query.get('cislo') || '',
+            nazev: '_n_', styl: 'r', aktualni_rok: year, cislo_vozu: '', od: '', do_x: '', virtualni_vlak: '',
+            cislo_alias: '', vsechny_planovane: '1'});
+        const response = await fetch('/razeni/ajax_dalsi_razeni_vlak.php', {method: 'POST', body: form,
+            headers: {'X-Requested-With': 'XMLHttpRequest'}});
+        const part = await response.text();
+        // Nothing there either: the page as it is, which the client reads as vagonweb not answering.
+        return part.includes('color-z') ? part : document.documentElement.outerHTML;
         """
 }

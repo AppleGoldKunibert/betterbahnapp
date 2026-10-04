@@ -109,7 +109,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `vagonweb-ice*.html`). Used when bahn.de has no coach sequence: the train type (`AppModel.trainType`) and the
   planned Wagenreihung without platform positions (`CoachSequence.source == .vagonweb`, "Plan-Wagenreihung").
   vagonweb sits behind Cloudflare's bot check; when it answers instead of the page, the app loads it in a hidden
-  `WebPage` (`VagonwebBrowser`, passed in as `browserLoader`). Pages are cached per train and timetable year.
+  `WebPage` (`VagonwebBrowser`, passed in as `browserLoader`). On a first visit vagonweb shows only an "anzeigen" link
+  (`VagonwebClient.isGate`); then the compositions come from `ajax_dalsi_razeni_vlak.php` (`plannedCompositionsRequest`).
+  Pages are cached per train and timetable year; logs under the `vagonweb` category.
 - `Transit/BahnExpert/` – bahn.expert, only as fallback for the train type (`TrainTypeLookup`) when bahn.de
   has no coach sequence and vagonweb has none either: it has DB's planned formation (`DB-plan`) for days
   ahead; bahn.de is only asked for departures within `BahnDeClient.formationLookahead` (12 h).

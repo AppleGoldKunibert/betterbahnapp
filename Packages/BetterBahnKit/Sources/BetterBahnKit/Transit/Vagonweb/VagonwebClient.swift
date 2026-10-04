@@ -93,13 +93,25 @@ public struct VagonwebClient: Sendable {
     }
 
     /// The page's HTML: a plain request first, the browser loader when Cloudflare's check answers.
+    /// Asked for without a previous visit, vagonweb shows only an "anzeigen" link to the same page
+    /// (`isGate`); then the scheduled compositions are asked for directly, as vagonweb's page does
+    /// (`plannedCompositionsRequest`), or the page again, as from that link.
     func page(at url: URL) async throws -> String {
-        var request = URLRequest(url: url, timeoutInterval: http.timeout)
-        request.setValue("text/html", forHTTPHeaderField: "Accept")
         do {
-            let data = try await http.sendRaw(request)
-            let html = String(decoding: data, as: UTF8.self)
-            if !Self.isChallenge(html) { return html }
+            for attempt in 0..<3 {
+                var request = URLRequest(url: url, timeoutInterval: http.timeout)
+                request.setValue("text/html", forHTTPHeaderField: "Accept")
+                if attempt > 0 { request.setValue(url.absoluteString, forHTTPHeaderField: "Referer") }
+                let html = String(decoding: try await http.sendRaw(request), as: UTF8.self)
+                if Self.isChallenge(html) { break }
+                if !Self.isGate(html) { return html }
+                // The request vagonweb's own page sends for "show all planned compositions".
+                if attempt == 0, let request = Self.plannedCompositionsRequest(for: url),
+                   let data = try? await http.sendRaw(request) {
+                    let part = String(decoding: data, as: UTF8.self)
+                    if !VagonwebComposition.scheduled(fromHTML: part).isEmpty { return part }
+                }
+            }
         } catch TransitError.http(let status, _) where [403, 503].contains(status) {
             // Cloudflare's check, or its block page: a browser may still get through.
         } catch TransitError.http(let status, _) where status == 404 {
@@ -107,8 +119,34 @@ public struct VagonwebClient: Sendable {
         }
         guard let browserLoader else { throw TransitError.rateLimited }
         let html = try await browserLoader(url)
-        guard !Self.isChallenge(html) else { throw TransitError.rateLimited }
+        guard !Self.isChallenge(html), !Self.isGate(html) else { throw TransitError.rateLimited }
         return html
+    }
+
+    /// `ajax_dalsi_razeni_vlak.php` with `vsechny_planovane`: all scheduled compositions of the train
+    /// as an HTML fragment, what vagonweb's page loads when its calendar's "all" is tapped.
+    static func plannedCompositionsRequest(for pageURL: URL) -> URLRequest? {
+        let query = URLComponents(url: pageURL, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let value = { (name: String) in query.first { $0.name == name }?.value }
+        guard let number = value("cislo"), let year = value("rok") else { return nil }
+        var form = URLComponents()
+        form.queryItems = [
+            ("rok", year), ("zeme", value("zeme") ?? "DB"), ("cislo", number), ("nazev", "_n_"), ("styl", "r"),
+            ("aktualni_rok", year), ("cislo_vozu", ""), ("od", ""), ("do_x", ""), ("virtualni_vlak", ""),
+            ("cislo_alias", ""), ("vsechny_planovane", "1"),
+        ].map { URLQueryItem(name: $0.0, value: $0.1) }
+        var request = URLRequest(url: baseURL.appending(path: "razeni/ajax_dalsi_razeni_vlak.php"))
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded; charset=UTF-8", forHTTPHeaderField: "Content-Type")
+        request.setValue("XMLHttpRequest", forHTTPHeaderField: "X-Requested-With")
+        request.setValue(pageURL.absoluteString, forHTTPHeaderField: "Referer")
+        request.httpBody = Data((form.percentEncodedQuery ?? "").utf8)
+        return request
+    }
+
+    /// vagonweb's page before "anzeigen": the train's route, then only a link to show its compositions.
+    public static func isGate(_ html: String) -> Bool {
+        !html.contains("id='planovane_razeni'") && html.contains("<h2>&raquo; <a href=") && html.contains("vlak.php?")
     }
 
     /// Cloudflare's "Just a moment…" interstitial instead of the page.
@@ -209,13 +247,13 @@ extension VagonwebComposition {
         let notes = coach.notes.joined(separator: " ").lowercased()
         return CoachSequence.Coach.Amenity.allCases.filter { amenity in
             switch amenity {
-            case .bikeSpace: (coach.bikeSpaces ?? 0) > 0 || notes.contains("bicycle")
-            case .wheelchairSpace: coach.wheelchairSpaces != nil || notes.contains("wheelchair")
+            case .bikeSpace: (coach.bikeSpaces ?? 0) > 0 || notes.contains("bicycle") || notes.contains("fahrrad")
+            case .wheelchairSpace: coach.wheelchairSpaces != nil || notes.contains("wheelchair") || notes.contains("rollstuhl")
             case .wheelchairToilet: false
-            case .severelyDisabledSeats: notes.contains("disabled")
-            case .quietZone: notes.contains("quiet")
+            case .severelyDisabledSeats: notes.contains("disabled") || notes.contains("behindert")
+            case .quietZone: notes.contains("quiet") || notes.contains("ruhe")
             case .familyZone: notes.contains("famil")
-            case .infantCabin: notes.contains("childern") || notes.contains("children")
+            case .infantCabin: notes.contains("childern") || notes.contains("children") || notes.contains("kleinkind")
             case .bahnComfortSeats: notes.contains("bahn.comfort") || notes.contains("bahncomfort")
             case .info: coach.hasInfoPoint
             }

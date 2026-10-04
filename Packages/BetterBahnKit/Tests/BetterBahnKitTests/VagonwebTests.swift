@@ -144,6 +144,37 @@ private func berlinDate(_ year: Int, _ month: Int, _ day: Int, hour: Int = 12) -
         #expect(lookup?.summary == "ICE 3neo")
     }
 
+    @Test func recognisesTheAnzeigenPage() throws {
+        #expect(VagonwebClient.isGate(try vagonwebPage("vagonweb-ice804-gate")))
+        #expect(VagonwebComposition.scheduled(fromHTML: try vagonwebPage("vagonweb-ice804-gate")).isEmpty)
+        #expect(!VagonwebClient.isGate(try vagonwebPage("vagonweb-ice154")))
+    }
+
+    @Test func asksAgainAfterTheAnzeigenPage() async throws {
+        let client = VagonwebClient(http: HTTPClient(session: VagonwebStubProtocol.session(
+            number: "377", html: try vagonwebPage("vagonweb-ice804-gate"), revisit: try vagonwebPage("vagonweb-ice377"))))
+        let lookup = try await client.trainType(category: "ICE", number: "377", on: berlinDate(2026, 10, 5))
+        #expect(lookup?.summary == "ICE 4")
+    }
+
+    @Test func plannedCompositionsRequest() throws {
+        let page = VagonwebClient.trainURL(category: "ICE", number: "804", timetableYear: 2026)
+        let request = try #require(VagonwebClient.plannedCompositionsRequest(for: page))
+        #expect(request.url?.absoluteString == "https://www.vagonweb.cz/razeni/ajax_dalsi_razeni_vlak.php")
+        #expect(request.httpMethod == "POST")
+        let body = String(decoding: request.httpBody ?? Data(), as: UTF8.self)
+        #expect(body.contains("cislo=804") && body.contains("rok=2026") && body.contains("vsechny_planovane=1") && body.contains("nazev=_n_"))
+        #expect(request.value(forHTTPHeaderField: "Referer") == page.absoluteString)
+    }
+
+    @Test func anzeigenPageForeverGoesToTheBrowser() async throws {
+        let gate = try vagonwebPage("vagonweb-ice804-gate")
+        let html = try vagonwebPage("vagonweb-ice1005")
+        let client = VagonwebClient(http: HTTPClient(session: VagonwebStubProtocol.session(number: "804", html: gate)),
+                                    browserLoader: { _ in html })
+        #expect(try await client.coachSequence(category: "ICE", number: "804", on: berlinDate(2026, 10, 5))?.coaches.count == 16)
+    }
+
     @Test func withoutBrowserCloudflaresCheckCountsAsBlocked() async throws {
         let challenge = "<html><head><title>Just a moment...</title></head><body><script>window._cf_chl_opt = {}</script></body></html>"
         let client = VagonwebClient(http: HTTPClient(session: VagonwebStubProtocol.session(number: "155", html: challenge, status: 403)))
@@ -156,12 +187,14 @@ private func berlinDate(_ year: Int, _ month: Int, _ day: Int, hour: Int = 12) -
 /// Answers requests for a train's page with the page registered for it. Keyed by URL, so tests running
 /// in parallel need different trains.
 final class VagonwebStubProtocol: URLProtocol, @unchecked Sendable {
-    nonisolated(unsafe) static var pages: [URL: (html: String, status: Int)] = [:]
+    nonisolated(unsafe) static var pages: [URL: (html: String, status: Int, revisit: String?)] = [:]
     static let lock = NSLock()
 
-    static func session(number: String, html: String, status: Int = 200) -> URLSession {
+    /// - Parameter revisit: the page when it is asked for again (with a `Referer`), like vagonweb
+    ///   answers after its "anzeigen" page.
+    static func session(number: String, html: String, status: Int = 200, revisit: String? = nil) -> URLSession {
         let url = VagonwebClient.trainURL(category: "ICE", number: number, timetableYear: 2026)
-        lock.withLock { pages[url] = (html, status) }
+        lock.withLock { pages[url] = (html, status, revisit) }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [VagonwebStubProtocol.self]
         return URLSession(configuration: configuration)
@@ -170,10 +203,11 @@ final class VagonwebStubProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
-        let page = request.url.flatMap { url in Self.lock.withLock { Self.pages[url] } } ?? (html: "", status: 404)
+        let page = request.url.flatMap { url in Self.lock.withLock { Self.pages[url] } } ?? (html: "", status: 404, revisit: nil)
+        let html = request.value(forHTTPHeaderField: "Referer") != nil ? page.revisit ?? page.html : page.html
         let response = HTTPURLResponse(url: request.url!, statusCode: page.status, httpVersion: nil, headerFields: ["Content-Type": "text/html"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data(page.html.utf8))
+        client?.urlProtocol(self, didLoad: Data(html.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
