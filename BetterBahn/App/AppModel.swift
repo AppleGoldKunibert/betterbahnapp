@@ -3,6 +3,7 @@ import BetterBahnKit
 import Foundation
 import Network
 import Observation
+import os
 import UserNotifications
 
 @Observable
