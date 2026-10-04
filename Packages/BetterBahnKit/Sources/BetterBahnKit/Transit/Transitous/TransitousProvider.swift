@@ -27,11 +27,10 @@ public struct TransitousProvider: TransitProvider {
     }
 
     /// With a mode filter the geocoder itself only returns stops with those modes, so its 50 hits
-    /// aren't used up by others; with "l" it looks around the user instead of Germany as a whole.
+    /// aren't used up by others. "l" only sorts on the device: the location never leaves it.
     public func searchStations(_ search: StationSearch, near location: Coordinate?) async throws -> [Station] {
         let modes = search.modes.reduce(into: Set<String>()) { $0.formUnion($1.motisModes) }
-        let matches = try await geocode(search.text, addingMainStation: true, near: location, modes: modes,
-                                        aroundUser: search.byDistance)
+        let matches = try await geocode(search.text, addingMainStation: true, near: location, modes: modes)
         let merged = Self.rankedAndMerged(matches, query: search.text, near: location)
         return Self.applying(search, to: merged, near: location).map { $0.toStation() }
     }
@@ -924,12 +923,10 @@ public struct TransitousProvider: TransitProvider {
     /// `shortQueries(for:)`), a known short name (`aliasQuery(for:)`) and, `near` a location, stations
     /// in the user's town (`nearbyTownQuery(for:near:)`) and nearby ones
     /// (`nearbyStationQueries(for:near:)`), and keeps those hits only if they match `query`.
-    /// `modes`: only stops where any of these stop. `aroundUser`: the geocoder looks around `location`
-    /// instead of Germany as a whole.
+    /// `modes`: only stops where any of these stop.
     private func geocode(_ query: String, addingMainStation: Bool = false, near location: Coordinate? = nil,
-                         modes: Set<String> = [], aroundUser: Bool = false) async throws -> [MGeocodeMatch]
+                         modes: Set<String> = []) async throws -> [MGeocodeMatch]
     {
-        let bias = aroundUser ? location : nil
         var queries = [query]
         let umlauts = Self.withUmlauts(query)
         if umlauts != query { queries.append(umlauts) }
@@ -950,12 +947,12 @@ public struct TransitousProvider: TransitProvider {
             for (index, text) in texts.enumerated() {
                 group.addTask {
                     guard index >= required else {
-                        return (index, try await geocodeRequest(text, modes: modes, around: bias))
+                        return (index, try await geocodeRequest(text, modes: modes))
                     }
                     // Only an extra: if it fails or is slow, the search still works without it. Waiting
                     // for it longer would run into `CombinedProvider`'s deadline and lose every hit.
                     let found = (try? await CombinedProvider.withDeadline(Self.extraQueryDeadline) {
-                        try await geocodeRequest(text, modes: modes, around: bias)
+                        try await geocodeRequest(text, modes: modes)
                     }) ?? []
                     // The main station only of the place typed: "nord Hbf" also finds "Hamburg Hbf Nord".
                     let isMainStationQuery = text == mainStation
@@ -1027,15 +1024,13 @@ public struct TransitousProvider: TransitProvider {
     /// well within `CombinedProvider`'s 2.5 s for the whole station search.
     static let extraQueryDeadline: Duration = .milliseconds(1800)
 
-    /// `modes`: only stops where any of these stop. `location`: biased towards stops around it
-    /// instead of Germany as a whole.
-    private func geocodeRequest(_ text: String, modes: Set<String> = [], around location: Coordinate? = nil) async throws -> [MGeocodeMatch] {
-        let place = location.map { "\($0.latitude),\($0.longitude)" } ?? "51.1,10.4" // bias towards Germany
+    /// `modes`: only stops where any of these stop.
+    private func geocodeRequest(_ text: String, modes: Set<String> = []) async throws -> [MGeocodeMatch] {
         var items: [URLQueryItem] = [
                 .init(name: "text", value: text),
                 .init(name: "type", value: "STOP"),
                 .init(name: "language", value: "de"),
-                .init(name: "place", value: place),
+                .init(name: "place", value: "51.1,10.4"), // bias towards Germany
                 .init(name: "placeBias", value: "5"),
                 // The API's own text-relevance ranking defaults to 10 hits and buries real train
                 // stations under a pile of similarly-named bus stops when a common name is shared
