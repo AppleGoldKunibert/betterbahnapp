@@ -36,7 +36,7 @@ struct TripView: View {
             }
         }
         .animation(.snappy, value: selectedLeg?.id)
-        .navigationTitle(entry.line.name)
+        .navigationTitle(entry.line.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .task {
             await load()
@@ -395,7 +395,7 @@ struct LegTripSheet: View {
                 .padding(.bottom, 16)
             }
             .background { AppBackground() }
-            .navigationTitle(leg.line?.name ?? "Zug")
+            .navigationTitle(leg.line?.displayName ?? "Zug")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

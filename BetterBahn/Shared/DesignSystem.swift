@@ -180,7 +180,7 @@ struct LineBadge: View {
             HStack(spacing: 4) {
                 Image(systemName: line.product.symbolName)
                     .font(badgeFont)
-                Text(line.name)
+                Text(line.displayName)
                     .font(badgeFont)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)

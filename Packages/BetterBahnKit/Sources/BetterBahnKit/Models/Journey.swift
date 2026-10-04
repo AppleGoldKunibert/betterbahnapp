@@ -53,11 +53,41 @@ public struct Line: Codable, Sendable, Hashable {
     /// 3307) – what DB's dispatching feed knows the train by.
     public var tripNumber: String?
 
+    /// Other trains coupled to this one for the whole stretch ridden, each under its own number
+    /// ("Doppeltraktion", e.g. ICE 950 that runs together with ICE 940 from Berlin to Hamm, where
+    /// they split). Riding either is the same, so they are shown as one (`displayName`).
+    public var coupledNames: [String]?
+
     /// The number to look this train up by in DB's own feed.
     public var dispatchNumber: String? { tripNumber ?? number }
 
+    /// `name`, or for coupled trains every train's name, lowest number first: "ICE 940 / 950".
+    public var displayName: String {
+        guard let coupledNames, !coupledNames.isEmpty else { return name }
+        let names = ([name] + coupledNames).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        let categories = Set(names.map(Self.category))
+        guard categories.count == 1, let category = categories.first, !category.isEmpty else {
+            return names.joined(separator: " / ")
+        }
+        return category + " " + names.map { $0.dropFirst(category.count).trimmingCharacters(in: .whitespaces) }
+            .joined(separator: " / ")
+    }
+
+    /// Every name this train goes by: its own, the codeshare's and those of the coupled trains.
+    public var allNames: [String] {
+        [name] + [alternateName].compactMap { $0 } + (coupledNames ?? [])
+    }
+
+    /// "ICE" for "ICE 940"; "" when the name doesn't end in a number.
+    private static func category(_ name: String) -> String {
+        let parts = name.split(separator: " ")
+        guard parts.count > 1, let last = parts.last, last.allSatisfy(\.isNumber) else { return "" }
+        return parts.dropLast().joined(separator: " ")
+    }
+
     public init(name: String, number: String?, product: Product, operatorName: String?, alternateName: String? = nil,
-                tripNumber: String? = nil) {
+                tripNumber: String? = nil, coupledNames: [String]? = nil) {
+        self.coupledNames = coupledNames
         self.tripNumber = tripNumber
         self.name = name
         self.number = number

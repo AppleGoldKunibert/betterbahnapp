@@ -114,12 +114,33 @@ public final class CombinedProvider: TransitProvider {
         page.laterCursor = page.laterCursor.map { "\(page.source.rawValue):\($0)" }
         page.journeys = page.journeys.filter(query.allows)
         page.journeys = page.journeys.filter { journey in !journey.transitLegs.contains { Self.isFlixBus($0.line) } }
+        let journeys = page.journeys
+        async let coupled = coupledTrainNames(in: journeys)
         // bahn.de's own names beat Transitous' generic ones for cross-border trains, like on boards.
         if let bahnDe {
-            let journeys = page.journeys
             page.journeys = (try? await Self.withDeadline(.seconds(3)) { await bahnDe.correctingTrainNames(in: journeys) }) ?? journeys
         }
+        page.journeys = Self.applying(await coupled, to: page.journeys)
         return page
+    }
+
+    /// Trains coupled to the journeys' legs (see `TransitousProvider.coupledTrainNames(for:)`), keyed by
+    /// `Leg.id`; none if Transitous isn't the primary or doesn't answer in time.
+    private func coupledTrainNames(in journeys: [Journey]) async -> [String: [String]] {
+        guard let transitous = primary as? TransitousProvider else { return [:] }
+        let legs = journeys.flatMap(\.legs)
+        return (try? await Self.withDeadline(.seconds(3)) { await transitous.coupledTrainNames(for: legs) }) ?? [:]
+    }
+
+    static func applying(_ coupled: [String: [String]], to journeys: [Journey]) -> [Journey] {
+        guard !coupled.isEmpty else { return journeys }
+        return journeys.map { journey in
+            var journey = journey
+            for index in journey.legs.indices {
+                if let names = coupled[journey.legs[index].id] { journey.legs[index].line?.coupledNames = names }
+            }
+            return journey
+        }
     }
 
     public func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int, products: Set<Product>) async throws -> [BoardEntry] {
