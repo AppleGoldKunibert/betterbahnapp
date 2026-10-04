@@ -275,16 +275,21 @@ struct TrainFormationLabel: View {
 /// same request `TrainFormationLabel` makes, so it is only sent once), or else vagonweb.cz has the
 /// planned one ("Plan-Wagenreihung"). Opens the Wagenreihung sheet.
 struct CoachSequenceButton: View {
+    /// bahn.de's request, only for departures within `BahnDeClient.formationLookahead`.
     let request: BahnDeClient.FormationRequest?
+    /// The same for any later departure, for vagonweb's planned Wagenreihung days ahead.
+    let plannedRequest: BahnDeClient.FormationRequest?
     let trainName: String?
 
     init(leg: Leg) {
         request = BahnDeClient.formationRequest(for: leg)
+        plannedRequest = BahnDeClient.formationRequest(for: leg, lookahead: nil)
         trainName = leg.line?.name
     }
 
     init(trip: Trip) {
         request = BahnDeClient.formationRequest(for: trip)
+        plannedRequest = BahnDeClient.formationRequest(for: trip, lookahead: nil)
         trainName = trip.line?.name
     }
 
@@ -306,17 +311,16 @@ struct CoachSequenceButton: View {
             }
         }
         .sheet(isPresented: $showSequence) {
-            if let request {
+            if let request = request ?? plannedRequest {
                 CoachSequenceView(request: request, trainName: trainName, sequence: sequence)
             }
         }
-        .task(id: request) {
+        .task(id: plannedRequest) {
             sequence = nil
-            guard let request else { return }
-            if let live = try? await model.coachSequence(for: request), !live.coaches.isEmpty {
+            if let request, let live = try? await model.coachSequence(for: request), !live.coaches.isEmpty {
                 sequence = live
-            } else {
-                sequence = await model.plannedCoachSequence(for: request)
+            } else if let plannedRequest {
+                sequence = await model.plannedCoachSequence(for: plannedRequest)
             }
         }
     }

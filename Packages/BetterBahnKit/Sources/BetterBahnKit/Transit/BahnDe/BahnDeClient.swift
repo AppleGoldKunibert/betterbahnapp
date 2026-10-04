@@ -243,24 +243,26 @@ public struct BahnDeClient: Sendable {
 
     /// The request for `line`'s formation at the first of `stops` where it still departs, if that
     /// departure is soon enough for bahn.de to know the coach sequence (see `formationLookahead`).
+    /// Without `lookahead` any later departure counts too (for vagonweb's planned Wagenreihung).
     public static func formationRequest(line: Line?, stops: [(station: Station, departure: TimeInfo?)],
-                                        now: Date = .now) -> FormationRequest? {
+                                        now: Date = .now, lookahead: TimeInterval? = formationLookahead) -> FormationRequest? {
         guard let ref = sequenceReference(for: line) else { return nil }
         guard let stop = stops.first(where: { $0.departure.map { $0.best >= now.addingTimeInterval(-60) } ?? false }),
               let departure = stop.departure,
-              departure.planned <= now.addingTimeInterval(formationLookahead) else { return nil }
+              lookahead.map({ departure.planned <= now.addingTimeInterval($0) }) ?? true else { return nil }
         return FormationRequest(category: ref.category, number: ref.number, station: stop.station, plannedDeparture: departure.planned)
     }
 
-    public static func formationRequest(for leg: Leg, now: Date = .now) -> FormationRequest? {
+    public static func formationRequest(for leg: Leg, now: Date = .now, lookahead: TimeInterval? = formationLookahead) -> FormationRequest? {
         guard !leg.cancelled else { return nil }
         let stops = [(station: leg.origin, departure: Optional(leg.departure))]
             + leg.stopovers.filter { !$0.cancelled }.map { (station: $0.station, departure: $0.departure) }
-        return formationRequest(line: leg.line, stops: stops, now: now)
+        return formationRequest(line: leg.line, stops: stops, now: now, lookahead: lookahead)
     }
 
-    public static func formationRequest(for trip: Trip, now: Date = .now) -> FormationRequest? {
-        formationRequest(line: trip.line, stops: trip.stopovers.filter { !$0.cancelled }.map { (station: $0.station, departure: $0.departure) }, now: now)
+    public static func formationRequest(for trip: Trip, now: Date = .now, lookahead: TimeInterval? = formationLookahead) -> FormationRequest? {
+        formationRequest(line: trip.line, stops: trip.stopovers.filter { !$0.cancelled }.map { (station: $0.station, departure: $0.departure) },
+                         now: now, lookahead: lookahead)
     }
 
     /// Formation of a DB long-distance train at its departure from the request's station.
