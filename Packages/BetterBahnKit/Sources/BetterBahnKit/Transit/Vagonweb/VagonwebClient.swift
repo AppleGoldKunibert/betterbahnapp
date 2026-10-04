@@ -100,7 +100,8 @@ public struct VagonwebClient: Sendable {
             let data = try await http.sendRaw(request)
             let html = String(decoding: data, as: UTF8.self)
             if !Self.isChallenge(html) { return html }
-        } catch TransitError.http(let status, let body) where [403, 503].contains(status) && Self.isChallenge(body ?? "") {
+        } catch TransitError.http(let status, _) where [403, 503].contains(status) {
+            // Cloudflare's check, or its block page: a browser may still get through.
         } catch TransitError.http(let status, _) where status == 404 {
             throw TransitError.notFound(url.absoluteString)
         }

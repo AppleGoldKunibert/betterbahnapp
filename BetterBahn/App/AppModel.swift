@@ -592,10 +592,16 @@ final class AppModel {
         let day = BahnDeClient.berlinDay(date)
         let key = "\(ref.category) \(ref.number)|\(day)"
         if let cached = trainTypeCache[key] { return cached }
-        if let vagonweb = provider.vagonweb,
-           let lookup = try? await vagonweb.trainType(category: ref.category, number: ref.number, on: date) {
-            trainTypeCache[key] = .some(lookup)
-            return lookup
+        if let vagonweb = provider.vagonweb {
+            do {
+                if let lookup = try await vagonweb.trainType(category: ref.category, number: ref.number, on: date) {
+                    trainTypeCache[key] = .some(lookup)
+                    return lookup
+                }
+                VagonwebBrowser.log.info("No ICE series for \(ref.category, privacy: .public) \(ref.number, privacy: .public) on \(day, privacy: .public)")
+            } catch {
+                VagonwebBrowser.log.error("Train type of \(ref.category, privacy: .public) \(ref.number, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
         }
         guard let bahnExpert = provider.bahnExpert,
               let lookup = try? await bahnExpert.trainType(category: ref.category, number: ref.number, date: day) else { return nil }
@@ -606,7 +612,14 @@ final class AppModel {
     /// The planned Wagenreihung from vagonweb.cz, for when bahn.de has no coach sequence (yet), e.g.
     /// days ahead. Without platform positions; vagonweb caches its pages itself.
     func plannedCoachSequence(for request: BahnDeClient.FormationRequest) async -> CoachSequence? {
-        try? await provider.vagonweb?.coachSequence(for: request)
+        do {
+            let sequence = try await provider.vagonweb?.coachSequence(for: request)
+            VagonwebBrowser.log.info("Plan-Wagenreihung \(request.category, privacy: .public) \(request.number, privacy: .public): \(sequence.map { "\($0.coaches.count) Wagen" } ?? "keine", privacy: .public)")
+            return sequence
+        } catch {
+            VagonwebBrowser.log.error("Plan-Wagenreihung \(request.category, privacy: .public) \(request.number, privacy: .public): \(String(describing: error), privacy: .public)")
+            return nil
+        }
     }
 
     @ObservationIgnored private var refreshLoop: Task<Void, Never>?
