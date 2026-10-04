@@ -28,8 +28,14 @@ struct StationInput<Focus: Hashable>: View {
 
     private var isFocused: Bool { focus.wrappedValue == focusValue }
 
+    /// `query` without its shortcuts ("b", "t", "l", see `StationSearch`).
+    private var search: StationSearch { StationSearch(parsing: query) }
+
+    /// Enough typed (shortcuts aside) to search.
+    private var isTyping: Bool { search.text.count >= 2 }
+
     private var suggestions: [Station] {
-        if query.count >= 2 { return Array(results.prefix(5)) }
+        if isTyping { return Array(results.prefix(5)) }
         var seen: [Station] = []
         for s in model.favoriteStations + model.recentStations where !seen.contains(where: { $0.isSamePlace(as: s) }) {
             seen.append(s)
@@ -54,7 +60,7 @@ struct StationInput<Focus: Hashable>: View {
                         .submitLabel(.search)
                         .autocorrectionDisabled()
                         .onSubmit {
-                            if query.count >= 2, isSearching || results.isEmpty {
+                            if isTyping, isSearching || results.isEmpty {
                                 submitPending = true
                                 focus.wrappedValue = focusValue
                             } else if let first = suggestions.first {
@@ -97,14 +103,15 @@ struct StationInput<Focus: Hashable>: View {
                 query = station?.displayName ?? ""
             }
         }
-        .task(id: query) {
-            guard isFocused, query.count >= 2 else { results = []; return }
+        .task(id: search) {
+            let search = self.search
+            guard isFocused, search.text.count >= 2 else { results = []; return }
             try? await Task.sleep(for: .milliseconds(250)) // debounce
             guard !Task.isCancelled else { return }
             isSearching = true
             defer { isSearching = false }
             do {
-                results = try await model.provider.searchStations(query, near: LocationService.shared.coordinate)
+                results = try await model.provider.searchStations(search, near: LocationService.shared.coordinate)
                 error = nil
                 if submitPending, let first = results.first {
                     submitPending = false
@@ -121,7 +128,10 @@ struct StationInput<Focus: Hashable>: View {
     @ViewBuilder
     private var suggestionList: some View {
         VStack(spacing: 0) {
-            if let error, query.count >= 2 {
+            if search.hasShortcuts {
+                shortcutChips
+            }
+            if let error, isTyping {
                 Label(error.localizedDescription, systemImage: "exclamationmark.octagon.fill")
                     .font(.caption)
                     .foregroundStyle(Color.heavyDelay)
@@ -135,7 +145,7 @@ struct StationInput<Focus: Hashable>: View {
                 } label: {
                     HStack(spacing: 12) {
                         let favorite = model.isFavorite(suggestion)
-                        Image(systemName: favorite ? "star.fill" : query.count >= 2 ? "building.2.fill" : "clock.arrow.circlepath")
+                        Image(systemName: favorite ? "star.fill" : isTyping ? "building.2.fill" : "clock.arrow.circlepath")
                             .font(.subheadline)
                             .foregroundStyle(favorite ? Color.yellow : Color.secondary)
                             .frame(width: 24)
@@ -153,18 +163,49 @@ struct StationInput<Focus: Hashable>: View {
                 }
                 .buttonStyle(.plain)
             }
-            if query.count >= 2, !isSearching, suggestions.isEmpty, error == nil {
+            if isTyping, !isSearching, suggestions.isEmpty, error == nil {
                 Label("Kein Bahnhof gefunden", systemImage: "magnifyingglass")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 10)
             }
+            if query.isEmpty {
+                Text("Tipp: „b“ vor oder hinter dem Namen sucht Bushaltestellen, „t“ Trams, „l“ sortiert nach Entfernung.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .background(Color.secondary.opacity(0.06))
     }
 
+    /// Which shortcuts are active, so a typed "b" doesn't silently change the results.
+    private var shortcutChips: some View {
+        HStack(spacing: 6) {
+            if search.modes.contains(.bus) {
+                InfoChip(text: "Bus", systemImage: "bus.fill", tint: .brand)
+            }
+            if search.modes.contains(.tram) {
+                InfoChip(text: "Tram", systemImage: "tram.fill", tint: .brand)
+            }
+            if search.byDistance {
+                if LocationService.shared.coordinate == nil {
+                    InfoChip(text: "Standort unbekannt", systemImage: "location.slash.fill")
+                } else {
+                    InfoChip(text: "Nach Entfernung", systemImage: "location.fill", tint: .brand)
+                }
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+
     /// Bold the part of the name that matches the query.
     private func highlighted(_ name: String) -> Text {
+        let query = search.text
         guard query.count >= 2, let range = name.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) else {
             return Text(name)
         }
@@ -180,7 +221,7 @@ struct StationInput<Focus: Hashable>: View {
     /// own timetables disambiguate same-named stations. Stations whose name is already distinct
     /// (e.g. "Bernau a. Chiemsee") are left alone.
     private func rowLabel(for suggestion: Station) -> Text {
-        let query = self.query
+        let query = search.text
         let displayName = suggestion.displayName
         guard let region = suggestion.region, needsRegion(suggestion) else {
             return highlighted(displayName)
