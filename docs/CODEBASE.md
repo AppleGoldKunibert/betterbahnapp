@@ -135,6 +135,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   (parse DB Navigator/bahn.de shared text, resolve via `betterbahn://import`).
 - `Geometry/` – polyline decode, `RouteGeometryService`, `SegmentHeatmap`.
 - `Support/HTTPClient.swift` – shared HTTP + `TransitError`, `JSONDecoding`. `ProductStyle` colors.
+- `Support/LoadingDeadline.swift` – waits up to 4 s for live data before a screen shows anything (journey
+  detail, `TripView`, `LegTripSheet`), so it doesn't show the timetable first and jump to the delays.
 - `Support/WorkerAuth.swift` – App Attest for BetterBahn's own Workers: attests the device key once, then
   gets hourly access tokens (`X-BetterBahn-Token`); `HTTPClient.sendRaw(_:auth:)` adds the token and retries
   once after a 401. Clients use `WorkerAuth.shared` only on the real `URLSession.shared` (tests' mocked

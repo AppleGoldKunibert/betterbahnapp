@@ -91,29 +91,35 @@ struct TripView: View {
             if let name = loaded.line?.name, entry.line.alternateName == name {
                 loaded.line = entry.line
             }
-            trip = loaded
-            if boardingID == nil {
-                let here = loaded.stopovers.first { $0.station.isSamePlace(as: entry.station) }?.id
-                if entry.kind == .arrivals {
-                    // For arrivals the selected station is where you get off.
-                    exitID = here
-                    boardingID = loaded.stopovers.first?.id
-                } else {
-                    boardingID = here
-                }
-            }
             error = nil
-            // Transitous sometimes lacks a platform for the trip's own first/last stop even though it
-            // has one for stops in between (e.g. reported for the S15 at Berlin Hbf); fill that in from
-            // DB's own schedule once the trip is already showing, so this never blocks the initial render.
+            // DB's delays and the platforms Transitous lacks (e.g. for the S15's own first/last stop at
+            // Berlin Hbf) before showing the trip, so it doesn't jump from the timetable to the live
+            // times; a reload keeps showing the previous live data meanwhile.
             if let timetables = model.timetablesClient {
-                let withDelays = await timetables.tripWithRealtime(loaded)
-                trip = await timetables.fillMissingPlatforms(in: withDelays)
+                let timetable = loaded
+                show(await LoadingDeadline.run({ await timetables.liveTrip(timetable) }, showingAfter: LoadingDeadline.liveData) {
+                    if trip == nil { show(timetable) }
+                })
+            } else {
+                show(loaded)
             }
             await insertZusatzhalte()
         } catch is CancellationError {
         } catch {
             self.error = error
+        }
+    }
+
+    private func show(_ loaded: Trip) {
+        trip = loaded
+        guard boardingID == nil else { return }
+        let here = loaded.stopovers.first { $0.station.isSamePlace(as: entry.station) }?.id
+        if entry.kind == .arrivals {
+            // For arrivals the selected station is where you get off.
+            exitID = here
+            boardingID = loaded.stopovers.first?.id
+        } else {
+            boardingID = here
         }
     }
 
@@ -429,11 +435,14 @@ struct LegTripSheet: View {
         }
         do {
             let loaded = try await model.provider.trip(id: tripId, source: leg.source)
-            trip = loaded
             error = nil
+            // Live data first, like `TripView.load()`.
             if let timetables = model.timetablesClient {
-                let withDelays = await timetables.tripWithRealtime(loaded)
-                trip = await timetables.fillMissingPlatforms(in: withDelays)
+                trip = await LoadingDeadline.run({ await timetables.liveTrip(loaded) }, showingAfter: LoadingDeadline.liveData) {
+                    if trip == nil { trip = loaded }
+                }
+            } else {
+                trip = loaded
             }
             await insertZusatzhalte()
         } catch is CancellationError {
