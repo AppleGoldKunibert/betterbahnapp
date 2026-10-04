@@ -39,6 +39,8 @@ struct TripView: View {
         .navigationTitle(entry.line.name)
         .navigationBarTitleDisplayMode(.inline)
         .task {
+            // Seen before: its last live data right away, refreshed below.
+            if trip == nil, let seen = model.liveTrips.value(for: entry.tripId) { show(seen) }
             await load()
             await autoRefresh(tripId: entry.tripId)
         }
@@ -93,8 +95,8 @@ struct TripView: View {
             }
             error = nil
             // DB's delays and the platforms Transitous lacks (e.g. for the S15's own first/last stop at
-            // Berlin Hbf) before showing the trip, so it doesn't jump from the timetable to the live
-            // times; a reload keeps showing the previous live data meanwhile.
+            // Berlin Hbf) before showing a trip not seen before, so it doesn't jump from the timetable to
+            // the live times; one already showing (seen before, or a reload) stays meanwhile.
             if let timetables = model.timetablesClient {
                 let timetable = loaded
                 show(await LoadingDeadline.run({ await timetables.liveTrip(timetable) }, showingAfter: LoadingDeadline.liveData) {
@@ -104,6 +106,7 @@ struct TripView: View {
                 show(loaded)
             }
             await insertZusatzhalte()
+            if let trip { model.rememberLive(trip) }
         } catch is CancellationError {
         } catch {
             self.error = error
@@ -409,6 +412,7 @@ struct LegTripSheet: View {
                 }
             }
             .task {
+                if trip == nil, let tripId = leg.tripId, let seen = model.liveTrips.value(for: tripId) { trip = seen }
                 await load()
                 guard let tripId = leg.tripId else { return }
                 while !Task.isCancelled {
@@ -445,6 +449,7 @@ struct LegTripSheet: View {
                 trip = loaded
             }
             await insertZusatzhalte()
+            if let trip { model.rememberLive(trip) }
         } catch is CancellationError {
         } catch {
             self.error = error

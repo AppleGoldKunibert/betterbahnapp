@@ -19,7 +19,8 @@ struct JourneyDetailView: View {
     @State private var showJourneyMap = false
     @State private var showJourneyEditor = false
     /// Set once the live data asked for on opening is in (or took longer than `LoadingDeadline.liveData`),
-    /// so the plan doesn't first show the stored times and then jump to the delays.
+    /// so a journey never loaded live before doesn't first show the timetable and then jump to the delays.
+    /// One seen before shows its last live data at once and refreshes in the background.
     @State private var liveDataLoaded = false
 
     struct LegSelection: Identifiable {
@@ -42,6 +43,9 @@ struct JourneyDetailView: View {
             await refreshRealtime()
         }
         .task {
+            if !readOnly, model.savedEntry(for: journey) == nil, let seen = model.liveJourneys.value(for: journey.id) {
+                journey = seen
+            }
             await LoadingDeadline.run({ @MainActor in
                 await refreshRecentlyFinished()
                 await fillMissingPlatforms()
@@ -128,8 +132,8 @@ struct JourneyDetailView: View {
         .padding(.bottom, 32)
     }
 
-    /// Whether opening asks for live data at all (see the `.task` above).
-    private var loadsLiveDataOnOpen: Bool { !readOnly || recentlyFinishedEntry != nil }
+    /// Whether opening waits for live data (see the `.task` above): only for a journey not seen live yet.
+    private var loadsLiveDataOnOpen: Bool { !readOnly && !model.hasLiveData(for: journey) }
 
     /// The options to start a re-plan from: this view's own, else whatever was saved with the journey.
     private var replanSearch: ConnectionSearch? { search ?? model.savedEntry(for: journey)?.search }
@@ -138,6 +142,7 @@ struct JourneyDetailView: View {
     private func refreshRealtime() async {
         guard !readOnly else { return }
         let refreshed = await model.journeyRefresher.refresh(journey)
+        if model.savedEntry(for: journey) == nil { model.rememberLive(refreshed) }
         guard refreshed != journey else { return }
         if let entry = model.savedEntry(for: journey) {
             model.updateSavedJourneyData(id: entry.id, journey: refreshed)
