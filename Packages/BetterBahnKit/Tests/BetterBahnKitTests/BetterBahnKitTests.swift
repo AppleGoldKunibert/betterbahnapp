@@ -135,6 +135,16 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(Station.displayName(for: "Bahnhofstraße") == "Bahnhofstraße")
     }
 
+    /// DELFI leaves out the river/region some towns need ("Schwedt, Bahnhof"); the direction showed
+    /// "Schwedt" instead of DB's "Schwedt (Oder)" (#85). Other stops in the town keep their name.
+    @Test func delfiTownsGetTheirQualifierBack() {
+        #expect(Station.displayName(for: "Schwedt, Bahnhof") == "Schwedt (Oder)")
+        #expect(Station.displayName(for: "Lübbenau, Bahnhof") == "Lübbenau (Spreewald)")
+        #expect(Station.displayName(for: "Falkenberg/E., Bahnhof") == "Falkenberg (Elster)")
+        #expect(Station.displayName(for: "Schwedt (Oder)") == "Schwedt (Oder)")
+        #expect(Station.displayName(for: "Schwedt, ZOB") == "Schwedt, ZOB")
+    }
+
     /// Real-world Transitous names where the part in brackets is a river or region telling apart
     /// same-named towns, not a city - these showed up as "N-Wendlingen" or "Oder-Frankfurt".
     @Test func riverAndRegionQualifiersAreNotTreatedAsCities() {
