@@ -2757,6 +2757,43 @@ private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
         #expect(buffer == 0)
     }
 
+    /// A search result looked fine when found; the live data loaded afterwards shows ICE 1 now 15
+    /// minutes late, so the 10-minute transfer to ICE 2 no longer works.
+    @Test func refreshingEndsFindsAMissedTransfer() async {
+        func stop(_ name: String, _ minute: Double, delay: Double) -> Stopover {
+            let time = TimeInfo(planned: base.addingTimeInterval(minute * 60), actual: base.addingTimeInterval((minute + delay) * 60))
+            return Stopover(station: station(name, name), arrival: time, departure: time,
+                            arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+        }
+        let mock = MockProvider(source: .bahnDe)
+        mock.trips["ICE 1"] = Trip(id: "ICE 1", line: nil, direction: nil,
+                                   stopovers: [stop("A", 0, delay: 15), stop("B", 60, delay: 15)],
+                                   cancelled: false, remarks: [], source: .bahnDe)
+        let found = Journey(legs: [leg("ICE 1", "A", "B", dep: 0, arr: 60), leg("ICE 2", "B", "C", dep: 70, arr: 120)], source: .bahnDe)
+        #expect(found.connectionIssues().isEmpty)
+        let refresher = JourneyRefresher(provider: CombinedProvider(primary: mock, fallback: nil, bahnDe: nil))
+
+        let live = await refresher.refreshEnds(found, now: base)
+
+        #expect(live.id == found.id)
+        #expect(live.legs[0].arrival.actual == base.addingTimeInterval(75 * 60))
+        #expect(live.connectionIssues().first?.title == "Umstieg in B klappt nicht mehr")
+        #expect(live.connectionIssues().first?.isBlocking == true)
+
+        // Meanwhile the results got ICE 2's platform from DB; the live version keeps it.
+        var filled = found
+        filled.legs[1].departurePlatform = PlatformInfo(planned: "7", actual: nil)
+        #expect(JourneyRefresher.keepingPlatforms(of: filled, in: live).legs[1].departurePlatform?.best == "7")
+    }
+
+    @Test func onlyResultsStartingSoonAndNotOverAreCheckedLive() {
+        let journey = Journey(legs: [leg("ICE 1", "A", "B", dep: 0, arr: 60), leg("ICE 2", "B", "C", dep: 70, arr: 120)], source: .bahnDe)
+        #expect(JourneyRefresher.isWorthLiveCheck(journey, now: base.addingTimeInterval(-11 * 3600)))
+        #expect(JourneyRefresher.isWorthLiveCheck(journey, now: base.addingTimeInterval(90 * 60)))
+        #expect(!JourneyRefresher.isWorthLiveCheck(journey, now: base.addingTimeInterval(-13 * 3600)))
+        #expect(!JourneyRefresher.isWorthLiveCheck(journey, now: base.addingTimeInterval(121 * 60)))
+    }
+
     @Test func refreshOnRingLinePicksTheVisitAtTheSavedTime() {
         // S41 passes Gesundbrunnen and Wedding every hour on the same trip; the saved 9:41 ride must
         // not be moved to the trip's first 6:41 pass when refreshed.

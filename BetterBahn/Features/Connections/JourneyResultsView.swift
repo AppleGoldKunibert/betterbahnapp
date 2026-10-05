@@ -21,6 +21,8 @@ struct JourneyResultsView: View {
     @State private var plan: TrainRoutePlan?
     @State private var planError: Error?
     @State private var isPlanning = false
+    /// Results on screen with their live times, loaded after the list shows (see `checkLive`).
+    @State private var liveResults: [String: Journey] = [:]
 
     /// A route counts as noticeably slower than the free choice from this much extra travel time.
     private static let slowRouteThreshold: TimeInterval = 60 * 60
@@ -98,7 +100,8 @@ struct JourneyResultsView: View {
                     }
                 }
 
-                ForEach(Array(visibleJourneys.enumerated()), id: \.element.id) { index, journey in
+                ForEach(Array(visibleJourneys.enumerated()), id: \.element.id) { index, result in
+                    let journey = liveResults[result.id].map { JourneyRefresher.keepingPlatforms(of: result, in: $0) } ?? result
                     NavigationLink(value: ConnectionsRoute.journey(JourneyRoute(journey: journey, finalDestination: search.to, search: search))) {
                         JourneyCard(journey: journey)
                             .overlay {
@@ -109,6 +112,7 @@ struct JourneyResultsView: View {
                             }
                     }
                     .buttonStyle(.plain)
+                    .task { await checkLive(result) }
                 }
 
                 if requirements.isEmpty, laterCursor != nil {
@@ -449,6 +453,17 @@ struct JourneyResultsView: View {
         }
     }
 
+    /// Loads the live times of a result once it scrolls into view, so a missed transfer or a
+    /// cancellation the search didn't know yet shows as "Nicht möglich" on its card. The list never
+    /// waits for it; cards just update when the data is in.
+    private func checkLive(_ journey: Journey) async {
+        guard liveResults[journey.id] == nil, JourneyRefresher.isWorthLiveCheck(journey) else { return }
+        let live = await model.journeyRefresher.refreshEnds(journey)
+        // Scrolled away before it loaded: the lookups were cancelled, so this isn't live data.
+        guard !Task.isCancelled else { return }
+        withAnimation(.snappy) { liveResults[journey.id] = live }
+    }
+
     /// Transitous leaves some trains' Gleis out (whole regional feeds, but now and then ICEs and RJs
     /// too); fills those in from DB's own schedule once the results are already on screen.
     private func fillMissingPlatforms(in loaded: [Journey]) async {
@@ -523,7 +538,7 @@ struct JourneyCard: View {
                     if journey.isCancelled {
                         InfoChip(text: "Fällt aus", systemImage: "xmark.octagon.fill", tint: .heavyDelay)
                     } else if journey.connectionIssues().contains(where: \.isBlocking) {
-                        InfoChip(text: "Anschluss weg", systemImage: "exclamationmark.triangle.fill", tint: .heavyDelay)
+                        InfoChip(text: "Nicht möglich", systemImage: "exclamationmark.triangle.fill", tint: .heavyDelay)
                     } else if !journey.connectionIssues().isEmpty {
                         InfoChip(text: "Knapp", systemImage: "exclamationmark.triangle.fill", tint: .slightDelay)
                     } else if journey.legs.contains(where: { $0.messages.containsDelayReason }) {
