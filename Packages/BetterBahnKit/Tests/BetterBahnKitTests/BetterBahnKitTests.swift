@@ -2651,6 +2651,13 @@ private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
         #expect(issues[0].isBlocking)
     }
 
+    @Test func issuesUseDisplayNames() {
+        let hbf = "S+U Berlin Hauptbahnhof"
+        let journey = Journey(legs: [leg("RE 3", "A", hbf, dep: 0, arr: 60, arrDelay: 15), leg("ICE 2", hbf, "C", dep: 70, arr: 120)],
+                              source: .bahnDe)
+        #expect(journey.connectionIssues().first?.title == "Umstieg in Berlin Hbf klappt nicht mehr")
+    }
+
     @Test func tightButPossible() {
         let journey = Journey(legs: [leg("ICE 1", "A", "B", dep: 0, arr: 60, arrDelay: 6), leg("ICE 2", "B", "C", dep: 70, arr: 120)], source: .bahnDe)
         #expect(journey.connectionIssues().first?.isBlocking == false)
