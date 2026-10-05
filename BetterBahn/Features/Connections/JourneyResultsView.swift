@@ -10,6 +10,8 @@ struct JourneyResultsView: View {
     @State private var earlierCursor: String?
     @State private var laterCursor: String?
     @State private var hiddenCount = 0
+    /// Trains added by the expert option "Nur Ein-/Ausstieg ignorieren" (see `addTrainsIgnoringBoardingRules`).
+    @State private var restrictedTripIds: Set<String> = []
     @State private var source: DataSource?
     @State private var isLoading = false
     @State private var loadingMore = false
@@ -372,6 +374,7 @@ struct JourneyResultsView: View {
         earlierCursor = nil
         laterCursor = nil
         hiddenCount = 0
+        restrictedTripIds = []
         await load(cursor: nil, prepend: false)
         // Train requirements survive a new time – they're only cleared by the reset button.
         await replan()
@@ -430,6 +433,7 @@ struct JourneyResultsView: View {
                 hiddenCount += before - result.count
             }
             source = page?.source ?? model.provider.source
+            result = result.filter { !Self.detours(onto: restrictedTripIds, $0) }
             if cursor == nil {
                 journeys = result.removingDuplicateIDs()
                 // The first connection is the one most likely opened next: have its live data ready.
@@ -471,10 +475,20 @@ struct JourneyResultsView: View {
             extra = extra.filter(filter.isValid)
         }
         guard !extra.isEmpty, !Task.isCancelled else { return }
+        let tripIds = Set(extra.flatMap(\.transitLegs).compactMap(\.tripId))
+        restrictedTripIds.formUnion(tripIds)
         withAnimation(.snappy) {
-            journeys = (journeys + extra).removingDuplicateIDs()
+            // Routes that only change trains to board one of these further along (Berlin Hbf → Halle →
+            // back to Gesundbrunnen on the ICE that also stops at Hbf) give way to the direct ride.
+            journeys = (journeys.filter { !Self.detours(onto: tripIds, $0) } + extra).removingDuplicateIDs()
                 .sorted { ($0.departure?.planned ?? .distantFuture) < ($1.departure?.planned ?? .distantFuture) }
         }
+    }
+
+    /// A connection with transfers that rides one of `tripIds`: a detour to get on (or off) a train the
+    /// expert option already offers directly.
+    private static func detours(onto tripIds: Set<String>, _ journey: Journey) -> Bool {
+        journey.transitLegs.count > 1 && journey.transitLegs.contains { $0.tripId.map(tripIds.contains) ?? false }
     }
 
     /// Loads the live times of a result once it scrolls into view, so a missed transfer or a
