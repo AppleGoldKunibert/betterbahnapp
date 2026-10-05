@@ -211,21 +211,22 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
                 .map(\.element.id)
         }
 
-        // Bernau bei Berlin is preferred and stays first; then ~80 km and ~120 km, Berlin Hbf
-        // (~500 km) after, the nearby bus stop last.
-        #expect(ranked(near: munich) == ["bernau-berlin", "bernau-chiemsee", "salzburg", "far", "bus"])
+        // Bernau bei Berlin is preferred and stays first; then ~80 km, Berlin Hbf (~500 km) after,
+        // the nearby bus stop, and Salzburg (~120 km, abroad, not typed) last.
+        #expect(ranked(near: munich) == ["bernau-berlin", "bernau-chiemsee", "far", "bus", "salzburg"])
         // Without a location: Bernau bei Berlin, then German trains (main stations first), then Austria.
         #expect(ranked(near: nil) == ["bernau-berlin", "far", "bernau-chiemsee", "salzburg", "bus"])
 
-        // Typing "Bernau": a bus stop named exactly "Bernau" is an exact match, but Bernau bei Berlin
-        // matches exactly too (without its bracket) and still comes first.
+        // Typing "Bernau": Bernau bei Berlin matches exactly too (without its bracket) and comes first.
+        // A bus stop named exactly "Bernau" 150 km away doesn't count as exact (only nearby ones do),
+        // so the train station at the Chiemsee comes before it.
         let exactBus = MGeocodeMatch(type: "STOP", name: "Bernau", id: "exact-bus", lat: 49.17, lon: 10.33,
                                      country: "DE", modes: ["BUS"])
         let typed = [exactBus, near, far].enumerated()
             .sorted { TransitousProvider.searchRank($0.element, query: "Bernau", offset: $0.offset, near: munich)
                     > TransitousProvider.searchRank($1.element, query: "Bernau", offset: $1.offset, near: munich) }
             .map(\.element.id)
-        #expect(typed == ["bernau-berlin", "exact-bus", "bernau-chiemsee"])
+        #expect(typed == ["bernau-berlin", "bernau-chiemsee", "exact-bus"])
         #expect(TransitousProvider.distanceBand(forMeters: 75_000) == 1)
         #expect(TransitousProvider.distanceBand(forMeters: 1_200_000) == 7)
     }
@@ -414,10 +415,13 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
     /// Frankfurt (M) Hbf, being in a nearer distance band. Busy stations count as nearer now.
     @Test func searchRankLetsBusyStationsCountAsNearer() {
         let berlin = Coordinate(latitude: 52.52, longitude: 13.40)
+        func town(_ name: String) -> [MGeocodeMatch.Area] { [.init(name: name, adminLevel: 6, isDefault: true)] }
         let mainHbf = MGeocodeMatch(type: "STOP", name: "Frankfurt (M) Hbf", id: "main", lat: 50.107, lon: 8.663,
-                                    country: "DE", modes: ["HIGHSPEED_RAIL", "REGIONAL_RAIL"], importance: 0.0215)
+                                    country: "DE", modes: ["HIGHSPEED_RAIL", "REGIONAL_RAIL"],
+                                    areas: town("Frankfurt am Main"), importance: 0.0215)
         let oder = MGeocodeMatch(type: "STOP", name: "Frankfurt (Oder)", id: "oder", lat: 52.336, lon: 14.546,
-                                 country: "DE", modes: ["LONG_DISTANCE", "REGIONAL_RAIL"], importance: 0.0028)
+                                 country: "DE", modes: ["LONG_DISTANCE", "REGIONAL_RAIL"],
+                                 areas: town("Frankfurt (Oder)"), importance: 0.0028)
         let border = MGeocodeMatch(type: "STOP", name: "Frankfurt(Oder), Grenze", id: "border", lat: 52.34, lon: 14.56,
                                    country: "PL", modes: ["REGIONAL_RAIL"], importance: 0.00043)
         let small = MGeocodeMatch(type: "STOP", name: "Frankfurt(Oder)-Rosengarten", id: "small", lat: 52.31, lon: 14.46,
@@ -426,7 +430,7 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
             .sorted { TransitousProvider.searchRank($0.element, query: "Frankfurt", offset: $0.offset, near: berlin)
                     > TransitousProvider.searchRank($1.element, query: "Frankfurt", offset: $1.offset, near: berlin) }
             .map(\.element.id)
-        #expect(ranked == ["main", "oder", "small", "border"])
+        #expect(ranked == ["main", "oder", "border", "small"])
 
         // A coach stop named just "Bonn" in Bonn doesn't count as an exact match for "Bonn".
         let bonnArea = [MGeocodeMatch.Area(name: "Bonn", adminLevel: 6, isDefault: true)]
@@ -464,6 +468,505 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         let stations = try await provider.searchStations("Potsdam")
 
         #expect(stations.map(\.id) == ["potsdamHbf", "golm"])
+    }
+
+    /// Real-world hits (issue #91): from Berlin, "ber" lists Flughafen BER before Bern and "ost" Berlin's
+    /// stations before Ulm Ost, while from Munich Bern (nearer there) stays first and typing "bern"
+    /// in full keeps Bern on top. Without a location the order stays as before.
+    @Test func searchRankWeighsNearbyStationsAgainstTheText() {
+        let berlin = Coordinate(latitude: 52.52, longitude: 13.405)
+        let munich = Coordinate(latitude: 48.14, longitude: 11.56)
+        func match(_ id: String, _ name: String, _ lat: Double, _ lon: Double, _ country: String,
+                   _ modes: [String], _ importance: Double) -> MGeocodeMatch {
+            MGeocodeMatch(type: "STOP", name: name, id: id, lat: lat, lon: lon, country: country, modes: modes,
+                          importance: importance)
+        }
+        func ranked(_ query: String, _ matches: [MGeocodeMatch], near location: Coordinate?) -> [String] {
+            matches.enumerated()
+                .sorted { TransitousProvider.searchRank($0.element, query: query, offset: $0.offset, near: location)
+                        > TransitousProvider.searchRank($1.element, query: query, offset: $1.offset, near: location) }
+                .map(\.element.id)
+        }
+
+        let bern = match("bern", "Bern", 46.949, 7.439, "CH", ["HIGHSPEED_RAIL", "LONG_DISTANCE", "REGIONAL_RAIL"], 0.0518)
+        let beroun = match("beroun", "Beroun", 49.958, 14.078, "CZ", ["REGIONAL_RAIL", "BUS"], 0.0031)
+        let dilBer = match("dilBer", "Dil Ber", 9.071, 38.738, "ET", ["BUS"], 0.0002)
+        let ber = match("ber", "Flughafen BER", 52.365, 13.510, "DE", ["LONG_DISTANCE", "REGIONAL_RAIL", "SUBURBAN"], 0.0033)
+        let berHits = [bern, beroun, dilBer, ber]
+        #expect(ranked("ber", berHits, near: berlin) == ["ber", "bern", "beroun", "dilBer"])
+        // Stations abroad only count in full ("bern") or nearby: from Munich too, BER comes first.
+        #expect(ranked("ber", berHits, near: munich) == ["ber", "bern", "beroun", "dilBer"])
+        #expect(ranked("ber", berHits, near: nil).first == "ber")
+        // Near the border, stations abroad count from the first letters: Basel from Freiburg.
+        let basel = match("basel", "Basel SBB", 47.547, 7.590, "CH", ["LONG_DISTANCE", "REGIONAL_RAIL"], 0.03)
+        let freiburg = Coordinate(latitude: 47.997, longitude: 7.842)
+        #expect(!TransitousProvider.isFarForeign(basel, query: "bas", isTrain: true, near: freiburg))
+        #expect(TransitousProvider.isFarForeign(basel, query: "bas", isTrain: true, near: berlin))
+        // A train station in the place that was typed counts from anywhere, a far bus stop doesn't.
+        #expect(!TransitousProvider.isFarForeign(basel, query: "basel", isTrain: true, near: berlin))
+        #expect(!TransitousProvider.isFarForeign(basel, query: "Basel SBB", isTrain: true, near: berlin))
+        #expect(TransitousProvider.isFarForeign(dilBer, query: "ber", isTrain: false, near: berlin))
+        // "flughafen" or "ost" isn't a place: Zürich Flughafen and Interlaken Ost stay behind.
+        let zurichAirport = match("zurichAirport", "Zürich Flughafen", 47.450, 8.562, "CH", ["LONG_DISTANCE"], 0.03)
+        let stuttgart = Coordinate(latitude: 48.78, longitude: 9.18)
+        #expect(TransitousProvider.isFarForeign(zurichAirport, query: "flughafen", isTrain: true, near: stuttgart))
+        #expect(!TransitousProvider.isFarForeign(zurichAirport, query: "zürich", isTrain: true, near: stuttgart))
+
+        let ostbf = match("ostbf", "Berlin Ostbf", 52.510, 13.435, "DE", ["HIGHSPEED_RAIL", "REGIONAL_RAIL", "SUBURBAN"], 0.0057)
+        let ostkreuz = match("ostkreuz", "S Ostkreuz Bhf (Berlin)", 52.503, 13.469, "DE", ["REGIONAL_RAIL", "SUBURBAN"], 0.0089)
+        let ulmOst = match("ulmOst", "Ulm Ost", 48.407, 9.995, "DE", ["REGIONAL_RAIL"], 0.00025)
+        let ostra = match("ostra", "Ostrá", 50.188, 14.891, "CZ", ["REGIONAL_RAIL"], 0.0012)
+        let ostHits = [ulmOst, ostra, ostbf, ostkreuz]
+        // "Ostbf" is the station "Ost", like "Nordbahnhof" is "Nord".
+        #expect(ranked("ost", ostHits, near: berlin) == ["ostbf", "ostkreuz", "ulmOst", "ostra"])
+        #expect(ranked("ost", ostHits, near: nil).first == "ostbf")
+
+        let bernau = match("bernau-berlin", "S Bernau Bhf", 52.68, 13.59, "DE", ["REGIONAL_RAIL", "SUBURBAN"], 0.0012)
+        #expect(ranked("bern", [bernau, beroun, bern], near: berlin).first == "bern")
+
+        // A bus stop's exact name only counts nearby: not "Zoo" in Bavaria or Wrocław for Berlin's zoo.
+        let zoo = match("zoo", "S+U Zoologischer Garten Bhf (Berlin)", 52.507, 13.332, "DE",
+                        ["LONG_DISTANCE", "REGIONAL_RAIL"], 0.006)
+        let bavarianZoo = match("bavarianZoo", "Zoo", 49.95, 11.57, "DE", ["BUS"], 0.0001)
+        let wroclawZoo = match("wroclawZoo", "ZOO", 51.10, 17.07, "PL", ["TRAM", "BUS"], 0.0003)
+        let berlinZooBus = match("berlinZooBus", "Zoo", 52.506, 13.335, "DE", ["BUS"], 0.0002)
+        #expect(ranked("zoo", [bavarianZoo, wroclawZoo, zoo], near: berlin) == ["zoo", "bavarianZoo", "wroclawZoo"])
+        #expect(ranked("zoo", [bavarianZoo, zoo, berlinZooBus], near: berlin).first == "berlinZooBus")
+        #expect(ranked("zoo", [zoo, bavarianZoo], near: nil).first == "bavarianZoo")
+
+        // "ber" is Flughafen BER's short name, so it comes first from Munich too.
+        let bergAmLaim = match("bergAmLaim", "München-Berg am Laim", 48.123, 11.633, "DE", ["SUBURBAN"], 0.002)
+        #expect(ranked("ber", [bergAmLaim, ber], near: munich) == ["ber", "bergAmLaim"])
+
+        // German names of towns abroad find their stations: "stettin" is Szczecin.
+        let szczecin = match("szczecin", "Szczecin Główny", 53.418, 14.551, "PL",
+                             ["LONG_DISTANCE", "REGIONAL_RAIL"], 0.0014)
+        let stettinBus = match("stettinBus", "Stettin", 59.0, 16.2, "SE", ["BUS"], 0.00001)
+        let stettinerStr = match("stettinerStr", "Gartz, Stettiner Str.", 53.21, 14.39, "DE", ["BUS"], 0.0001)
+        #expect(ranked("stettin", [stettinBus, stettinerStr, szczecin], near: berlin).first == "szczecin")
+        #expect(ranked("stettin", [stettinBus, stettinerStr, szczecin], near: nil).first == "szczecin")
+    }
+
+    /// German names of towns abroad: matched by `searchWords`, asked for in the local spelling.
+    @Test func germanNamesOfTownsAbroad() {
+        let szczecin = MGeocodeMatch(type: "STOP", name: "Szczecin Główny", id: "s", lat: 53.418, lon: 14.551,
+                                     country: "PL")
+        #expect(TransitousProvider.textMatch(szczecin, query: "Stettin") == (matched: 1, whole: 1))
+        #expect(TransitousProvider.localNameQuery(for: "stettin") == "Szczecin")
+        #expect(TransitousProvider.localNameQuery(for: "Brüssel Midi") == "Bruxelles Midi")
+        #expect(TransitousProvider.localNameQuery(for: "Bruessel") == "Bruxelles")
+        #expect(TransitousProvider.localNameQuery(for: "berlin") == nil)
+        // Only the whole word: "Prager Str." isn't Praha.
+        let pragerStr = MGeocodeMatch(type: "STOP", name: "Praha hl.n.", id: "p", lat: 50.08, lon: 14.43, country: "CZ")
+        #expect(TransitousProvider.textMatch(pragerStr, query: "prager").matched == 0)
+    }
+
+    /// "Hbf" next to a place only counts for that place's stations, abroad too ("hl.n."), and the
+    /// local query leaves it out: for "Szczecin hbf" the geocoder only lists German Hbfs. A part of
+    /// town alone isn't a match either, while "Nordbahnhof" is the station "Nord".
+    @Test func stationWordsAndPartsOfTownOnlyCountNextToAPlace() {
+        func stop(_ name: String, country: String = "DE", town: String, district: String? = nil) -> MGeocodeMatch {
+            var areas = [MGeocodeMatch.Area(name: town, adminLevel: 6, isDefault: true)]
+            if let district { areas.append(.init(name: district, adminLevel: 9, isDefault: false)) }
+            return MGeocodeMatch(type: "STOP", name: name, id: name, lat: 0, lon: 0, country: country, areas: areas)
+        }
+        let berlinHbf = stop("Berlin Hbf", town: "Berlin")
+        let praha = stop("Praha hl.n.", country: "CZ", town: "Prag")
+        #expect(TransitousProvider.textMatch(berlinHbf, query: "prag hbf") == (matched: 0, whole: 0))
+        #expect(TransitousProvider.textMatch(praha, query: "prag hbf") == (matched: 2, whole: 2))
+        #expect(TransitousProvider.textMatch(berlinHbf, query: "hbf") == (matched: 1, whole: 1))
+        #expect(TransitousProvider.textMatch(berlinHbf, query: "berlin hbf") == (matched: 2, whole: 2))
+        #expect(TransitousProvider.localNameQuery(for: "stettin hbf") == "Szczecin")
+
+        let dortmund = stop("Dortmund Hbf", town: "Dortmund", district: "Innenstadt West")
+        #expect(TransitousProvider.textMatch(dortmund, query: "west") == (matched: 0, whole: 0))
+        #expect(TransitousProvider.textMatch(dortmund, query: "dortmund west") == (matched: 2, whole: 1))
+        let nordbahnhof = stop("Berlin-Nordbahnhof", town: "Berlin")
+        #expect(TransitousProvider.textMatch(nordbahnhof, query: "nord") == (matched: 1, whole: 1))
+        // "an" is the town's word for every stop in Brandenburg an der Havel, not just Am Anger's.
+        let brandenburgHbf = stop("Brandenburg, Hauptbahnhof", town: "Brandenburg an der Havel")
+        let amAnger = stop("Brandenburg, Am Anger", town: "Brandenburg an der Havel")
+        #expect(TransitousProvider.textMatch(brandenburgHbf, query: "brandenburg an der havel")
+            == TransitousProvider.textMatch(amAnger, query: "brandenburg an der havel"))
+        let halleHbf = stop("Halle (Saale) Hbf", town: "Halle (Saale)")
+        let feuerwache = stop("Halle (Saale), An der Feuerwache", town: "Halle (Saale)")
+        #expect(TransitousProvider.textMatch(halleHbf, query: "halle an der saale") == (matched: 2, whole: 2))
+        #expect(TransitousProvider.textMatch(feuerwache, query: "halle an der saale") == (matched: 2, whole: 2))
+        // Typed last, "an" is still the start of a word: Anhalter Bahnhof.
+        #expect(TransitousProvider.typedWords("berlin an").count == 2)
+    }
+
+    /// ø, æ and ł aren't accented letters in Unicode, but typed as o, ae and l they still match, and
+    /// the start of a German name already asks for the local one.
+    @Test func lettersAbroadAndStartsOfGermanNames() {
+        #expect(TransitousProvider.searchWords("København H").first?.contains("kobenhavn") == true)
+        #expect(TransitousProvider.searchWords("Wrocław").first?.contains("wroclaw") == true)
+        #expect(TransitousProvider.isExactMatch("Tønder", query: "tonder"))
+        #expect(TransitousProvider.localNameQuery(for: "sonderburg") == "Sønderborg")
+        #expect(TransitousProvider.localNameQuery(for: "kopenh") == "København")
+        #expect(TransitousProvider.localNameQuery(for: "trie") == nil) // Triest or Trient
+        #expect(TransitousProvider.localNameQuery(for: "kop") == nil)
+        let copenhagen = MGeocodeMatch(type: "STOP", name: "København H", id: "k", lat: 55.67, lon: 12.56, country: "DK")
+        #expect(TransitousProvider.textMatch(copenhagen, query: "kopenh") == (matched: 1, whole: 0))
+        #expect(TransitousProvider.namesPlace("kopenh", copenhagen))
+
+        // The start of a big station's name names its place from 4 letters on: "wroc" from Görlitz.
+        let wroclaw = MGeocodeMatch(type: "STOP", name: "Wrocław Główny", id: "w", lat: 51.098, lon: 17.037, country: "PL",
+                                    modes: ["LONG_DISTANCE"], importance: 0.0035)
+        #expect(TransitousProvider.namesPlace("wroc", wroclaw))
+        #expect(!TransitousProvider.namesPlace("wro", wroclaw))
+        // A stop without trips named like its town (in German "Stettin") isn't an exact match, and the
+        // main station abroad comes first among equals.
+        let szczecinArea = [MGeocodeMatch.Area(name: "Stettin", adminLevel: 8, isDefault: true)]
+        let phantom = MGeocodeMatch(type: "STOP", name: "Szczecin", id: "phantom", lat: 53.43, lon: 14.55, country: "PL",
+                                    modes: [], areas: szczecinArea)
+        let glowny = MGeocodeMatch(type: "STOP", name: "Szczecin Główny", id: "glowny", lat: 53.418, lon: 14.551,
+                                   country: "PL", modes: ["LONG_DISTANCE"], areas: szczecinArea, importance: 0.003)
+        let dabie = MGeocodeMatch(type: "STOP", name: "Szczecin Dąbie", id: "dabie", lat: 53.40, lon: 14.62,
+                                  country: "PL", modes: ["REGIONAL_RAIL"], areas: szczecinArea, importance: 0.003)
+        #expect(TransitousProvider.isNamed("Szczecin", like: "Stettin"))
+        let prenzlau = Coordinate(latitude: 53.316, longitude: 13.862)
+        let ranked = [phantom, dabie, glowny].enumerated()
+            .sorted { TransitousProvider.searchRank($0.element, query: "szczecin", offset: $0.offset, near: prenzlau)
+                    > TransitousProvider.searchRank($1.element, query: "szczecin", offset: $1.offset, near: prenzlau) }
+            .map(\.element.id)
+        #expect(ranked.first == "glowny")
+        // DELFI's border points aren't stations.
+        let border = MGeocodeMatch(type: "STOP", name: "Toender [Grenze]", id: "b", lat: 54.9, lon: 8.9, country: "DE")
+        #expect(TransitousProvider.isBorderPoint(border))
+        #expect(!TransitousProvider.isBorderPoint(MGeocodeMatch(type: "STOP", name: "Ahlbeck Grenze", id: "a", lat: 0,
+                                                                lon: 0, country: "DE")))
+    }
+
+    /// In the user's town its stations go by their short name ("süd" in Essen, "ost" in Frankfurt),
+    /// U-Bahn stations nearby count their nearness, and train stations just across the border count
+    /// like a neighbour's (Sopron from Vienna).
+    @Test func searchRankKnowsTheUsersTownAndTheBorder() {
+        func match(_ id: String, _ name: String, _ lat: Double, _ lon: Double, _ country: String, _ modes: [String],
+                   _ importance: Double, town: String) -> MGeocodeMatch {
+            MGeocodeMatch(type: "STOP", name: name, id: id, lat: lat, lon: lon, country: country, modes: modes,
+                          areas: [.init(name: town, adminLevel: 6, isDefault: true)], importance: importance)
+        }
+        func ranked(_ query: String, _ matches: [MGeocodeMatch], near location: Coordinate, town: String?) -> [String] {
+            matches.enumerated()
+                .sorted {
+                    TransitousProvider.searchRank($0.element, query: query, offset: $0.offset, near: location, userTown: town)
+                        > TransitousProvider.searchRank($1.element, query: query, offset: $1.offset, near: location,
+                                                        userTown: town)
+                }
+                .map(\.element.id)
+        }
+
+        let essen = Coordinate(latitude: 51.456, longitude: 7.012)
+        let essenSued = match("essenSued", "Essen Süd S", 51.44, 7.02, "DE", ["SUBURBAN"], 0.00057, town: "Essen")
+        let kraySued = match("kraySued", "Essen-Kray Süd", 51.47, 7.08, "DE", ["REGIONAL_RAIL"], 0.00025, town: "Essen")
+        let reSued = match("reSued", "RE Süd Bf", 51.6, 7.2, "DE", ["REGIONAL_RAIL"], 0.0012, town: "Recklinghausen")
+        let ffmSued = match("ffmSued", "Frankfurt (Main) Süd", 50.10, 8.69, "DE", ["LONG_DISTANCE", "REGIONAL_RAIL"],
+                            0.008, town: "Frankfurt am Main")
+        #expect(ranked("süd", [ffmSued, reSued, kraySued, essenSued], near: essen, town: "Essen").first == "essenSued")
+
+        let frankfurt = Coordinate(latitude: 50.111, longitude: 8.682)
+        let ffmOst = match("ffmOst", "Frankfurt (Main) Ostbahnhof", 50.112, 8.708, "DE", ["REGIONAL_RAIL", "SUBWAY"],
+                           0.00203, town: "Frankfurt am Main")
+        let ofOst = match("ofOst", "Offenbach Ost", 50.10, 8.78, "DE", ["SUBURBAN"], 0.00223, town: "Offenbach am Main")
+        #expect(ranked("ost", [ofOst, ffmOst], near: frankfurt, town: "Frankfurt").first == "ffmOst")
+
+        // Trams too: "neumarkt" in Köln.
+        let cologne = Coordinate(latitude: 50.938, longitude: 6.960)
+        let neumarkt = match("neumarkt", "Köln Neumarkt", 50.936, 6.947, "DE", ["TRAM", "BUS"], 0.00037, town: "Köln")
+        let oberpfalz = match("oberpfalz", "Neumarkt (Oberpf)", 49.28, 11.46, "DE", ["REGIONAL_RAIL"], 0.0015,
+                              town: "Neumarkt in der Oberpfalz")
+        #expect(ranked("neumarkt", [oberpfalz, neumarkt], near: cologne, town: "Köln").first == "neumarkt")
+        // VRS names Köln-Mülheim "Köln Mülheim Bf Mülheim".
+        let koelnMuelheim = match("koelnMuelheim", "Köln Mülheim Bf Mülheim", 50.958, 7.013, "DE",
+                                  ["REGIONAL_RAIL", "SUBURBAN", "TRAM", "BUS"], 0.00226, town: "Köln")
+        let ruhr = match("ruhr", "Mülheim Hbf", 51.431, 6.887, "DE", ["LONG_DISTANCE", "REGIONAL_RAIL"], 0.0023,
+                         town: "Mülheim an der Ruhr")
+        #expect(ranked("mülheim", [ruhr, koelnMuelheim], near: cologne, town: "Köln").first == "koelnMuelheim")
+
+        // Just "hbf" is the station nearby: Stralsund Hbf, not Berlin Hbf.
+        let stralsund = Coordinate(latitude: 54.309, longitude: 13.077)
+        let stralsundHbf = match("stralsundHbf", "Stralsund Hbf", 54.309, 13.077, "DE", ["LONG_DISTANCE"], 0.0015,
+                                 town: "Stralsund")
+        let berlinHbf = match("berlinHbf", "Berlin Hbf", 52.525, 13.369, "DE", ["LONG_DISTANCE"], 0.015, town: "Berlin")
+        #expect(ranked("hbf", [berlinHbf, stralsundHbf], near: stralsund, town: nil).first == "stralsundHbf")
+
+        let nuremberg = Coordinate(latitude: 49.452, longitude: 11.077)
+        let nueAirport = match("nueAirport", "Nürnberg Flughafen", 49.4945, 11.0779, "DE", ["BUS", "SUBWAY"], 0.00133,
+                               town: "Nürnberg")
+        let mucAirport = match("mucAirport", "Flughafen München", 48.353, 11.785, "DE", ["SUBURBAN", "REGIONAL_RAIL"],
+                               0.003, town: "Freising")
+        #expect(ranked("flughafen", [mucAirport, nueAirport], near: nuremberg, town: "Nürnberg").first == "nueAirport")
+        #expect(ranked("flughafen", [mucAirport, nueAirport], near: nuremberg, town: nil).first == "nueAirport")
+
+        let vienna = Coordinate(latitude: 48.208, longitude: 16.373)
+        let sopron = match("sopron", "Sopron", 47.68, 16.58, "HU", ["REGIONAL_RAIL"], 0.0011, town: "Sopron")
+        let sopronBus = match("sopronBus", "Sopron, autóbusz-állomás", 47.685, 16.59, "HU", ["BUS"], 0.0031, town: "Sopron")
+        #expect(ranked("sopron", [sopronBus, sopron], near: vienna, town: "Wien").first == "sopron")
+
+        // Neuchâtel's stops (in "Neuenburg", in German) match "neuenburg" only by its German name, so
+        // they don't push Neuenburg (Baden) down.
+        let freiburg = Coordinate(latitude: 47.997, longitude: 7.842)
+        let neuchatel = match("neuchatel", "Neuchâtel", 46.996, 6.936, "CH", ["LONG_DISTANCE", "REGIONAL_RAIL"], 0.0094,
+                              town: "Neuenburg")
+        let evole = match("evole", "Neuchâtel, Evole", 46.99, 6.92, "CH", ["REGIONAL_RAIL"], 0.0032, town: "Neuenburg")
+        let neuenburg = match("neuenburg", "Neuenburg (Baden)", 47.815, 7.556, "DE", ["REGIONAL_RAIL"], 0.0004,
+                              town: "Neuenburg am Rhein")
+        #expect(ranked("neuenburg", [evole, neuchatel, neuenburg], near: freiburg, town: "Freiburg").last == "evole")
+    }
+
+    /// A town only counts as typed from its first word: "neustadt" isn't Wiener Neustadt.
+    @Test func typedTownStartsWithItsFirstWord() {
+        func stop(_ town: String) -> MGeocodeMatch {
+            MGeocodeMatch(type: "STOP", name: "Bahnhof", id: town, lat: 0, lon: 0, country: "DE",
+                          areas: [MGeocodeMatch.Area(name: town, adminLevel: 8, isDefault: true)])
+        }
+        #expect(!TransitousProvider.isInTown(named: "neustadt", stop("Wiener Neustadt"), wholeWords: true))
+        #expect(TransitousProvider.isInTown(named: "neustadt", stop("Neustadt an der Weinstraße"), wholeWords: true))
+        #expect(TransitousProvider.isInTown(named: "frankfurt oder", stop("Frankfurt (Oder)"), wholeWords: true))
+        #expect(TransitousProvider.isInTown(named: "neust", stop("Wiener Neustadt")))
+    }
+
+    /// A small town's station a bit farther away comes before a village station nearby, and a busy
+    /// one far away after both; the village is still found, and first once its name is typed in full.
+    @Test func searchRankPrefersBusierStationsButKeepsVillages() {
+        let berlin = Coordinate(latitude: 52.52, longitude: 13.405)
+        func match(_ id: String, _ name: String, _ lat: Double, _ lon: Double, _ importance: Double) -> MGeocodeMatch {
+            MGeocodeMatch(type: "STOP", name: name, id: id, lat: lat, lon: lon, country: "DE", modes: ["REGIONAL_RAIL"],
+                          importance: importance)
+        }
+        let village = match("village", "Neudorf", 52.65, 13.80, 0.0002)
+        let smallTown = match("smallTown", "Neustadt (Dosse)", 52.85, 12.45, 0.0015)
+        let far = match("far", "Neustadt (Weinstr) Hbf", 49.0, 8.4, 0.004)
+        func ranked(_ query: String) -> [String] {
+            [far, village, smallTown].enumerated()
+                .sorted { TransitousProvider.searchRank($0.element, query: query, offset: $0.offset, near: berlin)
+                        > TransitousProvider.searchRank($1.element, query: query, offset: $1.offset, near: berlin) }
+                .map(\.element.id)
+        }
+        #expect(ranked("neu") == ["smallTown", "village", "far"])
+
+        // An S-Bahn-only halt counts a quarter of its departures: behind a regional station with fewer,
+        // but still ahead of a village station.
+        func rankedHits(_ query: String, _ matches: [MGeocodeMatch]) -> [String] {
+            matches.enumerated()
+                .sorted { TransitousProvider.searchRank($0.element, query: query, offset: $0.offset, near: berlin)
+                        > TransitousProvider.searchRank($1.element, query: query, offset: $1.offset, near: berlin) }
+                .map(\.element.id)
+        }
+        let sBahn = MGeocodeMatch(type: "STOP", name: "Neue Mühle", id: "sBahn", lat: 52.40, lon: 13.55, country: "DE",
+                                  modes: ["SUBURBAN", "SUBWAY", "BUS"], importance: 0.008)
+        let regional = MGeocodeMatch(type: "STOP", name: "Neuenhagen", id: "regional", lat: 52.529, lon: 13.69, country: "DE",
+                                     modes: ["REGIONAL_RAIL", "SUBURBAN"], importance: 0.004)
+        #expect(rankedHits("neu", [village, sBahn, regional]) == ["regional", "sBahn", "village"])
+        #expect(TransitousProvider.isSuburbanOnly(["SUBURBAN", "BUS"]))
+        #expect(!TransitousProvider.isSuburbanOnly(["SUBURBAN", "REGIONAL_RAIL"]))
+        #expect(ranked("Neudorf").first == "village")
+        #expect(TransitousProvider.sizeScore(forImportance: nil) == 0)
+        #expect(TransitousProvider.sizeScore(forImportance: 0.0015) == 3)
+        #expect(TransitousProvider.sizeScore(forImportance: 1) == 8)
+    }
+
+    /// A slow extra query ("Po Bahnhof") is dropped after `extraQueryDeadline` instead of holding up
+    /// the whole search until `CombinedProvider` gives up on it and falls back to bahn.de's noise.
+    @Test func slowExtraQueriesDontHoldUpTheSearch() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [SlowExtraGeocodeProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let provider = TransitousProvider(http: HTTPClient(session: session))
+
+        let start = Date.now
+        let stations = try await provider.searchStations("Po")
+        #expect(stations.map(\.id) == ["potsdamHbf"])
+        #expect(Date.now.timeIntervalSince(start) < 2.4)
+        #expect(CombinedProvider.isShortQuery("Po "))
+        #expect(!CombinedProvider.isShortQuery("Pot"))
+    }
+
+    /// "Be" in Berlin: at most three Berlin stations first, then Bern, the rest of Berlin after.
+    /// The Swiss canton in "Brügg BE" isn't a whole-word match for "Be".
+    @Test func shortSearchesSpreadOverTowns() {
+        func match(_ id: String, town: String) -> MGeocodeMatch {
+            MGeocodeMatch(type: "STOP", name: id, id: id, lat: 0, lon: 0, country: "DE", modes: ["REGIONAL_RAIL"],
+                          areas: [.init(name: town, adminLevel: 4, isDefault: true)])
+        }
+        let berlin = ["hbf", "suedkreuz", "ostbf", "spandau", "gesundbrunnen"].map { match($0, town: "Berlin") }
+        let bern = match("bern", town: "Bern")
+        let spread = TransitousProvider.spreadingTowns(berlin + [bern], query: "Be")
+        #expect(spread.map(\.id) == ["hbf", "suedkreuz", "ostbf", "bern", "spandau", "gesundbrunnen"])
+        // Typing the town keeps its stations together.
+        #expect(TransitousProvider.spreadingTowns(berlin + [bern], query: "Berlin").map(\.id).last == "bern")
+
+        let bruegg = MGeocodeMatch(type: "STOP", name: "Brügg BE, Bahnhof", id: "bruegg", lat: 47.12, lon: 7.28,
+                                   country: "CH", modes: ["REGIONAL_RAIL"])
+        #expect(TransitousProvider.textMatch(bruegg, query: "Be").whole == 0)
+        #expect(TransitousProvider.textMatch(bruegg, query: "Be").matched == 1)
+    }
+
+    /// "be" near Berlin asks for Berlin Hbf and Bernau (one station per place); Bern and Bebra are
+    /// too far away to be hinted.
+    @Test func stationHintsFindNearbyStationsByTheirFirstLetters() throws {
+        let json = #"[["Berlin Hbf",52.525,13.369,0.02],["Berlin Südkreuz",52.475,13.365,0.0097],"#
+            + #"["S Bernau Bhf",52.676,13.592,0.0012],["Bern",46.949,7.439,0.05],["Bebra",50.97,9.79,0.002],"#
+            + #"["S+U Potsdamer Platz Bhf (Berlin)",52.509,13.376,0.0063],["S Potsdam Hauptbahnhof",52.391,13.067,0.0038]]"#
+        let hints = try JSONDecoder().decode([StationHints.Hint].self, from: Data(json.utf8))
+        let berlin = Coordinate(latitude: 52.52, longitude: 13.405)
+        // Bern is far, but big enough (`hubSize`) to count from anywhere; Bebra isn't.
+        #expect(StationHints.names(matching: "be", near: berlin, in: hints) == ["Berlin Hbf", "S Bernau Bhf", "Bern"])
+        #expect(StationHints.names(matching: "bern", near: berlin, in: hints) == ["S Bernau Bhf", "Bern"])
+        #expect(StationHints.names(matching: "x", near: berlin, in: hints).isEmpty)
+        #expect(StationHints.names(matching: "be", near: berlin, excluding: "Berlin", in: hints)
+            == ["S Bernau Bhf", "Bern"])
+        // Stations in the user's town still count when what was typed matches more than the town.
+        #expect(StationHints.names(matching: "po", near: berlin, excluding: "Berlin", in: hints)
+            == ["S+U Potsdamer Platz Bhf (Berlin)", "S Potsdam Hauptbahnhof"])
+        // The bundled list loads.
+        #expect(StationHints.all.count > 1000)
+
+        // Big stations count from anywhere: "ham" in Berlin finds Hamburg Hbf before Hammelspring.
+        let more = try JSONDecoder().decode([StationHints.Hint].self, from: Data(#"""
+            [["Hamburg Hbf",53.553,10.007,0.03],["Hammelspring",52.99,13.62,0.0002],
+             ["Neustadt (Dosse), Bahnhof",52.853,12.45,0.0006],["Dresden-Neustadt",51.065,13.741,0.004],
+             ["Neustadt (Weinstr) Hbf",49.35,8.14,0.0022]]
+            """#.utf8))
+        #expect(StationHints.names(matching: "ham", near: berlin, in: more) == ["Hamburg Hbf", "Hammelspring"])
+        // For longer names only nearby ones whose name starts with it: Neustadt (Dosse), not Dresden-Neustadt.
+        #expect(StationHints.names(matching: "neustadt", near: berlin, nearbyOnly: true, in: more)
+            == ["Neustadt (Dosse), Bahnhof"])
+        #expect(TransitousProvider.nearbyStationQueries(for: "neustadt", near: berlin).count
+            <= TransitousProvider.longQueryHints)
+    }
+
+    /// A typed umlaut stays one at the start of a word ("kö" for Köln, not Konstanz), a resort's title
+    /// doesn't count as its place ("rathen" for Kurort Rathen), and longer names also find a station
+    /// by its second word ("travem" for Lübeck-Travemünde).
+    @Test func stationHintsKeepUmlautsAndLookPastTitles() throws {
+        let hints = try JSONDecoder().decode([StationHints.Hint].self, from: Data(#"""
+            [["Köln Hbf",50.943,6.959,0.011],["Konstanz",47.659,9.177,0.004],["Kurort Rathen Bahnhof",50.958,14.081,0.0004],
+             ["Lübeck-Travemünde Strand",53.962,10.874,0.0003],["Rathenow",52.6,12.33,0.001]]
+            """#.utf8))
+        let freiburg = Coordinate(latitude: 47.997, longitude: 7.842)
+        #expect(StationHints.names(matching: "kö", near: freiburg, in: hints) == ["Köln Hbf"])
+        #expect(StationHints.names(matching: "ko", near: freiburg, in: hints).first == "Konstanz")
+        let dresden = Coordinate(latitude: 51.05, longitude: 13.74)
+        #expect(StationHints.names(matching: "rathen", near: dresden, nearbyOnly: true, in: hints)
+            == ["Kurort Rathen Bahnhof"])
+        let kiel = Coordinate(latitude: 54.32, longitude: 10.13)
+        #expect(StationHints.names(matching: "travem", near: kiel, nearbyOnly: true, in: hints)
+            == ["Lübeck-Travemünde Strand"])
+        #expect(TransitousProvider.typedWords("kö").first?.starts == ["koe"])
+        #expect(TransitousProvider.typedWords("lü").first?.isWord == false)
+    }
+
+    /// Main stations go by their own name, not the stop in front of them ("…/Münchener Straße"
+    /// would match "mü") or a short one ("KA Hbf (Vorplatz)").
+    @Test func mainStationsKeepTheirOwnName() throws {
+        let hints = try JSONDecoder().decode([StationHints.Hint].self, from: Data(#"""
+            [["Karlsruhe Hbf",48.993,8.4,0.012],["Frankfurt (M) Hbf",50.107,8.664,0.022]]
+            """#.utf8))
+        func station(_ name: String, _ lat: Double, _ lon: Double) -> MGeocodeMatch {
+            MGeocodeMatch(type: "STOP", name: name, id: name, lat: lat, lon: lon, country: "DE",
+                          modes: ["LONG_DISTANCE", "REGIONAL_RAIL"])
+        }
+        let frankfurt = station("Frankfurt (Main) Hauptbahnhof/Münchener Straße", 50.1072, 8.6638)
+        #expect(TransitousProvider.withMainStationName(frankfurt, hints: hints).name == "Frankfurt (M) Hbf")
+        let karlsruhe = station("KA Hbf (Vorplatz)", 48.9935, 8.4005)
+        #expect(TransitousProvider.withMainStationName(karlsruhe, hints: hints).name == "Karlsruhe Hbf")
+        let brandenburg = station("Brandenburg, ZOB", 52.4006, 12.5636)
+        let brandenburgHints = try JSONDecoder().decode([StationHints.Hint].self,
+                                                        from: Data(#"[["Brandenburg, Hauptbahnhof",52.401,12.563,0.002]]"#.utf8))
+        #expect(TransitousProvider.withMainStationName(brandenburg, hints: brandenburgHints).name == "Brandenburg, Hauptbahnhof")
+        // Without a main station nearby in the list, the name up to "Hbf".
+        let hamburg = station("Hamburg Hbf/ZOB", 53.553, 10.007)
+        #expect(TransitousProvider.withMainStationName(hamburg, hints: []).name == "Hamburg Hbf")
+        let leipzig = station("Leipzig Hbf", 51.345, 12.382)
+        #expect(TransitousProvider.withMainStationName(leipzig, hints: hints).name == "Leipzig Hbf")
+        #expect(TransitousProvider.isBetterName("Karlsruhe Hbf", than: "KA Hbf (Vorplatz)"))
+    }
+
+    /// Short words don't name a place ("st" isn't St. Gallen), typed words follow the town's order
+    /// ("bad harz" is Bad Harzburg, not Bad Lauterberg im Harz), and the big town nearby counts next
+    /// to a station's name ("stuttgart flughafen" for Flughafen/Messe in Leinfelden-Echterdingen).
+    @Test func placesAreNamedInFullAndInOrder() {
+        func stop(_ name: String, town: String, _ lat: Double = 0, _ lon: Double = 0, country: String = "DE",
+                  modes: [String] = ["REGIONAL_RAIL"]) -> MGeocodeMatch {
+            MGeocodeMatch(type: "STOP", name: name, id: name, lat: lat, lon: lon, country: country, modes: modes,
+                          areas: [.init(name: town, adminLevel: 8, isDefault: true)])
+        }
+        let stGallen = stop("St. Gallen", town: "St. Gallen", country: "CH")
+        #expect(!TransitousProvider.isInTown(named: "st", stGallen, wholeWords: true))
+        #expect(!TransitousProvider.namesPlace("st", stGallen))
+        #expect(TransitousProvider.namesPlace("st gallen", stGallen))
+        #expect(TransitousProvider.isInTown(named: "bad harz", stop("Bad Harzburg", town: "Bad Harzburg"), wholeWords: true))
+        #expect(!TransitousProvider.isInTown(named: "bad harz", stop("Barbis", town: "Bad Lauterberg im Harz"),
+                                             wholeWords: true))
+        #expect(TransitousProvider.isInTown(named: "rathen", stop("Kurort Rathen", town: "Kurort Rathen"), wholeWords: true))
+
+        let airport = stop("Flughafen/Messe", town: "Leinfelden-Echterdingen", 48.690, 9.193, modes: ["SUBURBAN"])
+        #expect(TransitousProvider.textMatch(airport, query: "stuttgart flughafen") == (matched: 2, whole: 2))
+        #expect(TransitousProvider.textMatch(airport, query: "stuttgart") == (matched: 0, whole: 0))
+        #expect(TransitousProvider.isInTypedPlace("stuttgart flughafen", airport))
+
+        #expect(TransitousProvider.withoutStationWords("bahnhof zoo") == "zoo")
+        #expect(TransitousProvider.withoutStationWords("hbf") == "hbf")
+        #expect(TransitousProvider.placeStationQuery(for: "rathen") == "rathen Bahnhof")
+
+        // "Airport" in Vantaa isn't a place called "airport"; "Sankt" is "St.".
+        let vantaa = stop("Airport", town: "Vantaa", country: "FI", modes: ["REGIONAL_RAIL"])
+        #expect(!TransitousProvider.namesPlace("airport", vantaa))
+        #expect(TransitousProvider.textMatch(stop("St.Pauli", town: "Hamburg", modes: ["SUBWAY"]), query: "sankt pauli")
+            == (matched: 2, whole: 2))
+        #expect(TransitousProvider.typedWords("st").first?.starts == ["st"])
+
+        // Without a location, a bus stop abroad called "Han" doesn't beat Hannover Hbf.
+        let han = stop("Han", town: "Konya", country: "TR", modes: ["BUS"])
+        let hannover = stop("Hannover Hbf", town: "Hannover", modes: ["LONG_DISTANCE"])
+        #expect(TransitousProvider.searchRank(hannover, query: "han", offset: 1)
+            > TransitousProvider.searchRank(han, query: "han", offset: 0))
+    }
+
+    @Test func extraQueriesForAliasesAndTheNearbyTown() {
+        let berlin = Coordinate(latitude: 52.52, longitude: 13.405)
+        #expect(TransitousProvider.aliasQuery(for: "BER ") == "Flughafen BER")
+        #expect(TransitousProvider.aliasQuery(for: "bern") == nil)
+
+        #expect(TransitousProvider.nearbyTownQuery(for: "ost ", near: berlin) == "Berlin ost")
+        #expect(TransitousProvider.nearbyTownQuery(for: "ost", near: Coordinate(latitude: 48.10, longitude: 11.50)) == "München ost")
+        // What was typed could be (the start of) the town itself.
+        #expect(TransitousProvider.nearbyTownQuery(for: "ber", near: berlin) == nil)
+        // One or two letters ask for the town itself: the geocoder finds nothing for them.
+        #expect(TransitousProvider.nearbyTownQuery(for: "Be", near: berlin) == "Berlin")
+        #expect(TransitousProvider.nearbyTownQuery(for: "Berlin Hbf", near: berlin) == nil)
+        // No location, or no larger town nearby (Perleberg in the Prignitz).
+        #expect(TransitousProvider.nearbyTownQuery(for: "ost", near: nil) == nil)
+        #expect(TransitousProvider.nearbyTownQuery(for: "ost", near: Coordinate(latitude: 53.07, longitude: 11.86)) == nil)
+    }
+
+    /// The geocoder has neither Berlin's stations for "ost" nor Flughafen BER for "ber" among its hits;
+    /// "Berlin ost" and "Flughafen BER" are asked for too, and only hits matching what was typed kept.
+    @Test func searchStationsAsksForStationsInTheNearbyTownAndAliases() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [NearbyGeocodeProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let provider = TransitousProvider(http: HTTPClient(session: session))
+        let berlin = Coordinate(latitude: 52.52, longitude: 13.405)
+
+        let ost = try await provider.searchStations("ost", near: berlin)
+        #expect(ost.map(\.id) == ["ostbf", "ulmOst"])
+
+        let ber = try await provider.searchStations("ber", near: berlin)
+        #expect(ber.map(\.id) == ["ber", "bern"])
+        #expect(!NearbyGeocodeProtocol.requestedTexts.withLock { $0 }.contains("Berlin ber"))
+
+        // Two letters: the geocoder finds nothing, but main stations starting with them, and nearby
+        // stations from the bundled list (Flughafen BER).
+        let be = try await provider.searchStations("Be", near: berlin)
+        #expect(be.map(\.id) == ["berlinHbf", "ber"])
+        #expect(TransitousProvider.shortQueries(for: "bre") == ["bre Hbf", "bre Bahnhof"])
+        #expect(TransitousProvider.shortQueries(for: "brem").isEmpty)
+        #expect(TransitousProvider.shortQueries(for: "Be ") == ["Be Hbf", "Be Bahnhof"])
     }
 
     /// Some feeds (e.g. European rail interoperability reference data) carry an all-caps, umlaut-free
@@ -3164,6 +3667,71 @@ private final class MainStationGeocodeProtocol: URLProtocol, @unchecked Sendable
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
+}
+
+/// "Po Hbf" answers at once, "Po Bahnhof" only after 5 s, everything else with nothing.
+private final class SlowExtraGeocodeProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    private let stopped = Mutex(false)
+    override func stopLoading() { stopped.withLock { $0 = true } }
+
+    override func startLoading() {
+        let text = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+            .queryItems?.first { $0.name == "text" }?.value ?? ""
+        let body = text == "Po Hbf"
+            ? #"[{"type":"STOP","id":"potsdamHbf","name":"S Potsdam Hauptbahnhof","lat":52.391,"lon":13.067,"country":"DE","modes":["LONG_DISTANCE","REGIONAL_RAIL"],"importance":0.0038}]"#
+            : "[]"
+        let finish: @Sendable () -> Void = { [self] in
+            guard !stopped.withLock({ $0 }) else { return }
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Data(body.utf8))
+            client?.urlProtocolDidFinishLoading(self)
+        }
+        if text == "Po Bahnhof" {
+            DispatchQueue.global().asyncAfter(deadline: .now() + 5, execute: finish)
+        } else {
+            finish()
+        }
+    }
+}
+
+/// Geocode answers for `searchStationsAsksForStationsInTheNearbyTownAndAliases`.
+private final class NearbyGeocodeProtocol: URLProtocol, @unchecked Sendable {
+    static let requestedTexts = Mutex<[String]>([])
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+
+    override func startLoading() {
+        let text = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+            .queryItems?.first { $0.name == "text" }?.value ?? ""
+        Self.requestedTexts.withLock { $0.append(text) }
+        let berlin = #"[{"name":"Deutschland","adminLevel":2},{"name":"Berlin","adminLevel":4,"default":true}]"#
+        let body = switch text {
+        case "ost":
+            #"[{"type":"STOP","id":"ulmOst","name":"Ulm Ost","lat":48.407,"lon":9.995,"country":"DE","modes":["REGIONAL_RAIL"],"importance":0.00025}]"#
+        case "Berlin ost":
+            #"[{"type":"STOP","id":"ostbf","name":"Berlin Ostbf","lat":52.510,"lon":13.435,"country":"DE","modes":["LONG_DISTANCE","REGIONAL_RAIL","SUBURBAN"],"importance":0.0057,"areas":\#(berlin)},"#
+                + #"{"type":"STOP","id":"hbf","name":"Berlin Hbf","lat":52.525,"lon":13.369,"country":"DE","modes":["LONG_DISTANCE","REGIONAL_RAIL"],"importance":0.02,"areas":\#(berlin)}]"#
+        case "ber":
+            #"[{"type":"STOP","id":"bern","name":"Bern","lat":46.949,"lon":7.439,"country":"CH","modes":["LONG_DISTANCE","REGIONAL_RAIL"],"importance":0.0518}]"#
+        case "Flughafen BER":
+            #"[{"type":"STOP","id":"ber","name":"Flughafen BER","lat":52.365,"lon":13.510,"country":"DE","modes":["LONG_DISTANCE","REGIONAL_RAIL","SUBURBAN"],"importance":0.0033},"#
+                + #"{"type":"STOP","id":"zrh","name":"Zürich Flughafen","lat":47.450,"lon":8.562,"country":"CH","modes":["LONG_DISTANCE"],"importance":0.019}]"#
+        case "Be Hbf":
+            #"[{"type":"STOP","id":"berlinHbf","name":"Berlin Hauptbahnhof","lat":52.525,"lon":13.369,"country":"DE","modes":["LONG_DISTANCE","REGIONAL_RAIL"],"importance":0.02},"#
+                + #"{"type":"STOP","id":"erfurtHbf","name":"Erfurt, Hauptbahnhof","lat":50.972,"lon":11.038,"country":"DE","modes":["LONG_DISTANCE","REGIONAL_RAIL"],"importance":0.0059}]"#
+        default:
+            "[]"
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
 }
 
 /// 404 for Berlin Hbf's upper level, the fixture's coach sequence for its lower level.

@@ -90,7 +90,8 @@ public final class CombinedProvider: TransitProvider {
         do {
             let stations = try await withFallback(deadline: .milliseconds(2500),
                 { try await $0.searchStations(query, near: location) }, { try await $0.searchStations(query, near: location) })
-            if !stations.isEmpty || bahnDe == nil { return stations }
+            // bahn.de's hits for one or two letters are unordered noise ("Pinarolo Po" for "Po").
+            if !stations.isEmpty || bahnDe == nil || Self.isShortQuery(query) { return stations }
         } catch {
             try Task.checkCancellation()
             guard let bahnDe else { throw error }
@@ -99,6 +100,10 @@ public final class CombinedProvider: TransitProvider {
         try Task.checkCancellation()
         guard let bahnDe else { return [] }
         return try await Self.withDeadline(.milliseconds(2500)) { try await bahnDe.searchStations(query) }
+    }
+
+    static func isShortQuery(_ query: String) -> Bool {
+        query.trimmingCharacters(in: .whitespacesAndNewlines).count < 3
     }
 
     public func journeys(_ query: JourneyQuery) async throws -> JourneyPage {
