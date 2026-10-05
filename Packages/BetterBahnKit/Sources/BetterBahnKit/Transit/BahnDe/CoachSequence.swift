@@ -87,6 +87,10 @@ public struct CoachSequence: Sendable, Hashable {
 
     /// Groups that run as another train with another destination than the requested one.
     public var hasOtherTrains: Bool { groups.contains { !$0.isRequestedTrain } }
+    /// Several trains run in this consist, each under its own number (coupled, or split later on).
+    public var hasSeveralTrains: Bool { Set(groups.compactMap(\.trainName)).count > 1 }
+    /// Its parts go on to different places, so it matters which coach you board.
+    public var partsGoToDifferentPlaces: Bool { Set(groups.compactMap(\.destination)).count > 1 }
 }
 
 extension CoachSequence.Coach.Kind {
@@ -105,12 +109,15 @@ extension CoachSequence.Coach.Kind {
 }
 
 extension BahnDeClient {
-    static func coachSequence(from response: SequenceResponse, category: String, number: Int?) -> CoachSequence {
+    static func coachSequence(from response: SequenceResponse, category: String, number: Int?,
+                              coupledNumbers: Set<Int> = []) -> CoachSequence {
         let groups = response.groups ?? []
         let requestedNumbers = Set(groups.compactMap(\.transport?.number))
+        // Trains coupled to it for the whole ride are just as much the train asked for.
+        let wanted = coupledNumbers.union([number].compactMap(\.self))
         // Without train numbers every group counts as the requested train.
         let isRequested = { (group: SequenceResponse.Group) in
-            requestedNumbers.contains(number ?? -1) ? group.transport?.number == number : true
+            requestedNumbers.contains(number ?? -1) ? group.transport?.number.map(wanted.contains) ?? false : true
         }
 
         let platform = response.platform
@@ -172,6 +179,6 @@ extension BahnDeClient {
             coaches: coaches,
             travelsTowardsPlatformEnd: towardsEnd,
             differsFromSchedule: response.sequenceStatus == "DIFFERS_FROM_SCHEDULE",
-            formation: formation(from: response, category: category, number: number))
+            formation: formation(from: response, category: category, number: number, coupledNumbers: coupledNumbers))
     }
 }

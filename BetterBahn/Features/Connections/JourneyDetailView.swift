@@ -458,8 +458,11 @@ struct LegCard: View {
                     LiveTrainIconTile(route: LiveTrainRoute(leg: leg), systemImage: leg.line?.product.symbolName ?? "tram.fill",
                                       color: color, size: 38)
                     VStack(alignment: .leading, spacing: 2) {
-                        TrainNameRow(name: leg.line?.name ?? "Zug", wrapsTag: false) { TrainSeriesTag(leg: leg) }
-                        if let direction = leg.direction {
+                        // Coupled trains have a long name; their series tag goes below it rather than being cut off.
+                        TrainNameRow(name: leg.line?.displayName ?? "Zug") {
+                            TrainSeriesTag(leg: leg)
+                        }
+                        if let direction = leg.directionDescription {
                             Text("Richtung \(direction)").font(.caption).foregroundStyle(.secondary).fullTextPopup("Richtung \(direction)")
                         }
                         TrainFormationLabel(leg: leg)

@@ -11,9 +11,23 @@ struct TripView: View {
     @State private var boardingID: String?
     @State private var exitID: String?
     @State private var error: Error?
+    /// The coupled train whose stops are shown instead of this one's (nil: this one).
+    @State private var shownTripId: String?
+    /// Where you got on/off before switching trains, picked again in the other one.
+    @State private var keptStops: (boarding: Station?, exit: Station?)?
+
+    private var tripId: String { shownTripId ?? entry.tripId }
+
+    private var ownDirection: String? { entry.kind == .departures ? entry.otherEnd : nil }
+
+    private var runs: [Line.CoupledTrain] { entry.line.runs(ownDirection: ownDirection, ownTripId: entry.tripId) }
 
     var body: some View {
         ScrollView {
+            if !runs.isEmpty {
+                CoupledTrainPicker(trains: runs, selection: Binding(get: { tripId }, set: { switchTrain(to: $0) }))
+                    .padding(.horizontal)
+            }
             if trip == nil, error == nil {
                 TripLoadingView()
             }
@@ -36,13 +50,13 @@ struct TripView: View {
             }
         }
         .animation(.snappy, value: selectedLeg?.id)
-        .navigationTitle(entry.line.name)
+        .navigationTitle(entry.line.displayName)
         .navigationBarTitleDisplayMode(.inline)
-        .task {
+        .task(id: tripId) {
             // Seen before: its last live data right away, refreshed below.
-            if trip == nil, let seen = model.liveTrips.value(for: entry.tripId) { show(seen) }
+            if trip == nil, let seen = model.liveTrips.value(for: tripId) { show(seen) }
             await load()
-            await autoRefresh(tripId: entry.tripId)
+            await autoRefresh(tripId: tripId)
         }
         .refreshable {
             await TimetablesClient.invalidateDelays()
@@ -85,23 +99,47 @@ struct TripView: View {
         .padding(.bottom, 8)
     }
 
+    /// Shows the stops of another of the coupled trains, keeping where you get on/off where it stops there too.
+    private func switchTrain(to id: String) {
+        guard id != tripId else { return }
+        keptStops = (station(boardingID), station(exitID))
+        boardingID = nil
+        exitID = nil
+        error = nil
+        shownTripId = id == entry.tripId ? nil : id
+        trip = nil
+        if let seen = model.liveTrips.value(for: id) { show(seen) }
+    }
+
+    private func station(_ stopoverID: String?) -> Station? {
+        trip?.stopovers.first { $0.id == stopoverID }?.station
+    }
+
     private func load() async {
+        let tripId = tripId
         do {
-            var loaded = try await model.provider.trip(id: entry.tripId, source: entry.source)
-            // The board may have taken bahn.de's name for this train (e.g. "RJ 171" for Transitous'
-            // "ICE 171"); keep it rather than switching back to the trip's own.
-            if let name = loaded.line?.name, entry.line.alternateName == name {
+            var loaded = try await model.provider.trip(id: tripId, source: entry.source)
+            if tripId != entry.tripId, let train = runs.first(where: { $0.tripId == tripId }) {
+                // A coupled train: it leads, this one becomes the coupled one.
+                loaded.line = entry.line.riding(train, ownDirection: ownDirection, ownTripId: entry.tripId)
+            } else if let name = loaded.line?.name, entry.line.alternateName == name || entry.line.coupledTrains != nil {
+                // The board may have taken bahn.de's name for this train (e.g. "RJ 171" for Transitous'
+                // "ICE 171"), or found the trains coupled to it; keep that rather than switching back.
                 loaded.line = entry.line
             }
+            guard tripId == self.tripId else { return }
             error = nil
             // DB's delays and the platforms Transitous lacks (e.g. for the S15's own first/last stop at
             // Berlin Hbf) before showing a trip not seen before, so it doesn't jump from the timetable to
             // the live times; one already showing (seen before, or a reload) stays meanwhile.
             if let timetables = model.timetablesClient {
                 let timetable = loaded
-                show(await LoadingDeadline.run({ await timetables.liveTrip(timetable) }, showingAfter: LoadingDeadline.liveData) {
-                    if trip == nil { show(timetable) }
-                })
+                let live = await LoadingDeadline.run({ await timetables.liveTrip(timetable) }, showingAfter: LoadingDeadline.liveData) {
+                    if trip == nil, tripId == self.tripId { show(timetable) }
+                }
+                // Switched to another train meanwhile.
+                guard tripId == self.tripId else { return }
+                show(live)
             } else {
                 show(loaded)
             }
@@ -116,6 +154,11 @@ struct TripView: View {
     private func show(_ loaded: Trip) {
         trip = loaded
         guard boardingID == nil else { return }
+        if let keptStops {
+            boardingID = keptStops.boarding.flatMap { kept in loaded.stopovers.first { $0.station.isSamePlace(as: kept) }?.id }
+            exitID = keptStops.exit.flatMap { kept in loaded.stopovers.last { $0.station.isSamePlace(as: kept) }?.id }
+            if boardingID != nil { return }
+        }
         let here = loaded.stopovers.first { $0.station.isSamePlace(as: entry.station) }?.id
         if entry.kind == .arrivals {
             // For arrivals the selected station is where you get off.
@@ -129,7 +172,8 @@ struct TripView: View {
     /// Only bahn.de's journey details report a Zusatzhalt (an unscheduled stop the train additionally
     /// picked up today) at all — Transitous and DB Timetables above only ever overlay onto stops already there.
     private func insertZusatzhalte() async {
-        guard let trip, let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: trip) else { return }
+        guard let trip, let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: trip),
+              self.trip?.id == trip.id else { return }
         self.trip?.stopovers = BahnDeClient.inserting(stops, into: trip.stopovers)
     }
 }
@@ -140,6 +184,30 @@ private struct TripLoadingView: View {
     var body: some View {
         ProgressView("Lade Fahrtverlauf …")
             .containerRelativeFrame([.horizontal, .vertical])
+    }
+}
+
+/// Switches between the trains running coupled together (Doppeltraktion), to see each one's stops.
+private struct CoupledTrainPicker: View {
+    let trains: [Line.CoupledTrain]
+    @Binding var selection: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Picker("Zugteil", selection: $selection) {
+                ForEach(trains, id: \.tripId) { train in
+                    Text(train.name).tag(train.tripId ?? "")
+                }
+            }
+            .pickerStyle(.segmented)
+            if let direction = trains.first(where: { $0.tripId == selection })?.direction {
+                Text("Zugteil nach \(direction)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.bottom, 8)
     }
 }
 
@@ -383,10 +451,23 @@ struct LegTripSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var trip: Trip?
     @State private var error: Error?
+    /// The coupled train whose stops are shown instead of this one's (nil: this one).
+    @State private var shownTripId: String?
+
+    private var tripId: String? { shownTripId ?? leg.tripId }
+
+    private var runs: [Line.CoupledTrain] {
+        guard let line = leg.line, let tripId = leg.tripId else { return [] }
+        return line.runs(ownDirection: leg.direction, ownTripId: tripId)
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
+                if !runs.isEmpty {
+                    CoupledTrainPicker(trains: runs, selection: Binding(get: { tripId ?? "" }, set: { switchTrain(to: $0) }))
+                        .padding(.horizontal)
+                }
                 if trip == nil, error == nil {
                     TripLoadingView()
                 }
@@ -404,17 +485,17 @@ struct LegTripSheet: View {
                 .padding(.bottom, 16)
             }
             .background { AppBackground() }
-            .navigationTitle(leg.line?.name ?? "Zug")
+            .navigationTitle(leg.line?.displayName ?? "Zug")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Fertig", systemImage: "xmark", role: .cancel) { dismiss() }
                 }
             }
-            .task {
-                if trip == nil, let tripId = leg.tripId, let seen = model.liveTrips.value(for: tripId) { trip = seen }
+            .task(id: tripId) {
+                if trip == nil, let tripId, let seen = model.liveTrips.value(for: tripId) { trip = seen }
                 await load()
-                guard let tripId = leg.tripId else { return }
+                guard let tripId else { return }
                 while !Task.isCancelled {
                     try? await Task.sleep(for: AppModel.realtimeRefreshInterval)
                     guard !Task.isCancelled else { return }
@@ -432,19 +513,38 @@ struct LegTripSheet: View {
         trip.stopovers.last { $0.station.isSamePlace(as: leg.destination) }?.id
     }
 
+    /// Shows the stops of another of the coupled trains.
+    private func switchTrain(to id: String) {
+        guard id != tripId else { return }
+        error = nil
+        shownTripId = id == leg.tripId ? nil : id
+        trip = model.liveTrips.value(for: id)
+    }
+
     private func load() async {
-        guard let tripId = leg.tripId else {
+        guard let tripId else {
             error = TransitError.notFound("Fahrt")
             return
         }
         do {
-            let loaded = try await model.provider.trip(id: tripId, source: leg.source)
+            var loaded = try await model.provider.trip(id: tripId, source: leg.source)
+            guard tripId == self.tripId else { return }
+            // The leg's own line knows the trains coupled to it, so the trainsets of both show.
+            if tripId == leg.tripId {
+                loaded.line = leg.line ?? loaded.line
+            } else if let train = runs.first(where: { $0.tripId == tripId }) {
+                loaded.line = leg.line?.riding(train, ownDirection: leg.direction, ownTripId: leg.tripId) ?? loaded.line
+            }
             error = nil
             // Live data first, like `TripView.load()`.
             if let timetables = model.timetablesClient {
-                trip = await LoadingDeadline.run({ await timetables.liveTrip(loaded) }, showingAfter: LoadingDeadline.liveData) {
-                    if trip == nil { trip = loaded }
+                let timetable = loaded
+                let live = await LoadingDeadline.run({ await timetables.liveTrip(timetable) }, showingAfter: LoadingDeadline.liveData) {
+                    if trip == nil, tripId == self.tripId { trip = timetable }
                 }
+                // Switched to another train meanwhile.
+                guard tripId == self.tripId else { return }
+                trip = live
             } else {
                 trip = loaded
             }
@@ -459,7 +559,8 @@ struct LegTripSheet: View {
     /// Only bahn.de's journey details report a Zusatzhalt (an unscheduled stop the train additionally
     /// picked up today) at all — Transitous and DB Timetables above only ever overlay onto stops already there.
     private func insertZusatzhalte() async {
-        guard let trip, let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: trip) else { return }
+        guard let trip, let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: trip),
+              self.trip?.id == trip.id else { return }
         self.trip?.stopovers = BahnDeClient.inserting(stops, into: trip.stopovers)
     }
 }

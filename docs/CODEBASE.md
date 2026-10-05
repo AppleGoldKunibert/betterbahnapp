@@ -119,7 +119,15 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   refreshed by `AppModel.followTrainPositions()` while the map is on screen). Long-distance trains by
   number, regional/S-Bahn by run number (`Line.tripNumber`).
 - `Transit/Transitous/` – MOTIS API client + DTOs (`M*` types). Station-name cleanup and
-  deduplication of boards happen here.
+  deduplication of boards happen here. Coupled trains under two numbers (ICE 940 + 950 Berlin–Hamm) show as
+  one (`Line.coupledTrains` with each train's direction, `displayName` "ICE 940 / 950",
+  `Leg.directionDescription`): board rows by same time/platform/destination (`combiningCoupledTrains`), journey
+  legs by `coupledTrains(for:)` (same arrival at the destination, checked against the other train's departure at
+  the origin; called from `CombinedProvider.journeys` with a 3 s deadline, and again from `JourneyRefresher.refresh`
+  for legs the search had no time for). Their Wagenreihung/Tz include both halves
+  (`FormationRequest.coupledNumbers`), each part labelled with its train, destination and Tz; a Träwelling
+  check-in asks which train you sit in (`Leg.riding(_:)`). `CoupledTrain.tripId` lets `TripView`/`LegTripSheet`
+  switch between the trains' own stops (`Line.runs(ownDirection:ownTripId:)`).
 - `Transit/Timetables/` – official DB Timetables XML client (realtime overrides, messages), through the
   `bahnde-proxy` Worker, which holds the API key. The app only uses it where App Attest works. A train not
   found at a station's EVA is looked for at its other levels (`/station` `meta`, e.g. "Hamburg Hbf (S-Bahn)").

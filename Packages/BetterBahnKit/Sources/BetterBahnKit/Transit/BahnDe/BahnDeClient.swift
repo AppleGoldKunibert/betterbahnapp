@@ -228,8 +228,11 @@ public struct BahnDeClient: Sendable {
         public var station: Station
         /// Scheduled departure at `station`.
         public var plannedDeparture: Date
+        /// Trains coupled to it for the whole ride (`Line.coupledTrains`), whose trainsets count as its own.
+        public var coupledNumbers: [String]
 
-        public init(category: String, number: String, station: Station, plannedDeparture: Date) {
+        public init(category: String, number: String, station: Station, plannedDeparture: Date, coupledNumbers: [String] = []) {
+            self.coupledNumbers = coupledNumbers
             self.category = category
             self.number = number
             self.station = station
@@ -250,7 +253,8 @@ public struct BahnDeClient: Sendable {
         guard let stop = stops.first(where: { $0.departure.map { $0.best >= now.addingTimeInterval(-60) } ?? false }),
               let departure = stop.departure,
               lookahead.map({ departure.planned <= now.addingTimeInterval($0) }) ?? true else { return nil }
-        return FormationRequest(category: ref.category, number: ref.number, station: stop.station, plannedDeparture: departure.planned)
+        return FormationRequest(category: ref.category, number: ref.number, station: stop.station, plannedDeparture: departure.planned,
+                                coupledNumbers: line?.coupledNumbers ?? [])
     }
 
     public static func formationRequest(for leg: Leg, now: Date = .now, lookahead: TimeInterval? = formationLookahead) -> FormationRequest? {
@@ -284,7 +288,7 @@ public struct BahnDeClient: Sendable {
     /// - Returns: nil if bahn.de has no coach sequence for it (yet).
     /// - Throws: `TransitError.rateLimited` while bahn.de is blocking requests.
     public func coachSequence(_ request: FormationRequest) async throws -> CoachSequence? {
-        let key = "\(request.category) \(request.number)|\(request.station.id)|\(request.plannedDeparture.timeIntervalSince1970)"
+        let key = "\(request.category) \(([request.number] + request.coupledNumbers).joined(separator: "+"))|\(request.station.id)|\(request.plannedDeparture.timeIntervalSince1970)"
         guard usesSharedCaches else { return try await fetchCoachSequence(request) }
         return try await Self.sequenceCache.value(for: key, maxAge: Self.formationMaxAge) {
             try await self.fetchCoachSequence(request)
@@ -299,7 +303,8 @@ public struct BahnDeClient: Sendable {
         guard let eva = try await evaNumber(for: request.station) else { return nil }
         for candidate in [eva, Self.otherLevel(of: eva)].compactMap(\.self) {
             guard let response = try await sequenceResponse(request, eva: candidate) else { continue }
-            let sequence = Self.coachSequence(from: response, category: request.category, number: Int(request.number))
+            let sequence = Self.coachSequence(from: response, category: request.category, number: Int(request.number),
+                                              coupledNumbers: Set(request.coupledNumbers.compactMap { Int($0) }))
             return sequence.coaches.isEmpty && sequence.formation.units.isEmpty ? nil : sequence
         }
         return nil
@@ -334,12 +339,17 @@ public struct BahnDeClient: Sendable {
         ])
     }
 
-    static func formation(from response: SequenceResponse, category: String, number: Int? = nil) -> TrainFormation {
+    static func formation(from response: SequenceResponse, category: String, number: Int? = nil,
+                          coupledNumbers: Set<Int> = []) -> TrainFormation {
         // Split trains (e.g. ICE 950 + ICE 940 coupled up to Hamm) list every half; keep the ones that
-        // run as the requested train so the other half's trainset doesn't leak in.
+        // run as the requested train (or a train coupled to it for the whole ride) so the other half's
+        // trainset doesn't leak in.
         // Every field is optional, like in DBRIS: one odd group mustn't lose the whole formation.
         let groups = response.groups ?? []
-        let own = groups.filter { $0.transport?.number != nil && $0.transport?.number == number }
+        let wanted = coupledNumbers.union([number].compactMap(\.self))
+        // The requested train's own trainset first, then the coupled ones' (Tz 9203 + 9228 for ICE 956).
+        let own = groups.filter { $0.transport?.number == number }
+            + groups.filter { $0.transport?.number != number && ($0.transport?.number.map(wanted.contains) ?? false) }
         var units: [TrainFormation.Unit] = []
         for group in own.isEmpty ? groups : own {
             let vehicles = group.vehicles ?? []
