@@ -630,7 +630,15 @@ final class AppModel {
         if let cached = trainTypeCache[key] { return cached }
         if let vagonweb = provider.vagonweb {
             do {
-                if let lookup = try await vagonweb.trainType(category: ref.category, number: ref.number, on: date) {
+                if var lookup = try await vagonweb.trainType(category: ref.category, number: ref.number, on: date) {
+                    // vagonweb only has the plan, without Tz numbers. Around the day of the ride
+                    // bahn.expert has DB's live assignment, which names the Tz and so tells a
+                    // redesigned ICE 3neo apart ("ICE 3neo Redesign" for Tz 8039).
+                    if !lookup.hasUnitNumbers, abs(date.timeIntervalSinceNow) < 36 * 3600,
+                       let live = try? await provider.bahnExpert?.trainType(category: ref.category, number: ref.number, date: day),
+                       live.hasUnitNumbers {
+                        lookup = live
+                    }
                     trainTypeCache[key] = .some(lookup)
                     return lookup
                 }

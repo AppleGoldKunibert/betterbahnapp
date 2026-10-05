@@ -380,15 +380,16 @@ struct TrainSeriesTag: View {
             family = nil
             if let request, let live = try? await model.formation(for: request)?.modelSummary {
                 family = live
+            } else if let leg, let remembered = model.rememberedFormation(for: leg)?.modelSummary {
+                // The trainsets that actually ran (with their Tz) beat the plan, which can't tell a
+                // redesigned ICE 3neo apart.
+                family = remembered
             } else if let planned = await model.trainType(for: line, on: date)?.summary {
                 family = planned
             } else if request == nil, let tripId, let source,
                       let trip = try? await model.provider.trip(id: tripId, source: source),
                       let later = BahnDeClient.formationRequest(for: trip) {
                 family = try? await model.formation(for: later)?.modelSummary
-            }
-            if family == nil, let leg {
-                family = model.rememberedFormation(for: leg)?.modelSummary
             }
         }
     }
