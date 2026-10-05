@@ -58,8 +58,6 @@ test("Worker serves the privacy policy, the callback and a 404 fallback", async 
     assert.equal(privacy.status, 200);
     assert.equal(privacy.headers.get("Content-Type"), "text/html; charset=utf-8");
     assert.match(await privacy.text(), /keiner Verbindung zur Deutschen Bahn AG/);
-    // The association file was never used (the login goes through betterbahn://) and is gone.
-    assert.equal((await worker.fetch(new Request(new URL("/.well-known/apple-app-site-association", endpoint)))).status, 404);
     assert.equal((await worker.fetch(new Request(new URL("/unknown", endpoint)))).status, 404);
     assert.equal((await worker.fetch(new Request(endpoint + "?code=test&state=test"))).status, 302);
 });

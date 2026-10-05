@@ -7,12 +7,15 @@ features or data flows change (and update the privacy policy in `Cloudflare/work
 
 - **Workers deployed** with `TOKEN_SECRET` (same value in `betterbahn2` and `betterbahn-pass`),
   `DB_CLIENT_ID`/`DB_API_KEY` in `betterbahn2`, and `ALLOW_UNATTESTED` removed once no old builds
-  are left. The privacy policy Worker (`betterbahn`) has the controller's name filled in.
+  are left. The privacy policy Worker (`betterbahn`) has the controller's name filled in, its KV
+  namespace `SHARES` and `TOKEN_SECRET` set (share links), and the App ID has Associated Domains.
 - **Privacy policy URL:** `https://betterbahn.betterbahn.workers.dev/datenschutz`.
 - **Support URL:** `https://betterbahn.betterbahn.workers.dev/support`.
 - **App Privacy:** nothing is collected in Apple's sense — data either stays on the device / in the
   user's iCloud, or is only passed through BetterBahn's Workers to answer the request right away
-  (timetable lookups, Wallet pass signing) and not kept. Check this against the current code before
+  (timetable lookups, Wallet pass signing) and not kept. Exception: a journey the user shares is
+  stored for 30 days (connection only, no identity) so the short link works – decide whether to
+  declare it (e.g. "Other User Content", not linked, not tracking). Check this against the current code before
   answering "Data Not Collected"; Träwelling check-ins go to the user's own Träwelling account at
   their request.
 - **Demo access:** create a Träwelling test account and put its login in the review notes, and keep

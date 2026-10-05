@@ -4,6 +4,12 @@ import Testing
 
 @Suite struct JourneyShareLinkTests {
     @Test func roundTripsAJourney() throws {
+        let journey = Self.journey()
+        let url = try #require(JourneyShareLink.url(for: journey))
+        #expect(JourneyShareLink.journey(from: url) == journey)
+    }
+
+    static func journey() -> Journey {
         let departure = Date(timeIntervalSince1970: 1_790_000_000)
         let leg = Leg(origin: station("8002549", "Hamburg Hbf"), destination: station("8010085", "Dresden Hbf"),
                       departure: TimeInfo(planned: departure, actual: nil),
@@ -12,9 +18,18 @@ import Testing
                       line: Line(name: "ICE 171", number: "171", product: .highSpeed, operatorName: nil),
                       direction: "Dresden Hbf", isWalking: false, cancelled: false, stopovers: [], remarks: [],
                       source: .transitous)
-        let journey = Journey(legs: [leg], source: .transitous)
-        let url = try #require(JourneyShareLink.url(for: journey))
-        #expect(JourneyShareLink.journey(from: url) == journey)
+        return Journey(legs: [leg], source: .transitous)
+    }
+
+    @Test func recognizesShortLinks() {
+        #expect(JourneyShareLink.shortLinkID(from: URL(string: "https://betterbahn.betterbahn.workers.dev/s/Ab3xK9zz")!) == "Ab3xK9zz")
+        #expect(JourneyShareLink.shortLinkID(from: URL(string: "betterbahn://share?id=Ab3xK9zz")!) == "Ab3xK9zz")
+        #expect(JourneyShareLink.shortLinkID(from: URL(string: "https://example.com/s/Ab3xK9zz")!) == nil)
+        #expect(JourneyShareLink.shortLinkID(from: URL(string: "http://betterbahn.betterbahn.workers.dev/s/Ab3xK9zz")!) == nil)
+        #expect(JourneyShareLink.shortLinkID(from: URL(string: "https://betterbahn.betterbahn.workers.dev/s/Ab3xK9")!) == nil)
+        #expect(JourneyShareLink.shortLinkID(from: URL(string: "https://betterbahn.betterbahn.workers.dev/s/Ab3x-9zz")!) == nil)
+        #expect(JourneyShareLink.shortLinkID(from: URL(string: "https://betterbahn.betterbahn.workers.dev/datenschutz")!) == nil)
+        #expect(JourneyShareLink.shortLinkID(from: URL(string: "betterbahn://share?data=abc")!) == nil)
     }
 
     /// A few kilobytes that would inflate to megabytes are refused instead of decompressed.

@@ -1,7 +1,11 @@
+import { TOKEN_HEADER, unauthorized, verifyToken } from "./shared/appattest.mjs";
+
 export default {
-    async fetch(request) {
+    async fetch(request, env) {
         return handlePage(request)
             ?? handleTraewellingCallback(request)
+            ?? handleAppSiteAssociation(request, env)
+            ?? await handleShare(request, env)
             ?? new Response("Not Found", { status: 404 });
     },
 };
@@ -55,7 +59,7 @@ ${PAGE_STYLE}
 <body>
 <main>
 <h1>Datenschutz</h1>
-<p class="muted">BetterBahn für iPhone · Stand: 1. Oktober 2026</p>
+<p class="muted">BetterBahn für iPhone · Stand: 4. Oktober 2026</p>
 
 <p>BetterBahn ist ein privates Projekt und steht in keiner Verbindung zur Deutschen Bahn AG. Die App hat
 keine Benutzerkonten, keine Werbung, kein Tracking und keine Analyse-Werkzeuge. Was du in der App speicherst,
@@ -96,12 +100,20 @@ kurz zwischen (Sekunden bis höchstens einen Tag), damit nicht jede Anfrage erne
 <li>signieren Apple-Wallet-Pässe: Wenn du „Zu Apple Wallet hinzufügen“ tippst, werden die Daten des Passes
 (Barcode des Tickets, Namen der Reisenden, Verbindung, Sitzplätze, Auftragsnummer; bei Zeitkarten auch das
 Geburtsdatum aus dem Barcode) an den Server geschickt, dort signiert und sofort zurückgegeben,</li>
-<li>leiten die Anmeldung bei Träwelling an die App weiter.</li>
+<li>leiten die Anmeldung bei Träwelling an die App weiter,</li>
+<li>speichern Reisen, die du teilst (siehe „Reisen teilen“).</li>
 </ul>
-<p>Dabei wird nichts gespeichert oder protokolliert. Cloudflare verarbeitet zur Absicherung des Dienstes
+<p>Abgesehen von geteilten Reisen wird dabei nichts gespeichert oder protokolliert. Cloudflare verarbeitet zur Absicherung des Dienstes
 IP-Adressen; Details stehen in der <a href="https://www.cloudflare.com/privacypolicy/">Datenschutzerklärung von Cloudflare</a>.</p>
 <p>Damit nur die echte App diese Funktionen nutzen kann, prüft die App ihre Echtheit mit Apples App Attest.
 Der Server erhält dabei eine zufällige Schlüsselkennung dieser App-Installation, aber keine Angaben über dich.</p>
+
+<h2>Reisen teilen</h2>
+<p>Wenn du eine Reise teilst, schickt die App die Verbindung (Bahnhöfe, Züge, Zeiten, Gleise) an den Server
+von BetterBahn. Dort wird sie unter einer zufälligen Kennung 30 Tage lang gespeichert und danach automatisch
+gelöscht. Geteilt wird nur ein kurzer Link; wer ihn hat, kann die Reise in dieser Zeit abrufen. Namen, Tickets
+oder andere Angaben über dich sind nicht dabei. Ist der Server nicht erreichbar, teilt die App stattdessen einen
+längeren Link, der die Reise selbst enthält; dann wird nichts gespeichert.</p>
 
 <h2>Tickets abrufen</h2>
 <p>Zum Abrufen eines Tickets öffnet die App die Auftragssuche von bahn.de. Auftragsnummer und Nachname gehen nur
@@ -218,4 +230,197 @@ export function handleTraewellingCallback(request) {
         status: 302,
         headers: { ...headers, Location: callback.href },
     });
+}
+
+// MARK: - Short share links (/s/<id>)
+
+// A journey shared from the app is stored here for a while, so the app can share a short HTTPS link
+// instead of a `betterbahn://share?data=…` link several KB long. The payload is exactly that link's
+// `data` (zlib JSON, base64url); the app decodes and checks it as before, the Worker never looks inside.
+//
+// POST /share { data }  → 201 { id, url, expiresAt }   (App Attest token, rate limited per app install)
+// GET  /share/<id>      → { data }                     (what the app fetches for a link)
+// GET  /s/<id>          → fallback page: with the app installed, iOS opens the app instead (Universal Link)
+
+export const SHARE_API_PATH = "/share";
+export const SHARE_PAGE_PREFIX = "/s/";
+export const SHARE_TTL = 30 * 24 * 60 * 60;
+// Same cap as `JourneyShareLink.maxEncodedLength` in the app.
+export const MAX_SHARE_DATA_LENGTH = 64 * 1024;
+export const SHARE_ID_LENGTH = 8;
+const ID_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+const ID_PATTERN = /^[A-Za-z0-9]{8}$/;
+const DATA_PATTERN = /^[A-Za-z0-9_-]+$/;
+export const DEFAULT_APP_IDS = "9NXP66M9UL.de.goldkunibert.BetterBahn";
+
+// null means the request is for a different route.
+export function handleAppSiteAssociation(request, env = {}) {
+    const url = new URL(request.url);
+    if (url.pathname !== "/.well-known/apple-app-site-association") return null;
+    const appIDs = (env.APP_IDS || DEFAULT_APP_IDS).split(",").map(id => id.trim()).filter(Boolean);
+    const body = {
+        applinks: {
+            details: [{ appIDs, components: [{ "/": `${SHARE_PAGE_PREFIX}*`, comment: "Geteilte Reisen" }] }],
+        },
+    };
+    return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json", "Cache-Control": "public, max-age=3600" },
+    });
+}
+
+// null means the request is for a different route. `now` only matters for the returned expiry.
+export async function handleShare(request, env = {}, now = Date.now()) {
+    const url = new URL(request.url);
+    if (url.pathname === SHARE_API_PATH) return createShare(request, env, url, now);
+    if (url.pathname.startsWith(`${SHARE_API_PATH}/`)) {
+        return readShare(request, env, url.pathname.slice(SHARE_API_PATH.length + 1));
+    }
+    if (url.pathname.startsWith(SHARE_PAGE_PREFIX)) {
+        return sharePage(request, env, url.pathname.slice(SHARE_PAGE_PREFIX.length).replace(/\/$/, ""));
+    }
+    return null;
+}
+
+async function createShare(request, env, url, now) {
+    if (request.method !== "POST") return shareJSON(405, { error: "method_not_allowed" }, { Allow: "POST" });
+    if (!env.SHARES) return shareJSON(503, { error: "not_configured" });
+
+    // Only the genuine app may store journeys: an App Attest token from the bahn.de proxy's `/auth`
+    // routes (same TOKEN_SECRET), or no token while ALLOW_UNATTESTED is "true" (see shared/appattest.mjs).
+    const token = request.headers.get(TOKEN_HEADER);
+    const claims = token && env.TOKEN_SECRET ? await verifyToken(token, "a", env.TOKEN_SECRET) : null;
+    if (token ? !claims : env.ALLOW_UNATTESTED !== "true") return unauthorized();
+    if (!(await withinLimit(env.SHARE_CREATE_LIMITER, claims?.kid ?? clientIP(request)))) {
+        return shareJSON(429, { error: "rate_limited" });
+    }
+
+    const body = await request.arrayBuffer();
+    if (body.byteLength > MAX_SHARE_DATA_LENGTH + 1024) return shareJSON(413, { error: "too_large" });
+    let data;
+    try {
+        data = JSON.parse(new TextDecoder().decode(body))?.data;
+    } catch {
+        return shareJSON(400, { error: "invalid_json" });
+    }
+    if (typeof data !== "string" || !DATA_PATTERN.test(data)) return shareJSON(400, { error: "invalid_data" });
+    if (data.length > MAX_SHARE_DATA_LENGTH) return shareJSON(413, { error: "too_large" });
+
+    // No "is this ID free?" read first: KV caches a miss for up to a minute at that location, so the
+    // link would 404 right after sharing. With 62^8 IDs a collision is practically impossible.
+    const id = randomID();
+    await env.SHARES.put(id, data, { expirationTtl: SHARE_TTL });
+    return shareJSON(201, {
+        id,
+        url: `${url.origin}${SHARE_PAGE_PREFIX}${id}`,
+        expiresAt: new Date(now + SHARE_TTL * 1000).toISOString(),
+    });
+}
+
+async function readShare(request, env, id) {
+    if (request.method !== "GET") return shareJSON(405, { error: "method_not_allowed" }, { Allow: "GET" });
+    if (!env.SHARES) return shareJSON(503, { error: "not_configured" });
+    if (!ID_PATTERN.test(id)) return shareJSON(404, { error: "not_found" });
+    if (!(await withinLimit(env.SHARE_READ_LIMITER, clientIP(request)))) return shareJSON(429, { error: "rate_limited" });
+    const data = await env.SHARES.get(id);
+    if (data === null) return shareJSON(404, { error: "not_found" });
+    return shareJSON(200, { data });
+}
+
+async function sharePage(request, env, id) {
+    if (request.method !== "GET" && request.method !== "HEAD") {
+        return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
+    }
+    let exists = false;
+    if (ID_PATTERN.test(id) && env.SHARES) {
+        if (!(await withinLimit(env.SHARE_READ_LIMITER, clientIP(request)))) {
+            return new Response("Too many requests", { status: 429 });
+        }
+        exists = await env.SHARES.get(id) !== null;
+    }
+    const html = sharePageHTML(exists ? id : null, env.APP_STORE_URL);
+    return new Response(request.method === "HEAD" ? null : html, {
+        status: exists ? 200 : 404,
+        headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "no-store",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+            "Referrer-Policy": "no-referrer",
+            "X-Content-Type-Options": "nosniff",
+        },
+    });
+}
+
+/// Rate limiting binding (`[[ratelimits]]` in wrangler.toml); without one, nothing is limited.
+async function withinLimit(limiter, key) {
+    if (!limiter) return true;
+    const { success } = await limiter.limit({ key: String(key) });
+    return success;
+}
+
+function clientIP(request) {
+    return request.headers.get("CF-Connecting-IP") ?? "unknown";
+}
+
+export function randomID() {
+    // 248 is the largest multiple of 62 below 256: rejecting bytes above keeps every character equally likely.
+    let id = "";
+    while (id.length < SHARE_ID_LENGTH) {
+        for (const byte of crypto.getRandomValues(new Uint8Array(16))) {
+            if (byte < 248 && id.length < SHARE_ID_LENGTH) id += ID_ALPHABET[byte % 62];
+        }
+    }
+    return id;
+}
+
+function shareJSON(status, body, extra = {}) {
+    return new Response(JSON.stringify(body), {
+        status,
+        headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...extra },
+    });
+}
+
+function escapeHTML(text) {
+    return String(text).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+
+/// `id` is null when the link is unknown or has expired.
+export function sharePageHTML(id, appStoreURL) {
+    const store = appStoreURL
+        ? `<p><a class="button secondary" href="${escapeHTML(appStoreURL)}">BetterBahn im App Store</a></p>`
+        : "";
+    const content = id
+        ? `<h1>Geteilte Reise</h1>
+<p>Jemand hat dir eine Reise aus BetterBahn geschickt. Öffne den Link auf einem iPhone mit BetterBahn, dann
+erscheint die Reise direkt in der App.</p>
+<p><a class="button" href="betterbahn://share?id=${id}">In BetterBahn öffnen</a></p>
+${store}`
+        : `<h1>Link abgelaufen</h1>
+<p>Diese Reise ist nicht mehr gespeichert. Geteilte Reisen bleiben ${SHARE_TTL / 86400} Tage abrufbar. Bitte
+lass sie dir noch einmal schicken.</p>
+${store}`;
+    return `<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta property="og:title" content="Reise in BetterBahn">
+<meta property="og:site_name" content="BetterBahn">
+<title>Geteilte Reise – BetterBahn</title>
+${PAGE_STYLE}
+<style>
+.button { display: inline-block; padding: .7rem 1.2rem; border-radius: 999px; background: var(--accent); color: #fff; text-decoration: none; font-weight: 600; }
+.button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+</style>
+</head>
+<body>
+<main>
+${content}
+<p class="muted"><a href="${PRIVACY_PATH}">Datenschutz</a> · BetterBahn ist ein privates Projekt und steht in keiner
+Verbindung zur Deutschen Bahn AG.</p>
+</main>
+</body>
+</html>
+`;
 }
