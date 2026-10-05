@@ -2225,6 +2225,64 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         #expect(BahnDeClient.journeyId(in: board, for: line, plannedDeparture: farOff) == nil)
     }
 
+    /// RE 3 from Bernau (bei Berlin) at 12:08 (2026-10-05) stopped additionally at Berlin-Lichtenberg.
+    /// Regional trains are looked up by their run number (3307, Transitous' trip short name "003307")
+    /// on bahn.de's regional board; the journey ID's number tells apart the RE 3 the other way.
+    @Test func findsRegionalJourneyIdByRunNumber() throws {
+        let json = #"""
+        {"entries": [
+            {"journeyId": "2|#VN#1#ST#1#PI#0#ZI#1#TA#0#DA#51026#1S#8010381#CA#RE#ZE#3306#ZB#RE 3    #PC#3#", "zeit": "2026-10-05T12:07:00", "verkehrmittel": {"name": "RE 3"}},
+            {"journeyId": "2|#VN#1#ST#1#PI#0#ZI#2#TA#0#DA#51026#1S#8010338#CA#RE#ZE#3307#ZB#RE 3    #PC#3#", "zeit": "2026-10-05T12:08:00", "verkehrmittel": {"name": "RE 3"}}
+        ]}
+        """#
+        let board = try JSONDecoding.decoder.decode(BahnDeClient.Board.self, from: Data(json.utf8))
+        let line = Line(name: "RE3", number: "3", product: .regionalExpress, operatorName: nil, tripNumber: "3307")
+        let ref = try #require(BahnDeClient.journeyReference(for: line))
+        #expect(ref.category == "RE" && ref.number == "3307" && ref.isRegional)
+        #expect(BahnDeClient.journeyReference(for: Line(name: "ICE 693", number: "693", product: .highSpeed, operatorName: nil))?.isRegional == false)
+        // Without a run number a regional train can't be told apart from the line's other runs.
+        #expect(BahnDeClient.journeyReference(for: Line(name: "RE3", number: "3", product: .regionalExpress, operatorName: nil)) == nil)
+
+        let planned = try #require(JSONDecoding.parseISODate("2026-10-05T10:08:00Z"))
+        #expect(BahnDeClient.journeyId(in: board, for: line, plannedDeparture: planned)?.contains("#ZE#3307#") == true)
+        #expect(BahnDeClient.journeyNumber(in: board.entries[0].journeyId) == "3306")
+
+        let url = BahnDeClient.boardURL(eva: "8010338", at: planned, products: BahnDeClient.regionalProducts).absoluteString
+        #expect(url.contains("verkehrsmittel%5B%5D=REGIONAL") || url.contains("verkehrsmittel[]=REGIONAL"))
+        #expect(!url.contains("EC_IC"))
+    }
+
+    /// Transitous' VBB names ("S Bernau Bhf") and missing EVA numbers don't match bahn.de's own
+    /// ("Bernau(b Berlin)"), so the Zusatzhalt is placed by display name or coordinates instead of
+    /// landing in front of the whole run.
+    @Test func insertsRegionalZusatzhaltByPlace() throws {
+        func stopover(_ name: String, _ lat: Double, _ lon: Double) -> Stopover {
+            Stopover(station: Station(id: "de-DELFI_\(name)", name: name, coordinate: Coordinate(latitude: lat, longitude: lon),
+                                      evaNumber: nil, source: .transitous),
+                     arrival: nil, departure: nil, arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+        }
+        let existing = [
+            stopover("Eberswalde, Hauptbahnhof", 52.8331, 13.7871),
+            stopover("S Bernau Bhf", 52.6755, 13.5915),
+            stopover("S+U Gesundbrunnen Bhf (Berlin)", 52.5486, 13.3887),
+            stopover("S+U Berlin Hauptbahnhof", 52.5250, 13.3696),
+        ]
+        let stops = [
+            JourneyStop(evaNumber: "8010334", name: "Eberswalde Hbf", coordinate: Coordinate(latitude: 52.8329, longitude: 13.7877)),
+            JourneyStop(evaNumber: "8010338", name: "Bernau(b Berlin)", coordinate: Coordinate(latitude: 52.6757, longitude: 13.5920)),
+            JourneyStop(evaNumber: "8010036", name: "Berlin-Lichtenberg", coordinate: Coordinate(latitude: 52.5100, longitude: 13.4967),
+                        isAdditional: true),
+            JourneyStop(evaNumber: "8011102", name: "Berlin Gesundbrunnen", coordinate: Coordinate(latitude: 52.5489, longitude: 13.3881)),
+            JourneyStop(evaNumber: "8011160", name: "Berlin Hbf", coordinate: Coordinate(latitude: 52.5251, longitude: 13.3694)),
+        ]
+
+        let merged = BahnDeClient.inserting(stops, into: existing)
+
+        #expect(merged.map(\.station.name) == ["Eberswalde, Hauptbahnhof", "S Bernau Bhf", "Berlin-Lichtenberg",
+                                               "S+U Gesundbrunnen Bhf (Berlin)", "S+U Berlin Hauptbahnhof"])
+        #expect(merged[2].isAdditional)
+    }
+
     /// Transitous calls the ČD Railjet Hamburg–Dresden "ICE 171"; bahn.de's board has "RJ 171".
     @Test func findsJourneyIdByNumberWhenBrandsDiffer() throws {
         let json = #"{"entries": [{"journeyId": "rj", "zeit": "2026-09-30T05:34:00", "verkehrmittel": {"name": "RJ 171"}}]}"#
