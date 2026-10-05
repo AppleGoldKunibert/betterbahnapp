@@ -70,6 +70,9 @@ import Testing
         let both = BahnDeClient.coachSequence(from: response, category: "ICE", number: 946, coupledNumbers: [956])
         #expect(both.formation.unitSummary == "Tz 9228 + 9203")
         #expect(both.groups.map(\.isRequestedTrain) == [true, true])
+        // Riding the other train, its own trainset comes first.
+        let other = BahnDeClient.coachSequence(from: response, category: "ICE", number: 956, coupledNumbers: [946])
+        #expect(other.formation.unitSummary == "Tz 9203 + 9228")
         // Both parts are labelled with their own train and destination.
         #expect(both.hasSeveralTrains)
         #expect(both.partsGoToDifferentPlaces)

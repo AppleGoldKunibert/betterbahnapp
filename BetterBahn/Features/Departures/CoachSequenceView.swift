@@ -202,10 +202,26 @@ private struct CoachSequenceDiagram: View {
                             .frame(height: max(y(item.end) - y(item.start) - 3, 24), alignment: .top)
                             .offset(y: y(item.start))
                     }
+                    // A dashed line where one part of the train ends and the next begins.
+                    ForEach(partBoundaries(placed), id: \.self) { meters in
+                        DividerLine()
+                            .stroke(.secondary, style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                            .frame(height: 1.5)
+                            .offset(y: y(meters) - 2.25)
+                    }
                 }
                 .frame(maxWidth: .infinity, minHeight: y(bottom), maxHeight: y(bottom), alignment: .topLeading)
             }
             if sequence.travelsTowardsPlatformEnd == true { directionLabel(up: false) }
+        }
+    }
+
+    /// Where one part of the train meets the next, in meters along the platform.
+    private func partBoundaries(_ placed: [Placed]) -> [Double] {
+        guard sequence.groups.count > 1 else { return [] }
+        let ordered = placed.sorted { $0.start < $1.start }
+        return zip(ordered, ordered.dropFirst()).compactMap { previous, next in
+            previous.coach.group == next.coach.group ? nil : (previous.end + next.start) / 2
         }
     }
 
@@ -228,6 +244,15 @@ private struct CoachSequenceDiagram: View {
             return [train.isEmpty ? nil : train, unit].compactMap(\.self).joined(separator: " · ")
         }
         return unit
+    }
+}
+
+private struct DividerLine: Shape {
+    func path(in rect: CGRect) -> Path {
+        Path { path in
+            path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+            path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+        }
     }
 }
 

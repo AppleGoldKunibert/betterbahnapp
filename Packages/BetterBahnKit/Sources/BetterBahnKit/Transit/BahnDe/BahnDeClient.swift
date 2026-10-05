@@ -347,7 +347,9 @@ public struct BahnDeClient: Sendable {
         // Every field is optional, like in DBRIS: one odd group mustn't lose the whole formation.
         let groups = response.groups ?? []
         let wanted = coupledNumbers.union([number].compactMap(\.self))
-        let own = groups.filter { $0.transport?.number.map(wanted.contains) ?? false }
+        // The requested train's own trainset first, then the coupled ones' (Tz 9203 + 9228 for ICE 956).
+        let own = groups.filter { $0.transport?.number == number }
+            + groups.filter { $0.transport?.number != number && ($0.transport?.number.map(wanted.contains) ?? false) }
         var units: [TrainFormation.Unit] = []
         for group in own.isEmpty ? groups : own {
             let vehicles = group.vehicles ?? []
