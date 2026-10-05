@@ -14,10 +14,11 @@ struct JourneyReplanSheet: View {
     let finalDestination: Station
     /// Options the journey was searched with, so they can be edited instead of set up again.
     var search: ConnectionSearch?
-    let onApply: (Journey) -> Void
+    /// The re-planned journey and the destination it now heads for (changed if the user picked a new one).
+    let onApply: (Journey, Station) -> Void
 
     init(journey: Journey, startLeg: Leg? = nil, finalDestination: Station,
-         search: ConnectionSearch? = nil, onApply: @escaping (Journey) -> Void) {
+         search: ConnectionSearch? = nil, onApply: @escaping (Journey, Station) -> Void) {
         self.journey = journey
         self.startLeg = startLeg
         self.finalDestination = finalDestination
@@ -911,7 +912,7 @@ struct JourneyReplanSheet: View {
         if let entry = model.savedEntry(for: journey) {
             model.replaceSaved(id: entry.id, with: updated, reason: reason, search: updatedSearch)
         }
-        onApply(updated)
+        onApply(updated, target)
         applyingID = nil
         withAnimation(.snappy) {
             appliedExit = exit
