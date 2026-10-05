@@ -428,6 +428,10 @@ struct JourneyResultsView: View {
             source = page?.source ?? model.provider.source
             if cursor == nil {
                 journeys = result
+                // The first connection is the one most likely opened next: have its live data ready.
+                if let first = result.first(where: { ($0.departure?.best ?? .distantFuture) > .now }) {
+                    model.prepareLiveData(for: first)
+                }
                 earlierCursor = page?.earlierCursor
                 laterCursor = page?.laterCursor
             } else if prepend {

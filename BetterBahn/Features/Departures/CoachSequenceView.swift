@@ -62,11 +62,21 @@ struct CoachSequenceView: View {
             } catch TransitError.rateLimited {
                 blocked = true
             } catch {}
+            if sequence?.coaches.isEmpty ?? true, let planned = await model.plannedCoachSequence(for: request) {
+                sequence = planned
+                blocked = false
+            }
         }
     }
 
+    /// Where the train goes; coupled trains that split later list every destination.
     private func destination(_ sequence: CoachSequence) -> String? {
-        sequence.groups.first { $0.isRequestedTrain }?.destination
+        var destinations: [String] = []
+        for case let destination? in sequence.groups.filter(\.isRequestedTrain).map(\.destination)
+        where !destinations.contains(destination) {
+            destinations.append(destination)
+        }
+        return destinations.isEmpty ? nil : destinations.joined(separator: " / ")
     }
 
     private func header(_ sequence: CoachSequence) -> some View {
@@ -78,6 +88,9 @@ struct CoachSequenceView: View {
             Text([station.displayName, sequence.platform.map { "Gleis \($0)" }].compactMap(\.self).joined(separator: " · "))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+            if case .vagonweb(let from, let until) = sequence.source {
+                plannedNote(from: from, until: until)
+            }
             if let units = sequence.formation.unitDescription ?? sequence.formation.modelSummary {
                 Label(units, systemImage: "tram.fill")
                     .font(.caption)
@@ -86,9 +99,24 @@ struct CoachSequenceView: View {
             if sequence.differsFromSchedule {
                 InfoChip(text: "Abweichende Wagenreihung", systemImage: "exclamationmark.triangle.fill", tint: .slightDelay)
             }
-            if sequence.hasOtherTrains {
+            if sequence.hasOtherTrains || sequence.partsGoToDifferentPlaces {
                 InfoChip(text: "Zugteile mit anderem Ziel – auf den Wagen achten", systemImage: "arrow.triangle.branch", tint: .slightDelay)
             }
+        }
+    }
+
+    /// vagonweb's plan is for the whole train, not this stop: no platform positions, and the real
+    /// train can differ (bahn.de has the actual one in the hours before departure).
+    private func plannedNote(from: Date?, until: Date?) -> some View {
+        let validity: String? = switch (from, until) {
+        case let (from?, until?): "gilt \(from.formatted(.dateTime.day().month(.twoDigits).year())) – \(until.formatted(.dateTime.day().month(.twoDigits).year()))"
+        default: nil
+        }
+        return VStack(alignment: .leading, spacing: 4) {
+            InfoChip(text: "Plan-Wagenreihung – kann abweichen", systemImage: "calendar", tint: .secondary)
+            Text(["Ohne Gleisabschnitte", validity, "Daten: vagonweb.cz"].compactMap(\.self).joined(separator: " · "))
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -174,10 +202,26 @@ private struct CoachSequenceDiagram: View {
                             .frame(height: max(y(item.end) - y(item.start) - 3, 24), alignment: .top)
                             .offset(y: y(item.start))
                     }
+                    // A dashed line where one part of the train ends and the next begins.
+                    ForEach(partBoundaries(placed), id: \.self) { meters in
+                        DividerLine()
+                            .stroke(.secondary, style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                            .frame(height: 1.5)
+                            .offset(y: y(meters) - 2.25)
+                    }
                 }
                 .frame(maxWidth: .infinity, minHeight: y(bottom), maxHeight: y(bottom), alignment: .topLeading)
             }
             if sequence.travelsTowardsPlatformEnd == true { directionLabel(up: false) }
+        }
+    }
+
+    /// Where one part of the train meets the next, in meters along the platform.
+    private func partBoundaries(_ placed: [Placed]) -> [Double] {
+        guard sequence.groups.count > 1 else { return [] }
+        let ordered = placed.sorted { $0.start < $1.start }
+        return zip(ordered, ordered.dropFirst()).compactMap { previous, next in
+            previous.coach.group == next.coach.group ? nil : (previous.end + next.start) / 2
         }
     }
 
@@ -193,10 +237,22 @@ private struct CoachSequenceDiagram: View {
         guard sequence.groups.count > 1, sequence.groups.indices.contains(coach.group),
               sequence.coaches.first(where: { $0.group == coach.group })?.id == coach.id else { return nil }
         let group = sequence.groups[coach.group]
-        if sequence.hasOtherTrains {
-            return [group.trainName, group.destination].compactMap(\.self).joined(separator: " → ")
+        let unit = group.unit?.number.map { "Tz \($0)" }
+        // Each part's own number and destination whenever several trains run together (coupled ones too).
+        if sequence.hasSeveralTrains || sequence.hasOtherTrains {
+            let train = [group.trainName, group.destination].compactMap(\.self).joined(separator: " → ")
+            return [train.isEmpty ? nil : train, unit].compactMap(\.self).joined(separator: " · ")
         }
-        return group.unit?.number.map { "Tz \($0)" }
+        return unit
+    }
+}
+
+nonisolated private struct DividerLine: Shape {
+    func path(in rect: CGRect) -> Path {
+        Path { path in
+            path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+            path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+        }
     }
 }
 
@@ -212,7 +268,7 @@ private struct CoachRow: View {
                     Text(group)
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(Color.brand)
-                        .lineLimit(1)
+                        .lineLimit(2)
                 }
                 Text(coach.title)
                     .font(.caption.weight(.semibold))

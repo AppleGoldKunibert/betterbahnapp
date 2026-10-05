@@ -418,6 +418,11 @@ public struct TimetablesClient: Sendable {
     /// own Timetables ("IRIS") schedule. Only queried for stopovers that are actually missing a
     /// platform, so a long route doesn't fire a lookup per stop; a stopover that already has one is
     /// left untouched (see `realtime(for:)` for overlaying live Gleisänderungen onto an existing leg).
+    /// `trip` with DB's delays (`tripWithRealtime(_:)`) and missing platforms (`fillMissingPlatforms(in:)`).
+    public func liveTrip(_ trip: Trip) async -> Trip {
+        await fillMissingPlatforms(in: await tripWithRealtime(trip))
+    }
+
     public func fillMissingPlatforms(in trip: Trip) async -> Trip {
         guard let line = trip.line, let number = line.dispatchNumber,
               let category = Self.category(from: line.name) else { return trip }
