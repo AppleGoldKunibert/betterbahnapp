@@ -44,6 +44,10 @@ features or data flows change (and update the privacy policy in `Cloudflare/work
   proxy also sends browser user agents. Ask DB / the operators for permission if App Review asks.
 - vagonweb.cz (planned Wagenreihung, train types) is used with the permission of vagonweb (issue #95);
   keep that email in case App Review asks. The app credits it ("Daten: vagonweb.cz").
+- Attribution (#103): Settings → Datenquellen lists every service with links (Transitous sources,
+  DB Timetables under CC BY 4.0, OpenStreetMap, OpenRailwayMap, bahn.de, vagonweb, bahn.expert,
+  bahn.jetzt, Träwelling); the map legend links OSM and OpenRailwayMap. All requests except the
+  bahn.de proxy send `HTTPClient.identifyingUserAgent` (app version + `/support` contact).
 - The share extension opens the app through the responder chain (`ShareViewController.openApp`),
   which Apple only officially allows for widgets. Common practice, but a possible review question.
 - Zeitkarten from screenshots can be added to Wallet (see `TravelPassView`). The pass signer only
