@@ -60,4 +60,40 @@ import Testing
         let journeys = try await planner.journeys(from: a, to: c, via: [ViaWaypoint(station: b)], date: base)
         #expect(journeys.first?.legs.map { $0.line?.name } == ["ICE 1", "ICE 2"])
     }
+
+    func sBahn(_ id: String, run: String, _ stops: [Stopover]) -> Trip {
+        Trip(id: id, line: Line(name: "S7", number: "7", product: .suburban, operatorName: nil, tripNumber: run),
+             direction: stops.last?.station.name, stopovers: stops, cancelled: false, remarks: [], source: .bahnDe)
+    }
+
+    @Test func zeroStayKeepsTransferBetweenRunsOfSameLine() async throws {
+        let first = sBahn("s7a", run: "37101", [stop(a, arr: nil, dep: 10), stop(b, arr: 70, dep: nil)])
+        let second = sBahn("s7b", run: "37202", [stop(b, arr: nil, dep: 80), stop(c, arr: 140, dep: nil)])
+        let mock = RoutingMockProvider()
+        mock.routes["\(a.name) -> \(b.name)"] = [journey(first, a, b)]
+        mock.routes["\(b.name) -> \(c.name)"] = [journey(second, b, c)]
+        let journeys = try await ViaRoutePlanner(provider: mock).journeys(from: a, to: c, via: [ViaWaypoint(station: b)], date: base)
+        #expect(journeys.first?.legs.count == 2)
+    }
+
+    @Test func zeroStayKeepsTrainBackTheOtherWay() async throws {
+        // Out to B on the line, then the line's other direction back through A (no run numbers known).
+        let out = trip("re1", "RE 7", [stop(a, arr: nil, dep: 10), stop(b, arr: 70, dep: nil)])
+        let back = trip("re2", "RE 7", [stop(b, arr: nil, dep: 80), stop(a, arr: 140, dep: nil)])
+        let mock = RoutingMockProvider()
+        mock.routes["\(a.name) -> \(b.name)"] = [journey(out, a, b)]
+        mock.routes["\(b.name) -> \(a.name)"] = [journey(back, b, a)]
+        let journeys = try await ViaRoutePlanner(provider: mock).journeys(from: a, to: a, via: [ViaWaypoint(station: b)], date: base)
+        #expect(journeys.first?.legs.count == 2)
+    }
+
+    @Test func identicalRoutesAreListedOnce() async throws {
+        // Both routes to B lead to the same onward train, so several beam candidates end up the same journey.
+        let mock = provider()
+        let toB = try #require(mock.routes["\(a.name) -> \(b.name)"]?.first)
+        mock.routes["\(a.name) -> \(b.name)"] = [toB, toB]
+        let journeys = try await ViaRoutePlanner(provider: mock).journeys(from: a, to: c, via: [ViaWaypoint(station: b)], date: base)
+        #expect(journeys.count == 1)
+        #expect(Set(journeys.map(\.id)).count == journeys.count)
+    }
 }

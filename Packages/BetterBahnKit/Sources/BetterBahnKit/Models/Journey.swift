@@ -267,6 +267,15 @@ public struct Stopover: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
+extension Array where Element == Journey {
+    /// Drops journeys whose `id` already came earlier: a list showing both (e.g. in a `LazyVStack`)
+    /// renders only one of them and leaves an empty gap for the other.
+    public func removingDuplicateIDs() -> [Journey] {
+        var seen = Set<String>()
+        return filter { seen.insert($0.id).inserted }
+    }
+}
+
 public struct Leg: Codable, Sendable, Hashable, Identifiable {
     public var id: String { (tripId ?? "walk") + origin.id + departure.planned.description }
     public var origin: Station

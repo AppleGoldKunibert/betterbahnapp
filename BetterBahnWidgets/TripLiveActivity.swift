@@ -31,14 +31,26 @@ struct TripLiveActivity: Widget {
                         .padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    HStack(spacing: 8) {
-                        Text(state.isDeparture ? "Abfahrt" : state.arrived ? "Angekommen" : "Ankunft")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                    let title = Text(state.isDeparture ? "Abfahrt" : state.arrived ? "Angekommen" : "Ankunft")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .fixedSize()
+                    // The region beside the camera is narrow: drop the title before the platform wraps.
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            title
+                            if let platform = state.displayPlatform {
+                                PlatformChip(platform: platform, replaced: state.replacedPlatform)
+                            }
+                        }
                         if let platform = state.displayPlatform {
                             PlatformChip(platform: platform, replaced: state.replacedPlatform)
+                        } else {
+                            title
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                     .padding(.trailing, 4)
                 }
                 DynamicIslandExpandedRegion(.center, priority: 2) {
@@ -268,6 +280,8 @@ struct PlatformChip: View {
                 .foregroundStyle(replaced == nil ? Color.white : Color.yellow)
         }
         .foregroundStyle(.white)
+        .lineLimit(1)
+        .fixedSize()
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
         .background(.white.opacity(0.18), in: .capsule)
