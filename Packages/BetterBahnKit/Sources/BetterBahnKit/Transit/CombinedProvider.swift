@@ -2,13 +2,15 @@ import Foundation
 
 /// Transitous is primary. A separately configured provider can supply failover.
 /// bahn.de remains a station-search fallback and the source for coach sequences and journey details;
-/// bahn.expert is the fallback for the train type when bahn.de has no coach sequence (yet); bahn.jetzt supplies live train positions.
+/// when bahn.de has no coach sequence (yet), vagonweb.cz supplies the train type and planned Wagenreihung, with bahn.expert as the
+/// fallback for the train type; bahn.jetzt supplies live train positions.
 public final class CombinedProvider: TransitProvider {
     public var source: DataSource { primary.source }
     public let primary: any TransitProvider
     public let fallback: (any TransitProvider)?
     public let bahnDe: BahnDeClient?
     public let bahnExpert: BahnExpertClient?
+    public let vagonweb: VagonwebClient?
     public let bahnJetzt: BahnJetztClient?
     private let health: Health
 
@@ -16,10 +18,12 @@ public final class CombinedProvider: TransitProvider {
                 fallback: (any TransitProvider)? = nil,
                 bahnDe: BahnDeClient? = BahnDeClient(),
                 bahnExpert: BahnExpertClient? = BahnExpertClient(),
+                vagonweb: VagonwebClient? = VagonwebClient(),
                 bahnJetzt: BahnJetztClient? = BahnJetztClient(),
                 cooldown: TimeInterval = 120) {
         self.bahnDe = bahnDe
         self.bahnExpert = bahnExpert
+        self.vagonweb = vagonweb
         self.bahnJetzt = bahnJetzt
         self.primary = primary
         self.fallback = fallback

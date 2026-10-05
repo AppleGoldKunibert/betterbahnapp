@@ -76,6 +76,15 @@ public struct CoachSequence: Sendable, Hashable {
     /// Series, Tz and Taufname of the requested train's trainsets.
     public var formation: TrainFormation
 
+    public enum Source: Sendable, Hashable {
+        /// bahn.de's coach sequence at a stop.
+        case bahnDe
+        /// vagonweb.cz's scheduled composition: the plan, without platform positions, sectors or Tz.
+        case vagonweb(validFrom: Date?, validUntil: Date?)
+    }
+
+    public var source: Source = .bahnDe
+
     /// Groups that run as another train with another destination than the requested one.
     public var hasOtherTrains: Bool { groups.contains { !$0.isRequestedTrain } }
 }
