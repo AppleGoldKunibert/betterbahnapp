@@ -22,6 +22,12 @@ struct JourneyDetailView: View {
     /// so a journey never loaded live before doesn't first show the timetable and then jump to the delays.
     /// One seen before shows its last live data at once and refreshes in the background.
     @State private var liveDataLoaded = false
+    /// The destination picked when the journey was edited, so later edits and "Anderer Zug" route there
+    /// instead of back to the one the journey was opened with.
+    @State private var editedDestination: Station?
+
+    /// Where the journey is going now.
+    private var goal: Station { editedDestination ?? finalDestination }
 
     struct LegSelection: Identifiable {
         let index: Int
@@ -67,7 +73,7 @@ struct JourneyDetailView: View {
         .sheet(item: $legToReplace) { selection in
             AlternativeTrainsSheet(leg: selection.leg) { newLegs in
                 let updated = try await model.trainPicker.replacing(
-                    legAt: selection.index, in: journey, with: newLegs, finalDestination: finalDestination)
+                    legAt: selection.index, in: journey, with: newLegs, finalDestination: goal)
                 withAnimation {
                     if let entry = model.savedEntry(for: journey) {
                         model.replaceSaved(id: entry.id, with: updated, reason: "Anderer Zug gewählt")
@@ -77,14 +83,16 @@ struct JourneyDetailView: View {
             }
         }
         .sheet(item: $legToReplan) { selection in
-            JourneyReplanSheet(journey: journey, startLeg: selection.leg, finalDestination: finalDestination,
-                               search: replanSearch) { updated in
+            JourneyReplanSheet(journey: journey, startLeg: selection.leg, finalDestination: goal,
+                               search: replanSearch) { updated, destination in
+                editedDestination = destination
                 withAnimation { journey = updated }
             }
         }
         .sheet(isPresented: $showJourneyEditor) {
-            JourneyReplanSheet(journey: journey, finalDestination: finalDestination,
-                               search: replanSearch) { updated in
+            JourneyReplanSheet(journey: journey, finalDestination: goal,
+                               search: replanSearch) { updated, destination in
+                editedDestination = destination
                 withAnimation { journey = updated }
             }
         }
@@ -97,7 +105,7 @@ struct JourneyDetailView: View {
             }
         }
         .sheet(isPresented: $showJourneyMap) {
-            JourneyMapView(journey: journey, finalDestination: finalDestination)
+            JourneyMapView(journey: journey, finalDestination: goal)
         }
         .onChange(of: model.savedEntry(for: journey)?.journey) { _, refreshed in
             // Pick up realtime refreshes of this saved journey.
