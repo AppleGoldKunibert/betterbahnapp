@@ -320,6 +320,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Config/BetterBahn-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = BetterBahn;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Damit bei der Bahnhofssuche Bahnhöfe in deiner Nähe zuerst angezeigt werden.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
@@ -395,6 +396,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Config/BetterBahn-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = BetterBahn;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Damit bei der Bahnhofssuche Bahnhöfe in deiner Nähe zuerst angezeigt werden.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;

@@ -45,6 +45,7 @@ struct RootView: View {
     @State private var incomingSharedJourney: Journey?
     @State private var incomingDBShare: DBShareText?
     @State private var showInvalidShareLinkAlert = false
+    @State private var shareLinkError: String?
     @State private var selectedTab = RootTab.connections
 
     enum RootTab: Hashable {
@@ -116,6 +117,12 @@ struct RootView: View {
                 incomingDBShare = DBShareText(text: text)
                 return
             }
+            // A short link (`https://…/s/<id>` as Universal Link, or the fallback page's button):
+            // the journey is fetched from BetterBahn's Worker.
+            if let id = JourneyShareLink.shortLinkID(from: url) {
+                Task { await openShortShareLink(id: id) }
+                return
+            }
             guard let journey = JourneyShareLink.journey(from: url) else {
                 showInvalidShareLinkAlert = true
                 return
@@ -129,6 +136,24 @@ struct RootView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text("Dieser Link funktioniert leider nicht.")
+        }
+        .alert("Reise nicht geladen", isPresented: Binding(get: { shareLinkError != nil },
+                                                           set: { if !$0 { shareLinkError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(shareLinkError ?? "")
+        }
+    }
+
+    private func openShortShareLink(id: String) async {
+        do {
+            let journey = try await ShortShareLinkClient().journey(id: id)
+            incomingDBShare = nil
+            incomingSharedJourney = journey
+        } catch let error as ShortShareLinkError {
+            shareLinkError = error.localizedDescription
+        } catch {
+            shareLinkError = "Die Reise konnte nicht geladen werden. Prüf deine Internetverbindung und öffne den Link noch einmal."
         }
     }
 }

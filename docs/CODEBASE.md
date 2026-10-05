@@ -19,7 +19,7 @@ comments are English.
 | `BetterBahnShare/` | Share extension: `ShareViewController` takes shared DB text/URL and opens `betterbahn://import?...`. |
 | `Packages/BetterBahnKit/` | Local SwiftPM package with all models, networking and logic (iOS 26 + macOS 26, everything `Sendable`). Tests live here. |
 | `Config/` | xcconfigs + Info.plists. `Signing.xcconfig` holds team ID; optional gitignored `Local.xcconfig` overrides it. |
-| `Cloudflare/` | Worker (`betterbahn`) that bounces the Träwelling OAuth callback to `betterbahn://oauth` and serves the privacy policy at `/datenschutz` (linked in Settings) and the support page at `/support` (see its README). |
+| `Cloudflare/` | Worker (`betterbahn`, `wrangler.toml`) that bounces the Träwelling OAuth callback to `betterbahn://oauth`, serves the privacy policy at `/datenschutz` (linked in Settings) and the support page at `/support`, and stores shared journeys for short links (`/share`, `/s/<id>` + `apple-app-site-association`, KV with 30-day TTL, App Attest + rate limit; see its README). |
 | `Cloudflare/bahnde-proxy/` | Separate Worker (`betterbahn2`) proxying bahn.de's web API (`/web/api/…` paths), because bahn.de blocks Apple's URL loading stack, and DB Timetables (`/timetables/v1/…`, API key as Worker secret). Also hands out the App Attest tokens (`/auth/…`). See its README. `BahnDeClient.baseURL`, `TimetablesClient.baseURL` point at it. |
 | `Cloudflare/pass-signer/` | Worker (`betterbahn-pass`) that signs Apple Wallet passes for DB tickets with the Pass Type ID certificate (secrets), since that can't ship in the app. Needs an App Attest token, and only signs UIC (`#UT`) barcodes whose issuer signature verifies against UIC's public key list (`uicsignature.mjs`). `npm install && npm test` (see its README). |
 | `Cloudflare/shared/` | `appattest.mjs`: App Attest verification and the signed tokens both Workers check (`X-BetterBahn-Token`); `node --test Cloudflare/shared/appattest.test.mjs`. |
@@ -36,7 +36,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 - `App/BetterBahnApp.swift` – `@main`, `AppDelegate` (registers BG task for ending Live
   Activities), `RootView` with 4 tabs: Verbindungen (`ConnectionsView`), Karte (`TravelMapView`),
   Abfahrten (`StationBoardView`), Einstellungen (`SettingsView`). Handles `onOpenURL`
-  (`DBShare.text(fromAppURL:)` → `ImportedJourneyView`, `JourneyShareLink` → `SharedJourneyPreviewView`, `LiveActivityLink` from tapping the Live Activity → that saved
+  (`DBShare.text(fromAppURL:)` → `ImportedJourneyView`, `JourneyShareLink` → `SharedJourneyPreviewView` (short links via
+  `ShortShareLinkClient`, also as Universal Links), `LiveActivityLink` from tapping the Live Activity → that saved
   journey via `AppModel.journeyToOpen` on the Verbindungen tab)
   and scene-phase refresh start/stop.
 - `App/AppModel.swift` – the single `@Observable` app state, injected via `.environment(model)`.
@@ -80,7 +81,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   tickets (`AppModel.reservations(for:)`) and only show on the leg whose train matches.
 - `Features/Trips/TripsView.swift` – upcoming/past saved journeys, `SaveJourneyButton`.
 - `Features/Traewelling/` – `CheckinSheet`, `TraewellingLoginButton`.
-- `Features/Sharing/` – preview of `betterbahn://share` links and imported DB shares.
+- `Features/Sharing/` – preview of shared journeys and imported DB shares; `JourneyShareButton` (in `JourneyDetailView`)
+  uploads for a short link, falls back to the long link, and opens `UIActivityViewController`.
 - `Features/Settings/` – settings (incl. privacy policy link and "not affiliated with DB" note), `DataSourcesView`
   (Datenquellen: every service with its attribution/license links; keep it current when adding a source), `BC100RulesView`, quick tags.
 - `Shared/DesignSystem.swift` – reusable UI pieces (`Card`, `SectionHeader`, `LineBadge`, `TimeStack`,
@@ -131,7 +133,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   refreshed by `AppModel.followTrainPositions()` while the map is on screen). Long-distance trains by
   number, regional/S-Bahn by run number (`Line.tripNumber`).
 - `Transit/Transitous/` – MOTIS API client + DTOs (`M*` types). Station-name cleanup and
-  deduplication of boards happen here. Station search ranking is `searchRank`; with the user's location
+  deduplication of boards happen here. MOTIS leaves trains nobody may board out of departures, so a departure
+  board also asks for arrivals and adds the ones going on as "Nur Ausstieg" (`continuingWithoutBoarding`, #105). Station search ranking is `searchRank`; with the user's location
   it balances text match against nearness and size and also asks for "<nearby town> <query>"
   (`NearbyTowns`, an offline list, so coordinates never leave the device), nearby stations starting
   with what was typed (`StationHints`, from `Resources/StationHints.json`, built by
@@ -165,7 +168,10 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   such made-up "pünktlich" from journeys saved earlier.
 - Logic: `JourneyReplanner`, `ConnectionCheck` (`ConnectionIssue`, `JourneyRefresher`), `PlatformChange`
   (platform changes since the last refresh → push, ignores sectors/bus bays), `TrainRoutePlanner`,
-  `ViaRoutePlanner` (vias without minimum stay keep a through train as one leg), `TrainPicker`, `TicketFilter`/`BC100Rules`, `BoardFilter`.
+  `ViaRoutePlanner` (vias without minimum stay keep a through train as one leg), `TrainPicker` (also
+  `journeysIgnoringBoardingRules`: direct trains with "Nur Ein-/Ausstieg" for the expert option of that name,
+  added to search results in `JourneyResultsView`), `StationCalls` (hides routes that change onto a train also calling at
+  the origin, or leave one also calling at the destination – e.g. Berlin Hbf → Halle → back via Hbf; not for via searches), `TicketFilter`/`BC100Rules`, `BoardFilter`.
 - `Traewelling/` – OAuth PKCE (`TraewellingAuth`, `TokenStore`), `TraewellingClient`
   (check-ins, history), `QuickTag`. Finding the train asks only the nearest few stations' departures, in parallel
   (12 s timeout), and caches autocomplete/departures, so retries and "Manuell eintragen" (`checkinAsManualTrip`) don't search again (#106).
@@ -179,7 +185,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `WalletPassError.unverifiedBarcode`), `TravelPass` ("Zeitkarte" read from such a barcode, only its bytes are kept; a Deutschland-Ticket valid
   longer than a month counts as a BahnCard 100's; `WalletPassPayload(pass:)` shows the validity as from → until). Passes are stored like tickets (`TicketStore`, `passes.json`).
   bahn.de's bot protection blocks the order API outside its page in a real browser (403), so there is no direct client.
-- `Sharing/` – `JourneyShareLink` (betterbahn://share encoding), `DBShare` + `DBShareImporter`
+- `Sharing/` – `JourneyShareLink` (betterbahn://share encoding, payload limits, short-link IDs),
+  `ShortShareLinkClient` (`/share` on the `betterbahn` Worker, long link as fallback), `DBShare` + `DBShareImporter`
   (parse DB Navigator/bahn.de shared text, resolve via `betterbahn://import`).
 - `Geometry/` – polyline decode, `RouteGeometryService`, `SegmentHeatmap`.
 - `Support/HTTPClient.swift` – shared HTTP + `TransitError`, `JSONDecoding`. Every request sends `identifyingUserAgent` (app version + `/support` contact, as Transitous/OpenRailwayMap/Träwelling ask); only `BahnDeClient` sends browser agents. `ProductStyle` colors.
