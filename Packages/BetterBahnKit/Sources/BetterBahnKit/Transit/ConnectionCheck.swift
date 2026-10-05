@@ -101,7 +101,40 @@ public struct JourneyRefresher: Sendable {
         return CombinedProvider.applying(await coupled, to: [updated]).first ?? updated
     }
 
-    private func refresh(_ originalLeg: Leg, now: Date) async -> Leg {
+    /// Only what `connectionIssues()` looks at: each leg's times, platforms and cancellation at its
+    /// ends, without its stops, bahn.de's Zusatzhalte or train names. Light enough to check every
+    /// search result on screen for whether it can still be made.
+    public func refreshEnds(_ journey: Journey, now: Date = .now) async -> Journey {
+        var updated = journey
+        await withTaskGroup(of: (Int, Leg).self) { group in
+            for (index, leg) in journey.legs.enumerated() where !leg.isWalking {
+                group.addTask { (index, await refreshEnds(of: leg, now: now)) }
+            }
+            for await (index, leg) in group { updated.legs[index] = leg }
+        }
+        return updated
+    }
+
+    /// A search result whose live data can still change whether it works: not over yet and starting
+    /// within the next 12 hours (further ahead there is no realtime beyond what the search had).
+    public static func isWorthLiveCheck(_ journey: Journey, now: Date = .now) -> Bool {
+        guard let first = journey.transitLegs.first, let last = journey.transitLegs.last else { return false }
+        return first.departure.planned <= now.addingTimeInterval(12 * 3600) && last.arrival.best >= now
+    }
+
+    /// `live` with the platforms `base` knows where live has none: search results get missing
+    /// platforms filled in while their live check is still loading (from the version before).
+    public static func keepingPlatforms(of base: Journey, in live: Journey) -> Journey {
+        guard base.id == live.id else { return live }
+        var merged = live
+        for index in merged.legs.indices {
+            if merged.legs[index].departurePlatform?.best == nil { merged.legs[index].departurePlatform = base.legs[index].departurePlatform }
+            if merged.legs[index].arrivalPlatform?.best == nil { merged.legs[index].arrivalPlatform = base.legs[index].arrivalPlatform }
+        }
+        return merged
+    }
+
+    private func refreshEnds(of originalLeg: Leg, now: Date) async -> Leg {
         var leg = originalLeg
         if !leg.isWalking, let tripId = leg.tripId, leg.source != .traewelling,
            let trip = try? await provider.trip(id: tripId, source: leg.source) {
@@ -113,6 +146,12 @@ public struct JourneyRefresher: Sendable {
         if let timetables, let override = await timetables.realtime(for: leg) {
             leg = Self.apply(override, to: leg)
         }
+        return leg
+    }
+
+    private func refresh(_ originalLeg: Leg, now: Date) async -> Leg {
+        var leg = await refreshEnds(of: originalLeg, now: now)
+        let timetables = TimetablesClient.knowsChanges(until: leg.arrival.planned, now: now) ? self.timetables : nil
         if let timetables, timetables.canLookUp(leg) {
             leg = Self.syncingEnds(of: leg, toStopovers: true)
             let live = await timetables.liveStopovers(for: leg)
