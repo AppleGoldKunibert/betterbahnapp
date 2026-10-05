@@ -1334,9 +1334,7 @@ public struct TransitousProvider: TransitProvider {
         }
     }
 
-    static func isUnknown(_ line: Line) -> Bool {
-        line.product == .other && line.name.trimmingCharacters(in: CharacterSet(charactersIn: "? ")).isEmpty
-    }
+    static func isUnknown(_ line: Line) -> Bool { line.isUnknown }
 
     /// Merges board rows that are almost certainly the same physical departure. Transitous stitches
     /// together many feeds, and an international train sometimes gets one row per feed under a
