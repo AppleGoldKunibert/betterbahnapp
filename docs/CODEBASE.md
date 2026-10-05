@@ -24,6 +24,7 @@ comments are English.
 | `Cloudflare/pass-signer/` | Worker (`betterbahn-pass`) that signs Apple Wallet passes for DB tickets with the Pass Type ID certificate (secrets), since that can't ship in the app. Needs an App Attest token, and only signs UIC (`#UT`) barcodes whose issuer signature verifies against UIC's public key list (`uicsignature.mjs`). `npm install && npm test` (see its README). |
 | `Cloudflare/shared/` | `appattest.mjs`: App Attest verification and the signed tokens both Workers check (`X-BetterBahn-Token`); `node --test Cloudflare/shared/appattest.test.mjs`. |
 | `.github/workflows/` | GitHub Actions: `pr-build.yml` (macOS: Kit tests + unsigned app build on PRs touching code), `pr-secrets.yml` (Linux: gitleaks secret scan + guard against committing `DefaultCredentials.swift`), `sync-prod.yml` (merges prod into every other branch except `appstorerelease`). |
+| `scripts/` | `make-station-hints.py`: rebuilds BetterBahnKit's offline station list for search (see Transitous below). `searchsim/`: Linux package that copies the platform-neutral Kit sources in (`./sync.sh`), so `swift test` runs `BetterBahnKitTests.swift` without a Mac and `swift run SearchSim scenarios.txt` runs the real station search against live Transitous for ~1150 place/query scenarios (rerun after changing search ranking). |
 | `docs/transit-providers.md` | Why Transitous is the primary data source and fallback options. |
 | `docs/app-review-notes.md` | App Store submission checklist (privacy URL, App Privacy, demo access) and review notes. |
 
@@ -112,7 +113,21 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   refreshed by `AppModel.followTrainPositions()` while the map is on screen). Long-distance trains by
   number, regional/S-Bahn by run number (`Line.tripNumber`).
 - `Transit/Transitous/` – MOTIS API client + DTOs (`M*` types). Station-name cleanup and
-  deduplication of boards happen here.
+  deduplication of boards happen here. Station search ranking is `searchRank`; with the user's location
+  it balances text match against nearness and size and also asks for "<nearby town> <query>"
+  (`NearbyTowns`, an offline list, so coordinates never leave the device), nearby stations starting
+  with what was typed (`StationHints`, from `Resources/StationHints.json`, built by
+  `scripts/make-station-hints.py`; only names, rerun now and then for new stations; big ones from
+  anywhere, for longer names only the two nearest starting with them) and aliases like "ber" → "Flughafen
+  BER". German names of towns abroad ("stettin", "prag", `germanNames`) match and ask for the local name.
+  A bus stop's exact name only counts nearby, and stops abroad far away only for a train station in the
+  place that was typed (train stations abroad within 100 km count like German ones). In the user's town a
+  station's short name is exact ("süd" in Essen, `isLocalName`). "Hbf"/"Bahnhof" and parts of town only
+  count next to a word matching the stop; "an der"/"am" inside a typed town name don't count at all
+  (`joiningWords`). Up to 3 letters it also asks for "<q> Hbf"/"<q> Bahnhof", for
+  a single longer word "<q> Hbf" (kept only in that town) and "<q> Bahnhof" (Kurort Rathen, Sylt). Main
+  stations get their own name back (`withMainStationName`: not "KA Hbf (Vorplatz)"), DELFI's border
+  points ("Kehl(Gr)") are dropped.
 - `Transit/Timetables/` – official DB Timetables XML client (realtime overrides, messages), through the
   `bahnde-proxy` Worker, which holds the API key. The app only uses it where App Attest works. A train not
   found at a station's EVA is looked for at its other levels (`/station` `meta`, e.g. "Hamburg Hbf (S-Bahn)").

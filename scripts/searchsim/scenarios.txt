@@ -1,0 +1,1254 @@
+# place | query | expected name part(s), ";"-separated | must be within top n
+Berlin | ber | Flughafen BER | 1
+Berlin | ost | Ost | 2
+Berlin | bern | =Bern | 1
+Berlin | bernau | Bernau (bei Berlin) | 1
+Berlin | be | Berlin Hbf | 3
+Berlin | po | Potsdamer Platz | 5
+Berlin | pots | Potsdam Hbf | 2
+Berlin | stettin | Szczecin | 3
+Berlin | szczecin | Szczecin G | 3
+Berlin | hamburg | Hamburg Hbf | 1
+Berlin | münchen | München Hbf | 1
+Berlin | muenchen | München Hbf | 1
+Berlin | frankfurt | Frankfurt (Oder); Frankfurt (M) Hbf | 3
+Berlin | spandau | Spandau | 1
+Berlin | alex | Alexanderplatz | 1
+Berlin | gesund | Gesundbrunnen | 1
+Berlin | südkreuz | Südkreuz | 1
+Berlin | suedkreuz | Südkreuz | 1
+Berlin | zoo | Zoologischer Garten | 2
+Berlin | friedrichstr | Friedrichstr | 1
+Berlin | warschau | Warszawa | 3
+Berlin | prag | Praha | 3
+Berlin | wien | Wien Hbf | 2
+Berlin | kopenhagen | København | 3
+Berlin | erkner | Erkner | 1
+Berlin | oranienburg | Oranienburg | 1
+Berlin | flughafen | BER | 1
+Berlin | hbf | Berlin Hbf | 1
+Berlin | dresden | Dresden Hbf | 1
+Berlin | leipzig | Leipzig Hbf | 1
+Berlin | köln | Köln Hbf | 1
+Berlin | koeln | Köln Hbf | 1
+Berlin | halle | Halle (Saale) Hbf | 1
+Berlin | brandenburg | Brandenburg Hbf | 1
+Berlin | cottbus | Cottbus | 1
+Berlin | wannsee | Wannsee | 1
+Berlin | lichtenberg | Lichtenberg | 1
+Berlin | königs wusterhausen | Königs Wusterhausen | 1
+Berlin | swinemünde | Świnoujście | 3
+Berlin | breslau | Wrocław | 3
+Berlin | danzig | Gdańsk | 3
+Berlin | posen | Poznań | 3
+Berlin | küstrin | Kostrzyn | 3
+Berlin | ham | Hamburg Hbf | 3
+Berlin | ost | Ostkreuz | 3
+Berlin | west | Westkreuz | 5
+Berlin | pankow | Pankow | 1
+Berlin | potsdam | Potsdam Hbf | 1
+Berlin | schönefeld | Schönefeld | 2
+München | ost | Ost | 1
+München | ost | Interlaken | 0
+München | pasing | Pasing | 1
+München | flughafen | Flughafen | 1
+München | ber | Flughafen BER | 1
+München | salzburg | Salzburg Hbf | 1
+München | innsbruck | Innsbruck Hbf | 1
+München | mailand | Milano | 3
+München | venedig | Venezia | 3
+München | rom | Roma | 3
+München | hbf | München Hbf | 1
+München | frankfurt | Frankfurt (M) Hbf | 1
+München | augsburg | Augsburg Hbf | 1
+München | bozen | Bolzano | 3
+München | verona | Verona | 3
+München | zürich | Zürich HB | 2
+München | prag | Praha | 3
+München | nürnberg | Nürnberg Hbf | 1
+München | mü | München Hbf | 2
+München | bern | =Bern | 1
+Hamburg | dammtor | Dammtor | 1
+Hamburg | altona | Altona | 1
+Hamburg | harburg | Harburg | 1
+Hamburg | kopenhagen | København | 3
+Hamburg | lübeck | Lübeck Hbf | 1
+Hamburg | kiel | Kiel Hbf | 1
+Hamburg | hbf | Hamburg Hbf | 1
+Hamburg | ber | Flughafen BER | 4
+Hamburg | ber | Berlin Hbf | 6
+Hamburg | berlin | Berlin Hbf | 1
+Hamburg | br | Bremen Hbf | 4
+Köln | messe | Messe | 1
+Köln | deutz | Deutz | 1
+Köln | brüssel | Brussel | 3
+Köln | lüttich | Liège | 3
+Köln | amsterdam | Centraal | 1
+Köln | paris | Paris | 3
+Köln | bonn | Bonn Hbf | 1
+Köln | düsseldorf | Düsseldorf Hbf | 1
+Köln | flughafen | Köln/Bonn | 2
+Köln | hbf | Köln Hbf | 1
+Frankfurt | süd | Frankfurt (Main) Süd | 1
+Frankfurt | flughafen | Frankfurt (Main) Flughafen | 1
+Frankfurt | mainz | Mainz Hbf | 1
+Frankfurt | frankfurt | Frankfurt (M) Hbf | 1
+Frankfurt | straßburg | Strasbourg | 3
+Frankfurt | basel | Basel SBB | 3
+Frankfurt | of | Offenbach | 5
+Freiburg | basel | Basel SBB | 2
+Freiburg | bas | Basel | 3
+Freiburg | mulhouse | Mulhouse | 1
+Freiburg | mülhausen | Mulhouse | 3
+Freiburg | zürich | Zürich HB | 1
+Freiburg | straßburg | Strasbourg | 3
+Freiburg | offenburg | Offenburg | 1
+Freiburg | genf | Genève | 3
+Görlitz | breslau | Wrocław | 3
+Görlitz | zgorzelec | Zgorzelec | 1
+Görlitz | dresden | Dresden Hbf | 1
+Görlitz | zittau | Zittau | 1
+Passau | linz | Linz | 1
+Passau | wien | Wien Hbf | 2
+Passau | schärding | Schärding | 1
+Aachen | lüttich | Liège | 3
+Aachen | maastricht | Maastricht | 1
+Aachen | heerlen | Heerlen | 1
+Aachen | brüssel | Brussel | 3
+Konstanz | kreuzlingen | Kreuzlingen | 1
+Konstanz | zürich | Zürich HB | 1
+Konstanz | st gallen | St. Gallen | 1
+Flensburg | kopenhagen | København | 3
+Flensburg | padborg | Padborg | 1
+Dresden | prag | Praha | 3
+Dresden | neustadt | Dresden-Neustadt | 1
+Dresden | tetschen | Děčín | 3
+Dresden | pirna | Pirna | 1
+Leipzig | halle | Halle (Saale) Hbf | 1
+Leipzig | messe | Leipzig Messe | 1
+Leipzig | flughafen | Leipzig/Halle Flughafen | 1
+Stuttgart | ulm | Ulm Hbf | 1
+Stuttgart | flughafen | Flughafen/Messe | 1
+Stuttgart | bad cannstatt | Bad Cannstatt | 1
+Bernau | berlin | Berlin Hbf | 1
+Bernau | be | Bernau | 2
+Eberswalde | berlin | Berlin Hbf | 1
+Eberswalde | stettin | Szczecin | 3
+Rosenheim | salzburg | Salzburg Hbf | 1
+Rosenheim | kufstein | Kufstein | 1
+Rosenheim | münchen | München Hbf | 1
+Saarbrücken | metz | Metz | 1
+Saarbrücken | paris | Paris | 3
+Saarbrücken | forbach | Forbach | 1
+Nürnberg | hbf | Nürnberg Hbf | 1
+Nürnberg | fürth | Fürth | 1
+Nürnberg | pilsen | Plzeň | 3
+Hannover | messe | Messe | 2
+Hannover | hbf | Hannover Hbf | 1
+Rostock | warnemünde | Warnemünde | 1
+Erfurt | weimar | Weimar | 1
+Karlsruhe | straßburg | Strasbourg | 3
+Karlsruhe | karlsbad | Karlsbad | 3
+Lindau | bregenz | Bregenz | 1
+Lindau | lindau | Lindau-Reutin | 2
+- | bern | =Bern | 1
+- | münchen | München Hbf | 1
+- | frankfurt | Frankfurt (M) Hbf | 1
+- | ber | Flughafen BER | 1
+- | stettin | Szczecin | 3
+- | hamburg | Hamburg Hbf | 1
+- | köln | Köln Hbf | 1
+- | wien | Wien Hbf | 1
+- | basel | Basel SBB | 2
+- | prag | Praha | 3
+Berlin | zoo | Zoologischer Garten | 1
+Berlin | ham | Hamburg Hbf | 3
+Hamburg | mü | München | 3
+Berlin | kö | Köln Hbf | 5
+Stuttgart | flughafen | Zürich | 0
+Berlin | rom | Roma | 3
+Berlin | genf | Genève | 3
+München | nürnberg | Nürnberg Hbf | 1
+Berlin | ostk | Ostkreuz | 1
+Berlin | gesundbr | Gesundbrunnen | 1
+Berlin | hauptbahnhof | Berlin Hbf | 1
+Berlin | berlin hbf | Berlin Hbf | 1
+Berlin | potsdamer platz | Potsdamer Platz | 1
+
+# Small stations and villages, nearby (full name and first letters) and far away
+Berlin | wustermark | Wustermark | 1
+Berlin | wuste | Wustermark | 5
+Berlin | werder | Werder (Havel) | 1
+Berlin | strausberg | Strausberg | 1
+Berlin | strau | Strausberg | 3
+Berlin | fürstenwalde | Fürstenwalde | 1
+Berlin | fürsten | Fürstenwalde | 3
+Berlin | neuruppin | Neuruppin | 1
+Berlin | lübben | Lübben | 1
+Berlin | golm | Golm | 1
+Berlin | wünsdorf | Wünsdorf | 1
+Berlin | ahrensfelde | Ahrensfelde | 1
+Berlin | blankenfelde | Blankenfelde | 1
+Berlin | templin | Templin | 1
+Berlin | müncheberg | Müncheberg | 1
+Berlin | prenzlau | Prenzlau | 1
+Berlin | angermünde | Angermünde | 1
+Berlin | joachimsthal | Joachimsthal | 1
+Berlin | groß schönebeck | Groß Schönebeck | 1
+Berlin | rehfelde | Rehfelde | 1
+Berlin | hennigsdorf | Hennigsdorf | 1
+Berlin | henni | Hennigsdorf | 3
+Berlin | velten | Velten | 1
+Berlin | zossen | Zossen | 1
+Berlin | zos | Zossen | 3
+Berlin | beelitz | Beelitz | 2
+Berlin | neustadt | Neustadt (Dosse) | 3
+Berlin | titisee | Titisee | 1
+Berlin | bebra | Bebra | 1
+Berlin | treuchtlingen | Treuchtlingen | 1
+Berlin | altenbeken | Altenbeken | 1
+Berlin | lichtenfels | Lichtenfels | 1
+Berlin | plattling | Plattling | 1
+Berlin | oberstdorf | Oberstdorf | 1
+Berlin | westerland | Westerland | 1
+Berlin | norddeich | Norddeich | 2
+Berlin | bad schandau | Bad Schandau | 1
+Berlin | garmisch | Garmisch-Partenkirchen | 1
+Berlin | berchtesgaden | Berchtesgaden | 1
+Berlin | wernigerode | Wernigerode | 1
+Berlin | eberswalde | Eberswalde | 1
+Berlin | ebers | Eberswalde | 3
+München | grafing | Grafing | 1
+München | holzkirchen | Holzkirchen | 1
+München | hol | Holzkirchen | 3
+München | tutzing | Tutzing | 1
+München | tutz | Tutzing | 1
+München | erding | Erding | 1
+München | freising | Freising | 1
+München | frei | Freising | 3
+München | dachau | Dachau | 1
+München | geltendorf | Geltendorf | 1
+München | ebersberg | Ebersberg | 1
+München | westerland | Westerland | 1
+München | treuchtlingen | Treuchtlingen | 1
+Hamburg | elmshorn | Elmshorn | 1
+Hamburg | elms | Elmshorn | 1
+Hamburg | buxtehude | Buxtehude | 1
+Hamburg | pinneberg | Pinneberg | 1
+Hamburg | ahrensburg | Ahrensburg | 1
+Hamburg | wedel | Wedel | 1
+Hamburg | neustadt | Neustadt in Holstein | 3
+Hamburg | hagenow | Hagenow | 1
+Freiburg | weil | Weil am Rhein | 2
+Freiburg | hausach | Hausach | 1
+Freiburg | titisee | Titisee | 1
+Freiburg | kirchzarten | Kirchzarten | 1
+Freiburg | kirch | Kirchzarten | 3
+Karlsruhe | neustadt | Neustadt (Weinstr) | 2
+Rosenheim | bernau | Chiemsee | 2
+Köln | hagen | Hagen Hbf | 1
+Köln | brühl | Brühl | 1
+Köln | troisdorf | Troisdorf | 1
+Dresden | radebeul | Radebeul | 1
+Dresden | kurort | Kurort | 3
+Leipzig | markkleeberg | Markkleeberg | 1
+Leipzig | wurzen | Wurzen | 1
+Erfurt | arnstadt | Arnstadt | 1
+Erfurt | neudietendorf | Neudietendorf | 1
+- | titisee | Titisee | 1
+- | wustermark | Wustermark | 1
+- | treuchtlingen | Treuchtlingen | 1
+
+# ===== Bugs found while hunting
+Garmisch | mitt | Mittenwald | 1
+Weiden | mitt | Stuttgart Hbf; Leipzig Hbf; Hannover Hbf; Berlin Hbf | 0
+Hannover | burgdorf | Burgdorf Bahnhof | 1
+Stuttgart | reichenbach | Reichenbach (Fils) | 1
+Görlitz | reichenbach | Reichenbach/OL | 1
+Prenzlau | seehausen | Seehausen (UM) | 1
+Lindau | wangen | Wangen Bahnhof | 1
+Frankfurt | friedberg | Friedberg (Hessen) | 1
+- | friedberg | Friedberg (Hessen) | 1
+Schwerin | schönberg | Schönberg (Meckl) | 1
+Augsburg | neuburg | Neuburg (Donau) | 1
+München | neuburg | Neuburg (Donau) | 1
+München | münster | Münster (Westf) Hbf | 1
+Würzburg | rothenburg | Rothenburg ob der Tauber | 1
+Erfurt | mühlhausen | Mühlhausen (Thüringen) | 1
+- | mühlhausen | Mühlhausen (Thüringen) | 2
+Frankfurt | homburg | Bad Homburg; Homburg (Saar) Hbf | 3
+Frankfurt | soden | Bad Soden | 2
+Berlin | bergen | Bergen Bahnhof | 3
+- | bergen | Bergen Bahnhof | 3
+Freiburg | neustadt | Neustadt (Schwarzw) | 3
+
+# ===== Villages and small towns, every state: full name and first letters, nearby and far away
+# Schleswig-Holstein
+Husum | niebüll | Niebüll | 1
+Husum | nieb | Niebüll | 1
+Husum | bredstedt | Bredstedt | 1
+Husum | hei | Heide | 2
+Kiel | eck | Eckernförde | 2
+Westerland | keitum | Keitum | 1
+Westerland | klanx | Klanxbüll | 1
+Dresden | niebüll | Niebüll | 1
+# Niedersachsen / Bremen
+Meppen | lingen | Lingen | 1
+Meppen | lin | Lingen | 2
+Meppen | pap | Papenburg | 2
+Meppen | geeste | Geeste | 1
+Bremen | rotenburg | Rotenburg (Wümme) | 1
+Bremen | roten | Rotenburg (Wümme) | 1
+Hannover | wun | Wunstorf | 1
+Wernigerode | ilsenburg | Ilsenburg | 1
+Wernigerode | ils | Ilsenburg | 1
+Wernigerode | hal | Halberstadt | 3
+Berlin | ilsenburg | Ilsenburg | 1
+# Nordrhein-Westfalen
+Münster | drensteinfurt | Drensteinfurt | 1
+Münster | dren | Drensteinfurt | 1
+Bielefeld | lage | =Lage | 1
+Aachen | stolberg | Stolberg, Hbf | 1
+Köln | eus | Euskirchen | 2
+# Hessen
+Fulda | schlüchtern | Schlüchtern | 1
+Fulda | schl | Schlüchtern | 2
+Fulda | hün | Hünfeld | 1
+Kassel | mel | Melsungen | 2
+Kassel | göt | Göttingen | 2
+Berlin | schlüchtern | Schlüchtern | 1
+# Rheinland-Pfalz / Saarland
+Gerolstein | jünkerath | Jünkerath | 1
+Gerolstein | jünk | Jünkerath | 1
+Gerolstein | kall | Kall | 1
+Gerolstein | tri | Trier Hbf | 2
+Trier | wittlich | Wittlich | 1
+Trier | wit | Wittlich | 2
+Saarbrücken | neun | Neunkirchen (Saar) | 2
+Hamburg | jünkerath | Jünkerath | 1
+# Baden-Württemberg
+Ulm | blaubeuren | Blaubeuren | 1
+Ulm | neu | Neu-Ulm | 2
+Konstanz | rad | Radolfzell | 2
+Lindau | hergatz | Hergatz | 1
+Stuttgart | back | Backnang | 2
+# Bayern
+Kempten | immenstadt | Immenstadt | 1
+Kempten | imm | Immenstadt | 1
+Kempten | kau | Kaufbeuren | 2
+Kempten | mem | Memmingen | 2
+Weiden | neustadt | Neustadt (Waldnaab) | 1
+Weiden | wind | Windischeschenbach | 1
+Weiden | schwan | Schwandorf | 1
+# Straubing and Vilshofen (Niederbay) are bus-only stops in Transitous right now (no rail modes)
+Passau | plat | Plattling | 1
+Garmisch | mur | Murnau | 2
+Regensburg | neumarkt | Neumarkt (Oberpf) | 1
+Berlin | mittenwald | Mittenwald | 1
+Hamburg | immenstadt | Immenstadt | 1
+# Thüringen
+Erfurt | sömmerda | Sömmerda | 1
+Plauen | greiz | Greiz | 1
+Fulda | meiningen | Meiningen | 1
+# Sachsen
+Plauen | oelsnitz | =Oelsnitz | 1
+Plauen | reichenbach | =Reichenbach | 1
+Plauen | reich | =Reichenbach | 2
+Plauen | zwi | Zwickau | 2
+Bautzen | bisch | Bischofswerda | 1
+Bautzen | gör | Görlitz | 2
+# Sachsen-Anhalt
+Magdeburg | schönebeck | Schönebeck | 1
+Magdeburg | burg | Magdeburg) | 1
+Halle | weiß | Weißenfels | 2
+# Brandenburg
+Perleberg | witt | Wittenberge | 1
+Perleberg | pritz | Pritzwalk | 1
+Perleberg | bad wilsnack | Bad Wilsnack | 1
+Prenzlau | pas | Pasewalk | 1
+Neuruppin | rhein | Rheinsberg | 2
+Neuruppin | neustadt | Neustadt (Dosse) | 1
+Neuruppin | ora | Oranienburg | 2
+Lübben | lübbenau | Lübbenau | 1
+Lübben | cot | Cottbus | 2
+Cottbus | forst | =Forst | 1
+Stuttgart | pasewalk | Pasewalk | 1
+# Mecklenburg-Vorpommern
+Rostock | güs | Güstrow | 1
+Rostock | kühlungsborn | Kühlungsborn | 1
+Stralsund | bergen | Bergen Bahnhof | 1
+Stralsund | binz | Binz | 1
+Stralsund | gre | Greifswald | 2
+München | binz | Binz | 1
+Köln | sassnitz | Sassnitz | 1
+# Without location
+- | lübbenau | Lübbenau | 1
+- | jünkerath | Jünkerath | 1
+# Follow-ups: same-named places, district names, short prefixes
+Garmisch | mit | Mittenwald | 2
+Rostock | str | Stralsund | 2
+Husum | friedrichstadt | Friedrichstadt | 1
+Kassel | friedland | Friedland (Kr Göttingen) | 1
+
+# ===== Ambiguous place names: the nearby one or the clearly biggest one first, others stay listed.
+# Neustadt
+Mannheim | neustadt | Neustadt (Weinstr) | 1
+Nürnberg | neustadt | Neustadt (Aisch) | 1
+Bautzen | neustadt | Neustadt Bahnhof; Dresden-Neustadt | 2
+Hannover | neustadt | Neustadt am Rübenberge | 1
+Kiel | neustadt | Neustadt in Holstein | 2
+Regensburg | neustadt | Neustadt (Donau) | 1
+Schwerin | neustadt | Neustadt-Glewe | 2
+Wien | neustadt | Wiener Neustadt | 2
+- | neustadt | Neustadt (Weinstr) | 3
+# Frankfurt
+Cottbus | frankfurt | Frankfurt (Oder); Frankfurt (M) Hbf | 2
+Görlitz | frankfurt | Frankfurt (Oder); Frankfurt (M) Hbf | 3
+Szczecin | frankfurt | Frankfurt (Oder) | 2
+Karlsruhe | frankfurt | Frankfurt (M) Hbf | 1
+# Halle
+Bielefeld | halle | Halle, Bahnhof/ZOB | 1
+Bielefeld | halle | Halle (Saale) Hbf | 5
+Münster | halle | Halle (Saale) Hbf; Halle, Bahnhof/ZOB | 3
+Salzburg | halle | Halle (Saale) Hbf | 3
+- | halle | Halle (Saale) Hbf | 1
+# Brandenburg
+München | brandenburg | Brandenburg Hbf | 1
+- | brandenburg | Brandenburg Hbf | 1
+# Freiburg
+Hamburg | freiburg | Freiburg Hbf | 1
+Basel | freiburg | Freiburg Hbf; Fribourg | 2
+- | freiburg | Freiburg Hbf | 1
+# Mühlhausen
+Kassel | mühlhausen | Mühlhausen (Thüringen) | 1
+# Hagen
+Dortmund | hagen | Hagen Hbf | 1
+Schwerin | hagen | Hagen Hbf; Hagenow | 3
+- | hagen | Hagen Hbf | 1
+# Burg
+Berlin | burg | Magdeburg) | 1
+# Weiden
+Weiden | weiden | Weiden (Oberpf) | 1
+Nürnberg | weiden | Weiden (Oberpf) | 1
+Köln | weiden | Weiden (Oberpf) | 5
+- | weiden | Weiden (Oberpf) | 1
+# Neukirchen
+Nürnberg | neukirchen | Neukirchen (bei Sulzbach-Rosenberg) | 1
+# Rheinfelden / Laufenburg
+Freiburg | rheinfelden | Rheinfelden (Baden); =Rheinfelden | 3
+Basel | rheinfelden | Rheinfelden | 1
+Freiburg | laufenburg | Laufenburg (Baden); =Laufenburg | 2
+# Kirchheim
+Stuttgart | kirchheim | Kirchheim (T) | 1
+- | kirchheim | Kirchheim (T) | 3
+# Lichtenberg
+München | lichtenberg | Lichtenberg | 2
+# Bergen
+Rosenheim | bergen | Bergen | 2
+# Schönberg
+Kiel | schönberg | Schönberg | 2
+# Grünberg
+Frankfurt | grünberg | Grünberg Bahnhof | 1
+Cottbus | grünberg | Zielona Góra | 3
+# Rothenburg / Rotenburg
+- | rothenburg | Rothenburg ob der Tauber | 1
+Kassel | rotenburg | Rotenburg (Fulda) | 1
+# Landsberg
+Augsburg | landsberg | Landsberg (Lech) | 1
+München | landsberg | Landsberg (Lech) | 1
+Berlin | landsberg | Landsberger Allee | 5
+# Neuburg
+# Lauf / Weil
+Nürnberg | lauf | Lauf | 1
+Stuttgart | weil | Weil der Stadt | 2
+München | weil | Weilheim | 5
+# Münster
+Freiburg | münster | Münster (Westf) Hbf | 3
+Frankfurt | münster | Münster (Westf) Hbf | 3
+- | münster | Münster (Westf) Hbf | 1
+# Linden
+Hannover | linden | Linden/Fischerhof | 1
+# Ebersbach
+Stuttgart | ebersbach | Ebersbach (Fils) | 1
+Görlitz | ebersbach | Ebersbach | 1
+# Altenburg / Altenberg
+Leipzig | altenburg | Altenburg | 1
+- | altenburg | Altenburg | 1
+Dresden | altenberg | Altenberg | 1
+# Rosenheim vs Rosenberg
+München | rosen | Rosenheim | 1
+Nürnberg | rosenberg | Sulzbach-Rosenberg | 2
+# Friedberg
+Augsburg | friedberg | Friedberg | 1
+# Homburg
+Saarbrücken | homburg | Homburg (Saar) Hbf | 1
+# Offenbach
+Frankfurt | offenbach | Offenbach (Main)-Zentrum Hbf | 1
+- | offenbach | Offenbach (Main)-Zentrum Hbf | 1
+# Neunkirchen
+Saarbrücken | neunkirchen | Neunkirchen (Saar) Hbf | 1
+Wien | neunkirchen | Neunkirchen | 1
+Nürnberg | neunkirchen | Neunkirchen am Sand | 1
+# Neumarkt / Hof / Langen / Wörth / Neuhaus
+Nürnberg | neumarkt | Neumarkt (Oberpf) | 1
+Plauen | hof | Hof Hbf | 1
+Berlin | hof | Hof Hbf | 3
+Frankfurt | langen | Langen (Hessen) | 1
+Karlsruhe | wörth | Wörth (Rhein) | 1
+Nürnberg | neuhaus | Neuhaus (Pegnitz) | 1
+# Same-named places with a "Bad" in front, and stations named like a town's bus stops
+Rosenheim | aibling | Bad Aibling | 1
+Köln | godesberg | Godesberg | 1
+Kassel | hersfeld | Bad Hersfeld | 1
+Berlin | saarow | Bad Saarow | 1
+- | nordhausen | Nordhausen | 1
+Erfurt | gotha | Gotha | 1
+
+# ===== Abroad
+# German names of foreign towns, far away
+München | breslau | Wrocław | 3
+Berlin | krakau | Kraków | 3
+Berlin | kattowitz | Katowice | 3
+Berlin | pilsen | Plzeň | 3
+Berlin | brünn | Brno | 3
+Berlin | budweis | Budějovice | 3
+Berlin | pressburg | Bratislava | 3
+Berlin | mailand | Milano | 3
+Berlin | venedig | Venezia | 3
+Frankfurt | florenz | Firenze | 3
+Berlin | neapel | Napoli | 3
+München | triest | Trieste | 3
+München | laibach | Ljubljana | 3
+München | meran | Merano | 3
+München | trient | Trento | 3
+Berlin | nizza | Nice | 3
+Berlin | straßburg | Strasbourg | 3
+Köln | löwen | Leuven | 3
+Frankfurt | grünberg | Grünberg | 1
+# German names near the border / from abroad
+Nürnberg | karlsbad | Karlovy Vary | 3
+Weiden | eger | Cheb | 3
+Nürnberg | marienbad | Mariánské | 3
+Dresden | aussig | Ústí | 3
+Görlitz | reichenberg | Liberec | 3
+Passau | budweis | Budějovice | 3
+Wien | preßburg | Bratislava | 3
+Wien | ödenburg | Sopron | 3
+Freiburg | neuenburg | Neuenburg (Baden) | 2
+Szczecin | stettin | Szczecin G | 2
+Strasbourg | straßburg | Strasbourg | 1
+Basel | mülhausen | Mulhouse | 1
+Berlin | stettin hbf | Szczecin G | 1
+Berlin | prag hbf | Praha | 1
+Berlin | breslau hbf | Wrocław | 1
+# Partial German names (typing letter by letter)
+Berlin | kopenh | København | 3
+München | maila | Milano | 3
+# Local names
+Dresden | praha | Praha | 1
+Berlin | wrocław | Wrocław | 1
+Berlin | wroclaw | Wroclaw Glowny | 1
+Berlin | gdansk | Gdańsk | 3
+Berlin | lodz | Lodz | 3
+Berlin | amsterdam | Amsterdam, Centraal | 1
+Berlin | bruxelles | Brux | 3
+Hamburg | paris | Paris | 1
+Hamburg | zürich | Zürich HB | 1
+Berlin | budapest | Budapest | 1
+Düsseldorf | venlo | Venlo | 1
+Essen | arnhem | Arnhem | 1
+Berlin | utrecht | Utrecht Centraal | 1
+Köln | antwerpen | Antwerpen | 1
+Trier | luxembourg | Luxembourg | 1
+Trier | luxemburg | Luxembourg | 3
+Berlin | luxemburg | Luxembourg | 3
+Berlin | metz | Metz | 3
+Berlin | graz | Graz Hbf | 1
+München | linz | Linz Hbf | 1
+Berlin | linz | Linz | 3
+München | ljubljana | Ljubljana | 1
+Hamburg | kobenhavn | København | 3
+Flensburg | sonderborg | Sønderborg | 1
+Flensburg | aarhus | Aarhus | 1
+Berlin | malmö | Malmö | 1
+Görlitz | wrocław | Wrocław G | 1
+Konstanz | schaffhausen | Schaffhausen | 1
+Garmisch | innsbruck | Innsbruck Hbf | 1
+Trier | wasserbillig | Wasserbillig | 1
+Aachen | eupen | Eupen | 1
+Saarbrücken | sarreguemines | Sarreguemines | 1
+Freiburg | colmar | Colmar | 1
+Plauen | cheb | Cheb | 1
+# From abroad, German stations
+Salzburg | münchen | München Hbf | 1
+Salzburg | freilassing | Freilassing | 1
+Salzburg | berchtesgaden | Berchtesgaden | 1
+Salzburg | hbf | Salzburg Hbf | 1
+Basel | freiburg | Freiburg Hbf | 2
+Basel | basel bad | Basel Bad | 1
+Basel | frankfurt | Frankfurt (M) Hbf | 1
+Strasbourg | kehl | Kehl | 1
+Strasbourg | karlsruhe | Karlsruhe Hbf | 1
+Szczecin | berlin | Berlin Hbf | 1
+Szczecin | pasewalk | Pasewalk | 1
+Venlo | düsseldorf | Düsseldorf Hbf | 1
+Venlo | kaldenkirchen | Kaldenkirchen | 1
+Wien | münchen | München Hbf | 1
+Wien | hbf | Wien Hbf | 1
+Wien | frankfurt | Frankfurt (M) Hbf | 1
+# Generic words: far-away stops abroad must not come first
+Berlin | bahnhof | Zürich; Wien; Bern; Basel; Praha; Amsterdam | 0
+Frankfurt | ost | Interlaken; Ostrava; Wien | 0
+Hamburg | nord | Paris; Wien; Zürich | 0
+München | zentrum | Wien; Zürich; Graz; Linz; Innsbruck | 0
+Berlin | centrum | Amsterdam; Praha; Warszawa; Wrocław | 0
+Köln | flughafen | Zürich; Wien | 0
+Salzburg | flughafen | Zürich; Wien | 0
+Hamburg | hbf | Wien; Zürich | 0
+# Second round
+- | prag hbf | Praha | 1
+Flensburg | sonderburg | Sønderborg | 3
+Flensburg | sønderborg | Sønderborg | 1
+Flensburg | tønder | Tønder | 1
+Aachen | liège | Guillemins | 1
+Wien | sopron | =Sopron | 1
+Basel | mulhouse | =Mulhouse | 1
+Saarbrücken | thionville | Thionville | 1
+Strasbourg | strasbourg | =Strasbourg | 1
+
+# ===== City stations typed by local short name / first letters while in that city
+Berlin | ostbahnhof | Ostbahnhof | 1
+Berlin | jungfernheide | Jungfernheide | 1
+Berlin | jungf | Jungfernheide | 1
+Berlin | gesu | Gesundbrunnen | 2
+Berlin | südk | Südkreuz | 1
+Berlin | süd | Südkreuz | 3
+Berlin | nord | Nordbahnhof | 5
+Berlin | westkreuz | Westkreuz | 1
+Berlin | schöneweide | Schöneweide | 1
+Berlin | charlottenburg | Charlottenburg | 1
+Berlin | hacke | Hackescher Markt | 1
+Berlin | messe | Messe | 2
+Berlin | warschauer | Warschauer Str | 1
+Berlin | köpenick | Köpenick | 1
+Berlin | lichtenb | Lichtenberg | 1
+Hamburg | damm | Dammtor | 1
+Hamburg | alt | Altona | 3
+Hamburg | wilhelmsburg | Wilhelmsburg | 1
+Hamburg | harb | Harburg | 2
+Hamburg | bergedorf | Bergedorf | 1
+Hamburg | jungfernstieg | Jungfernstieg | 1
+Hamburg | jungf | Jungfernstieg | 2
+Hamburg | sternschanze | Sternschanze | 1
+Hamburg | flughafen | Airport | 1
+Hamburg | berliner tor | Berliner Tor | 1
+Hamburg | elbbrücken | Elbbrücken | 1
+München | pas | Pasing | 2
+München | marienplatz | Marienplatz | 1
+München | marien | Marienplatz | 1
+München | ostbahnhof | =Ostbahnhof | 1
+München | laim | Laim | 1
+München | donnersberger | Donnersbergerbrücke | 1
+München | hackerbrücke | Hackerbrücke | 1
+München | karlsplatz | Karlsplatz | 1
+München | heimeranplatz | Heimeranplatz | 1
+Köln | ehrenfeld | Ehrenfeld | 1
+Köln | ehren | Ehrenfeld | 2
+Köln | deu | Deutz | 2
+Köln | süd | Köln Süd | 1
+Köln | west | Köln West | 1
+Köln | mülheim | Köln Mülheim | 2
+Köln | hansaring | Hansaring | 1
+Köln | nippes | Nippes | 1
+Frankfurt | höchst | Höchst | 1
+Frankfurt | hö | Höchst | 3
+Frankfurt | hauptwache | Hauptwache | 1
+Frankfurt | west | Frankfurt (Main) West | 1
+Frankfurt | ost | Frankfurt (Main) Ost | 1
+Frankfurt | messe | Messe | 1
+Frankfurt | stadion | Stadion | 1
+Frankfurt | hbf | Frankfurt Hbf | 1
+Frankfurt | rödelheim | Rödelheim | 1
+Frankfurt | lokalbahnhof | Lokalbahnhof | 1
+Stuttgart | feuerbach | Feuerbach | 1
+Stuttgart | feuer | Feuerbach | 2
+Stuttgart | cannstatt | Bad Cannstatt | 1
+Stuttgart | vaihingen | =Vaihingen | 2
+Stuttgart | zuffenhausen | Zuffenhausen | 1
+Stuttgart | schwabstraße | Schwabstr | 1
+Stuttgart | stadtmitte | =Stadtmitte | 1
+Stuttgart | nord | Nordbahnhof | 1
+Stuttgart | messe | Flughafen/Messe | 2
+Düsseldorf | benrath | Benrath | 1
+Düsseldorf | flughafen | D-Flughafen | 1
+Düsseldorf | flu | D-Flughafen | 3
+Düsseldorf | bilk | Bilk | 1
+Düsseldorf | wehrhahn | Wehrhahn | 1
+Düsseldorf | hbf | Düsseldorf Hbf | 1
+Leipzig | connewitz | Connewitz | 1
+Leipzig | plagwitz | Plagwitz | 1
+Leipzig | markt | Leipzig Markt | 1
+Leipzig | nord | Leipzig Nord | 3
+Dresden | mitte | Dresden Mitte | 1
+Dresden | flughafen | Dresden Flughafen | 1
+Dresden | klotzsche | Klotzsche | 1
+Dresden | neus | Dresden-Neustadt | 1
+Hannover | flughafen | Langenhagen Flughafen | 1
+Hannover | nordstadt | Nordstadt | 1
+Nürnberg | ost | Nürnberg Ost | 1
+Nürnberg | flughafen | Nürnberg Flughafen | 1
+Nürnberg | frankenstadion | Frankenstadion | 1
+Nürnberg | nordost | Nürnberg Nordost | 1
+Essen | steele | Steele | 1
+Essen | altenessen | Altenessen | 1
+Essen | west | Essen West | 1
+Essen | süd | Essen Süd | 1
+Dortmund | hörde | Hörde | 1
+Dortmund | signal iduna | Signal-Iduna | 1
+Dortmund | universität | Universität | 1
+# U-Bahn-only stations and more first letters
+Berlin | kottbusser tor | Kottbusser Tor | 1
+Berlin | hermannplatz | Hermannplatz | 1
+München | odeonsplatz | Odeonsplatz | 1
+Nürnberg | plärrer | Plärrer | 1
+Hamburg | hallerstraße | Hallerstr | 1
+Essen | berliner platz | Essen Berliner Platz | 1
+München | hack | Hackerbrücke | 2
+Leipzig | conn | Connewitz | 1
+Dortmund | stadthaus | Dortmund Stadthaus | 1
+Hamburg | rathaus | Rathaus | 1
+Nürnberg | rathenauplatz | Rathenauplatz | 1
+Frankfurt | willy-brandt-platz | Frankfurt (Main) Willy-Brandt-Platz | 1
+München | sendlinger tor | Sendlinger Tor | 1
+Hannover | kröpcke | Kröpcke | 1
+Stuttgart | stadtmitte | Düsseldorf Hbf | 0
+
+# ===== Typing angle: umlaut variants, ß/ss, abbreviations, case, hyphens, St./Sankt, brackets, word order, short prefixes
+# --- umlauts: ü / ue / u
+Berlin | munchen | München Hbf | 1
+Hamburg | koln | Köln Hbf | 1
+Hamburg | luebeck | Lübeck Hbf | 1
+Hamburg | lubeck | Lübeck Hbf | 1
+Köln | dusseldorf | Düsseldorf Hbf | 1
+Nürnberg | fuerth | Fürth (Bay) Hbf | 1
+Nürnberg | furth | Fürth | 3
+München | nurnberg | Nürnberg Hbf | 1
+Frankfurt | wurzburg | Würzburg Hbf | 1
+Kassel | gottingen | Göttingen | 1
+Münster | osnabruck | Osnabrück Hbf | 1
+- | saarbruecken | Saarbrücken Hbf | 1
+Düsseldorf | monchengladbach | Mönchengladbach Hbf | 1
+Konstanz | zurich | Zürich HB | 1
+Berlin | lubben | Lübben | 1
+Leipzig | goessnitz | Gößnitz | 1
+Leipzig | gossnitz | Gößnitz | 1
+# --- real "oe/ue/ae" in names (must survive the umlaut re-query)
+Hamburg | itzehoe | Itzehoe | 1
+Dortmund | soest | Soest | 1
+Hannover | uelzen | Uelzen | 1
+Münster | coesfeld | Coesfeld | 1
+Düsseldorf | moers | Moers | 1
+Magdeburg | oebisfelde | Oebisfelde | 1
+# --- ß vs ss
+Dresden | grossenhain | Großenhain | 1
+Frankfurt | giessen | Gießen | 1
+Leipzig | weissenfels | Weißenfels | 1
+Berlin | warschauer strasse | Warschauer Str | 1
+Berlin | warschauer straße | Warschauer Str | 1
+Berlin | friedrichstrasse | Friedrichstr | 1
+Berlin | gross kreutz | Groß Kreutz | 1
+# --- abbreviations, Hbf
+München | berlin hbf | Berlin Hbf | 1
+Berlin | hamburg hbf | Hamburg Hbf | 1
+Berlin | frankfurt hbf | Frankfurt Hbf | 1
+Berlin | halle hbf | Halle (Saale) Hbf | 1
+Hamburg | münster hbf | Münster Hbf | 1
+Köln | koeln hbf | Köln Hbf | 1
+München | münchen hauptbahnhof | München Hbf | 1
+Stuttgart | hbf | Stuttgart Hbf | 1
+Halle | hbf | Halle (Saale) Hbf | 1
+Kassel | hbf | Kassel Hbf | 1
+Frankfurt | hauptbahnhof | Frankfurt Hbf | 1
+Berlin | spandau bhf | Spandau | 1
+# --- case
+- | MÜNCHEN HBF | München Hbf | 1
+# --- hyphens vs spaces
+Berlin | garmisch-partenkirchen | Garmisch-Partenkirchen | 1
+München | garmisch partenkirchen | Garmisch-Partenkirchen | 1
+Halle | halle-neustadt | Halle-Neustadt | 1
+Halle | halle neustadt | Halle-Neustadt | 1
+Köln | koeln deutz | Deutz | 1
+Frankfurt | frankfurt hoechst | Höchst | 1
+Berlin | königs-wusterhausen | Königs Wusterhausen | 1
+Stuttgart | stuttgart-bad cannstatt | Bad Cannstatt | 1
+# --- St. / Sankt
+Konstanz | st. gallen | St. Gallen | 1
+Konstanz | sankt gallen | St. Gallen | 1
+Husum | sankt peter-ording | Peter-Ording | 1
+Husum | st peter ording | Peter-Ording | 1
+Saarbrücken | sankt ingbert | Ingbert | 1
+# --- brackets / qualifiers
+Berlin | frankfurt oder | Frankfurt (Oder) | 1
+Berlin | frankfurt (oder) | Frankfurt (Oder) | 1
+- | frankfurt am main | Hbf | 1
+München | frankfurt main | Frankfurt (Main) Hbf | 1
+Leipzig | halle saale | Halle (Saale) Hbf | 1
+Bielefeld | halle westf | Halle (Westf) | 1
+# --- word order
+Berlin | hbf berlin | Berlin Hbf | 1
+Berlin | bahnhof zoo | Zoologischer Garten | 1
+Berlin | berlin zoo | Zoologischer Garten | 1
+München | flughafen münchen | Flughafen | 1
+# --- 1-2 letter prefixes
+Hannover | ha | Hannover Hbf | 1
+Hamburg | ha | Hamburg Hbf | 1
+Köln | kö | Köln Hbf | 1
+Leipzig | le | Leipzig Hbf | 1
+Stuttgart | st | Stuttgart Hbf | 1
+Münster | mü | Münster Hbf | 1
+Karlsruhe | ka | Karlsruhe Hbf | 1
+Freiburg | fr | Freiburg | 1
+München | m | München Hbf | 1
+Husum | hu | Husum | 1
+# --- start of two-word names
+Dresden | bad sch | Bad Schandau | 1
+Berlin | kön wus | Königs Wusterhausen | 1
+Berlin | königs w | Königs Wusterhausen | 1
+Berlin | zool gar | Zoologischer Garten | 1
+Berlin | pots pl | Potsdamer Platz | 1
+Hamburg | hamburg alt | Altona | 1
+München | mü ost | München Ost | 1
+Garmisch | gar par | Garmisch-Partenkirchen | 1
+Frankfurt | bad hom | Bad Homburg | 1
+Rosenheim | bad ai | Bad Aibling | 1
+Berlin | frankfurt o | Frankfurt (Oder) | 1
+Leipzig | halle s | Halle (Saale) Hbf | 1
+# --- second batch
+Hamburg | bahnhof altona | Altona | 1
+Berlin | bahnhof friedrichstraße | Friedrichstr | 1
+Berlin | bhf zoo | Zoologischer Garten | 1
+Ulm | st | Stuttgart Hbf | 1
+- | frankfurt(main) hbf | Frankfurt | 1
+Leipzig | halle/saale | Halle (Saale) Hbf | 1
+Stuttgart | freiburg im breisgau | Freiburg | 1
+Berlin | frankfurt flughafen | Flughafen | 1
+Hamburg | muenster | Münster (Westf) Hbf | 1
+Berlin | schoenefeld | Schönefeld | 2
+Berlin | schonefeld | Schönefeld | 2
+Lübben | lü | Lübben | 1
+Weiden | wei | Weiden | 1
+Garmisch | ga | Garmisch-Partenkirchen | 1
+Würzburg | wü | Würzburg Hbf | 1
+
+# ===== Big hubs
+# Big hubs from far away with short prefixes
+Kiel | mü | München Hbf | 3
+Kiel | mü | Frankfurt | 0
+Kiel | fr | Frankfurt Hbf | 3
+Kiel | st | Stuttgart Hbf | 5
+Kiel | kö | Köln Hbf | 3
+Kiel | dü | Düsseldorf Hbf | 3
+Kiel | le | Leipzig Hbf | 3
+Kiel | nü | Nürnberg Hbf | 3
+Kiel | han | Hannover Hbf | 2
+München | ham | Hamburg Hbf | 2
+München | bre | Bremen Hbf | 3
+München | dor | Dortmund | 3
+München | dü | Düsseldorf Hbf | 3
+München | kö | Köln Hbf | 3
+München | han | Hannover Hbf | 2
+München | berl | Berlin Hbf | 1
+Freiburg | ham | Hamburg Hbf | 2
+Freiburg | kö | Köln Hbf | 3
+Freiburg | mü | München Hbf | 3
+Rostock | mü | München Hbf | 3
+Dresden | ham | Hamburg Hbf | 2
+Dresden | kö | Köln Hbf | 5
+Passau | ham | Hamburg Hbf | 2
+Passau | be | Berlin Hbf | 3
+Flensburg | mü | München Hbf | 3
+Konstanz | berl | Berlin Hbf | 2
+Görlitz | kö | Köln Hbf | 3
+Aachen | dr | Dresden Hbf | 3
+Aachen | be | Berlin Hbf | 6
+Kempten | ham | Hamburg Hbf | 2
+# Full names from far away
+München | mönchengladbach | Mönchengladbach Hbf | 1
+Dresden | gelsenkirchen | Gelsenkirchen Hbf | 1
+Berlin | oberhausen | Oberhausen Hbf | 1
+München | halle | Halle (Saale) Hbf | 2
+Stuttgart | braunschweig | Braunschweig Hbf | 1
+Dresden | duisburg | Duisburg Hbf | 1
+Hamburg | mainz | Mainz Hbf | 1
+Berlin | wiesbaden | Wiesbaden Hbf | 1
+Berlin | freiburg | Freiburg Hbf | 1
+Stuttgart | kassel | Kassel | 1
+Berlin | hagen | Hagen Hbf | 1
+München | potsdam | Potsdam Hbf | 1
+Berlin | bonn | Bonn Hbf | 1
+München | essen | Essen Hbf | 1
+# Airports and Messe
+Berlin | frankfurt flughafen | Frankfurt (Main) Flughafen Fernbahnhof | 2
+München | flughafen frankfurt | Frankfurt (Main) Flughafen | 2
+Hamburg | münchen flughafen | Flughafen München | 1
+München | düsseldorf flughafen | D-Flughafen Bf | 1
+Berlin | köln/bonn | Flughafen Köln/Bonn | 1
+Hamburg | leipzig flughafen | Leipzig/Halle Flughafen | 1
+München | hamburg airport | Hamburg Airport | 1
+Köln | hamburg flughafen | Hamburg Airport | 1
+Berlin | stuttgart flughafen | Flughafen/Messe | 1
+Berlin | nürnberg flughafen | Nürnberg Flughafen | 1
+Düsseldorf | flughafen | D-Flughafen Bf | 1
+Hamburg | flughafen | Hamburg Airport | 1
+Halle | flughafen | Leipzig/Halle Flughafen | 1
+Berlin | hannover messe | Hannover Messe | 1
+München | köln messe | Köln Messe | 1
+Berlin | leipzig messe | Leipzig Messe | 1
+# No location
+- | dresden | Dresden Hbf | 1
+- | stuttgart | Stuttgart Hbf | 1
+- | düsseldorf | Düsseldorf Hbf | 1
+- | essen | Essen Hbf | 1
+- | hannover | Hannover Hbf | 1
+- | bonn | Bonn Hbf | 1
+- | mönchengladbach | Mönchengladbach Hbf | 1
+- | aachen | Aachen, Hbf | 1
+- | chemnitz | Chemnitz Hbf | 1
+- | oberhausen | Oberhausen Hbf | 1
+- | rostock | Rostock Hbf | 1
+- | kassel | Kassel | 1
+- | berlin | Berlin Hbf | 1
+- | mü | München Hbf | 3
+- | ha | Hamburg Hbf | 3
+- | kö | Köln Hbf | 3
+- | fr | Frankfurt Hbf | 3
+- | stu | Stuttgart Hbf | 2
+- | han | Hannover Hbf | 2
+- | frankfurt flughafen | Frankfurt (Main) Flughafen | 1
+- | münchen flughafen | Flughafen München | 1
+- | düsseldorf flughafen | D-Flughafen Bf | 1
+- | köln/bonn | Flughafen Köln/Bonn | 1
+- | leipzig/halle | Leipzig/Halle Flughafen | 1
+- | hamburg airport | Hamburg Airport | 1
+- | hannover messe | Hannover Messe | 1
+# Follow-up probes
+München | kie | Kiel Hbf | 3
+München | dre | Dresden Hbf | 3
+Freiburg | ros | Rostock Hbf | 6
+Berlin | bre | Bremen Hbf | 3
+- | bre | Bremen Hbf | 2
+- | dre | Dresden Hbf | 2
+Berlin | hannover flughafen | Langenhagen Flughafen | 1
+München | berlin flughafen | Flughafen BER | 1
+- | stuttgart flughafen | Flughafen/Messe | 1
+Hamburg | st | St. Gallen; St. Pölten; St. Moritz | 0
+Hamburg | sta | Central Station | 0
+
+# ===== Holiday and leisure destinations: islands and coast
+Hamburg | sylt | Westerland | 1
+Köln | westerland | Westerland | 1
+Husum | westerl | Westerland | 2
+Köln | norddeich mole | Norddeich (Norden) Mole | 1
+Meppen | norddeich | Norddeich | 2
+Bremen | norden | Norden (Ostfriesl) | 1
+Hamburg | dagebüll | Dagebüll Mole | 1
+Husum | dageb | Dagebüll | 3
+Berlin | binz | Binz | 1
+- | binz | Binz | 1
+München | sassnitz | Sassnitz | 1
+Stralsund | sassn | Sassnitz | 2
+Rostock | warne | Warnemünde | 2
+Rostock | bad dob | Bad Doberan | 2
+Berlin | heringsdorf | Heringsdorf | 1
+Berlin | ahlbeck | Ahlbeck | 1
+Berlin | zinnowitz | Zinnowitz | 1
+Stralsund | zinnow | Zinnowitz | 3
+Hamburg | cuxhaven | Cuxhaven | 1
+Hamburg | büsum | Büsum | 1
+Husum | st. peter-ording | Peter-Ording | 1
+Hamburg | st peter | Bad St Peter | 1
+Hamburg | timmendorf | Timmendorfer Strand | 2
+Hamburg | travemünde | Travemünde | 1
+Berlin | travemünde strand | Travemünde Strand | 1
+Kiel | travem | Travemünde | 3
+# Mountains and lakes
+München | garmisch | Garmisch-Partenkirchen | 1
+Köln | garmisch-partenkirchen | Garmisch-Partenkirchen | 1
+Garmisch | mittenwald | Mittenwald | 1
+Garmisch | mitten | Mittenwald | 2
+Kempten | oberstdorf | Oberstdorf | 1
+Kempten | oberst | Oberstdorf | 2
+Kempten | füssen | Füssen | 1
+Hamburg | füssen | Füssen | 1
+München | berchtesgaden | Berchtesgaden Hbf | 1
+Salzburg | berchtesgaden | Berchtesgaden Hbf | 1
+Salzburg | königssee | Königssee | 3
+München | königssee | Königssee | 3
+Rosenheim | prien | Prien | 1
+München | prien am chiemsee | Prien | 1
+Frankfurt | prien | Prien | 1
+München | tegernsee | Tegernsee | 1
+München | schliersee | Schliersee | 1
+München | murnau | Murnau | 1
+Freiburg | feldberg | Feldberg-Bärental | 3
+Freiburg | hinterzarten | Hinterzarten | 1
+Freiburg | triberg | Triberg | 1
+Wernigerode | schierke | Schierke | 1
+Wernigerode | brocken | Brocken | 1
+Berlin | brocken | Brocken | 1
+Erfurt | oberhof | Oberhof | 1
+Berlin | oberhof | Oberhof | 1
+Plauen | oberwiesenthal | Oberwiesenthal | 1
+Dresden | kurort oberwiesenthal | Oberwiesenthal | 1
+Dresden | rathen | Kurort Rathen | 1
+München | lindau | Lindau-Insel; Lindau-Reutin | 3
+Lindau | lindau-insel | Lindau-Insel | 1
+Berlin | konstanz | Konstanz | 1
+# Spa towns: "bad" + first letters nearby, and full names from far away
+Salzburg | bad rei | Bad Reichenhall | 2
+Rosenheim | bad aib | Bad Aibling | 2
+München | bad tö | Bad Tölz | 2
+Dresden | bad scha | Bad Schandau | 2
+Freiburg | bad kro | Bad Krozingen | 2
+Würzburg | bad kiss | Bad Kissingen | 2
+Würzburg | bad merg | Bad Mergentheim | 2
+Fulda | bad hers | Bad Hersfeld | 2
+Frankfurt | bad vil | Bad Vilbel | 2
+Köln | bad godes | Bad Godesberg | 2
+Bielefeld | bad oe | Bad Oeynhausen | 2
+Hannover | bad nenn | Bad Nenndorf | 2
+Hamburg | bad old | Bad Oldesloe | 2
+Kiel | bad seg | Bad Segeberg | 2
+Mannheim | bad dür | Bad Dürkheim | 2
+Plauen | bad els | Bad Elster | 2
+Berlin | bad saa | Bad Saarow | 2
+Berlin | bad frei | Bad Freienwalde | 2
+Kassel | bad wildu | Bad Wildungen | 2
+Wernigerode | bad harz | Bad Harzburg | 1
+Münster | bad bent | Bad Bentheim | 2
+Salzburg | bad isch | Bad Ischl | 2
+Berlin | bad reichenhall | Bad Reichenhall | 1
+Hamburg | bad harzburg | Bad Harzburg | 1
+Karlsruhe | bad wildbad | Bad Wildbad | 1
+# Names behind a prefix (Kurort, Seebad, Heilbad, "<Town>-"), islands, and more partial "bad"
+Husum | sylt | Westerland | 1
+Berlin | sylt | Westerland | 2
+- | sylt | Westerland | 2
+Hamburg | travem | Travemünde | 3
+Görlitz | oybin | Kurort Oybin | 1
+Görlitz | jonsdorf | Kurort Jonsdorf | 1
+Dresden | kipsdorf | Kurort Kipsdorf | 1
+Kassel | heiligenstadt | Heilbad Heiligenstadt | 1
+Stralsund | heringsd | Heringsdorf | 2
+Berlin | bansin | Bansin | 1
+Rostock | graal | Graal-Müritz | 1
+Hamburg | fehmarn | Burg auf Fehmarn | 1
+Garmisch | eibsee | Eibsee | 1
+München | oberammergau | Oberammergau | 1
+Stralsund | göhren | Göhren | 1
+Hamburg | sankt peter-ording | Peter-Ording | 1
+Dresden | schand | Bad Schandau | 2
+Frankfurt | homburg | Bad Homburg | 2
+Salzburg | reichenhall | Bad Reichenhall | 1
+Frankfurt | bad so | Bad Soden | 2
+Leipzig | bad d | Bad Dürrenberg | 3
+Stuttgart | bad c | Bad Cannstatt | 1
+Köln | bad g | Bad Godesberg | 3
+Wernigerode | bad harzb | Bad Harzburg | 1
+
+# ===== Border towns, typed locally
+# Aachen
+Aachen | heer | Heerlen | 3
+Aachen | maas | Maastricht | 3
+Aachen | liege | Liège | 2
+Aachen | lieg | Guillemins | 3
+Aachen | eup | Eupen | 3
+Aachen | welk | Welkenraedt | 3
+Aachen | kerkrade | Kerkrade | 1
+Aachen | kerk | Kerkrade | 3
+Aachen | verviers | Verviers | 1
+Aachen | west | West Bf | 1
+# Saarbrücken
+Saarbrücken | forb | Forbach | 3
+Saarbrücken | sarre | Sarreguemines | 3
+Saarbrücken | saargemünd | Sarreguemines | 3
+Saarbrücken | luxemburg | Luxembourg | 3
+# Trier
+Trier | lux | Luxembourg | 3
+Trier | wasser | Wasserbillig | 3
+Trier | konz | Konz | 1
+Trier | perl | Perl | 1
+Trier | thionville | Thionville | 1
+# Freiburg / Basel
+Freiburg | basel bad | Basel Bad | 1
+Freiburg | basel sbb | Basel SBB | 1
+Freiburg | colm | Colmar | 3
+Freiburg | mulh | Mulhouse | 3
+Freiburg | müllheim | Müllheim | 1
+Freiburg | bern | =Bern | 1
+Basel | bad | Basel Bad | 2
+Basel | sbb | Basel SBB | 1
+Basel | lör | Lörrach | 3
+Basel | weil | Weil am Rhein | 1
+Basel | mulh | Mulhouse | 3
+Basel | saint-louis | Saint-Louis | 1
+# Konstanz / Lindau
+Konstanz | kreuz | Kreuzlingen | 3
+Konstanz | schaff | Schaffhausen | 3
+Lindau | breg | Bregenz | 3
+Lindau | st. margrethen | Margrethen | 1
+Lindau | margrethen | Margrethen | 2
+Lindau | dornbirn | Dornbirn | 1
+Lindau | insel | Lindau-Insel | 1
+# Passau / Salzburg
+Passau | schär | Schärding | 3
+Passau | braunau | Braunau | 1
+Passau | brau | Braunau | 3
+Passau | simbach | Simbach | 1
+Salzburg | frei | Freilassing | 3
+Salzburg | süd | Salzburg-Süd | 2
+# Görlitz / Bautzen
+Görlitz | zgorz | Zgorzelec | 3
+Görlitz | wroclaw | Wroclaw G | 1
+Görlitz | wroc | Wrocław | 3
+Görlitz | jelenia gora | Jelenia | 1
+Görlitz | hirschberg | Jelenia | 3
+Görlitz | wegliniec | Wegliniec | 1
+Bautzen | zgorzelec | Zgorzelec | 1
+# Prenzlau / Szczecin / Oder
+Prenzlau | tantow | Tantow | 1
+Prenzlau | szczecin | Szczecin G | 1
+Prenzlau | stet | Szczecin | 3
+Szczecin | gumience | Gumie | 1
+Szczecin | gum | Gumie | 3
+Szczecin | tantow | Tantow | 1
+Szczecin | dabie | Szczecin Dabie | 1
+Szczecin | swinoujscie | Świnoujście | 1
+Berlin | kostrzyn | Kostrzyn | 1
+Cottbus | guben | Guben | 1
+# Flensburg / Husum
+Flensburg | pad | Padborg | 3
+Flensburg | tønder | nder st | 1
+Flensburg | tondern | nder st | 3
+Flensburg | weiche | Flensburg Weiche | 1
+Husum | tønder | nder st | 1
+Husum | tond | nder st | 3
+# Venlo
+Venlo | kald | Kaldenkirchen | 3
+Venlo | vier | Viersen | 3
+Venlo | venlo | =Venlo | 1
+Venlo | blerick | Blerick | 1
+# Strasbourg
+# second batch: border pseudo-stops, far big stations, stops outside the hint bounds
+Flensburg | toender | nder st | 1
+Szczecin | szczecin | Szczecin G | 1
+Görlitz | wroc | Wrocław Główny | 3
+Aachen | eindh | Eindhoven | 3
+Aachen | guillemins | Guillemins | 1
+Dresden | schöna | =Schöna | 1
+Prenzlau | grambow | =Grambow | 1
+Plauen | vojtanov | =Vojtanov | 1
+Meppen | bentheim | =Bad Bentheim | 1
+Garmisch | mittenw | =Mittenwald | 1
+Venlo | arnheim | Arnhem Centraal | 1
+Venlo | nimwegen | Nijmegen | 3
+Dresden | teplitz | Teplice v | 1
+Saarbrücken | diedenhofen | Thionville | 3
+- | szczecin | Szczecin G | 1
+
+# ===== Town and station typed together, airports, other angles
+# --- town typed together with the station, from far away / no location
+München | berlin ostkreuz | Ostkreuz | 1
+- | berlin ostkreuz | Ostkreuz | 1
+Berlin | münchen pasing | Pasing | 1
+Berlin | frankfurt süd | Frankfurt (Main) Süd | 1
+- | frankfurt süd | Frankfurt (Main) Süd | 1
+Köln | hamburg altona | Altona | 1
+München | köln deutz | Deutz | 1
+Berlin | dresden neustadt | Dresden-Neustadt | 1
+Hamburg | hannover messe | Messe | 1
+München | berlin ostbahnhof | Berlin Ostbahnhof | 1
+Berlin | berlin ostbahnhof | Berlin Ostbahnhof | 1
+Berlin | hamburg-harburg | Harburg | 1
+Hamburg | berlin-spandau | Spandau | 1
+- | frankfurt main | Frankfurt (Main) Hbf | 1
+Berlin | halle saale | Halle (Saale) Hbf | 1
+München | stuttgart hbf | Stuttgart Hbf | 1
+Hamburg | münchen hbf | München Hbf | 1
+- | köln hbf | Köln Hbf | 1
+# --- airports by town name
+Hamburg | flughafen berlin | Flughafen BER | 1
+Berlin | münchen flughafen | Flughafen München | 1
+Berlin | frankfurt flughafen | Flughafen Fernbahnhof | 1
+Berlin | düsseldorf flughafen | D-Flughafen Bf | 1
+Berlin | hamburg flughafen | Hamburg Airport | 1
+Berlin | köln flughafen | Köln/Bonn | 1
+Berlin | leipzig flughafen | Leipzig/Halle Flughafen | 1
+# --- towns whose Hbf the geocoder may leave out, typed from far away
+Berlin | bochum | Bochum | 1
+München | wuppertal | Wuppertal Hbf | 1
+Berlin | darmstadt | Darmstadt | 1
+Köln | gera | Gera Hbf | 1
+- | dessau | Dessau | 1
+Berlin | wittenberg | Lutherstadt Wittenberg Hbf | 1
+Berlin | gießen | Gießen | 1
+Berlin | zwickau | Zwickau | 1
+Berlin | ludwigshafen | Ludwigshafen (Rhein) Hbf | 1
+Köln | hamm | Hamm (Westf) | 1
+München | ulm | Ulm Hbf | 1
+- | ulm | Ulm Hbf | 1
+Hamburg | eisenach | Eisenach | 1
+- | mülheim | Mülheim Hbf | 1
+Köln | mülheim | Mülheim Hbf | 3
+- | castrop-rauxel | Castrop-Rauxel Hbf | 1
+- | neustadt an der weinstraße | Neustadt (Weinstr) Hbf | 1
+- | garmisch-partenkirchen | Garmisch-Partenkirchen | 1
+- | lutherstadt wittenberg hbf | Lutherstadt Wittenberg Hbf | 1
+- | brandenburg an der havel | Brandenburg Hbf | 1
+# --- same word: local stop vs. far station
+Köln | neumarkt | Neumarkt | 1
+Köln | neumarkt | Neumarkt (Oberpf) | 3
+Berlin | frankfurter allee | Frankfurter Allee | 1
+Berlin | hallesches tor | Hallesches Tor | 1
+Berlin | warschauer str | Warschauer Str | 1
+München | münchner freiheit | Münchner Freiheit | 1
+# --- rural places: nearest town and own town
+Plauen | plauen | Plauen | 1
+Kempten | hbf | Kempten | 1
+Kempten | kem | Kempten | 1
+Meppen | me | Meppen | 1
+Weiden | regensburg | Regensburg Hbf | 1
+Stralsund | str | Stralsund | 1
+Stralsund | hbf | Stralsund | 1
+Bautzen | bau | Bautzen | 1
+Wernigerode | halberstadt | Halberstadt | 1
+Wernigerode | wer | Wernigerode | 1
+Gerolstein | trier | Trier Hbf | 1
+Lübben | cottbus | Cottbus | 1
+Neuruppin | neuruppin | Neuruppin | 1
+# --- own big town with 1-3 letters
+Köln | k | Köln Hbf | 1
+Dresden | dr | Dresden Hbf | 1
+Leipzig | lei | Leipzig Hbf | 1
+Hannover | han | Hannover Hbf | 1
+Düsseldorf | dü | Düsseldorf Hbf | 1
+Bremen | b | Bremen Hbf | 1
+# --- nonsense / empty-ish
+Frankfurt | hbf | Frankfurt; Hbf | 1
+- | hbf | Hbf | 1
+Berlin | bahnhof | Berlin | 3
+Berlin | x | Zürich | 0
+Berlin | a | Alexanderplatz | 1
+München | 1 | XXXX | 0
+# --- town names with "an der", "am", "im", "ob der" typed in full
+- | halle an der saale | Halle (Saale) Hbf | 1
+- | frankfurt an der oder | Frankfurt (Oder) | 1
+- | rothenburg ob der tauber | Rothenburg ob der Tauber | 1
+- | weiden in der oberpfalz | Weiden (Oberpf) | 1
+Berlin | berlin an | Anhalter Bahnhof | 3
+- | mühlheim am main | Mühlheim (Main) | 1
+- | neumarkt in der oberpfalz | Neumarkt (Oberpf) | 1
+- | landsberg am lech | Landsberg (Lech) | 1
+Berlin | am anger | Anger | 3
+- | frankfurt am main | Frankfurt; Hbf | 1
+- | freiburg im breisgau | Freiburg; Hbf | 1
