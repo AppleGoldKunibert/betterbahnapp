@@ -51,14 +51,14 @@ public extension Journey {
         var issues: [ConnectionIssue] = []
         let transit = transitLegs
         for leg in transit where leg.cancelled {
-            issues.append(.legCancelled(line: leg.line?.name ?? "Zug", from: leg.origin.name, to: leg.destination.name))
+            issues.append(.legCancelled(line: leg.line?.name ?? "Zug", from: leg.origin.displayName, to: leg.destination.displayName))
         }
         guard transit.count > 1 else { return issues }
         for index in 1..<transit.count {
             let arriving = transit[index - 1], departing = transit[index]
             guard !arriving.cancelled, !departing.cancelled else { continue }
             let buffer = Int(((departing.departure.best.timeIntervalSince(arriving.arrival.best)) / 60).rounded(.down))
-            let station = departing.origin.name
+            let station = departing.origin.displayName
             let a = arriving.line?.name ?? "Zug", d = departing.line?.name ?? "Zug"
             if buffer < minimumTransfer {
                 issues.append(.transferMissed(at: station, arrivingLine: a, departingLine: d, bufferMinutes: buffer))
@@ -84,45 +84,94 @@ public struct JourneyRefresher: Sendable {
 
     public func refresh(_ journey: Journey, now: Date = .now) async -> Journey {
         var updated = journey
-        for (index, originalLeg) in journey.legs.enumerated() {
-            var leg = originalLeg
-            if !leg.isWalking, let tripId = leg.tripId, leg.source != .traewelling,
-               let trip = try? await provider.trip(id: tripId, source: leg.source) {
-                leg = Self.apply(trip, to: leg)
+        // Coupled trains the search had no time to find (see `CombinedProvider.journeys`).
+        async let coupled = provider.coupledTrains(in: [journey], deadline: .seconds(6))
+        // Legs are looked up side by side, so a journey with transfers loads as fast as its slowest leg.
+        await withTaskGroup(of: (Int, Leg).self) { group in
+            for (index, leg) in journey.legs.enumerated() {
+                group.addTask { (index, await refresh(leg, now: now)) }
             }
-            let timetables = TimetablesClient.knowsChanges(until: leg.arrival.planned, now: now) ? self.timetables : nil
-            // DB Timetables wins wherever it knows the stop; the trip data above only fills in
-            // what DB can't match (regional operators, far-off stops).
-            if let timetables, let override = await timetables.realtime(for: leg) {
-                leg = Self.apply(override, to: leg)
-            }
-            if let timetables, timetables.canLookUp(leg) {
-                leg = Self.syncingEnds(of: leg, toStopovers: true)
-                let live = await timetables.liveStopovers(for: leg)
-                leg.stopovers = live.stopovers
-                leg.messages = TrainMessage.merged(leg.messages + live.messages)
-                leg = Self.syncingEnds(of: leg, toStopovers: false)
-            }
-            // Neither Transitous nor DB Timetables above ever *inserts* a stop — only bahn.de's journey
-            // details report a Zusatzhalt (an unscheduled stop the train additionally picked up today)
-            // at all, so it's the only way one ends up in `leg.stopovers` for the UI to show. They also
-            // carry the platforms Transitous lacks at some stations (e.g. Hamburg Hbf), days before DB
-            // Timetables knows them. Asked for legs underway or departing within 12 hours, and hourly
-            // for legs up to a week ahead that miss a platform, so many saved journeys don't flood bahn.de.
-            let runningSoon = Self.isRunningSoon(leg)
-            if let bahnDe = provider.bahnDe, runningSoon || Self.needsPlatforms(leg),
-               let stops = try? await bahnDe.journeyStops(for: leg, maxAge: runningSoon ? BahnDeClient.journeyStopsMaxAge : 3600) {
-                if runningSoon, !leg.stopovers.isEmpty { leg.stopovers = BahnDeClient.inserting(stops, into: leg.stopovers) }
-                leg = BahnDeClient.fillingMissingPlatforms(in: leg, from: stops)
-            }
-            updated.legs[index] = leg
+            for await (index, leg) in group { updated.legs[index] = leg }
         }
         // Journeys saved from results where bahn.de didn't answer in time keep Transitous' generic
         // names (e.g. "ICE 175" for the Railjet "RJ 175"); bahn.de's answers are cached for the day.
         if let bahnDe = provider.bahnDe, let named = await bahnDe.correctingTrainNames(in: [updated]).first {
             updated = named
         }
+        return CombinedProvider.applying(await coupled, to: [updated]).first ?? updated
+    }
+
+    /// Only what `connectionIssues()` looks at: each leg's times, platforms and cancellation at its
+    /// ends, without its stops, bahn.de's Zusatzhalte or train names. Light enough to check every
+    /// search result on screen for whether it can still be made.
+    public func refreshEnds(_ journey: Journey, now: Date = .now) async -> Journey {
+        var updated = journey
+        await withTaskGroup(of: (Int, Leg).self) { group in
+            for (index, leg) in journey.legs.enumerated() where !leg.isWalking {
+                group.addTask { (index, await refreshEnds(of: leg, now: now)) }
+            }
+            for await (index, leg) in group { updated.legs[index] = leg }
+        }
         return updated
+    }
+
+    /// A search result whose live data can still change whether it works: not over yet and starting
+    /// within the next 12 hours (further ahead there is no realtime beyond what the search had).
+    public static func isWorthLiveCheck(_ journey: Journey, now: Date = .now) -> Bool {
+        guard let first = journey.transitLegs.first, let last = journey.transitLegs.last else { return false }
+        return first.departure.planned <= now.addingTimeInterval(12 * 3600) && last.arrival.best >= now
+    }
+
+    /// `live` with the platforms `base` knows where live has none: search results get missing
+    /// platforms filled in while their live check is still loading (from the version before).
+    public static func keepingPlatforms(of base: Journey, in live: Journey) -> Journey {
+        guard base.id == live.id else { return live }
+        var merged = live
+        for index in merged.legs.indices {
+            if merged.legs[index].departurePlatform?.best == nil { merged.legs[index].departurePlatform = base.legs[index].departurePlatform }
+            if merged.legs[index].arrivalPlatform?.best == nil { merged.legs[index].arrivalPlatform = base.legs[index].arrivalPlatform }
+        }
+        return merged
+    }
+
+    private func refreshEnds(of originalLeg: Leg, now: Date) async -> Leg {
+        var leg = originalLeg
+        if !leg.isWalking, let tripId = leg.tripId, leg.source != .traewelling,
+           let trip = try? await provider.trip(id: tripId, source: leg.source) {
+            leg = Self.apply(trip, to: leg)
+        }
+        let timetables = TimetablesClient.knowsChanges(until: leg.arrival.planned, now: now) ? self.timetables : nil
+        // DB Timetables wins wherever it knows the stop; the trip data above only fills in
+        // what DB can't match (regional operators, far-off stops).
+        if let timetables, let override = await timetables.realtime(for: leg) {
+            leg = Self.apply(override, to: leg)
+        }
+        return leg
+    }
+
+    private func refresh(_ originalLeg: Leg, now: Date) async -> Leg {
+        var leg = await refreshEnds(of: originalLeg, now: now)
+        let timetables = TimetablesClient.knowsChanges(until: leg.arrival.planned, now: now) ? self.timetables : nil
+        if let timetables, timetables.canLookUp(leg) {
+            leg = Self.syncingEnds(of: leg, toStopovers: true)
+            let live = await timetables.liveStopovers(for: leg)
+            leg.stopovers = live.stopovers
+            leg.messages = TrainMessage.merged(leg.messages + live.messages)
+            leg = Self.syncingEnds(of: leg, toStopovers: false)
+        }
+        // Neither Transitous nor DB Timetables above ever *inserts* a stop — only bahn.de's journey
+        // details report a Zusatzhalt (an unscheduled stop the train additionally picked up today)
+        // at all, so it's the only way one ends up in `leg.stopovers` for the UI to show. They also
+        // carry the platforms Transitous lacks at some stations (e.g. Hamburg Hbf), days before DB
+        // Timetables knows them. Asked for legs underway or departing within 12 hours, and hourly
+        // for legs up to a week ahead that miss a platform, so many saved journeys don't flood bahn.de.
+        let runningSoon = Self.isRunningSoon(leg)
+        if let bahnDe = provider.bahnDe, runningSoon || Self.needsPlatforms(leg),
+           let stops = try? await bahnDe.journeyStops(for: leg, maxAge: runningSoon ? BahnDeClient.journeyStopsMaxAge : 3600) {
+            if runningSoon, !leg.stopovers.isEmpty { leg.stopovers = BahnDeClient.inserting(stops, into: leg.stopovers) }
+            leg = BahnDeClient.fillingMissingPlatforms(in: leg, from: stops)
+        }
+        return leg
     }
 
     /// Copies the leg's departure/arrival onto its first/last stopover (`toStopovers`) or back, when

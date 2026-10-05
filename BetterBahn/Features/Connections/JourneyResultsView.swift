@@ -21,6 +21,8 @@ struct JourneyResultsView: View {
     @State private var plan: TrainRoutePlan?
     @State private var planError: Error?
     @State private var isPlanning = false
+    /// Results on screen with their live times, loaded after the list shows (see `checkLive`).
+    @State private var liveResults: [String: Journey] = [:]
 
     /// A route counts as noticeably slower than the free choice from this much extra travel time.
     private static let slowRouteThreshold: TimeInterval = 60 * 60
@@ -32,7 +34,7 @@ struct JourneyResultsView: View {
 
     /// Only routes that fulfil every train requirement are shown once one is set.
     private var visibleJourneys: [Journey] {
-        requirements.isEmpty ? journeys : (plan?.journeys ?? [])
+        requirements.isEmpty ? journeys : (plan?.journeys ?? []).removingDuplicateIDs()
     }
 
     /// Fastest connection without any train requirement, for comparison.
@@ -98,7 +100,8 @@ struct JourneyResultsView: View {
                     }
                 }
 
-                ForEach(Array(visibleJourneys.enumerated()), id: \.element.id) { index, journey in
+                ForEach(Array(visibleJourneys.enumerated()), id: \.element.id) { index, result in
+                    let journey = liveResults[result.id].map { JourneyRefresher.keepingPlatforms(of: result, in: $0) } ?? result
                     NavigationLink(value: ConnectionsRoute.journey(JourneyRoute(journey: journey, finalDestination: search.to, search: search))) {
                         JourneyCard(journey: journey)
                             .overlay {
@@ -109,6 +112,7 @@ struct JourneyResultsView: View {
                             }
                     }
                     .buttonStyle(.plain)
+                    .task { await checkLive(result) }
                 }
 
                 if requirements.isEmpty, laterCursor != nil {
@@ -427,14 +431,18 @@ struct JourneyResultsView: View {
             }
             source = page?.source ?? model.provider.source
             if cursor == nil {
-                journeys = result
+                journeys = result.removingDuplicateIDs()
+                // The first connection is the one most likely opened next: have its live data ready.
+                if let first = result.first(where: { ($0.departure?.best ?? .distantFuture) > .now }) {
+                    model.prepareLiveData(for: first)
+                }
                 earlierCursor = page?.earlierCursor
                 laterCursor = page?.laterCursor
             } else if prepend {
-                journeys = result + journeys
+                journeys = (result + journeys).removingDuplicateIDs()
                 earlierCursor = page?.earlierCursor
             } else {
-                journeys += result
+                journeys = (journeys + result).removingDuplicateIDs()
                 laterCursor = page?.laterCursor
             }
             error = nil
@@ -443,6 +451,17 @@ struct JourneyResultsView: View {
         } catch {
             self.error = error
         }
+    }
+
+    /// Loads the live times of a result once it scrolls into view, so a missed transfer or a
+    /// cancellation the search didn't know yet shows as "Nicht möglich" on its card. The list never
+    /// waits for it; cards just update when the data is in.
+    private func checkLive(_ journey: Journey) async {
+        guard liveResults[journey.id] == nil, JourneyRefresher.isWorthLiveCheck(journey) else { return }
+        let live = await model.journeyRefresher.refreshEnds(journey)
+        // Scrolled away before it loaded: the lookups were cancelled, so this isn't live data.
+        guard !Task.isCancelled else { return }
+        withAnimation(.snappy) { liveResults[journey.id] = live }
     }
 
     /// Transitous leaves some trains' Gleis out (whole regional feeds, but now and then ICEs and RJs
@@ -519,7 +538,7 @@ struct JourneyCard: View {
                     if journey.isCancelled {
                         InfoChip(text: "Fällt aus", systemImage: "xmark.octagon.fill", tint: .heavyDelay)
                     } else if journey.connectionIssues().contains(where: \.isBlocking) {
-                        InfoChip(text: "Anschluss weg", systemImage: "exclamationmark.triangle.fill", tint: .heavyDelay)
+                        InfoChip(text: "Nicht möglich", systemImage: "exclamationmark.triangle.fill", tint: .heavyDelay)
                     } else if !journey.connectionIssues().isEmpty {
                         InfoChip(text: "Knapp", systemImage: "exclamationmark.triangle.fill", tint: .slightDelay)
                     } else if journey.legs.contains(where: { $0.messages.containsDelayReason }) {

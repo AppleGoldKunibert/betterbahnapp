@@ -132,13 +132,17 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    LabeledContent("Fahrplandaten", value: "Transitous")
+                    NavigationLink {
+                        DataSourcesView()
+                    } label: {
+                        IconLabel(title: "Datenquellen", systemImage: "server.rack", color: .gray)
+                    }
                     Link(destination: Self.privacyPolicyURL) {
                         IconLabel(title: "Datenschutz", systemImage: "hand.raised.fill", color: .blue)
                     }
                     .foregroundStyle(.primary)
                 } footer: {
-                    Text("[Quellen](https://transitous.org/sources/) · [© OpenStreetMap](https://www.openstreetmap.org/copyright)\n\nBetterBahn ist ein privates Projekt und steht in keiner Verbindung zur Deutschen Bahn AG.")
+                    Text("Fahrplandaten: [Transitous](https://transitous.org/sources/), Echtzeitdaten: Deutsche Bahn ([DB Timetables](https://developers.deutschebahn.com/db-api-marketplace/apis/product/timetables), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.de)), Karten: [© OpenStreetMap](https://www.openstreetmap.org/copyright), [OpenRailwayMap](https://www.openrailwaymap.org)\n\nBetterBahn ist ein privates Projekt und steht in keiner Verbindung zur Deutschen Bahn AG.")
                 }
             }
             .navigationTitle("Einstellungen")

@@ -94,7 +94,8 @@ public struct ViaRoutePlanner: Sendable {
             }
             return Journey(legs: legs, source: candidate.legs.first?.source ?? .transitous)
         }
-        return Array(combined.sorted { ($0.arrival?.best ?? .distantFuture) < ($1.arrival?.best ?? .distantFuture) }.prefix(limit))
+        let sorted = combined.sorted { ($0.arrival?.best ?? .distantFuture) < ($1.arrival?.best ?? .distantFuture) }
+        return Array(sorted.removingDuplicateIDs().prefix(limit))
     }
 
     /// Appends `next` to `legs`, folding the two legs at the seam into one when the same train simply
@@ -132,7 +133,12 @@ public struct ViaRoutePlanner: Sendable {
         let dwell = second.departure.planned.timeIntervalSince(first.arrival.planned)
         guard dwell >= 0, dwell <= 30 * 60 else { return false }
         if let a = first.tripId, let b = second.tripId, a == b { return true }
-        guard let line = first.line, let other = second.line, let number = line.number else { return false }
-        return line.product == other.product && number == other.number
+        // A train heading back to where the first one started is the line's other direction.
+        guard !second.destination.isSamePlace(as: first.origin) else { return false }
+        guard let line = first.line, let other = second.line, line.product == other.product else { return false }
+        // Every run of a regional line shares its number ("S7" → 7); only the run numbers tell two trains apart.
+        if let run = line.tripNumber, let otherRun = other.tripNumber { return run == otherRun }
+        guard let number = line.number else { return false }
+        return number == other.number
     }
 }

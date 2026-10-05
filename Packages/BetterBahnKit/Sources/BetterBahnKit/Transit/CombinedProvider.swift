@@ -2,13 +2,15 @@ import Foundation
 
 /// Transitous is primary. A separately configured provider can supply failover.
 /// bahn.de remains a station-search fallback and the source for coach sequences and journey details;
-/// bahn.expert is the fallback for the train type when bahn.de has no coach sequence (yet); bahn.jetzt supplies live train positions.
+/// when bahn.de has no coach sequence (yet), vagonweb.cz supplies the train type and planned Wagenreihung, with bahn.expert as the
+/// fallback for the train type; bahn.jetzt supplies live train positions.
 public final class CombinedProvider: TransitProvider {
     public var source: DataSource { primary.source }
     public let primary: any TransitProvider
     public let fallback: (any TransitProvider)?
     public let bahnDe: BahnDeClient?
     public let bahnExpert: BahnExpertClient?
+    public let vagonweb: VagonwebClient?
     public let bahnJetzt: BahnJetztClient?
     private let health: Health
 
@@ -16,10 +18,12 @@ public final class CombinedProvider: TransitProvider {
                 fallback: (any TransitProvider)? = nil,
                 bahnDe: BahnDeClient? = BahnDeClient(),
                 bahnExpert: BahnExpertClient? = BahnExpertClient(),
+                vagonweb: VagonwebClient? = VagonwebClient(),
                 bahnJetzt: BahnJetztClient? = BahnJetztClient(),
                 cooldown: TimeInterval = 120) {
         self.bahnDe = bahnDe
         self.bahnExpert = bahnExpert
+        self.vagonweb = vagonweb
         self.bahnJetzt = bahnJetzt
         self.primary = primary
         self.fallback = fallback
@@ -86,7 +90,8 @@ public final class CombinedProvider: TransitProvider {
         do {
             let stations = try await withFallback(deadline: .milliseconds(2500),
                 { try await $0.searchStations(query, near: location) }, { try await $0.searchStations(query, near: location) })
-            if !stations.isEmpty || bahnDe == nil { return stations }
+            // bahn.de's hits for one or two letters are unordered noise ("Pinarolo Po" for "Po").
+            if !stations.isEmpty || bahnDe == nil || Self.isShortQuery(query) { return stations }
         } catch {
             try Task.checkCancellation()
             guard let bahnDe else { throw error }
@@ -95,6 +100,30 @@ public final class CombinedProvider: TransitProvider {
         try Task.checkCancellation()
         guard let bahnDe else { return [] }
         return try await Self.withDeadline(.milliseconds(2500)) { try await bahnDe.searchStations(query) }
+    }
+
+    /// Like `searchStations(_:near:)`; bahn.de's stations don't say which modes stop there, so it's
+    /// only asked when no mode filter is set.
+    public func searchStations(_ search: StationSearch, near location: Coordinate?) async throws -> [Station] {
+        let askBahnDe = search.modes.isEmpty && !Self.isShortQuery(search.text)
+        do {
+            let stations = try await withFallback(deadline: .milliseconds(2500),
+                { try await $0.searchStations(search, near: location) }, { try await $0.searchStations(search, near: location) })
+            if !stations.isEmpty || bahnDe == nil || !askBahnDe { return stations }
+        } catch {
+            try Task.checkCancellation()
+            guard let bahnDe, search.modes.isEmpty else { throw error }
+            let stations = try await Self.withDeadline(.milliseconds(2500)) { try await bahnDe.searchStations(search.text) }
+            return search.ordered(stations, near: location)
+        }
+        try Task.checkCancellation()
+        guard let bahnDe else { return [] }
+        let stations = try await Self.withDeadline(.milliseconds(2500)) { try await bahnDe.searchStations(search.text) }
+        return search.ordered(stations, near: location)
+    }
+
+    static func isShortQuery(_ query: String) -> Bool {
+        query.trimmingCharacters(in: .whitespacesAndNewlines).count < 3
     }
 
     public func journeys(_ query: JourneyQuery) async throws -> JourneyPage {
@@ -114,12 +143,36 @@ public final class CombinedProvider: TransitProvider {
         page.laterCursor = page.laterCursor.map { "\(page.source.rawValue):\($0)" }
         page.journeys = page.journeys.filter(query.allows)
         page.journeys = page.journeys.filter { journey in !journey.transitLegs.contains { Self.isFlixBus($0.line) } }
+        let journeys = page.journeys
+        async let coupled = coupledTrains(in: journeys, deadline: .seconds(3))
         // bahn.de's own names beat Transitous' generic ones for cross-border trains, like on boards.
         if let bahnDe {
-            let journeys = page.journeys
             page.journeys = (try? await Self.withDeadline(.seconds(3)) { await bahnDe.correctingTrainNames(in: journeys) }) ?? journeys
         }
+        page.journeys = Self.applying(await coupled, to: page.journeys)
         return page
+    }
+
+    /// Trains coupled to the journeys' legs not checked yet (see `TransitousProvider.coupledTrains(for:)`),
+    /// keyed by `Leg.id`; none if Transitous isn't the primary or doesn't answer in time. A lookup that
+    /// misses the deadline still finishes and is cached, so the journey's next refresh has it right away.
+    public func coupledTrains(in journeys: [Journey], deadline: Duration) async -> [String: [Line.CoupledTrain]] {
+        guard let transitous = primary as? TransitousProvider else { return [:] }
+        let legs = journeys.flatMap(\.legs).filter { $0.line?.coupledTrains == nil }
+        guard !legs.isEmpty else { return [:] }
+        let lookup = Task { await transitous.coupledTrains(for: legs) }
+        return (try? await Self.withDeadline(deadline) { await lookup.value }) ?? [:]
+    }
+
+    static func applying(_ coupled: [String: [Line.CoupledTrain]], to journeys: [Journey]) -> [Journey] {
+        guard !coupled.isEmpty else { return journeys }
+        return journeys.map { journey in
+            var journey = journey
+            for index in journey.legs.indices {
+                if let trains = coupled[journey.legs[index].id] { journey.legs[index].line?.coupledTrains = trains }
+            }
+            return journey
+        }
     }
 
     public func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int, products: Set<Product>) async throws -> [BoardEntry] {
@@ -130,7 +183,12 @@ public final class CombinedProvider: TransitProvider {
         // bahn.de's own names beat Transitous' generic ones for cross-border trains (see
         // `BahnDeClient.correctingTrainNames`); a slow bahn.de mustn't hold up the board for long.
         guard let bahnDe else { return filtered }
-        return (try? await Self.withDeadline(.seconds(3)) { await bahnDe.correctingTrainNames(filtered, at: station) }) ?? filtered
+        // Lines Transitous didn't know ("?") come from bahn.de's board too, in the same 3 s.
+        return (try? await Self.withDeadline(.seconds(3)) {
+            let named = filtered.contains { TransitousProvider.isUnknown($0.line) }
+                ? await bahnDe.namingUnknownLines(filtered, at: station) : filtered
+            return await bahnDe.correctingTrainNames(named, at: station)
+        }) ?? filtered
     }
 
     /// FlixBus results are hidden from journey planning and departure boards entirely.
