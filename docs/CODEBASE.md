@@ -124,7 +124,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `Leg.directionDescription`): board rows by same time/platform/destination (`combiningCoupledTrains`), journey
   legs by `coupledTrains(for:)` (same arrival at the destination, checked against the other train's departure at
   the origin; called from `CombinedProvider.journeys`). Their Wagenreihung/Tz include both halves
-  (`FormationRequest.coupledNumbers`); a Träwelling check-in asks which train you sit in (`Leg.riding(_:)`).
+  (`FormationRequest.coupledNumbers`), each part labelled with its train, destination and Tz; a Träwelling
+  check-in asks which train you sit in (`Leg.riding(_:)`). `CoupledTrain.tripId` lets `TripView`/`LegTripSheet`
+  switch between the trains' own stops (`Line.runs(ownDirection:ownTripId:)`).
 - `Transit/Timetables/` – official DB Timetables XML client (realtime overrides, messages), through the
   `bahnde-proxy` Worker, which holds the API key. The app only uses it where App Attest works. A train not
   found at a station's EVA is looked for at its other levels (`/station` `meta`, e.g. "Hamburg Hbf (S-Bahn)").

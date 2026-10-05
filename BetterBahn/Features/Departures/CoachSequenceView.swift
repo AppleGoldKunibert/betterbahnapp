@@ -69,8 +69,14 @@ struct CoachSequenceView: View {
         }
     }
 
+    /// Where the train goes; coupled trains that split later list every destination.
     private func destination(_ sequence: CoachSequence) -> String? {
-        sequence.groups.first { $0.isRequestedTrain }?.destination
+        var destinations: [String] = []
+        for case let destination? in sequence.groups.filter(\.isRequestedTrain).map(\.destination)
+        where !destinations.contains(destination) {
+            destinations.append(destination)
+        }
+        return destinations.isEmpty ? nil : destinations.joined(separator: " / ")
     }
 
     private func header(_ sequence: CoachSequence) -> some View {
@@ -93,7 +99,7 @@ struct CoachSequenceView: View {
             if sequence.differsFromSchedule {
                 InfoChip(text: "Abweichende Wagenreihung", systemImage: "exclamationmark.triangle.fill", tint: .slightDelay)
             }
-            if sequence.hasOtherTrains {
+            if sequence.hasOtherTrains || sequence.partsGoToDifferentPlaces {
                 InfoChip(text: "Zugteile mit anderem Ziel – auf den Wagen achten", systemImage: "arrow.triangle.branch", tint: .slightDelay)
             }
         }
@@ -215,10 +221,13 @@ private struct CoachSequenceDiagram: View {
         guard sequence.groups.count > 1, sequence.groups.indices.contains(coach.group),
               sequence.coaches.first(where: { $0.group == coach.group })?.id == coach.id else { return nil }
         let group = sequence.groups[coach.group]
-        if sequence.hasOtherTrains {
-            return [group.trainName, group.destination].compactMap(\.self).joined(separator: " → ")
+        let unit = group.unit?.number.map { "Tz \($0)" }
+        // Each part's own number and destination whenever several trains run together (coupled ones too).
+        if sequence.hasSeveralTrains || sequence.hasOtherTrains {
+            let train = [group.trainName, group.destination].compactMap(\.self).joined(separator: " → ")
+            return [train.isEmpty ? nil : train, unit].compactMap(\.self).joined(separator: " · ")
         }
-        return group.unit?.number.map { "Tz \($0)" }
+        return unit
     }
 }
 
@@ -234,7 +243,7 @@ private struct CoachRow: View {
                     Text(group)
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(Color.brand)
-                        .lineLimit(1)
+                        .lineLimit(2)
                 }
                 Text(coach.title)
                     .font(.caption.weight(.semibold))

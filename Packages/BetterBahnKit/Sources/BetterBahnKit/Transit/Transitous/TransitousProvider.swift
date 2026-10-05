@@ -656,7 +656,8 @@ public struct TransitousProvider: TransitProvider {
                     var merged = existing.time.actual == nil && entry.time.actual != nil ? entry : existing
                     let other = merged.tripId == entry.tripId ? existing : entry
                     merged.line.coupledTrains = (merged.line.coupledTrains ?? [])
-                        + [Line.CoupledTrain(name: other.line.name, direction: other.kind == .departures ? other.otherEnd : nil)]
+                        + [Line.CoupledTrain(name: other.line.name, direction: other.kind == .departures ? other.otherEnd : nil,
+                                             tripId: other.tripId)]
                         + (other.line.coupledTrains ?? [])
                     result[index] = merged
                     continue outer
@@ -703,7 +704,7 @@ public struct TransitousProvider: TransitProvider {
             // from Hamburg and Berlin coupled in Hannover), so it must leave the leg's origin with it too.
             guard let trip = try? await trip(id: partner.tripId),
                   Self.departs(trip, from: leg.origin, at: leg.departure.planned) else { continue }
-            trains.append(Line.CoupledTrain(name: partner.lineInfo.toLine().name, direction: trip.direction))
+            trains.append(Line.CoupledTrain(name: partner.lineInfo.toLine().name, direction: trip.direction, tripId: partner.tripId))
         }
         return trains
     }

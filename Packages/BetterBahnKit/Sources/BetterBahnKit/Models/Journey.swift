@@ -59,10 +59,13 @@ public struct Line: Codable, Sendable, Hashable {
         public var name: String
         /// Where that train goes, which can be past the stretch ridden ("Düsseldorf Hbf").
         public var direction: String?
+        /// Its own run, to show its stops.
+        public var tripId: String?
 
-        public init(name: String, direction: String?) {
+        public init(name: String, direction: String?, tripId: String? = nil) {
             self.name = name
             self.direction = direction
+            self.tripId = tripId
         }
     }
 
@@ -78,13 +81,21 @@ public struct Line: Codable, Sendable, Hashable {
         (coupledTrains ?? []).compactMap { Self.trailingNumber($0.name) }
     }
 
+    /// This train and the coupled ones whose own run is known, this one first, to switch between
+    /// their stops. Empty when there is nothing to switch to.
+    public func runs(ownDirection direction: String?, ownTripId tripId: String) -> [CoupledTrain] {
+        let others = (coupledTrains ?? []).filter { $0.tripId != nil && $0.tripId != tripId }
+        guard !others.isEmpty else { return [] }
+        return [CoupledTrain(name: name, direction: direction, tripId: tripId)] + others
+    }
+
     /// This train ridden as the coupled train `name` instead: that one's name and number lead, this
     /// one becomes a coupled train going `direction`.
-    public func riding(_ train: CoupledTrain, ownDirection direction: String?) -> Line {
+    public func riding(_ train: CoupledTrain, ownDirection direction: String?, ownTripId: String? = nil) -> Line {
         guard let index = coupledTrains?.firstIndex(of: train) else { return self }
         var line = self
         var others = coupledTrains ?? []
-        others[index] = CoupledTrain(name: name, direction: direction)
+        others[index] = CoupledTrain(name: name, direction: direction, tripId: ownTripId)
         line.coupledTrains = others
         line.name = train.name
         line.number = Self.trailingNumber(train.name)
@@ -446,8 +457,9 @@ public extension Leg {
     func riding(_ train: Line.CoupledTrain) -> Leg {
         guard let line else { return self }
         var leg = self
-        leg.line = line.riding(train, ownDirection: direction)
+        leg.line = line.riding(train, ownDirection: direction, ownTripId: tripId)
         leg.direction = train.direction ?? direction
+        leg.tripId = train.tripId ?? tripId
         return leg
     }
 }

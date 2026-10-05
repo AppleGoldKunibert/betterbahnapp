@@ -34,23 +34,35 @@ import Testing
     /// The plan names both places the coupled trains go on to, and checking in picks one of them.
     @Test func legCanBeRiddenAsTheCoupledTrain() throws {
         var leg = try leg()
-        leg.line?.coupledTrains = [.init(name: "ICE 940", direction: "Düsseldorf Hbf")]
+        let partner = Line.CoupledTrain(name: "ICE 940", direction: "Düsseldorf Hbf", tripId: "trip-940")
+        leg.line?.coupledTrains = [partner]
         #expect(leg.directionDescription == "Köln Hbf / Düsseldorf Hbf")
 
-        let ice940 = leg.riding(.init(name: "ICE 940", direction: "Düsseldorf Hbf"))
+        let ice940 = leg.riding(partner)
         #expect(ice940.line?.name == "ICE 940")
         #expect(ice940.line?.number == "940")
         #expect(ice940.direction == "Düsseldorf Hbf")
-        #expect(ice940.line?.coupledTrains == [.init(name: "ICE 950", direction: "Köln Hbf")])
+        #expect(ice940.tripId == "trip-940")
+        #expect(ice940.line?.coupledTrains == [.init(name: "ICE 950", direction: "Köln Hbf", tripId: "trip-950")])
         #expect(ice940.line?.displayName == "ICE 940 / 950")
+    }
+
+    /// The trip view switches between the coupled trains' own runs, this one first.
+    @Test func runsListEveryCoupledTrainWithItsOwnTrip() throws {
+        var line = try #require(try leg().line)
+        #expect(line.runs(ownDirection: "Köln Hbf", ownTripId: "trip-950").isEmpty)
+        line.coupledTrains = [.init(name: "ICE 940", direction: "Düsseldorf Hbf")]
+        #expect(line.runs(ownDirection: "Köln Hbf", ownTripId: "trip-950").isEmpty)
+        line.coupledTrains = [.init(name: "ICE 940", direction: "Düsseldorf Hbf", tripId: "trip-940")]
+        #expect(line.runs(ownDirection: "Köln Hbf", ownTripId: "trip-950").map(\.tripId) == ["trip-950", "trip-940"])
     }
 
     /// bahn.de lists both halves; for a coupled leg both trainsets are the train ridden.
     @Test func formationOfACoupledLegNamesBothTrainsets() throws {
         let json = #"""
         {"groups": [
-            {"name": "ICE9228", "transport": {"category": "ICE", "number": 946}, "vehicles": []},
-            {"name": "ICE9203", "transport": {"category": "ICE", "number": 956}, "vehicles": []}
+            {"name": "ICE9228", "transport": {"category": "ICE", "number": 946, "destination": {"name": "Düsseldorf Hbf"}}, "vehicles": []},
+            {"name": "ICE9203", "transport": {"category": "ICE", "number": 956, "destination": {"name": "Köln Hbf"}}, "vehicles": []}
         ]}
         """#
         let response = try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data(json.utf8))
@@ -58,6 +70,10 @@ import Testing
         let both = BahnDeClient.coachSequence(from: response, category: "ICE", number: 946, coupledNumbers: [956])
         #expect(both.formation.unitSummary == "Tz 9228 + 9203")
         #expect(both.groups.map(\.isRequestedTrain) == [true, true])
+        // Both parts are labelled with their own train and destination.
+        #expect(both.hasSeveralTrains)
+        #expect(both.partsGoToDifferentPlaces)
+        #expect(both.groups.map(\.destination) == ["Düsseldorf Hbf", "Köln Hbf"])
 
         var line = Line(name: "ICE 946", number: "946", product: .highSpeed, operatorName: nil)
         line.coupledTrains = [.init(name: "ICE 956", direction: "Köln Hbf")]
@@ -128,7 +144,7 @@ import Testing
 
         let coupled = await provider.coupledTrains(for: [leg])
 
-        #expect(coupled[leg.id] == [.init(name: "ICE 940", direction: "Düsseldorf Hbf")])
+        #expect(coupled[leg.id] == [.init(name: "ICE 940", direction: "Düsseldorf Hbf", tripId: "trip-940")])
         let journeys = CombinedProvider.applying(coupled, to: [Journey(legs: [leg], source: .transitous)])
         #expect(journeys.first?.legs.first?.line?.displayName == "ICE 940 / 950")
     }

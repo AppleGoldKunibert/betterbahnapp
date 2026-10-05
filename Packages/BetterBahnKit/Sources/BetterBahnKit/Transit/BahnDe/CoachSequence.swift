@@ -87,6 +87,10 @@ public struct CoachSequence: Sendable, Hashable {
 
     /// Groups that run as another train with another destination than the requested one.
     public var hasOtherTrains: Bool { groups.contains { !$0.isRequestedTrain } }
+    /// Several trains run in this consist, each under its own number (coupled, or split later on).
+    public var hasSeveralTrains: Bool { Set(groups.compactMap(\.trainName)).count > 1 }
+    /// Its parts go on to different places, so it matters which coach you board.
+    public var partsGoToDifferentPlaces: Bool { Set(groups.compactMap(\.destination)).count > 1 }
 }
 
 extension CoachSequence.Coach.Kind {
