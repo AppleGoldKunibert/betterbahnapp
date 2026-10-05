@@ -183,7 +183,12 @@ public final class CombinedProvider: TransitProvider {
         // bahn.de's own names beat Transitous' generic ones for cross-border trains (see
         // `BahnDeClient.correctingTrainNames`); a slow bahn.de mustn't hold up the board for long.
         guard let bahnDe else { return filtered }
-        return (try? await Self.withDeadline(.seconds(3)) { await bahnDe.correctingTrainNames(filtered, at: station) }) ?? filtered
+        // Lines Transitous didn't know ("?") come from bahn.de's board too, in the same 3 s.
+        return (try? await Self.withDeadline(.seconds(3)) {
+            let named = filtered.contains { TransitousProvider.isUnknown($0.line) }
+                ? await bahnDe.namingUnknownLines(filtered, at: station) : filtered
+            return await bahnDe.correctingTrainNames(named, at: station)
+        }) ?? filtered
     }
 
     /// FlixBus results are hidden from journey planning and departure boards entirely.
