@@ -98,6 +98,14 @@ struct TripLiveActivity: Widget {
                                 }
                             }
                             Spacer()
+                            if state.warning != nil, !state.arrived {
+                                // A missed transfer or a cancelled train: the journey can't be made as planned.
+                                Label("Nicht möglich", systemImage: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(heavyDelayColor)
+                                    .lineLimit(1)
+                                    .fixedSize()
+                                Spacer()
+                            }
                             DelayText(state: state)
                         }
                         .font(.caption.weight(.semibold))
@@ -392,6 +400,13 @@ extension TripActivityAttributes.ContentState {
         platform: "16", isDeparture: false, cancelled: false,
         progressStart: .now.addingTimeInterval(-10 * 60), progressEnd: .now.addingTimeInterval(14 * 60), product: .regionalExpress)
 
+    static let previewMissedTransfer = Self(
+        lineName: "RE 3", nextStopName: "Berlin Hbf",
+        plannedTime: .now.addingTimeInterval(6 * 60), expectedTime: .now.addingTimeInterval(21 * 60),
+        platform: "4", isDeparture: false, cancelled: false,
+        progressStart: .now.addingTimeInterval(-10 * 60), progressEnd: .now.addingTimeInterval(21 * 60), product: .regionalExpress,
+        warning: "Umstieg in Berlin Hbf klappt nicht mehr")
+
     static let previewTransfer = Self(
         lineName: "ICE 849", nextStopName: "Hannover Hbf",
         plannedTime: .now.addingTimeInterval(8 * 60), expectedTime: .now.addingTimeInterval(8 * 60),
@@ -416,6 +431,7 @@ private let previewAttributes = TripActivityAttributes(originName: "Köln Hbf", 
     TripLiveActivity()
 } contentStates: {
     TripActivityAttributes.ContentState.previewDeparture
+    TripActivityAttributes.ContentState.previewMissedTransfer
 }
 
 #Preview("Dynamic Island kompakt", as: .dynamicIsland(.compact), using: previewAttributes) {
