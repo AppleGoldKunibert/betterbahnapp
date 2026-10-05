@@ -48,11 +48,13 @@ extension BahnDeClient {
 
     struct Board: Decodable {
         struct Entry: Decodable {
-            struct Transport: Decodable { var name: String?; var mittelText: String? }
+            struct Transport: Decodable { var name: String?; var mittelText: String?; var produktGattung: String? }
             var journeyId: String
             /// Scheduled departure, Berlin local time without zone, e.g. "2026-09-29T22:38:00".
             var zeit: String?
             var verkehrmittel: Transport?
+            /// Destination (departures) or origin (arrivals), e.g. "Berlin-Frohnau".
+            var terminus: String?
         }
         var entries: [Entry]
     }
@@ -136,19 +138,22 @@ extension BahnDeClient {
         return id
     }
 
-    static func boardURL(eva: String, at date: Date, kind: BoardKind = .departures) -> URL {
+    /// Long-distance trains only, unless `allProducts`.
+    static func boardURL(eva: String, at date: Date, kind: BoardKind = .departures, allProducts: Bool = false) -> URL {
         // Starting a minute early so the train itself is on the board even at a full minute.
         let start = date.addingTimeInterval(-60)
         let path = kind == .departures ? "reiseloesung/abfahrten" : "reiseloesung/ankuenfte"
+        let products: [URLQueryItem] = allProducts ? [] : [
+            .init(name: "verkehrsmittel[]", value: "ICE"),
+            .init(name: "verkehrsmittel[]", value: "EC_IC"),
+        ]
         return baseURL.appending(path: path).appending(queryItems: [
             .init(name: "datum", value: berlinDay(start)),
             .init(name: "zeit", value: berlinTime(start)),
             .init(name: "ortExtId", value: eva),
             .init(name: "ortId", value: "A=1@L=\(eva)@"),
             .init(name: "mitVias", value: "false"),
-            .init(name: "verkehrsmittel[]", value: "ICE"),
-            .init(name: "verkehrsmittel[]", value: "EC_IC"),
-        ])
+        ] + products)
     }
 
     /// The board entry running as `line` closest to its scheduled departure (within 30 minutes).
@@ -228,6 +233,55 @@ extension BahnDeClient {
               let name = match.verkehrmittel?.name,
               normalizedTrainName(name) != normalizedTrainName(line.name) else { return nil }
         return name
+    }
+
+    /// `entries` whose line is still unknown ("?", see `TransitousProvider.namingUnknownLines`) named
+    /// after bahn.de's board of the same kind: the train there at the same scheduled time (±1 min) to
+    /// the same destination. One board request, only when such an entry is there.
+    public func namingUnknownLines(_ entries: [BoardEntry], at station: Station) async -> [BoardEntry] {
+        let unknown = entries.filter { TransitousProvider.isUnknown($0.line) }
+        guard let first = unknown.map(\.time.planned).min(), let kind = unknown.first?.kind,
+              let eva = try? await evaNumber(for: station),
+              let board = try? await get(Self.boardURL(eva: eva, at: first, kind: kind, allProducts: true), as: Board.self)
+        else { return entries }
+        return Self.namingUnknownLines(entries, using: board.entries)
+    }
+
+    static func namingUnknownLines(_ entries: [BoardEntry], using board: [Board.Entry]) -> [BoardEntry] {
+        entries.map { entry in
+            guard TransitousProvider.isUnknown(entry.line) else { return entry }
+            let matches = board.filter { candidate in
+                guard let time = candidate.zeit.flatMap(parseBerlinTime),
+                      abs(time.timeIntervalSince(entry.time.planned)) <= 60,
+                      candidate.verkehrmittel?.name?.isEmpty == false else { return false }
+                guard let terminus = candidate.terminus, let otherEnd = entry.otherEnd else { return true }
+                let a = Station.normalize(Station.displayName(for: terminus))
+                let b = Station.normalize(otherEnd)
+                return a.contains(b) || b.contains(a)
+            }
+            guard matches.count == 1, let transport = matches[0].verkehrmittel, let name = transport.name else { return entry }
+            let product = product(forGattung: transport.produktGattung)
+            var named = entry
+            // "S 1" → "S1", like the other S- and U-Bahn rows.
+            let compact = [.suburban, .subway].contains(product) ? name.replacingOccurrences(of: " ", with: "") : name
+            named.line = Line(name: compact, number: trainNumber(in: name), product: product, operatorName: entry.line.operatorName)
+            return named
+        }
+    }
+
+    /// bahn.de's `produktGattung` ("SBAHN", "REGIONAL", …) as a `Product`.
+    static func product(forGattung gattung: String?) -> Product {
+        switch gattung {
+        case "ICE": .highSpeed
+        case "EC_IC", "IR": .longDistance
+        case "REGIONAL": .regional
+        case "SBAHN": .suburban
+        case "UBAHN": .subway
+        case "TRAM": .tram
+        case "BUS", "ANRUFPFLICHTIG": .bus
+        case "SCHIFF": .ferry
+        default: .other
+        }
     }
 
     static func renamed(_ line: Line, to name: String) -> Line {

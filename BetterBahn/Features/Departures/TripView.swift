@@ -126,6 +126,9 @@ struct TripView: View {
                 // The board may have taken bahn.de's name for this train (e.g. "RJ 171" for Transitous'
                 // "ICE 171"), or found the trains coupled to it; keep that rather than switching back.
                 loaded.line = entry.line
+            } else if loaded.line?.isUnknown ?? true, tripId == entry.tripId, !entry.line.isUnknown {
+                // An extra train Transitous has no line for, which the board named ("S1" for "?").
+                loaded.line = entry.line
             }
             guard tripId == self.tripId else { return }
             error = nil
