@@ -1716,6 +1716,15 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         let normal = Journey(legs: [leg("10", hbf, halle, 0, 70), leg("12", halle, leipzig, 80, 110)], source: .transitous)
         #expect(!calls.isDetour(normal))
         #expect(!calls.isDetour(Journey(legs: [leg("594", hbf, gesundbrunnen, 150, 158)], source: .transitous)))
+
+        // Transitous' routing offers ICE 594 from Hbf as a normal ride; the stop times mark it "Nur Ausstieg".
+        var direct = leg("594", hbf, gesundbrunnen, 150, 158)
+        direct.stopovers = [Stopover(station: hbf, arrival: nil, departure: direct.departure, arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+                            Stopover(station: gesundbrunnen, arrival: direct.arrival, departure: nil, arrivalPlatform: nil, departurePlatform: nil, cancelled: false)]
+        let marked = calls.marking(Journey(legs: [direct], source: .transitous))
+        #expect(marked.legs[0].stopovers.first?.access == .exitOnly)
+        #expect(marked.legs[0].stopovers.last?.access == .normal)
+        #expect(StationCalls.directTripIds([marked, viaHalle]) == ["594"])
     }
 
     /// Expert option "Nur Ein-/Ausstieg ignorieren": only trains you may not board at the origin, or

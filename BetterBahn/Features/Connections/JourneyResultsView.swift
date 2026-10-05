@@ -154,7 +154,8 @@ struct JourneyResultsView: View {
                 Task { await replan() }
             }
         }
-        .task { await load(cursor: nil, prepend: false) }
+        // Only the first time: coming back from a connection keeps the list (and the trains added below).
+        .task { if journeys.isEmpty, error == nil { await load(cursor: nil, prepend: false) } }
         .refreshable {
             await load(cursor: nil, prepend: false)
             await replan()
@@ -405,6 +406,14 @@ struct JourneyResultsView: View {
     private func load(cursor: String?, prepend: Bool) async {
         isLoading = true
         defer { isLoading = false }
+        // First page: which trains call at both ends is looked up alongside the search, so detours are
+        // gone and the expert option's trains are there about when the results show.
+        let lookup: Task<DetourLookup, Never>? = cursor == nil && search.via.isEmpty ? {
+            let start = search.isArrival ? searchDate.addingTimeInterval(-Self.lookupWindow) : searchDate
+            let addingRestricted = model.settings.ignoreBoardingRulesEnabled
+            return Task { await detourLookup(start: start, end: start.addingTimeInterval(2 * Self.lookupWindow),
+                                             addingRestricted: addingRestricted) }
+        }() : nil
         do {
             var result: [Journey]
             var page: JourneyPage?
@@ -416,8 +425,17 @@ struct JourneyResultsView: View {
                 page = loaded
             } else {
                 // Routed via search has no cursor-based paging – it's a single chained search.
-                result = try await ViaRoutePlanner(provider: model.provider, products: search.products).journeys(
-                    from: search.from, to: search.to, via: search.via, date: searchDate)
+                var planner = ViaRoutePlanner(provider: model.provider, products: search.products)
+                if model.settings.ignoreBoardingRulesEnabled {
+                    // Each part of the route may also use trains you may not board or leave at its ends.
+                    let picker = model.trainPicker
+                    let window = Self.lookupWindow
+                    planner.extraSegmentJourneys = { from, to, date in
+                        let calls = await picker.stationCalls(from: from, to: to, start: date, end: date.addingTimeInterval(window))
+                        return await picker.journeysIgnoringBoardingRules(from: from, to: to, calls: calls)
+                    }
+                }
+                result = try await planner.journeys(from: search.from, to: search.to, via: search.via, date: searchDate)
                 // Products are applied per leg by the planner; only the overall transfer limit is left.
                 if let maxTransfers = search.maxTransfers {
                     result = result.filter { $0.transfers <= maxTransfers }
@@ -430,6 +448,9 @@ struct JourneyResultsView: View {
                 hiddenCount += before - result.count
             }
             source = page?.source ?? model.provider.source
+            // Wait a moment for the lookup, so the list doesn't change right after it shows.
+            let early = await lookup?.value(within: .milliseconds(1500))
+            if let early { result = applying(early, to: result) }
             if cursor == nil {
                 journeys = result.removingDuplicateIDs()
                 // The first connection is the one most likely opened next: have its live data ready.
@@ -446,52 +467,63 @@ struct JourneyResultsView: View {
                 laterCursor = page?.laterCursor
             }
             error = nil
-            if search.via.isEmpty {
-                await hideDetours(in: result, addingRestricted: cursor == nil && model.settings.ignoreBoardingRulesEnabled)
+            if let lookup, early == nil {
+                let found = await lookup.value
+                if !Task.isCancelled { withAnimation(.snappy) { journeys = applying(found, to: journeys) } }
+            } else if cursor != nil, search.via.isEmpty, !result.isEmpty {
+                // A further page: its own window, detours and markings only.
+                let start = result.compactMap(\.departure?.planned).min() ?? searchDate
+                let end = result.compactMap(\.arrival?.planned).max() ?? start
+                let found = await detourLookup(start: start, end: end, addingRestricted: false)
+                if !Task.isCancelled { withAnimation(.snappy) { journeys = applying(found, to: journeys) } }
             }
             await fillMissingPlatforms(in: result)
         } catch is CancellationError {
+            lookup?.cancel()
         } catch {
+            lookup?.cancel()
             self.error = error
         }
     }
 
-    /// Hides routes that change onto a train which also calls at the origin, or leave one that goes on
-    /// to the destination (e.g. Berlin Hbf → Halle → back to Gesundbrunnen on an ICE that stops at Hbf
-    /// too). Via searches keep them, since there the change is wanted. With the expert option "Nur
-    /// Ein-/Ausstieg ignorieren", also adds direct trains the timetable doesn't let you board or leave
-    /// here, which the search itself never offers. Runs after the list shows.
-    private func hideDetours(in loaded: [Journey], addingRestricted: Bool) async {
-        let window: TimeInterval = 180 * 60
-        let departures = loaded.compactMap(\.departure?.planned)
-        let fallbackStart = search.isArrival ? searchDate.addingTimeInterval(-window) : searchDate
-        let start = departures.min() ?? fallbackStart
-        var end = loaded.compactMap(\.arrival?.planned).max() ?? start
-        if addingRestricted { end = max(end, start.addingTimeInterval(window)) }
-        guard addingRestricted || loaded.contains(where: { $0.transitLegs.count > 1 }) else { return }
+    private static let lookupWindow: TimeInterval = 180 * 60
 
+    /// What `detourLookup` found: which trains call at both ends, and the expert option's extra trains.
+    struct DetourLookup: Sendable {
+        var calls: StationCalls
+        var extra: [Journey]
+    }
+
+    /// Looks up the trains calling at the origin and destination between `start` and `end`, to hide
+    /// routes that change onto a train also calling at the origin, or leave one also calling at the
+    /// destination (e.g. Berlin Hbf → Halle → back to Gesundbrunnen on an ICE that stops at Hbf too).
+    /// Via searches keep those, since there the change is wanted. With the expert option "Nur
+    /// Ein-/Ausstieg ignorieren" it also finds the direct trains the timetable doesn't let you board or
+    /// leave here, which the search itself never offers.
+    private func detourLookup(start: Date, end: Date, addingRestricted: Bool) async -> DetourLookup {
         let picker = model.trainPicker
         let calls = await picker.stationCalls(from: search.from, to: search.to, start: start, end: end)
-        var extra: [Journey] = []
-        if addingRestricted {
-            extra = await picker.journeysIgnoringBoardingRules(from: search.from, to: search.to, calls: calls)
-                .filter { journey in
-                    journey.transitLegs.allSatisfy { search.products.contains($0.line?.product ?? .other) }
-                }
-            if search.onlyValidTicket {
-                let filter = model.ticketFilter
-                extra = extra.filter(filter.isValid)
+        guard addingRestricted else { return DetourLookup(calls: calls, extra: []) }
+        var extra = await picker.journeysIgnoringBoardingRules(from: search.from, to: search.to, calls: calls)
+            .filter { journey in
+                journey.transitLegs.allSatisfy { search.products.contains($0.line?.product ?? .other) }
             }
+        if search.onlyValidTicket {
+            let filter = model.ticketFilter
+            extra = extra.filter(filter.isValid)
         }
-        let detours = Set(loaded.filter(calls.isDetour).map(\.id))
-        guard !detours.isEmpty || !extra.isEmpty, !Task.isCancelled else { return }
-        withAnimation(.snappy) {
-            var updated = (journeys.filter { !detours.contains($0.id) } + extra).removingDuplicateIDs()
-            if !extra.isEmpty {
-                updated.sort { ($0.departure?.planned ?? .distantFuture) < ($1.departure?.planned ?? .distantFuture) }
-            }
-            journeys = updated
+        return DetourLookup(calls: calls, extra: extra)
+    }
+
+    private func applying(_ lookup: DetourLookup, to list: [Journey]) -> [Journey] {
+        let kept = list.filter { !lookup.calls.isDetour($0) }.map(lookup.calls.marking)
+        let direct = StationCalls.directTripIds(kept)
+        let extra = lookup.extra.filter { !($0.transitLegs.first?.tripId.map(direct.contains) ?? false) }
+        var updated = (kept + extra).removingDuplicateIDs()
+        if !extra.isEmpty {
+            updated.sort { ($0.departure?.planned ?? .distantFuture) < ($1.departure?.planned ?? .distantFuture) }
         }
+        return updated
     }
 
     /// Loads the live times of a result once it scrolls into view, so a missed transfer or a
@@ -578,9 +610,9 @@ struct JourneyCard: View {
                     Spacer()
                     if journey.isCancelled {
                         InfoChip(text: "Fällt aus", systemImage: "xmark.octagon.fill", tint: .heavyDelay)
-                    } else if let first = journey.transitLegs.first, first.stopovers.first?.access.allowsBoarding == false {
+                    } else if journey.transitLegs.contains(where: { $0.stopovers.first?.access.allowsBoarding == false }) {
                         InfoChip(text: "Kein Einstieg", systemImage: "arrow.down.right.circle.fill", tint: .slightDelay)
-                    } else if let last = journey.transitLegs.last, last.stopovers.last?.access.allowsAlighting == false {
+                    } else if journey.transitLegs.contains(where: { $0.stopovers.last?.access.allowsAlighting == false }) {
                         InfoChip(text: "Kein Ausstieg", systemImage: "arrow.up.right.circle.fill", tint: .slightDelay)
                     } else if journey.connectionIssues().contains(where: \.isBlocking) {
                         InfoChip(text: "Nicht möglich", systemImage: "exclamationmark.triangle.fill", tint: .heavyDelay)
@@ -785,4 +817,17 @@ struct ChipFlowLayout: Layout {
         .padding()
     }
     .background { AppBackground() }
+}
+
+private extension Task where Failure == Never {
+    /// The task's result if it's ready within `limit`, else nil (the task keeps running).
+    func value(within limit: Duration) async -> Success? {
+        await withTaskGroup(of: Success?.self) { group in
+            group.addTask { await self.value }
+            group.addTask { try? await Task<Never, Never>.sleep(for: limit); return nil }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+    }
 }

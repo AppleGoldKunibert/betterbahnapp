@@ -8,6 +8,9 @@ public struct StationCalls: Sendable {
     var atOrigin: [String: Date]
     /// Per train: when it reaches (or leaves) the destination (planned).
     var atDestination: [String: Date]
+    /// Trains you may not board at the origin / leave at the destination.
+    var noBoardingAtOrigin: Set<String>
+    var noAlightingAtDestination: Set<String>
     /// The origin's departures, including trains you may not board there.
     public var departuresAtOrigin: [BoardEntry]
     public var departuresAtDestination: [BoardEntry]
@@ -18,6 +21,34 @@ public struct StationCalls: Sendable {
         atOrigin = Dictionary(departuresAtOrigin.map { ($0.tripId, $0.time.planned) }, uniquingKeysWith: min)
         atDestination = Dictionary((arrivalsAtDestination + departuresAtDestination).map { ($0.tripId, $0.time.planned) },
                                    uniquingKeysWith: min)
+        noBoardingAtOrigin = Set(departuresAtOrigin.filter { !$0.access.allowsBoarding }.map(\.tripId))
+        noAlightingAtDestination = Set((arrivalsAtDestination + departuresAtDestination)
+            .filter { !$0.access.allowsAlighting }.map(\.tripId))
+    }
+
+    /// `journey` with "Nur Ausstieg" at the origin and "Nur Einstieg" at the destination marked on its
+    /// first and last leg. Transitous' routing doesn't report them (it even offers ICE 806 from Berlin
+    /// Hbf to Gesundbrunnen as a normal ride), only its stop times at the station do.
+    public func marking(_ journey: Journey) -> Journey {
+        var journey = journey
+        if let first = journey.legs.first, !first.isWalking, let id = first.tripId, noBoardingAtOrigin.contains(id),
+           var stop = first.stopovers.first {
+            stop.access = stop.access.allowsAlighting ? .exitOnly : .passThrough
+            journey.legs[0].stopovers[0] = stop
+        }
+        let lastIndex = journey.legs.count - 1
+        if let last = journey.legs.last, !last.isWalking, let id = last.tripId, noAlightingAtDestination.contains(id),
+           var stop = last.stopovers.last {
+            stop.access = stop.access.allowsBoarding ? .entryOnly : .passThrough
+            journey.legs[lastIndex].stopovers[last.stopovers.count - 1] = stop
+        }
+        return journey
+    }
+
+    /// Trips ridden from origin to destination in one go, to leave out the expert option's extra
+    /// trains the search already has.
+    public static func directTripIds(_ journeys: [Journey]) -> Set<String> {
+        Set(journeys.compactMap { $0.transitLegs.count == 1 ? $0.transitLegs[0].tripId : nil })
     }
 
     /// Whether `journey` changes onto a train that also calls at the origin while the journey is
