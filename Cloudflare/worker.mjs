@@ -306,17 +306,15 @@ async function createShare(request, env, url, now) {
     if (typeof data !== "string" || !DATA_PATTERN.test(data)) return shareJSON(400, { error: "invalid_data" });
     if (data.length > MAX_SHARE_DATA_LENGTH) return shareJSON(413, { error: "too_large" });
 
-    for (let attempt = 0; attempt < 5; attempt++) {
-        const id = randomID();
-        if (await env.SHARES.get(id) !== null) continue;
-        await env.SHARES.put(id, data, { expirationTtl: SHARE_TTL });
-        return shareJSON(201, {
-            id,
-            url: `${url.origin}${SHARE_PAGE_PREFIX}${id}`,
-            expiresAt: new Date(now + SHARE_TTL * 1000).toISOString(),
-        });
-    }
-    return shareJSON(503, { error: "no_free_id" });
+    // No "is this ID free?" read first: KV caches a miss for up to a minute at that location, so the
+    // link would 404 right after sharing. With 62^8 IDs a collision is practically impossible.
+    const id = randomID();
+    await env.SHARES.put(id, data, { expirationTtl: SHARE_TTL });
+    return shareJSON(201, {
+        id,
+        url: `${url.origin}${SHARE_PAGE_PREFIX}${id}`,
+        expiresAt: new Date(now + SHARE_TTL * 1000).toISOString(),
+    });
 }
 
 async function readShare(request, env, id) {

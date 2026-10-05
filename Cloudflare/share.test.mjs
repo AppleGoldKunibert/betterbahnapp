@@ -87,17 +87,15 @@ test("only accepts base64url data up to the app's size limit", async () => {
     assert.equal((await worker.fetch(new Request(`${origin}/share`), environment)).status, 405);
 });
 
-test("never overwrites an existing link", async () => {
+test("doesn't look up the new ID before storing it", async () => {
+    // KV caches misses for up to a minute, so a lookup before the write made fresh links 404.
     const environment = env({ ALLOW_UNATTESTED: "true" });
-    const first = await (await create(environment, { data: "first" })).json();
-    // Pretend every free ID is taken except by retrying.
-    let calls = 0;
+    let reads = 0;
     const get = environment.SHARES.get.bind(environment.SHARES);
-    environment.SHARES.get = async key => (calls++ === 0 ? "taken" : get(key));
-    const second = await (await create(environment, { data: "second" })).json();
-    assert.equal(calls, 2);
-    assert.notEqual(first.id, second.id);
-    assert.equal(await get(first.id), "first");
+    environment.SHARES.get = async key => { reads++; return get(key); };
+    const created = await (await create(environment, { data: "first" })).json();
+    assert.equal(reads, 0);
+    assert.equal(await get(created.id), "first");
 });
 
 test("unknown, expired and malformed IDs are 404", async () => {
