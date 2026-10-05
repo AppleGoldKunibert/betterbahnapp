@@ -88,8 +88,9 @@ extension BahnDeClient {
 
     /// The realtime stop sequence for `leg`'s train, including any Zusatzhalt (unscheduled stop) or
     /// stop it skipped — data Transitous doesn't carry at all (see `TimetablesClient` for the same gap
-    /// on delays/platforms) since it only ever has the planned schedule. `nil` if `leg`'s train isn't a
-    /// DB long-distance category; throws `TransitError.notFound` if bahn.de doesn't list it.
+    /// on delays/platforms) since it only ever has the planned schedule. `nil` if `leg`'s train is
+    /// neither a DB long-distance train nor a regional train with a run number (`journeyReference`);
+    /// throws `TransitError.notFound` if bahn.de doesn't list it.
     /// `maxAge` is how old a cached answer may be; legs days ahead can do with an hourly look.
     public func journeyStops(for leg: Leg, maxAge: TimeInterval = BahnDeClient.journeyStopsMaxAge) async throws -> [JourneyStop]? {
         try await journeyStops(line: leg.line, station: leg.origin, plannedDeparture: leg.departure.planned, maxAge: maxAge)
@@ -104,7 +105,7 @@ extension BahnDeClient {
 
     private func journeyStops(line: Line?, station: Station, plannedDeparture: Date,
                               maxAge: TimeInterval = BahnDeClient.journeyStopsMaxAge) async throws -> [JourneyStop]? {
-        guard let ref = Self.trainReference(for: line), let line else { return nil }
+        guard let ref = Self.journeyReference(for: line), let line else { return nil }
         let journeyKey = "\(ref.category) \(ref.number)|\(station.id)|\(plannedDeparture.timeIntervalSince1970)"
         guard usesSharedCaches else {
             let id = try await findJourneyId(line: line, station: station, plannedDeparture: plannedDeparture)
@@ -126,17 +127,33 @@ extension BahnDeClient {
     /// changes soon, long enough that reopening the same view right after doesn't wait again.
     public static let journeyStopsMaxAge: TimeInterval = 4 * 60
 
+    /// The train to look up bahn.de's journey details for: long-distance trains by their number, and
+    /// regional trains (RE 3 running as 3307) by their run number, since a Zusatzhalt happens there
+    /// just as well, e.g. an RE 3 diverted via Berlin-Lichtenberg.
+    static func journeyReference(for line: Line?) -> (category: String, number: String, isRegional: Bool)? {
+        if let ref = trainReference(for: line) { return (ref.category, ref.number, false) }
+        guard let ref = regionalReference(for: line, products: [.regionalExpress, .regional]) else { return nil }
+        return (ref.category, ref.number, true)
+    }
+
     /// bahn.de's journey ID for `line`, found on the departure board of `station` at its scheduled time.
     func findJourneyId(line: Line, station: Station, plannedDeparture: Date) async throws -> String {
         guard let eva = try await evaNumber(for: station) else { throw TransitError.notFound(line.name) }
-        let board = try await get(Self.boardURL(eva: eva, at: plannedDeparture), as: Board.self)
+        let regional = Self.journeyReference(for: line)?.isRegional == true
+        let board = try await get(Self.boardURL(eva: eva, at: plannedDeparture, products: regional ? Self.regionalProducts : Self.longDistanceProducts),
+                                  as: Board.self)
         guard let id = Self.journeyId(in: board, for: line, plannedDeparture: plannedDeparture) else {
             throw TransitError.notFound(line.name)
         }
         return id
     }
 
-    static func boardURL(eva: String, at date: Date, kind: BoardKind = .departures) -> URL {
+    /// bahn.de's product filters for its boards: long-distance trains, or regional ones (its
+    /// "IR" and "REGIONAL" products, as in db-vendo-client).
+    static let longDistanceProducts = ["ICE", "EC_IC"]
+    static let regionalProducts = ["IR", "REGIONAL"]
+
+    static func boardURL(eva: String, at date: Date, kind: BoardKind = .departures, products: [String] = longDistanceProducts) -> URL {
         // Starting a minute early so the train itself is on the board even at a full minute.
         let start = date.addingTimeInterval(-60)
         let path = kind == .departures ? "reiseloesung/abfahrten" : "reiseloesung/ankuenfte"
@@ -146,19 +163,20 @@ extension BahnDeClient {
             .init(name: "ortExtId", value: eva),
             .init(name: "ortId", value: "A=1@L=\(eva)@"),
             .init(name: "mitVias", value: "false"),
-            .init(name: "verkehrsmittel[]", value: "ICE"),
-            .init(name: "verkehrsmittel[]", value: "EC_IC"),
-        ])
+        ] + products.map { .init(name: "verkehrsmittel[]", value: $0) })
     }
 
     /// The board entry running as `line` closest to its scheduled departure (within 30 minutes).
     /// Matched by name, or by train number alone, since bahn.de can brand a train differently than
-    /// Transitous does (e.g. "RJ 171" for Transitous' "ICE 171").
+    /// Transitous does (e.g. "RJ 171" for Transitous' "ICE 171"). Where the journey ID carries the
+    /// train's number, that decides: a regional line's name ("RE 3") is shared by every run in both
+    /// directions.
     static func journeyId(in board: Board, for line: Line, plannedDeparture: Date) -> String? {
         let targets = Set([line.name, line.alternateName].compactMap { $0 }.map(normalizedTrainName))
-        let number = trainReference(for: line)?.number
+        let number = journeyReference(for: line)?.number
         return board.entries
             .filter { entry in
+                if let number, let run = journeyNumber(in: entry.journeyId) { return run == number }
                 let names = [entry.verkehrmittel?.name, entry.verkehrmittel?.mittelText].compactMap { $0 }
                 return names.contains { targets.contains(normalizedTrainName($0)) }
                     || (number != nil && names.contains { trainNumber(in: $0) == number })
@@ -166,6 +184,13 @@ extension BahnDeClient {
             .compactMap { entry in entry.zeit.flatMap(parseBerlinTime).map { (entry.journeyId, abs($0.timeIntervalSince(plannedDeparture))) } }
             .filter { $0.1 <= 30 * 60 }
             .min { $0.1 < $1.1 }?.0
+    }
+
+    /// The train number in a bahn.de journey ID ("…#ZE#3307#ZB#RE 3…" → "3307"), nil without one.
+    static func journeyNumber(in journeyId: String) -> String? {
+        guard let start = journeyId.range(of: "#ZE#") else { return nil }
+        let value = journeyId[start.upperBound...].prefix { $0 != "#" }
+        return trainNumber(in: String(value))
     }
 
     /// "ICE 693" / "ICE693" → "ICE693".
@@ -367,6 +392,15 @@ extension BahnDeClient {
         return Station.normalize(stop.name) == Station.normalize(station.name)
     }
 
+    /// Looser than `matches`, for anchoring bahn.de's stops in Transitous' list: regional trains carry
+    /// local names there ("S Bernau Bhf" for bahn.de's "Bernau(b Berlin)") and no EVA number, so
+    /// the display name or being within 400 m (as `Station.isSamePlace`) count too.
+    private static func isSamePlace(_ stop: JourneyStop, _ station: Station) -> Bool {
+        if matches(stop, station) || Station.normalize(stop.name) == Station.normalize(station.displayName) { return true }
+        guard let a = stop.coordinate, let b = station.coordinate else { return false }
+        return a.distance(to: b) < 400
+    }
+
     /// `stopovers` (a leg's or trip's own schedule-only stop list) with every Zusatzhalt from `stops`
     /// inserted at its rightful place, so an unscheduled stop shows up in the UI instead of silently
     /// being missing — found by walking `stops` in bahn.de's own order and using every stop that
@@ -385,7 +419,7 @@ extension BahnDeClient {
                 result.append(Stopover(stop))
                 continue
             }
-            guard let match = stopovers[index...].firstIndex(where: { matches(stop, $0.station) }) else { continue }
+            guard let match = stopovers[index...].firstIndex(where: { isSamePlace(stop, $0.station) }) else { continue }
             result.append(contentsOf: stopovers[index..<match])
             result.append(stopovers[match])
             index = match + 1
