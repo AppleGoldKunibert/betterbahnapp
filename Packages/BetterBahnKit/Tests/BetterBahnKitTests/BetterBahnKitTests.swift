@@ -263,6 +263,85 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(merged.map(\.id) == [complete.id, farAway.id])
     }
 
+    /// Real-world geocode hits for "Berlin-Gesundbrunnen": "gesund" typed far from Berlin only finds
+    /// SNCF's entry, whose board has nothing but the bus 247. Boards and journeys use DELFI's far busier
+    /// station there instead; the U-Bahn stop and a station elsewhere don't count.
+    @Test func busierStopReplacesForeignFeedsGermanStation() {
+        let sncf = MGeocodeMatch(type: "STOP", name: "Berlin-Gesundbrunnen",
+                                 id: "fr-horaires-sncf_FR::LMO:71a3fb60-3a69-11e9-8417-bb1d8a705241:",
+                                 lat: 52.5488, lon: 13.391, country: "DE",
+                                 modes: ["HIGHSPEED_RAIL", "LONG_DISTANCE", "NIGHT_RAIL", "REGIONAL_RAIL", "BUS"],
+                                 importance: 0.000174)
+        let delfi = MGeocodeMatch(type: "STOP", name: "S+U Gesundbrunnen Bhf (Berlin)", id: "de-DELFI_de:11000:900007102",
+                                  lat: 52.548637, lon: 13.388372, country: "DE",
+                                  modes: ["HIGHSPEED_RAIL", "LONG_DISTANCE", "REGIONAL_RAIL", "SUBURBAN", "SUBWAY", "BUS"],
+                                  importance: 0.00865)
+        let subway = MGeocodeMatch(type: "STOP", name: "U Gesundbrunnen (Berlin)", id: "de-VBB_u8",
+                                   lat: 52.5487, lon: 13.3895, country: "DE", modes: ["SUBWAY"], importance: 0.02)
+        let elsewhere = MGeocodeMatch(type: "STOP", name: "Northeim Gesundbrunnen", id: "de-DELFI_de:03155:68739::1",
+                                      lat: 51.7067, lon: 10.0286, country: "DE", modes: ["REGIONAL_RAIL"], importance: 0.01)
+        let station = sncf.toStation()
+
+        #expect(TransitousProvider.busierStop(for: station, among: [sncf, subway, elsewhere, delfi])?.id == delfi.id)
+        // Not busier by far: the stop stays.
+        var quiet = delfi
+        quiet.importance = 0.0005
+        #expect(TransitousProvider.busierStop(for: station, among: [sncf, quiet]) == nil)
+    }
+
+    /// Real-world board at Berlin Gesundbrunnen: an extra S1 to Frohnau DB added at short notice came
+    /// without a line ("?", mode OTHER). It takes the line of the other trains to Frohnau; one to a
+    /// destination two lines go to stays unknown.
+    @Test func boardNamesUnknownLinesAfterTrainsToTheSameDestination() {
+        let gesundbrunnen = Station(id: "g", name: "Berlin Gesundbrunnen", coordinate: nil, evaNumber: nil, source: .transitous)
+        func entry(_ name: String, _ product: Product, to otherEnd: String, platform: String?) -> BoardEntry {
+            BoardEntry(kind: .departures, tripId: UUID().uuidString, station: gesundbrunnen,
+                       line: Line(name: name, number: nil, product: product, operatorName: nil), otherEnd: otherEnd,
+                       time: TimeInfo(planned: .now, actual: nil), platform: PlatformInfo(planned: platform, actual: nil),
+                       cancelled: false, terminatesOrOriginatesHere: false, remarks: [], source: .transitous)
+        }
+        let entries = [
+            entry("S1", .suburban, to: "Berlin-Frohnau", platform: "4"),
+            entry("S26", .suburban, to: "Berlin-Blankenburg", platform: "4"),
+            entry("? ", .other, to: "Berlin-Frohnau", platform: "4"),
+            entry("S25", .suburban, to: "Berlin-Hennigsdorf", platform: "4"),
+            entry("RE5", .regionalExpress, to: "Berlin-Hennigsdorf", platform: "6"),
+            entry("?", .other, to: "Berlin-Hennigsdorf", platform: nil),
+        ]
+
+        let named = TransitousProvider.namingUnknownLines(entries)
+
+        #expect(named[2].line.name == "S1")
+        #expect(named[2].line.product == .suburban)
+        #expect(named[5].line.name == "?")
+    }
+
+    /// The row two lines could be: bahn.de's board has the train at that time to that destination.
+    @Test func bahnDeNamesUnknownLines() throws {
+        let gesundbrunnen = Station(id: "g", name: "Berlin Gesundbrunnen", coordinate: nil, evaNumber: nil, source: .transitous)
+        let planned = try #require(JSONDecoding.parseISODate("2026-10-05T09:51:00Z"))
+        let unknown = BoardEntry(kind: .departures, tripId: "extra", station: gesundbrunnen,
+                                 line: Line(name: "? ", number: "", product: .other, operatorName: nil),
+                                 otherEnd: "Berlin-Frohnau", time: TimeInfo(planned: planned, actual: nil),
+                                 platform: PlatformInfo(planned: "4", actual: nil), cancelled: false,
+                                 terminatesOrOriginatesHere: false, remarks: [], source: .transitous)
+        let json = #"""
+        {"entries": [
+            {"journeyId": "s26", "zeit": "2026-10-05T11:51:00", "terminus": "Berlin-Blankenburg",
+             "verkehrmittel": {"name": "S 26", "produktGattung": "SBAHN"}},
+            {"journeyId": "s1", "zeit": "2026-10-05T11:51:00", "terminus": "Berlin-Frohnau",
+             "verkehrmittel": {"name": "S 1", "produktGattung": "SBAHN"}}
+        ]}
+        """#
+        let board = try JSONDecoding.decoder.decode(BahnDeClient.Board.self, from: Data(json.utf8)).entries
+
+        let named = BahnDeClient.namingUnknownLines([unknown], using: board)
+
+        #expect(named[0].line.name == "S1")
+        #expect(named[0].line.product == .suburban)
+        #expect(BahnDeClient.namingUnknownLines([unknown], using: [board[0]])[0].line.name == "? ")
+    }
+
     /// German train stations first, then the listed neighbours' train stations (AT, CH, NL, PL, CZ,
     /// in that order), then German buses, then German U-Bahn, then everything else.
     @Test func searchRankOrdersByCountryAndMode() {
