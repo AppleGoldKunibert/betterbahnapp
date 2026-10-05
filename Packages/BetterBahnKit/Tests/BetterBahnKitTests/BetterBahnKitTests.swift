@@ -306,6 +306,32 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(named[5].line.name == "?")
     }
 
+    /// The row two lines could be: bahn.de's board has the train at that time to that destination.
+    @Test func bahnDeNamesUnknownLines() throws {
+        let gesundbrunnen = Station(id: "g", name: "Berlin Gesundbrunnen", coordinate: nil, evaNumber: nil, source: .transitous)
+        let planned = try #require(JSONDecoding.parseISODate("2026-10-05T09:51:00Z"))
+        let unknown = BoardEntry(kind: .departures, tripId: "extra", station: gesundbrunnen,
+                                 line: Line(name: "? ", number: "", product: .other, operatorName: nil),
+                                 otherEnd: "Berlin-Frohnau", time: TimeInfo(planned: planned, actual: nil),
+                                 platform: PlatformInfo(planned: "4", actual: nil), cancelled: false,
+                                 terminatesOrOriginatesHere: false, remarks: [], source: .transitous)
+        let json = #"""
+        {"entries": [
+            {"journeyId": "s26", "zeit": "2026-10-05T11:51:00", "terminus": "Berlin-Blankenburg",
+             "verkehrmittel": {"name": "S 26", "produktGattung": "SBAHN"}},
+            {"journeyId": "s1", "zeit": "2026-10-05T11:51:00", "terminus": "Berlin-Frohnau",
+             "verkehrmittel": {"name": "S 1", "produktGattung": "SBAHN"}}
+        ]}
+        """#
+        let board = try JSONDecoding.decoder.decode(BahnDeClient.Board.self, from: Data(json.utf8)).entries
+
+        let named = BahnDeClient.namingUnknownLines([unknown], using: board)
+
+        #expect(named[0].line.name == "S1")
+        #expect(named[0].line.product == .suburban)
+        #expect(BahnDeClient.namingUnknownLines([unknown], using: [board[0]])[0].line.name == "? ")
+    }
+
     /// German train stations first, then the listed neighbours' train stations (AT, CH, NL, PL, CZ,
     /// in that order), then German buses, then German U-Bahn, then everything else.
     @Test func searchRankOrdersByCountryAndMode() {
