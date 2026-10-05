@@ -17,18 +17,32 @@ struct CheckinSheet: View {
     @State private var offerManualTrip = false
     @State private var activeTags: Set<String> = []
     @State private var tagValues: [String: String] = [:]
+    /// For coupled trains (`Line.coupledTrains`): which of them the user sits in, picked by hand since
+    /// Träwelling knows them as separate trains. Nil until picked.
+    @State private var chosenTrain: String?
+
+    private var coupledTrains: [Line.CoupledTrain] { leg.line?.coupledTrains ?? [] }
+
+    /// The leg as checked in: as the picked train for coupled trains.
+    private var rideLeg: Leg {
+        guard let chosenTrain, let train = coupledTrains.first(where: { $0.name == chosenTrain }) else { return leg }
+        return leg.riding(train)
+    }
+
+    private var needsTrainChoice: Bool { !coupledTrains.isEmpty && chosenTrain == nil }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    CheckinTicket(leg: leg)
+                    CheckinTicket(leg: rideLeg)
 
                     if !isLoggedIn {
                         loginCard
                     } else if let result {
                         successCard(result)
                     } else {
+                        if !coupledTrains.isEmpty { trainChoiceCard }
                         formCard
                         if let error {
                             ErrorBanner(error: error)
@@ -58,7 +72,7 @@ struct CheckinSheet: View {
                 Button("Manuell eintragen") { send(allowManualTrip: true) }
                 Button("Abbrechen", role: .cancel) {}
             } message: {
-                Text("Träwelling kennt \(leg.line?.name ?? "diesen Zug") nicht. Du kannst ihn selbst eintragen.")
+                Text("Träwelling kennt \(rideLeg.line?.name ?? "diesen Zug") nicht. Du kannst ihn selbst eintragen.")
             }
         }
     }
@@ -96,6 +110,48 @@ struct CheckinSheet: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 8)
         }
+    }
+
+    /// Coupled trains split later on, and Träwelling needs the one actually ridden.
+    private var trainChoiceCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 12) {
+                    IconTile(systemImage: "arrow.triangle.branch", color: .orange, size: 32)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("In welchem Zugteil sitzt du?").font(.subheadline.weight(.medium))
+                        Text("Die Züge fahren gekoppelt und trennen sich später.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                ForEach(trainChoices, id: \.name) { train in
+                    let isChosen = chosenTrain == train.name
+                    Button {
+                        withAnimation(.snappy) { chosenTrain = train.name }
+                    } label: {
+                        HStack {
+                            Text(train.name).font(.subheadline.weight(.semibold))
+                            if let direction = train.direction {
+                                Text("→ \(direction)").font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                            Spacer()
+                            Image(systemName: isChosen ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(isChosen ? Color.brand : .secondary)
+                        }
+                        .padding(.vertical, 6)
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    /// The leg's own train first, then the ones coupled to it.
+    private var trainChoices: [Line.CoupledTrain] {
+        guard let line = leg.line else { return [] }
+        return [Line.CoupledTrain(name: line.name, direction: leg.direction)] + coupledTrains
     }
 
     private var formCard: some View {
@@ -228,7 +284,7 @@ struct CheckinSheet: View {
         .buttonStyle(.glassProminent)
         .tint(.brand)
         .controlSize(.large)
-        .disabled(isSending || message.count > 280)
+        .disabled(isSending || message.count > 280 || needsTrainChoice)
     }
 
     private func send(allowManualTrip: Bool = false) {
@@ -236,6 +292,7 @@ struct CheckinSheet: View {
         Task {
             defer { isSending = false }
             do {
+                let leg = rideLeg
                 let checkin = try await attemptCheckin(leg: leg, allowManualTrip: allowManualTrip)
                 await finishSuccess(checkin, leg: leg)
             } catch OAuthError.notLoggedIn {
@@ -244,8 +301,8 @@ struct CheckinSheet: View {
                 // Some international trains are listed under two names by separate feeds (e.g. an
                 // ÖBB "RJ 177" that Deutsche Bahn's own live feed calls "ICE 177") — try the other
                 // name Transitous knows about before asking to create a manual entry.
-                if let alternate = await model.provider.alternateLineName(for: leg) {
-                    var altLeg = leg
+                if let alternate = await model.provider.alternateLineName(for: rideLeg) {
+                    var altLeg = rideLeg
                     altLeg.line?.name = alternate
                     if let checkin = try? await attemptCheckin(leg: altLeg, allowManualTrip: false) {
                         await finishSuccess(checkin, leg: altLeg)
@@ -257,7 +314,7 @@ struct CheckinSheet: View {
                 // just failed. Bridge the gap with a short manual trip instead of asking the user to
                 // manually enter the whole rest of the journey.
                 if let checkin = try? await attemptZusatzhaltCheckin() {
-                    await finishSuccess(checkin, leg: leg)
+                    await finishSuccess(checkin, leg: rideLeg)
                     return
                 }
                 offerManualTrip = true
@@ -278,10 +335,10 @@ struct CheckinSheet: View {
     /// reason Träwelling didn't recognise the departure).
     private func attemptZusatzhaltCheckin() async throws -> CheckinResult? {
         guard let bahnDe = model.provider.bahnDe,
-              let stops = try await bahnDe.journeyStops(for: leg),
-              let (zusatzhalt, nextRegular) = BahnDeClient.nextRegularStop(after: leg.origin, in: stops)
+              let stops = try await bahnDe.journeyStops(for: rideLeg),
+              let (zusatzhalt, nextRegular) = BahnDeClient.nextRegularStop(after: rideLeg.origin, in: stops)
         else { return nil }
-        let draft = CheckinDraft(leg: leg, message: message, visibility: visibility, business: business, toot: toot)
+        let draft = CheckinDraft(leg: rideLeg, message: message, visibility: visibility, business: business, toot: toot)
         return try await model.traewelling.checkin(draft, fromZusatzhalt: zusatzhalt, toNextRegularStop: nextRegular)
     }
 

@@ -1849,6 +1849,8 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(BahnDeClient.formationRequest(line: line, stops: stops, now: now)?.station.name == "Next")
         #expect(BahnDeClient.formationRequest(line: line, stops: [(station: station("4", "Tonight"), departure: at(8 * 60))], now: now)?.station.name == "Tonight")
         #expect(BahnDeClient.formationRequest(line: line, stops: [(station: station("5", "Tomorrow"), departure: at(13 * 60))], now: now) == nil)
+        // vagonweb's planned Wagenreihung has no lookahead.
+        #expect(BahnDeClient.formationRequest(line: line, stops: [(station: station("5", "Tomorrow"), departure: at(13 * 60))], now: now, lookahead: nil)?.station.name == "Tomorrow")
         let regional = Line(name: "RE 5", number: "5", product: .regional, operatorName: nil)
         #expect(BahnDeClient.formationRequest(line: regional, stops: stops, now: now) == nil)
     }

@@ -50,7 +50,7 @@ public enum RideMatch {
     }
 
     private static func names(of line: Line) -> Set<String> {
-        Set([line.name, line.alternateName].compactMap { $0 }.map(Line.normalize)).subtracting([""])
+        Set(line.allNames.map(Line.normalize)).subtracting([""])
     }
 
     /// Same start and end, even when the line names disagree (regional lines are often named

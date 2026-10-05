@@ -312,10 +312,9 @@ public struct TrainRoutePlanner: Sendable {
         return rescued
     }
 
-    /// "ICE 423" matches the line name, "423" the train number alone.
+    /// "ICE 423" matches the line name (or a coupled train's), "423" the train number alone.
     static func matches(_ wanted: String, _ line: Line) -> Bool {
-        if Line.normalize(line.name) == wanted { return true }
-        if let alternate = line.alternateName, Line.normalize(alternate) == wanted { return true }
+        if line.allNames.contains(where: { Line.normalize($0) == wanted }) { return true }
         return wanted.allSatisfy(\.isNumber) && line.number == wanted
     }
 

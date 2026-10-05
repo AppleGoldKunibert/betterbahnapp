@@ -7,6 +7,8 @@ public struct TransitousProvider: TransitProvider {
     public let source = DataSource.transitous
     public var baseURL: URL
     let http: HTTPClient
+    /// `coupledTrains(for:)` answers per leg; the timetable doesn't change during the day.
+    private let coupledCache = ExpiringCache<[Line.CoupledTrain]>()
 
     public init(baseURL: URL = TransitousProvider.defaultBaseURL, http: HTTPClient = HTTPClient()) {
         self.baseURL = baseURL
@@ -1207,11 +1209,12 @@ public struct TransitousProvider: TransitProvider {
     /// `board(_:at:date:duration:products:)`).
     private static let longDistanceModes: [Product] = [.highSpeed, .longDistance]
 
-    private func fetchStopTimes(stopId: String, date: Date, duration: Int, kind: BoardKind, modes: [String]?) async throws -> [MStopTime] {
+    private func fetchStopTimes(stopId: String, date: Date, duration: Int, kind: BoardKind, modes: [String]?,
+                                count: Int = 150) async throws -> [MStopTime] {
         var items: [URLQueryItem] = [
             .init(name: "stopId", value: stopId),
             .init(name: "time", value: JSONDecoding.isoString(date)),
-            .init(name: "n", value: "150"),
+            .init(name: "n", value: String(count)),
             .init(name: "arriveBy", value: kind == .arrivals ? "true" : "false"),
             // Without it, `arriveBy=true` searches backwards from `time`, so an arrivals board showed
             // days of past arrivals instead of the coming ones.
@@ -1258,7 +1261,7 @@ public struct TransitousProvider: TransitProvider {
         let entries = Self.mergeBorderSplitDuplicates(stopTimes, kind: kind)
             .compactMap { $0.toEntry(kind: kind) }
             .filter { $0.time.planned <= end }
-        let deduplicated = Self.deduplicated(entries).sorted { $0.time.planned < $1.time.planned }
+        let deduplicated = Self.combiningCoupledTrains(Self.deduplicated(entries)).sorted { $0.time.planned < $1.time.planned }
         return await withCorrectedLongDistanceEnds(deduplicated, kind: kind)
     }
 
@@ -1365,6 +1368,99 @@ public struct TransitousProvider: TransitProvider {
             result.append(entry)
         }
         return result
+    }
+
+    /// Folds board rows of trains coupled together ("Doppeltraktion" under two numbers, e.g. ICE 941
+    /// and ICE 951 leaving Hamm together for Berlin) into one row naming both (`Line.coupledTrains`).
+    /// Recognized by the same kind of train at the same planned time and platform, going to (or
+    /// coming from) the same place – trains that split or join here differ in that place and stay apart.
+    static func combiningCoupledTrains(_ entries: [BoardEntry]) -> [BoardEntry] {
+        var result: [BoardEntry] = []
+        outer: for entry in entries {
+            if entry.line.product.isTrain, let platform = entry.platform.planned, let otherEnd = entry.otherEnd {
+                for (index, existing) in result.enumerated() {
+                    guard existing.kind == entry.kind, existing.line.product == entry.line.product,
+                          existing.time.planned == entry.time.planned, existing.platform.planned == platform,
+                          existing.cancelled == entry.cancelled,
+                          let existingEnd = existing.otherEnd, Station.normalize(existingEnd) == Station.normalize(otherEnd),
+                          !existing.line.allNames.map(Line.normalize).contains(Line.normalize(entry.line.name))
+                    else { continue }
+                    // The row with live data leads, so the board shows the delay.
+                    var merged = existing.time.actual == nil && entry.time.actual != nil ? entry : existing
+                    let other = merged.tripId == entry.tripId ? existing : entry
+                    merged.line.coupledTrains = (merged.line.coupledTrains ?? [])
+                        + [Line.CoupledTrain(name: other.line.name, direction: other.kind == .departures ? other.otherEnd : nil,
+                                             tripId: other.tripId)]
+                        + (other.line.coupledTrains ?? [])
+                    result[index] = merged
+                    continue outer
+                }
+            }
+            result.append(entry)
+        }
+        return result
+    }
+
+    /// For each long-distance leg, the trains coupled to it from its origin all the way
+    /// to its destination, keyed by `Leg.id`: Transitous routes over just one of them (e.g. ICE 950
+    /// from Berlin to Hamm, while ICE 940 runs in the same consist up to Hamm, where they split), so
+    /// the other one is looked up among the arrivals at the destination and checked against its own
+    /// departure at the origin. Legs without coupled trains, or that couldn't be checked, are left out.
+    public func coupledTrains(for legs: [Leg]) async -> [String: [Line.CoupledTrain]] {
+        let candidates = legs.filter { leg in
+            !leg.isWalking && !leg.cancelled && leg.tripId != nil && leg.source == .transitous
+                && (leg.line?.product == .highSpeed || leg.line?.product == .longDistance)
+        }
+        var result: [String: [Line.CoupledTrain]] = [:]
+        await withTaskGroup(of: (String, [Line.CoupledTrain]).self) { group in
+            for leg in Dictionary(candidates.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }).values {
+                group.addTask {
+                    let key = "\(leg.id)|\(leg.destination.id)|\(leg.arrival.planned.timeIntervalSince1970)"
+                    let trains = try? await coupledCache.value(for: key, maxAge: 6 * 3600) { try await coupledTrains(for: leg) }
+                    return (leg.id, trains ?? [])
+                }
+            }
+            for await (id, trains) in group where !trains.isEmpty { result[id] = trains }
+        }
+        return result
+    }
+
+    private func coupledTrains(for leg: Leg) async throws -> [Line.CoupledTrain] {
+        guard let tripId = leg.tripId, let product = leg.line?.product else { return [] }
+        // A couple of minutes around the arrival is enough: coupled trains arrive at the very same minute.
+        let arrivals = try await fetchStopTimes(stopId: leg.destination.id, date: leg.arrival.planned.addingTimeInterval(-60),
+                                                duration: 2, kind: .arrivals, modes: MLineInfo.motisModes(for: product), count: 10)
+        guard let own = arrivals.first(where: { $0.tripId == tripId }) else { return [] }
+        var trains: [Line.CoupledTrain] = []
+        for partner in Self.coupledCandidates(of: own, in: arrivals) {
+            // Same arrival isn't enough: the other train may have joined on the way (e.g. two halves
+            // from Hamburg and Berlin coupled in Hannover), so it must leave the leg's origin with it too.
+            guard let trip = try? await trip(id: partner.tripId),
+                  Self.departs(trip, from: leg.origin, at: leg.departure.planned) else { continue }
+            trains.append(Line.CoupledTrain(name: partner.lineInfo.toLine().name, direction: trip.direction, tripId: partner.tripId))
+        }
+        return trains
+    }
+
+    /// Arrivals of other trains of the same kind at the same planned minute and platform as `own`.
+    static func coupledCandidates(of own: MStopTime, in arrivals: [MStopTime]) -> [MStopTime] {
+        guard let arrival = own.place.scheduledArrival else { return [] }
+        let ownName = Line.normalize(own.lineInfo.toLine().name)
+        var seen: Set<String> = [ownName]
+        return arrivals.filter { candidate in
+            let name = Line.normalize(candidate.lineInfo.toLine().name)
+            guard candidate.tripId != own.tripId, candidate.mode == own.mode,
+                  candidate.place.scheduledArrival == arrival,
+                  candidate.cancelled != true, candidate.tripCancelled != true,
+                  !name.isEmpty, seen.insert(name).inserted else { return false }
+            if let ownTrack = own.place.scheduledTrack, let track = candidate.place.scheduledTrack, ownTrack != track { return false }
+            return true
+        }
+    }
+
+    /// Whether `trip` leaves `station` at `plannedDeparture`.
+    static func departs(_ trip: Trip, from station: Station, at plannedDeparture: Date) -> Bool {
+        trip.stopovers.contains { $0.station.isSamePlace(as: station) && $0.departure?.planned == plannedDeparture }
     }
 
     private static func isGenericICEBrand(_ name: String) -> Bool {
