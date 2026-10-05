@@ -446,10 +446,34 @@ struct JourneyResultsView: View {
                 laterCursor = page?.laterCursor
             }
             error = nil
+            if cursor == nil, search.via.isEmpty, model.settings.ignoreBoardingRulesEnabled {
+                await addTrainsIgnoringBoardingRules()
+            }
             await fillMissingPlatforms(in: result)
         } catch is CancellationError {
         } catch {
             self.error = error
+        }
+    }
+
+    /// Expert option: direct trains the timetable doesn't let you board or leave here ("Nur Ausstieg" /
+    /// "Nur Einstieg"), which the search itself never offers. Added after the list shows, in time order.
+    private func addTrainsIgnoringBoardingRules() async {
+        let window = 180
+        let start = search.isArrival ? searchDate.addingTimeInterval(TimeInterval(-window * 60)) : searchDate
+        var extra = await model.trainPicker.journeysIgnoringBoardingRules(from: search.from, to: search.to,
+                                                                          date: start, windowMinutes: window)
+        extra = extra.filter { journey in
+            journey.transitLegs.allSatisfy { search.products.contains($0.line?.product ?? .other) }
+        }
+        if search.onlyValidTicket {
+            let filter = model.ticketFilter
+            extra = extra.filter(filter.isValid)
+        }
+        guard !extra.isEmpty, !Task.isCancelled else { return }
+        withAnimation(.snappy) {
+            journeys = (journeys + extra).removingDuplicateIDs()
+                .sorted { ($0.departure?.planned ?? .distantFuture) < ($1.departure?.planned ?? .distantFuture) }
         }
     }
 
@@ -537,6 +561,10 @@ struct JourneyCard: View {
                     Spacer()
                     if journey.isCancelled {
                         InfoChip(text: "Fällt aus", systemImage: "xmark.octagon.fill", tint: .heavyDelay)
+                    } else if let first = journey.transitLegs.first, first.stopovers.first?.access.allowsBoarding == false {
+                        InfoChip(text: "Kein Einstieg", systemImage: "arrow.down.right.circle.fill", tint: .slightDelay)
+                    } else if let last = journey.transitLegs.last, last.stopovers.last?.access.allowsAlighting == false {
+                        InfoChip(text: "Kein Ausstieg", systemImage: "arrow.up.right.circle.fill", tint: .slightDelay)
                     } else if journey.connectionIssues().contains(where: \.isBlocking) {
                         InfoChip(text: "Nicht möglich", systemImage: "exclamationmark.triangle.fill", tint: .heavyDelay)
                     } else if !journey.connectionIssues().isEmpty {

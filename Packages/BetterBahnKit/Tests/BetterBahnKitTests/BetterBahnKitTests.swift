@@ -1681,6 +1681,22 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(StopAccess(pickupAllowed: false, dropoffAllowed: true) == .exitOnly)
     }
 
+    /// Expert option "Nur Ein-/Ausstieg ignorieren": only trains you may not board at the origin, or
+    /// not leave at the destination, are looked up; normal ones the search already has.
+    @Test func restrictedCandidatesAreTrainsWithoutBoardingOrAlighting() {
+        func entry(_ tripId: String, _ access: StopAccess, product: Product = .highSpeed, cancelled: Bool = false) -> BoardEntry {
+            BoardEntry(kind: .departures, tripId: tripId, station: station("1", "Berlin Hbf"),
+                       line: Line(name: "ICE \(tripId)", number: tripId, product: product, operatorName: nil), otherEnd: nil,
+                       time: TimeInfo(planned: .now, actual: nil), platform: PlatformInfo(planned: nil, actual: nil),
+                       cancelled: cancelled, terminatesOrOriginatesHere: false, remarks: [], access: access, source: .transitous)
+        }
+        let atOrigin = [entry("1", .exitOnly), entry("2", .normal), entry("3", .normal), entry("4", .exitOnly, cancelled: true),
+                        entry("5", .exitOnly, product: .bus), entry("1", .exitOnly)]
+        let atDestination = [entry("3", .entryOnly), entry("2", .normal)]
+        let candidates = TrainPicker.restrictedCandidates(departures: atOrigin, atDestination: atDestination)
+        #expect(candidates.map(\.tripId) == ["1", "3"])
+    }
+
     final class SlowProvider: TransitProvider, @unchecked Sendable {
         let source = DataSource.bahnDe
         func searchStations(_ query: String) async throws -> [Station] {

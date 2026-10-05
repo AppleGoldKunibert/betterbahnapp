@@ -124,11 +124,17 @@ struct SettingsView: View {
                             IconLabel(title: "Bestimmten Zug wählen", systemImage: "number", color: .purple)
                         }
                         .tint(.brand)
+                        Toggle(isOn: $settings.expertIgnoreBoardingRules) {
+                            IconLabel(title: "„Nur Ein-/Ausstieg“ ignorieren", systemImage: "arrow.up.arrow.down.circle.fill", color: .teal)
+                        }
+                        .tint(.brand)
                     }
                 } header: {
                     Text("Für Profis")
                 } footer: {
-                    Text("Zusätzliche Funktionen für Vielfahrer.")
+                    Text(settings.expertMode
+                         ? "Zusätzliche Funktionen für Vielfahrer. „Nur Ein-/Ausstieg“ ignorieren zeigt in der Suche auch direkte Züge, die laut Fahrplan dort keinen Einstieg oder Ausstieg erlauben."
+                         : "Zusätzliche Funktionen für Vielfahrer.")
                 }
 
                 Section {

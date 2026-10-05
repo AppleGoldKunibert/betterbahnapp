@@ -158,7 +158,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   would report them on time. Without live data a time has no `actual`, so no delay shows (not "+0").
 - Logic: `JourneyReplanner`, `ConnectionCheck` (`ConnectionIssue`, `JourneyRefresher`), `PlatformChange`
   (platform changes since the last refresh → push, ignores sectors/bus bays), `TrainRoutePlanner`,
-  `ViaRoutePlanner` (vias without minimum stay keep a through train as one leg), `TrainPicker`, `TicketFilter`/`BC100Rules`, `BoardFilter`.
+  `ViaRoutePlanner` (vias without minimum stay keep a through train as one leg), `TrainPicker` (also
+  `journeysIgnoringBoardingRules`: direct trains with "Nur Ein-/Ausstieg" for the expert option of that name,
+  added to search results in `JourneyResultsView`), `TicketFilter`/`BC100Rules`, `BoardFilter`.
 - `Traewelling/` – OAuth PKCE (`TraewellingAuth`, `TokenStore`), `TraewellingClient`
   (check-ins, history), `QuickTag`.
 - `Tickets/` – DB tickets by order number: `DBOrder` reads bahn.de's order JSON into `DBTicket`s (one per
