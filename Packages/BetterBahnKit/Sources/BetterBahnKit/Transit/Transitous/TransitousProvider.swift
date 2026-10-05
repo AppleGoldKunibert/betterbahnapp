@@ -27,6 +27,19 @@ public struct TransitousProvider: TransitProvider {
 
     public func searchStations(_ query: String, near location: Coordinate?) async throws -> [Station] {
         let matches = try await geocode(query, addingMainStation: true, near: location)
+        return Self.rankedAndMerged(matches, query: query, near: location).map { $0.toStation() }
+    }
+
+    /// With a mode filter the geocoder itself only returns stops with those modes, so its 50 hits
+    /// aren't used up by others. "l" only sorts on the device: the location never leaves it.
+    public func searchStations(_ search: StationSearch, near location: Coordinate?) async throws -> [Station] {
+        let modes = search.modes.reduce(into: Set<String>()) { $0.formUnion($1.motisModes) }
+        let matches = try await geocode(search.text, addingMainStation: true, near: location, modes: modes)
+        let merged = Self.rankedAndMerged(matches, query: search.text, near: location)
+        return Self.applying(search, to: merged, near: location).map { $0.toStation() }
+    }
+
+    static func rankedAndMerged(_ matches: [MGeocodeMatch], query: String, near location: Coordinate?) -> [MGeocodeMatch] {
         let typedTown = matches.contains { Self.isInTown(named: query, $0) }
         let sharedName = Self.isSharedName(query, among: matches)
         let userTown = location.flatMap { NearbyTowns.town(near: $0) }
@@ -39,7 +52,37 @@ public struct TransitousProvider: TransitProvider {
             .sorted { $0.1 > $1.1 }
             .map { $0.0 }
         let merged = Self.mergingNearbyDuplicates(ranked)
-        return (location == nil ? merged : Self.spreadingTowns(merged, query: query)).map { $0.toStation() }
+        return location == nil ? merged : Self.spreadingTowns(merged, query: query)
+    }
+
+    /// Modes that alone make a stop a bus stop: buses, coaches and on-demand services.
+    private static let busOnlyModes: Set<String> = ["BUS", "COACH", "ODM"]
+
+    /// True for a stop only buses (or coaches, on-demand services) serve. A stop without known
+    /// modes isn't one.
+    static func isBusOnly(_ match: MGeocodeMatch) -> Bool {
+        let modes = Set(match.modes ?? [])
+        return !modes.isEmpty && modes.isSubset(of: busOnlyModes)
+    }
+
+    /// `search`'s filter and order on already ranked and merged hits: with modes, the stops where any
+    /// of them stops; without, everything but bus-only stops – unless that leaves nothing, as for a
+    /// village without a station. "l" sorts by distance alone.
+    static func applying(_ search: StationSearch, to merged: [MGeocodeMatch], near location: Coordinate?) -> [MGeocodeMatch] {
+        var kept: [MGeocodeMatch]
+        if search.modes.isEmpty {
+            kept = merged.filter { !isBusOnly($0) }
+            if kept.isEmpty { kept = merged }
+        } else {
+            let wanted = search.modes.reduce(into: Set<String>()) { $0.formUnion($1.motisModes) }
+            kept = merged.filter { !wanted.isDisjoint(with: $0.modes ?? []) }
+        }
+        guard search.byDistance, let location else { return kept }
+        return kept.enumerated().sorted {
+            let a = location.distance(to: Coordinate(latitude: $0.element.lat, longitude: $0.element.lon))
+            let b = location.distance(to: Coordinate(latitude: $1.element.lat, longitude: $1.element.lon))
+            return a != b ? a < b : $0.offset < $1.offset
+        }.map(\.element)
     }
 
     /// How many hits from one town come first before other towns get a turn (see `spreadingTowns`).
@@ -848,7 +891,9 @@ public struct TransitousProvider: TransitProvider {
     /// turns into several confusingly similar-looking suggestions for one place in the station
     /// picker, and picking the less complete one silently drops whole products from its board.
     /// Once candidates are ranked by completeness, folds any hit within `duplicateRadius` of an
-    /// already-kept one into it — it's certainly the same stop under another feed's ID.
+    /// already-kept one into it — it's certainly the same stop under another feed's ID. The kept hit
+    /// takes on the folded one's modes, so a U-Bahn stop merged with the tram stop next to it still
+    /// counts as a tram stop.
     static let duplicateRadius: Double = 200
 
     /// How many times as busy another feed's entry for a station must be to replace the one ranked first.
@@ -861,6 +906,8 @@ public struct TransitousProvider: TransitProvider {
             for (index, existing) in kept.enumerated() {
                 let existingCoordinate = Coordinate(latitude: existing.lat, longitude: existing.lon)
                 guard coordinate.distance(to: existingCoordinate) < duplicateRadius else { continue }
+                let existingModes = existing.modes ?? []
+                let modes = match.modes.map { existingModes + $0.filter { !existingModes.contains($0) } } ?? existing.modes
                 // A bus stop in front of a station ("Mühlhausen, Bahnhof") mustn't stand in for it: its
                 // board would only show buses. The station takes its place, and so does another feed's
                 // far busier entry for it (Langenhagen Flughafen for VBN's "Hannover Flughafen").
@@ -868,6 +915,7 @@ public struct TransitousProvider: TransitProvider {
                     || (match.importance ?? 0) > (existing.importance ?? 0) * Self.busierDuplicate {
                     kept[index] = match
                 }
+                kept[index].modes = modes
                 continue outer
             }
             kept.append(match)
@@ -879,8 +927,9 @@ public struct TransitousProvider: TransitProvider {
     /// `shortQueries(for:)`), a known short name (`aliasQuery(for:)`) and, `near` a location, stations
     /// in the user's town (`nearbyTownQuery(for:near:)`) and nearby ones
     /// (`nearbyStationQueries(for:near:)`), and keeps those hits only if they match `query`.
-    private func geocode(_ query: String, addingMainStation: Bool = false, near location: Coordinate? = nil)
-        async throws -> [MGeocodeMatch]
+    /// `modes`: only stops where any of these stop.
+    private func geocode(_ query: String, addingMainStation: Bool = false, near location: Coordinate? = nil,
+                         modes: Set<String> = []) async throws -> [MGeocodeMatch]
     {
         var queries = [query]
         let umlauts = Self.withUmlauts(query)
@@ -901,11 +950,13 @@ public struct TransitousProvider: TransitProvider {
         let results = try await withThrowingTaskGroup(of: (Int, [MGeocodeMatch]).self) { group in
             for (index, text) in texts.enumerated() {
                 group.addTask {
-                    guard index >= required else { return (index, try await geocodeRequest(text)) }
+                    guard index >= required else {
+                        return (index, try await geocodeRequest(text, modes: modes))
+                    }
                     // Only an extra: if it fails or is slow, the search still works without it. Waiting
                     // for it longer would run into `CombinedProvider`'s deadline and lose every hit.
                     let found = (try? await CombinedProvider.withDeadline(Self.extraQueryDeadline) {
-                        try await geocodeRequest(text)
+                        try await geocodeRequest(text, modes: modes)
                     }) ?? []
                     // The main station only of the place typed: "nord Hbf" also finds "Hamburg Hbf Nord".
                     let isMainStationQuery = text == mainStation
@@ -977,8 +1028,9 @@ public struct TransitousProvider: TransitProvider {
     /// well within `CombinedProvider`'s 2.5 s for the whole station search.
     static let extraQueryDeadline: Duration = .milliseconds(1800)
 
-    private func geocodeRequest(_ text: String) async throws -> [MGeocodeMatch] {
-        try await http.get(url("v1/geocode", [
+    /// `modes`: only stops where any of these stop.
+    private func geocodeRequest(_ text: String, modes: Set<String> = []) async throws -> [MGeocodeMatch] {
+        var items: [URLQueryItem] = [
                 .init(name: "text", value: text),
                 .init(name: "type", value: "STOP"),
                 .init(name: "language", value: "de"),
@@ -990,7 +1042,10 @@ public struct TransitousProvider: TransitProvider {
                 // "Bernau a. Chiemsee"). Asking for more candidates gives `searchRank` below –
                 // which already knows to prefer trains – enough to actually find.
                 .init(name: "numResults", value: "50"),
-            ]), as: [MGeocodeMatch].self, headers: ["User-Agent": HTTPClient.identifyingUserAgent])
+            ]
+        if !modes.isEmpty { items.append(.init(name: "mode", value: modes.sorted().joined(separator: ","))) }
+        return try await http.get(url("v1/geocode", items), as: [MGeocodeMatch].self,
+                                  headers: ["User-Agent": HTTPClient.identifyingUserAgent])
     }
 
     /// "Koeln" → "Köln", so ASCII input still finds the station.
