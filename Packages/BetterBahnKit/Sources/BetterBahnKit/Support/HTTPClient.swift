@@ -24,7 +24,7 @@ public struct HTTPClient: Sendable {
     /// Plain UA: bahn.de's bot protection rejects agents containing URLs.
     public static let userAgent = "BetterBahn/0.1 (iOS app)"
     /// Träwelling asks apps to identify themselves with a contact.
-    public static let identifyingUserAgent = "BetterBahn/0.1 (iOS; +https://github.com/goldkunibert/betterbahnapp)"
+    public static let identifyingUserAgent = "BetterBahn/0.1 (iOS; +https://github.com/AppleGoldKunibert/betterbahnapp)"
 
     let session: URLSession
     let timeout: TimeInterval
