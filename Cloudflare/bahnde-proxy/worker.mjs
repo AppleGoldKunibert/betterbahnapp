@@ -27,10 +27,12 @@ const PATTERN_ROUTES = [
     { pattern: /^angebote\/verbindung\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/, ttl: 3600 },
 ];
 
-// DB Timetables: the hourly schedule and the live changes at a station (EVA number).
+// DB Timetables: the hourly schedule and the live changes at a station (EVA number), and the
+// station itself, whose `meta` lists the EVAs of its other levels (e.g. "Hamburg Hbf (S-Bahn)").
 const TIMETABLES_ROUTES = [
     { pattern: /^plan\/\d{6,8}\/\d{6}\/\d{2}$/, ttl: 1800 },
     { pattern: /^fchg\/\d{6,8}$/, ttl: 30 },
+    { pattern: /^station\/\d{6,8}$/, ttl: 86400 },
 ];
 
 /// The allowed route for `pathname` (`path` relative to its upstream, cache TTL in seconds), or null.

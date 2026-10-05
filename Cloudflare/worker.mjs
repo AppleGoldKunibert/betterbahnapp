@@ -78,11 +78,12 @@ iCloud abgeglichen.</p>
 <h2>Fahrplandaten</h2>
 <p>Für Suchen, Abfahrtstafeln und Echtzeitdaten schickt die App deine Anfragen (z. B. eingegebene Bahnhofsnamen,
 Bahnhöfe, Zeiten und Zugnummern) an diese Dienste. Dabei sehen sie, wie bei jedem Abruf im Internet, die
-IP-Adresse deines Geräts:</p>
+IP-Adresse deines Geräts. Die App nennt sich dabei mit Name, Version und einer Kontaktadresse (User-Agent),
+aber nicht mit Daten über dich:</p>
 <ul>
 <li><a href="https://transitous.org">Transitous</a> (Verbindungen, Abfahrten, Bahnhofssuche)</li>
-<li><a href="https://bahn.expert">bahn.expert</a> (Zugtypen) und <a href="https://bahn.jetzt">bahn.jetzt</a> (Zugpositionen auf der Karte)</li>
-<li><a href="https://www.openrailwaymap.org">OpenRailwayMap</a> (Kartenkacheln) und Apple Karten</li>
+<li><a href="https://www.vagonweb.cz">vagonweb.cz</a> (geplante Wagenreihungen und Zugtypen), <a href="https://bahn.expert">bahn.expert</a> (Zugtypen) und <a href="https://bahn.jetzt">bahn.jetzt</a> (Zugpositionen auf der Karte)</li>
+<li><a href="https://www.openrailwaymap.org">OpenRailwayMap</a> (Kartenkacheln mit Daten von <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>) und Apple Karten</li>
 <li>bahn.de und die Timetables-Schnittstelle der Deutschen Bahn – diese Anfragen laufen über den Server von
 BetterBahn (siehe unten), daher sieht die Deutsche Bahn nicht deine IP-Adresse, sondern die des Servers.</li>
 </ul>
@@ -109,7 +110,10 @@ an bahn.de, das Ticket wird nur auf deinem Gerät gespeichert. Es gelten die
 
 <h2>Standort</h2>
 <p>Wenn du es erlaubst, nutzt die App deinen ungefähren Standort, um Bahnhöfe in deiner Nähe in der Suche
-weiter oben anzuzeigen. Der Standort wird nur auf dem Gerät verwendet und nicht verschickt.</p>
+weiter oben anzuzeigen. Der Standort wird nur auf dem Gerät verwendet und nicht verschickt. Damit auch Bahnhöfe
+in deiner Nähe gefunden werden, sucht die App zusätzlich mit den Namen naher Städte und Bahnhöfe (z.&nbsp;B.
+„Berlin ost“ oder „Bernau“), die sie aus einer Liste auf dem Gerät nimmt; an Transitous gehen dabei nur diese
+Namen mit dem Suchtext.</p>
 
 <h2>Träwelling</h2>
 <p>Wenn du dich bei <a href="https://traewelling.de">Träwelling</a> anmeldest, schickt die App deine Check-ins

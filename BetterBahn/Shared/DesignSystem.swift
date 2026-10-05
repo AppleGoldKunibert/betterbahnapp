@@ -180,7 +180,7 @@ struct LineBadge: View {
             HStack(spacing: 4) {
                 Image(systemName: line.product.symbolName)
                     .font(badgeFont)
-                Text(line.name)
+                Text(line.displayName)
                     .font(badgeFont)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
@@ -206,21 +206,25 @@ struct LineBadge: View {
 /// Triebzug numbers and names of a train (e.g. "Tz 9457 „Bundesrepublik Deutschland“"). bahn.de's
 /// coach sequence first (it only has one in the coming hours); bahn.expert as fallback, which
 /// has the Tz once its data is live. Says so when bahn.de is refusing requests and nothing else helped.
+/// A saved journey's leg remembers what was found, so it still shows once neither source answers.
 struct TrainFormationLabel: View {
     let request: BahnDeClient.FormationRequest?
     let line: Line?
     let date: Date
+    let leg: Leg?
 
     init(leg: Leg) {
         request = BahnDeClient.formationRequest(for: leg)
         line = leg.line
         date = leg.departure.planned
+        self.leg = leg
     }
 
     init(trip: Trip) {
         request = BahnDeClient.formationRequest(for: trip)
         line = trip.line
         date = trip.stopovers.first?.departure?.planned ?? .now
+        leg = nil
     }
 
     @Environment(AppModel.self) private var model
@@ -243,37 +247,49 @@ struct TrainFormationLabel: View {
             }
         }
         .task(id: "\(line?.name ?? "")|\(date)|\(request?.station.id ?? "")") {
-            formation = nil
+            let remembered = leg.flatMap(model.rememberedFormation(for:))
+            formation = remembered
             blocked = false
+            var found: TrainFormation?
             if let request {
                 do {
-                    formation = try await model.formation(for: request)
+                    found = try await model.formation(for: request)
                 } catch TransitError.rateLimited {
-                    blocked = true
+                    blocked = remembered == nil
                 } catch {}
             }
-            if formation?.unitDescription == nil, let fallback = await model.trainType(for: line, on: date)?.formation,
+            if found?.unitDescription == nil, let fallback = await model.trainType(for: line, on: date)?.formation,
                fallback.unitDescription != nil {
-                formation = fallback
+                found = fallback
+            }
+            if let found, found.unitDescription != nil {
+                formation = found
                 blocked = false
+                if let leg { model.rememberFormation(found, for: leg) }
             }
         }
     }
 }
 
 /// "Wagenreihung" chip for a train's header, shown once bahn.de has a coach sequence for it (the
-/// same request `TrainFormationLabel` makes, so it is only sent once). Opens the Wagenreihung sheet.
+/// same request `TrainFormationLabel` makes, so it is only sent once), or else vagonweb.cz has the
+/// planned one ("Plan-Wagenreihung"). Opens the Wagenreihung sheet.
 struct CoachSequenceButton: View {
+    /// bahn.de's request, only for departures within `BahnDeClient.formationLookahead`.
     let request: BahnDeClient.FormationRequest?
+    /// The same for any later departure, for vagonweb's planned Wagenreihung days ahead.
+    let plannedRequest: BahnDeClient.FormationRequest?
     let trainName: String?
 
     init(leg: Leg) {
         request = BahnDeClient.formationRequest(for: leg)
+        plannedRequest = BahnDeClient.formationRequest(for: leg, lookahead: nil)
         trainName = leg.line?.name
     }
 
     init(trip: Trip) {
         request = BahnDeClient.formationRequest(for: trip)
+        plannedRequest = BahnDeClient.formationRequest(for: trip, lookahead: nil)
         trainName = trip.line?.name
     }
 
@@ -288,27 +304,31 @@ struct CoachSequenceButton: View {
                 Button {
                     showSequence = true
                 } label: {
-                    InfoChip(text: "Wagenreihung", systemImage: "train.side.front.car", tint: .brand)
+                    InfoChip(text: sequence.source == .bahnDe ? "Wagenreihung" : "Plan-Wagenreihung",
+                             systemImage: "train.side.front.car", tint: .brand)
                 }
                 .buttonStyle(.plain)
             }
         }
         .sheet(isPresented: $showSequence) {
-            if let request {
+            if let request = request ?? plannedRequest {
                 CoachSequenceView(request: request, trainName: trainName, sequence: sequence)
             }
         }
-        .task(id: request) {
+        .task(id: plannedRequest) {
             sequence = nil
-            guard let request else { return }
-            sequence = try? await model.coachSequence(for: request)
+            if let request, let live = try? await model.coachSequence(for: request), !live.coaches.isEmpty {
+                sequence = live
+            } else if let plannedRequest {
+                sequence = await model.plannedCoachSequence(for: plannedRequest)
+            }
         }
     }
 }
 
 /// "ICE 4" / "ICE 3neo" / "ICE L" … next to a train's name. bahn.de's coach sequence first (the same
-/// request `TrainFormationLabel` makes, so it is only sent once); bahn.expert as fallback, which has
-/// DB's planned formation for days ahead.
+/// request `TrainFormationLabel` makes, so it is only sent once); then the planned formation for days
+/// ahead from vagonweb.cz, or bahn.expert when vagonweb has none (`AppModel.trainType`).
 struct TrainSeriesTag: View {
     let request: BahnDeClient.FormationRequest?
     let line: Line?
@@ -317,6 +337,8 @@ struct TrainSeriesTag: View {
     /// answer for (it is over) and bahn.expert knows no series, as the train may still be running.
     let tripId: String?
     let source: DataSource?
+    /// A saved journey's leg, whose remembered formation is shown when nothing answers any more.
+    let leg: Leg?
 
     init(leg: Leg) {
         request = BahnDeClient.formationRequest(for: leg)
@@ -324,6 +346,7 @@ struct TrainSeriesTag: View {
         date = leg.departure.planned
         tripId = leg.tripId
         source = leg.source
+        self.leg = leg
     }
 
     init(trip: Trip) {
@@ -332,6 +355,7 @@ struct TrainSeriesTag: View {
         date = trip.stopovers.lazy.compactMap { $0.departure?.planned ?? $0.arrival?.planned }.first ?? .now
         tripId = nil
         source = nil
+        leg = nil
     }
 
     @Environment(AppModel.self) private var model
@@ -362,6 +386,9 @@ struct TrainSeriesTag: View {
                       let trip = try? await model.provider.trip(id: tripId, source: source),
                       let later = BahnDeClient.formationRequest(for: trip) {
                 family = try? await model.formation(for: later)?.modelSummary
+            }
+            if family == nil, let leg {
+                family = model.rememberedFormation(for: leg)?.modelSummary
             }
         }
     }

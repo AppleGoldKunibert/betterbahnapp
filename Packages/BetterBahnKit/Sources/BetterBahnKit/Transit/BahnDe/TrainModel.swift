@@ -112,6 +112,17 @@ struct TrainModel: Sendable, Hashable {
         return table.mapValues { TrainModel(name: $0[0], series: $0[$0.count - 1]) }
     }()
 
+    /// From Tz 8017 on (in service since October 2023), ICE 3neo trainsets come with the new ICE interior
+    /// (new seats and tables, tablet holders). bahn.de's coach sequence has nothing that tells them apart,
+    /// only the Tz number does.
+    static let firstRedesignedICE3neo = 8017
+
+    /// `model` with " Redesign" added for ICE 3neo trainsets with the new interior, e.g. "ICE 3neo Redesign" for Tz 8030.
+    static func name(_ model: String?, unit: String?) -> String? {
+        guard model == "ICE 3neo", let number = unit.flatMap(Int.init), number >= firstRedesignedICE3neo else { return model }
+        return "ICE 3neo Redesign"
+    }
+
     /// The most likely series of `carriages`, or nil if the numbers are inconclusive (fewer than two
     /// vehicles agreeing, except for the single-car BR 631/640/650).
     static func detect(_ carriages: [Carriage], category: String) -> TrainModel? {

@@ -18,6 +18,16 @@ struct JourneyDetailView: View {
     @State private var showAlternatives = false
     @State private var showJourneyMap = false
     @State private var showJourneyEditor = false
+    /// Set once the live data asked for on opening is in (or took longer than `LoadingDeadline.liveData`),
+    /// so a journey never loaded live before doesn't first show the timetable and then jump to the delays.
+    /// One seen before shows its last live data at once and refreshes in the background.
+    @State private var liveDataLoaded = false
+    /// The destination picked when the journey was edited, so later edits and "Anderer Zug" route there
+    /// instead of back to the one the journey was opened with.
+    @State private var editedDestination: Station?
+
+    /// Where the journey is going now.
+    private var goal: Station { editedDestination ?? finalDestination }
 
     struct LegSelection: Identifiable {
         let index: Int
@@ -27,39 +37,28 @@ struct JourneyDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
-                summaryCard
-                if !readOnly { issuesCard }
-                ForEach(Array(journey.legs.enumerated()), id: \.element.id) { index, leg in
-                    if !leg.isWalking {
-                        LegCard(
-                            leg: leg,
-                            transferBroken: journey.brokenTransferIndices.contains(journey.transitLegs.firstIndex(of: leg) ?? -1),
-                            onReplace: readOnly || !model.settings.trainChoiceEnabled ? nil
-                                : { legToReplace = LegSelection(index: index, leg: leg) },
-                            onReplan: readOnly || !model.settings.editJourneyEnabled ? nil
-                                : { legToReplan = LegSelection(index: index, leg: leg) },
-                            onCheckin: readOnly || !model.settings.traewellingEnabled ? nil : { checkinLeg = leg },
-                            reservation: model.reservation(for: leg, in: journey)
-                        )
-                        if let info = transferInfo(after: leg) {
-                            TransferRow(from: leg, to: info.next, walk: info.walk)
-                        }
-                    }
-                }
-                if !readOnly { historySection }
+            if !liveDataLoaded, loadsLiveDataOnOpen {
+                ProgressView("Lade Echtzeitdaten …")
+                    .containerRelativeFrame([.horizontal, .vertical])
+            } else {
+                plan
             }
-            .padding(.horizontal)
-            .padding(.bottom, 32)
         }
         .refreshable {
             await TimetablesClient.invalidateDelays()
             await refreshRealtime()
         }
         .task {
-            await fillMissingPlatforms()
-            // Live data right away on opening, instead of only after the first pull-to-refresh.
-            await refreshRealtime()
+            if !readOnly, model.savedEntry(for: journey) == nil, let seen = model.liveJourneys.value(for: journey.id) {
+                journey = seen
+            }
+            await LoadingDeadline.run({ @MainActor in
+                await refreshRecentlyFinished()
+                await fillMissingPlatforms()
+                // Live data right away on opening, instead of only after the first pull-to-refresh.
+                await refreshRealtime()
+            }, showingAfter: LoadingDeadline.liveData) { liveDataLoaded = true }
+            liveDataLoaded = true
             // Keep a saved journey's delays current while it's open.
             while !Task.isCancelled {
                 try? await Task.sleep(for: AppModel.realtimeRefreshInterval)
@@ -72,9 +71,9 @@ struct JourneyDetailView: View {
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $legToReplace) { selection in
-            AlternativeTrainsSheet(leg: selection.leg) { newLeg in
+            AlternativeTrainsSheet(leg: selection.leg) { newLegs in
                 let updated = try await model.trainPicker.replacing(
-                    legAt: selection.index, in: journey, with: newLeg, finalDestination: finalDestination)
+                    legAt: selection.index, in: journey, with: newLegs, finalDestination: goal)
                 withAnimation {
                     if let entry = model.savedEntry(for: journey) {
                         model.replaceSaved(id: entry.id, with: updated, reason: "Anderer Zug gewählt")
@@ -84,14 +83,16 @@ struct JourneyDetailView: View {
             }
         }
         .sheet(item: $legToReplan) { selection in
-            JourneyReplanSheet(journey: journey, startLeg: selection.leg, finalDestination: finalDestination,
-                               search: replanSearch) { updated in
+            JourneyReplanSheet(journey: journey, startLeg: selection.leg, finalDestination: goal,
+                               search: replanSearch) { updated, destination in
+                editedDestination = destination
                 withAnimation { journey = updated }
             }
         }
         .sheet(isPresented: $showJourneyEditor) {
-            JourneyReplanSheet(journey: journey, finalDestination: finalDestination,
-                               search: replanSearch) { updated in
+            JourneyReplanSheet(journey: journey, finalDestination: goal,
+                               search: replanSearch) { updated, destination in
+                editedDestination = destination
                 withAnimation { journey = updated }
             }
         }
@@ -104,13 +105,43 @@ struct JourneyDetailView: View {
             }
         }
         .sheet(isPresented: $showJourneyMap) {
-            JourneyMapView(journey: journey, finalDestination: finalDestination)
+            JourneyMapView(journey: journey, finalDestination: goal)
         }
         .onChange(of: model.savedEntry(for: journey)?.journey) { _, refreshed in
             // Pick up realtime refreshes of this saved journey.
             if let refreshed, refreshed != journey { journey = refreshed }
         }
     }
+
+    private var plan: some View {
+        VStack(spacing: 16) {
+            summaryCard
+            if !readOnly { issuesCard }
+            ForEach(Array(journey.legs.enumerated()), id: \.element.id) { index, leg in
+                if !leg.isWalking {
+                    LegCard(
+                        leg: leg,
+                        transferBroken: journey.brokenTransferIndices.contains(journey.transitLegs.firstIndex(of: leg) ?? -1),
+                        onReplace: readOnly || !model.settings.trainChoiceEnabled ? nil
+                            : { legToReplace = LegSelection(index: index, leg: leg) },
+                        onReplan: readOnly || !model.settings.editJourneyEnabled ? nil
+                            : { legToReplan = LegSelection(index: index, leg: leg) },
+                        onCheckin: readOnly || !model.settings.traewellingEnabled ? nil : { checkinLeg = leg },
+                        reservation: model.reservation(for: leg, in: journey)
+                    )
+                    if let info = transferInfo(after: leg) {
+                        TransferRow(from: leg, to: info.next, walk: info.walk)
+                    }
+                }
+            }
+            if !readOnly { historySection }
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 32)
+    }
+
+    /// Whether opening waits for live data (see the `.task` above): only for a journey not seen live yet.
+    private var loadsLiveDataOnOpen: Bool { !readOnly && !model.hasLiveData(for: journey) }
 
     /// The options to start a re-plan from: this view's own, else whatever was saved with the journey.
     private var replanSearch: ConnectionSearch? { search ?? model.savedEntry(for: journey)?.search }
@@ -119,11 +150,30 @@ struct JourneyDetailView: View {
     private func refreshRealtime() async {
         guard !readOnly else { return }
         let refreshed = await model.journeyRefresher.refresh(journey)
+        if model.savedEntry(for: journey) == nil { model.rememberLive(refreshed) }
         guard refreshed != journey else { return }
         if let entry = model.savedEntry(for: journey) {
             model.updateSavedJourneyData(id: entry.id, journey: refreshed)
         }
         withAnimation { journey = refreshed }
+    }
+
+    /// A saved journey is only refreshed until 10 minutes after it arrives, so its end keeps whatever
+    /// delay DB reported last, often before the train got there. Opened within 24 hours of arriving,
+    /// it's refreshed once more and stored, so it shows the real arrival like the trip view does.
+    /// Once neither source has live data any more, the refresh keeps the delays it already had.
+    private func refreshRecentlyFinished() async {
+        guard let entry = recentlyFinishedEntry else { return }
+        let refreshed = await model.journeyRefresher.refresh(journey)
+        guard refreshed != journey else { return }
+        model.updateSavedJourneyData(id: entry.id, journey: refreshed)
+        withAnimation { journey = refreshed }
+    }
+
+    private var recentlyFinishedEntry: SavedJourney? {
+        guard readOnly, let entry = model.pastJourneys.first(where: { $0.journey == journey }),
+              let arrival = journey.arrival?.planned, arrival.addingTimeInterval(SavedJourney.liveDataLifetime) > .now else { return nil }
+        return entry
     }
 
     /// Saved or imported journeys may still lack a Gleis Transitous didn't have; DB's schedule fills it.
@@ -416,8 +466,11 @@ struct LegCard: View {
                     LiveTrainIconTile(route: LiveTrainRoute(leg: leg), systemImage: leg.line?.product.symbolName ?? "tram.fill",
                                       color: color, size: 38)
                     VStack(alignment: .leading, spacing: 2) {
-                        TrainNameRow(name: leg.line?.name ?? "Zug", wrapsTag: false) { TrainSeriesTag(leg: leg) }
-                        if let direction = leg.direction {
+                        // Coupled trains have a long name; their series tag goes below it rather than being cut off.
+                        TrainNameRow(name: leg.line?.displayName ?? "Zug") {
+                            TrainSeriesTag(leg: leg)
+                        }
+                        if let direction = leg.directionDescription {
                             Text("Richtung \(direction)").font(.caption).foregroundStyle(.secondary).fullTextPopup("Richtung \(direction)")
                         }
                         TrainFormationLabel(leg: leg)
@@ -577,11 +630,13 @@ struct LegCard: View {
 
 struct AlternativeTrainsSheet: View {
     let leg: Leg
-    let onSelect: (Leg) async throws -> Void
+    /// The legs replacing `leg`: one for a direct train, several for a connection with transfers.
+    let onSelect: ([Leg]) async throws -> Void
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var alternatives: [Leg] = []
+    @State private var connections: [Journey] = []
     @State private var isLoading = true
     @State private var applyingID: String?
     @State private var onlyValidTicket = false
@@ -625,9 +680,27 @@ struct AlternativeTrainsSheet: View {
 
                     ForEach(alternatives) { alternative in
                         Button {
-                            apply(alternative)
+                            apply([alternative], id: alternative.id)
                         } label: {
                             AlternativeRow(leg: alternative, current: leg, isApplying: applyingID == alternative.id)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(applyingID != nil)
+                    }
+
+                    if !connections.isEmpty {
+                        SectionHeader(title: "Mit Umstieg", systemImage: "arrow.triangle.swap")
+                            .padding(.top, 6)
+                    }
+
+                    ForEach(connections) { connection in
+                        Button {
+                            apply(connection.legs, id: connection.id)
+                        } label: {
+                            JourneyCard(journey: connection)
+                                .overlay(alignment: .topTrailing) {
+                                    if applyingID == connection.id { ProgressView().padding(14) }
+                                }
                         }
                         .buttonStyle(.plain)
                         .disabled(applyingID != nil)
@@ -639,9 +712,9 @@ struct AlternativeTrainsSheet: View {
             .overlay {
                 if isLoading {
                     ProgressView("Suche Züge …")
-                } else if alternatives.isEmpty, error == nil {
+                } else if alternatives.isEmpty, connections.isEmpty, error == nil {
                     ContentUnavailableView("Keine anderen Züge", systemImage: "tram.fill",
-                                           description: Text("Gerade fährt kein anderer Zug direkt von \(leg.origin.displayName) nach \(leg.destination.displayName)."))
+                                           description: Text("Gerade fährt kein anderer Zug von \(leg.origin.displayName) nach \(leg.destination.displayName)."))
                 }
             }
             .navigationTitle("Anderen Zug wählen")
@@ -659,22 +732,27 @@ struct AlternativeTrainsSheet: View {
     private func load() async {
         isLoading = true
         defer { isLoading = false }
-        do {
-            alternatives = try await model.trainPicker.alternatives(
-                for: leg, ticketFilter: onlyValidTicket ? model.ticketFilter : nil)
-            error = nil
-        } catch is CancellationError {
-        } catch {
-            self.error = error
-        }
+        let filter = onlyValidTicket ? model.ticketFilter : nil
+        let picker = model.trainPicker, leg = leg
+        // Both lists load together; one failing still shows the other.
+        async let direct = picker.alternatives(for: leg, ticketFilter: filter)
+        async let withTransfers = picker.connections(for: leg, ticketFilter: filter)
+        var failure: Error?
+        var foundDirect: [Leg] = [], foundWithTransfers: [Journey] = []
+        do { foundDirect = try await direct } catch { failure = error }
+        do { foundWithTransfers = try await withTransfers } catch { failure = failure ?? error }
+        guard !Task.isCancelled, !(failure is CancellationError) else { return }
+        alternatives = foundDirect
+        connections = foundWithTransfers
+        error = foundDirect.isEmpty && foundWithTransfers.isEmpty ? failure : nil
     }
 
-    private func apply(_ alternative: Leg) {
-        applyingID = alternative.id
+    private func apply(_ legs: [Leg], id: String) {
+        applyingID = id
         Task {
             defer { applyingID = nil }
             do {
-                try await onSelect(alternative)
+                try await onSelect(legs)
                 dismiss()
             } catch {
                 self.error = error
