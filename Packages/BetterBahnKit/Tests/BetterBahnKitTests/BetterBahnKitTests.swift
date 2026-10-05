@@ -253,6 +253,32 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(merged.map(\.id) == [complete.id, farAway.id])
     }
 
+    /// Real-world geocode hits for "Berlin-Gesundbrunnen": "gesund" typed far from Berlin only finds
+    /// SNCF's entry, whose board has nothing but the bus 247. Boards and journeys use DELFI's far busier
+    /// station there instead; the U-Bahn stop and a station elsewhere don't count.
+    @Test func busierStopReplacesForeignFeedsGermanStation() {
+        let sncf = MGeocodeMatch(type: "STOP", name: "Berlin-Gesundbrunnen",
+                                 id: "fr-horaires-sncf_FR::LMO:71a3fb60-3a69-11e9-8417-bb1d8a705241:",
+                                 lat: 52.5488, lon: 13.391, country: "DE",
+                                 modes: ["HIGHSPEED_RAIL", "LONG_DISTANCE", "NIGHT_RAIL", "REGIONAL_RAIL", "BUS"],
+                                 importance: 0.000174)
+        let delfi = MGeocodeMatch(type: "STOP", name: "S+U Gesundbrunnen Bhf (Berlin)", id: "de-DELFI_de:11000:900007102",
+                                  lat: 52.548637, lon: 13.388372, country: "DE",
+                                  modes: ["HIGHSPEED_RAIL", "LONG_DISTANCE", "REGIONAL_RAIL", "SUBURBAN", "SUBWAY", "BUS"],
+                                  importance: 0.00865)
+        let subway = MGeocodeMatch(type: "STOP", name: "U Gesundbrunnen (Berlin)", id: "de-VBB_u8",
+                                   lat: 52.5487, lon: 13.3895, country: "DE", modes: ["SUBWAY"], importance: 0.02)
+        let elsewhere = MGeocodeMatch(type: "STOP", name: "Northeim Gesundbrunnen", id: "de-DELFI_de:03155:68739::1",
+                                      lat: 51.7067, lon: 10.0286, country: "DE", modes: ["REGIONAL_RAIL"], importance: 0.01)
+        let station = sncf.toStation()
+
+        #expect(TransitousProvider.busierStop(for: station, among: [sncf, subway, elsewhere, delfi])?.id == delfi.id)
+        // Not busier by far: the stop stays.
+        var quiet = delfi
+        quiet.importance = 0.0005
+        #expect(TransitousProvider.busierStop(for: station, among: [sncf, quiet]) == nil)
+    }
+
     /// German train stations first, then the listed neighbours' train stations (AT, CH, NL, PL, CZ,
     /// in that order), then German buses, then German U-Bahn, then everything else.
     @Test func searchRankOrdersByCountryAndMode() {

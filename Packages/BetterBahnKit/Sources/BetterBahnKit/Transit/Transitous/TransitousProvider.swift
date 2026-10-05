@@ -9,6 +9,8 @@ public struct TransitousProvider: TransitProvider {
     let http: HTTPClient
     /// `coupledTrains(for:)` answers per leg; the timetable doesn't change during the day.
     private let coupledCache = ExpiringCache<[Line.CoupledTrain]>()
+    /// `withBusierStop(for:)` answers per stop ID.
+    private let stopCache = ExpiringCache<Station?>()
 
     public init(baseURL: URL = TransitousProvider.defaultBaseURL, http: HTTPClient = HTTPClient()) {
         self.baseURL = baseURL
@@ -1026,7 +1028,7 @@ public struct TransitousProvider: TransitProvider {
     /// Picking the raw nearest match can land on a partial one and quietly drop a whole product from
     /// the board, so among stops within a small distance of each other the more complete one wins.
     public func resolve(_ station: Station) async throws -> Station {
-        if station.source == .transitous { return station }
+        if station.source == .transitous { return await withBusierStop(for: station) }
         let candidates = try await geocode(station.name)
         guard let coordinate = station.coordinate else {
             guard let first = candidates.first else { throw TransitError.notFound(station.name) }
@@ -1043,6 +1045,39 @@ public struct TransitousProvider: TransitProvider {
         let nearby = byDistance.filter { $0.1 <= nearest.1 + 300 }
         let mostComplete = nearby.max { Self.completeness($0.0, 0) < Self.completeness($1.0, 0) } ?? nearest
         return mostComplete.0.toStation()
+    }
+
+    /// A stop from a feed outside Germany can stand for a German station in search when the geocoder
+    /// finds nothing better for what was typed ("gesund" far from Berlin only finds SNCF's "Berlin-
+    /// Gesundbrunnen"), and it lands in recents and favorites that way. Its own board can be nearly
+    /// empty: SNCF's Gesundbrunnen only has the bus 247. So boards and journeys use another feed's far
+    /// busier train station at the same place (`busierStop(for:among:)`), looked up by its name once a day.
+    private func withBusierStop(for station: Station) async -> Station {
+        guard !station.id.hasPrefix("de-"), station.coordinate != nil else { return station }
+        let busier = try? await stopCache.value(for: station.id, maxAge: 24 * 3600) {
+            [station] in
+            let matches = try await CombinedProvider.withDeadline(Self.extraQueryDeadline) {
+                try await geocode(station.displayName)
+            }
+            return Self.busierStop(for: station, among: matches)?.toStation()
+        }
+        guard let busier = busier ?? nil else { return station }
+        return Station(id: busier.id, name: station.name, coordinate: busier.coordinate, evaNumber: station.evaNumber,
+                       source: .transitous, region: station.region)
+    }
+
+    /// The train station within `duplicateRadius` of `station` that is `busierDuplicate` times as busy
+    /// as `station`'s own entry among `matches` (or any train station there, if it isn't among them).
+    static func busierStop(for station: Station, among matches: [MGeocodeMatch]) -> MGeocodeMatch? {
+        guard let coordinate = station.coordinate else { return nil }
+        let own = matches.first { $0.id == station.id }?.importance ?? 0
+        return matches
+            .filter {
+                $0.id != station.id && isTrainStation($0)
+                    && Coordinate(latitude: $0.lat, longitude: $0.lon).distance(to: coordinate) < duplicateRadius
+                    && ($0.importance ?? 0) > own * busierDuplicate
+            }
+            .max { ($0.importance ?? 0) < ($1.importance ?? 0) }
     }
 
     public func journeys(_ query: JourneyQuery) async throws -> JourneyPage {
