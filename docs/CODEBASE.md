@@ -131,7 +131,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   refreshed by `AppModel.followTrainPositions()` while the map is on screen). Long-distance trains by
   number, regional/S-Bahn by run number (`Line.tripNumber`).
 - `Transit/Transitous/` – MOTIS API client + DTOs (`M*` types). Station-name cleanup and
-  deduplication of boards happen here. Station search ranking is `searchRank`; with the user's location
+  deduplication of boards happen here. MOTIS leaves trains nobody may board out of departures, so a departure
+  board also asks for arrivals and adds the ones going on as "Nur Ausstieg" (`continuingWithoutBoarding`, #105). Station search ranking is `searchRank`; with the user's location
   it balances text match against nearness and size and also asks for "<nearby town> <query>"
   (`NearbyTowns`, an offline list, so coordinates never leave the device), nearby stations starting
   with what was typed (`StationHints`, from `Resources/StationHints.json`, built by

@@ -47,6 +47,50 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(entry.platform.planned == "4")
     }
 
+    /// Real-world Transitous data for Berlin Hbf (#105): ICEs going on to Gesundbrunnen may not be
+    /// boarded there, so MOTIS leaves them out of the departures and only lists them as arrivals. They
+    /// show as departures marked "Nur Ausstieg"; trains ending here and ones already departing don't.
+    @Test func continuingArrivalsWithoutBoardingBecomeDepartures() throws {
+        let arrivalsJSON = """
+        {"stopTimes": [
+          {"place": {"name": "S+U Berlin Hauptbahnhof", "lat": 52.525, "lon": 13.369,
+             "scheduledArrival": "2026-10-05T20:33:00Z", "scheduledDeparture": "2026-10-05T20:37:00Z",
+             "arrival": "2026-10-05T20:33:00Z", "departure": "2026-10-05T20:37:00Z",
+             "pickupType": "NOT_ALLOWED", "dropoffType": "NORMAL"},
+           "mode": "HIGHSPEED_RAIL", "tripId": "ice594", "displayName": "ICE 594", "tripShortName": "594",
+           "headsign": "S+U Gesundbrunnen Bhf (Berlin)",
+           "tripTo": {"name": "S+U Gesundbrunnen Bhf (Berlin)", "lat": 52.548, "lon": 13.388}},
+          {"place": {"name": "S+U Berlin Hauptbahnhof", "lat": 52.525, "lon": 13.369,
+             "scheduledArrival": "2026-10-05T21:29:00Z", "arrival": "2026-10-05T21:29:00Z"},
+           "mode": "HIGHSPEED_RAIL", "tripId": "ice500", "displayName": "ICE 500", "tripShortName": "500",
+           "tripTo": {"name": "S+U Berlin Hauptbahnhof", "lat": 52.525, "lon": 13.369}},
+          {"place": {"name": "S+U Berlin Hauptbahnhof", "lat": 52.525, "lon": 13.369,
+             "scheduledArrival": "2026-10-05T21:25:00Z", "scheduledDeparture": "2026-10-05T21:28:00Z"},
+           "mode": "HIGHSPEED_RAIL", "tripId": "ice870", "displayName": "ICE 870", "tripShortName": "870",
+           "tripTo": {"name": "Hamburg-Altona", "lat": 53.55, "lon": 9.93}}
+        ]}
+        """
+        let departuresJSON = """
+        {"stopTimes": [
+          {"place": {"name": "S+U Berlin Hauptbahnhof", "lat": 52.525, "lon": 13.369,
+             "scheduledArrival": "2026-10-05T21:25:00Z", "scheduledDeparture": "2026-10-05T21:28:00Z"},
+           "mode": "HIGHSPEED_RAIL", "tripId": "ice870", "displayName": "ICE 870", "tripShortName": "870",
+           "tripTo": {"name": "Hamburg-Altona", "lat": 53.55, "lon": 9.93}}
+        ]}
+        """
+        let arrivals = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(arrivalsJSON.utf8)).stopTimes
+        let departures = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(departuresJSON.utf8)).stopTimes
+
+        let added = TransitousProvider.continuingWithoutBoarding(arrivals, missingFrom: departures)
+        #expect(added.map(\.tripId) == ["ice594"])
+        let entry = try #require(added.first?.toEntry(kind: .departures))
+        #expect(entry.kind == .departures)
+        #expect(entry.access == .exitOnly)
+        #expect(entry.time.planned == ISO8601DateFormatter().date(from: "2026-10-05T20:37:00Z"))
+        #expect(entry.otherEnd == Station.displayName(for: "S+U Gesundbrunnen Bhf (Berlin)"))
+        #expect(BoardFilter().includes(entry))
+    }
+
     /// Real-world Transitous response for Hanau Hbf: DELFI puts some trains (ICE 12, RE50, …) at the
     /// station's bus bay "Steig F" instead of their track, so the app showed "Gleis F" rather than
     /// Gleis 6. A train must not take a bus bay's letter as its platform; a bus still does.
