@@ -25,7 +25,7 @@ struct TripView: View {
     var body: some View {
         ScrollView {
             if !runs.isEmpty {
-                CoupledTrainPicker(trains: runs, selection: Binding(get: { tripId }, set: switchTrain))
+                CoupledTrainPicker(trains: runs, selection: Binding(get: { tripId }, set: { switchTrain(to: $0) }))
                     .padding(.horizontal)
             }
             if trip == nil, error == nil {
@@ -465,7 +465,7 @@ struct LegTripSheet: View {
         NavigationStack {
             ScrollView {
                 if !runs.isEmpty {
-                    CoupledTrainPicker(trains: runs, selection: Binding(get: { tripId ?? "" }, set: switchTrain))
+                    CoupledTrainPicker(trains: runs, selection: Binding(get: { tripId ?? "" }, set: { switchTrain(to: $0) }))
                         .padding(.horizontal)
                 }
                 if trip == nil, error == nil {
