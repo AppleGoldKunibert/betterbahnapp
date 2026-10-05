@@ -106,7 +106,7 @@ struct TripLiveActivity: Widget {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(heavyDelayColor)
                     } else {
                         let minutes = state.currentDelayMinutes ?? state.delayMinutes
-                        Text(minutes > 0 ? "+\(minutes)" : "0")
+                        Text("+\(max(0, minutes))")
                             .font(.caption.weight(.bold)).monospacedDigit()
                             .foregroundStyle(delayColor(max(0, minutes)))
                     }
@@ -127,7 +127,7 @@ struct TripLiveActivity: Widget {
                 if state.cancelled {
                     Image(systemName: "xmark.circle.fill").foregroundStyle(heavyDelayColor)
                 } else {
-                    Text(minutes > 0 ? "+\(minutes)" : "0").font(.caption.weight(.bold)).monospacedDigit()
+                    Text("+\(max(0, minutes))").font(.caption.weight(.bold)).monospacedDigit()
                         .lineLimit(1).minimumScaleFactor(0.5)
                         .foregroundStyle(delayColor(max(0, minutes)))
                 }
@@ -257,7 +257,7 @@ struct StopDelayLabel: View {
         if let minutes = state.currentDelayMinutes, !state.cancelled {
             HStack(spacing: 3) {
                 Image(systemName: "clock.fill")
-                Text(minutes > 0 ? "+\(minutes)" : "0").monospacedDigit()
+                Text("+\(max(0, minutes))").monospacedDigit()
             }
             .font((compact ? Font.caption : Font.subheadline).weight(.bold))
             .foregroundStyle(delayColor(max(0, minutes)))
