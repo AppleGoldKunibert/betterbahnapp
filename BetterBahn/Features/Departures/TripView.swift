@@ -400,7 +400,8 @@ struct TripContent: View {
         guard let ref = BahnDeClient.sequenceReference(for: trip.line), !stop.cancelled,
               let time = (stop.departure ?? stop.arrival)?.planned,
               (stop.departurePlatform ?? stop.arrivalPlatform)?.best != nil else { return nil }
-        return BahnDeClient.FormationRequest(category: ref.category, number: ref.number, station: stop.station, plannedDeparture: time)
+        return BahnDeClient.FormationRequest(category: ref.category, number: ref.number, station: stop.station, plannedDeparture: time,
+                                             stopsBefore: BahnDeClient.stopsBefore(stop.station, in: trip))
     }
 
     private func select(_ index: Int) {
