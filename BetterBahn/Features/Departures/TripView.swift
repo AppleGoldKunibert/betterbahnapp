@@ -538,8 +538,9 @@ struct LegTripSheet: View {
             error = nil
             // Live data first, like `TripView.load()`.
             if let timetables = model.timetablesClient {
-                let live = await LoadingDeadline.run({ await timetables.liveTrip(loaded) }, showingAfter: LoadingDeadline.liveData) {
-                    if trip == nil, tripId == self.tripId { trip = loaded }
+                let timetable = loaded
+                let live = await LoadingDeadline.run({ await timetables.liveTrip(timetable) }, showingAfter: LoadingDeadline.liveData) {
+                    if trip == nil, tripId == self.tripId { trip = timetable }
                 }
                 // Switched to another train meanwhile.
                 guard tripId == self.tripId else { return }
