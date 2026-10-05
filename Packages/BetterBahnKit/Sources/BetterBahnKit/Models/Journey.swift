@@ -53,6 +53,12 @@ public struct Line: Codable, Sendable, Hashable {
     /// 3307) – what DB's dispatching feed knows the train by.
     public var tripNumber: String?
 
+    /// A line the feed didn't name ("?", e.g. an extra train DB added at short notice); a board names
+    /// it after the other trains to its destination or bahn.de (`TransitousProvider.namingUnknownLines`).
+    public var isUnknown: Bool {
+        product == .other && name.trimmingCharacters(in: CharacterSet(charactersIn: "? ")).isEmpty
+    }
+
     /// Another train coupled to this one for the whole stretch ridden, under its own number.
     public struct CoupledTrain: Codable, Sendable, Hashable {
         /// "ICE 940"
