@@ -247,7 +247,7 @@ private struct CoachSequenceDiagram: View {
     }
 }
 
-private struct DividerLine: Shape {
+nonisolated private struct DividerLine: Shape {
     func path(in rect: CGRect) -> Path {
         Path { path in
             path.move(to: CGPoint(x: rect.minX, y: rect.midY))
