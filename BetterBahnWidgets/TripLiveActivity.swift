@@ -36,7 +36,7 @@ struct TripLiveActivity: Widget {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .fixedSize()
-                    // The region beside the camera is narrow: drop the title before the platform wraps.
+                    // The region beside the camera is narrow: drop the word "Gleis" before anything wraps.
                     ViewThatFits(in: .horizontal) {
                         HStack(spacing: 8) {
                             title
@@ -44,10 +44,14 @@ struct TripLiveActivity: Widget {
                                 PlatformChip(platform: platform, replaced: state.replacedPlatform)
                             }
                         }
-                        if let platform = state.displayPlatform {
-                            PlatformChip(platform: platform, replaced: state.replacedPlatform)
-                        } else {
+                        HStack(spacing: 8) {
                             title
+                            if let platform = state.displayPlatform {
+                                PlatformChip(platform: platform, replaced: state.replacedPlatform, showsLabel: false)
+                            }
+                        }
+                        if let platform = state.displayPlatform {
+                            PlatformChip(platform: platform, replaced: state.replacedPlatform, showsLabel: false)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .trailing)
@@ -269,10 +273,14 @@ struct PlatformChip: View {
     let platform: String
     /// The planned platform after a change of track, struck through before the new one.
     var replaced: String?
+    /// Without the word "Gleis", just the number, where space is tight.
+    var showsLabel = true
 
     var body: some View {
         HStack(spacing: 4) {
-            Text("Gleis").font(.caption2.weight(.semibold)).opacity(0.75)
+            if showsLabel {
+                Text("Gleis").font(.caption2.weight(.semibold)).opacity(0.75)
+            }
             if let replaced {
                 Text(replaced).font(.caption2.weight(.semibold)).strikethrough().opacity(0.6).monospacedDigit()
             }
