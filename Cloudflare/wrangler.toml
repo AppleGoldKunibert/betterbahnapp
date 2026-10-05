@@ -7,7 +7,7 @@ workers_dev = true
 # `npx wrangler kv namespace create SHARES` and put its id here.
 [[kv_namespaces]]
 binding = "SHARES"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "81b51e64f9d64ff0b66a6a76c1abe205"
 
 # Per app install (App Attest key): 10 new links per minute. Reads per IP: 60 per minute.
 # namespace_id is any number unique within the account.
