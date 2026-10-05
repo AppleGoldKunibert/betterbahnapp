@@ -41,6 +41,10 @@ final class AppModel {
     var travelPasses: [TravelPass] {
         didSet { TicketStore.savePasses(travelPasses) }
     }
+    /// Live versions of journeys and train runs already loaded once (see `LiveDataCache`), kept on disk
+    /// so after a restart too they show at once while a background refresh runs instead of a spinner.
+    @ObservationIgnored private(set) var liveJourneys = LiveDataCache<Journey>()
+    @ObservationIgnored private(set) var liveTrips = LiveDataCache<Trip>()
     /// Saved journey to open on the Verbindungen tab (set when the Live Activity is tapped);
     /// `ConnectionsView` pushes it and clears this.
     var journeyToOpen: SavedJourney?
@@ -97,6 +101,8 @@ final class AppModel {
         recentStations = Storage.load(key: "recentStations") ?? []
         savedJourneys = Storage.load(key: "savedJourneys") ?? []
         trackedManualCheckins = Storage.load(key: "trackedManualCheckins") ?? []
+        liveJourneys = Storage.load(key: "liveJourneys") ?? LiveDataCache()
+        liveTrips = Storage.load(key: "liveTrips") ?? LiveDataCache()
         tickets = TicketStore.load()
         travelPasses = TicketStore.loadPasses()
         manualLiveActivityJourneyID = UserDefaults.standard.string(forKey: "manualLiveActivityJourneyID").flatMap(UUID.init)
@@ -166,6 +172,35 @@ final class AppModel {
     }
 
     var journeyRefresher: JourneyRefresher { JourneyRefresher(provider: provider, timetables: timetablesClient) }
+
+    /// Whether `journey` was already loaded with live data: saved (refreshed in the background, also
+    /// right after launch) or opened or prepared before. Only an unseen one waits for live data.
+    func hasLiveData(for journey: Journey) -> Bool {
+        savedEntry(for: journey) != nil || liveJourneys.value(for: journey.id) != nil
+    }
+
+    func rememberLive(_ journey: Journey) {
+        liveJourneys.store(journey, for: journey.id)
+        let snapshot = liveJourneys
+        Task.detached(priority: .utility) { Storage.save(snapshot, key: "liveJourneys") }
+    }
+
+    func rememberLive(_ trip: Trip) {
+        liveTrips.store(trip, for: trip.id)
+        let snapshot = liveTrips
+        Task.detached(priority: .utility) { Storage.save(snapshot, key: "liveTrips") }
+    }
+
+    /// Loads the live data of a search result before it's opened (the first one), so its plan shows
+    /// without waiting.
+    func prepareLiveData(for journey: Journey) {
+        guard !hasLiveData(for: journey) else { return }
+        let refresher = journeyRefresher
+        Task { [weak self] in
+            let refreshed = await refresher.refresh(journey)
+            self?.rememberLive(refreshed)
+        }
+    }
 
     /// Applies a manual realtime refresh (e.g. pull-to-refresh in the journey detail view) to a
     /// saved journey in place, without touching its version history or already-sent notifications.
