@@ -31,14 +31,30 @@ struct TripLiveActivity: Widget {
                         .padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    HStack(spacing: 8) {
-                        Text(state.isDeparture ? "Abfahrt" : state.arrived ? "Angekommen" : "Ankunft")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                    let title = Text(state.isDeparture ? "Abfahrt" : state.arrived ? "Angekommen" : "Ankunft")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .fixedSize()
+                    // The region beside the camera is narrow: drop the word "Gleis" before anything wraps.
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            title
+                            if let platform = state.displayPlatform {
+                                PlatformChip(platform: platform, replaced: state.replacedPlatform)
+                            }
+                        }
+                        HStack(spacing: 8) {
+                            title
+                            if let platform = state.displayPlatform {
+                                PlatformChip(platform: platform, replaced: state.replacedPlatform, showsLabel: false)
+                            }
+                        }
                         if let platform = state.displayPlatform {
-                            PlatformChip(platform: platform, replaced: state.replacedPlatform)
+                            PlatformChip(platform: platform, replaced: state.replacedPlatform, showsLabel: false)
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                     .padding(.trailing, 4)
                 }
                 DynamicIslandExpandedRegion(.center, priority: 2) {
@@ -82,6 +98,14 @@ struct TripLiveActivity: Widget {
                                 }
                             }
                             Spacer()
+                            if state.warning != nil, !state.arrived {
+                                // A missed transfer or a cancelled train: the journey can't be made as planned.
+                                Label("Nicht möglich", systemImage: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(heavyDelayColor)
+                                    .lineLimit(1)
+                                    .fixedSize()
+                                Spacer()
+                            }
                             DelayText(state: state)
                         }
                         .font(.caption.weight(.semibold))
@@ -94,7 +118,7 @@ struct TripLiveActivity: Widget {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(heavyDelayColor)
                     } else {
                         let minutes = state.currentDelayMinutes ?? state.delayMinutes
-                        Text(minutes > 0 ? "+\(minutes)" : "0")
+                        Text("+\(max(0, minutes))")
                             .font(.caption.weight(.bold)).monospacedDigit()
                             .foregroundStyle(delayColor(max(0, minutes)))
                     }
@@ -115,7 +139,7 @@ struct TripLiveActivity: Widget {
                 if state.cancelled {
                     Image(systemName: "xmark.circle.fill").foregroundStyle(heavyDelayColor)
                 } else {
-                    Text(minutes > 0 ? "+\(minutes)" : "0").font(.caption.weight(.bold)).monospacedDigit()
+                    Text("+\(max(0, minutes))").font(.caption.weight(.bold)).monospacedDigit()
                         .lineLimit(1).minimumScaleFactor(0.5)
                         .foregroundStyle(delayColor(max(0, minutes)))
                 }
@@ -245,7 +269,7 @@ struct StopDelayLabel: View {
         if let minutes = state.currentDelayMinutes, !state.cancelled {
             HStack(spacing: 3) {
                 Image(systemName: "clock.fill")
-                Text(minutes > 0 ? "+\(minutes)" : "0").monospacedDigit()
+                Text("+\(max(0, minutes))").monospacedDigit()
             }
             .font((compact ? Font.caption : Font.subheadline).weight(.bold))
             .foregroundStyle(delayColor(max(0, minutes)))
@@ -257,10 +281,14 @@ struct PlatformChip: View {
     let platform: String
     /// The planned platform after a change of track, struck through before the new one.
     var replaced: String?
+    /// Without the word "Gleis", just the number, where space is tight.
+    var showsLabel = true
 
     var body: some View {
         HStack(spacing: 4) {
-            Text("Gleis").font(.caption2.weight(.semibold)).opacity(0.75)
+            if showsLabel {
+                Text("Gleis").font(.caption2.weight(.semibold)).opacity(0.75)
+            }
             if let replaced {
                 Text(replaced).font(.caption2.weight(.semibold)).strikethrough().opacity(0.6).monospacedDigit()
             }
@@ -268,6 +296,8 @@ struct PlatformChip: View {
                 .foregroundStyle(replaced == nil ? Color.white : Color.yellow)
         }
         .foregroundStyle(.white)
+        .lineLimit(1)
+        .fixedSize()
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
         .background(.white.opacity(0.18), in: .capsule)
@@ -370,6 +400,13 @@ extension TripActivityAttributes.ContentState {
         platform: "16", isDeparture: false, cancelled: false,
         progressStart: .now.addingTimeInterval(-10 * 60), progressEnd: .now.addingTimeInterval(14 * 60), product: .regionalExpress)
 
+    static let previewMissedTransfer = Self(
+        lineName: "RE 3", nextStopName: "Berlin Hbf",
+        plannedTime: .now.addingTimeInterval(6 * 60), expectedTime: .now.addingTimeInterval(21 * 60),
+        platform: "4", isDeparture: false, cancelled: false,
+        progressStart: .now.addingTimeInterval(-10 * 60), progressEnd: .now.addingTimeInterval(21 * 60), product: .regionalExpress,
+        warning: "Umstieg in Berlin Hbf klappt nicht mehr")
+
     static let previewTransfer = Self(
         lineName: "ICE 849", nextStopName: "Hannover Hbf",
         plannedTime: .now.addingTimeInterval(8 * 60), expectedTime: .now.addingTimeInterval(8 * 60),
@@ -394,6 +431,7 @@ private let previewAttributes = TripActivityAttributes(originName: "Köln Hbf", 
     TripLiveActivity()
 } contentStates: {
     TripActivityAttributes.ContentState.previewDeparture
+    TripActivityAttributes.ContentState.previewMissedTransfer
 }
 
 #Preview("Dynamic Island kompakt", as: .dynamicIsland(.compact), using: previewAttributes) {

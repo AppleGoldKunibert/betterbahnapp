@@ -95,6 +95,11 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `TrainMessage` (DB delay reasons/notices); `RideMatch`.
 - `Transit/TransitProvider.swift` – `TransitProvider` protocol (`searchStations`, `journeys`,
   `board`, `trip`) and `JourneyQuery`.
+- `Transit/StationSearch.swift` – station-field shortcuts (#90): "b" bus stops, "t" tram stops, "l" nearest
+  first, as a separate word before or after the name. Without "b", bus-only stops are left out of the
+  picker's search (unless nothing else matches); `TransitousProvider.searchStations(_:near:)` with a
+  `StationSearch` passes the modes to the geocoder and filters after `mergingNearbyDuplicates` (which unions modes).
+  The plain `searchStations(String)` (share import etc.) keeps every stop.
 - `Transit/CombinedProvider.swift` – what the app uses: primary `TransitousProvider`, optional
   fallback (none configured), cooldown health check, `BahnDeClient`, `VagonwebClient`, `BahnExpertClient`, `BahnJetztClient`.
 - `Transit/BahnDe/` – bahn.de web API via the `Cloudflare/bahnde-proxy` Worker (same endpoints/headers as Travel::Status::DE::DBRIS):

@@ -102,6 +102,26 @@ public final class CombinedProvider: TransitProvider {
         return try await Self.withDeadline(.milliseconds(2500)) { try await bahnDe.searchStations(query) }
     }
 
+    /// Like `searchStations(_:near:)`; bahn.de's stations don't say which modes stop there, so it's
+    /// only asked when no mode filter is set.
+    public func searchStations(_ search: StationSearch, near location: Coordinate?) async throws -> [Station] {
+        let askBahnDe = search.modes.isEmpty && !Self.isShortQuery(search.text)
+        do {
+            let stations = try await withFallback(deadline: .milliseconds(2500),
+                { try await $0.searchStations(search, near: location) }, { try await $0.searchStations(search, near: location) })
+            if !stations.isEmpty || bahnDe == nil || !askBahnDe { return stations }
+        } catch {
+            try Task.checkCancellation()
+            guard let bahnDe, search.modes.isEmpty else { throw error }
+            let stations = try await Self.withDeadline(.milliseconds(2500)) { try await bahnDe.searchStations(search.text) }
+            return search.ordered(stations, near: location)
+        }
+        try Task.checkCancellation()
+        guard let bahnDe else { return [] }
+        let stations = try await Self.withDeadline(.milliseconds(2500)) { try await bahnDe.searchStations(search.text) }
+        return search.ordered(stations, near: location)
+    }
+
     static func isShortQuery(_ query: String) -> Bool {
         query.trimmingCharacters(in: .whitespacesAndNewlines).count < 3
     }
