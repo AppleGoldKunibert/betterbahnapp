@@ -78,11 +78,12 @@ iCloud abgeglichen.</p>
 <h2>Fahrplandaten</h2>
 <p>Für Suchen, Abfahrtstafeln und Echtzeitdaten schickt die App deine Anfragen (z. B. eingegebene Bahnhofsnamen,
 Bahnhöfe, Zeiten und Zugnummern) an diese Dienste. Dabei sehen sie, wie bei jedem Abruf im Internet, die
-IP-Adresse deines Geräts:</p>
+IP-Adresse deines Geräts. Die App nennt sich dabei mit Name, Version und einer Kontaktadresse (User-Agent),
+aber nicht mit Daten über dich:</p>
 <ul>
 <li><a href="https://transitous.org">Transitous</a> (Verbindungen, Abfahrten, Bahnhofssuche)</li>
 <li><a href="https://www.vagonweb.cz">vagonweb.cz</a> (geplante Wagenreihungen und Zugtypen), <a href="https://bahn.expert">bahn.expert</a> (Zugtypen) und <a href="https://bahn.jetzt">bahn.jetzt</a> (Zugpositionen auf der Karte)</li>
-<li><a href="https://www.openrailwaymap.org">OpenRailwayMap</a> (Kartenkacheln) und Apple Karten</li>
+<li><a href="https://www.openrailwaymap.org">OpenRailwayMap</a> (Kartenkacheln mit Daten von <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>) und Apple Karten</li>
 <li>bahn.de und die Timetables-Schnittstelle der Deutschen Bahn – diese Anfragen laufen über den Server von
 BetterBahn (siehe unten), daher sieht die Deutsche Bahn nicht deine IP-Adresse, sondern die des Servers.</li>
 </ul>
