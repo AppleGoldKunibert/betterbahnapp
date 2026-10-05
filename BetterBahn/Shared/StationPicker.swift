@@ -20,6 +20,8 @@ struct StationInput<Focus: Hashable>: View {
 
     @Environment(AppModel.self) private var model
     @State private var query = ""
+    /// A shortcut ("b", "t", "l") was used once, so the tip explaining them isn't needed any more.
+    @AppStorage("usedStationSearchShortcuts") private var usedShortcuts = false
     @State private var results: [Station] = []
     @State private var isSearching = false
     @State private var error: Error?
@@ -106,6 +108,7 @@ struct StationInput<Focus: Hashable>: View {
         .task(id: search) {
             let search = self.search
             guard isFocused, search.text.count >= 2 else { results = []; return }
+            if search.hasShortcuts { usedShortcuts = true }
             try? await Task.sleep(for: .milliseconds(250)) // debounce
             guard !Task.isCancelled else { return }
             isSearching = true
@@ -169,7 +172,7 @@ struct StationInput<Focus: Hashable>: View {
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 10)
             }
-            if query.isEmpty {
+            if query.isEmpty, !usedShortcuts {
                 Text("Tipp: „b“ vor oder hinter dem Namen sucht Bushaltestellen, „t“ Trams, „l“ sortiert nach Entfernung.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
