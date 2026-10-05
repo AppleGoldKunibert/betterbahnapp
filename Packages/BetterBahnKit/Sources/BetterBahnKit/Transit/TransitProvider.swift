@@ -40,6 +40,9 @@ public protocol TransitProvider: Sendable {
     /// Like `searchStations(_:)`, but with the user's `location` (if known) so nearer train stations
     /// can come first. Providers that can't use it just ignore it.
     func searchStations(_ query: String, near location: Coordinate?) async throws -> [Station]
+    /// The station picker's search, with its shortcuts (`StationSearch`). Providers that don't know
+    /// a stop's modes ignore `modes` and only sort by distance.
+    func searchStations(_ search: StationSearch, near location: Coordinate?) async throws -> [Station]
     func journeys(_ query: JourneyQuery) async throws -> JourneyPage
     /// `products` lets a provider that supports server-side mode filtering (e.g. Transitous) avoid
     /// having rare long-distance trains crowded out of a fixed-size result page by frequent local ones.
@@ -50,6 +53,10 @@ public protocol TransitProvider: Sendable {
 public extension TransitProvider {
     func searchStations(_ query: String, near location: Coordinate?) async throws -> [Station] {
         try await searchStations(query)
+    }
+
+    func searchStations(_ search: StationSearch, near location: Coordinate?) async throws -> [Station] {
+        search.ordered(try await searchStations(search.text, near: location), near: location)
     }
 
     func departures(at station: Station, date: Date = .now, duration: Int = 60, products: Set<Product> = Set(Product.allCases)) async throws -> [BoardEntry] {

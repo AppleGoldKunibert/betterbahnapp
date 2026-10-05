@@ -269,6 +269,18 @@ struct TripContent: View {
                     Text(exitOnly ? "Tippe auf einen Halt, um dort auszusteigen."
                                   : "Tippe auf Halte, um Ein- und Ausstieg zu wählen.")
                     Spacer()
+                    if !exitOnly, boardingID != nil {
+                        Button("Zurücksetzen", systemImage: "xmark.circle.fill") {
+                            withAnimation(.snappy) {
+                                boardingID = nil
+                                exitID = nil
+                            }
+                        }
+                        .labelStyle(.titleAndIcon)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.brand)
+                        .accessibilityHint("Hebt Ein- und Ausstieg auf")
+                    }
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -388,7 +400,14 @@ struct TripContent: View {
     private func select(_ index: Int) {
         let stop = trip.stopovers[index]
         withAnimation(.snappy) {
-            if let boardingIndex, index > boardingIndex {
+            if !exitOnly, stop.id == exitID {
+                // Tapping the exit again takes it back.
+                exitID = nil
+            } else if !exitOnly, stop.id == boardingID {
+                // Tapping the boarding stop again clears the whole selection, so another one can be picked.
+                boardingID = nil
+                exitID = nil
+            } else if let boardingIndex, index > boardingIndex {
                 exitID = stop.id
             } else if !exitOnly {
                 boardingID = stop.id
