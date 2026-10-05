@@ -10,25 +10,58 @@ import Testing
     @Test func displayNameListsCoupledTrainsLowestFirst() {
         var line = ice950
         #expect(line.displayName == "ICE 950")
-        line.coupledNames = ["ICE 940"]
+        line.coupledTrains = [.init(name: "ICE 940", direction: "Düsseldorf Hbf")]
         #expect(line.displayName == "ICE 940 / 950")
-        line.coupledNames = ["IC 2048"]
+        line.coupledTrains = [.init(name: "IC 2048", direction: nil)]
         #expect(line.displayName == "IC 2048 / ICE 950")
     }
 
     @Test func linesSavedBeforeCoupledNamesStillDecode() throws {
         let json = #"{"name": "ICE 950", "number": "950", "product": "highSpeed"}"#
         let line = try JSONDecoder().decode(Line.self, from: Data(json.utf8))
-        #expect(line.coupledNames == nil)
+        #expect(line.coupledTrains == nil)
         #expect(line.displayName == "ICE 950")
     }
 
     @Test func coupledTrainNumbersMatchReservationsAndSearches() {
         var line = ice950
-        line.coupledNames = ["ICE 940"]
+        line.coupledTrains = [.init(name: "ICE 940", direction: "Düsseldorf Hbf")]
         #expect(DBShareImporter.matches("ICE 940", line))
         #expect(TrainRoutePlanner.matches("ice940", line))
         #expect(!DBShareImporter.matches("ICE 941", line))
+    }
+
+    /// The plan names both places the coupled trains go on to, and checking in picks one of them.
+    @Test func legCanBeRiddenAsTheCoupledTrain() throws {
+        var leg = try leg()
+        leg.line?.coupledTrains = [.init(name: "ICE 940", direction: "Düsseldorf Hbf")]
+        #expect(leg.directionDescription == "Köln Hbf / Düsseldorf Hbf")
+
+        let ice940 = leg.riding(.init(name: "ICE 940", direction: "Düsseldorf Hbf"))
+        #expect(ice940.line?.name == "ICE 940")
+        #expect(ice940.line?.number == "940")
+        #expect(ice940.direction == "Düsseldorf Hbf")
+        #expect(ice940.line?.coupledTrains == [.init(name: "ICE 950", direction: "Köln Hbf")])
+        #expect(ice940.line?.displayName == "ICE 940 / 950")
+    }
+
+    /// bahn.de lists both halves; for a coupled leg both trainsets are the train ridden.
+    @Test func formationOfACoupledLegNamesBothTrainsets() throws {
+        let json = #"""
+        {"groups": [
+            {"name": "ICE9228", "transport": {"category": "ICE", "number": 946}, "vehicles": []},
+            {"name": "ICE9203", "transport": {"category": "ICE", "number": 956}, "vehicles": []}
+        ]}
+        """#
+        let response = try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data(json.utf8))
+        #expect(BahnDeClient.formation(from: response, category: "ICE", number: 946).unitSummary == "Tz 9228")
+        let both = BahnDeClient.coachSequence(from: response, category: "ICE", number: 946, coupledNumbers: [956])
+        #expect(both.formation.unitSummary == "Tz 9228 + 9203")
+        #expect(both.groups.map(\.isRequestedTrain) == [true, true])
+
+        var line = Line(name: "ICE 946", number: "946", product: .highSpeed, operatorName: nil)
+        line.coupledTrains = [.init(name: "ICE 956", direction: "Köln Hbf")]
+        #expect(line.coupledNumbers == ["956"])
     }
 
     func entry(_ name: String, number: String, otherEnd: String, platform: String = "5", minute: Int = 11,
@@ -93,9 +126,9 @@ import Testing
         defer { session.invalidateAndCancel() }
         let leg = try leg()
 
-        let coupled = await provider.coupledTrainNames(for: [leg])
+        let coupled = await provider.coupledTrains(for: [leg])
 
-        #expect(coupled[leg.id] == ["ICE 940"])
+        #expect(coupled[leg.id] == [.init(name: "ICE 940", direction: "Düsseldorf Hbf")])
         let journeys = CombinedProvider.applying(coupled, to: [Journey(legs: [leg], source: .transitous)])
         #expect(journeys.first?.legs.first?.line?.displayName == "ICE 940 / 950")
     }
@@ -108,7 +141,7 @@ import Testing
         defer { session.invalidateAndCancel() }
         let leg = try leg()
 
-        #expect(await provider.coupledTrainNames(for: [leg]).isEmpty)
+        #expect(await provider.coupledTrains(for: [leg]).isEmpty)
     }
 }
 

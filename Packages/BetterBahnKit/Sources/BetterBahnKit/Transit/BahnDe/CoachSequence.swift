@@ -105,12 +105,15 @@ extension CoachSequence.Coach.Kind {
 }
 
 extension BahnDeClient {
-    static func coachSequence(from response: SequenceResponse, category: String, number: Int?) -> CoachSequence {
+    static func coachSequence(from response: SequenceResponse, category: String, number: Int?,
+                              coupledNumbers: Set<Int> = []) -> CoachSequence {
         let groups = response.groups ?? []
         let requestedNumbers = Set(groups.compactMap(\.transport?.number))
+        // Trains coupled to it for the whole ride are just as much the train asked for.
+        let wanted = coupledNumbers.union([number].compactMap(\.self))
         // Without train numbers every group counts as the requested train.
         let isRequested = { (group: SequenceResponse.Group) in
-            requestedNumbers.contains(number ?? -1) ? group.transport?.number == number : true
+            requestedNumbers.contains(number ?? -1) ? group.transport?.number.map(wanted.contains) ?? false : true
         }
 
         let platform = response.platform
@@ -172,6 +175,6 @@ extension BahnDeClient {
             coaches: coaches,
             travelsTowardsPlatformEnd: towardsEnd,
             differsFromSchedule: response.sequenceStatus == "DIFFERS_FROM_SCHEDULE",
-            formation: formation(from: response, category: category, number: number))
+            formation: formation(from: response, category: category, number: number, coupledNumbers: coupledNumbers))
     }
 }

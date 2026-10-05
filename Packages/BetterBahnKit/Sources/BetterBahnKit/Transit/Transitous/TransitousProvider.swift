@@ -7,8 +7,8 @@ public struct TransitousProvider: TransitProvider {
     public let source = DataSource.transitous
     public var baseURL: URL
     let http: HTTPClient
-    /// `coupledTrainNames(for:)` answers per leg; the timetable doesn't change during the day.
-    private let coupledCache = ExpiringCache<[String]>()
+    /// `coupledTrains(for:)` answers per leg; the timetable doesn't change during the day.
+    private let coupledCache = ExpiringCache<[Line.CoupledTrain]>()
 
     public init(baseURL: URL = TransitousProvider.defaultBaseURL, http: HTTPClient = HTTPClient()) {
         self.baseURL = baseURL
@@ -638,7 +638,7 @@ public struct TransitousProvider: TransitProvider {
     }
 
     /// Folds board rows of trains coupled together ("Doppeltraktion" under two numbers, e.g. ICE 941
-    /// and ICE 951 leaving Hamm together for Berlin) into one row naming both (`Line.coupledNames`).
+    /// and ICE 951 leaving Hamm together for Berlin) into one row naming both (`Line.coupledTrains`).
     /// Recognized by the same kind of train at the same planned time and platform, going to (or
     /// coming from) the same place – trains that split or join here differ in that place and stay apart.
     static func combiningCoupledTrains(_ entries: [BoardEntry]) -> [BoardEntry] {
@@ -655,7 +655,9 @@ public struct TransitousProvider: TransitProvider {
                     // The row with live data leads, so the board shows the delay.
                     var merged = existing.time.actual == nil && entry.time.actual != nil ? entry : existing
                     let other = merged.tripId == entry.tripId ? existing : entry
-                    merged.line.coupledNames = (merged.line.coupledNames ?? []) + [other.line.name] + (other.line.coupledNames ?? [])
+                    merged.line.coupledTrains = (merged.line.coupledTrains ?? [])
+                        + [Line.CoupledTrain(name: other.line.name, direction: other.kind == .departures ? other.otherEnd : nil)]
+                        + (other.line.coupledTrains ?? [])
                     result[index] = merged
                     continue outer
                 }
@@ -665,45 +667,45 @@ public struct TransitousProvider: TransitProvider {
         return result
     }
 
-    /// For each long-distance leg, the names of the trains coupled to it from its origin all the way
+    /// For each long-distance leg, the trains coupled to it from its origin all the way
     /// to its destination, keyed by `Leg.id`: Transitous routes over just one of them (e.g. ICE 950
     /// from Berlin to Hamm, while ICE 940 runs in the same consist up to Hamm, where they split), so
     /// the other one is looked up among the arrivals at the destination and checked against its own
     /// departure at the origin. Legs without coupled trains, or that couldn't be checked, are left out.
-    public func coupledTrainNames(for legs: [Leg]) async -> [String: [String]] {
+    public func coupledTrains(for legs: [Leg]) async -> [String: [Line.CoupledTrain]] {
         let candidates = legs.filter { leg in
             !leg.isWalking && !leg.cancelled && leg.tripId != nil && leg.source == .transitous
                 && (leg.line?.product == .highSpeed || leg.line?.product == .longDistance)
         }
-        var result: [String: [String]] = [:]
-        await withTaskGroup(of: (String, [String]).self) { group in
+        var result: [String: [Line.CoupledTrain]] = [:]
+        await withTaskGroup(of: (String, [Line.CoupledTrain]).self) { group in
             for leg in Dictionary(candidates.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }).values {
                 group.addTask {
                     let key = "\(leg.id)|\(leg.destination.id)|\(leg.arrival.planned.timeIntervalSince1970)"
-                    let names = try? await coupledCache.value(for: key, maxAge: 6 * 3600) { try await coupledTrainNames(for: leg) }
-                    return (leg.id, names ?? [])
+                    let trains = try? await coupledCache.value(for: key, maxAge: 6 * 3600) { try await coupledTrains(for: leg) }
+                    return (leg.id, trains ?? [])
                 }
             }
-            for await (id, names) in group where !names.isEmpty { result[id] = names }
+            for await (id, trains) in group where !trains.isEmpty { result[id] = trains }
         }
         return result
     }
 
-    private func coupledTrainNames(for leg: Leg) async throws -> [String] {
+    private func coupledTrains(for leg: Leg) async throws -> [Line.CoupledTrain] {
         guard let tripId = leg.tripId, let product = leg.line?.product else { return [] }
         // A couple of minutes around the arrival is enough: coupled trains arrive at the very same minute.
         let arrivals = try await fetchStopTimes(stopId: leg.destination.id, date: leg.arrival.planned.addingTimeInterval(-60),
                                                 duration: 2, kind: .arrivals, modes: MLineInfo.motisModes(for: product), count: 10)
         guard let own = arrivals.first(where: { $0.tripId == tripId }) else { return [] }
-        var names: [String] = []
+        var trains: [Line.CoupledTrain] = []
         for partner in Self.coupledCandidates(of: own, in: arrivals) {
             // Same arrival isn't enough: the other train may have joined on the way (e.g. two halves
             // from Hamburg and Berlin coupled in Hannover), so it must leave the leg's origin with it too.
             guard let trip = try? await trip(id: partner.tripId),
                   Self.departs(trip, from: leg.origin, at: leg.departure.planned) else { continue }
-            names.append(partner.lineInfo.toLine().name)
+            trains.append(Line.CoupledTrain(name: partner.lineInfo.toLine().name, direction: trip.direction))
         }
-        return names
+        return trains
     }
 
     /// Arrivals of other trains of the same kind at the same planned minute and platform as `own`.

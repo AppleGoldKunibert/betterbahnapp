@@ -53,10 +53,50 @@ public struct Line: Codable, Sendable, Hashable {
     /// 3307) – what DB's dispatching feed knows the train by.
     public var tripNumber: String?
 
-    /// Other trains coupled to this one for the whole stretch ridden, each under its own number
+    /// Another train coupled to this one for the whole stretch ridden, under its own number.
+    public struct CoupledTrain: Codable, Sendable, Hashable {
+        /// "ICE 940"
+        public var name: String
+        /// Where that train goes, which can be past the stretch ridden ("Düsseldorf Hbf").
+        public var direction: String?
+
+        public init(name: String, direction: String?) {
+            self.name = name
+            self.direction = direction
+        }
+    }
+
+    /// Trains coupled to this one for the whole stretch ridden, each under its own number
     /// ("Doppeltraktion", e.g. ICE 950 that runs together with ICE 940 from Berlin to Hamm, where
     /// they split). Riding either is the same, so they are shown as one (`displayName`).
-    public var coupledNames: [String]?
+    public var coupledTrains: [CoupledTrain]?
+
+    public var coupledNames: [String]? { coupledTrains?.map(\.name) }
+
+    /// The numbers of the coupled trains ("940"), for bahn.de's coach sequence.
+    public var coupledNumbers: [String] {
+        (coupledTrains ?? []).compactMap { Self.trailingNumber($0.name) }
+    }
+
+    /// This train ridden as the coupled train `name` instead: that one's name and number lead, this
+    /// one becomes a coupled train going `direction`.
+    public func riding(_ train: CoupledTrain, ownDirection direction: String?) -> Line {
+        guard let index = coupledTrains?.firstIndex(of: train) else { return self }
+        var line = self
+        var others = coupledTrains ?? []
+        others[index] = CoupledTrain(name: name, direction: direction)
+        line.coupledTrains = others
+        line.name = train.name
+        line.number = Self.trailingNumber(train.name)
+        line.tripNumber = nil
+        line.alternateName = nil
+        return line
+    }
+
+    private static func trailingNumber(_ name: String) -> String? {
+        guard let last = name.split(separator: " ").last, last.allSatisfy(\.isNumber) else { return nil }
+        return String(last)
+    }
 
     /// The number to look this train up by in DB's own feed.
     public var dispatchNumber: String? { tripNumber ?? number }
@@ -86,8 +126,8 @@ public struct Line: Codable, Sendable, Hashable {
     }
 
     public init(name: String, number: String?, product: Product, operatorName: String?, alternateName: String? = nil,
-                tripNumber: String? = nil, coupledNames: [String]? = nil) {
-        self.coupledNames = coupledNames
+                tripNumber: String? = nil, coupledTrains: [CoupledTrain]? = nil) {
+        self.coupledTrains = coupledTrains
         self.tripNumber = tripNumber
         self.name = name
         self.number = number
@@ -390,4 +430,24 @@ public struct Trip: Codable, Sendable, Hashable {
 
     public var origin: Station? { stopovers.first?.station }
     public var destination: Station? { stopovers.last?.station }
+}
+
+public extension Leg {
+    /// "Düsseldorf Hbf / Köln Hbf" when coupled trains go on to different places, otherwise `direction`.
+    var directionDescription: String? {
+        var directions: [String] = []
+        for direction in [direction] + (line?.coupledTrains ?? []).map(\.direction) {
+            if let direction, !direction.isEmpty, !directions.contains(direction) { directions.append(direction) }
+        }
+        return directions.isEmpty ? nil : directions.joined(separator: " / ")
+    }
+
+    /// This leg ridden as one of its coupled trains (e.g. to check in under that train's number).
+    func riding(_ train: Line.CoupledTrain) -> Leg {
+        guard let line else { return self }
+        var leg = self
+        leg.line = line.riding(train, ownDirection: direction)
+        leg.direction = train.direction ?? direction
+        return leg
+    }
 }
