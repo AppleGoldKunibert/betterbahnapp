@@ -34,7 +34,7 @@ struct JourneyResultsView: View {
 
     /// Only routes that fulfil every train requirement are shown once one is set.
     private var visibleJourneys: [Journey] {
-        requirements.isEmpty ? journeys : (plan?.journeys ?? [])
+        requirements.isEmpty ? journeys : (plan?.journeys ?? []).removingDuplicateIDs()
     }
 
     /// Fastest connection without any train requirement, for comparison.
@@ -431,7 +431,7 @@ struct JourneyResultsView: View {
             }
             source = page?.source ?? model.provider.source
             if cursor == nil {
-                journeys = result
+                journeys = result.removingDuplicateIDs()
                 // The first connection is the one most likely opened next: have its live data ready.
                 if let first = result.first(where: { ($0.departure?.best ?? .distantFuture) > .now }) {
                     model.prepareLiveData(for: first)
@@ -439,10 +439,10 @@ struct JourneyResultsView: View {
                 earlierCursor = page?.earlierCursor
                 laterCursor = page?.laterCursor
             } else if prepend {
-                journeys = result + journeys
+                journeys = (result + journeys).removingDuplicateIDs()
                 earlierCursor = page?.earlierCursor
             } else {
-                journeys += result
+                journeys = (journeys + result).removingDuplicateIDs()
                 laterCursor = page?.laterCursor
             }
             error = nil

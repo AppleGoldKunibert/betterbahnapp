@@ -51,14 +51,14 @@ public extension Journey {
         var issues: [ConnectionIssue] = []
         let transit = transitLegs
         for leg in transit where leg.cancelled {
-            issues.append(.legCancelled(line: leg.line?.name ?? "Zug", from: leg.origin.name, to: leg.destination.name))
+            issues.append(.legCancelled(line: leg.line?.name ?? "Zug", from: leg.origin.displayName, to: leg.destination.displayName))
         }
         guard transit.count > 1 else { return issues }
         for index in 1..<transit.count {
             let arriving = transit[index - 1], departing = transit[index]
             guard !arriving.cancelled, !departing.cancelled else { continue }
             let buffer = Int(((departing.departure.best.timeIntervalSince(arriving.arrival.best)) / 60).rounded(.down))
-            let station = departing.origin.name
+            let station = departing.origin.displayName
             let a = arriving.line?.name ?? "Zug", d = departing.line?.name ?? "Zug"
             if buffer < minimumTransfer {
                 issues.append(.transferMissed(at: station, arrivingLine: a, departingLine: d, bufferMinutes: buffer))

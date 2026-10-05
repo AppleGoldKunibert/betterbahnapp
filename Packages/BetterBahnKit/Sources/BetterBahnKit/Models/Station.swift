@@ -101,6 +101,21 @@ public struct Station: Codable, Sendable, Hashable, Identifiable {
     /// the name DB itself uses for them.
     private static let vbbTownNames: [String: String] = ["Bernau": "Bernau (bei Berlin)"]
 
+    /// DELFI "<town>, Bahnhof" stations whose name leaves out the river/region DB adds to tell the
+    /// town apart, e.g. the RE 3's headsign "Schwedt, Bahnhof" for DB's "Schwedt (Oder)" (#85).
+    private static let delfiTownNames: [String: String] = [
+        "Schwedt": "Schwedt (Oder)",
+        "Lübben": "Lübben (Spreewald)",
+        "Lübbenau": "Lübbenau (Spreewald)",
+        "Fürstenwalde": "Fürstenwalde (Spree)",
+        "Forst": "Forst (Lausitz)",
+        "Finsterwalde": "Finsterwalde (Niederlausitz)",
+        "Müncheberg": "Müncheberg (Mark)",
+        "Seelow": "Seelow (Mark)",
+        "Storkow": "Storkow (Mark)",
+        "Falkenberg/E.": "Falkenberg (Elster)",
+    ]
+
     /// User-facing name. The "<stop> (<city>)" rewrite ("S Spandau Bhf (Berlin)" -> "Berlin-Spandau")
     /// is only applied to VBB-style names - an "S "/"U " prefix or a "… Bhf" stop - since elsewhere
     /// the part in brackets tells apart same-named towns ("Böhlen (b. Leipzig)", "Borna (Leipzig)")
@@ -109,7 +124,10 @@ public struct Station: Codable, Sendable, Hashable, Identifiable {
         var name = rawName.trimmingCharacters(in: .whitespaces)
         // DELFI names many stations "<town>, Bahnhof" ("Friesack (Mark), Bahnhof") - the town alone
         // is what DB calls them.
-        if name.hasSuffix(", Bahnhof") { name.removeLast(", Bahnhof".count) }
+        if name.hasSuffix(", Bahnhof") {
+            name.removeLast(", Bahnhof".count)
+            name = delfiTownNames[name] ?? name
+        }
         // DB's own names leave out the space before the bracket ("Bernau(b Berlin)", "Frankfurt(Oder)").
         name = name.replacingOccurrences(of: #"(?<=\p{L})\("#, with: " (", options: .regularExpression)
 
