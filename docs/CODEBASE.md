@@ -123,7 +123,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   one (`Line.coupledTrains` with each train's direction, `displayName` "ICE 940 / 950",
   `Leg.directionDescription`): board rows by same time/platform/destination (`combiningCoupledTrains`), journey
   legs by `coupledTrains(for:)` (same arrival at the destination, checked against the other train's departure at
-  the origin; called from `CombinedProvider.journeys`). Their Wagenreihung/Tz include both halves
+  the origin; called from `CombinedProvider.journeys` with a 3 s deadline, and again from `JourneyRefresher.refresh`
+  for legs the search had no time for). Their Wagenreihung/Tz include both halves
   (`FormationRequest.coupledNumbers`), each part labelled with its train, destination and Tz; a Träwelling
   check-in asks which train you sit in (`Leg.riding(_:)`). `CoupledTrain.tripId` lets `TripView`/`LegTripSheet`
   switch between the trains' own stops (`Line.runs(ownDirection:ownTripId:)`).

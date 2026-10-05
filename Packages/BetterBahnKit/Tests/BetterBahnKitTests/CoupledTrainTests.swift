@@ -149,6 +149,22 @@ import Testing
         #expect(journeys.first?.legs.first?.line?.displayName == "ICE 940 / 950")
     }
 
+    /// A journey's refresh finds coupled trains the search had no time for, but doesn't look again
+    /// for legs that already know theirs.
+    @Test func journeyRefreshLooksUpOnlyLegsNotCheckedYet() async throws {
+        HammArrivalsProtocol.ice940Origin.withLock { $0 = ("berlin", "Berlin Hbf", "2026-10-05T08:39:00Z") }
+        let (transitous, session) = provider(HammArrivalsProtocol.self)
+        defer { session.invalidateAndCancel() }
+        let combined = CombinedProvider(primary: transitous, fallback: MockProvider(source: .transitous), bahnDe: nil)
+        var leg = try leg()
+
+        let found = await combined.coupledTrains(in: [Journey(legs: [leg], source: .transitous)], deadline: .seconds(5))
+        #expect(found[leg.id]?.map(\.name) == ["ICE 940"])
+
+        leg.line?.coupledTrains = []
+        #expect(await combined.coupledTrains(in: [Journey(legs: [leg], source: .transitous)], deadline: .seconds(5)).isEmpty)
+    }
+
     /// The same arrival, but ICE 940 came from Hamburg and was only coupled on the way: riding from
     /// Berlin, only ICE 950 gets you there.
     @Test func journeyLegIgnoresATrainJoinedOnTheWay() async throws {

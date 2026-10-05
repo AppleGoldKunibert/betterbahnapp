@@ -527,8 +527,14 @@ struct LegTripSheet: View {
             return
         }
         do {
-            let loaded = try await model.provider.trip(id: tripId, source: leg.source)
+            var loaded = try await model.provider.trip(id: tripId, source: leg.source)
             guard tripId == self.tripId else { return }
+            // The leg's own line knows the trains coupled to it, so the trainsets of both show.
+            if tripId == leg.tripId {
+                loaded.line = leg.line ?? loaded.line
+            } else if let train = runs.first(where: { $0.tripId == tripId }) {
+                loaded.line = leg.line?.riding(train, ownDirection: leg.direction, ownTripId: leg.tripId) ?? loaded.line
+            }
             error = nil
             // Live data first, like `TripView.load()`.
             if let timetables = model.timetablesClient {

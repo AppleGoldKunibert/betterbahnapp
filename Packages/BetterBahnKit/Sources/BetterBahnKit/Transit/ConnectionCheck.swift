@@ -84,6 +84,8 @@ public struct JourneyRefresher: Sendable {
 
     public func refresh(_ journey: Journey, now: Date = .now) async -> Journey {
         var updated = journey
+        // Coupled trains the search had no time to find (see `CombinedProvider.journeys`).
+        async let coupled = provider.coupledTrains(in: [journey], deadline: .seconds(6))
         // Legs are looked up side by side, so a journey with transfers loads as fast as its slowest leg.
         await withTaskGroup(of: (Int, Leg).self) { group in
             for (index, leg) in journey.legs.enumerated() {
@@ -96,7 +98,7 @@ public struct JourneyRefresher: Sendable {
         if let bahnDe = provider.bahnDe, let named = await bahnDe.correctingTrainNames(in: [updated]).first {
             updated = named
         }
-        return updated
+        return CombinedProvider.applying(await coupled, to: [updated]).first ?? updated
     }
 
     private func refresh(_ originalLeg: Leg, now: Date) async -> Leg {

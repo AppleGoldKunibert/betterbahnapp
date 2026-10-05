@@ -459,7 +459,7 @@ struct LegCard: View {
                                       color: color, size: 38)
                     VStack(alignment: .leading, spacing: 2) {
                         // Coupled trains have a long name; their series tag goes below it rather than being cut off.
-                        TrainNameRow(name: leg.line?.displayName ?? "Zug", wrapsTag: leg.line?.coupledTrains?.isEmpty == false) {
+                        TrainNameRow(name: leg.line?.displayName ?? "Zug") {
                             TrainSeriesTag(leg: leg)
                         }
                         if let direction = leg.directionDescription {
