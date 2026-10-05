@@ -279,6 +279,33 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(TransitousProvider.busierStop(for: station, among: [sncf, quiet]) == nil)
     }
 
+    /// Real-world board at Berlin Gesundbrunnen: an extra S1 to Frohnau DB added at short notice came
+    /// without a line ("?", mode OTHER). It takes the line of the other trains to Frohnau; one to a
+    /// destination two lines go to stays unknown.
+    @Test func boardNamesUnknownLinesAfterTrainsToTheSameDestination() {
+        let gesundbrunnen = Station(id: "g", name: "Berlin Gesundbrunnen", coordinate: nil, evaNumber: nil, source: .transitous)
+        func entry(_ name: String, _ product: Product, to otherEnd: String, platform: String?) -> BoardEntry {
+            BoardEntry(kind: .departures, tripId: UUID().uuidString, station: gesundbrunnen,
+                       line: Line(name: name, number: nil, product: product, operatorName: nil), otherEnd: otherEnd,
+                       time: TimeInfo(planned: .now, actual: nil), platform: PlatformInfo(planned: platform, actual: nil),
+                       cancelled: false, terminatesOrOriginatesHere: false, remarks: [], source: .transitous)
+        }
+        let entries = [
+            entry("S1", .suburban, to: "Berlin-Frohnau", platform: "4"),
+            entry("S26", .suburban, to: "Berlin-Blankenburg", platform: "4"),
+            entry("? ", .other, to: "Berlin-Frohnau", platform: "4"),
+            entry("S25", .suburban, to: "Berlin-Hennigsdorf", platform: "4"),
+            entry("RE5", .regionalExpress, to: "Berlin-Hennigsdorf", platform: "6"),
+            entry("?", .other, to: "Berlin-Hennigsdorf", platform: nil),
+        ]
+
+        let named = TransitousProvider.namingUnknownLines(entries)
+
+        #expect(named[2].line.name == "S1")
+        #expect(named[2].line.product == .suburban)
+        #expect(named[5].line.name == "?")
+    }
+
     /// German train stations first, then the listed neighbours' train stations (AT, CH, NL, PL, CZ,
     /// in that order), then German buses, then German U-Bahn, then everything else.
     @Test func searchRankOrdersByCountryAndMode() {

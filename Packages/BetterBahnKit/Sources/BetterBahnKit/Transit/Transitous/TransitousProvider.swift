@@ -1241,7 +1241,8 @@ public struct TransitousProvider: TransitProvider {
         let entries = Self.mergeBorderSplitDuplicates(stopTimes, kind: kind)
             .compactMap { $0.toEntry(kind: kind) }
             .filter { $0.time.planned <= end }
-        let deduplicated = Self.combiningCoupledTrains(Self.deduplicated(entries)).sorted { $0.time.planned < $1.time.planned }
+        let deduplicated = Self.namingUnknownLines(Self.combiningCoupledTrains(Self.deduplicated(entries)))
+            .sorted { $0.time.planned < $1.time.planned }
         return await withCorrectedLongDistanceEnds(deduplicated, kind: kind)
     }
 
@@ -1311,6 +1312,30 @@ public struct TransitousProvider: TransitProvider {
     private static func namesContinuation(headsign: String?, ownEnd: MPlace?) -> Bool {
         guard let headsign, let ownEnd else { return false }
         return Station.normalize(headsign) != Station.normalize(ownEnd.stationName)
+    }
+
+    /// Extra trains DB adds at short notice reach Transitous without a line ("?", mode OTHER): an S1 to
+    /// Frohnau at Berlin Gesundbrunnen showed as "?". Such a row takes the line of the other trains to the
+    /// same destination, when they all run as one line (preferring those at the same platform).
+    static func namingUnknownLines(_ entries: [BoardEntry]) -> [BoardEntry] {
+        entries.map { entry in
+            guard isUnknown(entry.line), let otherEnd = entry.otherEnd else { return entry }
+            let sameEnd = entries.filter { $0.otherEnd == otherEnd && !isUnknown($0.line) }
+            let samePlatform = sameEnd.filter { $0.platform.planned != nil && $0.platform.planned == entry.platform.planned }
+            for candidates in [samePlatform, sameEnd] {
+                let lines = Set(candidates.map { $0.line.name })
+                guard lines.count == 1, let known = candidates.first?.line else { continue }
+                var named = entry
+                named.line = Line(name: known.name, number: known.number, product: known.product,
+                                  operatorName: known.operatorName)
+                return named
+            }
+            return entry
+        }
+    }
+
+    static func isUnknown(_ line: Line) -> Bool {
+        line.product == .other && line.name.trimmingCharacters(in: CharacterSet(charactersIn: "? ")).isEmpty
     }
 
     /// Merges board rows that are almost certainly the same physical departure. Transitous stitches
