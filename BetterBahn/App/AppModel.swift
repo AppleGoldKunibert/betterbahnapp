@@ -647,15 +647,38 @@ final class AppModel {
 
     /// The planned Wagenreihung from vagonweb.cz, for when bahn.de has no coach sequence (yet), e.g.
     /// days ahead. Without platform positions; vagonweb caches its pages itself.
-    func plannedCoachSequence(for request: BahnDeClient.FormationRequest) async -> CoachSequence? {
+    /// Turned round where the train changes direction on the way (Kopfbahnhof, or vagonweb's note); for
+    /// that the train's stops before the request's station are needed, from the request or its trip.
+    /// - Parameter direction: false when only the coaches matter (comparing with bahn.de's sequence).
+    func plannedCoachSequence(for request: BahnDeClient.FormationRequest, direction: Bool = true) async -> CoachSequence? {
+        var route: [String]?
+        if direction, let before = await stopsBefore(request) { route = before + [request.station.name] }
         do {
-            let sequence = try await provider.vagonweb?.coachSequence(for: request)
+            let sequence = try await provider.vagonweb?.coachSequence(for: request, route: route)
             VagonwebBrowser.log.info("Plan-Wagenreihung \(request.category, privacy: .public) \(request.number, privacy: .public): \(sequence.map { "\($0.coaches.count) Wagen" } ?? "keine", privacy: .public)")
             return sequence
         } catch {
             VagonwebBrowser.log.error("Plan-Wagenreihung \(request.category, privacy: .public) \(request.number, privacy: .public): \(String(describing: error), privacy: .public)")
             return nil
         }
+    }
+
+    @ObservationIgnored private var tripStopNames: [String: [String]] = [:]
+
+    /// The train's stops before the request's station: from the request, else from its trip (a leg
+    /// starts mid-run), loaded once per trip.
+    private func stopsBefore(_ request: BahnDeClient.FormationRequest) async -> [String]? {
+        if let before = request.stopsBefore { return before }
+        guard let tripId = request.tripId, let source = request.tripSource else { return nil }
+        var trip = liveTrips.value(for: tripId)
+        if trip == nil, tripStopNames[tripId] == nil {
+            trip = try? await provider.trip(id: tripId, source: source)
+        }
+        if let trip { tripStopNames[tripId] = trip.stopovers.map(\.station.name) }
+        guard let names = tripStopNames[tripId] else { return nil }
+        let key = VagonwebClient.stationKey(request.station.name)
+        guard let index = names.firstIndex(where: { VagonwebClient.stationKey($0) == key }) else { return nil }
+        return Array(names[..<index])
     }
 
     @ObservationIgnored private var refreshLoop: Task<Void, Never>?

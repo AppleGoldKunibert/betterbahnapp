@@ -1809,6 +1809,48 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(sequence.formation.units.first?.number == "9226")
     }
 
+    /// bahn.de flags this ordinary ICE T as differing; compared with the plan nothing does, whichever
+    /// way round the plan stands.
+    @Test func coachSequenceDeviationsFromThePlan() throws {
+        let response = try fixture("bahnde-vehicle-sequence", as: BahnDeClient.SequenceResponse.self)
+        let actual = BahnDeClient.coachSequence(from: response, category: "ICE", number: 117)
+        var plan = actual
+        plan.source = .vagonweb(validFrom: nil, validUntil: nil)
+        plan.coaches = actual.coaches.reversed()
+        #expect(actual.differsFromSchedule)
+        #expect(actual.deviations(fromPlan: plan).isEmpty)
+        #expect(actual.deviations(fromPlan: plan.turned(after: ["Frankfurt (Main) Hbf"])).isEmpty)
+
+        // A second trainset in the plan that didn't come, and a coach in the other class.
+        var double = plan
+        double.coaches += (31...37).map { number in
+            var coach = actual.coaches[1]
+            coach.number = String(number)
+            return coach
+        }
+        double.coaches[6].firstClass = true
+        #expect(actual.deviations(fromPlan: double) == ["Wagen 31–37 fehlen", "Wagen 21: 2. statt 1. Klasse"])
+
+        // A shorter plan: the extra coaches are named.
+        var short = plan
+        short.coaches.removeAll { $0.number == "23" }
+        #expect(actual.deviations(fromPlan: short) == ["Zusätzlich Wagen 23"])
+
+        // Numbered differently: only the counts are compared.
+        var renumbered = plan
+        for index in renumbered.coaches.indices { renumbered.coaches[index].number = "\(index + 1)" }
+        #expect(actual.deviations(fromPlan: renumbered).isEmpty)
+        renumbered.coaches.removeLast()
+        #expect(actual.deviations(fromPlan: renumbered).first == "7 statt 6 Wagen")
+    }
+
+    @Test func coachNumberList() {
+        #expect(CoachSequence.numberList(["25"]) == "25")
+        #expect(CoachSequence.numberList(["23", "21"]) == "21, 23")
+        #expect(CoachSequence.numberList(["39", "31", "32", "33", "35", "36", "37", "38"]) == "31–33, 35–39")
+        #expect(CoachSequence.numberList(["21", "22"]) == "21, 22")
+    }
+
     /// Coupled trains: the other half keeps its own destination, and power cars have no coach number.
     @Test func coachSequenceMarksOtherTrains() throws {
         let json = #"""

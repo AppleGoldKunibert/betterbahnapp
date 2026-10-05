@@ -119,6 +119,11 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `WebPage` (`VagonwebBrowser`, passed in as `browserLoader`). On a first visit vagonweb shows only an "anzeigen" link
   (`VagonwebClient.isGate`); then the compositions come from `ajax_dalsi_razeni_vlak.php` (`plannedCompositionsRequest`).
   Pages are cached per train and timetable year; logs under the `vagonweb` category.
+  vagonweb draws a train as it leaves its first station; the plan is turned round after each change of direction
+  up to the stop (`reversalStations` from vagonweb's note plus `VagonwebClient.terminusStations`, counted along
+  `FormationRequest.stopsBefore` or the leg's trip). bahn.de's `sequenceStatus` ("DIFFERS_FROM_SCHEDULE") is set for
+  nearly every train, so "Abweichende Wagenreihung" comes from `CoachSequence.deviations(fromPlan:)` (missing/extra
+  coaches, class changes; order ignored) against vagonweb's plan.
 - `Transit/BahnExpert/` – bahn.expert, only as fallback for the train type (`TrainTypeLookup`) when bahn.de
   has no coach sequence and vagonweb has none either: it has DB's planned formation (`DB-plan`) for days
   ahead; bahn.de is only asked for departures within `BahnDeClient.formationLookahead` (12 h).

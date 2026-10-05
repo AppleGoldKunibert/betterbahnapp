@@ -34,6 +34,10 @@ public struct VagonwebComposition: Sendable, Hashable {
     public var validFrom: Date?
     public var validUntil: Date?
     public var coaches: [Coach]
+    /// Stations where the train changes direction, from vagonweb's note ("Fahrtrichtungswechsel in
+    /// Frankfurt (Main) Hbf, Basel SBB und Bern, …"). vagonweb draws the composition as it leaves its
+    /// first station, so after an odd number of these the train runs the other way round.
+    public var reversalStations: [String] = []
 
     /// Whether the composition applies on `day` (calendar day, Europe/Berlin).
     public func applies(on day: Date) -> Bool {
@@ -82,8 +86,36 @@ extension VagonwebComposition {
             }
             let coaches = block.components(separatedBy: "<td class='bunka_vozu'").dropFirst().map(coach(from:))
             guard !coaches.isEmpty else { return nil }
-            return VagonwebComposition(validFrom: dates.first, validUntil: dates.count > 1 ? dates[1] : nil, coaches: coaches)
+            return VagonwebComposition(validFrom: dates.first, validUntil: dates.count > 1 ? dates[1] : nil, coaches: coaches,
+                                       reversalStations: reversalStations(fromNotes: block))
         }
+    }
+
+    /// The stations in a composition's "changes direction in …" note. The note's German original
+    /// (the `text` of its "Bad translation?" link) is read first, as it names the stations the way DB does.
+    static func reversalStations(fromNotes block: String) -> [String] {
+        var notes = block.matches(of: #/spatny_preklad2[^>]*text='([^']*)'/#).map { String($0.1).strippingTags }
+        if let info = block.between("class='info_i'>", "</div>") { notes.append(info.strippingTags) }
+        let pattern = #/(?:fahrtrichtungswechsel|richtungswechsel|wechsel der fahrtrichtung|changes? (?:of )?direction|direction change)\s+(?:in|at)\s+(.+)/#.ignoresCase()
+        for note in notes {
+            guard let match = note.firstMatch(of: pattern) else { continue }
+            // The list ends where the note goes on ("…, von Frankfurt bis Basel …", "…, from Frankfurt …").
+            var list = Substring(match.1)
+            if let end = list.firstMatch(of: #/,\s*(?:von|ab|bis|dort|danach|from|until|then)\s|;|\s[–-]\s/#.ignoresCase()) {
+                list = list[..<end.range.lowerBound]
+            }
+            // A sentence ending ("… Leipzig Hbf. Ab …"), but not an abbreviation like "St. Gallen".
+            if let end = list.firstMatch(of: #/[A-Za-zäöüß]{3}\.(?:\s|$)/#) {
+                list = list[..<list.index(end.range.lowerBound, offsetBy: 3)]
+            }
+            let stations = list.replacing(#/\s+(?:und|and)\s+/#, with: ",")
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: ".:"))) }
+                .map { $0.replacing(#/^(?:in|at)\s+/#, with: "") }
+                .filter { !$0.isEmpty }
+            if !stations.isEmpty { return stations }
+        }
+        return []
     }
 
     static func coach(from cell: String) -> Coach {

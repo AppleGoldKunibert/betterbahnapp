@@ -19,6 +19,8 @@ struct CoachSequenceView: View {
     @Environment(AppModel.self) private var model
     @State private var loading = false
     @State private var blocked = false
+    /// What bahn.de's sequence has differently from vagonweb's plan (`CoachSequence.deviations(fromPlan:)`).
+    @State private var deviations: [String] = []
 
     private var station: Station { request.station }
 
@@ -54,17 +56,23 @@ struct CoachSequenceView: View {
             }
         }
         .task {
-            guard sequence == nil else { return }
-            loading = true
-            defer { loading = false }
-            do {
-                sequence = try await model.coachSequence(for: request)
-            } catch TransitError.rateLimited {
-                blocked = true
-            } catch {}
-            if sequence?.coaches.isEmpty ?? true, let planned = await model.plannedCoachSequence(for: request) {
-                sequence = planned
-                blocked = false
+            if sequence == nil {
+                loading = true
+                do {
+                    sequence = try await model.coachSequence(for: request)
+                } catch TransitError.rateLimited {
+                    blocked = true
+                } catch {}
+                if sequence?.coaches.isEmpty ?? true, let planned = await model.plannedCoachSequence(for: request) {
+                    sequence = planned
+                    blocked = false
+                }
+                loading = false
+            }
+            // bahn.de flags nearly every train as differing, so compare with the plan here.
+            if let sequence, sequence.source == .bahnDe, !sequence.coaches.isEmpty,
+               let plan = await model.plannedCoachSequence(for: request, direction: false) {
+                deviations = sequence.deviations(fromPlan: plan)
             }
         }
     }
@@ -89,15 +97,20 @@ struct CoachSequenceView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             if case .vagonweb(let from, let until) = sequence.source {
-                plannedNote(from: from, until: until)
+                plannedNote(sequence, from: from, until: until)
             }
             if let units = sequence.formation.unitDescription ?? sequence.formation.modelSummary {
                 Label(units, systemImage: "tram.fill")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            if sequence.differsFromSchedule {
-                InfoChip(text: "Abweichende Wagenreihung", systemImage: "exclamationmark.triangle.fill", tint: .slightDelay)
+            if !deviations.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    InfoChip(text: "Abweichende Wagenreihung", systemImage: "exclamationmark.triangle.fill", tint: .slightDelay)
+                    Text(deviations.joined(separator: " · "))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             if sequence.hasOtherTrains || sequence.partsGoToDifferentPlaces {
                 InfoChip(text: "Zugteile mit anderem Ziel – auf den Wagen achten", systemImage: "arrow.triangle.branch", tint: .slightDelay)
@@ -106,8 +119,9 @@ struct CoachSequenceView: View {
     }
 
     /// vagonweb's plan is for the whole train, not this stop: no platform positions, and the real
-    /// train can differ (bahn.de has the actual one in the hours before departure).
-    private func plannedNote(from: Date?, until: Date?) -> some View {
+    /// train can differ (bahn.de has the actual one in the hours before departure). Turned round when
+    /// the train changed direction on the way; without its stops the direction is unknown.
+    private func plannedNote(_ sequence: CoachSequence, from: Date?, until: Date?) -> some View {
         let validity: String? = switch (from, until) {
         case let (from?, until?): "gilt \(from.formatted(.dateTime.day().month(.twoDigits).year())) – \(until.formatted(.dateTime.day().month(.twoDigits).year()))"
         default: nil
@@ -117,6 +131,15 @@ struct CoachSequenceView: View {
             Text(["Ohne Gleisabschnitte", validity, "Daten: vagonweb.cz"].compactMap(\.self).joined(separator: " · "))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if sequence.travelsTowardsPlatformEnd == nil {
+                Text("Fahrtrichtung unbekannt")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if !sequence.reversals.isEmpty {
+                Text("Fahrtrichtungswechsel in \(ListFormatter.localizedString(byJoining: sequence.reversals)) berücksichtigt")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

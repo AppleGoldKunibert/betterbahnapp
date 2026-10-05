@@ -175,6 +175,80 @@ private func berlinDate(_ year: Int, _ month: Int, _ day: Int, hour: Int = 12) -
         #expect(try await client.coachSequence(category: "ICE", number: "804", on: berlinDate(2026, 10, 5))?.coaches.count == 16)
     }
 
+    @Test func readsWhereTheTrainChangesDirection() throws {
+        let composition = try #require(VagonwebComposition.scheduled(fromHTML: try vagonwebPage("vagonweb-ice377")).first)
+        #expect(composition.reversalStations == ["Frankfurt (Main) Hbf", "Basel SBB", "Bern"])
+        let ice154 = try #require(VagonwebComposition.scheduled(fromHTML: try vagonwebPage("vagonweb-ice154")).first)
+        #expect(ice154.reversalStations.isEmpty)
+        // English only, and German with "in" repeated and a sentence after it.
+        #expect(VagonwebComposition.reversalStations(fromNotes: "<div class='info_i'><span class=info1d>i</span> Changes direction in Leipzig Hbf, from Leipzig in reverse order</div>")
+            == ["Leipzig Hbf"])
+        #expect(VagonwebComposition.reversalStations(fromNotes: "<div class='info_i'>Fahrtrichtungswechsel in Stuttgart Hbf und in St. Gallen. Ab dort umgekehrt</div>")
+            == ["Stuttgart Hbf", "St. Gallen"])
+        #expect(VagonwebComposition.reversalStations(fromNotes: "<div class='info_i'>quiet zone</div>").isEmpty)
+    }
+
+    @Test func comparesStationNamesLooselyForReversals() {
+        #expect(VagonwebClient.stationKey("Frankfurt (Main) Hbf") == VagonwebClient.stationKey("Frankfurt(Main)Hbf"))
+        #expect(VagonwebClient.stationKey("Frankfurt (M) Hauptbahnhof") == "frankfurtmain")
+        #expect(VagonwebClient.stationKey("Zürich HB") == VagonwebClient.stationKey("Zurich"))
+        #expect(VagonwebClient.stationKey("Basel SBB") != VagonwebClient.stationKey("Basel Bad Bf"))
+    }
+
+    @Test func countsTheReversalsUpToTheStop() {
+        let route = ["Berlin Gesundbrunnen", "Berlin Hbf", "Erfurt Hbf", "Frankfurt(Main)Hbf", "Mannheim Hbf",
+                     "Basel Bad Bf", "Basel SBB", "Olten", "Bern", "Thun", "Interlaken Ost"]
+        let candidates = ["Frankfurt (Main) Hbf", "Basel SBB", "Bern"] + VagonwebClient.terminusStations
+        let at = { (stop: String) in
+            VagonwebClient.reversals(at: stop, route: Array(route[...route.firstIndex(of: stop)!]), in: candidates)
+        }
+        #expect(at("Berlin Hbf") == [])
+        // Leaving Frankfurt it already runs the other way round.
+        #expect(at("Frankfurt(Main)Hbf") == ["Frankfurt(Main)Hbf"])
+        #expect(at("Mannheim Hbf") == ["Frankfurt(Main)Hbf"])
+        #expect(at("Olten")?.count == 2)
+        #expect(at("Thun")?.count == 3)
+        // A train starting at a terminus doesn't change direction there.
+        #expect(VagonwebClient.reversals(at: "Fulda", route: ["Frankfurt (Main) Hbf", "Hanau Hbf", "Fulda"], in: candidates) == [])
+        #expect(VagonwebClient.reversals(at: "Köln Hbf", route: ["Berlin Hbf"], in: candidates) == nil)
+    }
+
+    @Test func plannedSequenceTurnsRoundAfterAReversal() async throws {
+        let html = try vagonwebPage("vagonweb-ice377")
+        let client = VagonwebClient(http: HTTPClient(session: VagonwebStubProtocol.session(number: "377", html: html)))
+        let at = { (name: String) in
+            BahnDeClient.FormationRequest(category: "ICE", number: "377", station: station("x", name), plannedDeparture: berlinDate(2026, 10, 5))
+        }
+        let before = try #require(try await client.coachSequence(for: at("Erfurt Hbf"), route: ["Berlin Hbf", "Erfurt Hbf"]))
+        #expect(before.coaches.first?.number == "1")
+        #expect(before.travelsTowardsPlatformEnd == false)
+        #expect(before.reversals.isEmpty)
+
+        let after = try #require(try await client.coachSequence(for: at("Mannheim Hbf"),
+                                                                route: ["Berlin Hbf", "Frankfurt (Main) Hbf", "Mannheim Hbf"]))
+        #expect(after.coaches.first?.number == "14")
+        #expect(after.coaches.last?.number == "1")
+        #expect(after.coaches.map(\.id) == Array(0..<13))
+        #expect(after.reversals == ["Frankfurt (Main) Hbf"])
+
+        // Without the train's stops the direction stays unknown.
+        let unknown = try #require(try await client.coachSequence(for: at("Mannheim Hbf")))
+        #expect(unknown.travelsTowardsPlatformEnd == nil)
+        #expect(unknown.coaches.first?.number == "1")
+    }
+
+    @Test func formationRequestKnowsTheStopsBefore() throws {
+        let now = berlinDate(2026, 10, 5, hour: 10)
+        let line = Line(name: "ICE 377", number: "377", product: .highSpeed, operatorName: nil)
+        let stops = [("Berlin Hbf", -60.0), ("Frankfurt (Main) Hbf", 30), ("Mannheim Hbf", 70)].map { name, minutes in
+            (station: station(name, name), departure: Optional(TimeInfo(planned: now.addingTimeInterval(minutes * 60), actual: nil)))
+        }
+        let request = try #require(BahnDeClient.formationRequest(line: line, stops: stops, wholeRun: true, now: now))
+        #expect(request.station.name == "Frankfurt (Main) Hbf")
+        #expect(request.stopsBefore == ["Berlin Hbf"])
+        #expect(BahnDeClient.formationRequest(line: line, stops: stops, now: now)?.stopsBefore == nil)
+    }
+
     @Test func withoutBrowserCloudflaresCheckCountsAsBlocked() async throws {
         let challenge = "<html><head><title>Just a moment...</title></head><body><script>window._cf_chl_opt = {}</script></body></html>"
         let client = VagonwebClient(http: HTTPClient(session: VagonwebStubProtocol.session(number: "155", html: challenge, status: 403)))
