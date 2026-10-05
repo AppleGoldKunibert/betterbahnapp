@@ -85,7 +85,7 @@ Bahnhöfe, Zeiten und Zugnummern) an diese Dienste. Dabei sehen sie, wie bei jed
 IP-Adresse deines Geräts:</p>
 <ul>
 <li><a href="https://transitous.org">Transitous</a> (Verbindungen, Abfahrten, Bahnhofssuche)</li>
-<li><a href="https://bahn.expert">bahn.expert</a> (Zugtypen) und <a href="https://bahn.jetzt">bahn.jetzt</a> (Zugpositionen auf der Karte)</li>
+<li><a href="https://www.vagonweb.cz">vagonweb.cz</a> (geplante Wagenreihungen und Zugtypen), <a href="https://bahn.expert">bahn.expert</a> (Zugtypen) und <a href="https://bahn.jetzt">bahn.jetzt</a> (Zugpositionen auf der Karte)</li>
 <li><a href="https://www.openrailwaymap.org">OpenRailwayMap</a> (Kartenkacheln) und Apple Karten</li>
 <li>bahn.de und die Timetables-Schnittstelle der Deutschen Bahn – diese Anfragen laufen über den Server von
 BetterBahn (siehe unten), daher sieht die Deutsche Bahn nicht deine IP-Adresse, sondern die des Servers.</li>

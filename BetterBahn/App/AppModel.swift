@@ -3,6 +3,7 @@ import BetterBahnKit
 import Foundation
 import Network
 import Observation
+import os
 import UserNotifications
 
 @Observable
@@ -40,6 +41,10 @@ final class AppModel {
     var travelPasses: [TravelPass] {
         didSet { TicketStore.savePasses(travelPasses) }
     }
+    /// Live versions of journeys and train runs already loaded once (see `LiveDataCache`), kept on disk
+    /// so after a restart too they show at once while a background refresh runs instead of a spinner.
+    @ObservationIgnored private(set) var liveJourneys = LiveDataCache<Journey>()
+    @ObservationIgnored private(set) var liveTrips = LiveDataCache<Trip>()
     /// Saved journey to open on the Verbindungen tab (set when the Live Activity is tapped);
     /// `ConnectionsView` pushes it and clears this.
     var journeyToOpen: SavedJourney?
@@ -86,7 +91,7 @@ final class AppModel {
     }
 
     init() {
-        provider = CombinedProvider()
+        provider = CombinedProvider(vagonweb: VagonwebClient(browserLoader: { url in try await VagonwebBrowser.shared.html(at: url) }))
         traewelling = TraewellingClient(config: TraewellingConfig())
         // Older versions stored everything in UserDefaults; move the raw bytes into files once
         // (re-encoding everything on every launch is what used to slow the start down).
@@ -96,6 +101,8 @@ final class AppModel {
         recentStations = Storage.load(key: "recentStations") ?? []
         savedJourneys = Storage.load(key: "savedJourneys") ?? []
         trackedManualCheckins = Storage.load(key: "trackedManualCheckins") ?? []
+        liveJourneys = Storage.load(key: "liveJourneys") ?? LiveDataCache()
+        liveTrips = Storage.load(key: "liveTrips") ?? LiveDataCache()
         tickets = TicketStore.load()
         travelPasses = TicketStore.loadPasses()
         manualLiveActivityJourneyID = UserDefaults.standard.string(forKey: "manualLiveActivityJourneyID").flatMap(UUID.init)
@@ -165,6 +172,35 @@ final class AppModel {
     }
 
     var journeyRefresher: JourneyRefresher { JourneyRefresher(provider: provider, timetables: timetablesClient) }
+
+    /// Whether `journey` was already loaded with live data: saved (refreshed in the background, also
+    /// right after launch) or opened or prepared before. Only an unseen one waits for live data.
+    func hasLiveData(for journey: Journey) -> Bool {
+        savedEntry(for: journey) != nil || liveJourneys.value(for: journey.id) != nil
+    }
+
+    func rememberLive(_ journey: Journey) {
+        liveJourneys.store(journey, for: journey.id)
+        let snapshot = liveJourneys
+        Task.detached(priority: .utility) { Storage.save(snapshot, key: "liveJourneys") }
+    }
+
+    func rememberLive(_ trip: Trip) {
+        liveTrips.store(trip, for: trip.id)
+        let snapshot = liveTrips
+        Task.detached(priority: .utility) { Storage.save(snapshot, key: "liveTrips") }
+    }
+
+    /// Loads the live data of a search result before it's opened (the first one), so its plan shows
+    /// without waiting.
+    func prepareLiveData(for journey: Journey) {
+        guard !hasLiveData(for: journey) else { return }
+        let refresher = journeyRefresher
+        Task { [weak self] in
+            let refreshed = await refresher.refresh(journey)
+            self?.rememberLive(refreshed)
+        }
+    }
 
     /// Applies a manual realtime refresh (e.g. pull-to-refresh in the journey detail view) to a
     /// saved journey in place, without touching its version history or already-sent notifications.
@@ -583,18 +619,43 @@ final class AppModel {
 
     @ObservationIgnored private var trainTypeCache: [String: TrainTypeLookup?] = [:]
 
-    /// A train's type ("ICE 4", "ICE 3neo" …) and, for live data, its Tz, from bahn.expert, which has
-    /// DB's planned formation for days ahead. Only the fallback when bahn.de's coach sequence
-    /// (`formation(for:)`) has nothing. Cached per train and day; failed requests are not
-    /// cached so they are retried.
+    /// A train's type ("ICE 4", "ICE 3neo" …) from its planned formation: vagonweb.cz's scheduled
+    /// composition first, bahn.expert (which also has the Tz once DB assigns one) when vagonweb has
+    /// nothing. Only the fallback when bahn.de's coach sequence (`formation(for:)`) has nothing.
+    /// Cached per train and day; failed requests are not cached so they are retried.
     func trainType(for line: Line?, on date: Date) async -> TrainTypeLookup? {
-        guard let ref = BahnDeClient.trainReference(for: line), let bahnExpert = provider.bahnExpert else { return nil }
+        guard let ref = BahnDeClient.trainReference(for: line) else { return nil }
         let day = BahnDeClient.berlinDay(date)
         let key = "\(ref.category) \(ref.number)|\(day)"
         if let cached = trainTypeCache[key] { return cached }
-        guard let lookup = try? await bahnExpert.trainType(category: ref.category, number: ref.number, date: day) else { return nil }
+        if let vagonweb = provider.vagonweb {
+            do {
+                if let lookup = try await vagonweb.trainType(category: ref.category, number: ref.number, on: date) {
+                    trainTypeCache[key] = .some(lookup)
+                    return lookup
+                }
+                VagonwebBrowser.log.info("No ICE series for \(ref.category, privacy: .public) \(ref.number, privacy: .public) on \(day, privacy: .public)")
+            } catch {
+                VagonwebBrowser.log.error("Train type of \(ref.category, privacy: .public) \(ref.number, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
+        }
+        guard let bahnExpert = provider.bahnExpert,
+              let lookup = try? await bahnExpert.trainType(category: ref.category, number: ref.number, date: day) else { return nil }
         trainTypeCache[key] = .some(lookup)
         return lookup
+    }
+
+    /// The planned Wagenreihung from vagonweb.cz, for when bahn.de has no coach sequence (yet), e.g.
+    /// days ahead. Without platform positions; vagonweb caches its pages itself.
+    func plannedCoachSequence(for request: BahnDeClient.FormationRequest) async -> CoachSequence? {
+        do {
+            let sequence = try await provider.vagonweb?.coachSequence(for: request)
+            VagonwebBrowser.log.info("Plan-Wagenreihung \(request.category, privacy: .public) \(request.number, privacy: .public): \(sequence.map { "\($0.coaches.count) Wagen" } ?? "keine", privacy: .public)")
+            return sequence
+        } catch {
+            VagonwebBrowser.log.error("Plan-Wagenreihung \(request.category, privacy: .public) \(request.number, privacy: .public): \(String(describing: error), privacy: .public)")
+            return nil
+        }
     }
 
     @ObservationIgnored private var refreshLoop: Task<Void, Never>?

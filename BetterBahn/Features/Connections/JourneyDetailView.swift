@@ -18,6 +18,10 @@ struct JourneyDetailView: View {
     @State private var showAlternatives = false
     @State private var showJourneyMap = false
     @State private var showJourneyEditor = false
+    /// Set once the live data asked for on opening is in (or took longer than `LoadingDeadline.liveData`),
+    /// so a journey never loaded live before doesn't first show the timetable and then jump to the delays.
+    /// One seen before shows its last live data at once and refreshes in the background.
+    @State private var liveDataLoaded = false
 
     struct LegSelection: Identifiable {
         let index: Int
@@ -27,40 +31,28 @@ struct JourneyDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
-                summaryCard
-                if !readOnly { issuesCard }
-                ForEach(Array(journey.legs.enumerated()), id: \.element.id) { index, leg in
-                    if !leg.isWalking {
-                        LegCard(
-                            leg: leg,
-                            transferBroken: journey.brokenTransferIndices.contains(journey.transitLegs.firstIndex(of: leg) ?? -1),
-                            onReplace: readOnly || !model.settings.trainChoiceEnabled ? nil
-                                : { legToReplace = LegSelection(index: index, leg: leg) },
-                            onReplan: readOnly || !model.settings.editJourneyEnabled ? nil
-                                : { legToReplan = LegSelection(index: index, leg: leg) },
-                            onCheckin: readOnly || !model.settings.traewellingEnabled ? nil : { checkinLeg = leg },
-                            reservation: model.reservation(for: leg, in: journey)
-                        )
-                        if let info = transferInfo(after: leg) {
-                            TransferRow(from: leg, to: info.next, walk: info.walk)
-                        }
-                    }
-                }
-                if !readOnly { historySection }
+            if !liveDataLoaded, loadsLiveDataOnOpen {
+                ProgressView("Lade Echtzeitdaten …")
+                    .containerRelativeFrame([.horizontal, .vertical])
+            } else {
+                plan
             }
-            .padding(.horizontal)
-            .padding(.bottom, 32)
         }
         .refreshable {
             await TimetablesClient.invalidateDelays()
             await refreshRealtime()
         }
         .task {
-            await refreshRecentlyFinished()
-            await fillMissingPlatforms()
-            // Live data right away on opening, instead of only after the first pull-to-refresh.
-            await refreshRealtime()
+            if !readOnly, model.savedEntry(for: journey) == nil, let seen = model.liveJourneys.value(for: journey.id) {
+                journey = seen
+            }
+            await LoadingDeadline.run({ @MainActor in
+                await refreshRecentlyFinished()
+                await fillMissingPlatforms()
+                // Live data right away on opening, instead of only after the first pull-to-refresh.
+                await refreshRealtime()
+            }, showingAfter: LoadingDeadline.liveData) { liveDataLoaded = true }
+            liveDataLoaded = true
             // Keep a saved journey's delays current while it's open.
             while !Task.isCancelled {
                 try? await Task.sleep(for: AppModel.realtimeRefreshInterval)
@@ -113,6 +105,36 @@ struct JourneyDetailView: View {
         }
     }
 
+    private var plan: some View {
+        VStack(spacing: 16) {
+            summaryCard
+            if !readOnly { issuesCard }
+            ForEach(Array(journey.legs.enumerated()), id: \.element.id) { index, leg in
+                if !leg.isWalking {
+                    LegCard(
+                        leg: leg,
+                        transferBroken: journey.brokenTransferIndices.contains(journey.transitLegs.firstIndex(of: leg) ?? -1),
+                        onReplace: readOnly || !model.settings.trainChoiceEnabled ? nil
+                            : { legToReplace = LegSelection(index: index, leg: leg) },
+                        onReplan: readOnly || !model.settings.editJourneyEnabled ? nil
+                            : { legToReplan = LegSelection(index: index, leg: leg) },
+                        onCheckin: readOnly || !model.settings.traewellingEnabled ? nil : { checkinLeg = leg },
+                        reservation: model.reservation(for: leg, in: journey)
+                    )
+                    if let info = transferInfo(after: leg) {
+                        TransferRow(from: leg, to: info.next, walk: info.walk)
+                    }
+                }
+            }
+            if !readOnly { historySection }
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 32)
+    }
+
+    /// Whether opening waits for live data (see the `.task` above): only for a journey not seen live yet.
+    private var loadsLiveDataOnOpen: Bool { !readOnly && !model.hasLiveData(for: journey) }
+
     /// The options to start a re-plan from: this view's own, else whatever was saved with the journey.
     private var replanSearch: ConnectionSearch? { search ?? model.savedEntry(for: journey)?.search }
 
@@ -120,6 +142,7 @@ struct JourneyDetailView: View {
     private func refreshRealtime() async {
         guard !readOnly else { return }
         let refreshed = await model.journeyRefresher.refresh(journey)
+        if model.savedEntry(for: journey) == nil { model.rememberLive(refreshed) }
         guard refreshed != journey else { return }
         if let entry = model.savedEntry(for: journey) {
             model.updateSavedJourneyData(id: entry.id, journey: refreshed)
@@ -132,12 +155,17 @@ struct JourneyDetailView: View {
     /// it's refreshed once more and stored, so it shows the real arrival like the trip view does.
     /// Once neither source has live data any more, the refresh keeps the delays it already had.
     private func refreshRecentlyFinished() async {
-        guard readOnly, let entry = model.pastJourneys.first(where: { $0.journey == journey }),
-              let arrival = journey.arrival?.planned, arrival.addingTimeInterval(SavedJourney.liveDataLifetime) > .now else { return }
+        guard let entry = recentlyFinishedEntry else { return }
         let refreshed = await model.journeyRefresher.refresh(journey)
         guard refreshed != journey else { return }
         model.updateSavedJourneyData(id: entry.id, journey: refreshed)
         withAnimation { journey = refreshed }
+    }
+
+    private var recentlyFinishedEntry: SavedJourney? {
+        guard readOnly, let entry = model.pastJourneys.first(where: { $0.journey == journey }),
+              let arrival = journey.arrival?.planned, arrival.addingTimeInterval(SavedJourney.liveDataLifetime) > .now else { return nil }
+        return entry
     }
 
     /// Saved or imported journeys may still lack a Gleis Transitous didn't have; DB's schedule fills it.
@@ -413,8 +441,11 @@ struct LegCard: View {
                     LiveTrainIconTile(route: LiveTrainRoute(leg: leg), systemImage: leg.line?.product.symbolName ?? "tram.fill",
                                       color: color, size: 38)
                     VStack(alignment: .leading, spacing: 2) {
-                        TrainNameRow(name: leg.line?.name ?? "Zug", wrapsTag: false) { TrainSeriesTag(leg: leg) }
-                        if let direction = leg.direction {
+                        // Coupled trains have a long name; their series tag goes below it rather than being cut off.
+                        TrainNameRow(name: leg.line?.displayName ?? "Zug") {
+                            TrainSeriesTag(leg: leg)
+                        }
+                        if let direction = leg.directionDescription {
                             Text("Richtung \(direction)").font(.caption).foregroundStyle(.secondary).fullTextPopup("Richtung \(direction)")
                         }
                         TrainFormationLabel(leg: leg)

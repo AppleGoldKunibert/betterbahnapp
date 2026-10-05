@@ -164,8 +164,8 @@ public struct DBShareImporter: Sendable {
         guard let line else { return false }
         if TrainRoutePlanner.matches(Line.normalize(name), line) { return true }
         guard let number = trailingNumber(name) else { return false }
-        return [line.number, line.tripNumber, trailingNumber(line.name), line.alternateName.flatMap(trailingNumber)]
-            .contains(number)
+        // A coupled train's number too: a seat reserved in ICE 940 is in the ICE 950 it runs with.
+        return ([line.number, line.tripNumber] + line.allNames.map(trailingNumber)).contains(number)
     }
 
     private static func trailingNumber(_ name: String) -> String? {
