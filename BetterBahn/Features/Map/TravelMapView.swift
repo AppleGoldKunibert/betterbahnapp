@@ -234,9 +234,12 @@ struct TravelMapView: View {
                             Text(item.label).font(.caption2.monospacedDigit())
                         }
                     }
-                    Text("© OpenStreetMap, OpenRailwayMap")
-                        .font(.system(size: 8))
-                        .foregroundStyle(.tertiary)
+                    HStack(spacing: 4) {
+                        Link("© OpenStreetMap", destination: URL(string: "https://www.openstreetmap.org/copyright")!)
+                        Link("OpenRailwayMap", destination: URL(string: "https://www.openrailwaymap.org")!)
+                    }
+                    .font(.system(size: 8))
+                    .tint(.secondary)
                 }
                 .padding(12)
                 .glassEffect(.regular, in: .rect(cornerRadius: 16))
@@ -363,7 +366,7 @@ nonisolated final class HeatPolyline: MKPolyline, @unchecked Sendable {
     var count = 1
 }
 
-/// OpenRailwayMap tiles with a plain User-Agent and attribution in the legend.
+/// OpenRailwayMap tiles with BetterBahn's identifying User-Agent and linked attribution in the legend.
 nonisolated final class RailwayTileOverlay: MKTileOverlay, @unchecked Sendable {
     init() {
         super.init(urlTemplate: "https://tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png")

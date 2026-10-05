@@ -21,10 +21,20 @@ public enum TransitError: Error, Sendable, Equatable, LocalizedError {
 }
 
 public struct HTTPClient: Sendable {
-    /// Plain UA: bahn.de's bot protection rejects agents containing URLs.
-    public static let userAgent = "BetterBahn/0.1 (iOS app)"
-    /// Träwelling asks apps to identify themselves with a contact.
-    public static let identifyingUserAgent = "BetterBahn/0.1 (iOS; +https://github.com/AppleGoldKunibert/betterbahnapp)"
+    /// Where service operators can reach BetterBahn (`Cloudflare/worker.mjs`, `/support`).
+    public static let contactURL = "https://betterbahn.betterbahn.workers.dev/support"
+    /// Sent with every request: Transitous, OpenRailwayMap and Träwelling ask apps to name themselves,
+    /// their version and a contact. Only the bahn.de proxy sends a browser agent instead (`BahnDeClient`).
+    public static let identifyingUserAgent = userAgent(version: appVersion)
+
+    /// The app's version (`MARKETING_VERSION`); extensions carry the same one.
+    static var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+    }
+
+    static func userAgent(version: String) -> String {
+        "BetterBahn/\(version) (iOS; +\(contactURL))"
+    }
 
     let session: URLSession
     let timeout: TimeInterval
@@ -38,7 +48,7 @@ public struct HTTPClient: Sendable {
     public func get<T: Decodable>(_ url: URL, as type: T.Type, headers: [String: String] = [:],
                                   auth: WorkerAuth? = nil) async throws -> T {
         var request = URLRequest(url: url, timeoutInterval: timeout)
-        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue(Self.identifyingUserAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
         return try await send(request, as: type, auth: auth)
@@ -56,7 +66,7 @@ public struct HTTPClient: Sendable {
     public func sendRaw(_ request: URLRequest) async throws -> Data {
         var request = request
         if request.value(forHTTPHeaderField: "User-Agent") == nil {
-            request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+            request.setValue(Self.identifyingUserAgent, forHTTPHeaderField: "User-Agent")
         }
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { return data }

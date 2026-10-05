@@ -2479,6 +2479,12 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         #expect(BahnJetztListProtocol.userAgent.withLock { $0 } == HTTPClient.identifyingUserAgent)
     }
 
+    @Test func userAgentNamesVersionAndContact() {
+        #expect(HTTPClient.userAgent(version: "1.2") == "BetterBahn/1.2 (iOS; +https://betterbahn.betterbahn.workers.dev/support)")
+        #expect(HTTPClient.identifyingUserAgent.hasPrefix("BetterBahn/"))
+        #expect(HTTPClient.identifyingUserAgent.contains(HTTPClient.contactURL))
+    }
+
     @Test func staleness() {
         let position = TrainPosition(coordinate: .init(latitude: 50, longitude: 8), time: .now, speedKmh: nil, source: nil)
         #expect(!position.isStale(now: position.time.addingTimeInterval(30)))
