@@ -1681,6 +1681,43 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(StopAccess(pickupAllowed: false, dropoffAllowed: true) == .exitOnly)
     }
 
+    /// Alfred's example: Berlin Hbf → Halle → back to Gesundbrunnen on an ICE that also stops at Hbf
+    /// (no boarding there) is a detour and gets hidden; so is leaving a train that goes on to the
+    /// destination. A change onto a train that doesn't call at either station stays.
+    @Test func detoursOntoATrainCallingAtTheOriginOrDestination() {
+        let hbf = station("8011160", "Berlin Hbf"), halle = station("8010159", "Halle (Saale) Hbf")
+        let gesundbrunnen = station("8011102", "Berlin Gesundbrunnen"), leipzig = station("8010205", "Leipzig Hbf")
+        let base = Date(timeIntervalSince1970: 1_790_000_000)
+        func t(_ minutes: Double) -> Date { base.addingTimeInterval(minutes * 60) }
+        func leg(_ trip: String, _ from: Station, _ to: Station, _ dep: Double, _ arr: Double) -> Leg {
+            Leg(origin: from, destination: to, departure: TimeInfo(planned: t(dep), actual: nil),
+                arrival: TimeInfo(planned: t(arr), actual: nil), departurePlatform: nil, arrivalPlatform: nil,
+                tripId: trip, line: Line(name: "ICE \(trip)", number: trip, product: .highSpeed, operatorName: nil),
+                direction: nil, isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+        }
+        func entry(_ trip: String, _ kind: BoardKind, _ minutes: Double, _ access: StopAccess = .normal) -> BoardEntry {
+            BoardEntry(kind: kind, tripId: trip, station: hbf,
+                       line: Line(name: "ICE \(trip)", number: trip, product: .highSpeed, operatorName: nil), otherEnd: nil,
+                       time: TimeInfo(planned: t(minutes), actual: nil), platform: PlatformInfo(planned: nil, actual: nil),
+                       cancelled: false, terminatesOrOriginatesHere: false, remarks: [], access: access, source: .transitous)
+        }
+        // ICE 594 runs Halle → Berlin Hbf (no boarding, minute 150) → Gesundbrunnen (minute 158).
+        let calls = StationCalls(departuresAtOrigin: [entry("594", .departures, 150, .exitOnly), entry("10", .departures, 0)],
+                                 departuresAtDestination: [entry("700", .departures, 50)],
+                                 arrivalsAtDestination: [entry("594", .arrivals, 158), entry("700", .arrivals, 48)])
+
+        let viaHalle = Journey(legs: [leg("10", hbf, halle, 0, 70), leg("594", halle, gesundbrunnen, 80, 158)], source: .transitous)
+        #expect(calls.isDetour(viaHalle))
+
+        // ICE 700 reaches Gesundbrunnen at minute 48, but the route leaves it earlier and goes on by another train.
+        let offEarly = Journey(legs: [leg("700", hbf, leipzig, 0, 20), leg("11", leipzig, gesundbrunnen, 30, 60)], source: .transitous)
+        #expect(calls.isDetour(offEarly))
+
+        let normal = Journey(legs: [leg("10", hbf, halle, 0, 70), leg("12", halle, leipzig, 80, 110)], source: .transitous)
+        #expect(!calls.isDetour(normal))
+        #expect(!calls.isDetour(Journey(legs: [leg("594", hbf, gesundbrunnen, 150, 158)], source: .transitous)))
+    }
+
     /// Expert option "Nur Ein-/Ausstieg ignorieren": only trains you may not board at the origin, or
     /// not leave at the destination, are looked up; normal ones the search already has.
     @Test func restrictedCandidatesAreTrainsWithoutBoardingOrAlighting() {

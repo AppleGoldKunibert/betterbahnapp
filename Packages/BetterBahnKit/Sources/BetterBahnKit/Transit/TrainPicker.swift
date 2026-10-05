@@ -127,13 +127,10 @@ public struct TrainPicker: Sendable {
     /// Direct trains from `origin` to `destination` the normal search leaves out because the timetable
     /// doesn't allow boarding at `origin` ("Nur Ausstieg", e.g. ICEs from Berlin Hbf to Gesundbrunnen)
     /// or getting off at `destination` ("Nur Einstieg"). Expert option: shown anyway, marked on the card.
-    /// Candidates come from both stations' departure boards, so only those trains' runs are loaded.
-    public func journeysIgnoringBoardingRules(from origin: Station, to destination: Station, date: Date,
-                                              windowMinutes: Int = 180) async -> [Journey] {
-        async let atOrigin = try? provider.departures(at: origin, date: date, duration: windowMinutes)
-        // The train reaches the destination later; a generous window catches long rides too.
-        async let atDestination = try? provider.departures(at: destination, date: date, duration: windowMinutes + 360)
-        let candidates = Self.restrictedCandidates(departures: await atOrigin ?? [], atDestination: await atDestination ?? [])
+    /// Candidates come from both stations' departure boards (`stationCalls`), so only those trains' runs are loaded.
+    public func journeysIgnoringBoardingRules(from origin: Station, to destination: Station,
+                                              calls: StationCalls) async -> [Journey] {
+        let candidates = Self.restrictedCandidates(departures: calls.departuresAtOrigin, atDestination: calls.departuresAtDestination)
         let legs = await legs(for: candidates, from: origin, to: destination)
         return legs.filter(\.breaksBoardingRules)
             .sorted { $0.departure.planned < $1.departure.planned }

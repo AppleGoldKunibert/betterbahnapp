@@ -1286,6 +1286,20 @@ public struct TransitousProvider: TransitProvider {
         return await withCorrectedLongDistanceEnds(deduplicated, kind: kind)
     }
 
+    /// Every train calling at `station` in the window, as departures (including ones you may not board)
+    /// and arrivals: the raw stop times, without the per-train corrections `board` makes, for the quick
+    /// detour check in `StationCalls`.
+    public func calls(at station: Station, date: Date, duration: Int) async throws -> (departures: [BoardEntry], arrivals: [BoardEntry]) {
+        let stop = try await resolve(station)
+        let all = Set(Product.allCases)
+        async let arriving = boardStopTimes(.arrivals, stopId: stop.id, date: date, duration: duration, products: all)
+        async let departing = boardStopTimes(.departures, stopId: stop.id, date: date, duration: duration, products: all)
+        let arrivals = try await arriving
+        let departures = try await departing
+        let allDepartures = departures + Self.continuingWithoutBoarding(arrivals, missingFrom: departures)
+        return (allDepartures.compactMap { $0.toEntry(kind: .departures) }, arrivals.compactMap { $0.toEntry(kind: .arrivals) })
+    }
+
     /// Arrivals that go on from this stop but may not be boarded here, so they're missing from the
     /// departures MOTIS reports. Shown as departures (marked "Nur Ausstieg") so the board lists every
     /// train leaving, like DB's own boards.
