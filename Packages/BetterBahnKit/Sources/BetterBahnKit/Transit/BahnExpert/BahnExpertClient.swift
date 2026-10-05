@@ -59,6 +59,9 @@ public struct TrainTypeLookup: Codable, Sendable, Hashable {
     /// "ICE 4" or "ICE 3neo + ICE 4"; nil if bahn.expert knows no series.
     public var summary: String? { families.isEmpty ? nil : families.joined(separator: " + ") }
 
+    /// Names a Tz, which only live data does (and only it tells a redesigned ICE 3neo apart).
+    public var hasUnitNumbers: Bool { groups.contains { $0.unitNumber != nil } }
+
     /// Adapter for the formation UI; adds the Taufname for live Tz numbers.
     public var formation: TrainFormation {
         TrainFormation(units: groups.map { group in

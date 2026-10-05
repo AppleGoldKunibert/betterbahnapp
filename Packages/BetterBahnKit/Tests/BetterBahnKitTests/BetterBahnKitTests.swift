@@ -1932,7 +1932,7 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
 
     @Test func formationSummary() {
         let formation = TrainFormation(units: [.init(model: "ICE 3neo", number: "8030"), .init(model: "ICE 3neo", number: "8005")])
-        #expect(formation.modelSummary == "2× ICE 3neo")
+        #expect(formation.modelSummary == "ICE 3neo Redesign + ICE 3neo")
         #expect(formation.unitSummary == "Tz 8030 + 8005")
         #expect(formation.unitDescription == "Tz 8030 + 8005")
     }
@@ -2081,6 +2081,16 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         #expect(lookup([group("8020")]).formation.modelSummary == "ICE 3neo Redesign")
         #expect(lookup([group("8020"), group("8005")]).summary == "ICE 3neo Redesign + ICE 3neo")
         #expect(lookup([group(nil)]).summary == "ICE 3neo")
+        #expect(lookup([group("8039")]).hasUnitNumbers)
+        #expect(!lookup([group(nil)]).hasUnitNumbers)
+    }
+
+    /// Formations remembered before the Redesign rule stored plain "ICE 3neo" for Tz 8039.
+    @Test func rememberedFormationMarksRedesignedICE3neo() {
+        let formation = TrainFormation(units: [.init(model: "ICE 3neo", number: "8039"), .init(model: "ICE 3neo", number: "8005")])
+        #expect(formation.modelSummary == "ICE 3neo Redesign + ICE 3neo")
+        #expect(TrainFormation(units: [.init(model: "ICE 3neo Redesign", number: "8039")]).modelSummary == "ICE 3neo Redesign")
+        #expect(TrainFormation(units: [.init(model: "ICE 3neo", number: nil)]).modelSummary == "ICE 3neo")
     }
 
     /// Real response for IC 2271 (2026-10-01): bahn.expert has no Baureihe for IC 2 Twindexx sets.

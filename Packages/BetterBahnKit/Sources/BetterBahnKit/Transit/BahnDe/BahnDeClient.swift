@@ -23,9 +23,10 @@ public struct TrainFormation: Codable, Sendable, Hashable {
         self.units = units
     }
 
-    /// "ICE 3neo" or "ICE 3neo + ICE 4".
+    /// "ICE 3neo" or "ICE 3neo + ICE 4". Redesigned ICE 3neo are named by their Tz here as well, so
+    /// formations remembered before that rule existed show "ICE 3neo Redesign" too.
     public var modelSummary: String? {
-        let models = units.compactMap(\.model)
+        let models = units.compactMap { TrainModel.name($0.model, unit: $0.number) }
         guard !models.isEmpty else { return nil }
         var unique: [String] = []
         for model in models where !unique.contains(model) { unique.append(model) }
