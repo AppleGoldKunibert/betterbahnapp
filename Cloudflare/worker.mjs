@@ -109,7 +109,10 @@ an bahn.de, das Ticket wird nur auf deinem Gerät gespeichert. Es gelten die
 
 <h2>Standort</h2>
 <p>Wenn du es erlaubst, nutzt die App deinen ungefähren Standort, um Bahnhöfe in deiner Nähe in der Suche
-weiter oben anzuzeigen. Der Standort wird nur auf dem Gerät verwendet und nicht verschickt.</p>
+weiter oben anzuzeigen. Der Standort wird nur auf dem Gerät verwendet und nicht verschickt. Damit auch Bahnhöfe
+in deiner Nähe gefunden werden, sucht die App zusätzlich mit den Namen naher Städte und Bahnhöfe (z.&nbsp;B.
+„Berlin ost“ oder „Bernau“), die sie aus einer Liste auf dem Gerät nimmt; an Transitous gehen dabei nur diese
+Namen mit dem Suchtext.</p>
 
 <h2>Träwelling</h2>
 <p>Wenn du dich bei <a href="https://traewelling.de">Träwelling</a> anmeldest, schickt die App deine Check-ins
