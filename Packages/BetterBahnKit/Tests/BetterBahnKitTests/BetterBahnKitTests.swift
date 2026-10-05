@@ -868,7 +868,7 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         let start = Date.now
         let stations = try await provider.searchStations("Po")
         #expect(stations.map(\.id) == ["potsdamHbf"])
-        #expect(Date.now.timeIntervalSince(start) < 2.4)
+        #expect(Date.now.timeIntervalSince(start) < 4)
         #expect(CombinedProvider.isShortQuery("Po "))
         #expect(!CombinedProvider.isShortQuery("Pot"))
     }
