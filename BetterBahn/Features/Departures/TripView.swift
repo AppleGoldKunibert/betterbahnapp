@@ -230,6 +230,10 @@ struct TripContent: View {
     var onSelectStop: ((Stopover) -> Void)?
     /// Tapping any stop time flips every stop between real-time and scheduled times — app-wide, and remembered.
     @AppStorage("showPlannedTimes") private var showPlannedTimes = false
+    /// Set once a boarding/exit stop was picked by hand; from then on the "Tippe auf Halte" tip stays hidden.
+    @AppStorage("pickedTripStop") private var pickedTripStop = false
+    /// Read when the view appears, so the tip doesn't vanish (and move the stops) while picking them.
+    @State private var showsStopTip = !UserDefaults.standard.bool(forKey: "pickedTripStop")
     @State private var sequenceRequest: BahnDeClient.FormationRequest?
 
     private var color: Color { trip.line?.product.color ?? .gray }
@@ -263,11 +267,13 @@ struct TripContent: View {
                 }
             }
 
-            if interactive {
+            if interactive, exitOnly || showsStopTip || boardingID != nil {
                 HStack(spacing: 8) {
-                    Image(systemName: "hand.tap.fill").foregroundStyle(Color.brand)
-                    Text(exitOnly ? "Tippe auf einen Halt, um dort auszusteigen."
-                                  : "Tippe auf Halte, um Ein- und Ausstieg zu wählen.")
+                    if exitOnly || showsStopTip {
+                        Image(systemName: "hand.tap.fill").foregroundStyle(Color.brand)
+                        Text(exitOnly ? "Tippe auf einen Halt, um dort auszusteigen."
+                                      : "Tippe auf Halte, um Ein- und Ausstieg zu wählen.")
+                    }
                     Spacer()
                     if !exitOnly, boardingID != nil {
                         Button("Zurücksetzen", systemImage: "xmark.circle.fill") {
@@ -416,6 +422,7 @@ struct TripContent: View {
                 return
             }
         }
+        if !exitOnly { pickedTripStop = true }
         onSelectStop?(stop)
     }
 }
