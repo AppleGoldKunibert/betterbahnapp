@@ -160,6 +160,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   found at a station's EVA is looked for at its other levels (`/station` `meta`, e.g. "Hamburg Hbf (S-Bahn)").
   Trains that ran over 4 hours ago aren't asked about (`changesMemory`): DB has dropped their changes and
   would report them on time. Without live data a time has no `actual`, so no delay shows (not "+0").
+  A stop DB schedules without a change only counts as on time when the train runs within 2 h
+  (`infersOnTime`); a journey tomorrow shows plain times, and `JourneyRefresher.droppingInferredOnTime` clears
+  such made-up "pünktlich" from journeys saved earlier.
 - Logic: `JourneyReplanner`, `ConnectionCheck` (`ConnectionIssue`, `JourneyRefresher`), `PlatformChange`
   (platform changes since the last refresh → push, ignores sectors/bus bays), `TrainRoutePlanner`,
   `ViaRoutePlanner` (vias without minimum stay keep a through train as one leg), `TrainPicker`, `TicketFilter`/`BC100Rules`, `BoardFilter`.

@@ -3220,6 +3220,46 @@ private final class TimetablesPlanProtocol: URLProtocol, @unchecked Sendable {
 
         #expect(override?.departurePlatform == PlatformInfo(planned: "3", actual: "14"))
     }
+
+    /// DB lists only changes, so a scheduled stop without one is on time, once the train is about to run.
+    @Test func unchangedTrainAboutToRunIsOnTime() async throws {
+        let (timetables, session) = client(UnchangedS15Protocol.self)
+        defer { session.invalidateAndCancel() }
+
+        let override = await timetables.realtime(for: leg(departurePlatform: nil), now: departure.addingTimeInterval(-600))
+
+        #expect(override?.departure?.actual == departure)
+        #expect(override?.departure?.delayMinutes == 0)
+    }
+
+    /// A journey tomorrow: DB has the schedule but nothing live yet, so no made-up "pünktlich".
+    @Test func unchangedTrainTomorrowHasNoLiveTime() async throws {
+        let (timetables, session) = client(UnchangedS15Protocol.self)
+        defer { session.invalidateAndCancel() }
+
+        let override = await timetables.realtime(for: leg(departurePlatform: nil), now: departure.addingTimeInterval(-86_400))
+
+        #expect(override?.departure?.actual == nil)
+        #expect(override?.departure?.delayMinutes == nil)
+        #expect(override?.departurePlatform?.planned == "12")
+    }
+
+    /// Saved journeys keep an earlier refresh's made-up "on time" until the train is close.
+    @Test func refreshDropsInferredOnTimeForTrainsHoursAhead() {
+        var saved = leg(departurePlatform: nil)
+        saved.departure.actual = departure
+        saved.arrival.actual = departure.addingTimeInterval(720)
+        saved.stopovers = [Stopover(station: berlinHbf, arrival: nil, departure: TimeInfo(planned: departure, actual: departure),
+                                    arrivalPlatform: nil, departurePlatform: nil, cancelled: false)]
+
+        let tomorrow = JourneyRefresher.droppingInferredOnTime(saved, now: departure.addingTimeInterval(-86_400))
+        #expect(tomorrow.departure.actual == nil)
+        #expect(tomorrow.arrival.actual == departure.addingTimeInterval(720))
+        #expect(tomorrow.stopovers[0].departure?.actual == nil)
+
+        let soon = JourneyRefresher.droppingInferredOnTime(saved, now: departure.addingTimeInterval(-600))
+        #expect(soon == saved)
+    }
 }
 
 /// Issue #76, for a station not in `lowerLevels`: station search only finds "Hamburg-Altona" (8002553),
