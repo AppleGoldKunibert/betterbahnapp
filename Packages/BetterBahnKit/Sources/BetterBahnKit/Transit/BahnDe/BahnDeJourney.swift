@@ -52,6 +52,8 @@ extension BahnDeClient {
             var journeyId: String
             /// Scheduled departure, Berlin local time without zone, e.g. "2026-09-29T22:38:00".
             var zeit: String?
+            /// DB's live time, same format; missing when DB has none for the train.
+            var ezZeit: String?
             var verkehrmittel: Transport?
             /// Destination (departures) or origin (arrivals), e.g. "Berlin-Frohnau".
             var terminus: String?
@@ -210,10 +212,11 @@ extension BahnDeClient {
     // MARK: Train names
 
     /// `entries` (a departure or arrival board) with every DB long-distance train renamed to what
-    /// bahn.de's own board of the same kind calls it. For some cross-border trains Transitous only has DB's GTFS entry,
+    /// bahn.de's own board of the same kind calls it, and with DB's live time from there
+    /// (`applyingLiveTimes`). For some cross-border trains Transitous only has DB's GTFS entry,
     /// which brands them generically, e.g. the ČD Railjet "RJ 171" Hamburg–Dresden as "ICE 171".
     /// Unchanged if bahn.de can't be asked (blocked, offline).
-    public func correctingTrainNames(_ entries: [BoardEntry], at station: Station) async -> [BoardEntry] {
+    public func correctingFromBoard(_ entries: [BoardEntry], at station: Station) async -> [BoardEntry] {
         // A board is all departures or all arrivals; bahn.de's matching board has the same kind.
         guard let kind = entries.first?.kind else { return entries }
         let times = entries.filter { $0.kind == kind && Self.trainReference(for: $0.line) != nil }.map(\.time.planned)
@@ -227,7 +230,7 @@ extension BahnDeClient {
             guard let latest = page.entries.compactMap({ $0.zeit.flatMap(Self.parseBerlinTime) }).max(), latest < last else { break }
             start = latest.addingTimeInterval(60)
         }
-        return Self.correctingTrainNames(entries, using: board, kind: kind)
+        return Self.applyingLiveTimes(Self.correctingTrainNames(entries, using: board, kind: kind), using: board, kind: kind)
     }
 
     /// Renames each entry of `kind` whose train number bahn.de's board of the same kind lists at the
@@ -246,15 +249,35 @@ extension BahnDeClient {
     /// bahn.de's name for `line` departing (or, on an arrivals board, arriving) at `plannedDeparture`
     /// (±2 min) on `board`, if it differs.
     static func bahnDeName(for line: Line?, plannedDeparture: Date, in board: [Board.Entry]) -> String? {
-        guard let line, let number = trainReference(for: line)?.number,
-              let match = board.first(where: { candidate in
-                  guard let name = candidate.verkehrmittel?.name, trainNumber(in: name) == number,
-                        let time = candidate.zeit.flatMap(parseBerlinTime) else { return false }
-                  return abs(time.timeIntervalSince(plannedDeparture)) <= 120
-              }),
+        guard let line, let match = boardEntry(for: line, plannedDeparture: plannedDeparture, in: board),
               let name = match.verkehrmittel?.name,
               normalizedTrainName(name) != normalizedTrainName(line.name) else { return nil }
         return name
+    }
+
+    /// The entry on `board` with `line`'s train number at `plannedDeparture` (±2 min).
+    static func boardEntry(for line: Line?, plannedDeparture: Date, in board: [Board.Entry]) -> Board.Entry? {
+        guard let number = trainReference(for: line)?.number else { return nil }
+        return board.first { candidate in
+            guard let name = candidate.verkehrmittel?.name, trainNumber(in: name) == number,
+                  let time = candidate.zeit.flatMap(parseBerlinTime) else { return false }
+            return abs(time.timeIntervalSince(plannedDeparture)) <= 120
+        }
+    }
+
+    /// Each entry of `kind` with DB's live time from bahn.de's board of the same kind, where it has
+    /// one. Transitous' realtime for DB trains is DELFI's forecast, which can differ from DB's own:
+    /// ICE 146 at Berlin Hbf left at 9:08 there, a minute before its planned time, while DB had it
+    /// on time. Entries bahn.de has no live time for keep Transitous'.
+    static func applyingLiveTimes(_ entries: [BoardEntry], using board: [Board.Entry], kind: BoardKind = .departures) -> [BoardEntry] {
+        entries.map { entry in
+            guard entry.kind == kind,
+                  let live = boardEntry(for: entry.line, plannedDeparture: entry.time.planned, in: board)?
+                    .ezZeit.flatMap(parseBerlinTime) else { return entry }
+            var corrected = entry
+            corrected.time.actual = live
+            return corrected
+        }
     }
 
     /// `entries` whose line is still unknown ("?", see `TransitousProvider.namingUnknownLines`) named
@@ -314,7 +337,7 @@ extension BahnDeClient {
     }
 
     /// `journeys` with every DB long-distance leg renamed to what bahn.de's departure board at the
-    /// leg's origin calls the train (see `correctingTrainNames(_:at:)`). One board request per
+    /// leg's origin calls the train (see `correctingFromBoard(_:at:)`). One board request per
     /// distinct train and origin, cached for the day; unchanged legs if bahn.de can't be asked.
     public func correctingTrainNames(in journeys: [Journey]) async -> [Journey] {
         struct Key: Hashable { let station: Station; let planned: Date; let line: Line }

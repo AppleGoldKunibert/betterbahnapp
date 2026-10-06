@@ -2441,6 +2441,43 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         #expect(corrected[1] == entries[1])
     }
 
+    /// DB's live time from bahn.de's board replaces Transitous' (DELFI's forecast had ICE 146 leave
+    /// Berlin Hbf at 9:08, a minute early); trains without one there keep Transitous' time.
+    @Test func takesLiveTimesFromBahnDeBoard() throws {
+        let json = #"""
+        {"entries": [
+            {"journeyId": "a", "zeit": "2026-10-06T09:09:00", "ezZeit": "2026-10-06T09:12:00", "verkehrmittel": {"name": "ICE 146"}},
+            {"journeyId": "b", "zeit": "2026-10-06T09:20:00", "verkehrmittel": {"name": "ICE 1005"}}
+        ]}
+        """#
+        let board = try JSONDecoding.decoder.decode(BahnDeClient.Board.self, from: Data(json.utf8)).entries
+        let berlin = station("8011160", "Berlin Hbf")
+        func departure(_ name: String, _ number: String, planned: String, actual: String?) throws -> BoardEntry {
+            BoardEntry(kind: .departures, tripId: name, station: berlin,
+                       line: Line(name: name, number: number, product: .highSpeed, operatorName: nil),
+                       otherEnd: "Amsterdam Centraal",
+                       time: TimeInfo(planned: try #require(JSONDecoding.parseISODate(planned)),
+                                      actual: actual.flatMap(JSONDecoding.parseISODate)),
+                       platform: PlatformInfo(planned: "6", actual: nil), cancelled: false,
+                       terminatesOrOriginatesHere: false, remarks: [], source: .transitous)
+        }
+        let entries = [
+            try departure("ICE 146", "146", planned: "2026-10-06T07:09:00Z", actual: "2026-10-06T07:08:00Z"),
+            try departure("ICE 1005", "1005", planned: "2026-10-06T07:20:00Z", actual: "2026-10-06T07:25:00Z"),
+            try departure("ICE 148", "148", planned: "2026-10-06T07:30:00Z", actual: nil),
+        ]
+
+        let corrected = BahnDeClient.applyingLiveTimes(entries, using: board)
+
+        #expect(corrected[0].time.actual == JSONDecoding.parseISODate("2026-10-06T07:12:00Z"))
+        #expect(corrected[1] == entries[1])
+        #expect(corrected[2] == entries[2])
+        // A departures board never touches arrivals.
+        var arrival = entries[0]
+        arrival.kind = .arrivals
+        #expect(BahnDeClient.applyingLiveTimes([arrival], using: board) == [arrival])
+    }
+
     /// Arrivals are matched against bahn.de's arrivals board, by arrival time.
     @Test func takesTrainNamesFromBahnDeArrivalsBoard() throws {
         let json = #"{"entries": [{"journeyId": "a", "zeit": "2026-09-30T09:07:00", "verkehrmittel": {"name": "RJ 171"}}]}"#

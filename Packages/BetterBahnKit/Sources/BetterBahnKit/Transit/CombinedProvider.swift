@@ -180,14 +180,15 @@ public final class CombinedProvider: TransitProvider {
                                { try await $0.board(kind, at: station, date: date, duration: duration, products: products) },
                                { try await $0.board(kind, at: station, date: date, duration: duration, products: products) })
         let filtered = entries.filter { !Self.isFlixBus($0.line) }
-        // bahn.de's own names beat Transitous' generic ones for cross-border trains (see
-        // `BahnDeClient.correctingTrainNames`); a slow bahn.de mustn't hold up the board for long.
+        // bahn.de's own names beat Transitous' generic ones for cross-border trains, and DB's live
+        // times beat DELFI's forecasts (see `BahnDeClient.correctingFromBoard`); a slow bahn.de
+        // mustn't hold up the board for long.
         guard let bahnDe else { return filtered }
         // Lines Transitous didn't know ("?") come from bahn.de's board too, in the same 3 s.
         return (try? await Self.withDeadline(.seconds(3)) {
             let named = filtered.contains { TransitousProvider.isUnknown($0.line) }
                 ? await bahnDe.namingUnknownLines(filtered, at: station) : filtered
-            return await bahnDe.correctingTrainNames(named, at: station)
+            return await bahnDe.correctingFromBoard(named, at: station)
         }) ?? filtered
     }
 
