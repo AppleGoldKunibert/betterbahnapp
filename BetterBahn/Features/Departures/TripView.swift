@@ -244,7 +244,7 @@ struct TripContent: View {
                     LiveTrainIconTile(route: LiveTrainRoute(trip: trip), systemImage: trip.line?.product.symbolName ?? "tram.fill",
                                       color: color, size: 46)
                     VStack(alignment: .leading, spacing: 3) {
-                        TrainNameRow(name: trip.line?.name ?? "Zug", font: .title3.weight(.bold), spacing: 8) {
+                        TrainNameRow(name: trip.line?.nameWithTripNumber ?? "Zug", font: .title3.weight(.bold), spacing: 8) {
                             TrainSeriesTag(trip: trip)
                         }
                         if let origin = trip.origin, let destination = trip.destination {
@@ -255,10 +255,6 @@ struct TripContent: View {
                         }
                         if let op = trip.line?.operatorName {
                             Label(op, systemImage: "building.2.fill").font(.caption).foregroundStyle(.tertiary)
-                        }
-                        if let run = trip.line?.shownTripNumber {
-                            Label("Fahrt \(run)", systemImage: "number").font(.caption).foregroundStyle(.tertiary)
-                                .accessibilityLabel("Fahrtnummer \(run)")
                         }
                         TrainFormationLabel(trip: trip)
                     }
