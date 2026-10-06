@@ -2650,6 +2650,20 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
     }
 }
 
+/// Answers `/v5/trip` with the Köln–Duisburg ICE leg that has its `legGeometry`.
+private final class TripGeometryProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let url = Bundle.module.url(forResource: "transitous-leg-geometry", withExtension: "json", subdirectory: "Fixtures")!
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: (try? Data(contentsOf: url)) ?? Data())
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
 private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
     static let requests = Mutex(0)
     static let userAgent = Mutex<String?>(nil)
@@ -2683,6 +2697,23 @@ private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
         let straight = try #require(ice.origin.coordinate).distance(to: try #require(ice.destination.coordinate))
         #expect(geometry.count > 50)
         #expect(Polyline.length(geometry) > straight)
+    }
+
+    /// A train opened from the board (not a journey) keeps its track geometry, so its live map
+    /// follows the tracks instead of joining the stops with straight lines.
+    @Test func transitousTripHasTrackGeometry() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [TripGeometryProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let provider = TransitousProvider(http: HTTPClient(session: session))
+
+        let trip = try await provider.trip(id: "ice")
+
+        let geometry = try #require(trip.geometry)
+        #expect(geometry.count > 50)
+        let decoded = try JSONDecoder().decode(Trip.self, from: JSONEncoder().encode(trip))
+        #expect(decoded.geometry == geometry)
     }
 
     @Test func slice() {
