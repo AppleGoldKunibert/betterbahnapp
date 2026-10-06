@@ -41,6 +41,13 @@ struct EmojiText: View {
 
     private var images: CustomEmojiImages { .shared }
 
+    /// Text puts a picture on the baseline, which leaves the descenders' room below it and makes it sit
+    /// high; moved down by this, its middle meets the middle of the capitals, as Mastodon draws it.
+    /// Both places showing it use `.subheadline`.
+    private var emojiBaselineOffset: CGFloat {
+        (UIFont.preferredFont(forTextStyle: .subheadline).capHeight - CustomEmojiImages.size) / 2
+    }
+
     var body: some View {
         let segments = CustomEmojiText.segments(of: text, emojis: emojis)
         segments.reduce(Text(verbatim: "")) { (result: Text, segment) -> Text in
@@ -49,7 +56,7 @@ struct EmojiText: View {
                 Text("\(result)\(Text(verbatim: string))")
             case .emoji(let emoji):
                 if let image = images.images[emoji.url] {
-                    Text("\(result)\(Image(uiImage: image))")
+                    Text("\(result)\(Text(Image(uiImage: image)).baselineOffset(emojiBaselineOffset))")
                 } else {
                     Text("\(result)\(Text(verbatim: ":\(emoji.shortcode):"))")
                 }
