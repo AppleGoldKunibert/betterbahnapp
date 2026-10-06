@@ -36,6 +36,23 @@ public struct TraewellingStatus: Decodable, Sendable, Hashable {
     public var id: Int
     public var checkin: Checkin
     public var createdAt: Date?
+    /// The check-in's text, which may hold Mastodon `:shortcode:` emojis (`CustomEmojiText`).
+    public var body: String?
+    public var visibility: TraewellingVisibility? { visibilityValue?.value.flatMap(TraewellingVisibility.init(rawValue:)) }
+    public var business: TraewellingBusiness? { businessValue?.value.flatMap(TraewellingBusiness.init(rawValue:)) }
+    // Read leniently: a value this app doesn't know must not break loading the whole history.
+    private var visibilityValue: LenientInt?
+    private var businessValue: LenientInt?
+
+    enum CodingKeys: String, CodingKey {
+        case id, checkin, createdAt, body
+        case visibilityValue = "visibility", businessValue = "business"
+    }
+
+    struct LenientInt: Decodable, Sendable, Hashable {
+        var value: Int?
+        init(from decoder: Decoder) throws { value = try? decoder.singleValueContainer().decode(Int.self) }
+    }
 
     public var product: Product {
         switch checkin.category {

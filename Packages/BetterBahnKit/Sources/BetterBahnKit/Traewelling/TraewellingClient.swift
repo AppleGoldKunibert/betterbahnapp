@@ -32,6 +32,9 @@ public struct TraewellingUser: Decodable, Sendable {
     public var displayName: String
     public var username: String
     public var points: Int?
+    /// The connected Mastodon profile (e.g. "https://zug.network/@name"), whose instance's
+    /// custom emojis the check-in text offers.
+    public var mastodonUrl: String?
 }
 
 public struct TraewellingStation: Decodable, Sendable, Hashable {
@@ -88,6 +91,20 @@ public struct StatusTag: Codable, Sendable, Hashable {
     public var key: String
     public var value: String
     public var visibility: TraewellingVisibility?
+
+    public init(key: String, value: String, visibility: TraewellingVisibility?) {
+        self.key = key
+        self.value = value
+        self.visibility = visibility
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        key = try container.decode(String.self, forKey: .key)
+        value = try container.decode(String.self, forKey: .value)
+        // A visibility this app doesn't know must not hide the tag.
+        visibility = try? container.decodeIfPresent(TraewellingVisibility.self, forKey: .visibility)
+    }
 }
 
 public struct CheckinResult: Sendable {

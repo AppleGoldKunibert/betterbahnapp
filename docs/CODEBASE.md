@@ -80,7 +80,11 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `SeatReservationViews` (`ReservationRow` in `LegCard` above "Mehr", read-only). Reservations come from the journey's
   tickets (`AppModel.reservations(for:)`) and only show on the leg whose train matches.
 - `Features/Trips/TripsView.swift` – upcoming/past saved journeys, `SaveJourneyButton`.
-- `Features/Traewelling/` – `CheckinSheet`, `TraewellingLoginButton`.
+- `Features/Traewelling/` – `CheckinSheet`, `TraewellingLoginButton`, `CustomEmojiViews` (`EmojiMessageField`: text field
+  with emoji suggestions + preview, `EmojiText`), `CheckinDetailSheet` ("Check-in ansehen" in a leg's "Mehr" once the leg was
+  checked in from the app, `AppModel.checkinStatusIDs`; shows and edits text, visibility, trip type and tags, deletes the
+  check-in), `CheckoutPrompt` (removing a saved journey with such check-ins asks: check out at the last stop reached
+  (`TraewellingClient.earlyExit`, later check-ins deleted), delete the check-ins, or keep them).
 - `Features/Sharing/` – preview of shared journeys and imported DB shares; `JourneyShareButton` (in `JourneyDetailView`)
   uploads for a short link, falls back to the long link, and opens `UIActivityViewController`.
 - `Features/Settings/` – settings (incl. privacy policy link and "not affiliated with DB" note), `DataSourcesView`
@@ -186,6 +190,11 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 - `Traewelling/` – OAuth PKCE (`TraewellingAuth`, `TokenStore`), `TraewellingClient`
   (check-ins, history), `QuickTag`. Finding the train asks only the nearest few stations' departures, in parallel
   (12 s timeout), and caches autocomplete/departures, so retries and "Manuell eintragen" (`checkinAsManualTrip`) don't search again (#106).
+  `TraewellingCheckinEdit`: `status(id:)`, `updateStatus` (text, visibility, trip type), `deleteStatus`, tags
+  (`tags`, `applyTagChanges` with `StatusTagChanges`), moving the exit, `earlyExit` (where checking out now ends a ride).
+- `Mastodon/CustomEmoji.swift` – Mastodon custom emojis for check-in texts (#168): `CustomEmojiClient` loads
+  `/api/v1/custom_emojis` of the instance from the Träwelling user's `mastodonUrl` (else zug.network) and caches it a day on
+  disk; `CustomEmojiText` finds the `:shortcode` being typed, completes it, ranks suggestions and splits text into text/emoji.
 - `Tickets/` – DB tickets by order number: `DBOrder` reads bahn.de's order JSON into `DBTicket`s (one per
   "Leistungsbündel"; partner tickets like Eurostar only noted; reservation-only bookings without a ticket become
   `DBTicket`s with `isReservationOnly`), `DBOrderPage` (page URL, fill/error/fetch scripts, result),

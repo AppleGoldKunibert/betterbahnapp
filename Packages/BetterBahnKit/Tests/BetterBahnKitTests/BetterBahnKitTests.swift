@@ -3314,6 +3314,10 @@ private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
         #expect(leg.geometry?.count == 2)
         #expect(leg.source == .traewelling)
         #expect(page.data[1].product == .suburban)
+        #expect(status.body == "Mit :ice: unterwegs")
+        #expect(status.visibility == .unlisted)
+        #expect(status.business == .commute)
+        #expect(page.data[1].body == nil)
     }
 }
 

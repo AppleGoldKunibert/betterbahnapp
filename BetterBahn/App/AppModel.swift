@@ -12,6 +12,7 @@ final class AppModel {
     private(set) var provider: CombinedProvider
     private(set) var traewelling: TraewellingClient
     let liveActivities = LiveActivityManager()
+    @ObservationIgnored let customEmojis = CustomEmojiClient()
 
     var favoriteStations: [Station] {
         didSet {
@@ -59,6 +60,11 @@ final class AppModel {
     var trackedManualCheckins: [TrackedManualCheckin] {
         didSet { Storage.save(trackedManualCheckins, key: "trackedManualCheckins") }
     }
+    /// Träwelling status of each leg checked in from this app (by `Leg.id`), so the leg's "Mehr"
+    /// offers "Check-in ansehen" instead of checking in again.
+    var checkinStatusIDs: [String: Int] {
+        didSet { Storage.save(checkinStatusIDs, key: "checkinStatusIDs") }
+    }
     /// Explicit choice (from the route view) of which saved journey's Live Activity to show,
     /// overriding the automatic pick until that journey finishes or another one is chosen.
     /// Journeys whose Live Activity was switched off by hand, so the automatic pick skips them.
@@ -103,6 +109,7 @@ final class AppModel {
         recentStations = Storage.load(key: "recentStations") ?? []
         savedJourneys = Storage.load(key: "savedJourneys") ?? []
         trackedManualCheckins = Storage.load(key: "trackedManualCheckins") ?? []
+        checkinStatusIDs = Storage.load(key: "checkinStatusIDs") ?? [:]
         liveJourneys = Storage.load(key: "liveJourneys") ?? LiveDataCache()
         liveTrips = Storage.load(key: "liveTrips") ?? LiveDataCache()
         tickets = TicketStore.load()
@@ -749,6 +756,67 @@ final class AppModel {
         liveJourneyRefreshLoop = nil
         liveActivitySyncLoop?.cancel()
         liveActivitySyncLoop = nil
+    }
+
+    // MARK: Träwelling check-ins
+
+    func rememberCheckin(statusId: Int, leg: Leg) {
+        // Keep the list small: legs are only looked up while their journey is still around.
+        if checkinStatusIDs.count > 300 { checkinStatusIDs.removeAll() }
+        checkinStatusIDs[leg.id] = statusId
+    }
+
+    func forgetCheckin(statusId: Int) {
+        checkinStatusIDs = checkinStatusIDs.filter { $0.value != statusId }
+        trackedManualCheckins.removeAll { $0.statusId == statusId }
+    }
+
+    /// Deletes a check-in on Träwelling and forgets it here.
+    func deleteCheckin(statusId: Int) async throws {
+        try await traewelling.deleteStatus(id: statusId)
+        forgetCheckin(statusId: statusId)
+    }
+
+    /// The journey's legs checked in from this app, in order.
+    func checkins(in journey: Journey) -> [(leg: Leg, statusId: Int)] {
+        let journey = savedEntry(for: journey)?.journey ?? journey
+        return journey.legs.compactMap { leg in checkinStatusIDs[leg.id].map { (leg: leg, statusId: $0) } }
+    }
+
+    /// The checked-in leg of `journey` that is under way, and where checking out now would end it
+    /// (`TraewellingClient.earlyExit`). Uses the saved journey's live times.
+    func earlyCheckout(in journey: Journey, at now: Date = .now) -> (leg: Leg, statusId: Int, exit: Stopover)? {
+        for checkin in checkins(in: journey) {
+            if let exit = TraewellingClient.earlyExit(on: checkin.leg, at: now) { return (leg: checkin.leg, statusId: checkin.statusId, exit: exit) }
+        }
+        return nil
+    }
+
+    /// Deletes every check-in of `journey` made from this app.
+    func deleteCheckins(in journey: Journey) async throws {
+        for checkin in checkins(in: journey) { try await deleteCheckin(statusId: checkin.statusId) }
+    }
+
+    /// Checks out of `journey` now: the ride under way ends at the last stop reached (see
+    /// `earlyCheckout`), check-ins of legs not yet started are deleted, finished ones stay.
+    func checkOutEarly(of journey: Journey, at now: Date = .now) async throws {
+        guard let running = earlyCheckout(in: journey, at: now) else { return }
+        let status = try await traewelling.status(id: running.statusId)
+        try await traewelling.changeDestination(of: status, to: running.exit.station, arrival: running.exit.arrival?.planned)
+        forgetCheckin(statusId: running.statusId)
+        for checkin in checkins(in: journey) where checkin.leg.departure.best > now {
+            try await deleteCheckin(statusId: checkin.statusId)
+        }
+    }
+
+    /// The custom emojis of the Mastodon instance connected to the Träwelling account, or of
+    /// zug.network without one. Empty if neither can be loaded; emojis are only a nicety.
+    func checkinEmojis() async -> [CustomEmoji] {
+        // Asked each time a check-in opens, so a newly connected Mastodon account counts at once.
+        var user: TraewellingUser?
+        if await traewelling.isLoggedIn { user = try? await traewelling.currentUser() }
+        let instance = CustomEmojiText.instance(fromMastodonURL: user?.mastodonUrl) ?? CustomEmojiText.defaultInstance
+        return (try? await customEmojis.emojis(instance: instance)) ?? []
     }
 
     // MARK: Manual Träwelling check-ins
