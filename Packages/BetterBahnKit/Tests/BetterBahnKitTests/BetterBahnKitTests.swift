@@ -1494,6 +1494,14 @@ private final class CrowdedHubStopTimesProtocol: URLProtocol, @unchecked Sendabl
     @Test func lineNormalize() {
         #expect(Line.normalize("ICE  423") == Line.normalize("ice423"))
     }
+
+    @Test func shownTripNumberOnlyWhereTheNameLacksIt() {
+        #expect(Line(name: "S 8", number: "8", product: .suburban, operatorName: nil, tripNumber: "37856").shownTripNumber == "37856")
+        #expect(Line(name: "RE 14a", number: "14", product: .regionalExpress, operatorName: nil, tripNumber: "17677").shownTripNumber == "17677")
+        #expect(Line(name: "ICE 423", number: "423", product: .highSpeed, operatorName: nil, tripNumber: "423").shownTripNumber == nil)
+        #expect(Line(name: "S 8", number: "8", product: .suburban, operatorName: nil).shownTripNumber == nil)
+        #expect(Line(name: "U 2", number: "2", product: .subway, operatorName: nil, tripNumber: "12").shownTripNumber == nil)
+    }
 }
 
 // MARK: - Providers with mocks

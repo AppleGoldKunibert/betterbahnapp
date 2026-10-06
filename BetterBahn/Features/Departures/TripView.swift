@@ -256,6 +256,10 @@ struct TripContent: View {
                         if let op = trip.line?.operatorName {
                             Label(op, systemImage: "building.2.fill").font(.caption).foregroundStyle(.tertiary)
                         }
+                        if let run = trip.line?.shownTripNumber {
+                            Label("Fahrt \(run)", systemImage: "number").font(.caption).foregroundStyle(.tertiary)
+                                .accessibilityLabel("Fahrtnummer \(run)")
+                        }
                         TrainFormationLabel(trip: trip)
                     }
                     Spacer()
