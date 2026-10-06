@@ -498,7 +498,11 @@ final class AppModel {
     // MARK: Live train positions
 
     /// Latest position of every train on a saved journey that is running right now, keyed by train name.
-    private(set) var trainPositions: [String: LiveTrainPosition] = [:]
+    private(set) var trainPositions: [String: LiveTrainPosition] = [:] {
+        didSet { if trainPositions != oldValue { updateWidgets() } }
+    }
+    /// What the widgets were last given, so they're only reloaded when something changed.
+    @ObservationIgnored var lastWidgetSnapshot: WidgetSnapshot?
 
     /// Fetches the position of each train leg of an unfinished saved journey that is underway
     /// (plus 10 minutes either side, since departures and arrivals shift). All legs share one
@@ -943,22 +947,27 @@ final class AppModel {
     ///   journey never interrupts one that's under way, it waits its turn;
     /// - otherwise, the most recently added journey among the ones that have started.
     func syncLiveActivity() {
-        let eligible = liveActivityEligibleJourneys
         if let manualID = manualLiveActivityJourneyID, !upcomingJourneys.contains(where: { $0.id == manualID }) {
             manualLiveActivityJourneyID = nil
             return // the didSet above already re-runs this
         }
-        let candidate: SavedJourney?
-        if let manualID = manualLiveActivityJourneyID, let manual = eligible.first(where: { $0.id == manualID }) {
-            candidate = manual
-        } else if let activeID = liveActivities.activeJourneyID, let current = eligible.first(where: { $0.journey.id == activeID }) {
-            candidate = current
-        } else {
-            candidate = eligible.max { $0.savedAt < $1.savedAt }
-        }
+        let candidate = liveJourneyCandidate
         // Switched off in the settings: `show(nil)` ends whatever is still running.
         let journey = settings.liveActivitiesEnabled ? candidate?.journey : nil
         Task { await liveActivities.show(journey) }
+        updateWidgets()
+    }
+
+    /// The journey that should be live right now (see `syncLiveActivity`), whether or not Live
+    /// Activities are switched on; the widgets follow it too.
+    var liveJourneyCandidate: SavedJourney? {
+        let eligible = liveActivityEligibleJourneys
+        if let manualID = manualLiveActivityJourneyID, let manual = eligible.first(where: { $0.id == manualID }) {
+            return manual
+        } else if let activeID = liveActivities.activeJourneyID, let current = eligible.first(where: { $0.journey.id == activeID }) {
+            return current
+        }
+        return eligible.max { $0.savedAt < $1.savedAt }
     }
 
     /// Identifier for the background refresh task that keeps the Live Activity's journey up to date

@@ -15,7 +15,7 @@ comments are English.
 | Path | Contents |
 | --- | --- |
 | `BetterBahn/` | App target (UI + app state). Default actor isolation is **MainActor** (hence `nonisolated` on some types). `PrivacyInfo.xcprivacy` declares the required-reason APIs (UserDefaults); keep it current when using new ones. |
-| `BetterBahnWidgets/` | Widget extension: `TripLiveActivity` (Lock Screen / Dynamic Island). |
+| `BetterBahnWidgets/` | Widget extension: `TripLiveActivity` (Lock Screen / Dynamic Island), `JourneyOverviewWidget` (home screen "Reiseübersicht", small/medium, timer target picked in the widget's settings via `JourneyWidgetIntent`). `CurrentTrainWidget` ("Aktueller Zug": next stops, delays, exit), same entries as the journey widget. `LiveTrainWidgets.swift`: "Live-Geschwindigkeit" (home + lock screen) and "Live-Position" (map snapshot via `MKMapSnapshotter`) fetch the ridden train (`JourneyWidgetState.ridingLeg`) from bahn.jetzt themselves, fall back to the app's stored position, else show the next stop with a timer; the refresh button (`RefreshLiveWidgetIntent`) reloads them, tapping opens `TrainMapLink`. Widgets read the app's `WidgetSnapshot` from the App Group `group.de.goldkunibert.BetterBahn` (Info.plist key `BetterBahnAppGroup`, entitlements in `Config/`). |
 | `BetterBahnShare/` | Share extension: `ShareViewController` takes shared DB text/URL and opens `betterbahn://import?...`. |
 | `Packages/BetterBahnKit/` | Local SwiftPM package with all models, networking and logic (iOS 26 + macOS 26, everything `Sendable`). Tests live here. |
 | `Config/` | xcconfigs + Info.plists. `Signing.xcconfig` holds team ID; optional gitignored `Local.xcconfig` overrides it. |
@@ -38,7 +38,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   Abfahrten (`StationBoardView`), Einstellungen (`SettingsView`). Handles `onOpenURL`
   (`DBShare.text(fromAppURL:)` → `ImportedJourneyView`, `JourneyShareLink` → `SharedJourneyPreviewView` (short links via
   `ShortShareLinkClient`, also as Universal Links), `LiveActivityLink` from tapping the Live Activity → that saved
-  journey via `AppModel.journeyToOpen` on the Verbindungen tab)
+  journey via `AppModel.journeyToOpen` on the Verbindungen tab (the journey widget uses the same link), `TrainMapLink` from a live widget → `LiveTrainMapView` of that leg)
   and scene-phase refresh start/stop.
 - `App/AppModel.swift` – the single `@Observable` app state, injected via `.environment(model)`.
   Owns `CombinedProvider`, `TraewellingClient`, helpers (`TrainPicker`, `JourneyReplanner`,
@@ -62,6 +62,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   iCloud), and the `AppModel` ticket functions (`importTickets` matches a saved journey or imports the booked
   connection via `DBShareImporter.journey(from:)`).
 - `App/LiveActivityManager.swift` – ActivityKit wrapper; attributes in Kit `TripActivityAttributes`.
+- `App/WidgetSync.swift` – `updateWidgets()` (called from `syncLiveActivity` and when train positions change; forced when
+  the app goes to the background) writes the `WidgetSnapshot` for `widgetJourney` (the Live Activity's pick
+  `liveJourneyCandidate`, else the next saved journey not switched off) and reloads the widgets only if it changed.
 - `Features/Connections/` – search form (`ConnectionsView`, `ConnectionSearch`, `RouteOptionsEditor`
   for via stops/products/max transfers), `JourneyResultsView` (+ `JourneyCard`, `TrainNumberSheet`),
   `JourneyDetailView` (+ `LegCard`, `TransferRow`, alternatives sheets), `JourneyMapView` (MapKit),
@@ -208,6 +211,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 - `Sharing/` – `JourneyShareLink` (betterbahn://share encoding, payload limits, short-link IDs),
   `ShortShareLinkClient` (`/share` on the `betterbahn` Worker, long link as fallback), `DBShare` + `DBShareImporter`
   (parse DB Navigator/bahn.de shared text, resolve via `betterbahn://import`).
+- `Widgets/` – `WidgetSnapshot` + `WidgetStore` (JSON in the App Group container), `JourneyWidgetState` (what the
+  journey widget shows at a moment: phase, next stop and its delay, transfer "RE 5 → ICE 645, Gl. 4 → Gl. 7", final
+  delay, countdown target; `changeDates` for the widget's timeline entries), `TrainMapLink` (`betterbahn://map`).
 - `Geometry/` – polyline decode, `RouteGeometryService`, `SegmentHeatmap`.
 - `Support/HTTPClient.swift` – shared HTTP + `TransitError`, `JSONDecoding`. Every request sends `identifyingUserAgent` (app version + `/support` contact, as Transitous/OpenRailwayMap/Träwelling ask); only `BahnDeClient` sends browser agents. `ProductStyle` colors.
 - `Support/LoadingDeadline.swift` – waits up to 4 s for live data before a screen shows a journey or train

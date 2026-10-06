@@ -363,7 +363,7 @@ struct JourneyDetailView: View {
                             && (model.manualLiveActivityJourneyID == entry.id || model.liveActivities.isActive(journey)) },
                         set: { model.setLiveActivity($0, for: entry.id) }
                     )) {
-                        Label("Als Live-Aktivität zeigen", systemImage: "arrow.left.arrow.right.circle.fill")
+                        Label("Als Widget und Live-Aktivität zeigen", systemImage: "arrow.left.arrow.right.circle.fill")
                             .font(.caption.weight(.semibold))
                     }
                     .tint(.brand)

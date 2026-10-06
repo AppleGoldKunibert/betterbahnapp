@@ -46,6 +46,8 @@ struct RootView: View {
     @State private var incomingDBShare: DBShareText?
     @State private var showInvalidShareLinkAlert = false
     @State private var shareLinkError: String?
+    /// A train's live map opened from a widget (`TrainMapLink`).
+    @State private var linkedTrainMap: LinkedTrainMap?
     @State private var selectedTab = RootTab.connections
 
     enum RootTab: Hashable {
@@ -91,6 +93,7 @@ struct RootView: View {
             } else if phase == .background {
                 model.stopRefreshing()
                 model.scheduleLiveActivityBackgroundCheck()
+                model.updateWidgets(force: true)
             }
         }
         #if DEBUG
@@ -101,6 +104,16 @@ struct RootView: View {
         }
         #endif
         .onOpenURL { url in
+            // A live widget was tapped: show its train on the live map.
+            if let target = TrainMapLink.target(from: url) {
+                if let entry = model.savedJourneys.first(where: { $0.journey.id == target.journeyID }),
+                   entry.journey.legs.indices.contains(target.legIndex) {
+                    incomingSharedJourney = nil
+                    incomingDBShare = nil
+                    linkedTrainMap = LinkedTrainMap(route: LiveTrainRoute(leg: entry.journey.legs[target.legIndex]))
+                }
+                return
+            }
             // The Live Activity was tapped: show its journey (if it's still saved).
             if let journeyID = LiveActivityLink.journeyID(from: url) {
                 if let entry = model.savedJourneys.first(where: { $0.journey.id == journeyID }) {
@@ -132,6 +145,7 @@ struct RootView: View {
         }
         .sheet(item: $incomingSharedJourney) { SharedJourneyPreviewView(journey: $0) }
         .sheet(item: $incomingDBShare) { ImportedJourneyView(text: $0.text) }
+        .sheet(item: $linkedTrainMap) { LiveTrainMapView(route: $0.route) }
         .alert("Reise-Link ungültig", isPresented: $showInvalidShareLinkAlert) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -156,4 +170,10 @@ struct RootView: View {
             shareLinkError = "Die Reise konnte nicht geladen werden. Prüf deine Internetverbindung und öffne den Link noch einmal."
         }
     }
+}
+
+/// A train's live map to open from a widget link.
+private struct LinkedTrainMap: Identifiable {
+    let id = UUID()
+    let route: LiveTrainRoute
 }
