@@ -909,10 +909,10 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         defer { session.invalidateAndCancel() }
         let provider = TransitousProvider(http: HTTPClient(session: session))
 
-        let start = Date.now
         let stations = try await provider.searchStations("Po")
         #expect(stations.map(\.id) == ["potsdamHbf"])
-        #expect(Date.now.timeIntervalSince(start) < 4)
+        // Checked against the slow answer itself, not a stopwatch, so a busy test runner can't fail it.
+        #expect(!SlowExtraGeocodeProtocol.answeredSlowly.withLock { $0 })
         #expect(CombinedProvider.isShortQuery("Po "))
         #expect(!CombinedProvider.isShortQuery("Pot"))
     }
@@ -1745,8 +1745,10 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
 
     final class SlowProvider: TransitProvider, @unchecked Sendable {
         let source = DataSource.bahnDe
+        let finished = Mutex(false)
         func searchStations(_ query: String) async throws -> [Station] {
             try await Task.sleep(for: .seconds(30))
+            finished.withLock { $0 = true }
             return []
         }
         func journeys(_ query: JourneyQuery) async throws -> JourneyPage { throw TransitError.timeout }
@@ -1755,25 +1757,29 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
     }
 
     @Test func slowPrimaryFallsBackQuickly() async throws {
-        let combined = CombinedProvider(primary: SlowProvider(), fallback: MockProvider(source: .transitous), bahnDe: nil)
-        let start = Date.now
+        let slow = SlowProvider()
+        let combined = CombinedProvider(primary: slow, fallback: MockProvider(source: .transitous), bahnDe: nil)
         let result = try await combined.searchStations("Köln")
         #expect(result.first?.source == .transitous)
-        #expect(Date.now.timeIntervalSince(start) < 5)
+        // Fell back without waiting for the slow provider (checked against it, not a stopwatch).
+        #expect(!slow.finished.withLock { $0 })
     }
 
     /// The deadline holds even when the work is slow to stop once cancelled (a URL request winding
     /// down), so a hanging extra query can't hold up the station search.
     @Test func deadlineDoesntWaitForWorkSlowToStop() async {
-        let start = ContinuousClock.now
+        let stopped = Mutex(false)
         let result = try? await CombinedProvider.withDeadline(.milliseconds(100)) {
             await withCheckedContinuation { continuation in
-                DispatchQueue.global().asyncAfter(deadline: .now() + 3) { continuation.resume() }
+                DispatchQueue.global().asyncAfter(deadline: .now() + 3) {
+                    stopped.withLock { $0 = true }
+                    continuation.resume()
+                }
             }
             return 1
         }
         #expect(result == nil)
-        #expect(ContinuousClock.now - start < .seconds(2))
+        #expect(!stopped.withLock { $0 })
     }
 }
 
@@ -4104,6 +4110,8 @@ private final class SlowExtraGeocodeProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     private let stopped = Mutex(false)
+    /// Set once the slow "Po Bahnhof" answer is due, whether or not the request was still waiting for it.
+    static let answeredSlowly = Mutex(false)
     override func stopLoading() { stopped.withLock { $0 = true } }
 
     override func startLoading() {
@@ -4120,7 +4128,10 @@ private final class SlowExtraGeocodeProtocol: URLProtocol, @unchecked Sendable {
             client?.urlProtocolDidFinishLoading(self)
         }
         if text == "Po Bahnhof" {
-            DispatchQueue.global().asyncAfter(deadline: .now() + 5, execute: finish)
+            DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
+                Self.answeredSlowly.withLock { $0 = true }
+                finish()
+            }
         } else {
             finish()
         }
