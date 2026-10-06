@@ -80,7 +80,7 @@ struct CoachSequenceView: View {
     /// Where the train goes; coupled trains that split later list every destination.
     private func destination(_ sequence: CoachSequence) -> String? {
         var destinations: [String] = []
-        for case let destination? in sequence.groups.filter(\.isRequestedTrain).map(\.destination)
+        for case let destination? in sequence.travellingGroups.filter(\.isRequestedTrain).map(\.destination)
         where !destinations.contains(destination) {
             destinations.append(destination)
         }
@@ -242,7 +242,8 @@ private struct CoachSequenceDiagram: View {
     /// Where one part of the train meets the next, in meters along the platform.
     private func partBoundaries(_ placed: [Placed]) -> [Double] {
         guard sequence.groups.count > 1 else { return [] }
-        let ordered = placed.sorted { $0.start < $1.start }
+        // A locomotive in a group of its own (changed on the way) is no separate part of the train.
+        let ordered = placed.sorted { $0.start < $1.start }.filter { !sequence.isLocomotiveOnly(group: $0.coach.group) }
         return zip(ordered, ordered.dropFirst()).compactMap { previous, next in
             previous.coach.group == next.coach.group ? nil : (previous.end + next.start) / 2
         }
@@ -257,7 +258,8 @@ private struct CoachSequenceDiagram: View {
 
     /// Train and destination (or Tz) on the first coach of each part, when the train has several.
     private func groupLabel(for coach: CoachSequence.Coach) -> String? {
-        guard sequence.groups.count > 1, sequence.groups.indices.contains(coach.group),
+        guard sequence.travellingGroups.count > 1, sequence.groups.indices.contains(coach.group),
+              !sequence.isLocomotiveOnly(group: coach.group),
               sequence.coaches.first(where: { $0.group == coach.group })?.id == coach.id else { return nil }
         let group = sequence.groups[coach.group]
         let unit = group.unit?.number.map { "Tz \($0)" }

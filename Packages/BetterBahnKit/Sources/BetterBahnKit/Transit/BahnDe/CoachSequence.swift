@@ -90,12 +90,25 @@ public struct CoachSequence: Sendable, Hashable {
     /// shown turned round after an odd number of them).
     public var reversals: [String] = []
 
+    /// A group with nothing but locomotives. bahn.de lists a locomotive as its own group with the
+    /// station where it is changed as destination, which is no part of the train passengers ride on.
+    public func isLocomotiveOnly(group index: Int) -> Bool {
+        let vehicles = coaches.filter { $0.group == index }
+        return !vehicles.isEmpty && vehicles.allSatisfy { $0.kind == .locomotive }
+    }
+
+    /// The groups passengers ride in: all but those of locomotives alone.
+    public var travellingGroups: [Group] {
+        let travelling = groups.indices.filter { !isLocomotiveOnly(group: $0) }
+        return travelling.isEmpty ? groups : travelling.map { groups[$0] }
+    }
+
     /// Groups that run as another train with another destination than the requested one.
-    public var hasOtherTrains: Bool { groups.contains { !$0.isRequestedTrain } }
+    public var hasOtherTrains: Bool { travellingGroups.contains { !$0.isRequestedTrain } }
     /// Several trains run in this consist, each under its own number (coupled, or split later on).
-    public var hasSeveralTrains: Bool { Set(groups.compactMap(\.trainName)).count > 1 }
+    public var hasSeveralTrains: Bool { Set(travellingGroups.compactMap(\.trainName)).count > 1 }
     /// Its parts go on to different places, so it matters which coach you board.
-    public var partsGoToDifferentPlaces: Bool { Set(groups.compactMap(\.destination)).count > 1 }
+    public var partsGoToDifferentPlaces: Bool { Set(travellingGroups.compactMap(\.destination)).count > 1 }
 }
 
 // MARK: - Compared with the plan

@@ -12,7 +12,8 @@ cp "$R/Sources/BetterBahnKit/Resources/StationHints.json" "$S/Sources/Kit/Resour
 cd "$R/Sources/BetterBahnKit"
 for f in $(find . -name "*.swift"); do
   # Tickets, Träwelling and anything importing Apple-only frameworks stay out.
-  case "$f" in ./Traewelling/*|./Tickets/*) continue;; esac
+  # ShortShareLinkClient needs JourneyShareLink, which imports Compression.
+  case "$f" in ./Traewelling/*|./Tickets/*|./Sharing/ShortShareLinkClient.swift) continue;; esac
   grep -qE "^import (ActivityKit|Compression|CoreGraphics|CryptoKit|DeviceCheck|ImageIO|PDFKit|Security|SwiftUI|UniformTypeIdentifiers|Vision)" "$f" && continue
   mkdir -p "$S/Sources/Kit/$(dirname "$f")"
   { printf '#if canImport(FoundationNetworking)\nimport FoundationNetworking\n#endif\n#if canImport(FoundationXML)\nimport FoundationXML\n#endif\n'; cat "$f"; } > "$S/Sources/Kit/$f"

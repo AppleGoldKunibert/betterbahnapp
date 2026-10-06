@@ -909,10 +909,10 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         defer { session.invalidateAndCancel() }
         let provider = TransitousProvider(http: HTTPClient(session: session))
 
-        let start = Date.now
         let stations = try await provider.searchStations("Po")
         #expect(stations.map(\.id) == ["potsdamHbf"])
-        #expect(Date.now.timeIntervalSince(start) < 4)
+        // Checked against the slow answer itself, not a stopwatch, so a busy test runner can't fail it.
+        #expect(!SlowExtraGeocodeProtocol.answeredSlowly.withLock { $0 })
         #expect(CombinedProvider.isShortQuery("Po "))
         #expect(!CombinedProvider.isShortQuery("Pot"))
     }
@@ -1859,8 +1859,10 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
 
     final class SlowProvider: TransitProvider, @unchecked Sendable {
         let source = DataSource.bahnDe
+        let finished = Mutex(false)
         func searchStations(_ query: String) async throws -> [Station] {
             try await Task.sleep(for: .seconds(30))
+            finished.withLock { $0 = true }
             return []
         }
         func journeys(_ query: JourneyQuery) async throws -> JourneyPage { throw TransitError.timeout }
@@ -1869,11 +1871,29 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
     }
 
     @Test func slowPrimaryFallsBackQuickly() async throws {
-        let combined = CombinedProvider(primary: SlowProvider(), fallback: MockProvider(source: .transitous), bahnDe: nil)
-        let start = Date.now
+        let slow = SlowProvider()
+        let combined = CombinedProvider(primary: slow, fallback: MockProvider(source: .transitous), bahnDe: nil)
         let result = try await combined.searchStations("Köln")
         #expect(result.first?.source == .transitous)
-        #expect(Date.now.timeIntervalSince(start) < 5)
+        // Fell back without waiting for the slow provider (checked against it, not a stopwatch).
+        #expect(!slow.finished.withLock { $0 })
+    }
+
+    /// The deadline holds even when the work is slow to stop once cancelled (a URL request winding
+    /// down), so a hanging extra query can't hold up the station search.
+    @Test func deadlineDoesntWaitForWorkSlowToStop() async {
+        let stopped = Mutex(false)
+        let result = try? await CombinedProvider.withDeadline(.milliseconds(100)) {
+            await withCheckedContinuation { continuation in
+                DispatchQueue.global().asyncAfter(deadline: .now() + 3) {
+                    stopped.withLock { $0 = true }
+                    continuation.resume()
+                }
+            }
+            return 1
+        }
+        #expect(result == nil)
+        #expect(!stopped.withLock { $0 })
     }
 }
 
@@ -2069,6 +2089,27 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(CoachSequence.numberList(["23", "21"]) == "21, 23")
         #expect(CoachSequence.numberList(["39", "31", "32", "33", "35", "36", "37", "38"]) == "31–33, 35–39")
         #expect(CoachSequence.numberList(["21", "22"]) == "21, 22")
+    }
+
+    /// A locomotive listed as its own group, ending where it is changed, is no train part with another destination.
+    @Test func coachSequenceIgnoresLocomotiveChange() throws {
+        let json = #"""
+        {"groups": [
+            {"name": "IC2013", "transport": {"category": "IC", "number": 2013, "destination": {"name": "Stuttgart Hbf"}},
+             "vehicles": [{"type": {"category": "LOCOMOTIVE"}}]},
+            {"name": "IC2013", "transport": {"category": "IC", "number": 2013, "destination": {"name": "Oberstdorf"}},
+             "vehicles": [{"wagonIdentificationNumber": 1, "type": {"category": "PASSENGERCARRIAGE_FIRST_CLASS"}},
+                          {"wagonIdentificationNumber": 2, "type": {"category": "PASSENGERCARRIAGE_ECONOMY_CLASS"}}]}
+        ]}
+        """#
+        let response = try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data(json.utf8))
+        let sequence = BahnDeClient.coachSequence(from: response, category: "IC", number: 2013)
+        #expect(sequence.isLocomotiveOnly(group: 0))
+        #expect(!sequence.isLocomotiveOnly(group: 1))
+        #expect(sequence.travellingGroups.compactMap(\.destination) == ["Oberstdorf"])
+        #expect(!sequence.partsGoToDifferentPlaces)
+        #expect(!sequence.hasOtherTrains)
+        #expect(!sequence.hasSeveralTrains)
     }
 
     /// Coupled trains: the other half keeps its own destination, and power cars have no coach number.
@@ -4183,6 +4224,8 @@ private final class SlowExtraGeocodeProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     private let stopped = Mutex(false)
+    /// Set once the slow "Po Bahnhof" answer is due, whether or not the request was still waiting for it.
+    static let answeredSlowly = Mutex(false)
     override func stopLoading() { stopped.withLock { $0 = true } }
 
     override func startLoading() {
@@ -4199,7 +4242,10 @@ private final class SlowExtraGeocodeProtocol: URLProtocol, @unchecked Sendable {
             client?.urlProtocolDidFinishLoading(self)
         }
         if text == "Po Bahnhof" {
-            DispatchQueue.global().asyncAfter(deadline: .now() + 5, execute: finish)
+            DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
+                Self.answeredSlowly.withLock { $0 = true }
+                finish()
+            }
         } else {
             finish()
         }
