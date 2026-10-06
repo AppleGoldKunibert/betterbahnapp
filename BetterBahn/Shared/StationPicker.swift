@@ -156,6 +156,11 @@ struct StationInput<Focus: Hashable>: View {
                             .font(.subheadline)
                             .lineLimit(1)
                         Spacer()
+                        if model.settings.ril100Enabled, let code = Ril100.code(for: suggestion) {
+                            Text(code)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                        }
                         Image(systemName: "arrow.up.left")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.tertiary)

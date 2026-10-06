@@ -24,7 +24,7 @@ comments are English.
 | `Cloudflare/pass-signer/` | Worker (`betterbahn-pass`) that signs Apple Wallet passes for DB tickets with the Pass Type ID certificate (secrets), since that can't ship in the app. Needs an App Attest token, and only signs UIC (`#UT`) barcodes whose issuer signature verifies against UIC's public key list (`uicsignature.mjs`). `npm install && npm test` (see its README). |
 | `Cloudflare/shared/` | `appattest.mjs`: App Attest verification and the signed tokens both Workers check (`X-BetterBahn-Token`); `node --test Cloudflare/shared/appattest.test.mjs`. |
 | `.github/workflows/` | GitHub Actions: `pr-build.yml` (macOS: Kit tests + unsigned app build on PRs touching code), `pr-secrets.yml` (Linux: gitleaks secret scan + guard against committing `DefaultCredentials.swift`), `sync-prod.yml` (merges prod into every other branch except `appstorerelease`). |
-| `scripts/` | `make-station-hints.py`: rebuilds BetterBahnKit's offline station list for search (see Transitous below). `searchsim/`: Linux package that copies the platform-neutral Kit sources in (`./sync.sh`), so `swift test` runs `BetterBahnKitTests.swift` without a Mac and `swift run SearchSim scenarios.txt` runs the real station search against live Transitous for ~1150 place/query scenarios (rerun after changing search ranking). |
+| `scripts/` | `make-station-hints.py`: rebuilds BetterBahnKit's offline station list for search (see Transitous below). `make-ril100.py`: rebuilds the RIL100 code list (`Ril100.swift`). `searchsim/`: Linux package that copies the platform-neutral Kit sources in (`./sync.sh`), so `swift test` runs `BetterBahnKitTests.swift` without a Mac and `swift run SearchSim scenarios.txt` runs the real station search against live Transitous for ~1150 place/query scenarios (rerun after changing search ranking). |
 | `docs/transit-providers.md` | Why Transitous is the primary data source and fallback options. |
 | `docs/app-review-notes.md` | App Store submission checklist (privacy URL, App Privacy, demo access) and review notes. |
 
@@ -103,6 +103,13 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   picker's search (unless nothing else matches); `TransitousProvider.searchStations(_:near:)` with a
   `StationSearch` passes the modes to the geocoder and filters after `mergingNearbyDuplicates` (which unions modes).
   The plain `searchStations(String)` (share import etc.) keeps every stop.
+- `Transit/Ril100.swift` – DB's RIL100 codes (#165) from `Resources/Ril100.json` (built by `scripts/make-ril100.py`
+  from DB InfraGO's "Betriebsstellen" on the Mobilithek, CC BY 4.0, yearly; stations and halts in service, each code
+  with all its positions, no EVA numbers). Typing a code in any case ("ff") puts that station first in the picker's
+  search (`searchStations(_ search:near:)`, looked up by DB's name, its first part and its town) and drops other hits
+  that are the same station; behind the first hit only when that starts with the typed word ("Bad …"). Stops are
+  matched to codes by position and name (`matches`); the shortest matching code is shown ("BL", not "BLS"), on the
+  right in the picker with the expert option "RIL100-Codes in der Suche" (`AppSettings.ril100Enabled`).
 - `Transit/CombinedProvider.swift` – what the app uses: primary `TransitousProvider`, optional
   fallback (none configured), cooldown health check, `BahnDeClient`, `VagonwebClient`, `BahnExpertClient`, `BahnJetztClient`.
 - `Transit/BahnDe/` – bahn.de web API via the `Cloudflare/bahnde-proxy` Worker (same endpoints/headers as Travel::Status::DE::DBRIS):
