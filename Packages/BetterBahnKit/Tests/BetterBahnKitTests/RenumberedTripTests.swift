@@ -42,9 +42,11 @@ import Testing
     @Test func refreshKeepsTheLegsOwnTripId() async throws {
         let (combined, session) = provider()
         defer { session.invalidateAndCancel() }
-        let journey = Journey(legs: [try leg()], source: .transitous)
+        let leg = try leg()
+        let journey = Journey(legs: [leg], source: .transitous)
 
-        let refreshed = await JourneyRefresher(provider: combined).refreshEnds(journey)
+        // While the train runs: once it's long over, the leg keeps what it had and isn't refreshed.
+        let refreshed = await JourneyRefresher(provider: combined).refreshEnds(journey, now: leg.departure.planned)
 
         #expect(refreshed.legs.first?.tripId == "old-2074")
         #expect(refreshed.legs.first?.departurePlatform?.best == "6")
