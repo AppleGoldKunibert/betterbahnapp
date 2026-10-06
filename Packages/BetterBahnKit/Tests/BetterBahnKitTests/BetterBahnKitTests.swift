@@ -1761,6 +1761,20 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(result.first?.source == .transitous)
         #expect(Date.now.timeIntervalSince(start) < 5)
     }
+
+    /// The deadline holds even when the work is slow to stop once cancelled (a URL request winding
+    /// down), so a hanging extra query can't hold up the station search.
+    @Test func deadlineDoesntWaitForWorkSlowToStop() async {
+        let start = ContinuousClock.now
+        let result = try? await CombinedProvider.withDeadline(.milliseconds(100)) {
+            await withCheckedContinuation { continuation in
+                DispatchQueue.global().asyncAfter(deadline: .now() + 3) { continuation.resume() }
+            }
+            return 1
+        }
+        #expect(result == nil)
+        #expect(ContinuousClock.now - start < .seconds(2))
+    }
 }
 
 @Suite struct BahnDeFormationTests {
