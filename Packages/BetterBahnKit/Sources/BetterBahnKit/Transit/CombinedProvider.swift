@@ -13,6 +13,7 @@ public final class CombinedProvider: TransitProvider {
     public let vagonweb: VagonwebClient?
     public let bahnJetzt: BahnJetztClient?
     private let health: Health
+    private let renumbered = RenumberedTrips()
 
     public init(primary: any TransitProvider = TransitousProvider(),
                 fallback: (any TransitProvider)? = nil,
@@ -203,6 +204,47 @@ public final class CombinedProvider: TransitProvider {
 
     public func trip(id: String, source: DataSource) async throws -> Trip {
         try await provider(for: source).trip(id: id)
+    }
+
+    /// The run of a journey's leg. Transitous' trip IDs only last until the feed is next imported
+    /// (DELFI renumbers its trips), so a saved journey's leg then gets a 404 for its train. Such a run
+    /// is looked up again on the board at the leg's origin, as the same train leaving at the same planned
+    /// time, and its new ID remembered while the app runs. The returned trip carries the new ID.
+    public func trip(for leg: Leg) async throws -> Trip {
+        guard let tripId = leg.tripId else { throw TransitError.notFound("Fahrt") }
+        let id = await renumbered.id(for: tripId) ?? tripId
+        do {
+            return try await trip(id: id, source: leg.source)
+        } catch let error as TransitError where error.isNotFound {
+            guard leg.source == primary.source, let line = leg.line,
+                  let entries = try? await primary.board(.departures, at: leg.origin,
+                                                         date: leg.departure.planned.addingTimeInterval(-5 * 60),
+                                                         duration: 15, products: [line.product]),
+                  let current = Self.sameTrain(as: leg, in: entries)?.tripId, current != id else { throw error }
+            await renumbered.remember(current, for: tripId)
+            return try await trip(id: current, source: leg.source)
+        }
+    }
+
+    /// The board entry for `leg`'s train: leaving at its planned time, by name or number.
+    static func sameTrain(as leg: Leg, in entries: [BoardEntry]) -> BoardEntry? {
+        guard let line = leg.line else { return nil }
+        let names = Set([line.name, line.alternateName].compactMap { $0 }.map(Line.normalize))
+        return entries.first { entry in
+            guard entry.time.planned == leg.departure.planned else { return false }
+            if [entry.line.name, entry.line.alternateName].compactMap({ $0 }).map(Line.normalize).contains(where: names.contains) {
+                return true
+            }
+            return entry.line.product == line.product && line.dispatchNumber != nil
+                && entry.line.dispatchNumber == line.dispatchNumber
+        }
+    }
+
+    /// Trip IDs a feed import replaced: old ID → current one.
+    actor RenumberedTrips {
+        private var ids: [String: String] = [:]
+        func id(for old: String) -> String? { ids[old] }
+        func remember(_ current: String, for old: String) { ids[old] = current }
     }
 
     private func provider(for source: DataSource?) throws -> any TransitProvider {

@@ -33,6 +33,37 @@ public extension Trip {
     }
 }
 
+public extension Leg {
+    /// The leg's own stops as a trip, for when its full run can't be loaded (any more): a past train
+    /// Transitous has dropped, or no connection. Only what was saved, from where you got on to where you got off.
+    var savedTrip: Trip? {
+        guard !isWalking else { return nil }
+        let stops = stopovers.count >= 2 ? stopovers : [
+            Stopover(station: origin, arrival: nil, departure: departure, arrivalPlatform: nil,
+                     departurePlatform: departurePlatform, cancelled: cancelled),
+            Stopover(station: destination, arrival: arrival, departure: nil, arrivalPlatform: arrivalPlatform,
+                     departurePlatform: nil, cancelled: cancelled),
+        ]
+        return Trip(id: tripId ?? id, line: line, direction: direction, stopovers: stops, cancelled: cancelled,
+                    remarks: remarks, messages: messages, source: source)
+    }
+}
+
+public extension Trip {
+    /// This run with the Zusatzhalte `leg` remembered (bahn.de only reports them while the train runs),
+    /// each put in by its planned time, unless the run already has that stop.
+    func keepingAdditionalStops(of leg: Leg) -> Trip {
+        func time(_ stop: Stopover) -> Date? { stop.arrival?.planned ?? stop.departure?.planned }
+        var trip = self
+        for extra in leg.stopovers where extra.isAdditional {
+            guard let at = time(extra), !trip.stopovers.contains(where: { $0.station.isSamePlace(as: extra.station) }) else { continue }
+            let index = trip.stopovers.firstIndex { stop in time(stop).map { $0 > at } ?? false } ?? trip.stopovers.endIndex
+            trip.stopovers.insert(extra, at: index)
+        }
+        return trip
+    }
+}
+
 /// Result of picking a specific train: the ride itself, plus – when boarding at the requested origin
 /// or alighting at the requested destination isn't actually allowed on it – a rule-respecting
 /// alternative between the same two stations.

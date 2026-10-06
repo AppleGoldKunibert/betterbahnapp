@@ -220,11 +220,11 @@ struct TrainFormationLabel: View {
         self.leg = leg
     }
 
-    init(trip: Trip) {
+    init(trip: Trip, savedLeg: Leg? = nil) {
         request = BahnDeClient.formationRequest(for: trip)
         line = trip.line
         date = trip.stopovers.first?.departure?.planned ?? .now
-        leg = nil
+        leg = savedLeg
     }
 
     @Environment(AppModel.self) private var model
@@ -349,13 +349,13 @@ struct TrainSeriesTag: View {
         self.leg = leg
     }
 
-    init(trip: Trip) {
+    init(trip: Trip, savedLeg: Leg? = nil) {
         request = BahnDeClient.formationRequest(for: trip)
         line = trip.line
         date = trip.stopovers.lazy.compactMap { $0.departure?.planned ?? $0.arrival?.planned }.first ?? .now
         tripId = nil
         source = nil
-        leg = nil
+        leg = savedLeg
     }
 
     @Environment(AppModel.self) private var model

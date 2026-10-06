@@ -819,9 +819,9 @@ struct JourneyReplanSheet: View {
     }
 
     private func loadTrip() async {
-        guard let tripId = leg.tripId else { return }
+        guard leg.tripId != nil else { return }
         do {
-            let loaded = try await model.provider.trip(id: tripId, source: leg.source)
+            let loaded = try await model.provider.trip(for: leg)
             var fresh = loaded
             if let timetables = model.timetablesClient {
                 fresh = await timetables.tripWithRealtime(loaded)

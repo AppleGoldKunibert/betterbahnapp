@@ -980,15 +980,13 @@ nonisolated struct SavedJourney: Codable, Hashable, Identifiable {
     /// synced so they stay known after the journey (optional so older saved data still decodes).
     var formations: [String: TrainFormation]?
 
-    var issues: [ConnectionIssue] { journey.connectionIssues() }
+    var issues: [ConnectionIssue] { journey.currentIssues() }
 
     /// How long after arriving a finished journey is still refreshed when opened.
     static let liveDataLifetime: TimeInterval = 24 * 3600
 
     /// Finished 10 minutes after the (realtime) arrival.
-    var isFinished: Bool {
-        (journey.arrival?.best ?? .distantFuture).addingTimeInterval(10 * 60) < .now
-    }
+    var isFinished: Bool { journey.isOver() }
 }
 
 /// Where a saved journey's train is right now.

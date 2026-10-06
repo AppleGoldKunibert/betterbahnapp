@@ -614,9 +614,9 @@ struct JourneyCard: View {
                         InfoChip(text: "Kein Einstieg", systemImage: "arrow.down.right.circle.fill", tint: .slightDelay)
                     } else if journey.transitLegs.contains(where: { $0.stopovers.last?.access.allowsAlighting == false }) {
                         InfoChip(text: "Kein Ausstieg", systemImage: "arrow.up.right.circle.fill", tint: .slightDelay)
-                    } else if journey.connectionIssues().contains(where: \.isBlocking) {
+                    } else if journey.currentIssues().contains(where: \.isBlocking) {
                         InfoChip(text: "Nicht möglich", systemImage: "exclamationmark.triangle.fill", tint: .heavyDelay)
-                    } else if !journey.connectionIssues().isEmpty {
+                    } else if !journey.currentIssues().isEmpty {
                         InfoChip(text: "Knapp", systemImage: "exclamationmark.triangle.fill", tint: .slightDelay)
                     } else if journey.legs.contains(where: { $0.messages.containsDelayReason }) {
                         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.heavyDelay)
