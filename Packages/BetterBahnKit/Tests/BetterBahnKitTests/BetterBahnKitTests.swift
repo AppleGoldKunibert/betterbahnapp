@@ -3092,6 +3092,58 @@ final class RoutingMockProvider: TransitProvider, @unchecked Sendable {
     }
 }
 
+/// Expert option "Nur Ein-/Ausstieg ignorieren": a train you may not board at the origin that ends
+/// short of the destination, continued from where it stops (ICE 204 Harburg → Hamburg Hbf, RJ 177 on).
+@Suite struct RestrictedTrainContinuationTests {
+    let harburg = station("8000147", "Hamburg-Harburg", 53.456, 9.992)
+    let hbf = station("8002549", "Hamburg Hbf", 53.553, 10.007)
+    let altona = station("8002553", "Hamburg-Altona", 53.552, 9.935)
+    let berlin = station("8011160", "Berlin Hbf", 52.525, 13.369)
+    let base = Date(timeIntervalSince1970: 1_800_000_000)
+
+    func time(_ minutes: Double) -> TimeInfo { TimeInfo(planned: base.addingTimeInterval(minutes * 60), actual: nil) }
+
+    func trip(_ id: String, _ name: String, _ stops: [Stopover]) -> Trip {
+        Trip(id: id, line: Line(name: name, number: String(name.split(separator: " ").last!), product: .highSpeed,
+                                operatorName: nil),
+             direction: stops.last?.station.name, stopovers: stops, cancelled: false, remarks: [], source: .bahnDe)
+    }
+
+    @Test func ridesRestrictedTrainAndContinues() async throws {
+        let ice204 = trip("ice204", "ICE 204", [
+            Stopover(station: harburg, arrival: time(-2), departure: time(0), arrivalPlatform: nil, departurePlatform: nil,
+                     cancelled: false, access: .exitOnly),
+            Stopover(station: hbf, arrival: time(11), departure: time(14), arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+            Stopover(station: altona, arrival: time(22), departure: nil, arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+        ])
+        let rj177 = trip("rj177", "RJ 177", [
+            Stopover(station: hbf, arrival: nil, departure: time(28), arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+            Stopover(station: berlin, arrival: time(139), departure: nil, arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+        ])
+        let slower = trip("ice801", "ICE 801", [
+            Stopover(station: hbf, arrival: nil, departure: time(47), arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+            Stopover(station: berlin, arrival: time(167), departure: nil, arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+        ])
+        let mock = RoutingMockProvider()
+        mock.trips["ice204"] = ice204
+        mock.routes["\(hbf.name) -> \(berlin.name)"] = [Journey(legs: [slower.leg(from: hbf, to: berlin)!], source: .bahnDe),
+                                                         Journey(legs: [rj177.leg(from: hbf, to: berlin)!], source: .bahnDe)]
+        let entry = BoardEntry(kind: .departures, tripId: "ice204", station: harburg, line: ice204.line!, otherEnd: altona.name,
+                               time: time(0), platform: PlatformInfo(planned: "2", actual: nil), cancelled: false,
+                               terminatesOrOriginatesHere: false, remarks: [], access: .exitOnly, source: .bahnDe)
+        let calls = StationCalls(departuresAtOrigin: [entry], departuresAtDestination: [], arrivalsAtDestination: [])
+        let picker = TrainPicker(provider: CombinedProvider(primary: mock, bahnDe: nil, bahnExpert: nil, vagonweb: nil, bahnJetzt: nil))
+
+        let journeys = await picker.journeysContinuingFromRestrictedTrains(
+            JourneyQuery(from: harburg, to: berlin, date: base), calls: calls, end: base.addingTimeInterval(3600), maxAlightStops: 1)
+        let best = try #require(journeys.first)
+        #expect(journeys.count == 1)
+        #expect(best.transitLegs.map { $0.line?.name } == ["ICE 204", "RJ 177"])
+        #expect(best.transitLegs.first?.breaksBoardingRules == true)
+        #expect(best.arrival?.planned == time(139).planned)
+    }
+}
+
 @Suite struct TrainRoutePlannerTests {
     let koeln = station("8000207", "Köln Hbf", 50.943, 6.958)
     let duesseldorf = station("8000085", "Düsseldorf Hbf", 51.219, 6.794)
