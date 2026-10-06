@@ -32,6 +32,9 @@ public struct TraewellingUser: Decodable, Sendable {
     public var displayName: String
     public var username: String
     public var points: Int?
+    /// The connected Mastodon profile (e.g. "https://zug.network/@name"), whose instance's
+    /// custom emojis the check-in text offers.
+    public var mastodonUrl: String?
 }
 
 public struct TraewellingStation: Decodable, Sendable, Hashable {

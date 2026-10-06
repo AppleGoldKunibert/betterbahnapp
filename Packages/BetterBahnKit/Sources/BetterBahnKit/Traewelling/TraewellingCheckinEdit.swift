@@ -27,6 +27,26 @@ public extension TraewellingClient {
         return RideMatch.isSameRide(checkedIn, leg)
     }
 
+    /// One of the user's check-ins.
+    func status(id: Int) async throws -> TraewellingStatus {
+        try await authorized("status/\(id)", as: DataWrapper<TraewellingStatus>.self).data
+    }
+
+    /// Changes a check-in's text, visibility and trip type. An empty text removes it.
+    @discardableResult
+    func updateStatus(id: Int, body: String, visibility: TraewellingVisibility,
+                      business: TraewellingBusiness) async throws -> TraewellingStatus {
+        let text = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        let json: [String: Any] = [
+            "body": text.isEmpty ? NSNull() : String(text.prefix(280)) as Any,
+            "visibility": visibility.rawValue,
+            "business": business.rawValue,
+        ]
+        let data = try JSONSerialization.data(withJSONObject: json)
+        return try await authorized("status/\(id)", method: "PUT", body: data,
+                                    as: DataWrapper<TraewellingStatus>.self).data
+    }
+
     /// Moves an existing check-in's exit to `station`. Träwelling only accepts a stopover of the
     /// checked-in trip itself, so the stop is resolved against the trip's own stop list first –
     /// the same source Träwelling validates the request against.

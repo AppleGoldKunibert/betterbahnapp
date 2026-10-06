@@ -12,6 +12,7 @@ final class AppModel {
     private(set) var provider: CombinedProvider
     private(set) var traewelling: TraewellingClient
     let liveActivities = LiveActivityManager()
+    @ObservationIgnored let customEmojis = CustomEmojiClient()
 
     var favoriteStations: [Station] {
         didSet {
@@ -59,6 +60,11 @@ final class AppModel {
     var trackedManualCheckins: [TrackedManualCheckin] {
         didSet { Storage.save(trackedManualCheckins, key: "trackedManualCheckins") }
     }
+    /// Träwelling status of each leg checked in from this app (by `Leg.id`), so the leg's "Mehr"
+    /// offers "Check-in ansehen" instead of checking in again.
+    var checkinStatusIDs: [String: Int] {
+        didSet { Storage.save(checkinStatusIDs, key: "checkinStatusIDs") }
+    }
     /// Explicit choice (from the route view) of which saved journey's Live Activity to show,
     /// overriding the automatic pick until that journey finishes or another one is chosen.
     /// Journeys whose Live Activity was switched off by hand, so the automatic pick skips them.
@@ -103,6 +109,7 @@ final class AppModel {
         recentStations = Storage.load(key: "recentStations") ?? []
         savedJourneys = Storage.load(key: "savedJourneys") ?? []
         trackedManualCheckins = Storage.load(key: "trackedManualCheckins") ?? []
+        checkinStatusIDs = Storage.load(key: "checkinStatusIDs") ?? [:]
         liveJourneys = Storage.load(key: "liveJourneys") ?? LiveDataCache()
         liveTrips = Storage.load(key: "liveTrips") ?? LiveDataCache()
         tickets = TicketStore.load()
@@ -749,6 +756,28 @@ final class AppModel {
         liveJourneyRefreshLoop = nil
         liveActivitySyncLoop?.cancel()
         liveActivitySyncLoop = nil
+    }
+
+    // MARK: Träwelling check-ins
+
+    func rememberCheckin(statusId: Int, leg: Leg) {
+        // Keep the list small: legs are only looked up while their journey is still around.
+        if checkinStatusIDs.count > 300 { checkinStatusIDs.removeAll() }
+        checkinStatusIDs[leg.id] = statusId
+    }
+
+    func forgetCheckin(statusId: Int) {
+        checkinStatusIDs = checkinStatusIDs.filter { $0.value != statusId }
+    }
+
+    /// The custom emojis of the Mastodon instance connected to the Träwelling account, or of
+    /// zug.network without one. Empty if neither can be loaded; emojis are only a nicety.
+    func checkinEmojis() async -> [CustomEmoji] {
+        // Asked each time a check-in opens, so a newly connected Mastodon account counts at once.
+        var user: TraewellingUser?
+        if await traewelling.isLoggedIn { user = try? await traewelling.currentUser() }
+        let instance = CustomEmojiText.instance(fromMastodonURL: user?.mastodonUrl) ?? CustomEmojiText.defaultInstance
+        return (try? await customEmojis.emojis(instance: instance)) ?? []
     }
 
     // MARK: Manual Träwelling check-ins

@@ -25,6 +25,8 @@ struct DataSourcesView: View {
         Source(name: "bahn.expert", usage: "Zugtypen", url: URL(string: "https://bahn.expert")!),
         Source(name: "bahn.jetzt", usage: "Zugpositionen auf der Karte", url: URL(string: "https://bahn.jetzt")!),
         Source(name: "Träwelling", usage: "Check-ins", url: URL(string: "https://traewelling.de")!),
+        Source(name: "zug.network", usage: "Emojis im Check-in-Text (oder die deiner mit Träwelling verbundenen Mastodon-Instanz)",
+               url: URL(string: "https://zug.network")!),
         Source(name: "OpenStreetMap", usage: "Kartendaten des Schienennetzes, © OpenStreetMap-Mitwirkende",
                url: URL(string: "https://www.openstreetmap.org/copyright")!),
         Source(name: "OpenRailwayMap", usage: "Kartenkacheln des Schienennetzes",

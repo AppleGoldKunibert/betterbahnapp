@@ -131,6 +131,9 @@ Namen mit dem Suchtext.</p>
 <p>Wenn du dich bei <a href="https://traewelling.de">Träwelling</a> anmeldest, schickt die App deine Check-ins
 (Zug, Strecke, Zeiten, Nachricht, Sichtbarkeit) und Abfragen an Träwelling. Dafür gilt die Datenschutzerklärung
 von Träwelling. Du kannst dich in den Einstellungen jederzeit abmelden.</p>
+<p>Für die Emojis im Check-in-Text lädt die App die Emoji-Liste und -Bilder der Mastodon-Instanz, die mit
+deinem Träwelling-Konto verbunden ist, sonst von <a href="https://zug.network">zug.network</a>. Dabei wird
+nichts über dich gesendet außer deiner IP-Adresse, die jeder Abruf im Internet mitschickt.</p>
 
 <h2>Mitteilungen</h2>
 <p>Hinweise zu Verspätungen und Gleiswechseln erzeugt die App selbst auf deinem Gerät. Es gibt keine
