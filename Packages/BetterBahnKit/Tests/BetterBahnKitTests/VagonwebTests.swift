@@ -336,6 +336,22 @@ private func berlinDate(_ year: Int, _ month: Int, _ day: Int, hour: Int = 12) -
         #expect(await client.images(at: [a]).isEmpty)
     }
 
+    @Test func iceThreeNeoUsesDBsOwnDrawings() async throws {
+        // No network: every drawing of the ICE 3neo ships with the app, in both directions.
+        let client = VagonwebClient(http: HTTPClient(session: VagonwebImageStubProtocol.session(files: [:])))
+        let plan = try #require(VagonwebComposition.scheduled(fromHTML: try vagonwebPage("vagonweb-ice154")).first)
+            .coachSequence(trainName: "ICE 154")
+        for sequence in [plan, plan.turned(after: ["Frankfurt (Main) Hbf"])] {
+            let drawings = await client.drawings(for: sequence)
+            #expect(drawings.count == 8)
+            #expect(drawings.values.allSatisfy { $0.source == .deutscheBahn && $0.scale == 3 && !$0.mirrored })
+        }
+        let front = try #require(VagonwebClient.bundledDrawing(for: URL(string: "https://www.vagonweb.cz/popisy/img/DB/408-5-b.gif")!))
+        let turned = try #require(VagonwebClient.bundledDrawing(for: URL(string: "https://www.vagonweb.cz/popisy/img/DB/408-5-a.gif")!))
+        #expect(front.data != turned.data)
+        #expect(VagonwebClient.bundledDrawing(for: URL(string: "https://www.vagonweb.cz/popisy/img/DB/412-07-b.gif")!) == nil)
+    }
+
     @Test func drawingsComeFromTheBrowserWhenCloudflareChecks() async throws {
         let url = URL(string: "https://www.vagonweb.cz/popisy/img/DB/test2-1-b.gif")!
         let session = VagonwebImageStubProtocol.session(files: [url: Data("<title>Just a moment...</title>".utf8)], status: 403)

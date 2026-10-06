@@ -3,7 +3,7 @@ import PackageDescription
 let package = Package(
     name: "SearchSim",
     targets: [
-        .target(name: "Kit", resources: [.copy("Resources/StationHints.json")]),
+        .target(name: "Kit", resources: [.copy("Resources/StationHints.json"), .copy("Resources/Drawings")]),
         .executableTarget(name: "SearchSim", dependencies: ["Kit"]),
         .testTarget(name: "KitTests", dependencies: ["Kit"], resources: [.copy("Fixtures")]),
     ]

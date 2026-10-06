@@ -22,6 +22,8 @@ struct DataSourcesView: View {
                url: URL(string: "https://www.bahn.de")!),
         Source(name: "vagonweb.cz", usage: "Geplante Wagenreihungen, Zugtypen und Wagenbilder, mit Erlaubnis von vagonweb",
                url: URL(string: "https://www.vagonweb.cz")!),
+        Source(name: "DB Fernverkehr", usage: "Wagenbilder des ICE 3neo, aus dem Datenblatt „Daten und Fakten“",
+               url: URL(string: "https://www.bahn.de")!),
         Source(name: "bahn.expert", usage: "Zugtypen", url: URL(string: "https://bahn.expert")!),
         Source(name: "bahn.jetzt", usage: "Zugpositionen auf der Karte", url: URL(string: "https://bahn.jetzt")!),
         Source(name: "Träwelling", usage: "Check-ins", url: URL(string: "https://traewelling.de")!),

@@ -180,13 +180,23 @@ struct CoachSequenceView: View {
 private struct TrainDrawing: View {
     let sequence: CoachSequence
     private let images: [Int: (image: UIImage, mirrored: Bool)]
+    private let sources: Set<VagonwebClient.LoadedDrawing.Source>
 
-    /// vagonweb's drawings are about 250 px per coach; a bit smaller shows more of the train.
+    /// vagonweb's drawings are about 250 pt per coach; a bit smaller shows more of the train.
     private static let scale: CGFloat = 0.6
 
     init(sequence: CoachSequence, drawings: [Int: VagonwebClient.LoadedDrawing]) {
         self.sequence = sequence
-        images = drawings.compactMapValues { drawing in UIImage(data: drawing.data).map { (image: $0, mirrored: drawing.mirrored) } }
+        images = drawings.compactMapValues { drawing in
+            UIImage(data: drawing.data, scale: drawing.scale).map { (image: $0, mirrored: drawing.mirrored) }
+        }
+        sources = Set(drawings.values.map(\.source))
+    }
+
+    /// "Wagenbilder: Deutsche Bahn AG, vagonweb.cz"
+    private var credit: String {
+        let names = [(VagonwebClient.LoadedDrawing.Source.deutscheBahn, "Deutsche Bahn AG"), (.vagonweb, "vagonweb.cz")]
+        return "Wagenbilder: " + names.filter { sources.contains($0.0) }.map(\.1).joined(separator: ", ")
     }
 
     /// bahn.de lists the coaches from the front; vagonweb's plan only when its direction is known.
@@ -218,12 +228,12 @@ private struct TrainDrawing: View {
                     }
                 }
             }
-            Text("Wagenbilder: vagonweb.cz")
+            Text(credit)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Zugbild von vagonweb.cz")
+        .accessibilityLabel("Zugbild")
     }
 }
 

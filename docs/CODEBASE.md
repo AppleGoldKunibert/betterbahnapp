@@ -133,6 +133,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   (`Drawing.candidates`). bahn.de's sequence gets the plan's drawings only when its coach numbers match the plan
   in either order (`withDrawings(from:)`). `VagonwebClient.drawings(for:)`/`images(at:)` load them (cached; plain
   request, else `browserFileLoader` = `VagonwebBrowser.files(at:)`, which fetches them inside vagonweb's start page).
+  DB's own drawings replace vagonweb's where the app ships them (`Resources/Drawings/<vagonweb name>.png`, @3x,
+  `VagonwebClient.bundledDrawing(for:)`): so far the ICE 3neo (BR 408), cut from DB's "Daten und Fakten" sheet (bahn.expert
+  `/WRSheets/408.pdf`, page 2); "-a" is the other side of the train. The other sheets only show an end car from outside.
 - `Transit/BahnExpert/` – bahn.expert, only as fallback for the train type (`TrainTypeLookup`) when bahn.de
   has no coach sequence and vagonweb has none either: it has DB's planned formation (`DB-plan`) for days
   ahead; bahn.de is only asked for departures within `BahnDeClient.formationLookahead` (12 h).

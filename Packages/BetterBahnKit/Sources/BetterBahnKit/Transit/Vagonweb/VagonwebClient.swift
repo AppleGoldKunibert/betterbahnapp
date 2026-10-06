@@ -215,8 +215,24 @@ public struct VagonwebClient: Sendable {
 
     /// A loaded coach drawing: the image file, and whether to show it mirrored.
     public struct LoadedDrawing: Sendable, Hashable {
+        public enum Source: Sendable, Hashable { case vagonweb, deutscheBahn }
+
         public var data: Data
         public var mirrored: Bool
+        /// Pixels per point: vagonweb's GIFs are 1, DB's drawings are three times as detailed.
+        public var scale: Double = 1
+        public var source: Source = .vagonweb
+    }
+
+    /// DB's own drawings shipped with the app, in place of vagonweb's of the same coach and direction
+    /// (`Resources/Drawings/408-5-b.png` for vagonweb's `popisy/img/DB/408-5-b.gif`). Cut from DB
+    /// Fernverkehr's "Daten und Fakten" sheets; so far only the ICE 3neo's shows the whole train.
+    static func bundledDrawing(for url: URL) -> LoadedDrawing? {
+        let name = url.deletingPathExtension().lastPathComponent
+        guard url.path().contains("/popisy/img/DB/"),
+              let file = Bundle.module.url(forResource: name, withExtension: "png", subdirectory: "Drawings"),
+              let data = try? Data(contentsOf: file) else { return nil }
+        return LoadedDrawing(data: data, mirrored: false, scale: 3, source: .deutscheBahn)
     }
 
     /// The drawings of a sequence's coaches, by coach id, each facing the way the coach stands
@@ -224,6 +240,10 @@ public struct VagonwebClient: Sendable {
     public func drawings(for sequence: CoachSequence) async -> [Int: LoadedDrawing] {
         let coaches = sequence.coaches.compactMap { coach in coach.drawing.map { (coach.id, $0.candidates) } }
         var loaded: [Int: LoadedDrawing] = [:]
+        // DB's drawing for the coach's direction, when the app has one.
+        for (id, candidates) in coaches {
+            if let first = candidates.first, let bundled = Self.bundledDrawing(for: first.url) { loaded[id] = bundled }
+        }
         var files: [URL: Data] = [:]
         // The drawing for each coach's direction first, then (mirrored) the plan's for those that failed.
         for round in 0..<2 {

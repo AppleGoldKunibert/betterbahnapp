@@ -9,6 +9,7 @@ S=$(cd "$(dirname "$0")" && pwd)
 R=$(cd "$S/../../Packages/BetterBahnKit" && pwd)
 rm -rf "$S/Sources/Kit" && mkdir -p "$S/Sources/Kit/Resources"
 cp "$R/Sources/BetterBahnKit/Resources/StationHints.json" "$S/Sources/Kit/Resources/"
+cp -r "$R/Sources/BetterBahnKit/Resources/Drawings" "$S/Sources/Kit/Resources/"
 cd "$R/Sources/BetterBahnKit"
 for f in $(find . -name "*.swift"); do
   # Tickets, Träwelling and anything importing Apple-only frameworks stay out.
