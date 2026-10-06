@@ -97,6 +97,9 @@ public struct JourneyRefresher: Sendable {
     }
 
     public func refresh(_ journey: Journey, now: Date = .now) async -> Journey {
+        // Journeys saved before "RJ 177" stopped counting as coupled to its DB twin "ICE 177"
+        // (`Line.isSameTrain(as:)`) drop that entry; a leg left without any is looked up again.
+        let journey = Self.withoutSelfCoupling(journey)
         var updated = journey
         // Coupled trains the search had no time to find (see `CombinedProvider.journeys`).
         async let coupled = provider.coupledTrains(in: [journey], deadline: .seconds(6))
@@ -113,6 +116,14 @@ public struct JourneyRefresher: Sendable {
             updated = named
         }
         return CombinedProvider.applying(await coupled, to: [updated]).first ?? updated
+    }
+
+    static func withoutSelfCoupling(_ journey: Journey) -> Journey {
+        var journey = journey
+        for index in journey.legs.indices {
+            journey.legs[index].line = journey.legs[index].line?.withoutSelfCoupling
+        }
+        return journey
     }
 
     /// Only what `connectionIssues()` looks at: each leg's times, platforms and cancellation at its

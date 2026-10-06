@@ -1266,25 +1266,34 @@ public struct TransitousProvider: TransitProvider {
 
     public func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int, products: Set<Product>) async throws -> [BoardEntry] {
         let stop = try await resolve(station)
+        // MOTIS picks stop times by their live time, so a train leaving early drops out while its
+        // planned-only twin from another feed (ICE 146: DB's row live at 9:08, NS's row planned 9:09)
+        // is still in. Ask a bit earlier so both rows are there to merge, then cut at `date` ourselves.
+        let from = date.addingTimeInterval(-Self.earlyDepartureMargin)
+        let fetchDuration = duration + Int(Self.earlyDepartureMargin / 60)
         var stopTimes: [MStopTime]
         if kind == .departures {
             // MOTIS leaves out departures nobody may board ("kein Einstieg", e.g. ICEs from Berlin Hbf on to
             // Gesundbrunnen); its arrivals still have them, with their departure time. Best-effort.
-            async let arrivals = try? boardStopTimes(.arrivals, stopId: stop.id, date: date, duration: duration, products: products)
-            stopTimes = try await boardStopTimes(.departures, stopId: stop.id, date: date, duration: duration, products: products)
+            async let arrivals = try? boardStopTimes(.arrivals, stopId: stop.id, date: from, duration: fetchDuration, products: products)
+            stopTimes = try await boardStopTimes(.departures, stopId: stop.id, date: from, duration: fetchDuration, products: products)
             stopTimes += Self.continuingWithoutBoarding(await arrivals ?? [], missingFrom: stopTimes)
         } else {
-            stopTimes = try await boardStopTimes(.arrivals, stopId: stop.id, date: date, duration: duration, products: products)
+            stopTimes = try await boardStopTimes(.arrivals, stopId: stop.id, date: from, duration: fetchDuration, products: products)
         }
 
         let end = date.addingTimeInterval(TimeInterval(duration * 60))
         let entries = Self.mergeBorderSplitDuplicates(stopTimes, kind: kind)
             .compactMap { $0.toEntry(kind: kind) }
-            .filter { $0.time.planned <= end }
+            .filter { ($0.time.actual ?? $0.time.planned) >= date && $0.time.planned <= end }
         let deduplicated = Self.namingUnknownLines(Self.combiningCoupledTrains(Self.deduplicated(entries)))
             .sorted { $0.time.planned < $1.time.planned }
         return await withCorrectedLongDistanceEnds(deduplicated, kind: kind)
     }
+
+    /// How much earlier than asked `board` fetches, so a train running early is still there to be
+    /// merged with its planned-only twin from another feed (`mergeBorderSplitDuplicates`).
+    static let earlyDepartureMargin: TimeInterval = 10 * 60
 
     /// Every train calling at `station` in the window, as departures (including ones you may not board)
     /// and arrivals: the raw stop times, without the per-train corrections `board` makes, for the quick
@@ -1380,6 +1389,13 @@ public struct TransitousProvider: TransitProvider {
     /// there (e.g. a Munich–Bologna Railjet, run under DB's "ICE 87" too, whose German feed entry says
     /// "Kufstein" — its own last stop — while the Austrian feed's entry correctly says "Bologna").
     /// Prefer whichever row names a destination beyond its own last stop.
+    ///
+    /// Often neither row does: DB's feed lists ICE 146 Berlin–Amsterdam as a trip ending in Hengelo
+    /// (with realtime), NS's feed as one starting in Berlin and ending in Amsterdam (without), each
+    /// headsign matching its own last stop, so Berlin Hbf's board showed the train twice. A train with
+    /// the same number leaving at the same planned time from the same track is still the same train:
+    /// keep the row with realtime data (else the first). Its destination is corrected afterwards
+    /// from the full trip (`withCorrectedLongDistanceEnds`).
     static func mergeBorderSplitDuplicates(_ stopTimes: [MStopTime], kind: BoardKind) -> [MStopTime] {
         var result: [MStopTime] = []
         outer: for stopTime in stopTimes {
@@ -1394,13 +1410,31 @@ public struct TransitousProvider: TransitProvider {
                 let candidateEnd = kind == .departures ? stopTime.tripTo : stopTime.tripFrom
                 let existingKnowsContinuation = Self.namesContinuation(headsign: existing.headsign, ownEnd: existingEnd)
                 let candidateKnowsContinuation = Self.namesContinuation(headsign: stopTime.headsign, ownEnd: candidateEnd)
-                guard existingKnowsContinuation != candidateKnowsContinuation else { continue }
-                if candidateKnowsContinuation { result[index] = stopTime }
+                if existingKnowsContinuation != candidateKnowsContinuation {
+                    if candidateKnowsContinuation { result[index] = stopTime }
+                    continue outer
+                }
+                guard Self.isSameTrainFromOtherFeed(existing, stopTime) else { continue }
+                if stopTime.realTime == true, existing.realTime != true { result[index] = stopTime }
                 continue outer
             }
             result.append(stopTime)
         }
         return result
+    }
+
+    /// Two rows of one number and planned time (checked by the caller) that are both long-distance
+    /// trains and use the same planned track, when both feeds name one. Long-distance only: their
+    /// numbers are unique for the day, while a local line's "number" (S5, RE4) is shared by the trains
+    /// in both directions, which can meet at the same minute in feeds without tracks (VBB's S-Bahn).
+    private static func isSameTrainFromOtherFeed(_ a: MStopTime, _ b: MStopTime) -> Bool {
+        let longDistance: Set<Product> = [.highSpeed, .longDistance]
+        guard longDistance.contains(a.lineInfo.toLine().product), longDistance.contains(b.lineInfo.toLine().product)
+        else { return false }
+        if let trackA = a.place.scheduledTrack, let trackB = b.place.scheduledTrack {
+            return trackA == trackB
+        }
+        return true
     }
 
     private static func namesContinuation(headsign: String?, ownEnd: MPlace?) -> Bool {
@@ -1439,7 +1473,8 @@ public struct TransitousProvider: TransitProvider {
     /// because DB's own feed happens to be the one tracking delays. The other name is kept as
     /// `alternateName` either way, so it can still be matched elsewhere (e.g. a Träwelling check-in).
     /// If neither has live data yet (the feed that eventually tracks it hasn't started for this
-    /// departure), both rows are kept rather than guessing which is which.
+    /// departure), both rows are kept rather than guessing which is which, unless they carry the same
+    /// train number ("RJ 177" and "ICE 177"): then they are the same train for sure.
     static func deduplicated(_ entries: [BoardEntry]) -> [BoardEntry] {
         var result: [BoardEntry] = []
         outer: for entry in entries {
@@ -1463,7 +1498,10 @@ public struct TransitousProvider: TransitProvider {
                       existing.line.name != entry.line.name else { continue }
                 let entryIsLive = entry.time.actual != nil
                 let existingIsLive = existing.time.actual != nil
-                guard entryIsLive != existingIsLive else { continue }
+                let longDistance: Set<Product> = [.highSpeed, .longDistance]
+                let sameTrain = longDistance.contains(existing.line.product) && longDistance.contains(entry.line.product)
+                    && existing.line.isSameTrain(as: entry.line.name)
+                guard entryIsLive != existingIsLive || sameTrain else { continue }
                 let live = entryIsLive ? entry : existing
                 let stale = entryIsLive ? existing : entry
                 var merged = live
@@ -1494,7 +1532,9 @@ public struct TransitousProvider: TransitProvider {
                           existing.time.planned == entry.time.planned, existing.platform.planned == platform,
                           existing.cancelled == entry.cancelled,
                           let existingEnd = existing.otherEnd, Station.normalize(existingEnd) == Station.normalize(otherEnd),
-                          !existing.line.allNames.map(Line.normalize).contains(Line.normalize(entry.line.name))
+                          !existing.line.allNames.map(Line.normalize).contains(Line.normalize(entry.line.name)),
+                          // The same number under another brand is the same train, not a coupled one.
+                          !existing.line.isSameTrain(as: entry.line.name)
                     else { continue }
                     // The row with live data leads, so the board shows the delay.
                     var merged = existing.time.actual == nil && entry.time.actual != nil ? entry : existing
@@ -1554,13 +1594,16 @@ public struct TransitousProvider: TransitProvider {
     }
 
     /// Arrivals of other trains of the same kind at the same planned minute and platform as `own`.
+    /// The same train from another feed under another brand ("ICE 177" for "RJ 177") isn't one.
     static func coupledCandidates(of own: MStopTime, in arrivals: [MStopTime]) -> [MStopTime] {
         guard let arrival = own.place.scheduledArrival else { return [] }
-        let ownName = Line.normalize(own.lineInfo.toLine().name)
+        let ownLine = own.lineInfo.toLine()
+        let ownName = Line.normalize(ownLine.name)
         var seen: Set<String> = [ownName]
         return arrivals.filter { candidate in
-            let name = Line.normalize(candidate.lineInfo.toLine().name)
-            guard candidate.tripId != own.tripId, candidate.mode == own.mode,
+            let candidateName = candidate.lineInfo.toLine().name
+            let name = Line.normalize(candidateName)
+            guard candidate.tripId != own.tripId, candidate.mode == own.mode, !ownLine.isSameTrain(as: candidateName),
                   candidate.place.scheduledArrival == arrival,
                   candidate.cancelled != true, candidate.tripCancelled != true,
                   !name.isEmpty, seen.insert(name).inserted else { return false }

@@ -171,7 +171,10 @@ public final class CombinedProvider: TransitProvider {
         return journeys.map { journey in
             var journey = journey
             for index in journey.legs.indices {
-                if let trains = coupled[journey.legs[index].id] { journey.legs[index].line?.coupledTrains = trains }
+                if let trains = coupled[journey.legs[index].id] {
+                    journey.legs[index].line?.coupledTrains = trains
+                    journey.legs[index].line = journey.legs[index].line?.withoutSelfCoupling
+                }
             }
             return journey
         }

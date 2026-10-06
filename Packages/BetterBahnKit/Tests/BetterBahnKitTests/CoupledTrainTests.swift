@@ -122,6 +122,50 @@ import Testing
         ]).count == 2)
     }
 
+    /// München: the Railjet RJ 177 comes from ÖBB's feed and again from DB's as "ICE 177". It is one
+    /// train, not a coupled pair "ICE 177 / RJ 177" – even before either feed has live data.
+    @Test func boardKeepsTheSameTrainUnderTwoBrandsAsOne() {
+        let rows = [entry("RJ 177", number: "177", otherEnd: "Wien Hbf"), entry("ICE 177", number: "177", otherEnd: "Wien Hbf")]
+        let board = TransitousProvider.combiningCoupledTrains(TransitousProvider.deduplicated(rows))
+        #expect(board.count == 1)
+        #expect(board.first?.line.displayName == "RJ 177")
+        #expect(board.first?.line.alternateName == "ICE 177")
+        #expect(board.first?.line.coupledTrains == nil)
+
+        // Even rows the deduplication leaves apart (other ends) never couple under one number.
+        #expect(TransitousProvider.combiningCoupledTrains(rows).count == 2)
+    }
+
+    @Test func sameNumberUnderAnotherBrandIsTheSameTrain() {
+        let rj177 = Line(name: "RJ 177", number: "177", product: .highSpeed, operatorName: nil)
+        #expect(rj177.isSameTrain(as: "ICE 177"))
+        #expect(!rj177.isSameTrain(as: "ICE 1177"))
+        #expect(!ice950.isSameTrain(as: "ICE 940"))
+
+        // Journeys saved with the bogus pair lose it; real partners stay.
+        var line = rj177
+        line.coupledTrains = [.init(name: "ICE 177", direction: "Wien Hbf")]
+        #expect(line.withoutSelfCoupling.coupledTrains == nil)
+        #expect(line.withoutSelfCoupling.displayName == "RJ 177")
+        var pair = ice950
+        pair.coupledTrains = [.init(name: "ICE 940", direction: "Düsseldorf Hbf")]
+        #expect(pair.withoutSelfCoupling == pair)
+    }
+
+    /// A journey leg on RJ 177 doesn't take DB's "ICE 177" arriving with it as a coupled train.
+    @Test func journeyLegIgnoresItsOwnTwinFromAnotherFeed() throws {
+        func arrival(_ name: String, trip: String) -> String {
+            """
+            {"place": {"name": "Wien Hbf", "stopId": "wien:7", "parentId": "wien", "lat": 48.18, "lon": 16.37,
+                       "scheduledArrival": "2026-10-05T19:30:00Z", "scheduledTrack": "7"},
+             "mode": "HIGHSPEED_RAIL", "tripId": "\(trip)", "displayName": "\(name)", "tripShortName": "\(name)"}
+            """
+        }
+        let json = "{\"stopTimes\": [\(arrival("RJ 177", trip: "trip-rj")), \(arrival("ICE 177", trip: "trip-ice"))]}"
+        let arrivals = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(json.utf8)).stopTimes
+        #expect(TransitousProvider.coupledCandidates(of: arrivals[0], in: arrivals).isEmpty)
+    }
+
     func leg() throws -> Leg {
         Leg(origin: station("berlin", "Berlin Hbf", source: .transitous),
             destination: station("hamm", "Hamm (Westf) Hbf", source: .transitous),
