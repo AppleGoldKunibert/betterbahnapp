@@ -108,15 +108,19 @@ final class AppModel {
         tickets = TicketStore.load()
         travelPasses = TicketStore.loadPasses()
         manualLiveActivityJourneyID = UserDefaults.standard.string(forKey: "manualLiveActivityJourneyID").flatMap(UUID.init)
-        // The check-in history holds every trip's full track geometry and can run to many
-        // megabytes, so it's decoded off the main thread instead of blocking the launch.
+        // The check-in history can run to thousands of trips, so it's decoded off the main thread
+        // instead of blocking the launch.
         traewellingTripsLoadTask = Task { [weak self] in
-            let trips = await Task.detached(priority: .userInitiated) { () -> [ImportedTrip] in
-                Storage.load(key: "traewellingTrips") ?? []
+            // Earlier versions kept every trip's track geometry in this file; it moves to the
+            // geometry cache, which stores it far more compactly (#170).
+            let (trips, geometries) = await Task.detached(priority: .userInitiated) { () -> ([ImportedTrip], [String: [Coordinate]]) in
+                ImportedTrip.movingGeometryOut(of: Storage.load(key: "traewellingTrips") ?? [])
             }.value
             guard let self else { return }
+            await rememberGeometries(geometries)
             traewellingTrips = trips
             traewellingTripsLoaded = true
+            if !geometries.isEmpty { traewellingTrips = trips } // saves the slimmed-down list
         }
         // After init, since taking over synced journeys also updates the Live Activity.
         Task { [weak self] in self?.startCloudSync() }
@@ -292,7 +296,10 @@ final class AppModel {
             var page = backfilling ? resumePage ?? 1 : 1
             while true {
                 let result = try await traewelling.historyPage(username: username, page: page, knownIDs: knownIDs)
-                pending += result.trips.map { ImportedTrip(statusID: $0.statusID, journey: $0.journey) }
+                let trips = result.trips.map { ImportedTrip(statusID: $0.statusID, journey: $0.journey) }
+                let (stripped, geometries) = ImportedTrip.movingGeometryOut(of: trips)
+                await rememberGeometries(geometries)
+                pending += stripped
                 knownIDs.formUnion(result.trips.map(\.statusID))
                 if !result.hasMore {
                     resumePage = nil
@@ -323,21 +330,38 @@ final class AppModel {
     // MARK: Track geometry
 
     @ObservationIgnored private let geometryService = RouteGeometryService()
-    /// Leg ID → encoded polyline, persisted so the map doesn't reload everything.
-    /// Loaded off the main thread on first use, since the file can grow large over time.
-    @ObservationIgnored private var geometryCacheTask: Task<[String: String], Never>?
+    /// Leg ID → encoded polyline, persisted so the map doesn't reload everything. Träwelling's track
+    /// geometry lives here too rather than in `traewellingTrips` (#170): as encoded polylines it takes
+    /// a fraction of the space. Loaded off the main thread on first use, since the file can grow large.
+    @ObservationIgnored private var geometryCache: [String: String]?
+    @ObservationIgnored private var geometryCacheLoad: Task<[String: String], Never>?
+    @ObservationIgnored private var geometryCacheSaveDelay: Task<Void, Never>?
 
     private func loadedGeometryCache() async -> [String: String] {
-        if let geometryCacheTask { return await geometryCacheTask.value }
-        let task = Task.detached(priority: .utility) { () -> [String: String] in
+        if let geometryCache { return geometryCache }
+        let task = geometryCacheLoad ?? Task.detached(priority: .utility) { () -> [String: String] in
             Storage.load(key: "legGeometries") ?? [:]
         }
-        geometryCacheTask = task
-        return await task.value
+        geometryCacheLoad = task
+        let loaded = await task.value
+        if geometryCache == nil { geometryCache = loaded }
+        return geometryCache ?? loaded
+    }
+
+    /// Writes the cache a moment after the last change. Filling in thousands of legs used to rewrite
+    /// the whole file, with its own copy of the cache in memory, once per leg, which with a long
+    /// Träwelling history ran the app out of memory (#170).
+    private func saveGeometryCache() {
+        geometryCacheSaveDelay?.cancel()
+        geometryCacheSaveDelay = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled, let cache = self?.geometryCache else { return }
+            Storage.saveInBackground(cache, key: "legGeometries")
+        }
     }
 
     func geometry(for leg: Leg) async -> [Coordinate]? {
-        var cache = await loadedGeometryCache()
+        let cache = await loadedGeometryCache()
         if let encoded = cache[leg.id] {
             let cached = Polyline.decode(encoded)
             // Earlier versions cached straight lines between the two stations; look those up again
@@ -345,10 +369,20 @@ final class AppModel {
             if RouteGeometryService.followsTracks(cached) { return cached }
         }
         guard let geometry = await geometryService.geometry(for: leg) else { return nil }
-        cache[leg.id] = Polyline.encode(geometry)
-        geometryCacheTask = Task { cache }
-        Task.detached(priority: .utility) { Storage.save(cache, key: "legGeometries") }
+        geometryCache?[leg.id] = Polyline.encode(geometry)
+        saveGeometryCache()
         return geometry
+    }
+
+    /// Adds track geometry that came with the data (Träwelling sends it with each check-in).
+    func rememberGeometries(_ geometries: [String: [Coordinate]]) async {
+        guard !geometries.isEmpty else { return }
+        let encoded = await Task.detached(priority: .utility) {
+            geometries.mapValues { Polyline.encode($0) }
+        }.value
+        _ = await loadedGeometryCache()
+        geometryCache?.merge(encoded) { _, new in new }
+        saveGeometryCache()
     }
 
     /// The already-cached geometry of many legs at once, decoded off the main thread.
@@ -968,10 +1002,25 @@ final class AppModel {
     }
 }
 
-struct ImportedTrip: Codable, Hashable, Identifiable {
+nonisolated struct ImportedTrip: Codable, Hashable, Identifiable {
     var id: Int { statusID }
     var statusID: Int
     var journey: Journey
+
+    /// The trips without their track geometry, plus that geometry by leg ID for the geometry cache.
+    static func movingGeometryOut(of trips: [ImportedTrip]) -> ([ImportedTrip], [String: [Coordinate]]) {
+        var geometries: [String: [Coordinate]] = [:]
+        let stripped = trips.map { trip in
+            var trip = trip
+            for index in trip.journey.legs.indices {
+                guard let geometry = trip.journey.legs[index].geometry else { continue }
+                geometries[trip.journey.legs[index].id] = geometry
+                trip.journey.legs[index].geometry = nil
+            }
+            return trip
+        }
+        return (stripped, geometries)
+    }
 }
 
 /// A manual Träwelling check-in whose delay we keep pushing until it arrives.
