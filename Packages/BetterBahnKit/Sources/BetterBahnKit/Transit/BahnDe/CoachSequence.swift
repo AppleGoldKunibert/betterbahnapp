@@ -224,10 +224,10 @@ extension CoachSequence.Coach.Kind {
 extension BahnDeClient {
     static func coachSequence(from response: SequenceResponse, category: String, number: Int?,
                               coupledNumbers: Set<Int> = []) -> CoachSequence {
-        let groups = response.groups ?? []
-        let requestedNumbers = Set(groups.compactMap(\.transport?.number))
         // Trains coupled to it for the whole ride are just as much the train asked for.
         let wanted = coupledNumbers.union([number].compactMap(\.self))
+        let groups = requestedTrainGroups(response.groups ?? [], wanted: wanted)
+        let requestedNumbers = Set(groups.compactMap(\.transport?.number))
         // Without train numbers every group counts as the requested train.
         let isRequested = { (group: SequenceResponse.Group) in
             requestedNumbers.contains(number ?? -1) ? group.transport?.number.map(wanted.contains) ?? false : true

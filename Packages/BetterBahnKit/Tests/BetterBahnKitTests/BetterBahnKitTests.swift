@@ -1830,6 +1830,15 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(TrainModel.detect(cars(["938054080011"]), category: "ICE") == nil)
     }
 
+    @Test func tellsFlirt1430FromSBahn430() {
+        let cars = { (ids: [String]) in ids.map { Carriage(vehicleID: $0, constructionType: nil) } }
+        // FLIRT 3 (BR 1430/1830): its model digits are "430" like the S-Bahn's.
+        #expect(TrainModel.detect(cars(["948014300011", "948018300015", "948014300029"]), category: "RE")?.series == "BR 1430")
+        #expect(TrainModel.detect(cars(["948004300011", "948008300015", "948004310019"]), category: "S")?.series == "BR 430")
+        #expect(TrainModel.detect(cars(["948014400011", "948014410019"]), category: "RE")?.series == "BR 1440")
+        #expect(TrainModel.detect(cars(["948004400011", "948004410019"]), category: "RE")?.series == "BR 440")
+    }
+
     @Test func detectsIntercity2FromDoubleDeckCoaches() {
         let cars = ["508026810011", "508026810029"].map { Carriage(vehicleID: $0, constructionType: "DApza") }
         #expect(TrainModel.detect(cars, category: "IC")?.name == "IC 2 Twindexx")
@@ -1903,9 +1912,26 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         let formation = BahnDeClient.formation(from: response, category: "ICE", number: 950)
         #expect(formation.units.first?.number == "9457")
         #expect(formation.units.first?.name == "Bundesrepublik Deutschland")
+        // Asked for another train, only the group without a number is left.
         let other = BahnDeClient.formation(from: response, category: "ICE", number: 1)
-        #expect(other.units.map(\.model) == [nil, "ICE 4"])
+        #expect(other.units.map(\.model) == ["ICE 4"])
         #expect(try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data("{}".utf8)).groups == nil)
+    }
+
+    /// bahn.de answered RE 6 at Itzehoe with another train's FLIRTs: units that all name a different
+    /// train show neither as the train's type nor as its Wagenreihung.
+    @Test func ignoresAnotherTrainsSequence() throws {
+        let json = #"""
+        {"groups": [
+            {"name": "RP1", "transport": {"category": "RE", "number": 21075},
+             "vehicles": [{"vehicleID": "948014300011"}, {"vehicleID": "948014300029"}]}
+        ]}
+        """#
+        let response = try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data(json.utf8))
+        #expect(BahnDeClient.formation(from: response, category: "RE", number: 11013).units.isEmpty)
+        let sequence = BahnDeClient.coachSequence(from: response, category: "RE", number: 11013)
+        #expect(sequence.coaches.isEmpty && sequence.groups.isEmpty)
+        #expect(BahnDeClient.formation(from: response, category: "RE", number: 21075).modelSummary == "FLIRT")
     }
 
     /// A real bahn.de response (ICE 117 at Frankfurt (Main) Hbf, Gleis 12): coaches from the front,
