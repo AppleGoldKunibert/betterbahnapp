@@ -2501,6 +2501,21 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         #expect(localCorrected[1].time.actual == JSONDecoding.parseISODate("2026-10-06T07:13:00Z"))
         #expect(localCorrected[2] == locals[2])
         #expect(localCorrected[3] == locals[3])
+        // Long-distance trains of other brands (NJ, FLX) by name and minute, never from a regional entry.
+        let otherJSON = #"""
+        {"entries": [
+            {"journeyId": "nj", "zeit": "2026-10-06T09:09:00", "ezZeit": "2026-10-06T09:19:00", "verkehrmittel": {"name": "NJ 40491", "produktGattung": "EC_IC"}},
+            {"journeyId": "rb", "zeit": "2026-10-06T09:09:00", "ezZeit": "2026-10-06T09:30:00", "verkehrmittel": {"name": "NJ 40491", "produktGattung": "REGIONAL"}}
+        ]}
+        """#
+        let otherBoard = try JSONDecoding.decoder.decode(BahnDeClient.Board.self, from: Data(otherJSON.utf8)).entries
+        let nightjet = try local("NJ 40491", .longDistance, run: nil, planned: "2026-10-06T07:09:00Z")
+        #expect(BahnDeClient.applyingLiveTimes([nightjet], using: otherBoard).first?.time.actual
+                == JSONDecoding.parseISODate("2026-10-06T07:19:00Z"))
+        // Subway, tram and bus are never looked up.
+        let tram = try local("M5", .tram, run: nil, planned: "2026-10-06T07:09:00Z")
+        #expect(!BahnDeClient.isLookedUp(tram.line))
+        #expect(BahnDeClient.isLookedUp(nightjet.line))
         // A long-distance train never takes a regional entry's time, even with the same number.
         let ice4 = try departure("ICE 4", "4", planned: "2026-10-06T07:09:00Z", actual: nil)
         #expect(BahnDeClient.applyingLiveTimes([ice4], using: localBoard) == [ice4])

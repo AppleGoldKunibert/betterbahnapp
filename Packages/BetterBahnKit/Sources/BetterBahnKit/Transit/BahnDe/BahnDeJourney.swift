@@ -156,7 +156,7 @@ extension BahnDeClient {
     /// "IR" and "REGIONAL" products, as in db-vendo-client); no filter at all for `[]`.
     static let longDistanceProducts = ["ICE", "EC_IC"]
     static let regionalProducts = ["IR", "REGIONAL"]
-    /// Local trains whose live times `applyingLiveTimes` takes from bahn.de too.
+    /// Local trains: matched against bahn.de's regional and S-Bahn entries (`isLocal`).
     static let localTrainProducts: Set<Product> = [.regionalExpress, .regional, .suburban]
 
     static func boardURL(eva: String, at date: Date, kind: BoardKind = .departures, products: [String] = longDistanceProducts) -> URL {
@@ -271,17 +271,20 @@ extension BahnDeClient {
         }
     }
 
-    /// Whether `applyingLiveTimes` looks `line` up on bahn.de's board.
+    /// Whether `applyingLiveTimes` looks `line` up on bahn.de's board: every train, no subway, tram or bus.
     static func isLookedUp(_ line: Line) -> Bool {
-        trainReference(for: line) != nil || localTrainProducts.contains(line.product)
+        line.product.isTrain
     }
 
-    /// bahn.de's entry for a regional or S-Bahn train: by its run number (RE 4 as 3148, S5 as 5540),
-    /// which the journey ID carries, at the same planned time (±1 min). A line's name alone ("S5") is
-    /// shared by every run, so without a run number on both sides the name must match at that minute.
-    static func localBoardEntry(for line: Line, plannedDeparture: Date, in board: [Board.Entry]) -> Board.Entry? {
+    /// bahn.de's entry for a train `boardEntry` can't look up by its number: regional and S-Bahn
+    /// trains, and long-distance ones of other brands (NJ, FLX, TGV). By its run number (RE 4 as
+    /// 3148, S5 as 5540), which the journey ID carries, at the same planned time (±1 min). A line's
+    /// name alone ("S5") is shared by every run, so without a run number on both sides the name must
+    /// match at that minute, and only one entry may.
+    static func otherBoardEntry(for line: Line, plannedDeparture: Date, in board: [Board.Entry]) -> Board.Entry? {
+        let local = localTrainProducts.contains(line.product)
         let matches = board.filter { candidate in
-            guard isLocal(candidate), let time = candidate.zeit.flatMap(parseBerlinTime),
+            guard isLocal(candidate) == local, let time = candidate.zeit.flatMap(parseBerlinTime),
                   abs(time.timeIntervalSince(plannedDeparture)) <= 60 else { return false }
             if let run = line.tripNumber, let theirs = journeyNumber(in: candidate.journeyId) { return run == theirs }
             let names = [candidate.verkehrmittel?.name, candidate.verkehrmittel?.mittelText].compactMap { $0 }
@@ -296,7 +299,7 @@ extension BahnDeClient {
         ["REGIONAL", "SBAHN"].contains(entry.verkehrmittel?.produktGattung ?? "")
     }
 
-    /// Each train of `kind` (long-distance, RE/RB, S-Bahn) with DB's live time from bahn.de's board
+    /// Each train of `kind` (long-distance, RE/RB, S-Bahn; no subway, tram or bus) with DB's live time from bahn.de's board
     /// of the same kind, where it has one. Transitous' realtime for DB trains is DELFI's forecast,
     /// which can differ from DB's own: ICE 146 at Berlin Hbf left at 9:08 there, a minute before its
     /// planned time, while DB had it on time. Entries bahn.de has no live time for keep Transitous'.
@@ -305,8 +308,8 @@ extension BahnDeClient {
             guard entry.kind == kind else { return entry }
             let match = trainReference(for: entry.line) != nil
                 ? boardEntry(for: entry.line, plannedDeparture: entry.time.planned, in: board)
-                : localTrainProducts.contains(entry.line.product)
-                    ? localBoardEntry(for: entry.line, plannedDeparture: entry.time.planned, in: board) : nil
+                : isLookedUp(entry.line)
+                    ? otherBoardEntry(for: entry.line, plannedDeparture: entry.time.planned, in: board) : nil
             guard let live = match?.ezZeit.flatMap(parseBerlinTime) else { return entry }
             var corrected = entry
             corrected.time.actual = live
