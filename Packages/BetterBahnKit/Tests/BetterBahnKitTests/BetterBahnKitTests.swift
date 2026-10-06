@@ -1585,38 +1585,38 @@ private final class CrowdedHubStopTimesProtocol: URLProtocol, @unchecked Sendabl
 // MARK: - RIL100 codes
 
 @Suite struct Ril100Tests {
-    func station(_ id: String, _ name: String, _ lat: Double, _ lon: Double, eva: String? = nil) -> Station {
-        Station(id: id, name: name, coordinate: Coordinate(latitude: lat, longitude: lon), evaNumber: eva, source: .transitous)
+    func station(_ id: String, _ name: String, _ lat: Double, _ lon: Double) -> Station {
+        Station(id: id, name: name, coordinate: Coordinate(latitude: lat, longitude: lon), evaNumber: nil, source: .transitous)
     }
 
-    /// Any of a station's codes finds it, in any case and with the double spaces DB writes some with (#165).
+    /// A code finds its station in any case, also with the double spaces DB writes some with (#165).
     @Test func findsStationsByCodeInAnyCase() {
         #expect(Ril100.entry(forCode: "ff")?.name == "Frankfurt (Main) Hbf")
-        #expect(Ril100.entry(forCode: "FfT")?.name == "Frankfurt (Main) Hbf")
+        #expect(Ril100.entry(forCode: "FfT")?.name == "Frankfurt (Main) Hbf (tief)")
         #expect(Ril100.entry(forCode: " ah ")?.name == "Hamburg Hbf")
-        #expect(Ril100.entry(forCode: "bl")?.code == "BHBF")
-        #expect(Ril100.entry(forCode: "ll t")?.name == "Leipzig Hbf")
+        #expect(Ril100.entry(forCode: "ll t")?.name == "Leipzig Hbf (Tiefgleise)")
         #expect(Ril100.entry(forCode: "f") == nil)
         #expect(Ril100.entry(forCode: "Frankfurt") == nil)
     }
 
-    /// Transitous' stops have no EVA number: they're matched by position and name, also on another
-    /// level of the station, but not a different station nearby.
+    /// Stops are matched by position and name, also on another level of the station (which shows the
+    /// station's shortest code), but not a different station nearby.
     @Test func matchesStopsToStationsByPositionAndName() {
         #expect(Ril100.code(for: station("a", "Frankfurt (Main) Hauptbahnhof", 50.1069, 8.6625)) == "FF")
         #expect(Ril100.code(for: station("b", "Frankfurt (Main) Hbf tief", 50.1072, 8.6650)) == "FF")
         #expect(Ril100.code(for: station("c", "S+U Alexanderplatz Bhf (Berlin)", 52.5215, 13.4115)) == "BALE")
-        #expect(Ril100.code(for: station("d", "Berlin Hbf (tief)", 52.5250, 13.3690)) == "BHBF")
+        #expect(Ril100.code(for: station("d", "Berlin Hbf (tief)", 52.5250, 13.3690)) == "BL")
+        #expect(Ril100.code(for: station("e", "Hamburg Hbf (S-Bahn)", 53.5530, 10.0070)) == "AH")
         // A tram stop named otherwise 300 m away isn't the station.
-        #expect(Ril100.code(for: station("e", "Frankfurt, Platz der Republik", 50.1095, 8.6660)) == nil)
-        // Far from DB's position the same name isn't enough.
-        #expect(Ril100.code(for: station("f", "Frankfurt (Main) Hbf", 50.12, 8.70)) == nil)
-        // An EVA number decides by itself.
-        #expect(Ril100.code(for: station("g", "Hamburg", 0, 0, eva: "8002549")) == "AH")
+        #expect(Ril100.code(for: station("f", "Frankfurt, Platz der Republik", 50.1095, 8.6660)) == nil)
+        // Far from DB's positions the same name isn't enough.
+        #expect(Ril100.code(for: station("g", "Frankfurt (Main) Hbf", 50.12, 8.70)) == nil)
+        let bls = Ril100.entry(forCode: "bls")!
+        #expect(Ril100.matches(station("h", "Berlin Hbf", 52.5251, 13.3692), bls))
     }
 
-    /// The station the code belongs to comes first and only once; a station named exactly what was
-    /// typed stays ahead of it.
+    /// The station the code belongs to comes first and only once; behind a first hit whose name starts
+    /// with the typed word.
     @Test func placesTheCodesStationFirstAndOnce() throws {
         let ff = try #require(Ril100.entry(forCode: "ff"))
         let hbf = station("hbf", "Frankfurt (Main) Hauptbahnhof", 50.1069, 8.6625)
@@ -1628,23 +1628,29 @@ private final class CrowdedHubStopTimesProtocol: URLProtocol, @unchecked Sendabl
         #expect(Ril100.placing(nil, for: ff, typed: "ff", in: [other]).map(\.id) == ["other"])
 
         let harblek = try #require(Ril100.entry(forCode: "aha"))
-        let aha = station("aha", "Aha", 47.8332, 8.1343)
-        let harblekStop = station("harblek", "Harblek", 54.362, 8.9626)
+        let aha = station("aha", "Aha", 47.8331, 8.1347)
+        let harblekStop = station("harblek", "Harblek", 54.3619, 8.9625)
         #expect(Ril100.placing(harblekStop, for: harblek, typed: "Aha", in: [aha]).map(\.id) == ["aha", "harblek"])
         let altdoebern = try #require(Ril100.entry(forCode: "bad"))
-        let altdoebernStop = station("altdoebern", "Altdöbern", altdoebern.coordinate.latitude, altdoebern.coordinate.longitude)
+        let altdoebernStop = station("altdoebern", "Altdöbern", 51.6528, 14.0092)
         let ragaz = station("ragaz", "Bad Ragaz", 47.0, 9.5)
         let toelz = station("toelz", "Bad Tölz", 47.76, 11.56)
         #expect(Ril100.placing(altdoebernStop, for: altdoebern, typed: "bad", in: [ragaz, toelz]).map(\.id)
             == ["ragaz", "altdoebern", "toelz"])
+        let canyon = station("canyon", "Canyon MHP", 40.0, -100.0)
+        let heimeranplatz = station("heimeranplatz", "München Heimeranplatz", 48.1330, 11.5315)
+        #expect(Ril100.placing(heimeranplatz, for: try #require(Ril100.entry(forCode: "mhp")), typed: "mhp", in: [canyon])
+            .map(\.id) == ["heimeranplatz", "canyon"])
     }
 
-    /// The geocoder finds "Hof" but not "Hof Hbf", so the station is also looked up by its town.
-    @Test func townNameLeavesOutHbfAndBrackets() {
-        #expect(Ril100.townName("Hof Hbf") == "Hof")
-        #expect(Ril100.townName("Frankfurt (Main) Hbf") == "Frankfurt")
-        #expect(Ril100.townName("Berlin Hauptbahnhof") == "Berlin")
-        #expect(Ril100.townName("Alexanderplatz") == "Alexanderplatz")
+    /// The geocoder misses many of DB's full names, so the station is also looked up by their first
+    /// part and the town.
+    @Test func searchTextsForDBsNames() {
+        #expect(Ril100.searchTexts(for: "Hof Hbf") == ["Hof Hbf", "Hof"])
+        #expect(Ril100.searchTexts(for: "Frankfurt (Main) Hbf") == ["Frankfurt (Main) Hbf", "Frankfurt"])
+        #expect(Ril100.searchTexts(for: "Berlin Hauptbahnhof - Lehrter Bahnhof")
+            == ["Berlin Hauptbahnhof - Lehrter Bahnhof", "Berlin Hauptbahnhof", "Berlin"])
+        #expect(Ril100.searchTexts(for: "Alexanderplatz") == ["Alexanderplatz"])
     }
 
     /// "ff" in the picker: Frankfurt (Main) Hbf, looked up by DB's name, first; its lower level, which

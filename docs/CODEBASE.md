@@ -104,11 +104,12 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `StationSearch` passes the modes to the geocoder and filters after `mergingNearbyDuplicates` (which unions modes).
   The plain `searchStations(String)` (share import etc.) keeps every stop.
 - `Transit/Ril100.swift` – DB's RIL100 codes (#165) from `Resources/Ril100.json` (built by `scripts/make-ril100.py`
-  from the npm package db-stations, DB StaDa, CC BY 4.0). Typing a code in any case ("ff") puts that station first in the
-  picker's search (`searchStations(_ search:near:)`, looked up by DB's name and its town) and drops other hits that are
-  the same station; behind the first hit only when that starts with the typed word ("Bad …"). Transitous stops are matched
-  to codes by position and name (`entry(for:)`). The picker shows the code on the right with the expert option
-  "RIL100-Codes in der Suche" (`AppSettings.ril100Enabled`).
+  from DB InfraGO's "Betriebsstellen" on the Mobilithek, CC BY 4.0, yearly; stations and halts in service, each code
+  with all its positions, no EVA numbers). Typing a code in any case ("ff") puts that station first in the picker's
+  search (`searchStations(_ search:near:)`, looked up by DB's name, its first part and its town) and drops other hits
+  that are the same station; behind the first hit only when that starts with the typed word ("Bad …"). Stops are
+  matched to codes by position and name (`matches`); the shortest matching code is shown ("BL", not "BLS"), on the
+  right in the picker with the expert option "RIL100-Codes in der Suche" (`AppSettings.ril100Enabled`).
 - `Transit/CombinedProvider.swift` – what the app uses: primary `TransitousProvider`, optional
   fallback (none configured), cooldown health check, `BahnDeClient`, `VagonwebClient`, `BahnExpertClient`, `BahnJetztClient`.
 - `Transit/BahnDe/` – bahn.de web API via the `Cloudflare/bahnde-proxy` Worker (same endpoints/headers as Travel::Status::DE::DBRIS):

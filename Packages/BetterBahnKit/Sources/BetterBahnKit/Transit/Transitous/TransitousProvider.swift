@@ -44,23 +44,35 @@ public struct TransitousProvider: TransitProvider {
         return search.byDistance ? search.ordered(placed, near: location) : placed
     }
 
-    /// The stop of the station with a typed RIL100 code ("ff"), looked up by DB's name for it and by
-    /// its town alone, as the geocoder finds "Hof" but not "Hof Hbf"; nil if neither finds it near
-    /// DB's position (or nothing was typed as a code).
+    /// The stop of the station with a typed RIL100 code ("ff"), looked up by DB's name for it, its
+    /// first part and its town (`Ril100.searchTexts`), as the geocoder finds "Hof" but not "Hof Hbf";
+    /// nil if none finds it near DB's position (or nothing was typed as a code).
     func station(for ril: Ril100.Entry?) async -> Station? {
         guard let ril else { return nil }
-        let texts = Set([ril.name, Ril100.townName(ril.name)])
         let matches = await withTaskGroup(of: [MGeocodeMatch].self) { group in
-            for text in texts {
+            for text in Ril100.searchTexts(for: ril.name) {
                 group.addTask {
                     (try? await CombinedProvider.withDeadline(Self.extraQueryDeadline) { try await geocodeRequest(text) }) ?? []
                 }
             }
             return await group.reduce(into: []) { $0 += $1 }
         }
-        return Self.rankedAndMerged(matches, query: ril.name, near: ril.coordinate)
-            .map { $0.toStation() }
-            .first { Ril100.entry(for: $0)?.evaNumber == ril.evaNumber }
+        // The geocoder names a stop after whichever of its names matched: for "Berlin Hauptbahnhof -
+        // Lehrter Bahnhof" Berlin Hbf comes back as "Berlin Hbf-Lehrter Bahnhof Nord", for "Ulm" Ulm Hbf
+        // as "Ulm ZOB". The shortest name that is DB's goes.
+        func preference(_ match: MGeocodeMatch) -> (Int, Int) {
+            (Ril100.isNamed(match.fullName, like: ril) ? 0 : 1, match.name.count)
+        }
+        var byId: [String: MGeocodeMatch] = [:]
+        for match in matches where byId[match.id].map({ preference(match) < preference($0) }) ?? true {
+            byId[match.id] = match
+        }
+        let named = matches.compactMap { byId.removeValue(forKey: $0.id) }
+        // The busiest stop that is the station: its main hall, not a bus stop in front of it.
+        return Self.rankedAndMerged(named, query: ril.name, near: ril.points.first)
+            .filter { Ril100.matches($0.toStation(), ril) }
+            .max { ($0.relevance, $0.importance ?? 0) < ($1.relevance, $1.importance ?? 0) }?
+            .toStation()
     }
 
     static func rankedAndMerged(_ matches: [MGeocodeMatch], query: String, near location: Coordinate?) -> [MGeocodeMatch] {
