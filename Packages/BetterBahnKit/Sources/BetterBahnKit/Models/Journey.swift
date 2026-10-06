@@ -441,9 +441,13 @@ public struct Trip: Codable, Sendable, Hashable {
     /// Delay reasons and notices from DB's own feed along the whole trip (see `TrainMessage`).
     public var messages: [TrainMessage]
     public var source: DataSource
+    /// Track geometry of the whole run, if known.
+    public var geometry: [Coordinate]?
 
     public init(id: String, line: Line?, direction: String?, stopovers: [Stopover],
-                cancelled: Bool, remarks: [String], messages: [TrainMessage] = [], source: DataSource) {
+                cancelled: Bool, remarks: [String], messages: [TrainMessage] = [], source: DataSource,
+                geometry: [Coordinate]? = nil) {
+        self.geometry = geometry
         self.messages = messages
         self.id = id
         self.line = line
@@ -455,10 +459,10 @@ public struct Trip: Codable, Sendable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, line, direction, stopovers, cancelled, remarks, messages, source
+        case id, line, direction, stopovers, cancelled, remarks, messages, source, geometry
     }
 
-    /// Custom-decoded so data saved before `messages` existed still loads.
+    /// Custom-decoded so data saved before `messages` or `geometry` existed still loads.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -469,6 +473,7 @@ public struct Trip: Codable, Sendable, Hashable {
         remarks = try c.decode([String].self, forKey: .remarks)
         messages = try c.decodeIfPresent([TrainMessage].self, forKey: .messages) ?? []
         source = try c.decode(DataSource.self, forKey: .source)
+        geometry = try c.decodeIfPresent([Coordinate].self, forKey: .geometry)
     }
 
     public var origin: Station? { stopovers.first?.station }

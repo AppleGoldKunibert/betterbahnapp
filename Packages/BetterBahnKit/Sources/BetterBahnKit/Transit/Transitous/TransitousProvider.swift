@@ -1627,7 +1627,7 @@ public struct TransitousProvider: TransitProvider {
         let converted = leg.toLeg()
         return Trip(
             id: id, line: converted.line, direction: converted.direction, stopovers: converted.stopovers,
-            cancelled: converted.cancelled, remarks: [], source: .transitous
+            cancelled: converted.cancelled, remarks: [], source: .transitous, geometry: converted.geometry
         )
     }
 }
