@@ -4,7 +4,7 @@ import SwiftUI
 import WidgetKit
 
 /// What the journey widget's timer counts down to, picked in the widget's settings.
-nonisolated enum WidgetCountdown: String, AppEnum {
+enum WidgetCountdown: String, AppEnum {
     case nextConnection
     case destination
 
@@ -21,7 +21,7 @@ nonisolated enum WidgetCountdown: String, AppEnum {
     }
 }
 
-nonisolated struct JourneyWidgetIntent: WidgetConfigurationIntent {
+struct JourneyWidgetIntent: WidgetConfigurationIntent {
     static var title: LocalizedStringResource { "Reiseübersicht" }
     static var description: IntentDescription { "Zeigt deine aktuelle oder nächste gespeicherte Reise." }
 
@@ -31,7 +31,7 @@ nonisolated struct JourneyWidgetIntent: WidgetConfigurationIntent {
     init() {}
 }
 
-nonisolated struct JourneyWidgetEntry: TimelineEntry {
+struct JourneyWidgetEntry: TimelineEntry {
     let date: Date
     let state: JourneyWidgetState?
     let journeyID: String?
@@ -40,7 +40,7 @@ nonisolated struct JourneyWidgetEntry: TimelineEntry {
     let countdown: JourneyWidgetState.CountdownTarget
 }
 
-nonisolated struct JourneyWidgetProvider: AppIntentTimelineProvider {
+struct JourneyWidgetProvider: AppIntentTimelineProvider {
     /// More entries than this aren't needed: the app reloads the widget whenever the journey changes.
     private static let maxEntries = 60
 
