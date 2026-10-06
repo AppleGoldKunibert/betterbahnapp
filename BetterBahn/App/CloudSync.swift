@@ -23,6 +23,13 @@ nonisolated enum CloudSync {
         store.set(data, forKey: cloudKey)
     }
 
+    private static let uploader = DispatchQueue(label: "de.goldkunibert.BetterBahn.cloudsync", qos: .utility)
+
+    /// Like `upload`, but encodes and compresses on a background queue, in the order of the calls.
+    static func uploadInBackground<T: Encodable & Sendable>(_ value: T, key: String) {
+        uploader.async { upload(value, key: key) }
+    }
+
     static func value<T: Decodable>(key: String) -> T? {
         guard let data = store.data(forKey: "cloud." + key),
               let json = try? (data as NSData).decompressed(using: .lzfse) as Data else { return nil }
@@ -92,6 +99,6 @@ final class CloudList<Element: Codable & Sendable & Identifiable & Equatable> wh
             changedAt = list.changedAt
             Storage.save(changedAt, key: "cloudSync-" + key)
         }
-        CloudSync.upload(list, key: key)
+        CloudSync.uploadInBackground(list, key: key)
     }
 }

@@ -28,7 +28,9 @@ final class AppModel {
     /// Journeys the user saved. The next upcoming one is shown as Live Activity.
     var savedJourneys: [SavedJourney] {
         didSet {
-            Storage.save(savedJourneys, key: "savedJourneys")
+            // Every saved journey with all its stops is encoded here, which takes noticeably long
+            // once there are many, so it happens off the main thread.
+            Storage.saveInBackground(savedJourneys, key: "savedJourneys")
             savedJourneysCloud.localChange(from: oldValue, to: savedJourneys)
             syncLiveActivity()
         }
@@ -441,8 +443,11 @@ final class AppModel {
     func save(_ journey: Journey, search: ConnectionSearch? = nil) {
         guard !isSaved(journey) else { return }
         if settings.connectionWarnings { Task { await ConnectionNotifier.requestAuthorization() } }
-        savedJourneys.append(SavedJourney(journey: journey, search: search))
-        savedJourneys.sort { ($0.journey.departure?.planned ?? .distantPast) < ($1.journey.departure?.planned ?? .distantPast) }
+        // One assignment, so the list is persisted and synced once rather than twice.
+        var updated = savedJourneys
+        updated.append(SavedJourney(journey: journey, search: search))
+        updated.sort { ($0.journey.departure?.planned ?? .distantPast) < ($1.journey.departure?.planned ?? .distantPast) }
+        savedJourneys = updated
     }
 
     func unsave(_ journey: Journey) {
@@ -1019,6 +1024,14 @@ nonisolated enum Storage {
         guard let data = try? JSONEncoder().encode(value) else { return }
         try? data.write(to: file(key), options: .atomic)
         UserDefaults.standard.removeObject(forKey: key)
+    }
+
+    private static let writer = DispatchQueue(label: "de.goldkunibert.BetterBahn.storage", qos: .userInitiated)
+
+    /// Like `save`, but encodes and writes on a background queue. Writes land in the order they
+    /// were made, so the last change always wins.
+    static func saveInBackground<T: Encodable & Sendable>(_ value: T, key: String) {
+        writer.async { save(value, key: key) }
     }
 
     /// Moves values older versions kept in UserDefaults into files, as is, without decoding them.
