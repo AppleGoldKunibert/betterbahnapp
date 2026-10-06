@@ -1266,25 +1266,34 @@ public struct TransitousProvider: TransitProvider {
 
     public func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int, products: Set<Product>) async throws -> [BoardEntry] {
         let stop = try await resolve(station)
+        // MOTIS picks stop times by their live time, so a train leaving early drops out while its
+        // planned-only twin from another feed (ICE 146: DB's row live at 9:08, NS's row planned 9:09)
+        // is still in. Ask a bit earlier so both rows are there to merge, then cut at `date` ourselves.
+        let from = date.addingTimeInterval(-Self.earlyDepartureMargin)
+        let fetchDuration = duration + Int(Self.earlyDepartureMargin / 60)
         var stopTimes: [MStopTime]
         if kind == .departures {
             // MOTIS leaves out departures nobody may board ("kein Einstieg", e.g. ICEs from Berlin Hbf on to
             // Gesundbrunnen); its arrivals still have them, with their departure time. Best-effort.
-            async let arrivals = try? boardStopTimes(.arrivals, stopId: stop.id, date: date, duration: duration, products: products)
-            stopTimes = try await boardStopTimes(.departures, stopId: stop.id, date: date, duration: duration, products: products)
+            async let arrivals = try? boardStopTimes(.arrivals, stopId: stop.id, date: from, duration: fetchDuration, products: products)
+            stopTimes = try await boardStopTimes(.departures, stopId: stop.id, date: from, duration: fetchDuration, products: products)
             stopTimes += Self.continuingWithoutBoarding(await arrivals ?? [], missingFrom: stopTimes)
         } else {
-            stopTimes = try await boardStopTimes(.arrivals, stopId: stop.id, date: date, duration: duration, products: products)
+            stopTimes = try await boardStopTimes(.arrivals, stopId: stop.id, date: from, duration: fetchDuration, products: products)
         }
 
         let end = date.addingTimeInterval(TimeInterval(duration * 60))
         let entries = Self.mergeBorderSplitDuplicates(stopTimes, kind: kind)
             .compactMap { $0.toEntry(kind: kind) }
-            .filter { $0.time.planned <= end }
+            .filter { ($0.time.actual ?? $0.time.planned) >= date && $0.time.planned <= end }
         let deduplicated = Self.namingUnknownLines(Self.combiningCoupledTrains(Self.deduplicated(entries)))
             .sorted { $0.time.planned < $1.time.planned }
         return await withCorrectedLongDistanceEnds(deduplicated, kind: kind)
     }
+
+    /// How much earlier than asked `board` fetches, so a train running early is still there to be
+    /// merged with its planned-only twin from another feed (`mergeBorderSplitDuplicates`).
+    static let earlyDepartureMargin: TimeInterval = 10 * 60
 
     /// Every train calling at `station` in the window, as departures (including ones you may not board)
     /// and arrivals: the raw stop times, without the per-train corrections `board` makes, for the quick
