@@ -1,0 +1,23 @@
+{
+  "images": [
+    {
+      "filename": "Operator-cd.png",
+      "idiom": "universal",
+      "scale": "1x"
+    },
+    {
+      "filename": "Operator-cd@2x.png",
+      "idiom": "universal",
+      "scale": "2x"
+    },
+    {
+      "filename": "Operator-cd@3x.png",
+      "idiom": "universal",
+      "scale": "3x"
+    }
+  ],
+  "info": {
+    "author": "xcode",
+    "version": 1
+  }
+}

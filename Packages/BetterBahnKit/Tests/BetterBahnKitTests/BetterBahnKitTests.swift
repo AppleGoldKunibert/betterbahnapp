@@ -4457,14 +4457,9 @@ private final class RE3318CancelledProtocol: RE3318Protocol, @unchecked Sendable
             "Ostdeutsche Eisenbahn GmbH": .odeg, "ODEG Ostdeutsche Eisenbahn GmbH": .odeg,
             "cantus Verkehrsgesellschaft": .cantus, "agilis": .agilis, "agilis-Schnellzug": .agilis,
             "Arverio Bayern GmbH": .arverio, "Südwestdeutsche Verkehrs-AG": .sweg,
-            "alex - Die Länderbahn GmbH DLB": .alex, "trilex - Die Länderbahn GmbH DLB1": .laenderbahn,
-            "oberpfalzbahn - Die Länderbahn GmbH DLB": .laenderbahn, "MittelrheinBahn (Trans Regio)": .transregio,
-            "Süd-Thüringen-Bahn": .suedthueringenbahn, "Süd-Thüringen-Bahn Express": .suedthueringenbahn,
-            "Erfurter Bahn": .erfurterbahn, "Hessische Landesbahn GmbH": .hlb, "Bayerische Regiobahn": .brb,
-            "Mitteldeutsche Regiobahn": .mrb, "Abellio Rail Mitteldeutschland GmbH": .abellio,
-            "vlexx": .vlexx, "vlexx1": .vlexx, "Eurobahn": .eurobahn, "WestfalenBahn": .westfalenbahn,
+            "Abellio Rail Mitteldeutschland GmbH": .abellio,
             "NS International": .ns, "European Sleeper": .europeansleeper, "PKP Intercity": .pkpic,
-            "PolRegio": .polregio, "Raaberbahn AG GYSEV Zrt.": .gysev,
+            "Raaberbahn AG GYSEV Zrt.": .gysev,
             "Železničná spoločnosť Slovensko, a.s.": .zssk,
         ]
         for (name, brand) in expected {
@@ -4473,7 +4468,8 @@ private final class RE3318CancelledProtocol: RE3318Protocol, @unchecked Sendable
     }
 
     @Test func unknownOperatorsKeepTheIcon() {
-        for name in ["SÜWEX", "KVG Tram", "VIAS Rail GmbH", "BördeBus Verkehrsgesellschaft mbH", "MAV", "", "Transnetz"] {
+        for name in ["SÜWEX", "KVG Tram", "VIAS Rail GmbH", "BördeBus Verkehrsgesellschaft mbH", "MAV", "", "Transnetz",
+                     "alex - Die Länderbahn GmbH DLB", "MittelrheinBahn (Trans Regio)"] {
             #expect(OperatorBrand(operatorName: name) == nil, "\(name)")
         }
         #expect(Line(name: "RE 1", number: nil, product: .regionalExpress, operatorName: nil).operatorBrand == nil)

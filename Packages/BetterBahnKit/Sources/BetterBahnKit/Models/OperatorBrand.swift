@@ -3,22 +3,18 @@ import Foundation
 /// Railway undertakings (EVUs) the app has a logo for, recognised from the feed's agency name
 /// (`Line.operatorName`, e.g. "DB Regio AG NRW", "OEBB Personenverkehr AG Kundenservice",
 /// "S-Bahn Hannover (Transdev)"). The logos are in the app's asset catalog as `Operator-<rawValue>`
-/// (from Wikimedia Commons); an operator not listed here keeps the generic icon.
+/// (from Wikimedia Commons); an operator not listed here keeps the generic icon. To add one, add its case,
+/// a rule and its logo (the test `everyBrandHasALogo` checks the asset exists).
 public enum OperatorBrand: String, CaseIterable, Sendable {
-    case abellio, agilis, alex, arverio, bls, brb, cantus, cd, db, enno, erfurterbahn, erixx, eurobahn
-    case europeansleeper, eurostar, flixtrain, gysev, hlb, laenderbahn, metronom, mrb, nationalexpress
-    case nordbahn, nordwestbahn, ns, odeg, oebb, pkpic, polregio, sbb, sob, suedthueringenbahn, sweg
-    case thurbo, transdev, transregio, trenitalia, vlexx, westfalenbahn, zssk
+    case abellio, agilis, arverio, bls, cantus, cd, db, enno, erixx, europeansleeper, eurostar, flixtrain
+    case gysev, metronom, nationalexpress, nordbahn, nordwestbahn, ns, odeg, oebb, pkpic, sbb, sob, sweg
+    case thurbo, transdev, trenitalia, zssk
 
     /// Whole words of the normalised name (lowercased, without diacritics, punctuation as spaces,
     /// digits stripped from word ends: "vlexx1", "DLB1"). Checked in order, so the specific ones come
-    /// first: "alex - Die Länderbahn" is alex, "S-Bahn Hannover (Transdev)" Transdev, not DB.
+    /// first: "S-Bahn Hannover (Transdev)" is Transdev, not DB.
     private static let rules: [(OperatorBrand, [String])] = [
         (.transdev, ["transdev", "s bahn hannover"]),
-        (.alex, ["alex"]),
-        (.laenderbahn, ["landerbahn"]),
-        (.transregio, ["trans regio", "transregio"]),
-        (.suedthueringenbahn, ["sud thuringen bahn", "sudthuringenbahn"]),
         (.sob, ["sudostbahn", "sob"]),
         (.sbb, ["sbb", "schweizerische bundesbahnen"]),
         (.oebb, ["oebb", "obb", "osterreichische bundesbahnen"]),
@@ -37,20 +33,12 @@ public enum OperatorBrand: String, CaseIterable, Sendable {
         (.europeansleeper, ["european sleeper"]),
         (.eurostar, ["eurostar"]),
         (.thurbo, ["thurbo"]),
-        (.eurobahn, ["eurobahn"]),
-        (.westfalenbahn, ["westfalenbahn"]),
-        (.hlb, ["hlb", "hessische landesbahn"]),
-        (.erfurterbahn, ["erfurter bahn"]),
-        (.brb, ["brb", "bayerische regiobahn"]),
-        (.mrb, ["mrb", "mitteldeutsche regiobahn"]),
         (.abellio, ["abellio"]),
-        (.vlexx, ["vlexx"]),
         (.ns, ["ns", "nederlandse spoorwegen"]),
         (.trenitalia, ["trenitalia"]),
         (.bls, ["bls"]),
         (.cd, ["cd", "ceske drahy"]),
         (.pkpic, ["pkp intercity"]),
-        (.polregio, ["polregio"]),
         (.gysev, ["gysev", "raaberbahn"]),
         (.zssk, ["zssk", "zeleznicna spolocnost slovensko"]),
         (.db, ["db", "deutsche bahn", "s bahn berlin", "s bahn hamburg"]),
