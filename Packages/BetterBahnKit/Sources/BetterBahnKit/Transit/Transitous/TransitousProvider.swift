@@ -1473,7 +1473,8 @@ public struct TransitousProvider: TransitProvider {
     /// because DB's own feed happens to be the one tracking delays. The other name is kept as
     /// `alternateName` either way, so it can still be matched elsewhere (e.g. a Träwelling check-in).
     /// If neither has live data yet (the feed that eventually tracks it hasn't started for this
-    /// departure), both rows are kept rather than guessing which is which.
+    /// departure), both rows are kept rather than guessing which is which, unless they carry the same
+    /// train number ("RJ 177" and "ICE 177"): then they are the same train for sure.
     static func deduplicated(_ entries: [BoardEntry]) -> [BoardEntry] {
         var result: [BoardEntry] = []
         outer: for entry in entries {
@@ -1483,7 +1484,10 @@ public struct TransitousProvider: TransitProvider {
                       existing.line.name != entry.line.name else { continue }
                 let entryIsLive = entry.time.actual != nil
                 let existingIsLive = existing.time.actual != nil
-                guard entryIsLive != existingIsLive else { continue }
+                let longDistance: Set<Product> = [.highSpeed, .longDistance]
+                let sameTrain = longDistance.contains(existing.line.product) && longDistance.contains(entry.line.product)
+                    && existing.line.isSameTrain(as: entry.line.name)
+                guard entryIsLive != existingIsLive || sameTrain else { continue }
                 let live = entryIsLive ? entry : existing
                 let stale = entryIsLive ? existing : entry
                 var merged = live
@@ -1514,7 +1518,9 @@ public struct TransitousProvider: TransitProvider {
                           existing.time.planned == entry.time.planned, existing.platform.planned == platform,
                           existing.cancelled == entry.cancelled,
                           let existingEnd = existing.otherEnd, Station.normalize(existingEnd) == Station.normalize(otherEnd),
-                          !existing.line.allNames.map(Line.normalize).contains(Line.normalize(entry.line.name))
+                          !existing.line.allNames.map(Line.normalize).contains(Line.normalize(entry.line.name)),
+                          // The same number under another brand is the same train, not a coupled one.
+                          !existing.line.isSameTrain(as: entry.line.name)
                     else { continue }
                     // The row with live data leads, so the board shows the delay.
                     var merged = existing.time.actual == nil && entry.time.actual != nil ? entry : existing
@@ -1574,13 +1580,16 @@ public struct TransitousProvider: TransitProvider {
     }
 
     /// Arrivals of other trains of the same kind at the same planned minute and platform as `own`.
+    /// The same train from another feed under another brand ("ICE 177" for "RJ 177") isn't one.
     static func coupledCandidates(of own: MStopTime, in arrivals: [MStopTime]) -> [MStopTime] {
         guard let arrival = own.place.scheduledArrival else { return [] }
-        let ownName = Line.normalize(own.lineInfo.toLine().name)
+        let ownLine = own.lineInfo.toLine()
+        let ownName = Line.normalize(ownLine.name)
         var seen: Set<String> = [ownName]
         return arrivals.filter { candidate in
-            let name = Line.normalize(candidate.lineInfo.toLine().name)
-            guard candidate.tripId != own.tripId, candidate.mode == own.mode,
+            let candidateName = candidate.lineInfo.toLine().name
+            let name = Line.normalize(candidateName)
+            guard candidate.tripId != own.tripId, candidate.mode == own.mode, !ownLine.isSameTrain(as: candidateName),
                   candidate.place.scheduledArrival == arrival,
                   candidate.cancelled != true, candidate.tripCancelled != true,
                   !name.isEmpty, seen.insert(name).inserted else { return false }

@@ -150,7 +150,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   stations get their own name back (`withMainStationName`: not "KA Hbf (Vorplatz)"), DELFI's border
   points ("Kehl(Gr)") are dropped.
   Coupled trains under two numbers (ICE 940 + 950 Berlin–Hamm) show as
-  one (`Line.coupledTrains` with each train's direction, `displayName` "ICE 940 / 950",
+  one (`Line.coupledTrains` with each train's direction, `displayName` "ICE 940 / 950"; the same number under
+  another brand, e.g. ÖBB's "RJ 177" and DB's "ICE 177", is one train, not a pair: `Line.isSameTrain(as:)`,
   `Leg.directionDescription`): board rows by same time/platform/destination (`combiningCoupledTrains`), journey
   legs by `coupledTrains(for:)` (same arrival at the destination, checked against the other train's departure at
   the origin; called from `CombinedProvider.journeys` with a 3 s deadline, and again from `JourneyRefresher.refresh`
