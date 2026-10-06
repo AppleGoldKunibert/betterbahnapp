@@ -3192,6 +3192,20 @@ private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
                           departure: "2026-03-04T12:00:00Z", arrival: "2026-03-04T13:00:00Z")
         #expect(!RideMatch.isSameRide(checkin, saved))
     }
+
+    /// A ride checked in twice must count once even with saved journeys hidden; before, the
+    /// duplicate only collapsed against a saved journey and the map showed the stretch twice.
+    @Test func duplicateCheckinsCountOnce() {
+        let first = leg("RE 6", from: "Hamburg-Altona", to: "Husum",
+                        departure: "2026-03-04T09:00:00Z", arrival: "2026-03-04T11:00:00Z")
+        let again = leg("RE6", from: "Hamburg-Altona", to: "Husum",
+                        departure: "2026-03-04T09:01:00Z", arrival: "2026-03-04T11:02:00Z")
+        let other = leg("RE 6", from: "Husum", to: "Hamburg-Altona",
+                        departure: "2026-03-04T15:00:00Z", arrival: "2026-03-04T17:00:00Z")
+        let checkins = [first, again, other].map { Journey(legs: [$0], source: .traewelling) }
+        #expect(RideMatch.deduplicated(checkins).count == 2)
+        #expect(RideMatch.deduplicated(checkins, against: [Journey(legs: [first], source: .transitous)]).count == 1)
+    }
 }
 
 @Suite struct TraewellingHistoryTests {

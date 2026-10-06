@@ -274,7 +274,10 @@ final class AppModel {
                 for status in result.statuses {
                     // Everything after a known status was imported before (unless a full resync is forced).
                     if knownIDs.contains(status.id), !force { break pages }
-                    if !knownIDs.contains(status.id) { newStatuses.append(status) }
+                    // Paging by offset can repeat a status when a check-in lands mid-sync.
+                    if !knownIDs.contains(status.id), !newStatuses.contains(where: { $0.id == status.id }) {
+                        newStatuses.append(status)
+                    }
                 }
                 guard result.hasMore else { break }
                 page += 1

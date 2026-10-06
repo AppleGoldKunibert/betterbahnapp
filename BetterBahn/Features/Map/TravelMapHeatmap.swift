@@ -52,7 +52,7 @@ struct TravelMapSelection: Hashable {
 
 extension AppModel {
     /// Saved journeys and Träwelling check-ins in the selected range. A ride that's both saved in
-    /// the app and checked in on Träwelling counts once (see `RideMatch`).
+    /// the app and checked in on Träwelling, or checked in twice, counts once (see `RideMatch`).
     func mapJourneys(for selection: TravelMapSelection) -> [Journey] {
         let saved = selection.includeSaved ? savedJourneys.map(\.journey) : []
         let imported = selection.includeTraewelling
@@ -83,7 +83,7 @@ extension AppModel {
             : ""
         // Bumped whenever the heatmap is built differently, so results cached by an older build
         // (with grid-snapped lines or the old duplicate matching) aren't shown again.
-        let version = "v5"
+        let version = "v6"
         return "\(version)|\(selection.range.rawValue)|\(custom)|\(savedJourneys.count)|\(traewellingTrips.count)|\(travelledLegs(of: mapJourneys(for: selection)).count)|\(selection.includeSaved)|\(selection.includeTraewelling)"
     }
 
