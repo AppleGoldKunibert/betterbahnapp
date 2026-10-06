@@ -557,7 +557,10 @@ struct LegTripSheet: View {
             return
         }
         do {
-            var loaded = try await model.provider.trip(id: tripId, source: leg.source)
+            // The leg's own run is looked up again if a feed import renumbered it (a saved journey's).
+            var loaded = tripId == leg.tripId
+                ? try await model.provider.trip(for: leg)
+                : try await model.provider.trip(id: tripId, source: leg.source)
             guard tripId == self.tripId else { return }
             // The leg's own line knows the trains coupled to it, so the trainsets of both show.
             if tripId == leg.tripId {

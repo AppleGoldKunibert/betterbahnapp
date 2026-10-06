@@ -136,8 +136,8 @@ public struct JourneyRefresher: Sendable {
 
     private func refreshEnds(of originalLeg: Leg, now: Date) async -> Leg {
         var leg = Self.droppingInferredOnTime(originalLeg, now: now)
-        if !leg.isWalking, let tripId = leg.tripId, leg.source != .traewelling,
-           let trip = try? await provider.trip(id: tripId, source: leg.source) {
+        if !leg.isWalking, leg.tripId != nil, leg.source != .traewelling,
+           let trip = try? await provider.trip(for: leg) {
             leg = Self.apply(trip, to: leg)
         }
         let timetables = TimetablesClient.knowsChanges(until: leg.arrival.planned, now: now) ? self.timetables : nil
