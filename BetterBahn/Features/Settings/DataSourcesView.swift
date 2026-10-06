@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Settings → Datenquellen: every service the app gets data from, with the attribution their terms ask for
-/// (Transitous sources, OSM + OpenRailwayMap with links, DB Timetables under CC BY 4.0).
+/// (Transitous sources, OSM + OpenRailwayMap with links, DB Timetables under CC BY 4.0, operator logos).
 struct DataSourcesView: View {
     struct Source: Identifiable {
         let name: String
@@ -29,6 +29,8 @@ struct DataSourcesView: View {
                url: URL(string: "https://www.openstreetmap.org/copyright")!),
         Source(name: "OpenRailwayMap", usage: "Kartenkacheln des Schienennetzes",
                url: URL(string: "https://www.openrailwaymap.org")!),
+        Source(name: "Wikimedia Commons", usage: "Logos der Bahnunternehmen, Marken der jeweiligen Unternehmen",
+               url: URL(string: "https://commons.wikimedia.org/wiki/Category:Logos_of_railway_companies")!),
     ]
 
     var body: some View {

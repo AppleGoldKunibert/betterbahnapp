@@ -4441,6 +4441,60 @@ private final class RE3318CancelledProtocol: RE3318Protocol, @unchecked Sendable
     }
 }
 
+@Suite struct OperatorBrandTests {
+    /// Agency names as Transitous reports them on German, Swiss and Austrian boards (#166).
+    @Test func recognisesFeedAgencyNames() {
+        let expected: [String: OperatorBrand] = [
+            "DB Fernverkehr AG": .db, "DB Fernverkehr (Codesharing)": .db, "DB Regio AG NRW": .db,
+            "DB Regio AG S-Bahn München": .db, "DB RegioNetz Verkehrs GmbH Kurhessenbahn": .db,
+            "Deutsche Bahn AG": .db, "S-Bahn Hamburg": .db, "S-Bahn Berlin GmbH": .db,
+            "S-Bahn Hannover (Transdev)": .transdev, "S-Bahn Hannover": .transdev,
+            "Schweizerische Bundesbahnen SBB": .sbb, "SBB GmbH (Grenzverkehr)": .sbb,
+            "Schweizerische Südostbahn (sob)": .sob, "THURBO": .thurbo, "BLS AG (bls)": .bls,
+            "OEBB Personenverkehr AG Kundenservice": .oebb, "Österreichische Bundesbahnen": .oebb, "ÖBB": .oebb,
+            "FlixTrain-de": .flixtrain, "National Express": .nationalexpress, "NordWestBahn": .nordwestbahn,
+            "Nordbahn Eisenbahngesellschaft": .nordbahn, "erixx": .erixx, "metronom": .metronom, "enno": .enno,
+            "Ostdeutsche Eisenbahn GmbH": .odeg, "ODEG Ostdeutsche Eisenbahn GmbH": .odeg,
+            "cantus Verkehrsgesellschaft": .cantus, "agilis": .agilis, "agilis-Schnellzug": .agilis,
+            "Arverio Bayern GmbH": .arverio, "Südwestdeutsche Verkehrs-AG": .sweg,
+            "alex - Die Länderbahn GmbH DLB": .alex, "trilex - Die Länderbahn GmbH DLB1": .laenderbahn,
+            "oberpfalzbahn - Die Länderbahn GmbH DLB": .laenderbahn, "MittelrheinBahn (Trans Regio)": .transregio,
+            "Süd-Thüringen-Bahn": .suedthueringenbahn, "Süd-Thüringen-Bahn Express": .suedthueringenbahn,
+            "Erfurter Bahn": .erfurterbahn, "Hessische Landesbahn GmbH": .hlb, "Bayerische Regiobahn": .brb,
+            "Mitteldeutsche Regiobahn": .mrb, "Abellio Rail Mitteldeutschland GmbH": .abellio,
+            "vlexx": .vlexx, "vlexx1": .vlexx, "Eurobahn": .eurobahn, "WestfalenBahn": .westfalenbahn,
+            "NS International": .ns, "European Sleeper": .europeansleeper, "PKP Intercity": .pkpic,
+            "PolRegio": .polregio, "Raaberbahn AG GYSEV Zrt.": .gysev,
+            "Železničná spoločnosť Slovensko, a.s.": .zssk,
+        ]
+        for (name, brand) in expected {
+            #expect(OperatorBrand(operatorName: name) == brand, "\(name)")
+        }
+    }
+
+    @Test func unknownOperatorsKeepTheIcon() {
+        for name in ["SÜWEX", "KVG Tram", "VIAS Rail GmbH", "BördeBus Verkehrsgesellschaft mbH", "MAV", "", "Transnetz"] {
+            #expect(OperatorBrand(operatorName: name) == nil, "\(name)")
+        }
+        #expect(Line(name: "RE 1", number: nil, product: .regionalExpress, operatorName: nil).operatorBrand == nil)
+        #expect(Line(name: "ICE 1", number: "1", product: .highSpeed, operatorName: "DB Fernverkehr AG").operatorBrand == .db)
+    }
+
+    /// Every brand needs its logo in the app's asset catalog, else it would silently keep the icon.
+    @Test func everyBrandHasALogo() throws {
+        var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        while !FileManager.default.fileExists(atPath: dir.appending(path: "BetterBahn/Assets.xcassets").path) {
+            try #require(dir.path != "/", "repository root not found")
+            dir.deleteLastPathComponent()
+        }
+        let operators = dir.appending(path: "BetterBahn/Assets.xcassets/Operators")
+        for brand in OperatorBrand.allCases {
+            let png = operators.appending(path: "\(brand.assetName).imageset/\(brand.assetName)@3x.png")
+            #expect(FileManager.default.fileExists(atPath: png.path), "\(brand)")
+        }
+    }
+}
+
 private final class RE3318NoChangesProtocol: RE3318Protocol, @unchecked Sendable {
     override class var fchgPasewalk: String? { nil }
 }

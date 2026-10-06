@@ -86,7 +86,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 - `Features/Settings/` – settings (incl. privacy policy link and "not affiliated with DB" note), `DataSourcesView`
   (Datenquellen: every service with its attribution/license links; keep it current when adding a source), `BC100RulesView`, quick tags.
 - `Shared/DesignSystem.swift` – reusable UI pieces (`Card`, `SectionHeader`, `LineBadge`, `TimeStack`,
-  `DelayPill`, `PlatformBadge`, `InfoChip`, `Color.brand`, …). Reuse these instead of new styling.
+  `DelayPill`, `PlatformBadge`, `InfoChip`, `OperatorLabel`, `Color.brand`, …). Reuse these instead of new styling.
 - `Shared/StationPicker.swift` (`StationInput`, `TimeSelector`), `LocationService`, `PreviewData`, `VagonwebBrowser`.
 - `Shared/DebugScreens.swift` (DEBUG only) – launch args: `-debugScreen <name>`,
   `-seedDemoTrips YES`, `-seedStressTrips <count>`.
@@ -95,7 +95,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 
 - `Models/` – `Journey` → `Leg` → `Stopover`, `Line`, `Product`, `TimeInfo` (planned/actual),
   `PlatformInfo`, `Trip`, `JourneyPage`; `Station` (+ `DataSource`, `Coordinate`); `BoardEntry`;
-  `TrainMessage` (DB delay reasons/notices); `RideMatch`.
+  `TrainMessage` (DB delay reasons/notices); `RideMatch`; `OperatorBrand` (feed agency name → EVU logo, #166: PNGs rendered from Wikimedia Commons SVGs in
+  `BetterBahn/Assets.xcassets/Operators/Operator-<brand>`, shown by `OperatorLabel`; unknown operators keep the building icon).
 - `Transit/TransitProvider.swift` – `TransitProvider` protocol (`searchStations`, `journeys`,
   `board`, `trip`) and `JourneyQuery`.
 - `Transit/StationSearch.swift` – station-field shortcuts (#90): "b" bus stops, "t" tram stops, "l" nearest

@@ -203,6 +203,32 @@ struct LineBadge: View {
     }
 }
 
+/// The operator of a train (e.g. "DB Fernverkehr AG") with its logo (#166), on a light plate so dark
+/// logos stay readable in dark mode. Operators without a logo (`OperatorBrand`) keep the building icon.
+struct OperatorLabel: View {
+    let name: String
+    @ScaledMetric(relativeTo: .caption) private var logoHeight: CGFloat = 12
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let logo = OperatorBrand(operatorName: name).flatMap({ UIImage(named: $0.assetName) }) {
+                Image(uiImage: logo)
+                    .renderingMode(.original)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: logoHeight * 5, maxHeight: logoHeight)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(.white, in: .rect(cornerRadius: 4, style: .continuous))
+                    .accessibilityHidden(true)
+            } else {
+                Image(systemName: "building.2.fill")
+            }
+            Text(name)
+        }
+    }
+}
+
 /// Triebzug numbers and names of a train (e.g. "Tz 9457 „Bundesrepublik Deutschland“"). bahn.de's
 /// coach sequence first (it only has one in the coming hours); bahn.expert as fallback, which
 /// has the Tz once its data is live. Says so when bahn.de is refusing requests and nothing else helped.

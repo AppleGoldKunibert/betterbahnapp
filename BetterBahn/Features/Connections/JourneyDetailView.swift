@@ -573,7 +573,7 @@ struct LegCard: View {
 
                     if showDetails {
                         if let operatorName = leg.line?.operatorName {
-                            Label(operatorName, systemImage: "building.2.fill")
+                            OperatorLabel(name: operatorName)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
