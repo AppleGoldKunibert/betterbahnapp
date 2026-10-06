@@ -52,17 +52,22 @@ struct TravelMapSelection: Hashable {
 
 extension AppModel {
     /// Saved journeys and Träwelling check-ins in the selected range. A ride that's both saved in
-    /// the app and checked in on Träwelling, or checked in twice, counts once (see `RideMatch`).
+    /// the app and checked in on Träwelling, or checked in twice, counts once (see `RideMatch`):
+    /// the check-in wins, so saved journeys only add the legs nobody checked in.
     func mapJourneys(for selection: TravelMapSelection) -> [Journey] {
-        let saved = selection.includeSaved ? savedJourneys.map(\.journey) : []
-        let imported = selection.includeTraewelling
-            ? RideMatch.deduplicated(traewellingTrips.map(\.journey), against: saved)
-            : []
-        return (saved + imported).filter { journey in
+        // Filtered before matching: `uncovered` drops legs, which can move a journey's departure.
+        func inRange(_ journey: Journey) -> Bool {
             guard let interval = selection.interval else { return true }
             guard let departure = journey.departure?.planned else { return false }
             return interval.contains(departure)
         }
+        let checkins = selection.includeTraewelling
+            ? RideMatch.deduplicated(traewellingTrips.map(\.journey).filter(inRange))
+            : []
+        let saved = selection.includeSaved
+            ? RideMatch.uncovered(savedJourneys.map(\.journey).filter(inRange), by: checkins)
+            : []
+        return saved + checkins
     }
 
     /// The train legs of these journeys that have actually been ridden: a leg counts once it has
@@ -83,7 +88,7 @@ extension AppModel {
             : ""
         // Bumped whenever the heatmap is built differently, so results cached by an older build
         // (with grid-snapped lines or the old duplicate matching) aren't shown again.
-        let version = "v6"
+        let version = "v7"
         return "\(version)|\(selection.range.rawValue)|\(custom)|\(savedJourneys.count)|\(traewellingTrips.count)|\(travelledLegs(of: mapJourneys(for: selection)).count)|\(selection.includeSaved)|\(selection.includeTraewelling)"
     }
 

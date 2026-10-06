@@ -3206,6 +3206,62 @@ private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
         #expect(RideMatch.deduplicated(checkins).count == 2)
         #expect(RideMatch.deduplicated(checkins, against: [Journey(legs: [first], source: .transitous)]).count == 1)
     }
+
+    /// A saved journey with a checked-in leg keeps only its other legs, so turning saved journeys
+    /// on adds rides to the Träwelling map instead of trading check-ins for a saved copy.
+    @Test func checkinWinsOverSavedLeg() {
+        let ice = leg("ICE 645", from: "Köln Hbf", to: "Hannover Hbf",
+                      departure: "2026-03-04T09:00:00Z", arrival: "2026-03-04T11:30:00Z")
+        let regional = leg("RE 1", from: "Hannover Hbf", to: "Bremen Hbf",
+                           departure: "2026-03-04T11:45:00Z", arrival: "2026-03-04T13:00:00Z")
+        let checkin = leg("ICE645", from: "Köln Messe/Deutz", to: "Hannover Hbf",
+                          departure: "2026-03-04T09:12:00Z", arrival: "2026-03-04T11:34:00Z")
+        let result = RideMatch.uncovered([Journey(legs: [ice, regional], source: .transitous)],
+                                         by: [Journey(legs: [checkin], source: .traewelling)])
+        #expect(result.map { $0.legs.map(\.line?.name) } == [["RE 1"]])
+
+        let both = Journey(legs: [checkin, leg("RE1", from: "Hannover Hbf", to: "Bremen Hbf",
+                                               departure: "2026-03-04T11:45:00Z", arrival: "2026-03-04T13:01:00Z")],
+                           source: .traewelling)
+        #expect(RideMatch.uncovered([Journey(legs: [ice, regional], source: .transitous)], by: [both]).isEmpty)
+    }
+
+    /// Saved, but another train taken at that time: the plan isn't drawn next to the real ride.
+    @Test func savedPlanNotTakenIsDropped() {
+        let saved = leg("ICE 1000", from: "Hamburg Hbf", to: "Berlin Hbf",
+                        departure: "2026-03-04T10:00:00Z", arrival: "2026-03-04T11:45:00Z")
+        let checkin = leg("RE 8", from: "Hamburg Hbf", to: "Wittenberge",
+                          departure: "2026-03-04T10:10:00Z", arrival: "2026-03-04T12:00:00Z")
+        #expect(RideMatch.uncovered([Journey(legs: [saved], source: .transitous)],
+                                    by: [Journey(legs: [checkin], source: .traewelling)]).isEmpty)
+    }
+
+    @Test func connectionAfterCheckinIsKept() {
+        let checkin = leg("ICE 645", from: "Köln Hbf", to: "Hannover Hbf",
+                          departure: "2026-03-04T09:00:00Z", arrival: "2026-03-04T11:30:00Z")
+        let connection = leg("RE 1", from: "Hannover Hbf", to: "Bremen Hbf",
+                             departure: "2026-03-04T11:30:00Z", arrival: "2026-03-04T12:45:00Z")
+        #expect(RideMatch.uncovered([Journey(legs: [connection], source: .transitous)],
+                                    by: [Journey(legs: [checkin], source: .traewelling)]).count == 1)
+    }
+
+    @Test func rideOverMidnightMatches() {
+        let saved = leg("ICE 1000", from: "München Hbf", to: "Nürnberg Hbf",
+                        departure: "2026-03-04T23:30:00Z", arrival: "2026-03-05T00:40:00Z")
+        let checkin = leg("ICE 1000", from: "Ingolstadt Hbf", to: "Nürnberg Hbf",
+                          departure: "2026-03-05T00:05:00Z", arrival: "2026-03-05T00:40:00Z")
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        #expect(RideMatch.uncovered([Journey(legs: [saved], source: .transitous)],
+                                    by: [Journey(legs: [checkin], source: .traewelling)], calendar: utc).isEmpty)
+    }
+
+    @Test func sameRideSavedTwiceCountsOnce() {
+        let ride = leg("ICE 645", from: "Köln Hbf", to: "Hannover Hbf",
+                       departure: "2026-03-04T09:00:00Z", arrival: "2026-03-04T11:30:00Z")
+        let saved = [ride, ride].map { Journey(legs: [$0], source: .transitous) }
+        #expect(RideMatch.uncovered(saved, by: []).count == 1)
+    }
 }
 
 @Suite struct TraewellingHistoryTests {
