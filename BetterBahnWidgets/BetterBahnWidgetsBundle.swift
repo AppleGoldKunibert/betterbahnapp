@@ -7,5 +7,7 @@ struct BetterBahnWidgetsBundle: WidgetBundle {
         TripLiveActivity()
         JourneyOverviewWidget()
         CurrentTrainWidget()
+        LiveSpeedWidget()
+        LivePositionWidget()
     }
 }

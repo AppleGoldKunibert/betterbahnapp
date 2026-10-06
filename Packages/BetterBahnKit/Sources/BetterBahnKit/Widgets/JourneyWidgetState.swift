@@ -195,3 +195,12 @@ public struct JourneyWidgetState: Hashable, Sendable {
                  toProduct: next.line?.product ?? .other)
     }
 }
+
+public extension JourneyWidgetState {
+    /// The leg of the train ridden at this moment, whose live position the live widgets show; nil
+    /// while waiting to board (they show the next stop with a timer instead) or after arriving.
+    func ridingLeg(of journey: Journey) -> Leg? {
+        guard !isWaitingToBoard, phase != .arrived, journey.legs.indices.contains(legIndex) else { return nil }
+        return journey.legs[legIndex]
+    }
+}

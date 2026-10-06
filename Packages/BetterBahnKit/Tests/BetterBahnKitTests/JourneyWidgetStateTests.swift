@@ -126,6 +126,16 @@ import Testing
         #expect(!riding.isWaitingToBoard)
     }
 
+    @Test func looksUpOnlyTheTrainBeingRidden() {
+        #expect(state(at: 5).ridingLeg(of: journey)?.line?.name == "RE 5")
+        // Approaching the transfer: still on the RE.
+        #expect(state(at: 25).ridingLeg(of: journey)?.line?.name == "RE 5")
+        #expect(state(at: -10).ridingLeg(of: journey) == nil)
+        #expect(state(at: 34).ridingLeg(of: journey) == nil)
+        #expect(state(at: 100).ridingLeg(of: journey)?.line?.name == "ICE 645")
+        #expect(state(at: 400).ridingLeg(of: journey) == nil)
+    }
+
     @Test func namesTrainsWithoutRunNumbers() {
         #expect(state(at: 5).trainName == "RE 5")
     }
