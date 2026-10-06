@@ -36,6 +36,14 @@ public struct JourneyWidgetState: Hashable, Sendable {
         public var toProduct: Product
     }
 
+    /// A stop of the current train still ahead (for the current-train widget).
+    public struct UpcomingStop: Hashable, Sendable {
+        public var name: String
+        public var time: Date
+        public var delayMinutes: Int?
+        public var cancelled: Bool
+    }
+
     public var phase: Phase
     /// The train ridden now, or boarded next before the journey/at a transfer.
     public var trainName: String
@@ -60,6 +68,17 @@ public struct JourneyWidgetState: Hashable, Sendable {
     public var cancelled: Bool
     /// E.g. "Anschluss in Hannover Hbf nicht mehr möglich".
     public var warning: String?
+    /// Where to get off that train, with the expected arrival, its delay and the platform.
+    public var exitName: String
+    public var exitTime: Date
+    public var exitDelayMinutes: Int?
+    public var exitPlatform: String?
+    /// The train's next stops up to `exitName` (excluding it), at most `maxUpcomingStops`.
+    public var upcomingStops: [UpcomingStop]
+    /// Not on the train yet: before the journey or waiting at a transfer.
+    public var isWaitingToBoard = false
+
+    public static let maxUpcomingStops = 3
 
     /// A transfer shows from this long before arriving at the transfer station.
     public static let transferLead: TimeInterval = 10 * 60
@@ -88,7 +107,9 @@ public struct JourneyWidgetState: Hashable, Sendable {
             originName: first.origin.displayName, destinationName: last.destination.displayName,
             finalArrival: last.arrival.best, finalDelayMinutes: last.arrival.delayMinutes,
             nextDeparture: nil, cancelled: last.cancelled,
-            warning: journey.connectionIssues().first(where: \.isBlocking)?.title)
+            warning: journey.connectionIssues().first(where: \.isBlocking)?.title,
+            exitName: last.destination.displayName, exitTime: last.arrival.best,
+            exitDelayMinutes: last.arrival.delayMinutes, exitPlatform: last.arrivalPlatform?.best, upcomingStops: [])
 
         for (position, (index, leg)) in legs.enumerated() {
             let previous = position > 0 ? legs[position - 1].element : nil
@@ -98,12 +119,18 @@ public struct JourneyWidgetState: Hashable, Sendable {
             state.legIndex = index
             state.direction = leg.direction
             state.cancelled = leg.cancelled
+            state.exitName = leg.destination.displayName
+            state.exitTime = leg.arrival.best
+            state.exitDelayMinutes = leg.arrival.delayMinutes
+            state.exitPlatform = leg.arrivalPlatform?.best
+            state.upcomingStops = upcomingStops(of: leg, after: now)
             if now < leg.departure.best {
                 state.nextStopName = leg.origin.displayName
                 state.nextStopTime = leg.departure.best
                 state.nextStopDelayMinutes = leg.departure.delayMinutes
                 state.platform = leg.departurePlatform?.best
                 state.nextDeparture = leg.departure.best
+                state.isWaitingToBoard = true
                 if let previous {
                     state.phase = .transfer
                     state.transfer = transfer(from: previous, to: leg)
@@ -149,6 +176,16 @@ public struct JourneyWidgetState: Hashable, Sendable {
     public static func name(of leg: Leg) -> String {
         guard let line = leg.line, !line.isUnknown else { return "Zug" }
         return line.displayName
+    }
+
+    /// Intermediate stops of `leg` not yet reached at `now` (arrival, else departure, after it).
+    static func upcomingStops(of leg: Leg, after now: Date) -> [UpcomingStop] {
+        guard leg.stopovers.count > 2 else { return [] }
+        return leg.stopovers.dropFirst().dropLast().compactMap { stop -> UpcomingStop? in
+            guard let time = stop.arrival ?? stop.departure, time.best > now else { return nil }
+            return UpcomingStop(name: stop.station.displayName, time: time.best, delayMinutes: time.delayMinutes,
+                                cancelled: stop.cancelled)
+        }.prefix(maxUpcomingStops).map { $0 }
     }
 
     private static func transfer(from previous: Leg, to next: Leg) -> Transfer {

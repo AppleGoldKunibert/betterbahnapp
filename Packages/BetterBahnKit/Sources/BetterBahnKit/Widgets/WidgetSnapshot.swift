@@ -36,6 +36,7 @@ public enum WidgetStore {
 
     /// Widget kinds, for reloading their timelines from the app.
     public static let journeyWidgetKind = "JourneyOverviewWidget"
+    public static let currentTrainWidgetKind = "CurrentTrainWidget"
 
     public static var fileURL: URL? {
         #if os(iOS) || os(macOS)

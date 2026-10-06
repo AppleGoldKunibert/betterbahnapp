@@ -49,7 +49,7 @@ struct JourneyWidgetProvider: AppIntentTimelineProvider {
     }
 
     func snapshot(for configuration: JourneyWidgetIntent, in context: Context) async -> JourneyWidgetEntry {
-        let entries = entries(for: configuration, now: .now)
+        let entries = Self.entries(countdown: configuration.countdown.target, now: .now)
         if context.isPreview, entries.first?.state == nil {
             return placeholder(in: context)
         }
@@ -57,14 +57,14 @@ struct JourneyWidgetProvider: AppIntentTimelineProvider {
     }
 
     func timeline(for configuration: JourneyWidgetIntent, in context: Context) async -> Timeline<JourneyWidgetEntry> {
-        Timeline(entries: entries(for: configuration, now: .now), policy: .atEnd)
+        Timeline(entries: Self.entries(countdown: configuration.countdown.target, now: .now), policy: .atEnd)
     }
 
     /// One entry now and one at every moment the journey's state changes (departures, arrivals,
     /// stops, transfers), so the widget moves on by itself.
-    private func entries(for configuration: JourneyWidgetIntent, now: Date) -> [JourneyWidgetEntry] {
+    /// Also used by the current-train widget.
+    static func entries(countdown: JourneyWidgetState.CountdownTarget, now: Date) -> [JourneyWidgetEntry] {
         let snapshot = WidgetStore.load()
-        let countdown = configuration.countdown.target
         guard let journey = snapshot?.journey else {
             return [JourneyWidgetEntry(date: now, state: nil, journeyID: nil, updatedAt: snapshot?.updatedAt, countdown: countdown)]
         }

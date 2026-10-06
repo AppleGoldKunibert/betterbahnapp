@@ -110,6 +110,22 @@ import Testing
         #expect(dates == dates.sorted())
     }
 
+    @Test func listsTheCurrentTrainsNextStopsAndExit() {
+        let riding = state(at: 5)
+        #expect(riding.upcomingStops.map(\.name) == ["Brühl"])
+        #expect(riding.upcomingStops.first?.delayMinutes == 2)
+        #expect(riding.exitName == "Köln Hbf")
+        #expect(riding.exitPlatform == "4")
+        #expect(riding.exitDelayMinutes == 2)
+        // Past Brühl only the exit is left.
+        #expect(state(at: 20).upcomingStops.isEmpty)
+        // At the transfer it's the next train's exit.
+        #expect(state(at: 34).exitName == "Berlin Hbf")
+        #expect(state(at: 34).exitPlatform == "12")
+        #expect(state(at: 34).isWaitingToBoard)
+        #expect(!riding.isWaitingToBoard)
+    }
+
     @Test func namesTrainsWithoutRunNumbers() {
         #expect(state(at: 5).trainName == "RE 5")
     }
