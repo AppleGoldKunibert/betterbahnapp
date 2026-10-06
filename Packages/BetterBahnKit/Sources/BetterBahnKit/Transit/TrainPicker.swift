@@ -25,6 +25,22 @@ public extension Trip {
     }
 }
 
+public extension Leg {
+    /// The leg's own stops as a trip, for when its full run can't be loaded (any more): a past train
+    /// Transitous has dropped, or no connection. Only what was saved, from where you got on to where you got off.
+    var savedTrip: Trip? {
+        guard !isWalking else { return nil }
+        let stops = stopovers.count >= 2 ? stopovers : [
+            Stopover(station: origin, arrival: nil, departure: departure, arrivalPlatform: nil,
+                     departurePlatform: departurePlatform, cancelled: cancelled),
+            Stopover(station: destination, arrival: arrival, departure: nil, arrivalPlatform: arrivalPlatform,
+                     departurePlatform: nil, cancelled: cancelled),
+        ]
+        return Trip(id: tripId ?? id, line: line, direction: direction, stopovers: stops, cancelled: cancelled,
+                    remarks: remarks, messages: messages, source: source)
+    }
+}
+
 /// Result of picking a specific train: the ride itself, plus – when boarding at the requested origin
 /// or alighting at the requested destination isn't actually allowed on it – a rule-respecting
 /// alternative between the same two stations.

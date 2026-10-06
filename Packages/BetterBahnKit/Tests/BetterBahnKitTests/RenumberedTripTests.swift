@@ -60,6 +60,25 @@ import Testing
         #expect(CombinedProvider.sameTrain(as: try leg(), in: [entry])?.tripId == "new-2074")
     }
 
+    /// A train Transitous no longer has at all (long past) shows the leg's saved stops instead.
+    @Test func savedTripIsTheLegsOwnStops() throws {
+        var leg = try leg()
+        let ends = try #require(leg.savedTrip)
+        #expect(ends.stopovers.map(\.station.name) == ["Berlin Gesundbrunnen", "Hamburg Hbf"])
+        #expect(ends.stopovers.first?.departure == leg.departure)
+        #expect(ends.stopovers.last?.arrival == leg.arrival)
+        #expect(ends.id == "old-2074")
+
+        let spandau = Stopover(station: station("spandau", "Berlin-Spandau", source: .transitous),
+                               arrival: leg.departure, departure: leg.departure,
+                               arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+        leg.stopovers = [ends.stopovers[0], spandau, ends.stopovers[1]]
+        #expect(leg.savedTrip?.stopovers.map(\.station.name) == ["Berlin Gesundbrunnen", "Berlin-Spandau", "Hamburg Hbf"])
+
+        leg.isWalking = true
+        #expect(leg.savedTrip == nil)
+    }
+
     @Test func unknownTripStillFailsWhenTheBoardHasNoSuchTrain() async throws {
         let (combined, session) = provider()
         defer { session.invalidateAndCancel() }

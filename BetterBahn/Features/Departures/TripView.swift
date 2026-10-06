@@ -228,6 +228,8 @@ struct TripContent: View {
     /// Called when the user taps a stop, so callers can react to a hand-picked change only (the
     /// bindings also move when a caller seeds them itself).
     var onSelectStop: ((Stopover) -> Void)?
+    /// The saved journey's leg riding this train, whose remembered Tz shows once nothing answers any more.
+    var savedLeg: Leg? = nil
     /// Tapping any stop time flips every stop between real-time and scheduled times — app-wide, and remembered.
     @AppStorage("showPlannedTimes") private var showPlannedTimes = false
     /// Set once a boarding/exit stop was picked by hand; from then on the "Tippe auf Halte" tip stays hidden.
@@ -246,7 +248,7 @@ struct TripContent: View {
                                       color: color, size: 46)
                     VStack(alignment: .leading, spacing: 3) {
                         TrainNameRow(name: trip.line?.name ?? "Zug", font: .title3.weight(.bold), spacing: 8) {
-                            TrainSeriesTag(trip: trip)
+                            TrainSeriesTag(trip: trip, savedLeg: savedLeg)
                         }
                         if let origin = trip.origin, let destination = trip.destination {
                             Text("\(origin.displayName) → \(destination.displayName)")
@@ -257,7 +259,7 @@ struct TripContent: View {
                         if let op = trip.line?.operatorName {
                             Label(op, systemImage: "building.2.fill").font(.caption).foregroundStyle(.tertiary)
                         }
-                        TrainFormationLabel(trip: trip)
+                        TrainFormationLabel(trip: trip, savedLeg: savedLeg)
                     }
                     Spacer()
                     VStack(alignment: .trailing, spacing: 6) {
@@ -481,6 +483,8 @@ struct LegTripSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var trip: Trip?
     @State private var error: Error?
+    /// The full run couldn't be loaded, so only the leg's own saved stops show.
+    @State private var showsSavedStops = false
     /// The coupled train whose stops are shown instead of this one's (nil: this one).
     @State private var shownTripId: String?
 
@@ -505,10 +509,15 @@ struct LegTripSheet: View {
                     if let error {
                         ErrorBanner(error: error)
                     }
+                    if showsSavedStops {
+                        InfoChip(text: "Der ganze Zuglauf ist nicht mehr abrufbar. Hier siehst du die gespeicherten Halte deiner Fahrt.",
+                                 systemImage: "clock.arrow.circlepath", tint: .secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                     if let trip {
                         TripContent(trip: trip, highlight: leg.origin,
                                     boardingID: .constant(boardingID(in: trip)), exitID: .constant(exitID(in: trip)),
-                                    interactive: false)
+                                    interactive: false, savedLeg: tripId == leg.tripId ? leg : nil)
                     }
                 }
                 .padding(.horizontal)
@@ -547,6 +556,7 @@ struct LegTripSheet: View {
     private func switchTrain(to id: String) {
         guard id != tripId else { return }
         error = nil
+        showsSavedStops = false
         shownTripId = id == leg.tripId ? nil : id
         trip = model.liveTrips.value(for: id)
     }
@@ -569,6 +579,7 @@ struct LegTripSheet: View {
                 loaded.line = leg.line?.riding(train, ownDirection: leg.direction, ownTripId: leg.tripId) ?? loaded.line
             }
             error = nil
+            showsSavedStops = false
             // Live data first, like `TripView.load()`.
             if let timetables = model.timetablesClient {
                 let timetable = loaded
@@ -585,7 +596,14 @@ struct LegTripSheet: View {
             if let trip { model.rememberLive(trip) }
         } catch is CancellationError {
         } catch {
-            self.error = error
+            // The leg's own train, gone from Transitous (long past) or not reachable: its saved stops
+            // rather than an error. Seen live before, that version stays.
+            if tripId == leg.tripId, let saved = leg.savedTrip {
+                if trip == nil { trip = saved }
+                showsSavedStops = trip == saved
+            } else {
+                self.error = error
+            }
         }
     }
 
