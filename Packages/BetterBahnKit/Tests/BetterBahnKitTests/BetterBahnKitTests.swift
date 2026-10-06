@@ -91,6 +91,27 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(BoardFilter().includes(entry))
     }
 
+    /// ICE 204 arrives at Hamburg-Harburg at 13:02 and leaves at 13:04, only to let people off. A
+    /// search from 13:04 must still see it (its arrival lies before the start), one from 13:05 not.
+    @Test func noBoardingTrainArrivingBeforeStartStillLeaves() throws {
+        let arrivalsJSON = """
+        {"stopTimes": [
+          {"place": {"name": "Hamburg-Harburg", "lat": 53.456, "lon": 9.992,
+             "scheduledArrival": "2026-10-06T11:02:00Z", "arrival": "2026-10-06T11:01:00Z",
+             "scheduledDeparture": "2026-10-06T11:04:00Z", "departure": "2026-10-06T11:04:00Z",
+             "pickupType": "NOT_ALLOWED", "dropoffType": "NORMAL"},
+           "mode": "HIGHSPEED_RAIL", "tripId": "ice204", "displayName": "ICE 204", "tripShortName": "204",
+           "tripTo": {"name": "Hamburg-Altona", "lat": 53.552, "lon": 9.935}}
+        ]}
+        """
+        let arrivals = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(arrivalsJSON.utf8)).stopTimes
+        let start = try #require(ISO8601DateFormatter().date(from: "2026-10-06T11:04:00Z"))
+        #expect(TransitousProvider.continuingWithoutBoarding(arrivals, missingFrom: [], departingFrom: start)
+            .map(\.tripId) == ["ice204"])
+        #expect(TransitousProvider.continuingWithoutBoarding(arrivals, missingFrom: [], departingFrom: start.addingTimeInterval(60))
+            .isEmpty)
+    }
+
     /// Real-world Transitous response for Hanau Hbf: DELFI puts some trains (ICE 12, RE50, …) at the
     /// station's bus bay "Steig F" instead of their track, so the app showed "Gleis F" rather than
     /// Gleis 6. A train must not take a bus bay's letter as its platform; a bus still does.
