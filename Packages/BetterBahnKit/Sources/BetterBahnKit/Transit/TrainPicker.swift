@@ -1,5 +1,13 @@
 import Foundation
 
+public extension Leg {
+    /// The timetable doesn't allow boarding where this leg starts or getting off where it ends
+    /// ("Nur Ausstieg" / "Nur Einstieg").
+    var breaksBoardingRules: Bool {
+        stopovers.first?.access.allowsBoarding == false || stopovers.last?.access.allowsAlighting == false
+    }
+}
+
 public extension Trip {
     /// Builds a leg riding this trip from `origin` to `destination`, if both are served in that order.
     func leg(from origin: Station, to destination: Station) -> Leg? {
@@ -22,6 +30,37 @@ public extension Trip {
             cancelled: cancelled || start.departureCancelled || end.arrivalCancelled,
             stopovers: Array(stopovers[startIndex...endIndex]), remarks: remarks, messages: messages, source: source
         )
+    }
+}
+
+public extension Leg {
+    /// The leg's own stops as a trip, for when its full run can't be loaded (any more): a past train
+    /// Transitous has dropped, or no connection. Only what was saved, from where you got on to where you got off.
+    var savedTrip: Trip? {
+        guard !isWalking else { return nil }
+        let stops = stopovers.count >= 2 ? stopovers : [
+            Stopover(station: origin, arrival: nil, departure: departure, arrivalPlatform: nil,
+                     departurePlatform: departurePlatform, cancelled: cancelled),
+            Stopover(station: destination, arrival: arrival, departure: nil, arrivalPlatform: arrivalPlatform,
+                     departurePlatform: nil, cancelled: cancelled),
+        ]
+        return Trip(id: tripId ?? id, line: line, direction: direction, stopovers: stops, cancelled: cancelled,
+                    remarks: remarks, messages: messages, source: source)
+    }
+}
+
+public extension Trip {
+    /// This run with the Zusatzhalte `leg` remembered (bahn.de only reports them while the train runs),
+    /// each put in by its planned time, unless the run already has that stop.
+    func keepingAdditionalStops(of leg: Leg) -> Trip {
+        func time(_ stop: Stopover) -> Date? { stop.arrival?.planned ?? stop.departure?.planned }
+        var trip = self
+        for extra in leg.stopovers where extra.isAdditional {
+            guard let at = time(extra), !trip.stopovers.contains(where: { $0.station.isSamePlace(as: extra.station) }) else { continue }
+            let index = trip.stopovers.firstIndex { stop in time(stop).map { $0 > at } ?? false } ?? trip.stopovers.endIndex
+            trip.stopovers.insert(extra, at: index)
+        }
+        return trip
     }
 }
 
@@ -107,14 +146,38 @@ public struct TrainPicker: Sendable {
         guard let leg = legs.min(by: { $0.departure.planned < $1.departure.planned }) else {
             throw TransitError.notFound("\(trainName) nach \(destination.name) (hält dort nicht)")
         }
-        let breaksBoardingRules = leg.stopovers.first?.access.allowsBoarding == false
-            || leg.stopovers.last?.access.allowsAlighting == false
+        let breaksBoardingRules = leg.breaksBoardingRules
         var alternative: Journey?
         if breaksBoardingRules {
             alternative = try? await legalAlternative(from: origin, to: destination, date: leg.departure.planned)
         }
         return TrainMatch(journey: Journey(legs: [leg], source: leg.source),
                           breaksBoardingRules: breaksBoardingRules, alternative: alternative)
+    }
+
+    /// Direct trains from `origin` to `destination` the normal search leaves out because the timetable
+    /// doesn't allow boarding at `origin` ("Nur Ausstieg", e.g. ICEs from Berlin Hbf to Gesundbrunnen)
+    /// or getting off at `destination` ("Nur Einstieg"). Expert option: shown anyway, marked on the card.
+    /// Candidates come from both stations' departure boards (`stationCalls`), so only those trains' runs are loaded.
+    public func journeysIgnoringBoardingRules(from origin: Station, to destination: Station,
+                                              calls: StationCalls) async -> [Journey] {
+        let candidates = Self.restrictedCandidates(departures: calls.departuresAtOrigin, atDestination: calls.departuresAtDestination)
+        let legs = await legs(for: candidates, from: origin, to: destination)
+        return legs.filter(\.breaksBoardingRules)
+            .sorted { $0.departure.planned < $1.departure.planned }
+            .map { Journey(legs: [$0], source: $0.source) }
+    }
+
+    /// Departures at the origin that may not be boarded there, or whose train may not be left at the
+    /// destination (it only lets passengers board there, so it shows as "Nur Einstieg" on that board).
+    static func restrictedCandidates(departures: [BoardEntry], atDestination: [BoardEntry]) -> [BoardEntry] {
+        let entryOnlyAtDestination = Set(atDestination.filter { $0.access == .entryOnly }.map(\.tripId))
+        var seen = Set<String>()
+        return departures.filter { entry in
+            guard entry.line.product.isTrain, !entry.cancelled,
+                  entry.access == .exitOnly || entryOnlyAtDestination.contains(entry.tripId) else { return false }
+            return seen.insert(entry.tripId).inserted
+        }
     }
 
     /// A normal connection between the same two stations, for when the picked train doesn't actually

@@ -69,6 +69,20 @@ public extension Journey {
         }
         return issues
     }
+
+    /// Over 10 minutes after its (realtime) arrival.
+    func isOver(now: Date = .now) -> Bool {
+        (arrival?.best ?? .distantFuture).addingTimeInterval(10 * 60) < now
+    }
+
+    /// `connectionIssues()` to show: a journey that is over only lists its cancellations. How its
+    /// transfers went is history then, and the last live data of its trains is often incomplete (DB
+    /// drops a train's changes a few hours after it ran), so they'd show as missed though they worked.
+    func currentIssues(now: Date = .now) -> [ConnectionIssue] {
+        let issues = connectionIssues()
+        guard isOver(now: now) else { return issues }
+        return issues.filter { if case .legCancelled = $0 { true } else { false } }
+    }
 }
 
 /// Updates the times, platforms and cancellations of a journey from current trip data, optionally
@@ -135,9 +149,10 @@ public struct JourneyRefresher: Sendable {
     }
 
     private func refreshEnds(of originalLeg: Leg, now: Date) async -> Leg {
+        guard !Self.isLongOver(originalLeg, now: now) else { return originalLeg }
         var leg = Self.droppingInferredOnTime(originalLeg, now: now)
-        if !leg.isWalking, let tripId = leg.tripId, leg.source != .traewelling,
-           let trip = try? await provider.trip(id: tripId, source: leg.source) {
+        if !leg.isWalking, leg.tripId != nil, leg.source != .traewelling,
+           let trip = try? await provider.trip(for: leg) {
             leg = Self.apply(trip, to: leg)
         }
         let timetables = TimetablesClient.knowsChanges(until: leg.arrival.planned, now: now) ? self.timetables : nil
@@ -149,7 +164,16 @@ public struct JourneyRefresher: Sendable {
         return leg
     }
 
+    /// A leg that arrived over 30 minutes ago keeps what was last seen live. Later answers only lose
+    /// data: DB drops a train's changes a few hours after it ran and Transitous' realtime runs out, so
+    /// one leg of a finished journey could fall back to the timetable while the other kept its delay,
+    /// and a transfer that worked showed as missed.
+    static func isLongOver(_ leg: Leg, now: Date) -> Bool {
+        leg.arrival.best.addingTimeInterval(30 * 60) < now
+    }
+
     private func refresh(_ originalLeg: Leg, now: Date) async -> Leg {
+        guard !Self.isLongOver(originalLeg, now: now) else { return originalLeg }
         var leg = await refreshEnds(of: originalLeg, now: now)
         let timetables = TimetablesClient.knowsChanges(until: leg.arrival.planned, now: now) ? self.timetables : nil
         if let timetables, timetables.canLookUp(leg) {

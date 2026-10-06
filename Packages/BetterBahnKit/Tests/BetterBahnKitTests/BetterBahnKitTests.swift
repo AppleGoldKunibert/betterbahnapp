@@ -47,6 +47,50 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(entry.platform.planned == "4")
     }
 
+    /// Real-world Transitous data for Berlin Hbf (#105): ICEs going on to Gesundbrunnen may not be
+    /// boarded there, so MOTIS leaves them out of the departures and only lists them as arrivals. They
+    /// show as departures marked "Nur Ausstieg"; trains ending here and ones already departing don't.
+    @Test func continuingArrivalsWithoutBoardingBecomeDepartures() throws {
+        let arrivalsJSON = """
+        {"stopTimes": [
+          {"place": {"name": "S+U Berlin Hauptbahnhof", "lat": 52.525, "lon": 13.369,
+             "scheduledArrival": "2026-10-05T20:33:00Z", "scheduledDeparture": "2026-10-05T20:37:00Z",
+             "arrival": "2026-10-05T20:33:00Z", "departure": "2026-10-05T20:37:00Z",
+             "pickupType": "NOT_ALLOWED", "dropoffType": "NORMAL"},
+           "mode": "HIGHSPEED_RAIL", "tripId": "ice594", "displayName": "ICE 594", "tripShortName": "594",
+           "headsign": "S+U Gesundbrunnen Bhf (Berlin)",
+           "tripTo": {"name": "S+U Gesundbrunnen Bhf (Berlin)", "lat": 52.548, "lon": 13.388}},
+          {"place": {"name": "S+U Berlin Hauptbahnhof", "lat": 52.525, "lon": 13.369,
+             "scheduledArrival": "2026-10-05T21:29:00Z", "arrival": "2026-10-05T21:29:00Z"},
+           "mode": "HIGHSPEED_RAIL", "tripId": "ice500", "displayName": "ICE 500", "tripShortName": "500",
+           "tripTo": {"name": "S+U Berlin Hauptbahnhof", "lat": 52.525, "lon": 13.369}},
+          {"place": {"name": "S+U Berlin Hauptbahnhof", "lat": 52.525, "lon": 13.369,
+             "scheduledArrival": "2026-10-05T21:25:00Z", "scheduledDeparture": "2026-10-05T21:28:00Z"},
+           "mode": "HIGHSPEED_RAIL", "tripId": "ice870", "displayName": "ICE 870", "tripShortName": "870",
+           "tripTo": {"name": "Hamburg-Altona", "lat": 53.55, "lon": 9.93}}
+        ]}
+        """
+        let departuresJSON = """
+        {"stopTimes": [
+          {"place": {"name": "S+U Berlin Hauptbahnhof", "lat": 52.525, "lon": 13.369,
+             "scheduledArrival": "2026-10-05T21:25:00Z", "scheduledDeparture": "2026-10-05T21:28:00Z"},
+           "mode": "HIGHSPEED_RAIL", "tripId": "ice870", "displayName": "ICE 870", "tripShortName": "870",
+           "tripTo": {"name": "Hamburg-Altona", "lat": 53.55, "lon": 9.93}}
+        ]}
+        """
+        let arrivals = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(arrivalsJSON.utf8)).stopTimes
+        let departures = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(departuresJSON.utf8)).stopTimes
+
+        let added = TransitousProvider.continuingWithoutBoarding(arrivals, missingFrom: departures)
+        #expect(added.map(\.tripId) == ["ice594"])
+        let entry = try #require(added.first?.toEntry(kind: .departures))
+        #expect(entry.kind == .departures)
+        #expect(entry.access == .exitOnly)
+        #expect(entry.time.planned == ISO8601DateFormatter().date(from: "2026-10-05T20:37:00Z"))
+        #expect(entry.otherEnd == Station.displayName(for: "S+U Gesundbrunnen Bhf (Berlin)"))
+        #expect(BoardFilter().includes(entry))
+    }
+
     /// Real-world Transitous response for Hanau Hbf: DELFI puts some trains (ICE 12, RE50, …) at the
     /// station's bus bay "Steig F" instead of their track, so the app showed "Gleis F" rather than
     /// Gleis 6. A train must not take a bus bay's letter as its platform; a bus still does.
@@ -1635,6 +1679,68 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(filter.includes(entry(.exitOnly)))
         #expect(filter.includes(entry(.normal)))
         #expect(StopAccess(pickupAllowed: false, dropoffAllowed: true) == .exitOnly)
+    }
+
+    /// Alfred's example: Berlin Hbf → Halle → back to Gesundbrunnen on an ICE that also stops at Hbf
+    /// (no boarding there) is a detour and gets hidden; so is leaving a train that goes on to the
+    /// destination. A change onto a train that doesn't call at either station stays.
+    @Test func detoursOntoATrainCallingAtTheOriginOrDestination() {
+        let hbf = station("8011160", "Berlin Hbf"), halle = station("8010159", "Halle (Saale) Hbf")
+        let gesundbrunnen = station("8011102", "Berlin Gesundbrunnen"), leipzig = station("8010205", "Leipzig Hbf")
+        let base = Date(timeIntervalSince1970: 1_790_000_000)
+        func t(_ minutes: Double) -> Date { base.addingTimeInterval(minutes * 60) }
+        func leg(_ trip: String, _ from: Station, _ to: Station, _ dep: Double, _ arr: Double) -> Leg {
+            Leg(origin: from, destination: to, departure: TimeInfo(planned: t(dep), actual: nil),
+                arrival: TimeInfo(planned: t(arr), actual: nil), departurePlatform: nil, arrivalPlatform: nil,
+                tripId: trip, line: Line(name: "ICE \(trip)", number: trip, product: .highSpeed, operatorName: nil),
+                direction: nil, isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+        }
+        func entry(_ trip: String, _ kind: BoardKind, _ minutes: Double, _ access: StopAccess = .normal) -> BoardEntry {
+            BoardEntry(kind: kind, tripId: trip, station: hbf,
+                       line: Line(name: "ICE \(trip)", number: trip, product: .highSpeed, operatorName: nil), otherEnd: nil,
+                       time: TimeInfo(planned: t(minutes), actual: nil), platform: PlatformInfo(planned: nil, actual: nil),
+                       cancelled: false, terminatesOrOriginatesHere: false, remarks: [], access: access, source: .transitous)
+        }
+        // ICE 594 runs Halle → Berlin Hbf (no boarding, minute 150) → Gesundbrunnen (minute 158).
+        let calls = StationCalls(departuresAtOrigin: [entry("594", .departures, 150, .exitOnly), entry("10", .departures, 0)],
+                                 departuresAtDestination: [entry("700", .departures, 50)],
+                                 arrivalsAtDestination: [entry("594", .arrivals, 158), entry("700", .arrivals, 48)])
+
+        let viaHalle = Journey(legs: [leg("10", hbf, halle, 0, 70), leg("594", halle, gesundbrunnen, 80, 158)], source: .transitous)
+        #expect(calls.isDetour(viaHalle))
+
+        // ICE 700 reaches Gesundbrunnen at minute 48, but the route leaves it earlier and goes on by another train.
+        let offEarly = Journey(legs: [leg("700", hbf, leipzig, 0, 20), leg("11", leipzig, gesundbrunnen, 30, 60)], source: .transitous)
+        #expect(calls.isDetour(offEarly))
+
+        let normal = Journey(legs: [leg("10", hbf, halle, 0, 70), leg("12", halle, leipzig, 80, 110)], source: .transitous)
+        #expect(!calls.isDetour(normal))
+        #expect(!calls.isDetour(Journey(legs: [leg("594", hbf, gesundbrunnen, 150, 158)], source: .transitous)))
+
+        // Transitous' routing offers ICE 594 from Hbf as a normal ride; the stop times mark it "Nur Ausstieg".
+        var direct = leg("594", hbf, gesundbrunnen, 150, 158)
+        direct.stopovers = [Stopover(station: hbf, arrival: nil, departure: direct.departure, arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+                            Stopover(station: gesundbrunnen, arrival: direct.arrival, departure: nil, arrivalPlatform: nil, departurePlatform: nil, cancelled: false)]
+        let marked = calls.marking(Journey(legs: [direct], source: .transitous))
+        #expect(marked.legs[0].stopovers.first?.access == .exitOnly)
+        #expect(marked.legs[0].stopovers.last?.access == .normal)
+        #expect(StationCalls.directTripIds([marked, viaHalle]) == ["594"])
+    }
+
+    /// Expert option "Nur Ein-/Ausstieg ignorieren": only trains you may not board at the origin, or
+    /// not leave at the destination, are looked up; normal ones the search already has.
+    @Test func restrictedCandidatesAreTrainsWithoutBoardingOrAlighting() {
+        func entry(_ tripId: String, _ access: StopAccess, product: Product = .highSpeed, cancelled: Bool = false) -> BoardEntry {
+            BoardEntry(kind: .departures, tripId: tripId, station: station("1", "Berlin Hbf"),
+                       line: Line(name: "ICE \(tripId)", number: tripId, product: product, operatorName: nil), otherEnd: nil,
+                       time: TimeInfo(planned: .now, actual: nil), platform: PlatformInfo(planned: nil, actual: nil),
+                       cancelled: cancelled, terminatesOrOriginatesHere: false, remarks: [], access: access, source: .transitous)
+        }
+        let atOrigin = [entry("1", .exitOnly), entry("2", .normal), entry("3", .normal), entry("4", .exitOnly, cancelled: true),
+                        entry("5", .exitOnly, product: .bus), entry("1", .exitOnly)]
+        let atDestination = [entry("3", .entryOnly), entry("2", .normal)]
+        let candidates = TrainPicker.restrictedCandidates(departures: atOrigin, atDestination: atDestination)
+        #expect(candidates.map(\.tripId) == ["1", "3"])
     }
 
     final class SlowProvider: TransitProvider, @unchecked Sendable {

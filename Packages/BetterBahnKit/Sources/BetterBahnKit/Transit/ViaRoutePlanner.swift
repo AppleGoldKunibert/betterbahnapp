@@ -31,6 +31,9 @@ public struct ViaRoutePlanner: Sendable {
     public var branchFactor: Int
     /// Vehicle types for every leg that has no waypoint-specific selection.
     public var products: Set<Product>
+    /// More options for a part of the route (from, to, earliest departure), e.g. trains the timetable
+    /// doesn't let you board or leave there, for the expert option "Nur Ein-/Ausstieg ignorieren".
+    public var extraSegmentJourneys: (@Sendable (Station, Station, Date) async -> [Journey])?
 
     public init(provider: any TransitProvider, beamWidth: Int = 3, branchFactor: Int = 2,
                 products: Set<Product> = Set(Product.allCases)) {
@@ -64,13 +67,20 @@ public struct ViaRoutePlanner: Sendable {
             let minStay = index == 0 ? 0 : via[index - 1].minStay
             let segmentProducts = index == 0 ? products : (via[index - 1].products ?? products)
 
+            // Looked up once per part, from the earliest arrival there; each candidate takes the ones it can reach.
+            var extras: [Journey] = []
+            if let extraSegmentJourneys, let earliest = beam.map(\.arrival).min() {
+                extras = await extraSegmentJourneys(segmentFrom, segmentTo, earliest.addingTimeInterval(minStay))
+                    .filter { $0.transitLegs.allSatisfy { segmentProducts.contains($0.line?.product ?? .other) } }
+            }
             var next: [Candidate] = []
             try await withThrowingTaskGroup(of: [Candidate].self) { group in
                 for candidate in beam {
                     let departAfter = candidate.arrival.addingTimeInterval(minStay)
+                    let reachable = extras.filter { ($0.departure?.planned ?? .distantPast) >= departAfter }.prefix(branchFactor)
                     group.addTask {
                         let page = try await provider.journeys(JourneyQuery(from: segmentFrom, to: segmentTo, date: departAfter, products: segmentProducts))
-                        return page.journeys.prefix(branchFactor).compactMap { option -> Candidate? in
+                        return (page.journeys.prefix(branchFactor) + reachable).compactMap { option -> Candidate? in
                             guard let arrival = option.arrival?.best else { return nil }
                             return Candidate(legs: candidate.legs + [option], arrival: arrival)
                         }

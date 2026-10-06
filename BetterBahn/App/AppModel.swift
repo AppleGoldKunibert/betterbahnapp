@@ -980,15 +980,13 @@ nonisolated struct SavedJourney: Codable, Hashable, Identifiable {
     /// synced so they stay known after the journey (optional so older saved data still decodes).
     var formations: [String: TrainFormation]?
 
-    var issues: [ConnectionIssue] { journey.connectionIssues() }
+    var issues: [ConnectionIssue] { journey.currentIssues() }
 
     /// How long after arriving a finished journey is still refreshed when opened.
     static let liveDataLifetime: TimeInterval = 24 * 3600
 
     /// Finished 10 minutes after the (realtime) arrival.
-    var isFinished: Bool {
-        (journey.arrival?.best ?? .distantFuture).addingTimeInterval(10 * 60) < .now
-    }
+    var isFinished: Bool { journey.isOver() }
 }
 
 /// Where a saved journey's train is right now.
@@ -1132,6 +1130,12 @@ final class AppSettings {
             uploadToCloud()
         }
     }
+    var expertIgnoreBoardingRules: Bool {
+        didSet {
+            UserDefaults.standard.set(expertIgnoreBoardingRules, forKey: "expertIgnoreBoardingRules")
+            uploadToCloud()
+        }
+    }
 
     /// Träwelling check-ins, login and map import.
     var traewellingEnabled: Bool { expertMode && expertTraewelling }
@@ -1139,6 +1143,9 @@ final class AppSettings {
     var editJourneyEnabled: Bool { expertMode && expertEditJourney }
     /// Forcing specific trains into a route or swapping a leg for another train.
     var trainChoiceEnabled: Bool { expertMode && expertTrainChoice }
+    /// The connection search also shows direct trains you may not board or leave at that station
+    /// ("Nur Ausstieg" / "Nur Einstieg"), which the timetable otherwise hides.
+    var ignoreBoardingRulesEnabled: Bool { expertMode && expertIgnoreBoardingRules }
 
     init() {
         let defaults = UserDefaults.standard
@@ -1150,6 +1157,7 @@ final class AppSettings {
         expertTraewelling = defaults.bool(forKey: "expertTraewelling")
         expertEditJourney = defaults.bool(forKey: "expertEditJourney")
         expertTrainChoice = defaults.bool(forKey: "expertTrainChoice")
+        expertIgnoreBoardingRules = defaults.bool(forKey: "expertIgnoreBoardingRules")
         traewellingVisibility = TraewellingVisibility(rawValue: defaults.integer(forKey: "traewellingVisibility")) ?? .publicVisible
         bc100Rules = Storage.load(key: "bc100Rules") ?? .default
         syncTraewellingToMap = defaults.object(forKey: "syncTraewellingToMap") as? Bool ?? true
@@ -1176,6 +1184,8 @@ final class AppSettings {
         var expertTraewelling: Bool
         var expertEditJourney: Bool
         var expertTrainChoice: Bool
+        /// Optional: settings synced by older versions don't have it.
+        var expertIgnoreBoardingRules: Bool?
     }
 
     /// What iCloud stores: the settings and when they were last changed.
@@ -1189,7 +1199,7 @@ final class AppSettings {
         traewellingVisibility: TraewellingVisibility(rawValue: 0) ?? .publicVisible, bc100Rules: .default,
         syncTraewellingToMap: true, connectionWarnings: true, quickTags: QuickTag.defaults,
         liveActivitiesEnabled: true, expertMode: false, expertTraewelling: false, expertEditJourney: false,
-        expertTrainChoice: false)
+        expertTrainChoice: false, expertIgnoreBoardingRules: false)
 
     @ObservationIgnored private var isApplyingCloudValue = false
 
@@ -1199,7 +1209,7 @@ final class AppSettings {
                    syncTraewellingToMap: syncTraewellingToMap, connectionWarnings: connectionWarnings,
                    quickTags: quickTags, liveActivitiesEnabled: liveActivitiesEnabled, expertMode: expertMode,
                    expertTraewelling: expertTraewelling, expertEditJourney: expertEditJourney,
-                   expertTrainChoice: expertTrainChoice)
+                   expertTrainChoice: expertTrainChoice, expertIgnoreBoardingRules: expertIgnoreBoardingRules)
     }
 
     /// When the settings were last changed on this device or taken over from iCloud. Before
@@ -1244,6 +1254,7 @@ final class AppSettings {
         expertTraewelling = value.expertTraewelling
         expertEditJourney = value.expertEditJourney
         expertTrainChoice = value.expertTrainChoice
+        expertIgnoreBoardingRules = value.expertIgnoreBoardingRules ?? expertIgnoreBoardingRules
     }
 }
 
