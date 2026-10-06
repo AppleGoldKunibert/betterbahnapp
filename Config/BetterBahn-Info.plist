@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>BetterBahnAppGroup</key>
-	<string>group.de.goldkunibert.BetterBahn$(LOCAL_BUNDLE_ID_SUFFIX)</string>
+	<string>group.de.goldkunibert.BetterBahn</string>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>de.goldkunibert.BetterBahn.endLiveActivity</string>

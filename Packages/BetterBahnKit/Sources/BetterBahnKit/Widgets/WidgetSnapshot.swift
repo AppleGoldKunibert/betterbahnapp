@@ -28,8 +28,9 @@ public struct WidgetSnapshot: Codable, Sendable, Hashable {
 }
 
 /// Reads and writes the `WidgetSnapshot` in the App Group container shared by the app and the widget
-/// extension. Both find the group's ID under `appGroupInfoKey` in their Info.plist (it follows the
-/// bundle ID, so a build with `LOCAL_BUNDLE_ID_SUFFIX` gets its own group).
+/// extension. Both find the group's ID under `appGroupInfoKey` in their Info.plist. It is written out
+/// in full there and in the entitlements: Xcode's automatic signing doesn't resolve build settings in
+/// App Group names and fails to register "group.…$(LOCAL_BUNDLE_ID_SUFFIX)".
 public enum WidgetStore {
     public static let appGroupInfoKey = "BetterBahnAppGroup"
     static let fileName = "widgetSnapshot.json"
