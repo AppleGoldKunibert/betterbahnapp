@@ -1582,6 +1582,105 @@ private final class CrowdedHubStopTimesProtocol: URLProtocol, @unchecked Sendabl
     }
 }
 
+// MARK: - RIL100 codes
+
+@Suite struct Ril100Tests {
+    func station(_ id: String, _ name: String, _ lat: Double, _ lon: Double, eva: String? = nil) -> Station {
+        Station(id: id, name: name, coordinate: Coordinate(latitude: lat, longitude: lon), evaNumber: eva, source: .transitous)
+    }
+
+    /// Any of a station's codes finds it, in any case and with the double spaces DB writes some with (#165).
+    @Test func findsStationsByCodeInAnyCase() {
+        #expect(Ril100.entry(forCode: "ff")?.name == "Frankfurt (Main) Hbf")
+        #expect(Ril100.entry(forCode: "FfT")?.name == "Frankfurt (Main) Hbf")
+        #expect(Ril100.entry(forCode: " ah ")?.name == "Hamburg Hbf")
+        #expect(Ril100.entry(forCode: "bl")?.code == "BHBF")
+        #expect(Ril100.entry(forCode: "ll t")?.name == "Leipzig Hbf")
+        #expect(Ril100.entry(forCode: "f") == nil)
+        #expect(Ril100.entry(forCode: "Frankfurt") == nil)
+    }
+
+    /// Transitous' stops have no EVA number: they're matched by position and name, also on another
+    /// level of the station, but not a different station nearby.
+    @Test func matchesStopsToStationsByPositionAndName() {
+        #expect(Ril100.code(for: station("a", "Frankfurt (Main) Hauptbahnhof", 50.1069, 8.6625)) == "FF")
+        #expect(Ril100.code(for: station("b", "Frankfurt (Main) Hbf tief", 50.1072, 8.6650)) == "FF")
+        #expect(Ril100.code(for: station("c", "S+U Alexanderplatz Bhf (Berlin)", 52.5215, 13.4115)) == "BALE")
+        #expect(Ril100.code(for: station("d", "Berlin Hbf (tief)", 52.5250, 13.3690)) == "BHBF")
+        // A tram stop named otherwise 300 m away isn't the station.
+        #expect(Ril100.code(for: station("e", "Frankfurt, Platz der Republik", 50.1095, 8.6660)) == nil)
+        // Far from DB's position the same name isn't enough.
+        #expect(Ril100.code(for: station("f", "Frankfurt (Main) Hbf", 50.12, 8.70)) == nil)
+        // An EVA number decides by itself.
+        #expect(Ril100.code(for: station("g", "Hamburg", 0, 0, eva: "8002549")) == "AH")
+    }
+
+    /// The station the code belongs to comes first and only once; a station named exactly what was
+    /// typed stays ahead of it.
+    @Test func placesTheCodesStationFirstAndOnce() throws {
+        let ff = try #require(Ril100.entry(forCode: "ff"))
+        let hbf = station("hbf", "Frankfurt (Main) Hauptbahnhof", 50.1069, 8.6625)
+        let tief = station("tief", "Frankfurt (Main) Hbf tief", 50.1072, 8.6650)
+        let other = station("other", "Fulda", 50.554, 9.684)
+        #expect(Ril100.placing(hbf, for: ff, typed: "ff", in: [other, tief, hbf]).map(\.id) == ["hbf", "other"])
+        // Without the looked-up stop, the first hit that is the station moves up.
+        #expect(Ril100.placing(nil, for: ff, typed: "ff", in: [other, tief, hbf]).map(\.id) == ["tief", "other"])
+        #expect(Ril100.placing(nil, for: ff, typed: "ff", in: [other]).map(\.id) == ["other"])
+
+        let harblek = try #require(Ril100.entry(forCode: "aha"))
+        let aha = station("aha", "Aha", 47.8332, 8.1343)
+        let harblekStop = station("harblek", "Harblek", 54.362, 8.9626)
+        #expect(Ril100.placing(harblekStop, for: harblek, typed: "Aha", in: [aha]).map(\.id) == ["aha", "harblek"])
+        let altdoebern = try #require(Ril100.entry(forCode: "bad"))
+        let altdoebernStop = station("altdoebern", "Altdöbern", altdoebern.coordinate.latitude, altdoebern.coordinate.longitude)
+        let ragaz = station("ragaz", "Bad Ragaz", 47.0, 9.5)
+        let toelz = station("toelz", "Bad Tölz", 47.76, 11.56)
+        #expect(Ril100.placing(altdoebernStop, for: altdoebern, typed: "bad", in: [ragaz, toelz]).map(\.id)
+            == ["ragaz", "altdoebern", "toelz"])
+    }
+
+    /// The geocoder finds "Hof" but not "Hof Hbf", so the station is also looked up by its town.
+    @Test func townNameLeavesOutHbfAndBrackets() {
+        #expect(Ril100.townName("Hof Hbf") == "Hof")
+        #expect(Ril100.townName("Frankfurt (Main) Hbf") == "Frankfurt")
+        #expect(Ril100.townName("Berlin Hauptbahnhof") == "Berlin")
+        #expect(Ril100.townName("Alexanderplatz") == "Alexanderplatz")
+    }
+
+    /// "ff" in the picker: Frankfurt (Main) Hbf, looked up by DB's name, first; its lower level, which
+    /// the geocoder found for "ff" itself, left out.
+    @Test func searchFindsTheStationForATypedCode() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [Ril100GeocodeProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let provider = TransitousProvider(http: HTTPClient(session: session))
+
+        let stations = try await provider.searchStations(StationSearch(parsing: "ff"), near: nil)
+
+        #expect(stations.map(\.id) == ["frankfurtHbf", "fulda"])
+    }
+}
+
+/// "Frankfurt (Main) Hbf" gives the station, anything else ("ff" and its extras) its lower level and Fulda.
+private final class Ril100GeocodeProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let text = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+            .queryItems?.first { $0.name == "text" }?.value
+        let body = text == "Frankfurt (Main) Hbf"
+            ? #"[{"type":"STOP","id":"frankfurtHbf","name":"Frankfurt (Main) Hauptbahnhof","lat":50.1069,"lon":8.6625,"country":"DE","modes":["HIGHSPEED_RAIL","REGIONAL_RAIL"],"importance":0.02}]"#
+            : #"[{"type":"STOP","id":"fulda","name":"Fulda","lat":50.554,"lon":9.684,"country":"DE","modes":["HIGHSPEED_RAIL"],"importance":0.004},"#
+                + #"{"type":"STOP","id":"tief","name":"Frankfurt (Main) Hbf tief","lat":50.1072,"lon":8.665,"country":"DE","modes":["SUBURBAN"],"importance":0.01}]"#
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
 // MARK: - Rules & filters
 
 @Suite struct RulesTests {

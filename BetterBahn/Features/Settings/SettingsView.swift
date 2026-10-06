@@ -128,12 +128,16 @@ struct SettingsView: View {
                             IconLabel(title: "„Nur Ein-/Ausstieg“ ignorieren", systemImage: "arrow.up.arrow.down.circle.fill", color: .teal)
                         }
                         .tint(.brand)
+                        Toggle(isOn: $settings.expertRil100) {
+                            IconLabel(title: "RIL100-Codes in der Suche", systemImage: "character.textbox", color: .gray)
+                        }
+                        .tint(.brand)
                     }
                 } header: {
                     Text("Für Profis")
                 } footer: {
                     Text(settings.expertMode
-                         ? "Zusätzliche Funktionen für Vielfahrer. „Nur Ein-/Ausstieg“ ignorieren zeigt in der Suche auch direkte Züge, die laut Fahrplan dort keinen Einstieg oder Ausstieg erlauben."
+                         ? "Zusätzliche Funktionen für Vielfahrer. „Nur Ein-/Ausstieg“ ignorieren zeigt in der Suche auch direkte Züge, die laut Fahrplan dort keinen Einstieg oder Ausstieg erlauben. RIL100-Codes zeigt in der Bahnhofssuche die DB-Abkürzung rechts neben dem Bahnhof (z. B. FF); suchen kann man mit „ff“ auch so."
                          : "Zusätzliche Funktionen für Vielfahrer.")
                 }
 

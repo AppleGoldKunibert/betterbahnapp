@@ -34,9 +34,33 @@ public struct TransitousProvider: TransitProvider {
     /// aren't used up by others. "l" only sorts on the device: the location never leaves it.
     public func searchStations(_ search: StationSearch, near location: Coordinate?) async throws -> [Station] {
         let modes = search.modes.reduce(into: Set<String>()) { $0.formUnion($1.motisModes) }
+        let ril = search.modes.isEmpty ? Ril100.entry(forCode: search.text) : nil
+        async let rilHit = station(for: ril)
         let matches = try await geocode(search.text, addingMainStation: true, near: location, modes: modes)
         let merged = Self.rankedAndMerged(matches, query: search.text, near: location)
-        return Self.applying(search, to: merged, near: location).map { $0.toStation() }
+        let stations = Self.applying(search, to: merged, near: location).map { $0.toStation() }
+        guard let ril else { return stations }
+        let placed = Ril100.placing(await rilHit, for: ril, typed: search.text, in: stations)
+        return search.byDistance ? search.ordered(placed, near: location) : placed
+    }
+
+    /// The stop of the station with a typed RIL100 code ("ff"), looked up by DB's name for it and by
+    /// its town alone, as the geocoder finds "Hof" but not "Hof Hbf"; nil if neither finds it near
+    /// DB's position (or nothing was typed as a code).
+    func station(for ril: Ril100.Entry?) async -> Station? {
+        guard let ril else { return nil }
+        let texts = Set([ril.name, Ril100.townName(ril.name)])
+        let matches = await withTaskGroup(of: [MGeocodeMatch].self) { group in
+            for text in texts {
+                group.addTask {
+                    (try? await CombinedProvider.withDeadline(Self.extraQueryDeadline) { try await geocodeRequest(text) }) ?? []
+                }
+            }
+            return await group.reduce(into: []) { $0 += $1 }
+        }
+        return Self.rankedAndMerged(matches, query: ril.name, near: ril.coordinate)
+            .map { $0.toStation() }
+            .first { Ril100.entry(for: $0)?.evaNumber == ril.evaNumber }
     }
 
     static func rankedAndMerged(_ matches: [MGeocodeMatch], query: String, near location: Coordinate?) -> [MGeocodeMatch] {

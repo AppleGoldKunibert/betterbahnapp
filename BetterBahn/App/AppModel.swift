@@ -1149,6 +1149,12 @@ final class AppSettings {
             uploadToCloud()
         }
     }
+    var expertRil100: Bool {
+        didSet {
+            UserDefaults.standard.set(expertRil100, forKey: "expertRil100")
+            uploadToCloud()
+        }
+    }
 
     /// Träwelling check-ins, login and map import.
     var traewellingEnabled: Bool { expertMode && expertTraewelling }
@@ -1159,6 +1165,9 @@ final class AppSettings {
     /// The connection search also shows direct trains you may not board or leave at that station
     /// ("Nur Ausstieg" / "Nur Einstieg"), which the timetable otherwise hides.
     var ignoreBoardingRulesEnabled: Bool { expertMode && expertIgnoreBoardingRules }
+    /// The station search shows each station's RIL100 code ("FF") next to its name (#165). Searching
+    /// by code works either way.
+    var ril100Enabled: Bool { expertMode && expertRil100 }
 
     init() {
         let defaults = UserDefaults.standard
@@ -1171,6 +1180,7 @@ final class AppSettings {
         expertEditJourney = defaults.bool(forKey: "expertEditJourney")
         expertTrainChoice = defaults.bool(forKey: "expertTrainChoice")
         expertIgnoreBoardingRules = defaults.bool(forKey: "expertIgnoreBoardingRules")
+        expertRil100 = defaults.bool(forKey: "expertRil100")
         traewellingVisibility = TraewellingVisibility(rawValue: defaults.integer(forKey: "traewellingVisibility")) ?? .publicVisible
         bc100Rules = Storage.load(key: "bc100Rules") ?? .default
         syncTraewellingToMap = defaults.object(forKey: "syncTraewellingToMap") as? Bool ?? true
@@ -1199,6 +1209,7 @@ final class AppSettings {
         var expertTrainChoice: Bool
         /// Optional: settings synced by older versions don't have it.
         var expertIgnoreBoardingRules: Bool?
+        var expertRil100: Bool?
     }
 
     /// What iCloud stores: the settings and when they were last changed.
@@ -1212,7 +1223,7 @@ final class AppSettings {
         traewellingVisibility: TraewellingVisibility(rawValue: 0) ?? .publicVisible, bc100Rules: .default,
         syncTraewellingToMap: true, connectionWarnings: true, quickTags: QuickTag.defaults,
         liveActivitiesEnabled: true, expertMode: false, expertTraewelling: false, expertEditJourney: false,
-        expertTrainChoice: false, expertIgnoreBoardingRules: false)
+        expertTrainChoice: false, expertIgnoreBoardingRules: false, expertRil100: false)
 
     @ObservationIgnored private var isApplyingCloudValue = false
 
@@ -1222,7 +1233,8 @@ final class AppSettings {
                    syncTraewellingToMap: syncTraewellingToMap, connectionWarnings: connectionWarnings,
                    quickTags: quickTags, liveActivitiesEnabled: liveActivitiesEnabled, expertMode: expertMode,
                    expertTraewelling: expertTraewelling, expertEditJourney: expertEditJourney,
-                   expertTrainChoice: expertTrainChoice, expertIgnoreBoardingRules: expertIgnoreBoardingRules)
+                   expertTrainChoice: expertTrainChoice, expertIgnoreBoardingRules: expertIgnoreBoardingRules,
+                   expertRil100: expertRil100)
     }
 
     /// When the settings were last changed on this device or taken over from iCloud. Before
@@ -1268,6 +1280,7 @@ final class AppSettings {
         expertEditJourney = value.expertEditJourney
         expertTrainChoice = value.expertTrainChoice
         expertIgnoreBoardingRules = value.expertIgnoreBoardingRules ?? expertIgnoreBoardingRules
+        expertRil100 = value.expertRil100 ?? expertRil100
     }
 }
 
