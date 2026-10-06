@@ -14,14 +14,19 @@ public struct VagonwebClient: Sendable {
 
     /// Loads a page's HTML like a browser does.
     public typealias PageLoader = @Sendable (URL) async throws -> String
+    /// Loads files (coach drawings) like a browser does; the ones it got, by URL.
+    public typealias FileLoader = @Sendable ([URL]) async throws -> [URL: Data]
 
     let http: HTTPClient
     let browserLoader: PageLoader?
+    let browserFileLoader: FileLoader?
     let cache = Cache()
 
-    public init(http: HTTPClient = HTTPClient(timeout: 12), browserLoader: PageLoader? = nil) {
+    public init(http: HTTPClient = HTTPClient(timeout: 12), browserLoader: PageLoader? = nil,
+                browserFileLoader: FileLoader? = nil) {
         self.http = http
         self.browserLoader = browserLoader
+        self.browserFileLoader = browserFileLoader
     }
 
     // MARK: Lookup
@@ -111,6 +116,16 @@ public struct VagonwebClient: Sendable {
         var loading: [URL: Task<[VagonwebComposition], any Error>] = [:]
         /// vagonweb turned every way of loading away; don't ask again for a while.
         var blockedUntil: Date?
+        /// Coach drawings, which don't change.
+        var images: [URL: Data] = [:]
+
+        func images(at urls: [URL]) -> [URL: Data] {
+            images.filter { urls.contains($0.key) }
+        }
+
+        func store(images found: [URL: Data]) {
+            images.merge(found) { _, new in new }
+        }
 
         func compositions(at url: URL, load: @escaping @Sendable () async throws -> String) async throws -> [VagonwebComposition] {
             if let entry = pages[url], Date.now.timeIntervalSince(entry.loadedAt) < 6 * 3600 { return entry.compositions }
@@ -198,6 +213,69 @@ public struct VagonwebClient: Sendable {
 
     // MARK: Helpers
 
+    /// A loaded coach drawing: the image file, and whether to show it mirrored.
+    public struct LoadedDrawing: Sendable, Hashable {
+        public var data: Data
+        public var mirrored: Bool
+    }
+
+    /// The drawings of a sequence's coaches, by coach id, each facing the way the coach stands
+    /// (`CoachSequence.Coach.Drawing.candidates`). Coaches whose drawing couldn't be loaded are missing.
+    public func drawings(for sequence: CoachSequence) async -> [Int: LoadedDrawing] {
+        let coaches = sequence.coaches.compactMap { coach in coach.drawing.map { (coach.id, $0.candidates) } }
+        var loaded: [Int: LoadedDrawing] = [:]
+        var files: [URL: Data] = [:]
+        // The drawing for each coach's direction first, then (mirrored) the plan's for those that failed.
+        for round in 0..<2 {
+            let wanted = coaches.compactMap { id, candidates in
+                loaded[id] == nil && candidates.indices.contains(round) ? candidates[round].url : nil
+            }
+            files.merge(await images(at: wanted)) { old, _ in old }
+            for (id, candidates) in coaches where loaded[id] == nil && candidates.indices.contains(round) {
+                let candidate = candidates[round]
+                if let data = files[candidate.url] { loaded[id] = LoadedDrawing(data: data, mirrored: candidate.mirrored) }
+            }
+        }
+        return loaded
+    }
+
+    /// Image files from vagonweb, by URL: from the cache, else a plain request, else (when Cloudflare's
+    /// check turns that away) the browser. Files that couldn't be loaded are missing.
+    public func images(at urls: [URL]) async -> [URL: Data] {
+        var unique: [URL] = []
+        for url in urls where !unique.contains(url) { unique.append(url) }
+        var found = await cache.images(at: unique)
+        var missing = unique.filter { found[$0] == nil }
+        guard !missing.isEmpty else { return found }
+        // One request first: if Cloudflare turns it away, it turns all of them away.
+        if let data = await plainImage(at: missing[0]) {
+            found[missing[0]] = data
+            await withTaskGroup(of: (URL, Data?).self) { group in
+                for url in missing.dropFirst() { group.addTask { (url, await plainImage(at: url)) } }
+                for await (url, data) in group { if let data { found[url] = data } }
+            }
+            missing = missing.filter { found[$0] == nil }
+        }
+        if !missing.isEmpty, let browserFileLoader, let files = try? await browserFileLoader(missing) {
+            for (url, data) in files where missing.contains(url) && Self.isImage(data) { found[url] = data }
+        }
+        await cache.store(images: found)
+        return found
+    }
+
+    private func plainImage(at url: URL) async -> Data? {
+        var request = URLRequest(url: url, timeoutInterval: http.timeout)
+        request.setValue("image/*", forHTTPHeaderField: "Accept")
+        request.setValue(Self.baseURL.absoluteString + "/", forHTTPHeaderField: "Referer")
+        guard let data = try? await http.sendRaw(request), Self.isImage(data) else { return nil }
+        return data
+    }
+
+    /// A GIF or PNG, not Cloudflare's check page.
+    static func isImage(_ data: Data) -> Bool {
+        data.starts(with: Array("GIF8".utf8)) || data.starts(with: [0x89, 0x50, 0x4E, 0x47])
+    }
+
     /// `https://www.vagonweb.cz/razeni/vlak.php?zeme=DB&kategorie=ICE&cislo=377&rok=2026&lang=en`.
     /// English, so the page reads the same whatever language vagonweb would pick.
     public static func trainURL(category: String, number: String, timetableYear: Int) -> URL {
@@ -274,7 +352,8 @@ extension VagonwebComposition {
                     amenities: Self.amenities(of: coach),
                     bikeSpaces: coach.bikeSpaces.flatMap { $0 > 0 ? $0 : nil },
                     start: nil, end: nil, sector: nil,
-                    group: groups.count - 1))
+                    group: groups.count - 1,
+                    drawing: coach.drawing))
             }
         }
         return CoachSequence(

@@ -68,7 +68,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `JourneyReplanSheet` (replan from mid-journey).
 - `Features/Departures/` – `StationBoardView`/`BoardRow`, `TripView` (single train's stops),
   `CoachSequenceView` (Wagenreihung sheet, opened from `CoachSequenceButton` in train headers or a stop's platform in `TripContent`;
-  bahn.de's sequence, else vagonweb's planned one).
+  bahn.de's sequence, else vagonweb's planned one; above the diagram `TrainDrawing`, the train drawn with vagonweb's coach pictures, #167).
 - `Features/Map/` – `TravelMapView` heatmap of past trips (`TravelMapHeatmap`, railway tile overlay),
   `LiveTrainMapView` (one train's live position on its route, opened from `LiveTrainIconTile`, the train icon on
   legs and trips bahn.jetzt has). `JourneyMapView` shows the journey's running trains too.
@@ -128,6 +128,11 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `FormationRequest.stopsBefore` or the leg's trip). bahn.de's `sequenceStatus` ("DIFFERS_FROM_SCHEDULE") is set for
   nearly every train, so "Abweichende Wagenreihung" comes from `CoachSequence.deviations(fromPlan:)` (missing/extra
   coaches, class changes; order ignored) against vagonweb's plan.
+  Coach drawings (#167): `Coach.drawingPath` (`popisy/img/DB/408-5-b.gif`) → `CoachSequence.Coach.Drawing`; vagonweb has
+  each drawing for both directions ("-b"/"-a"), so a turned coach loads the other one, else the plan's mirrored
+  (`Drawing.candidates`). bahn.de's sequence gets the plan's drawings only when its coach numbers match the plan
+  in either order (`withDrawings(from:)`). `VagonwebClient.drawings(for:)`/`images(at:)` load them (cached; plain
+  request, else `browserFileLoader` = `VagonwebBrowser.files(at:)`, which fetches them inside vagonweb's start page).
 - `Transit/BahnExpert/` – bahn.expert, only as fallback for the train type (`TrainTypeLookup`) when bahn.de
   has no coach sequence and vagonweb has none either: it has DB's planned formation (`DB-plan`) for days
   ahead; bahn.de is only asked for departures within `BahnDeClient.formationLookahead` (12 h).

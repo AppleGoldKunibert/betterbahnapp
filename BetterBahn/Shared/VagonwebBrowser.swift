@@ -23,6 +23,40 @@ final class VagonwebBrowser {
         return try await load.value
     }
 
+    /// Files (coach drawings) fetched inside vagonweb's site, once the web view has passed
+    /// Cloudflare's check there; the ones it got, by URL.
+    func files(at urls: [URL]) async throws -> [URL: Data] {
+        guard !urls.isEmpty else { return [:] }
+        let before = previous
+        let load = Task { () async throws -> [URL: Data] in
+            await before?.value
+            return try await Self.loadFiles(urls)
+        }
+        previous = Task { _ = try? await load.value }
+        return try await load.value
+    }
+
+    private static func loadFiles(_ urls: [URL]) async throws -> [URL: Data] {
+        log.info("Loading \(urls.count) drawings in the web view")
+        let page = WebPage()
+        page.load(URLRequest(url: VagonwebClient.baseURL))
+        let deadline = Date.now.addingTimeInterval(25)
+        while Date.now < deadline {
+            try await Task.sleep(for: .milliseconds(500))
+            let answer = try? await page.callJavaScript(filesScript, arguments: ["urls": urls.map(\.absoluteString)])
+            if let encoded = answer as? [String: Any] {
+                var files: [URL: Data] = [:]
+                for (key, value) in encoded {
+                    if let url = URL(string: key), let base64 = value as? String, let data = Data(base64Encoded: base64) { files[url] = data }
+                }
+                log.info("Web view loaded \(files.count) of \(urls.count) drawings")
+                return files
+            }
+        }
+        log.error("Web view gave up on the drawings")
+        throw TransitError.rateLimited
+    }
+
     /// A fresh page per load, so nothing of the previous train's page can be read by mistake.
     private static func load(_ url: URL) async throws -> String {
         log.info("Loading \(url.absoluteString, privacy: .public) in the web view")
@@ -48,6 +82,25 @@ final class VagonwebBrowser {
     private static let stateScript = """
         return document.readyState + ' | ' + location.href + ' | ' + document.title + ' | '
             + (document.body ? document.body.innerText.slice(0, 200) : '')
+        """
+
+    /// Once vagonweb's start page has loaded (not Cloudflare's check), each of `urls` fetched there,
+    /// base64-encoded by URL; those that failed are left out.
+    private static let filesScript = """
+        if (document.readyState !== 'complete' || document.title === 'Just a moment...'
+            || document.documentElement.outerHTML.includes('_cf_chl_opt')) return null;
+        const files = {};
+        for (const url of urls) {
+            try {
+                const response = await fetch(url);
+                if (!response.ok) continue;
+                const bytes = new Uint8Array(await response.arrayBuffer());
+                let binary = '';
+                for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+                files[url] = btoa(binary);
+            } catch (error) {}
+        }
+        return files;
         """
 
     /// The page's HTML once vagonweb's own page has loaded (it has the `stred0` content column,

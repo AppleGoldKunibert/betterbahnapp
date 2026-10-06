@@ -1,5 +1,6 @@
 import BetterBahnKit
 import SwiftUI
+import UIKit
 
 /// A train's coach sequence ("Wagenreihung") drawn along the platform: sectors on the left, coaches
 /// to scale with number, class and amenities, and the direction the train leaves in.
@@ -21,6 +22,9 @@ struct CoachSequenceView: View {
     @State private var blocked = false
     /// What bahn.de's sequence has differently from vagonweb's plan (`CoachSequence.deviations(fromPlan:)`).
     @State private var deviations: [String] = []
+    /// The sequence with vagonweb's coach drawings (`CoachSequence.isDrawn`), and the loaded drawings.
+    @State private var drawn: CoachSequence?
+    @State private var drawings: [Int: VagonwebClient.LoadedDrawing] = [:]
 
     private var station: Station { request.station }
 
@@ -30,6 +34,9 @@ struct CoachSequenceView: View {
                 if let sequence {
                     VStack(alignment: .leading, spacing: 16) {
                         header(sequence)
+                        if let drawn, drawings.count == drawn.coaches.count {
+                            TrainDrawing(sequence: drawn, drawings: drawings)
+                        }
                         CoachSequenceDiagram(sequence: sequence)
                         legend(sequence)
                     }
@@ -73,7 +80,12 @@ struct CoachSequenceView: View {
             if let sequence, sequence.source == .bahnDe, !sequence.coaches.isEmpty,
                let plan = await model.plannedCoachSequence(for: request, direction: false) {
                 deviations = sequence.deviations(fromPlan: plan)
+                // vagonweb's drawings only when it is the planned train, so no coach is drawn wrong.
+                drawn = sequence.withDrawings(from: plan)
+            } else if let sequence, sequence.isDrawn {
+                drawn = sequence
             }
+            if let drawn { drawings = await model.coachDrawings(for: drawn) }
         }
     }
 
@@ -159,6 +171,59 @@ struct CoachSequenceView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+    }
+}
+
+/// The whole train as vagonweb.cz draws it ("Řazení vlaků"): front to the left, coach numbers
+/// underneath, scrolling sideways. Coaches standing the other way round use vagonweb's drawing for
+/// that direction, or the plan's mirrored.
+private struct TrainDrawing: View {
+    let sequence: CoachSequence
+    private let images: [Int: (image: UIImage, mirrored: Bool)]
+
+    /// vagonweb's drawings are about 250 px per coach; a bit smaller shows more of the train.
+    private static let scale: CGFloat = 0.6
+
+    init(sequence: CoachSequence, drawings: [Int: VagonwebClient.LoadedDrawing]) {
+        self.sequence = sequence
+        images = drawings.compactMapValues { drawing in UIImage(data: drawing.data).map { (image: $0, mirrored: drawing.mirrored) } }
+    }
+
+    /// bahn.de lists the coaches from the front; vagonweb's plan only when its direction is known.
+    private var directionKnown: Bool { sequence.source == .bahnDe || sequence.travelsTowardsPlatformEnd != nil }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if directionKnown {
+                Label("Fahrtrichtung", systemImage: "arrow.left")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .bottom, spacing: 0) {
+                    ForEach(sequence.coaches) { coach in
+                        if let drawing = images[coach.id] {
+                            VStack(spacing: 2) {
+                                Image(uiImage: drawing.image)
+                                    .resizable()
+                                    .interpolation(.high)
+                                    .frame(width: drawing.image.size.width * Self.scale, height: drawing.image.size.height * Self.scale)
+                                    .scaleEffect(x: drawing.mirrored ? -1 : 1)
+                                Text(coach.number ?? " ")
+                                    .font(.caption2.weight(.semibold))
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+            Text("Wagenbilder: vagonweb.cz")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Zugbild von vagonweb.cz")
     }
 }
 

@@ -93,7 +93,8 @@ final class AppModel {
     }
 
     init() {
-        provider = CombinedProvider(vagonweb: VagonwebClient(browserLoader: { url in try await VagonwebBrowser.shared.html(at: url) }))
+        provider = CombinedProvider(vagonweb: VagonwebClient(browserLoader: { url in try await VagonwebBrowser.shared.html(at: url) },
+                                                                 browserFileLoader: { urls in try await VagonwebBrowser.shared.files(at: urls) }))
         traewelling = TraewellingClient(config: TraewellingConfig())
         // Older versions stored everything in UserDefaults; move the raw bytes into files once
         // (re-encoding everything on every launch is what used to slow the start down).
@@ -674,6 +675,15 @@ final class AppModel {
             VagonwebBrowser.log.error("Plan-Wagenreihung \(request.category, privacy: .public) \(request.number, privacy: .public): \(String(describing: error), privacy: .public)")
             return nil
         }
+    }
+
+    /// vagonweb's drawings of a sequence's coaches, by coach id (`CoachSequence.isDrawn`); empty when
+    /// they couldn't be loaded.
+    func coachDrawings(for sequence: CoachSequence) async -> [Int: VagonwebClient.LoadedDrawing] {
+        guard sequence.isDrawn, let vagonweb = provider.vagonweb else { return [:] }
+        let drawings = await vagonweb.drawings(for: sequence)
+        VagonwebBrowser.log.info("Wagenbilder: \(drawings.count) von \(sequence.coaches.count)")
+        return drawings
     }
 
     @ObservationIgnored private var tripStopNames: [String: [String]] = [:]

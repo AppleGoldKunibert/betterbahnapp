@@ -57,6 +57,37 @@ public struct CoachSequence: Sendable, Hashable {
         public var sector: String?
         /// Index into `CoachSequence.groups`.
         public var group: Int
+        /// vagonweb.cz's side view of the coach; nil for bahn.de's coaches until `withDrawings(from:)`.
+        public var drawing: Drawing? = nil
+
+        /// A coach drawn by vagonweb.cz, as in Řazení vlaků: front of the train to the left.
+        public struct Drawing: Sendable, Hashable {
+            /// vagonweb's drawing as its plan has it (the train leaving its first station).
+            public var url: URL
+            /// The coach stands the other way round than in `url`'s drawing (the train changed direction).
+            public var turned = false
+
+            public init(url: URL, turned: Bool = false) {
+                self.url = url
+                self.turned = turned
+            }
+
+            /// vagonweb has every drawing for both directions, told apart by the name's end: "408-5-b.gif"
+            /// and "408-5-a.gif". Nil when the name doesn't follow that pattern.
+            public var otherWayURL: URL? {
+                let name = url.lastPathComponent
+                guard let match = name.firstMatch(of: #/-([ab])(\.[A-Za-z]+)$/#) else { return nil }
+                let other = name[..<match.range.lowerBound] + (match.1 == "a" ? "-b" : "-a") + match.2
+                return url.deletingLastPathComponent().appending(path: String(other))
+            }
+
+            /// What to load for the way the coach stands: the drawing for that direction first, else the
+            /// plan's drawing mirrored.
+            public var candidates: [(url: URL, mirrored: Bool)] {
+                guard turned else { return [(url, false)] }
+                return (otherWayURL.map { [($0, false)] } ?? []) + [(url, true)]
+            }
+        }
 
         /// Passengers can't board locomotives and power cars.
         public var isPassengerCoach: Bool { kind != .locomotive && kind != .powerCar }
@@ -200,10 +231,38 @@ extension CoachSequence {
         sequence.coaches = coaches.reversed().enumerated().map { index, coach in
             var coach = coach
             coach.id = index
+            coach.drawing?.turned.toggle()
             return coach
         }
         return sequence
     }
+
+    /// bahn.de's sequence with the drawings of vagonweb's plan (`plan` as vagonweb has it, not turned),
+    /// when it is the same train: the same coaches by number, in the plan's order or the other way
+    /// round. Nil when the train differs from the plan, so no coach gets another coach's drawing.
+    public func withDrawings(from plan: CoachSequence) -> CoachSequence? {
+        let numbers = coaches.map(\.number)
+        let planned = plan.coaches.map(\.number)
+        guard !coaches.isEmpty, plan.coaches.allSatisfy({ $0.drawing != nil }), numbers.contains(where: { $0 != nil }) else { return nil }
+        let drawings: [Coach.Drawing?]
+        if numbers == planned {
+            drawings = plan.coaches.map(\.drawing)
+        } else if numbers == planned.reversed() {
+            drawings = plan.coaches.reversed().map { coach in
+                var drawing = coach.drawing
+                drawing?.turned.toggle()
+                return drawing
+            }
+        } else {
+            return nil
+        }
+        var sequence = self
+        for index in sequence.coaches.indices { sequence.coaches[index].drawing = drawings[index] }
+        return sequence
+    }
+
+    /// Every coach has vagonweb's drawing, so the whole train can be drawn.
+    public var isDrawn: Bool { !coaches.isEmpty && coaches.allSatisfy { $0.drawing != nil } }
 }
 
 extension CoachSequence.Coach.Kind {

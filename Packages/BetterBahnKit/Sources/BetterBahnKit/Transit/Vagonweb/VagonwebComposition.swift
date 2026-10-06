@@ -13,6 +13,9 @@ public struct VagonwebComposition: Sendable, Hashable {
         /// Baureihe from the coach's drawing (`…/img/DB/408-5-b.gif` → "408"), which is the trainset's
         /// series even where `series` names the coach's own one (ICE 4: "812" coaches in a BR 412).
         public var baureihe: String?
+        /// vagonweb's side view of the coach, relative to its site (`popisy/img/DB/408-5-b.gif`), drawn
+        /// as the train leaves its first station: front to the left.
+        public var drawingPath: String?
         public var firstClass: Bool
         public var secondClass: Bool
         /// Seats in a dining section ("jidel"); with no other seats it's a full dining car.
@@ -27,6 +30,10 @@ public struct VagonwebComposition: Sendable, Hashable {
         /// A driving vehicle at the end of a trainset ("…f": Bpmzf, Apmzf, Bpmbdzf).
         var hasCab: Bool { typeCode?.hasSuffix("f") == true }
         var hasSeats: Bool { firstClass || secondClass || diningSeats != nil || hasBar }
+
+        public var drawing: CoachSequence.Coach.Drawing? {
+            drawingPath.map { CoachSequence.Coach.Drawing(url: VagonwebClient.baseURL.appending(path: $0)) }
+        }
     }
 
     /// First and last day the composition applies to (`14.12.2025 - 30.10.2026`); nil when vagonweb
@@ -123,6 +130,7 @@ extension VagonwebComposition {
         let count = { (name: String) in icons.first { $0.0 == name }?.1 }
         let has = { (name: String) in icons.contains { $0.0 == name } }
         let baureihe = cell.firstMatch(of: #/popisy/img/DB/(\d{3})-/#).map { String($0.1) }
+        let drawing = cell.firstMatch(of: #/obrazek_vagonu[^>]*src='(?:\.\./|/|https://www\.vagonweb\.cz/)?(popisy/img/[^']+)'/#).map { String($0.1) }
         let notes = cell.components(separatedBy: "<div class=maly>").dropFirst().compactMap { part -> String? in
             guard let text = part.components(separatedBy: "</div>").first?.strippingTags, !text.isEmpty else { return nil }
             return text
@@ -132,6 +140,7 @@ extension VagonwebComposition {
             series: cell.between("tab-radam>", "<")?.strippingTags.nonEmpty,
             typeCode: cell.between("<small>", "</small>")?.strippingTags.nonEmpty,
             baureihe: baureihe,
+            drawingPath: drawing,
             firstClass: has("tr1") || cell.contains("'tab-1tr'"),
             secondClass: has("tr2") || cell.contains("'tab-2tr'"),
             diningSeats: has("jidel") ? count("jidel") ?? 0 : nil,

@@ -256,6 +256,101 @@ private func berlinDate(_ year: Int, _ month: Int, _ day: Int, hour: Int = 12) -
             try await client.trainType(category: "ICE", number: "155", on: berlinDate(2026, 10, 5))
         }
     }
+
+    @Test func readsEachCoachsDrawing() throws {
+        let composition = try #require(VagonwebComposition.scheduled(fromHTML: try vagonwebPage("vagonweb-ice154")).first)
+        #expect(composition.coaches.map(\.drawingPath) == [5, 6, 7, 8, 3, 2, 1, 0].map { "popisy/img/DB/408-\($0)-b.gif" })
+        let sequence = composition.coachSequence(trainName: "ICE 154")
+        #expect(sequence.isDrawn)
+        #expect(sequence.coaches[0].drawing?.url.absoluteString == "https://www.vagonweb.cz/popisy/img/DB/408-5-b.gif")
+        #expect(sequence.coaches[0].drawing?.turned == false)
+    }
+
+    @Test func drawingForTheOtherDirection() throws {
+        var drawing = CoachSequence.Coach.Drawing(url: URL(string: "https://www.vagonweb.cz/popisy/img/DB/412-07-b.gif")!)
+        #expect(drawing.otherWayURL?.absoluteString == "https://www.vagonweb.cz/popisy/img/DB/412-07-a.gif")
+        #expect(drawing.candidates.map(\.url) == [drawing.url])
+        drawing.turned = true
+        #expect(drawing.candidates.map(\.url.lastPathComponent) == ["412-07-a.gif", "412-07-b.gif"])
+        #expect(drawing.candidates.map(\.mirrored) == [false, true])
+
+        let unknown = CoachSequence.Coach.Drawing(url: URL(string: "https://www.vagonweb.cz/popisy/img/DB/loco.gif")!, turned: true)
+        #expect(unknown.otherWayURL == nil)
+        #expect(unknown.candidates.map(\.mirrored) == [true])
+    }
+
+    @Test func turnedPlanTurnsTheDrawings() throws {
+        let composition = try #require(VagonwebComposition.scheduled(fromHTML: try vagonwebPage("vagonweb-ice377")).first)
+        let plan = composition.coachSequence(trainName: "ICE 377")
+        #expect(plan.coaches.allSatisfy { $0.drawing?.url.lastPathComponent.hasSuffix("-b.gif") == true })
+        let turned = plan.turned(after: ["Frankfurt (Main) Hbf"])
+        #expect(turned.coaches.allSatisfy { $0.drawing?.turned == true })
+        #expect(turned.coaches.first?.drawing == plan.coaches.last?.drawing.map { CoachSequence.Coach.Drawing(url: $0.url, turned: true) })
+        #expect(plan.turned(after: ["Frankfurt (Main) Hbf", "Mannheim Hbf"]).coaches.allSatisfy { $0.drawing?.turned == false })
+    }
+
+    @Test func bahnDeSequenceGetsThePlansDrawingsWhenItIsTheSameTrain() throws {
+        let composition = try #require(VagonwebComposition.scheduled(fromHTML: try vagonwebPage("vagonweb-ice154")).first)
+        let plan = composition.coachSequence(trainName: "ICE 154")
+        var bahnDe = plan
+        bahnDe.source = .bahnDe
+        for index in bahnDe.coaches.indices { bahnDe.coaches[index].drawing = nil }
+        #expect(!bahnDe.isDrawn)
+
+        let same = try #require(bahnDe.withDrawings(from: plan))
+        #expect(same.isDrawn)
+        #expect(same.coaches.map(\.drawing) == plan.coaches.map(\.drawing))
+
+        // Standing the other way round: the plan's last coach leads, drawn facing the other way.
+        var reversed = bahnDe
+        reversed.coaches = bahnDe.coaches.reversed()
+        let turned = try #require(reversed.withDrawings(from: plan))
+        #expect(turned.coaches[0].number == "29")
+        #expect(turned.coaches[0].drawing?.url.lastPathComponent == "408-0-b.gif")
+        #expect(turned.coaches.allSatisfy { $0.drawing?.turned == true })
+
+        // Another train than planned (a coach missing): no drawings rather than wrong ones.
+        var shorter = bahnDe
+        shorter.coaches.removeLast()
+        #expect(shorter.withDrawings(from: plan) == nil)
+    }
+
+    @Test func loadsDrawingsAndFallsBackToTheMirroredOne() async throws {
+        let b = URL(string: "https://www.vagonweb.cz/popisy/img/DB/test1-1-b.gif")!
+        let a = URL(string: "https://www.vagonweb.cz/popisy/img/DB/test1-1-a.gif")!
+        let other = URL(string: "https://www.vagonweb.cz/popisy/img/DB/test1-2-b.gif")!
+        let session = VagonwebImageStubProtocol.session(files: [b: Data("GIF89a-b".utf8), other: Data("GIF89a-2".utf8)])
+        let client = VagonwebClient(http: HTTPClient(session: session))
+        var sequence = try #require(VagonwebComposition.scheduled(fromHTML: try vagonwebPage("vagonweb-ice154")).first)
+            .coachSequence(trainName: "ICE 154")
+        sequence.coaches = Array(sequence.coaches.prefix(2))
+        sequence.coaches[0].drawing = .init(url: b, turned: false)
+        sequence.coaches[1].drawing = .init(url: other, turned: false)
+        let drawings = await client.drawings(for: sequence)
+        #expect(drawings[0] == VagonwebClient.LoadedDrawing(data: Data("GIF89a-b".utf8), mirrored: false))
+        #expect(drawings[1]?.mirrored == false)
+
+        // Turned round: "-a" isn't there, so the "-b" drawing mirrored.
+        sequence.coaches[0].drawing?.turned = true
+        #expect(await client.drawings(for: sequence)[0] == VagonwebClient.LoadedDrawing(data: Data("GIF89a-b".utf8), mirrored: true))
+        #expect(await client.images(at: [a]).isEmpty)
+    }
+
+    @Test func drawingsComeFromTheBrowserWhenCloudflareChecks() async throws {
+        let url = URL(string: "https://www.vagonweb.cz/popisy/img/DB/test2-1-b.gif")!
+        let session = VagonwebImageStubProtocol.session(files: [url: Data("<title>Just a moment...</title>".utf8)], status: 403)
+        let client = VagonwebClient(http: HTTPClient(session: session), browserFileLoader: { urls in
+            Dictionary(uniqueKeysWithValues: urls.map { ($0, Data("GIF89a".utf8)) })
+        })
+        #expect(await client.images(at: [url]) == [url: Data("GIF89a".utf8)])
+
+        // A browser answer that is no image (Cloudflare's page) doesn't count.
+        let blocked = VagonwebClient(http: HTTPClient(session: session), browserFileLoader: { urls in
+            Dictionary(uniqueKeysWithValues: urls.map { ($0, Data("<html>".utf8)) })
+        })
+        let url2 = URL(string: "https://www.vagonweb.cz/popisy/img/DB/test2-2-b.gif")!
+        #expect(await blocked.images(at: [url2]).isEmpty)
+    }
 }
 
 /// Answers requests for a train's page with the page registered for it. Keyed by URL, so tests running
@@ -282,6 +377,30 @@ final class VagonwebStubProtocol: URLProtocol, @unchecked Sendable {
         let response = HTTPURLResponse(url: request.url!, statusCode: page.status, httpVersion: nil, headerFields: ["Content-Type": "text/html"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(html.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+/// Answers requests for vagonweb's coach drawings with the files registered for them.
+final class VagonwebImageStubProtocol: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var files: [URL: (data: Data, status: Int)] = [:]
+    static let lock = NSLock()
+
+    static func session(files: [URL: Data], status: Int = 200) -> URLSession {
+        lock.withLock { for (url, data) in files { self.files[url] = (data, status) } }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [VagonwebImageStubProtocol.self]
+        return URLSession(configuration: configuration)
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let file = request.url.flatMap { url in Self.lock.withLock { Self.files[url] } } ?? (data: Data(), status: 404)
+        let response = HTTPURLResponse(url: request.url!, statusCode: file.status, httpVersion: nil, headerFields: ["Content-Type": "image/gif"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: file.data)
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
