@@ -44,7 +44,8 @@ import Testing
         defer { session.invalidateAndCancel() }
         let journey = Journey(legs: [try leg()], source: .transitous)
 
-        let refreshed = await JourneyRefresher(provider: combined).refreshEnds(journey)
+        // At the train's departure: once it arrived over 30 minutes ago, the leg isn't refreshed anymore.
+        let refreshed = await JourneyRefresher(provider: combined).refreshEnds(journey, now: journey.legs[0].departure.planned)
 
         #expect(refreshed.legs.first?.tripId == "old-2074")
         #expect(refreshed.legs.first?.departurePlatform?.best == "6")
