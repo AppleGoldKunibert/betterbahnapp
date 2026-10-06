@@ -156,7 +156,7 @@ struct TripView: View {
 
     private func show(_ loaded: Trip) {
         trip = loaded
-        guard boardingID == nil else { return }
+        guard boardingID == nil, exitID == nil else { return }
         if let keptStops {
             boardingID = keptStops.boarding.flatMap { kept in loaded.stopovers.first { $0.station.isSamePlace(as: kept) }?.id }
             exitID = keptStops.exit.flatMap { kept in loaded.stopovers.last { $0.station.isSamePlace(as: kept) }?.id }
@@ -164,9 +164,8 @@ struct TripView: View {
         }
         let here = loaded.stopovers.first { $0.station.isSamePlace(as: entry.station) }?.id
         if entry.kind == .arrivals {
-            // For arrivals the selected station is where you get off.
+            // For arrivals the selected station is where you get off; where you got on is picked by tapping.
             exitID = here
-            boardingID = loaded.stopovers.first?.id
         } else {
             boardingID = here
         }
@@ -245,7 +244,7 @@ struct TripContent: View {
                     LiveTrainIconTile(route: LiveTrainRoute(trip: trip), systemImage: trip.line?.product.symbolName ?? "tram.fill",
                                       color: color, size: 46)
                     VStack(alignment: .leading, spacing: 3) {
-                        TrainNameRow(name: trip.line?.name ?? "Zug", font: .title3.weight(.bold), spacing: 8) {
+                        TrainNameRow(name: trip.line?.nameWithTripNumber ?? "Zug", font: .title3.weight(.bold), spacing: 8) {
                             TrainSeriesTag(trip: trip)
                         }
                         if let origin = trip.origin, let destination = trip.destination {
@@ -267,15 +266,16 @@ struct TripContent: View {
                 }
             }
 
-            if interactive, exitOnly || showsStopTip || boardingID != nil {
+            if interactive, exitOnly || showsStopTip || picksBoarding || boardingID != nil {
                 HStack(spacing: 8) {
-                    if exitOnly || showsStopTip {
+                    if exitOnly || showsStopTip || picksBoarding {
                         Image(systemName: "hand.tap.fill").foregroundStyle(Color.brand)
                         Text(exitOnly ? "Tippe auf einen Halt, um dort auszusteigen."
-                                      : "Tippe auf Halte, um Ein- und Ausstieg zu wählen.")
+                             : picksBoarding ? "Tippe auf den Halt, an dem du einsteigst."
+                             : "Tippe auf Halte, um Ein- und Ausstieg zu wählen.")
                     }
                     Spacer()
-                    if !exitOnly, boardingID != nil {
+                    if !exitOnly, boardingID != nil || exitID != nil {
                         Button("Zurücksetzen", systemImage: "xmark.circle.fill") {
                             withAnimation(.snappy) {
                                 boardingID = nil
@@ -312,6 +312,8 @@ struct TripContent: View {
 
     private var boardingIndex: Int? { trip.stopovers.firstIndex { $0.id == boardingID } }
     private var exitIndex: Int? { trip.stopovers.firstIndex { $0.id == exitID } }
+    /// Only the exit is known (opened from the arrivals board), so the next tap picks where you got on.
+    private var picksBoarding: Bool { !exitOnly && boardingID == nil && exitID != nil }
 
     private func isRidden(_ index: Int) -> Bool {
         guard let b = boardingIndex else { return false }
@@ -415,6 +417,8 @@ struct TripContent: View {
                 exitID = nil
             } else if let boardingIndex, index > boardingIndex {
                 exitID = stop.id
+            } else if picksBoarding, let exitIndex, index < exitIndex {
+                boardingID = stop.id
             } else if !exitOnly {
                 boardingID = stop.id
                 exitID = nil

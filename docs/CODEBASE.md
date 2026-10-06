@@ -111,7 +111,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `sequenceReference`),
   board + `fahrt` → `JourneyStop`s for Zusatzhalte (`inserting`, `nextRegularStop`) and platforms Transitous lacks
   (`fillingMissingPlatforms`, e.g. Hamburg Hbf; saved journeys via `JourneyRefresher`, which also applies the names below), and bahn.de's
-  own train names for boards (departures and arrivals) and journey legs (`correctingTrainNames`, e.g. "RJ 171" that Transitous calls "ICE 171"). Responses are
+  own train names for boards (departures and arrivals) and journey legs (`correctingTrainNames`, e.g. "RJ 171" that Transitous calls "ICE 171"),
+  and DB's live times (`ezZeit`) for every train on boards (not subway, tram, bus; RE/RB, S-Bahn and other brands by run number or name) (`correctingFromBoard`, `applyingLiveTimes`), which
+  beat DELFI's forecasts in Transitous. Responses are
   cached; a 403/429 pauses all bahn.de requests for 10 min (`BahnDeGate`).
 - `Transit/Vagonweb/` – vagonweb.cz (used with their permission, #95): scheduled train compositions for the
   whole timetable year, read from the train's HTML page (`VagonwebComposition.scheduled`, fixtures
@@ -128,7 +130,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   refreshed by `AppModel.followTrainPositions()` while the map is on screen). Long-distance trains by
   number, regional/S-Bahn by run number (`Line.tripNumber`).
 - `Transit/Transitous/` – MOTIS API client + DTOs (`M*` types). Station-name cleanup and
-  deduplication of boards happen here. Station search ranking is `searchRank`; with the user's location
+  deduplication of boards happen here. MOTIS leaves trains nobody may board out of departures, so a departure
+  board also asks for arrivals and adds the ones going on as "Nur Ausstieg" (`continuingWithoutBoarding`, #105). Station search ranking is `searchRank`; with the user's location
   it balances text match against nearness and size and also asks for "<nearby town> <query>"
   (`NearbyTowns`, an offline list, so coordinates never leave the device), nearby stations starting
   with what was typed (`StationHints`, from `Resources/StationHints.json`, built by
@@ -159,7 +162,11 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   would report them on time. Without live data a time has no `actual`, so no delay shows (not "+0").
 - Logic: `JourneyReplanner`, `ConnectionCheck` (`ConnectionIssue`, `JourneyRefresher`), `PlatformChange`
   (platform changes since the last refresh → push, ignores sectors/bus bays), `TrainRoutePlanner`,
-  `ViaRoutePlanner` (vias without minimum stay keep a through train as one leg), `TrainPicker`, `TicketFilter`/`BC100Rules`, `BoardFilter`.
+  `ViaRoutePlanner` (vias without minimum stay keep a through train as one leg), `TrainPicker` (also
+  `journeysIgnoringBoardingRules`: direct trains with "Nur Ein-/Ausstieg" for the expert option of that name,
+  and `journeysContinuingFromRestrictedTrains`: "Nur Ausstieg" trains that end short of the destination plus an onward
+  connection, e.g. ICE 204 Harburg → Hamburg Hbf → RJ; both added to search results in `JourneyResultsView`), `StationCalls` (hides routes that change onto a train also calling at
+  the origin, or leave one also calling at the destination – e.g. Berlin Hbf → Halle → back via Hbf; not for via searches), `TicketFilter`/`BC100Rules`, `BoardFilter`.
 - `Traewelling/` – OAuth PKCE (`TraewellingAuth`, `TokenStore`), `TraewellingClient`
   (check-ins, history), `QuickTag`.
 - `Tickets/` – DB tickets by order number: `DBOrder` reads bahn.de's order JSON into `DBTicket`s (one per

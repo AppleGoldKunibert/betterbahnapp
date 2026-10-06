@@ -1266,30 +1266,16 @@ public struct TransitousProvider: TransitProvider {
 
     public func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int, products: Set<Product>) async throws -> [BoardEntry] {
         let stop = try await resolve(station)
-
-        // A narrowed selection is restricted server-side too, so e.g. rare long-distance trains
-        // aren't crowded out of the fixed-size `n` page by frequent regional/S-Bahn departures.
-        // `.other` has no known mode mapping, so leave that branch of the request unfiltered.
-        let stopTimes: [MStopTime]
-        if products != Set(Product.allCases), !products.contains(.other) {
-            let modes = Set(products.flatMap(MLineInfo.motisModes(for:)))
-            stopTimes = try await fetchStopTimes(stopId: stop.id, date: date, duration: duration, kind: kind,
-                                                 modes: modes.isEmpty ? nil : Array(modes))
-        } else if products.contains(.highSpeed) || products.contains(.longDistance) {
-            // Unfiltered (or `.other`-inclusive) requests would otherwise send no `mode` param at
-            // all, so at a busy multimodal hub (e.g. Amsterdam Centraal, with dozens of bus/tram/
-            // metro/ferry departures sharing the stop cluster) the fixed-size page can fill up with
-            // local traffic within minutes, hiding long-distance/high-speed trains scheduled later
-            // in the requested window entirely – not just pushed down, genuinely absent. Fetch that
-            // slice in its own request so it's never starved by everything else.
-            let longDistanceModes = Set(Self.longDistanceModes.filter(products.contains).flatMap(MLineInfo.motisModes(for:)))
-            async let longDistance = fetchStopTimes(stopId: stop.id, date: date, duration: duration, kind: kind,
-                                                     modes: Array(longDistanceModes))
-            async let rest = fetchStopTimes(stopId: stop.id, date: date, duration: duration, kind: kind, modes: nil)
-            var seenTripIds = Set<String>()
-            stopTimes = try await (longDistance + rest).filter { seenTripIds.insert($0.tripId).inserted }
+        var stopTimes: [MStopTime]
+        if kind == .departures {
+            // MOTIS leaves out departures nobody may board ("kein Einstieg", e.g. ICEs from Berlin Hbf on to
+            // Gesundbrunnen); its arrivals still have them, with their departure time. Best-effort.
+            async let arrivals = try? boardStopTimes(.arrivals, stopId: stop.id, date: date.addingTimeInterval(-Self.arrivalLead),
+                                                     duration: duration + Int(Self.arrivalLead / 60), products: products)
+            stopTimes = try await boardStopTimes(.departures, stopId: stop.id, date: date, duration: duration, products: products)
+            stopTimes += Self.continuingWithoutBoarding(await arrivals ?? [], missingFrom: stopTimes, departingFrom: date)
         } else {
-            stopTimes = try await fetchStopTimes(stopId: stop.id, date: date, duration: duration, kind: kind, modes: nil)
+            stopTimes = try await boardStopTimes(.arrivals, stopId: stop.id, date: date, duration: duration, products: products)
         }
 
         let end = date.addingTimeInterval(TimeInterval(duration * 60))
@@ -1299,6 +1285,68 @@ public struct TransitousProvider: TransitProvider {
         let deduplicated = Self.namingUnknownLines(Self.combiningCoupledTrains(Self.deduplicated(entries)))
             .sorted { $0.time.planned < $1.time.planned }
         return await withCorrectedLongDistanceEnds(deduplicated, kind: kind)
+    }
+
+    /// Every train calling at `station` in the window, as departures (including ones you may not board)
+    /// and arrivals: the raw stop times, without the per-train corrections `board` makes, for the quick
+    /// detour check in `StationCalls`.
+    public func calls(at station: Station, date: Date, duration: Int) async throws -> (departures: [BoardEntry], arrivals: [BoardEntry]) {
+        let stop = try await resolve(station)
+        let all = Set(Product.allCases)
+        async let arriving = boardStopTimes(.arrivals, stopId: stop.id, date: date.addingTimeInterval(-Self.arrivalLead),
+                                            duration: duration + Int(Self.arrivalLead / 60), products: all)
+        async let departing = boardStopTimes(.departures, stopId: stop.id, date: date, duration: duration, products: all)
+        let arrivals = try await arriving
+        let departures = try await departing
+        let allDepartures = departures + Self.continuingWithoutBoarding(arrivals, missingFrom: departures, departingFrom: date)
+        let arrivalsInWindow = arrivals.filter { ($0.place.scheduledArrival ?? $0.place.arrival ?? .distantFuture) >= date }
+        return (allDepartures.compactMap { $0.toEntry(kind: .departures) }, arrivalsInWindow.compactMap { $0.toEntry(kind: .arrivals) })
+    }
+
+    /// How long before a board's start its arrivals are asked for: a train that arrives just before
+    /// and leaves after it (ICE 204 at Hamburg-Harburg arrives 13:02 and leaves 13:04) is only on the arrivals.
+    static let arrivalLead: TimeInterval = 15 * 60
+
+    /// Arrivals that go on from this stop at or after `start` but may not be boarded here, so they're
+    /// missing from the departures MOTIS reports. Shown as departures (marked "Nur Ausstieg") so the
+    /// board lists every train leaving, like DB's own boards.
+    static func continuingWithoutBoarding(_ arrivals: [MStopTime], missingFrom departures: [MStopTime],
+                                          departingFrom start: Date = .distantPast) -> [MStopTime] {
+        let departing = Set(departures.map(\.tripId))
+        return arrivals.filter { arrival in
+            guard !departing.contains(arrival.tripId), arrival.place.access == .exitOnly,
+                  let departure = arrival.place.scheduledDeparture else { return false }
+            return max(departure, arrival.place.departure ?? departure) >= start
+        }
+    }
+
+    private func boardStopTimes(_ kind: BoardKind, stopId: String, date: Date, duration: Int,
+                                products: Set<Product>) async throws -> [MStopTime] {
+        // A narrowed selection is restricted server-side too, so e.g. rare long-distance trains
+        // aren't crowded out of the fixed-size `n` page by frequent regional/S-Bahn departures.
+        // `.other` has no known mode mapping, so leave that branch of the request unfiltered.
+        let stopTimes: [MStopTime]
+        if products != Set(Product.allCases), !products.contains(.other) {
+            let modes = Set(products.flatMap(MLineInfo.motisModes(for:)))
+            stopTimes = try await fetchStopTimes(stopId: stopId, date: date, duration: duration, kind: kind,
+                                                 modes: modes.isEmpty ? nil : Array(modes))
+        } else if products.contains(.highSpeed) || products.contains(.longDistance) {
+            // Unfiltered (or `.other`-inclusive) requests would otherwise send no `mode` param at
+            // all, so at a busy multimodal hub (e.g. Amsterdam Centraal, with dozens of bus/tram/
+            // metro/ferry departures sharing the stop cluster) the fixed-size page can fill up with
+            // local traffic within minutes, hiding long-distance/high-speed trains scheduled later
+            // in the requested window entirely – not just pushed down, genuinely absent. Fetch that
+            // slice in its own request so it's never starved by everything else.
+            let longDistanceModes = Set(Self.longDistanceModes.filter(products.contains).flatMap(MLineInfo.motisModes(for:)))
+            async let longDistance = fetchStopTimes(stopId: stopId, date: date, duration: duration, kind: kind,
+                                                     modes: Array(longDistanceModes))
+            async let rest = fetchStopTimes(stopId: stopId, date: date, duration: duration, kind: kind, modes: nil)
+            var seenTripIds = Set<String>()
+            stopTimes = try await (longDistance + rest).filter { seenTripIds.insert($0.tripId).inserted }
+        } else {
+            stopTimes = try await fetchStopTimes(stopId: stopId, date: date, duration: duration, kind: kind, modes: nil)
+        }
+        return stopTimes
     }
 
     /// `/v5/stoptimes` reports a long-distance train's `headsign`/final stop as wherever *this
