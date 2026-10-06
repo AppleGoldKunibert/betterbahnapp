@@ -1830,6 +1830,15 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(TrainModel.detect(cars(["938054080011"]), category: "ICE") == nil)
     }
 
+    @Test func tellsFlirt1430FromSBahn430() {
+        let cars = { (ids: [String]) in ids.map { Carriage(vehicleID: $0, constructionType: nil) } }
+        // FLIRT 3 (BR 1430/1830): its model digits are "430" like the S-Bahn's.
+        #expect(TrainModel.detect(cars(["948014300011", "948018300015", "948014300029"]), category: "RE")?.series == "BR 1430")
+        #expect(TrainModel.detect(cars(["948004300011", "948008300015", "948004310019"]), category: "S")?.series == "BR 430")
+        #expect(TrainModel.detect(cars(["948014400011", "948014410019"]), category: "RE")?.series == "BR 1440")
+        #expect(TrainModel.detect(cars(["948004400011", "948004410019"]), category: "RE")?.series == "BR 440")
+    }
+
     @Test func detectsIntercity2FromDoubleDeckCoaches() {
         let cars = ["508026810011", "508026810029"].map { Carriage(vehicleID: $0, constructionType: "DApza") }
         #expect(TrainModel.detect(cars, category: "IC")?.name == "IC 2 Twindexx")
