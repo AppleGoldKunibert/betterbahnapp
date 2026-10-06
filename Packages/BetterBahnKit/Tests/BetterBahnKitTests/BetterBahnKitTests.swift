@@ -1171,6 +1171,63 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(merged.count == 2)
     }
 
+    /// ICE 146 Berlin–Amsterdam at Berlin Hbf: DB's feed has it ending in Hengelo (with realtime),
+    /// NS's feed starting in Berlin and ending in Amsterdam (without). Neither headsign goes beyond
+    /// its own trip, but same number, time and track are the same train: one row, the live one.
+    @Test func stopTimesMergeSameTrainFromTwoFeeds() throws {
+        let json = """
+        {"stopTimes": [
+            {"place": {"name": "Berlin Hbf", "stopId": "nl:1", "lat": 52.52, "lon": 13.37,
+                       "scheduledDeparture": "2026-10-06T07:09:00Z", "departure": "2026-10-06T07:09:00Z",
+                       "scheduledTrack": "6"},
+             "mode": "HIGHSPEED_RAIL", "realTime": false, "headsign": "Amsterdam Centraal",
+             "tripFrom": {"name": "Berlin Hbf", "lat": 52.52, "lon": 13.37},
+             "tripTo": {"name": "Amsterdam Centraal", "lat": 52.38, "lon": 4.9},
+             "tripId": "nl-trip", "routeShortName": "ICE", "tripShortName": "146", "displayName": "ICE 146",
+             "agencyName": "NS International"},
+            {"place": {"name": "S+U Berlin Hauptbahnhof", "stopId": "de:1", "lat": 52.52, "lon": 13.37,
+                       "scheduledDeparture": "2026-10-06T07:09:00Z", "departure": "2026-10-06T07:12:00Z",
+                       "scheduledTrack": "6", "track": "6"},
+             "mode": "HIGHSPEED_RAIL", "realTime": true, "headsign": "Hengelo",
+             "tripFrom": {"name": "S Südkreuz Bhf (Berlin)", "lat": 52.48, "lon": 13.37},
+             "tripTo": {"name": "Hengelo", "lat": 52.26, "lon": 6.79},
+             "tripId": "de-trip", "routeShortName": "77", "tripShortName": "ICE 146", "displayName": "ICE 146",
+             "agencyName": "DB Fernverkehr AG"},
+            {"place": {"name": "Berlin Hbf", "stopId": "nl:1", "lat": 52.52, "lon": 13.37,
+                       "scheduledDeparture": "2026-10-06T09:09:00Z", "scheduledTrack": "6"},
+             "mode": "HIGHSPEED_RAIL", "headsign": "Amsterdam Centraal",
+             "tripTo": {"name": "Amsterdam Centraal", "lat": 52.38, "lon": 4.9},
+             "tripId": "nl-144", "displayName": "ICE 144", "agencyName": "NS International"}
+        ]}
+        """
+        let response = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(json.utf8))
+        let merged = TransitousProvider.mergeBorderSplitDuplicates(response.stopTimes, kind: .departures)
+        #expect(merged.map(\.tripId) == ["de-trip", "nl-144"])
+        let entry = try #require(merged.first?.toEntry(kind: .departures))
+        #expect(entry.time.actual != nil)
+    }
+
+    /// Local lines share their "number" between both directions; two S5 at the same minute stay apart.
+    @Test func stopTimesKeepsLocalTrainsWithSameLineAndTime() throws {
+        let json = """
+        {"stopTimes": [
+            {"place": {"name": "Berlin Hbf", "stopId": "a:1", "lat": 52.52, "lon": 13.37,
+                       "scheduledDeparture": "2026-10-06T07:11:00Z"},
+             "mode": "SUBURBAN", "realTime": true, "headsign": "Berlin-Mahlsdorf",
+             "tripTo": {"name": "Berlin-Mahlsdorf", "lat": 52.5, "lon": 13.6},
+             "tripId": "s5-east", "displayName": "S5", "agencyName": "S-Bahn Berlin"},
+            {"place": {"name": "Berlin Hbf", "stopId": "a:2", "lat": 52.52, "lon": 13.37,
+                       "scheduledDeparture": "2026-10-06T07:11:00Z"},
+             "mode": "SUBURBAN", "headsign": "Westkreuz",
+             "tripTo": {"name": "Westkreuz", "lat": 52.5, "lon": 13.28},
+             "tripId": "s5-west", "displayName": "S5", "agencyName": "S-Bahn Berlin"}
+        ]}
+        """
+        let response = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(json.utf8))
+        let merged = TransitousProvider.mergeBorderSplitDuplicates(response.stopTimes, kind: .departures)
+        #expect(merged.count == 2)
+    }
+
     /// A single stitched itinerary leg (München–Innsbruck) riding the German feed's border-truncated
     /// trip still reaches the real destination as its `to`, but the trip's own `headsign` only names
     /// the border stop, which then shows up as one of this same leg's intermediate stops. The leg's

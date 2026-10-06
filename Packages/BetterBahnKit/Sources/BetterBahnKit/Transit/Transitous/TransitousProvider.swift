@@ -1380,6 +1380,13 @@ public struct TransitousProvider: TransitProvider {
     /// there (e.g. a Munich–Bologna Railjet, run under DB's "ICE 87" too, whose German feed entry says
     /// "Kufstein" — its own last stop — while the Austrian feed's entry correctly says "Bologna").
     /// Prefer whichever row names a destination beyond its own last stop.
+    ///
+    /// Often neither row does: DB's feed lists ICE 146 Berlin–Amsterdam as a trip ending in Hengelo
+    /// (with realtime), NS's feed as one starting in Berlin and ending in Amsterdam (without), each
+    /// headsign matching its own last stop, so Berlin Hbf's board showed the train twice. A train with
+    /// the same number leaving at the same planned time from the same track is still the same train:
+    /// keep the row with realtime data (else the first). Its destination is corrected afterwards
+    /// from the full trip (`withCorrectedLongDistanceEnds`).
     static func mergeBorderSplitDuplicates(_ stopTimes: [MStopTime], kind: BoardKind) -> [MStopTime] {
         var result: [MStopTime] = []
         outer: for stopTime in stopTimes {
@@ -1394,13 +1401,31 @@ public struct TransitousProvider: TransitProvider {
                 let candidateEnd = kind == .departures ? stopTime.tripTo : stopTime.tripFrom
                 let existingKnowsContinuation = Self.namesContinuation(headsign: existing.headsign, ownEnd: existingEnd)
                 let candidateKnowsContinuation = Self.namesContinuation(headsign: stopTime.headsign, ownEnd: candidateEnd)
-                guard existingKnowsContinuation != candidateKnowsContinuation else { continue }
-                if candidateKnowsContinuation { result[index] = stopTime }
+                if existingKnowsContinuation != candidateKnowsContinuation {
+                    if candidateKnowsContinuation { result[index] = stopTime }
+                    continue outer
+                }
+                guard Self.isSameTrainFromOtherFeed(existing, stopTime) else { continue }
+                if stopTime.realTime == true, existing.realTime != true { result[index] = stopTime }
                 continue outer
             }
             result.append(stopTime)
         }
         return result
+    }
+
+    /// Two rows of one number and planned time (checked by the caller) that are both long-distance
+    /// trains and use the same planned track, when both feeds name one. Long-distance only: their
+    /// numbers are unique for the day, while a local line's "number" (S5, RE4) is shared by the trains
+    /// in both directions, which can meet at the same minute in feeds without tracks (VBB's S-Bahn).
+    private static func isSameTrainFromOtherFeed(_ a: MStopTime, _ b: MStopTime) -> Bool {
+        let longDistance: Set<Product> = [.highSpeed, .longDistance]
+        guard longDistance.contains(a.lineInfo.toLine().product), longDistance.contains(b.lineInfo.toLine().product)
+        else { return false }
+        if let trackA = a.place.scheduledTrack, let trackB = b.place.scheduledTrack {
+            return trackA == trackB
+        }
+        return true
     }
 
     private static func namesContinuation(headsign: String?, ownEnd: MPlace?) -> Bool {
