@@ -112,7 +112,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   board + `fahrt` → `JourneyStop`s for Zusatzhalte (`inserting`, `nextRegularStop`) and platforms Transitous lacks
   (`fillingMissingPlatforms`, e.g. Hamburg Hbf; saved journeys via `JourneyRefresher`, which also applies the names below), and bahn.de's
   own train names for boards (departures and arrivals) and journey legs (`correctingTrainNames`, e.g. "RJ 171" that Transitous calls "ICE 171"),
-  and DB's live times (`ezZeit`) for long-distance trains on boards (`correctingFromBoard`, `applyingLiveTimes`), which
+  and DB's live times (`ezZeit`) for trains on boards (RE/RB and S-Bahn by run number) (`correctingFromBoard`, `applyingLiveTimes`), which
   beat DELFI's forecasts in Transitous. Responses are
   cached; a 403/429 pauses all bahn.de requests for 10 min (`BahnDeGate`).
 - `Transit/Vagonweb/` – vagonweb.cz (used with their permission, #95): scheduled train compositions for the
