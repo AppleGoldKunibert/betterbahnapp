@@ -114,13 +114,21 @@ struct MLineInfo {
         let prefix = name.split(separator: " ").first.map { String($0).uppercased() } ?? ""
         let product = MLineInfo.product(mode: mode, prefix: prefix)
         let digitsInName = name.split(separator: " ").last.map(String.init)?.filter(\.isNumber)
-        let number = (digitsInName?.isEmpty == false ? digitsInName : tripShortName?.filter(\.isNumber))
+        var number = (digitsInName?.isEmpty == false ? digitsInName : tripShortName?.filter(\.isNumber))
             .map { String($0.drop(while: { $0 == "0" })) }
         // Some feeds only give a bare product code ("RJ") with the actual run number buried in a raw
         // trip code ("000385") instead of the display name — fold it in, otherwise unrelated
         // departures under the same product all look identically labeled.
-        let displayedName = (digitsInName?.isEmpty != false) ? number.map { "\(name) \($0)" } ?? name : name
+        var displayedName = (digitsInName?.isEmpty != false) ? number.map { "\(name) \($0)" } ?? name : name
         let tripNumber = tripShortName.map { String($0.filter(\.isNumber).drop(while: { $0 == "0" })) }.flatMap { $0.isEmpty ? nil : $0 }
+        // DELFI names a regional run "RE3 (3309)", but VBB's own feed (Berlin/Brandenburg) only "RE3",
+        // with the run number as trip short name ("03309"). Name those the DELFI way, so the number
+        // shows whichever feed the train comes from.
+        if ["REGIONAL_RAIL", "REGIONAL_FAST_RAIL"].contains(mode), digitsInName?.isEmpty == false, !name.contains("("),
+           let tripNumber, tripNumber != number, tripShortName?.allSatisfy(\.isNumber) == true {
+            displayedName = "\(name) (\(tripNumber))"
+            number = tripNumber
+        }
         return Line(name: displayedName, number: number, product: product, operatorName: agencyName, tripNumber: tripNumber)
     }
 
