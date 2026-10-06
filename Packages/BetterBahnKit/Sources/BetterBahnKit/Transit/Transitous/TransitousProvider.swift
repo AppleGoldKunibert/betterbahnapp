@@ -1444,6 +1444,20 @@ public struct TransitousProvider: TransitProvider {
         var result: [BoardEntry] = []
         outer: for entry in entries {
             for (index, existing) in result.enumerated() {
+                // A regional run that both DELFI and a regional feed (VBB) list: the same run number
+                // at the same time is the same train, whatever each feed calls it or where it ends.
+                if existing.kind == entry.kind, existing.time.planned == entry.time.planned,
+                   existing.line.product == entry.line.product, [.regional, .regionalExpress].contains(entry.line.product),
+                   let run = entry.line.tripNumber, existing.line.tripNumber == run {
+                    if existing.time.actual == nil, entry.time.actual != nil {
+                        var merged = entry
+                        if existing.line.name != entry.line.name { merged.line.alternateName = existing.line.name }
+                        result[index] = merged
+                    } else if existing.line.name != entry.line.name, result[index].line.alternateName == nil {
+                        result[index].line.alternateName = entry.line.name
+                    }
+                    continue outer
+                }
                 guard existing.kind == entry.kind, existing.time.planned == entry.time.planned,
                       Station.normalize(existing.otherEnd ?? "") == Station.normalize(entry.otherEnd ?? ""),
                       existing.line.name != entry.line.name else { continue }

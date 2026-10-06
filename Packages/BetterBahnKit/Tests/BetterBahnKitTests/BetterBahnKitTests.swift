@@ -25,6 +25,41 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(first.source == .transitous)
     }
 
+    /// Real-world Transitous rows at Berlin Hbf: DELFI names the RE 3 "RE3 (3309)", VBB's own feed
+    /// only "RE3" with the run number as trip short name, so trains only VBB had showed no number.
+    /// Both are named the DELFI way, and the same run from both feeds is one board row.
+    @Test func regionalRunNumberFromVBB() throws {
+        func row(_ minute: Int, _ name: String, _ short: String, _ trip: String, live: Bool, to: String) -> String {
+            """
+            {"place": {"name": "Berlin Hbf", "lat": 52.52, "lon": 13.37,
+                       "departure": "2026-10-06T12:\(minute):00Z", "scheduledDeparture": "2026-10-06T12:\(minute):00Z"},
+             "mode": "REGIONAL_RAIL", "realTime": \(live), "tripId": "\(trip)", "headsign": "\(to)",
+             "routeShortName": "\(name.prefix { $0 != " " })", "displayName": "\(name)", "tripShortName": "\(short)"}
+            """
+        }
+        let json = """
+        {"stopTimes": [
+            \(row(41, "RE3 (3309)", "003309", "delfi-3309", live: true, to: "Lutherstadt Wittenberg Hbf")),
+            \(row(41, "RE3", "03309", "vbb-3309", live: false, to: "Lutherstadt Wittenberg, Hauptbahnhof")),
+            \(row(46, "RE8", "62018", "vbb-62018", live: true, to: "Elsterwerda, Bahnhof")),
+            \(row(46, "RE8 (62018)", "062018", "delfi-62018", live: true, to: "Elsterwerda, Bahnhof")),
+            \(row(52, "RE3", "03351", "vbb-3351", live: true, to: "Lutherstadt Wittenberg Hbf")),
+            \(row(53, "RE3", "03353", "vbb-3353", live: false, to: "Lutherstadt Wittenberg Hbf")),
+            \(row(54, "MEX18", "", "mex", live: false, to: "Sonstwo"))
+        ]}
+        """
+        let stopTimes = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(json.utf8)).stopTimes
+        let entries = stopTimes.compactMap { $0.toEntry(kind: .departures) }
+        #expect(entries[1].line.name == "RE3 (3309)")
+        #expect(entries[1].line.number == "3309" && entries[1].line.tripNumber == "3309")
+        #expect(entries[4].line.name == "RE3 (3351)")
+        #expect(entries[6].line.name == "MEX18")
+
+        let board = TransitousProvider.deduplicated(entries)
+        #expect(board.map(\.tripId) == ["delfi-3309", "vbb-62018", "vbb-3351", "vbb-3353", "mex"])
+        #expect(board.map(\.line.name) == ["RE3 (3309)", "RE8 (62018)", "RE3 (3351)", "RE3 (3353)", "MEX18"])
+    }
+
     /// Real-world response shape for the S-Bahn at Berlin Gesundbrunnen: VBB's feed leaves `track`
     /// and `scheduledTrack` both null and only encodes the platform as free text in `description`
     /// ("S-Bahnsteig Gleis 4"), unlike its U-Bahn feed which populates `track` directly - this is why
