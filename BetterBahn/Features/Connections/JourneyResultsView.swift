@@ -537,9 +537,9 @@ struct JourneyCard: View {
                     Spacer()
                     if journey.isCancelled {
                         InfoChip(text: "Fällt aus", systemImage: "xmark.octagon.fill", tint: .heavyDelay)
-                    } else if journey.connectionIssues().contains(where: \.isBlocking) {
+                    } else if journey.currentIssues().contains(where: \.isBlocking) {
                         InfoChip(text: "Nicht möglich", systemImage: "exclamationmark.triangle.fill", tint: .heavyDelay)
-                    } else if !journey.connectionIssues().isEmpty {
+                    } else if !journey.currentIssues().isEmpty {
                         InfoChip(text: "Knapp", systemImage: "exclamationmark.triangle.fill", tint: .slightDelay)
                     } else if journey.legs.contains(where: { $0.messages.containsDelayReason }) {
                         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.heavyDelay)
