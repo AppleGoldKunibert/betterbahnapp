@@ -372,8 +372,8 @@ public struct BahnDeClient: Sendable {
         // run as the requested train (or a train coupled to it for the whole ride) so the other half's
         // trainset doesn't leak in.
         // Every field is optional, like in DBRIS: one odd group mustn't lose the whole formation.
-        let groups = response.groups ?? []
         let wanted = coupledNumbers.union([number].compactMap(\.self))
+        let groups = requestedTrainGroups(response.groups ?? [], wanted: wanted)
         // The requested train's own trainset first, then the coupled ones' (Tz 9203 + 9228 for ICE 956).
         let own = groups.filter { $0.transport?.number == number }
             + groups.filter { $0.transport?.number != number && ($0.transport?.number.map(wanted.contains) ?? false) }
@@ -394,6 +394,15 @@ public struct BahnDeClient: Sendable {
             if unit.model != nil || unit.number != nil { units.append(unit) }
         }
         return TrainFormation(units: units)
+    }
+
+    /// `groups`, or none when they all name a train number and none of them is `wanted`: then bahn.de
+    /// answered with another train's sequence (RE 6 at Itzehoe showed someone else's FLIRTs), and no
+    /// type or Wagenreihung beats a wrong one. Groups without numbers still count as the train asked for.
+    static func requestedTrainGroups(_ groups: [SequenceResponse.Group], wanted: Set<Int>) -> [SequenceResponse.Group] {
+        let numbers = Set(groups.compactMap(\.transport?.number))
+        guard !wanted.isEmpty, !numbers.isEmpty, numbers.isDisjoint(with: wanted) else { return groups }
+        return groups.filter { $0.transport?.number == nil }
     }
 
     /// Group names for live data look like "ICE9465" or "ICE0160"; anything else has no Tz.
