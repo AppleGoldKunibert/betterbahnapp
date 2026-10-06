@@ -80,6 +80,48 @@ import Testing
     }
 }
 
+/// Träwelling's "Mitreisende": others on the same train whose ride overlaps the check-in.
+@Suite struct TraewellingFellowTravellerTests {
+    /// A check-in on trip 99 by `user` from `from` to `to` (minutes after 10:00 UTC).
+    static func json(id: Int, user: Int, from: Int, to: Int) -> String {
+        func time(_ minutes: Int) -> String { String(format: "2026-10-06T%02d:%02d:00+00:00", 10 + minutes / 60, minutes % 60) }
+        return """
+        {"id":\(id),"user":{"id":\(user),"displayName":"User \(user)","username":"user\(user)",
+         "profilePicture":"https://traewelling.de/@user\(user)/picture"},
+         "checkin":{"trip":99,"lineName":"ICE 1",
+          "origin":{"name":"S\(from)","departurePlanned":"\(time(from))"},
+          "destination":{"name":"S\(to)","arrivalPlanned":"\(time(to))"}}}
+        """
+    }
+
+    static func status(id: Int, user: Int, from: Int, to: Int) throws -> TraewellingStatus {
+        try JSONDecoding.decoder.decode(TraewellingStatus.self, from: Data(json(id: id, user: user, from: from, to: to).utf8))
+    }
+
+    @Test func keepsOverlappingRidesOfOthers() throws {
+        let mine = try Self.status(id: 1, user: 10, from: 30, to: 90)
+        let onTrip = [
+            mine,
+            try Self.status(id: 2, user: 11, from: 60, to: 120),  // boards on the way
+            try Self.status(id: 3, user: 12, from: 0, to: 30),    // gets off where I board
+            try Self.status(id: 4, user: 13, from: 90, to: 120),  // boards where I get off
+            try Self.status(id: 5, user: 10, from: 0, to: 20),    // my own other check-in
+            try Self.status(id: 6, user: 14, from: 0, to: 120),   // whole train
+        ]
+        let fellows = TraewellingClient.fellowTravellers(in: onTrip, of: mine)
+        #expect(fellows.map(\.id) == [6, 2])
+        #expect(fellows.first?.user?.username == "user14")
+        #expect(fellows.first?.user?.profilePicture?.absoluteString == "https://traewelling.de/@user14/picture")
+    }
+
+    @Test func statusWithoutUserStillDecodes() throws {
+        let status = try JSONDecoding.decoder.decode(TraewellingStatus.self, from: Data(#"""
+        {"id":1,"checkin":{"origin":{"name":"A"},"destination":{"name":"B"}}}
+        """#.utf8))
+        #expect(status.user == nil)
+    }
+}
+
 @Suite(.serialized) struct TraewellingCheckinEditRequestTests {
     @Test func deletingAGoneCheckinSucceeds() async throws {
         let (client, store) = client()
@@ -112,6 +154,18 @@ import Testing
         #expect(tags.map(\.key) == ["trwl:seat", "trwl:ticket"])
     }
 
+    @Test func loadsFellowTravellersOfTheTrip() async throws {
+        let (client, store) = client()
+        defer { store.clear() }
+        CheckinEditProtocol.reset(statusFor: { _ in 200 })
+        let mine = try TraewellingFellowTravellerTests.status(id: 1, user: 10, from: 30, to: 90)
+
+        let fellows = try await client.fellowTravellers(of: mine)
+
+        #expect(CheckinEditProtocol.requests.withLock { $0 } == ["GET /api/v1/trips/99/statuses"])
+        #expect(fellows.map(\.id) == [2])
+    }
+
     private func client() -> (TraewellingClient, TokenStore) {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [CheckinEditProtocol.self]
@@ -124,7 +178,7 @@ import Testing
 }
 
 /// Records "METHOD /path" and answers each request with the given status; tag requests get a tag
-/// back, the tag list two tags.
+/// back, the tag list two tags, a trip's statuses two check-ins.
 private final class CheckinEditProtocol: URLProtocol, @unchecked Sendable {
     static let requests = Mutex<[String]>([])
     nonisolated(unsafe) static var statusFor: (String) -> Int = { _ in 200 }
@@ -145,6 +199,10 @@ private final class CheckinEditProtocol: URLProtocol, @unchecked Sendable {
         let body: String
         if status != 200 {
             body = #"{"message":"Not found"}"#
+        } else if entry.hasSuffix("/statuses") {
+            let statuses = [TraewellingFellowTravellerTests.json(id: 1, user: 10, from: 30, to: 90),
+                            TraewellingFellowTravellerTests.json(id: 2, user: 11, from: 0, to: 60)]
+            body = #"{"data":["# + statuses.joined(separator: ",") + "]}"
         } else if entry.hasPrefix("GET") && entry.hasSuffix("/tags") {
             body = #"{"data":[{"key":"trwl:seat","value":"62","visibility":0},{"key":"trwl:ticket","value":"BC100","visibility":0}]}"#
         } else if entry.contains("/tags") && !entry.hasPrefix("DELETE") {
