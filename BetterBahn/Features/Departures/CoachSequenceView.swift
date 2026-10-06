@@ -148,7 +148,7 @@ struct CoachSequenceView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else if !sequence.reversals.isEmpty {
-                Text("Fahrtrichtungswechsel in \(ListFormatter.localizedString(byJoining: sequence.reversals)) berücksichtigt")
+                Text("Fahrtrichtungswechsel in \(ListFormatter.localizedString(byJoining: sequence.reversals))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
