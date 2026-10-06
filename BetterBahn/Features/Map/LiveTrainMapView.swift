@@ -46,7 +46,9 @@ struct LiveTrainRoute: Hashable {
 
     var isSupported: Bool { BahnJetztClient.supports(line) }
 
-    var hint: BahnJetztClient.RouteHint { .init(destination: destination, path: path) }
+    var hint: BahnJetztClient.RouteHint {
+        .init(destination: destination, path: path, timetable: BahnJetztClient.RouteHint.timetable(stops))
+    }
 
     func mayBeRunning(at date: Date = .now) -> Bool { start <= date && date <= end }
 

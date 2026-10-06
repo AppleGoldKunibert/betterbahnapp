@@ -131,7 +131,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   ahead; bahn.de is only asked for departures within `BahnDeClient.formationLookahead` (12 h).
 - `Transit/BahnJetzt/` – live train positions from bahn.jetzt's `/api/journeys` (one shared list,
   refreshed by `AppModel.followTrainPositions()` while the map is on screen). Long-distance trains by
-  number, regional/S-Bahn by run number (`Line.tripNumber`).
+  number, regional/S-Bahn by run number (`Line.tripNumber`). A position far from where the timetable
+  has the train (±20 min) is ignored (`isOnSchedule`).
 - `Transit/Transitous/` – MOTIS API client + DTOs (`M*` types). Station-name cleanup and
   deduplication of boards happen here. MOTIS leaves trains nobody may board out of departures, so a departure
   board also asks for arrivals and adds the ones going on as "Nur Ausstieg" (`continuingWithoutBoarding`, #105). Station search ranking is `searchRank`; with the user's location

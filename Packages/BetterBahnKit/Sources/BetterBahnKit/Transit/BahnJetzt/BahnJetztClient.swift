@@ -83,10 +83,33 @@ public struct BahnJetztClient: Sendable {
         public var destination: String?
         /// The route (track geometry or stops) the train is known to run along.
         public var path: [Coordinate]
+        /// The stops with coordinates and when the train is there (live time if known), in order;
+        /// empty skips the check against the timetable (`isOnSchedule`).
+        public var timetable: [TimedStop]
 
-        public init(destination: String?, path: [Coordinate]) {
+        public init(destination: String?, path: [Coordinate], timetable: [TimedStop] = []) {
             self.destination = destination
             self.path = path
+            self.timetable = timetable
+        }
+
+        public struct TimedStop: Sendable, Hashable {
+            public var coordinate: Coordinate
+            public var time: Date
+
+            public init(coordinate: Coordinate, time: Date) {
+                self.coordinate = coordinate
+                self.time = time
+            }
+        }
+
+        /// `stops` as a timetable: each stop's departure, else its arrival.
+        public static func timetable(_ stops: [Stopover]) -> [TimedStop] {
+            stops.compactMap { stop in
+                guard !stop.cancelled, let coordinate = stop.station.coordinate,
+                      let time = (stop.departure ?? stop.arrival)?.best else { return nil }
+                return TimedStop(coordinate: coordinate, time: time)
+            }
         }
     }
 
@@ -96,8 +119,14 @@ public struct BahnJetztClient: Sendable {
     public func position(for leg: Leg) async throws -> TrainPosition? {
         let path = leg.geometry.flatMap { $0.isEmpty ? nil : $0 }
             ?? ([leg.origin] + leg.stopovers.map(\.station) + [leg.destination]).compactMap(\.coordinate)
+        let stops = leg.stopovers.isEmpty
+            ? [Stopover(station: leg.origin, arrival: nil, departure: leg.departure, arrivalPlatform: nil,
+                        departurePlatform: nil, cancelled: false),
+               Stopover(station: leg.destination, arrival: leg.arrival, departure: nil, arrivalPlatform: nil,
+                        departurePlatform: nil, cancelled: false)]
+            : leg.stopovers
         return try await position(of: leg.line, plannedDeparture: leg.departure.planned,
-                                  route: RouteHint(destination: leg.direction, path: path))
+                                  route: RouteHint(destination: leg.direction, path: path, timetable: RouteHint.timetable(stops)))
     }
 
     /// Live position of `line`'s run that departs (somewhere along its route) at `plannedDeparture`.
@@ -114,6 +143,7 @@ public struct BahnJetztClient: Sendable {
            !Self.isPlausible(journey, at: coordinate, for: route) {
             return nil
         }
+        if let route, !Self.isOnSchedule(coordinate, timetable: route.timetable, now: snapshot.fetchedAt) { return nil }
         return TrainPosition(coordinate: coordinate, time: snapshot.fetchedAt, speedKmh: journey.speed, source: "bahn.jetzt")
     }
 
@@ -135,6 +165,38 @@ public struct BahnJetztClient: Sendable {
         }
         guard let distance = distance(from: position, to: route.path) else { return false }
         return distance <= maxDistanceFromRoute
+    }
+
+    /// How far from where the timetable has the train a position may be.
+    static let maxDistanceFromSchedule: Double = 40_000
+    /// How much a train may be off its timetable (beyond the live times known) and still count.
+    static let scheduleSlack: TimeInterval = 20 * 60
+
+    /// Whether `position` is near the stops the train passes around `now` (±`scheduleSlack`).
+    /// bahn.jetzt sometimes reports a position far from the train: ICE 2074 Berlin–Westerland standing
+    /// near Itzehoe while it ran between Ludwigslust and Büchen. That place is on the route, so only
+    /// the time tells it apart.
+    static func isOnSchedule(_ position: Coordinate, timetable: [RouteHint.TimedStop], now: Date) -> Bool {
+        guard timetable.count > 1 else { return true }
+        let from = now.addingTimeInterval(-scheduleSlack), to = now.addingTimeInterval(scheduleSlack)
+        // Where the timetable has the train from `from` to `to`: straight between stops, by time.
+        let stretch = [expectedPosition(at: from, in: timetable)]
+            + timetable.filter { $0.time > from && $0.time < to }.map(\.coordinate)
+            + [expectedPosition(at: to, in: timetable)]
+        guard let distance = distance(from: position, to: stretch) else { return true }
+        return distance <= maxDistanceFromSchedule
+    }
+
+    /// Where `timetable` has the train at `date`: between the stops before and after, by time; at the
+    /// first or last stop outside its run.
+    static func expectedPosition(at date: Date, in timetable: [RouteHint.TimedStop]) -> Coordinate {
+        guard let next = timetable.firstIndex(where: { $0.time > date }) else { return timetable[timetable.count - 1].coordinate }
+        guard next > 0 else { return timetable[0].coordinate }
+        let a = timetable[next - 1], b = timetable[next]
+        let span = b.time.timeIntervalSince(a.time)
+        let t = span > 0 ? date.timeIntervalSince(a.time) / span : 1
+        return Coordinate(latitude: a.coordinate.latitude + (b.coordinate.latitude - a.coordinate.latitude) * t,
+                          longitude: a.coordinate.longitude + (b.coordinate.longitude - a.coordinate.longitude) * t)
     }
 
     /// Shortest distance in meters from `point` to the polyline `path` (flat-earth approximation,

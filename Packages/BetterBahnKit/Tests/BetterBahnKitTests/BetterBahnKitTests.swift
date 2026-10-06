@@ -2655,6 +2655,34 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         #expect(try #require(BahnJetztClient.distance(from: here, to: route)) < 100)
     }
 
+    /// bahn.jetzt had ICE 2074 Berlin–Westerland standing near Itzehoe at 9:40, while it ran between
+    /// Wittenberge and Büchen: on the route, but hours from where the timetable has it.
+    @Test func positionMustFitTheTimetable() throws {
+        func stop(_ lat: Double, _ lon: Double, _ utc: String) throws -> BahnJetztClient.RouteHint.TimedStop {
+            .init(coordinate: Coordinate(latitude: lat, longitude: lon), time: try #require(JSONDecoding.parseISODate(utc)))
+        }
+        let timetable = [
+            try stop(52.549, 13.391, "2026-10-06T06:09:00Z"), // Berlin Gesundbrunnen
+            try stop(53.004, 11.763, "2026-10-06T07:02:00Z"), // Wittenberge
+            try stop(53.475, 10.623, "2026-10-06T07:49:00Z"), // Büchen
+            try stop(53.553, 10.007, "2026-10-06T08:14:00Z"), // Hamburg Hbf
+            try stop(53.924, 9.510, "2026-10-06T09:16:00Z"),  // Itzehoe
+            try stop(54.907, 8.311, "2026-10-06T11:31:00Z"),  // Westerland
+        ]
+        let itzehoe = Coordinate(latitude: 53.9267, longitude: 9.5085)
+        let nearBuechen = Coordinate(latitude: 53.40, longitude: 10.80)
+        for utc in ["2026-10-06T07:20:00Z", "2026-10-06T07:40:00Z", "2026-10-06T07:58:00Z"] {
+            let now = try #require(JSONDecoding.parseISODate(utc))
+            #expect(!BahnJetztClient.isOnSchedule(itzehoe, timetable: timetable, now: now))
+        }
+        let now = try #require(JSONDecoding.parseISODate("2026-10-06T07:40:00Z"))
+        #expect(BahnJetztClient.isOnSchedule(nearBuechen, timetable: timetable, now: now))
+        // Once the train is due there, Itzehoe is fine.
+        #expect(BahnJetztClient.isOnSchedule(itzehoe, timetable: timetable, now: now.addingTimeInterval(5_700)))
+        // Without a timetable nothing is checked.
+        #expect(BahnJetztClient.isOnSchedule(itzehoe, timetable: [], now: now))
+    }
+
     @Test func positionFromSharedList() async throws {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [BahnJetztListProtocol.self]
