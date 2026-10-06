@@ -28,7 +28,9 @@ final class AppModel {
     /// Journeys the user saved. The next upcoming one is shown as Live Activity.
     var savedJourneys: [SavedJourney] {
         didSet {
-            Storage.save(savedJourneys, key: "savedJourneys")
+            // Every saved journey with all its stops is encoded here, which takes noticeably long
+            // once there are many, so it happens off the main thread.
+            Storage.saveInBackground(savedJourneys, key: "savedJourneys")
             savedJourneysCloud.localChange(from: oldValue, to: savedJourneys)
             syncLiveActivity()
         }
@@ -441,8 +443,11 @@ final class AppModel {
     func save(_ journey: Journey, search: ConnectionSearch? = nil) {
         guard !isSaved(journey) else { return }
         if settings.connectionWarnings { Task { await ConnectionNotifier.requestAuthorization() } }
-        savedJourneys.append(SavedJourney(journey: journey, search: search))
-        savedJourneys.sort { ($0.journey.departure?.planned ?? .distantPast) < ($1.journey.departure?.planned ?? .distantPast) }
+        // One assignment, so the list is persisted and synced once rather than twice.
+        var updated = savedJourneys
+        updated.append(SavedJourney(journey: journey, search: search))
+        updated.sort { ($0.journey.departure?.planned ?? .distantPast) < ($1.journey.departure?.planned ?? .distantPast) }
+        savedJourneys = updated
     }
 
     func unsave(_ journey: Journey) {
@@ -630,7 +635,15 @@ final class AppModel {
         if let cached = trainTypeCache[key] { return cached }
         if let vagonweb = provider.vagonweb {
             do {
-                if let lookup = try await vagonweb.trainType(category: ref.category, number: ref.number, on: date) {
+                if var lookup = try await vagonweb.trainType(category: ref.category, number: ref.number, on: date) {
+                    // vagonweb only has the plan, without Tz numbers. Around the day of the ride
+                    // bahn.expert has DB's live assignment, which names the Tz and so tells a
+                    // redesigned ICE 3neo apart ("ICE 3neo Redesign" for Tz 8039).
+                    if !lookup.hasUnitNumbers, abs(date.timeIntervalSinceNow) < 36 * 3600,
+                       let live = try? await provider.bahnExpert?.trainType(category: ref.category, number: ref.number, date: day),
+                       live.hasUnitNumbers {
+                        lookup = live
+                    }
                     trainTypeCache[key] = .some(lookup)
                     return lookup
                 }
@@ -647,15 +660,38 @@ final class AppModel {
 
     /// The planned Wagenreihung from vagonweb.cz, for when bahn.de has no coach sequence (yet), e.g.
     /// days ahead. Without platform positions; vagonweb caches its pages itself.
-    func plannedCoachSequence(for request: BahnDeClient.FormationRequest) async -> CoachSequence? {
+    /// Turned round where the train changes direction on the way (Kopfbahnhof, or vagonweb's note); for
+    /// that the train's stops before the request's station are needed, from the request or its trip.
+    /// - Parameter direction: false when only the coaches matter (comparing with bahn.de's sequence).
+    func plannedCoachSequence(for request: BahnDeClient.FormationRequest, direction: Bool = true) async -> CoachSequence? {
+        var route: [String]?
+        if direction, let before = await stopsBefore(request) { route = before + [request.station.name] }
         do {
-            let sequence = try await provider.vagonweb?.coachSequence(for: request)
+            let sequence = try await provider.vagonweb?.coachSequence(for: request, route: route)
             VagonwebBrowser.log.info("Plan-Wagenreihung \(request.category, privacy: .public) \(request.number, privacy: .public): \(sequence.map { "\($0.coaches.count) Wagen" } ?? "keine", privacy: .public)")
             return sequence
         } catch {
             VagonwebBrowser.log.error("Plan-Wagenreihung \(request.category, privacy: .public) \(request.number, privacy: .public): \(String(describing: error), privacy: .public)")
             return nil
         }
+    }
+
+    @ObservationIgnored private var tripStopNames: [String: [String]] = [:]
+
+    /// The train's stops before the request's station: from the request, else from its trip (a leg
+    /// starts mid-run), loaded once per trip.
+    private func stopsBefore(_ request: BahnDeClient.FormationRequest) async -> [String]? {
+        if let before = request.stopsBefore { return before }
+        guard let tripId = request.tripId, let source = request.tripSource else { return nil }
+        var trip = liveTrips.value(for: tripId)
+        if trip == nil, tripStopNames[tripId] == nil {
+            trip = try? await provider.trip(id: tripId, source: source)
+        }
+        if let trip { tripStopNames[tripId] = trip.stopovers.map(\.station.name) }
+        guard let names = tripStopNames[tripId] else { return nil }
+        let key = VagonwebClient.stationKey(request.station.name)
+        guard let index = names.firstIndex(where: { VagonwebClient.stationKey($0) == key }) else { return nil }
+        return Array(names[..<index])
     }
 
     @ObservationIgnored private var refreshLoop: Task<Void, Never>?
@@ -949,15 +985,13 @@ nonisolated struct SavedJourney: Codable, Hashable, Identifiable {
     /// synced so they stay known after the journey (optional so older saved data still decodes).
     var formations: [String: TrainFormation]?
 
-    var issues: [ConnectionIssue] { journey.connectionIssues() }
+    var issues: [ConnectionIssue] { journey.currentIssues() }
 
     /// How long after arriving a finished journey is still refreshed when opened.
     static let liveDataLifetime: TimeInterval = 24 * 3600
 
     /// Finished 10 minutes after the (realtime) arrival.
-    var isFinished: Bool {
-        (journey.arrival?.best ?? .distantFuture).addingTimeInterval(10 * 60) < .now
-    }
+    var isFinished: Bool { journey.isOver() }
 }
 
 /// Where a saved journey's train is right now.
@@ -990,6 +1024,14 @@ nonisolated enum Storage {
         guard let data = try? JSONEncoder().encode(value) else { return }
         try? data.write(to: file(key), options: .atomic)
         UserDefaults.standard.removeObject(forKey: key)
+    }
+
+    private static let writer = DispatchQueue(label: "de.goldkunibert.BetterBahn.storage", qos: .userInitiated)
+
+    /// Like `save`, but encodes and writes on a background queue. Writes land in the order they
+    /// were made, so the last change always wins.
+    static func saveInBackground<T: Encodable & Sendable>(_ value: T, key: String) {
+        writer.async { save(value, key: key) }
     }
 
     /// Moves values older versions kept in UserDefaults into files, as is, without decoding them.

@@ -38,7 +38,7 @@ struct LiveTrainRoute: Hashable {
         line = trip.line
         stops = trip.stopovers
         plannedDeparture = trip.stopovers.lazy.compactMap(\.departure).first?.planned ?? .now
-        path = trip.stopovers.compactMap(\.station.coordinate)
+        path = trip.geometry.flatMap { $0.isEmpty ? nil : $0 } ?? trip.stopovers.compactMap(\.station.coordinate)
         destination = trip.stopovers.last?.station.name
         start = (trip.stopovers.lazy.compactMap(\.departure).first?.best ?? .distantPast).addingTimeInterval(-10 * 60)
         end = (trip.stopovers.last?.arrival?.best ?? .distantFuture).addingTimeInterval(10 * 60)

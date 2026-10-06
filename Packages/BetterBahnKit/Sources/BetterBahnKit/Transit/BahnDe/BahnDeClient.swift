@@ -23,9 +23,10 @@ public struct TrainFormation: Codable, Sendable, Hashable {
         self.units = units
     }
 
-    /// "ICE 3neo" or "ICE 3neo + ICE 4".
+    /// "ICE 3neo" or "ICE 3neo + ICE 4". Redesigned ICE 3neo are named by their Tz here as well, so
+    /// formations remembered before that rule existed show "ICE 3neo Redesign" too.
     public var modelSummary: String? {
-        let models = units.compactMap(\.model)
+        let models = units.compactMap { TrainModel.name($0.model, unit: $0.number) }
         guard !models.isEmpty else { return nil }
         var unique: [String] = []
         for model in models where !unique.contains(model) { unique.append(model) }
@@ -230,13 +231,23 @@ public struct BahnDeClient: Sendable {
         public var plannedDeparture: Date
         /// Trains coupled to it for the whole ride (`Line.coupledTrains`), whose trainsets count as its own.
         public var coupledNumbers: [String]
+        /// The train's stops before `station`, from its first one, when known (a whole train run);
+        /// they tell where it changed direction, for vagonweb's plan.
+        public var stopsBefore: [String]?
+        /// The train run, to load its stops when `stopsBefore` is unknown (a leg starts mid-run).
+        public var tripId: String?
+        public var tripSource: DataSource?
 
-        public init(category: String, number: String, station: Station, plannedDeparture: Date, coupledNumbers: [String] = []) {
+        public init(category: String, number: String, station: Station, plannedDeparture: Date, coupledNumbers: [String] = [],
+                    stopsBefore: [String]? = nil, tripId: String? = nil, tripSource: DataSource? = nil) {
             self.coupledNumbers = coupledNumbers
             self.category = category
             self.number = number
             self.station = station
             self.plannedDeparture = plannedDeparture
+            self.stopsBefore = stopsBefore
+            self.tripId = tripId
+            self.tripSource = tripSource
         }
     }
 
@@ -247,26 +258,42 @@ public struct BahnDeClient: Sendable {
     /// The request for `line`'s formation at the first of `stops` where it still departs, if that
     /// departure is soon enough for bahn.de to know the coach sequence (see `formationLookahead`).
     /// Without `lookahead` any later departure counts too (for vagonweb's planned Wagenreihung).
-    public static func formationRequest(line: Line?, stops: [(station: Station, departure: TimeInfo?)],
+    /// - Parameter wholeRun: `stops` start at the train's first stop, so the ones before the request's
+    ///   station are its `stopsBefore`.
+    public static func formationRequest(line: Line?, stops: [(station: Station, departure: TimeInfo?)], wholeRun: Bool = false,
                                         now: Date = .now, lookahead: TimeInterval? = formationLookahead) -> FormationRequest? {
         guard let ref = sequenceReference(for: line) else { return nil }
-        guard let stop = stops.first(where: { $0.departure.map { $0.best >= now.addingTimeInterval(-60) } ?? false }),
-              let departure = stop.departure,
+        guard let index = stops.firstIndex(where: { $0.departure.map { $0.best >= now.addingTimeInterval(-60) } ?? false }),
+              let departure = stops[index].departure,
               lookahead.map({ departure.planned <= now.addingTimeInterval($0) }) ?? true else { return nil }
-        return FormationRequest(category: ref.category, number: ref.number, station: stop.station, plannedDeparture: departure.planned,
-                                coupledNumbers: line?.coupledNumbers ?? [])
+        return FormationRequest(category: ref.category, number: ref.number, station: stops[index].station, plannedDeparture: departure.planned,
+                                coupledNumbers: line?.coupledNumbers ?? [],
+                                stopsBefore: wholeRun ? stops[..<index].map(\.station.name) : nil)
     }
 
     public static func formationRequest(for leg: Leg, now: Date = .now, lookahead: TimeInterval? = formationLookahead) -> FormationRequest? {
         guard !leg.cancelled else { return nil }
         let stops = [(station: leg.origin, departure: Optional(leg.departure))]
             + leg.stopovers.filter { !$0.cancelled }.map { (station: $0.station, departure: $0.departure) }
-        return formationRequest(line: leg.line, stops: stops, now: now, lookahead: lookahead)
+        var request = formationRequest(line: leg.line, stops: stops, now: now, lookahead: lookahead)
+        request?.tripId = leg.tripId
+        request?.tripSource = leg.source
+        return request
     }
 
     public static func formationRequest(for trip: Trip, now: Date = .now, lookahead: TimeInterval? = formationLookahead) -> FormationRequest? {
         formationRequest(line: trip.line, stops: trip.stopovers.filter { !$0.cancelled }.map { (station: $0.station, departure: $0.departure) },
-                         now: now, lookahead: lookahead)
+                         wholeRun: true, now: now, lookahead: lookahead)
+    }
+
+    /// The names of `trip`'s stops before `station` (found by id, else by name), for a request made
+    /// from a leg (`FormationRequest.stopsBefore`); nil when the station isn't one of its stops.
+    public static func stopsBefore(_ station: Station, in trip: Trip) -> [String]? {
+        let names = trip.stopovers.map(\.station.name)
+        guard let index = trip.stopovers.firstIndex(where: { $0.station.id == station.id })
+                ?? trip.stopovers.firstIndex(where: { VagonwebClient.stationKey($0.station.name) == VagonwebClient.stationKey(station.name) })
+        else { return nil }
+        return Array(names[..<index])
     }
 
     /// Formation of a DB long-distance train at its departure from the request's station.
@@ -345,8 +372,8 @@ public struct BahnDeClient: Sendable {
         // run as the requested train (or a train coupled to it for the whole ride) so the other half's
         // trainset doesn't leak in.
         // Every field is optional, like in DBRIS: one odd group mustn't lose the whole formation.
-        let groups = response.groups ?? []
         let wanted = coupledNumbers.union([number].compactMap(\.self))
+        let groups = requestedTrainGroups(response.groups ?? [], wanted: wanted)
         // The requested train's own trainset first, then the coupled ones' (Tz 9203 + 9228 for ICE 956).
         let own = groups.filter { $0.transport?.number == number }
             + groups.filter { $0.transport?.number != number && ($0.transport?.number.map(wanted.contains) ?? false) }
@@ -367,6 +394,15 @@ public struct BahnDeClient: Sendable {
             if unit.model != nil || unit.number != nil { units.append(unit) }
         }
         return TrainFormation(units: units)
+    }
+
+    /// `groups`, or none when they all name a train number and none of them is `wanted`: then bahn.de
+    /// answered with another train's sequence (RE 6 at Itzehoe showed someone else's FLIRTs), and no
+    /// type or Wagenreihung beats a wrong one. Groups without numbers still count as the train asked for.
+    static func requestedTrainGroups(_ groups: [SequenceResponse.Group], wanted: Set<Int>) -> [SequenceResponse.Group] {
+        let numbers = Set(groups.compactMap(\.transport?.number))
+        guard !wanted.isEmpty, !numbers.isEmpty, numbers.isDisjoint(with: wanted) else { return groups }
+        return groups.filter { $0.transport?.number == nil }
     }
 
     /// Group names for live data look like "ICE9465" or "ICE0160"; anything else has no Tz.

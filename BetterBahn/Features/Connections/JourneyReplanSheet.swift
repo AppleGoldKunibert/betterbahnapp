@@ -108,7 +108,7 @@ struct JourneyReplanSheet: View {
         guard leg.stopovers.count > 1 else { return nil }
         return Trip(id: leg.tripId ?? leg.id, line: leg.line, direction: leg.direction,
                     stopovers: leg.stopovers, cancelled: leg.cancelled, remarks: leg.remarks, messages: leg.messages,
-                    source: leg.source)
+                    source: leg.source, geometry: leg.geometry)
     }
 
     private var exitStop: Stopover? { shownTrip?.stopovers.first { $0.id == exitID } }
@@ -819,9 +819,9 @@ struct JourneyReplanSheet: View {
     }
 
     private func loadTrip() async {
-        guard let tripId = leg.tripId else { return }
+        guard leg.tripId != nil else { return }
         do {
-            let loaded = try await model.provider.trip(id: tripId, source: leg.source)
+            let loaded = try await model.provider.trip(for: leg)
             var fresh = loaded
             if let timetables = model.timetablesClient {
                 fresh = await timetables.tripWithRealtime(loaded)

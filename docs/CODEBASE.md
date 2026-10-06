@@ -123,6 +123,11 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `WebPage` (`VagonwebBrowser`, passed in as `browserLoader`). On a first visit vagonweb shows only an "anzeigen" link
   (`VagonwebClient.isGate`); then the compositions come from `ajax_dalsi_razeni_vlak.php` (`plannedCompositionsRequest`).
   Pages are cached per train and timetable year; logs under the `vagonweb` category.
+  vagonweb draws a train as it leaves its first station; the plan is turned round after each change of direction
+  up to the stop (`reversalStations` from vagonweb's note plus `VagonwebClient.terminusStations`, counted along
+  `FormationRequest.stopsBefore` or the leg's trip). bahn.de's `sequenceStatus` ("DIFFERS_FROM_SCHEDULE") is set for
+  nearly every train, so "Abweichende Wagenreihung" comes from `CoachSequence.deviations(fromPlan:)` (missing/extra
+  coaches, class changes; order ignored) against vagonweb's plan.
 - `Transit/BahnExpert/` – bahn.expert, only as fallback for the train type (`TrainTypeLookup`) when bahn.de
   has no coach sequence and vagonweb has none either: it has DB's planned formation (`DB-plan`) for days
   ahead; bahn.de is only asked for departures within `BahnDeClient.formationLookahead` (12 h).
@@ -147,7 +152,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   stations get their own name back (`withMainStationName`: not "KA Hbf (Vorplatz)"), DELFI's border
   points ("Kehl(Gr)") are dropped.
   Coupled trains under two numbers (ICE 940 + 950 Berlin–Hamm) show as
-  one (`Line.coupledTrains` with each train's direction, `displayName` "ICE 940 / 950",
+  one (`Line.coupledTrains` with each train's direction, `displayName` "ICE 940 / 950"; the same number under
+  another brand, e.g. ÖBB's "RJ 177" and DB's "ICE 177", is one train, not a pair: `Line.isSameTrain(as:)`,
   `Leg.directionDescription`): board rows by same time/platform/destination (`combiningCoupledTrains`), journey
   legs by `coupledTrains(for:)` (same arrival at the destination, checked against the other train's departure at
   the origin; called from `CombinedProvider.journeys` with a 3 s deadline, and again from `JourneyRefresher.refresh`
@@ -160,6 +166,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   found at a station's EVA is looked for at its other levels (`/station` `meta`, e.g. "Hamburg Hbf (S-Bahn)").
   Trains that ran over 4 hours ago aren't asked about (`changesMemory`): DB has dropped their changes and
   would report them on time. Without live data a time has no `actual`, so no delay shows (not "+0").
+  A stop DB schedules without a change only counts as on time when the train runs within 2 h
+  (`infersOnTime`); a journey tomorrow shows plain times, and `JourneyRefresher.droppingInferredOnTime` clears
+  such made-up "pünktlich" from journeys saved earlier.
 - Logic: `JourneyReplanner`, `ConnectionCheck` (`ConnectionIssue`, `JourneyRefresher`), `PlatformChange`
   (platform changes since the last refresh → push, ignores sectors/bus bays), `TrainRoutePlanner`,
   `ViaRoutePlanner` (vias without minimum stay keep a through train as one leg), `TrainPicker` (also
@@ -168,7 +177,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   connection, e.g. ICE 204 Harburg → Hamburg Hbf → RJ; both added to search results in `JourneyResultsView`), `StationCalls` (hides routes that change onto a train also calling at
   the origin, or leave one also calling at the destination – e.g. Berlin Hbf → Halle → back via Hbf; not for via searches), `TicketFilter`/`BC100Rules`, `BoardFilter`.
 - `Traewelling/` – OAuth PKCE (`TraewellingAuth`, `TokenStore`), `TraewellingClient`
-  (check-ins, history), `QuickTag`.
+  (check-ins, history), `QuickTag`. Finding the train asks only the nearest few stations' departures, in parallel
+  (12 s timeout), and caches autocomplete/departures, so retries and "Manuell eintragen" (`checkinAsManualTrip`) don't search again (#106).
 - `Tickets/` – DB tickets by order number: `DBOrder` reads bahn.de's order JSON into `DBTicket`s (one per
   "Leistungsbündel"; partner tickets like Eurostar only noted; reservation-only bookings without a ticket become
   `DBTicket`s with `isReservationOnly`), `DBOrderPage` (page URL, fill/error/fetch scripts, result),

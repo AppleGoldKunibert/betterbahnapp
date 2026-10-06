@@ -69,9 +69,11 @@ public struct CoachSequence: Sendable, Hashable {
     public var groups: [Group]
     /// Front of the train first.
     public var coaches: [Coach]
-    /// Whether the train leaves towards the platform's end (the last sector); nil when unknown.
+    /// Whether the train leaves towards the platform's end (the last sector); nil when unknown. For
+    /// vagonweb's plan (no platform) false means the first coach leads, nil that the direction is unknown.
     public var travelsTowardsPlatformEnd: Bool?
-    /// bahn.de says the sequence differs from the planned one (e.g. a trainset is missing or reversed).
+    /// bahn.de's own `sequenceStatus` flag. It is set for nearly every train (also when coaches and
+    /// classes match the plan), so the app compares with vagonweb's plan itself (`deviations(fromPlan:)`).
     public var differsFromSchedule: Bool
     /// Series, Tz and Taufname of the requested train's trainsets.
     public var formation: TrainFormation
@@ -84,13 +86,124 @@ public struct CoachSequence: Sendable, Hashable {
     }
 
     public var source: Source = .bahnDe
+    /// vagonweb's plan only: the stations up to this stop where the train changes direction (it is
+    /// shown turned round after an odd number of them).
+    public var reversals: [String] = []
+
+    /// A group with nothing but locomotives. bahn.de lists a locomotive as its own group with the
+    /// station where it is changed as destination, which is no part of the train passengers ride on.
+    public func isLocomotiveOnly(group index: Int) -> Bool {
+        let vehicles = coaches.filter { $0.group == index }
+        return !vehicles.isEmpty && vehicles.allSatisfy { $0.kind == .locomotive }
+    }
+
+    /// The groups passengers ride in: all but those of locomotives alone.
+    public var travellingGroups: [Group] {
+        let travelling = groups.indices.filter { !isLocomotiveOnly(group: $0) }
+        return travelling.isEmpty ? groups : travelling.map { groups[$0] }
+    }
 
     /// Groups that run as another train with another destination than the requested one.
-    public var hasOtherTrains: Bool { groups.contains { !$0.isRequestedTrain } }
+    public var hasOtherTrains: Bool { travellingGroups.contains { !$0.isRequestedTrain } }
     /// Several trains run in this consist, each under its own number (coupled, or split later on).
-    public var hasSeveralTrains: Bool { Set(groups.compactMap(\.trainName)).count > 1 }
+    public var hasSeveralTrains: Bool { Set(travellingGroups.compactMap(\.trainName)).count > 1 }
     /// Its parts go on to different places, so it matters which coach you board.
-    public var partsGoToDifferentPlaces: Bool { Set(groups.compactMap(\.destination)).count > 1 }
+    public var partsGoToDifferentPlaces: Bool { Set(travellingGroups.compactMap(\.destination)).count > 1 }
+}
+
+// MARK: - Compared with the plan
+
+extension CoachSequence {
+    /// What differs from the planned Wagenreihung (vagonweb's), as short German notes: missing or
+    /// extra coaches ("Wagen 31–39 fehlen") and coaches in another class. The order is left out on
+    /// purpose: the same train standing the other way round (first class at the back after a change
+    /// of direction) is not a different Wagenreihung, and the platform diagram already shows where
+    /// each coach stops. Empty when nothing differs or there is no plan to compare with.
+    public func deviations(fromPlan plan: CoachSequence) -> [String] {
+        let planned = plan.coaches.filter(\.isPassengerCoach)
+        let actual = coaches.filter(\.isPassengerCoach)
+        guard !planned.isEmpty, !actual.isEmpty else { return [] }
+
+        let plannedNumbers = planned.compactMap(\.number)
+        let actualNumbers = Set(actual.compactMap(\.number))
+        // Compare coach by coach when both number their coaches the same way.
+        if plannedNumbers.count == planned.count, actualNumbers.count == actual.compactMap(\.number).count,
+           actual.allSatisfy({ $0.number != nil }), !actualNumbers.isDisjoint(with: plannedNumbers) {
+            var notes: [String] = []
+            let missing = plannedNumbers.filter { !actualNumbers.contains($0) }
+            if !missing.isEmpty {
+                notes.append("Wagen \(Self.numberList(missing)) \(missing.count == 1 ? "fehlt" : "fehlen")")
+            }
+            // Coaches of trains coupled to this one aren't in its plan.
+            if !hasSeveralTrains {
+                let extra = actual.filter { coach in
+                    groups.indices.contains(coach.group) && groups[coach.group].isRequestedTrain && !plannedNumbers.contains(coach.number!)
+                }.compactMap(\.number)
+                if !extra.isEmpty { notes.append("Zusätzlich Wagen \(Self.numberList(extra))") }
+            }
+            let plannedByNumber = Dictionary(planned.map { ($0.number!, $0) }, uniquingKeysWith: { first, _ in first })
+            var nowFirst: [String] = []
+            var nowSecond: [String] = []
+            for coach in actual where coach.kind == .passenger {
+                guard let plannedCoach = plannedByNumber[coach.number!], plannedCoach.kind == .passenger,
+                      plannedCoach.firstClass != coach.firstClass else { continue }
+                if coach.firstClass { nowFirst.append(coach.number!) } else { nowSecond.append(coach.number!) }
+            }
+            if !nowFirst.isEmpty { notes.append("Wagen \(Self.numberList(nowFirst)): 1. statt 2. Klasse") }
+            if !nowSecond.isEmpty { notes.append("Wagen \(Self.numberList(nowSecond)): 2. statt 1. Klasse") }
+            return notes
+        }
+
+        // Otherwise only the number of coaches and of first-class ones.
+        var notes: [String] = []
+        if actual.count != planned.count {
+            notes.append("\(actual.count) statt \(planned.count) Wagen")
+        }
+        let actualFirst = actual.count { $0.firstClass }
+        let plannedFirst = planned.count { $0.firstClass }
+        if actualFirst != plannedFirst {
+            notes.append("\(actualFirst) statt \(plannedFirst) Wagen mit 1. Klasse")
+        }
+        return notes
+    }
+
+    /// "21", "21, 23", "31–39": coach numbers in order, runs of three or more joined.
+    static func numberList(_ numbers: [String]) -> String {
+        let ints = numbers.compactMap { Int($0) }
+        guard ints.count == numbers.count else { return numbers.joined(separator: ", ") }
+        var parts: [String] = []
+        var runStart: Int?
+        var previous: Int?
+        func close() {
+            guard let start = runStart, let end = previous else { return }
+            parts += end - start >= 2 ? ["\(start)–\(end)"] : (start...end).map(String.init)
+        }
+        for number in Set(ints).sorted() {
+            if let last = previous, number == last + 1 {
+                previous = number
+            } else {
+                close()
+                runStart = number
+                previous = number
+            }
+        }
+        close()
+        return parts.joined(separator: ", ")
+    }
+
+    /// The plan as the train runs at a stop after `reversals` (stations where it changes direction):
+    /// turned round after an odd number of them.
+    public func turned(after reversals: [String]) -> CoachSequence {
+        var sequence = self
+        sequence.reversals = reversals
+        guard reversals.count % 2 == 1 else { return sequence }
+        sequence.coaches = coaches.reversed().enumerated().map { index, coach in
+            var coach = coach
+            coach.id = index
+            return coach
+        }
+        return sequence
+    }
 }
 
 extension CoachSequence.Coach.Kind {
@@ -111,10 +224,10 @@ extension CoachSequence.Coach.Kind {
 extension BahnDeClient {
     static func coachSequence(from response: SequenceResponse, category: String, number: Int?,
                               coupledNumbers: Set<Int> = []) -> CoachSequence {
-        let groups = response.groups ?? []
-        let requestedNumbers = Set(groups.compactMap(\.transport?.number))
         // Trains coupled to it for the whole ride are just as much the train asked for.
         let wanted = coupledNumbers.union([number].compactMap(\.self))
+        let groups = requestedTrainGroups(response.groups ?? [], wanted: wanted)
+        let requestedNumbers = Set(groups.compactMap(\.transport?.number))
         // Without train numbers every group counts as the requested train.
         let isRequested = { (group: SequenceResponse.Group) in
             requestedNumbers.contains(number ?? -1) ? group.transport?.number.map(wanted.contains) ?? false : true

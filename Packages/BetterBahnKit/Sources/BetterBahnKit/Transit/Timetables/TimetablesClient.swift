@@ -138,6 +138,15 @@ public struct TimetablesClient: Sendable {
         lastPlanned.addingTimeInterval(changesMemory) > now
     }
 
+    /// DB only lists changes, so a stop it schedules without one counts as on time, but only for a
+    /// train about to run: hours ahead (a journey tomorrow) nothing is live yet, and an inferred
+    /// "pünktlich"/"+0" would be made up. Then only a change DB actually reports shows.
+    static let onTimeLookahead: TimeInterval = 2 * 3600
+
+    static func infersOnTime(departing start: Date, now: Date) -> Bool {
+        start.timeIntervalSince(now) < onTimeLookahead
+    }
+
     /// Drops cached delays so the next lookup asks DB again (e.g. on pull-to-refresh).
     public static func invalidateDelays() async {
         await cache.clear(prefix: "fchg/")
@@ -290,7 +299,7 @@ public struct TimetablesClient: Sendable {
     /// Live data for `leg`'s departure and arrival, matched by category, train number and planned
     /// time. Returns `nil` when nothing changed is known yet at either station, so callers should
     /// keep whatever schedule they already have.
-    public func realtime(for leg: Leg) async -> TimetablesLegOverride? {
+    public func realtime(for leg: Leg, now: Date = .now) async -> TimetablesLegOverride? {
         guard !leg.isWalking, let line = leg.line, let number = line.dispatchNumber,
               let category = Self.category(from: line.name) else { return nil }
 
@@ -301,11 +310,13 @@ public struct TimetablesClient: Sendable {
         var departureCancelled: Bool?
         var arrivalCancelled: Bool?
         var messages: [TimetablesMessage] = []
+        let onTime = Self.infersOnTime(departing: leg.departure.planned, now: now)
 
         if let eva = await eva(for: leg.origin),
            let event = await liveEvent(eva: eva, category: category, number: number, time: leg.departure.planned, side: \.departure) {
-            // DB lists only changes: a matched stop without one is live and on time.
-            departure = TimeInfo(planned: leg.departure.planned, actual: event.actual ?? leg.departure.actual ?? leg.departure.planned)
+            // DB lists only changes: a matched stop without one is on time (`infersOnTime`).
+            departure = TimeInfo(planned: leg.departure.planned,
+                                 actual: event.actual ?? leg.departure.actual ?? (onTime ? leg.departure.planned : nil))
             departurePlatform = Self.mergedPlatform(existing: leg.departurePlatform, event: event)
             departureCancelled = event.cancelled
             messages += event.messages
@@ -313,7 +324,8 @@ public struct TimetablesClient: Sendable {
 
         if let eva = await eva(for: leg.destination),
            let event = await liveEvent(eva: eva, category: category, number: number, time: leg.arrival.planned, side: \.arrival) {
-            arrival = TimeInfo(planned: leg.arrival.planned, actual: event.actual ?? leg.arrival.actual ?? leg.arrival.planned)
+            arrival = TimeInfo(planned: leg.arrival.planned,
+                               actual: event.actual ?? leg.arrival.actual ?? (onTime ? leg.arrival.planned : nil))
             arrivalPlatform = Self.mergedPlatform(existing: leg.arrivalPlatform, event: event)
             arrivalCancelled = event.cancelled
             messages += event.messages
@@ -333,16 +345,17 @@ public struct TimetablesClient: Sendable {
     }
 
     /// `leg`'s stopovers with DB Timetables' delays laid over them: where DB knows a stop its data wins
-    /// (unchanged means on time, not cancelled), and a stop DB can't match keeps whatever it already had.
-    public func stopoversWithRealtime(for leg: Leg) async -> [Stopover] {
-        await liveStopovers(for: leg).stopovers
+    /// (unchanged means on time once the train is about to run, see `infersOnTime`; not cancelled), and a
+    /// stop DB can't match keeps whatever it already had.
+    public func stopoversWithRealtime(for leg: Leg, now: Date = .now) async -> [Stopover] {
+        await liveStopovers(for: leg, now: now).stopovers
     }
 
     /// `stopoversWithRealtime(for:)` plus every delay reason and notice DB reports at any of those
     /// stops — what DB Navigator lists under "Aktuelle Informationen" for this part of the ride.
-    public func liveStopovers(for leg: Leg) async -> (stopovers: [Stopover], messages: [TrainMessage]) {
+    public func liveStopovers(for leg: Leg, now: Date = .now) async -> (stopovers: [Stopover], messages: [TrainMessage]) {
         guard canLookUp(leg), let line = leg.line else { return (leg.stopovers, []) }
-        let (stopovers, messages) = await stopoversWithRealtime(leg.stopovers, line: line)
+        let (stopovers, messages) = await stopoversWithRealtime(leg.stopovers, line: line, now: now)
         return (stopovers, TimetablesMessage.resolve(messages))
     }
 
@@ -353,15 +366,19 @@ public struct TimetablesClient: Sendable {
         if let last = trip.stopovers.last.flatMap({ $0.arrival?.planned ?? $0.departure?.planned }),
            !Self.knowsChanges(until: last, now: now) { return trip }
         var trip = trip
-        let (stopovers, messages) = await stopoversWithRealtime(trip.stopovers, line: line)
+        let (stopovers, messages) = await stopoversWithRealtime(trip.stopovers, line: line, now: now)
         trip.stopovers = stopovers
         trip.messages = TrainMessage.merged(trip.messages + TimetablesMessage.resolve(messages))
         return trip
     }
 
-    private func stopoversWithRealtime(_ original: [Stopover], line: Line) async -> ([Stopover], [TimetablesMessage]) {
+    private func stopoversWithRealtime(_ original: [Stopover], line: Line, now: Date) async -> ([Stopover], [TimetablesMessage]) {
         guard let number = line.dispatchNumber, let category = Self.category(from: line.name) else { return (original, []) }
         var stops = original
+        // Judged once for the whole run, so every stop agrees: before, a train tomorrow showed "+0"
+        // at the stops whose schedule DB already had and plain times further on.
+        let onTime = original.first.flatMap { $0.departure?.planned ?? $0.arrival?.planned }
+            .map { Self.infersOnTime(departing: $0, now: now) } ?? false
         var messages: [TimetablesMessage] = []
         await withTaskGroup(of: (Int, TimetablesEvent?, TimetablesEvent?).self) { group in
             for index in stops.indices {
@@ -383,14 +400,14 @@ public struct TimetablesClient: Sendable {
                 messages += (arrival?.messages ?? []) + (departure?.messages ?? [])
                 if let arrival {
                     let known = stops[index].arrival
-                    stops[index].arrival?.actual = arrival.actual ?? known?.actual ?? known?.planned
+                    stops[index].arrival?.actual = arrival.actual ?? known?.actual ?? (onTime ? known?.planned : nil)
                     // DB wins here too, both ways: Transitous' realtime feed only knows whole skipped
                     // stops and has been seen flagging stops DB runs normally (RE 3318 Wittenberg–Zahna).
                     stops[index].arrivalCancelled = arrival.cancelled
                 }
                 if let departure {
                     let known = stops[index].departure
-                    stops[index].departure?.actual = departure.actual ?? known?.actual ?? known?.planned
+                    stops[index].departure?.actual = departure.actual ?? known?.actual ?? (onTime ? known?.planned : nil)
                     stops[index].departureCancelled = departure.cancelled
                 }
             }
