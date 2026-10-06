@@ -91,6 +91,7 @@ struct RootView: View {
             } else if phase == .background {
                 model.stopRefreshing()
                 model.scheduleLiveActivityBackgroundCheck()
+                Task { await TrainSightings.shared.flush() }
             }
         }
         #if DEBUG

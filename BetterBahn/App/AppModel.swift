@@ -1118,6 +1118,16 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(trainPositionRefresh.rawValue, forKey: "trainPositionRefresh") }
     }
 
+    /// Reports the regional and long-distance trains the app shows to BetterBahn's statistics server
+    /// (`TrainSightings`, #169). On by default, per device.
+    var shareTrainStatistics: Bool {
+        didSet {
+            UserDefaults.standard.set(shareTrainStatistics, forKey: "shareTrainStatistics")
+            let enabled = shareTrainStatistics
+            Task { await TrainSightings.shared.setEnabled(enabled) }
+        }
+    }
+
     /// Unlocks the features below; each one still has to be switched on by itself.
     var expertMode: Bool {
         didSet {
@@ -1166,6 +1176,9 @@ final class AppSettings {
         ticketType = defaults.string(forKey: "ticketType").flatMap(TicketType.init) ?? .deutschlandticket
         liveActivitiesEnabled = defaults.object(forKey: "liveActivitiesEnabled") as? Bool ?? true
         trainPositionRefresh = defaults.string(forKey: "trainPositionRefresh").flatMap(TrainPositionRefresh.init) ?? .automatic
+        let shareTrainStatistics = defaults.object(forKey: "shareTrainStatistics") as? Bool ?? true
+        self.shareTrainStatistics = shareTrainStatistics
+        Task { await TrainSightings.shared.setEnabled(shareTrainStatistics) }
         expertMode = defaults.bool(forKey: "expertMode")
         expertTraewelling = defaults.bool(forKey: "expertTraewelling")
         expertEditJourney = defaults.bool(forKey: "expertEditJourney")
