@@ -111,7 +111,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `sequenceReference`),
   board + `fahrt` → `JourneyStop`s for Zusatzhalte (`inserting`, `nextRegularStop`) and platforms Transitous lacks
   (`fillingMissingPlatforms`, e.g. Hamburg Hbf; saved journeys via `JourneyRefresher`, which also applies the names below), and bahn.de's
-  own train names for boards (departures and arrivals) and journey legs (`correctingTrainNames`, e.g. "RJ 171" that Transitous calls "ICE 171"). Responses are
+  own train names for boards (departures and arrivals) and journey legs (`correctingTrainNames`, e.g. "RJ 171" that Transitous calls "ICE 171"),
+  and DB's live times (`ezZeit`) for every train on boards (not subway, tram, bus; RE/RB, S-Bahn and other brands by run number or name) (`correctingFromBoard`, `applyingLiveTimes`), which
+  beat DELFI's forecasts in Transitous. Responses are
   cached; a 403/429 pauses all bahn.de requests for 10 min (`BahnDeGate`).
 - `Transit/Vagonweb/` – vagonweb.cz (used with their permission, #95): scheduled train compositions for the
   whole timetable year, read from the train's HTML page (`VagonwebComposition.scheduled`, fixtures
@@ -171,7 +173,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   (platform changes since the last refresh → push, ignores sectors/bus bays), `TrainRoutePlanner`,
   `ViaRoutePlanner` (vias without minimum stay keep a through train as one leg), `TrainPicker` (also
   `journeysIgnoringBoardingRules`: direct trains with "Nur Ein-/Ausstieg" for the expert option of that name,
-  added to search results in `JourneyResultsView`), `StationCalls` (hides routes that change onto a train also calling at
+  and `journeysContinuingFromRestrictedTrains`: "Nur Ausstieg" trains that end short of the destination plus an onward
+  connection, e.g. ICE 204 Harburg → Hamburg Hbf → RJ; both added to search results in `JourneyResultsView`), `StationCalls` (hides routes that change onto a train also calling at
   the origin, or leave one also calling at the destination – e.g. Berlin Hbf → Halle → back via Hbf; not for via searches), `TicketFilter`/`BC100Rules`, `BoardFilter`.
 - `Traewelling/` – OAuth PKCE (`TraewellingAuth`, `TokenStore`), `TraewellingClient`
   (check-ins, history), `QuickTag`. Finding the train asks only the nearest few stations' departures, in parallel

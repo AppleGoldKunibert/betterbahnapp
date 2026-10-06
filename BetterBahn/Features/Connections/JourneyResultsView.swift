@@ -499,12 +499,18 @@ struct JourneyResultsView: View {
     /// destination (e.g. Berlin Hbf → Halle → back to Gesundbrunnen on an ICE that stops at Hbf too).
     /// Via searches keep those, since there the change is wanted. With the expert option "Nur
     /// Ein-/Ausstieg ignorieren" it also finds the direct trains the timetable doesn't let you board or
-    /// leave here, which the search itself never offers.
+    /// leave here, which the search itself never offers, and trains you may not board here that end
+    /// short of the destination, with a connection on from where they stop.
     private func detourLookup(start: Date, end: Date, addingRestricted: Bool) async -> DetourLookup {
         let picker = model.trainPicker
         let calls = await picker.stationCalls(from: search.from, to: search.to, start: start, end: end)
         guard addingRestricted else { return DetourLookup(calls: calls, extra: []) }
-        var extra = await picker.journeysIgnoringBoardingRules(from: search.from, to: search.to, calls: calls)
+        // Also trains you may not board here that don't go all the way, with a connection from where they stop.
+        let query = JourneyQuery(from: search.from, to: search.to, date: start, products: search.products,
+                                 maxTransfers: search.maxTransfers)
+        async let continuing = picker.journeysContinuingFromRestrictedTrains(query, calls: calls, end: end)
+        let direct = await picker.journeysIgnoringBoardingRules(from: search.from, to: search.to, calls: calls)
+        var extra = (direct + (await continuing))
             .filter { journey in
                 journey.transitLegs.allSatisfy { search.products.contains($0.line?.product ?? .other) }
             }
@@ -518,7 +524,12 @@ struct JourneyResultsView: View {
     private func applying(_ lookup: DetourLookup, to list: [Journey]) -> [Journey] {
         let kept = list.filter { !lookup.calls.isDetour($0) }.map(lookup.calls.marking)
         let direct = StationCalls.directTripIds(kept)
-        let extra = lookup.extra.filter { !($0.transitLegs.first?.tripId.map(direct.contains) ?? false) }
+        let extra = lookup.extra.filter { journey in
+            guard !(journey.transitLegs.first?.tripId.map(direct.contains) ?? false) else { return false }
+            // Not worth showing when a normal connection leaves no earlier and arrives no later.
+            guard let departure = journey.departure?.best, let arrival = journey.arrival?.best else { return true }
+            return !kept.contains { ($0.departure?.best ?? .distantPast) >= departure && ($0.arrival?.best ?? .distantFuture) <= arrival }
+        }
         var updated = (kept + extra).removingDuplicateIDs()
         if !extra.isEmpty {
             updated.sort { ($0.departure?.planned ?? .distantFuture) < ($1.departure?.planned ?? .distantFuture) }

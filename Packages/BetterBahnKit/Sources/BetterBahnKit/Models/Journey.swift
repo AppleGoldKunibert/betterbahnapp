@@ -135,6 +135,14 @@ public struct Line: Codable, Sendable, Hashable {
     /// The number to look this train up by in DB's own feed.
     public var dispatchNumber: String? { tripNumber ?? number }
 
+    /// An S-Bahn's name with its run number, the way DB names an RE: "S 8 (37856)". Only for the train
+    /// view, the numbers are long. Other trains keep `name` (an ICE's name is its number already).
+    public var nameWithTripNumber: String {
+        guard product == .suburban, let tripNumber, tripNumber != number,
+              !name.split(whereSeparator: { !$0.isNumber }).contains(where: { $0 == tripNumber }) else { return name }
+        return "\(name) (\(tripNumber))"
+    }
+
     /// `name`, or for coupled trains every train's name, lowest number first: "ICE 940 / 950".
     public var displayName: String {
         guard let coupledNames, !coupledNames.isEmpty else { return name }

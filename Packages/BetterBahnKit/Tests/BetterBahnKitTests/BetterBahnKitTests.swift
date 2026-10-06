@@ -126,6 +126,27 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(BoardFilter().includes(entry))
     }
 
+    /// ICE 204 arrives at Hamburg-Harburg at 13:02 and leaves at 13:04, only to let people off. A
+    /// search from 13:04 must still see it (its arrival lies before the start), one from 13:05 not.
+    @Test func noBoardingTrainArrivingBeforeStartStillLeaves() throws {
+        let arrivalsJSON = """
+        {"stopTimes": [
+          {"place": {"name": "Hamburg-Harburg", "lat": 53.456, "lon": 9.992,
+             "scheduledArrival": "2026-10-06T11:02:00Z", "arrival": "2026-10-06T11:01:00Z",
+             "scheduledDeparture": "2026-10-06T11:04:00Z", "departure": "2026-10-06T11:04:00Z",
+             "pickupType": "NOT_ALLOWED", "dropoffType": "NORMAL"},
+           "mode": "HIGHSPEED_RAIL", "tripId": "ice204", "displayName": "ICE 204", "tripShortName": "204",
+           "tripTo": {"name": "Hamburg-Altona", "lat": 53.552, "lon": 9.935}}
+        ]}
+        """
+        let arrivals = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(arrivalsJSON.utf8)).stopTimes
+        let start = try #require(ISO8601DateFormatter().date(from: "2026-10-06T11:04:00Z"))
+        #expect(TransitousProvider.continuingWithoutBoarding(arrivals, missingFrom: [], departingFrom: start)
+            .map(\.tripId) == ["ice204"])
+        #expect(TransitousProvider.continuingWithoutBoarding(arrivals, missingFrom: [], departingFrom: start.addingTimeInterval(60))
+            .isEmpty)
+    }
+
     /// Real-world Transitous response for Hanau Hbf: DELFI puts some trains (ICE 12, RE50, …) at the
     /// station's bus bay "Steig F" instead of their track, so the app showed "Gleis F" rather than
     /// Gleis 6. A train must not take a bus bay's letter as its platform; a bus still does.
@@ -1622,6 +1643,14 @@ private final class CrowdedHubStopTimesProtocol: URLProtocol, @unchecked Sendabl
     @Test func lineNormalize() {
         #expect(Line.normalize("ICE  423") == Line.normalize("ice423"))
     }
+
+    @Test func sBahnNameWithTripNumber() {
+        #expect(Line(name: "S 8", number: "8", product: .suburban, operatorName: nil, tripNumber: "37856").nameWithTripNumber == "S 8 (37856)")
+        #expect(Line(name: "S 8", number: "8", product: .suburban, operatorName: nil).nameWithTripNumber == "S 8")
+        #expect(Line(name: "S 8 (37856)", number: "8", product: .suburban, operatorName: nil, tripNumber: "37856").nameWithTripNumber == "S 8 (37856)")
+        #expect(Line(name: "RE 14a", number: "14", product: .regionalExpress, operatorName: nil, tripNumber: "17677").nameWithTripNumber == "RE 14a")
+        #expect(Line(name: "U 2", number: "2", product: .subway, operatorName: nil, tripNumber: "12").nameWithTripNumber == "U 2")
+    }
 }
 
 // MARK: - Providers with mocks
@@ -2709,6 +2738,91 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         #expect(corrected[1] == entries[1])
     }
 
+    /// DB's live time from bahn.de's board replaces Transitous' (DELFI's forecast had ICE 146 leave
+    /// Berlin Hbf at 9:08, a minute early); trains without one there keep Transitous' time.
+    @Test func takesLiveTimesFromBahnDeBoard() throws {
+        let json = #"""
+        {"entries": [
+            {"journeyId": "a", "zeit": "2026-10-06T09:09:00", "ezZeit": "2026-10-06T09:12:00", "verkehrmittel": {"name": "ICE 146"}},
+            {"journeyId": "b", "zeit": "2026-10-06T09:20:00", "verkehrmittel": {"name": "ICE 1005"}}
+        ]}
+        """#
+        let board = try JSONDecoding.decoder.decode(BahnDeClient.Board.self, from: Data(json.utf8)).entries
+        let berlin = station("8011160", "Berlin Hbf")
+        func departure(_ name: String, _ number: String, planned: String, actual: String?) throws -> BoardEntry {
+            BoardEntry(kind: .departures, tripId: name, station: berlin,
+                       line: Line(name: name, number: number, product: .highSpeed, operatorName: nil),
+                       otherEnd: "Amsterdam Centraal",
+                       time: TimeInfo(planned: try #require(JSONDecoding.parseISODate(planned)),
+                                      actual: actual.flatMap(JSONDecoding.parseISODate)),
+                       platform: PlatformInfo(planned: "6", actual: nil), cancelled: false,
+                       terminatesOrOriginatesHere: false, remarks: [], source: .transitous)
+        }
+        let entries = [
+            try departure("ICE 146", "146", planned: "2026-10-06T07:09:00Z", actual: "2026-10-06T07:08:00Z"),
+            try departure("ICE 1005", "1005", planned: "2026-10-06T07:20:00Z", actual: "2026-10-06T07:25:00Z"),
+            try departure("ICE 148", "148", planned: "2026-10-06T07:30:00Z", actual: nil),
+        ]
+
+        let corrected = BahnDeClient.applyingLiveTimes(entries, using: board)
+
+        #expect(corrected[0].time.actual == JSONDecoding.parseISODate("2026-10-06T07:12:00Z"))
+        #expect(corrected[1] == entries[1])
+        #expect(corrected[2] == entries[2])
+        // Regional and S-Bahn trains by their run number, which bahn.de's journey ID carries; a line
+        // name alone only at the same minute and when just one entry has it.
+        let localJSON = #"""
+        {"entries": [
+            {"journeyId": "2|#VN#1#ST#1#PI#0#ZI#1#TA#0#DA#61025#1S#1#1T#1#LS#1#LT#1#PU#80#RT#1#CA#RE#ZE#3148#ZB#RE 4#PC#3#FR#1#FT#1#TO#1#TT#1#", "zeit": "2026-10-06T09:09:00", "ezZeit": "2026-10-06T09:11:00", "verkehrmittel": {"name": "RE 4", "produktGattung": "REGIONAL"}},
+            {"journeyId": "2|#CA#S#ZE#5540#ZB#S 5#", "zeit": "2026-10-06T09:11:00", "ezZeit": "2026-10-06T09:13:00", "verkehrmittel": {"name": "S 5", "produktGattung": "SBAHN"}},
+            {"journeyId": "x", "zeit": "2026-10-06T09:09:00", "ezZeit": "2026-10-06T09:30:00", "verkehrmittel": {"name": "S 9", "produktGattung": "SBAHN"}},
+            {"journeyId": "y", "zeit": "2026-10-06T09:09:00", "ezZeit": "2026-10-06T09:40:00", "verkehrmittel": {"name": "S 9", "produktGattung": "SBAHN"}}
+        ]}
+        """#
+        let localBoard = try JSONDecoding.decoder.decode(BahnDeClient.Board.self, from: Data(localJSON.utf8)).entries
+        func local(_ name: String, _ product: Product, run: String?, planned: String) throws -> BoardEntry {
+            var entry = try departure(name, "", planned: planned, actual: planned)
+            entry.line = Line(name: name, number: nil, product: product, operatorName: nil, tripNumber: run)
+            return entry
+        }
+        let locals = [
+            try local("RE4", .regionalExpress, run: "3148", planned: "2026-10-06T07:09:00Z"),
+            try local("S5", .suburban, run: "5540", planned: "2026-10-06T07:11:00Z"),
+            // Another S5 run at the same minute: not this entry.
+            try local("S5", .suburban, run: "5541", planned: "2026-10-06T07:11:00Z"),
+            // Two S 9 at that minute on bahn.de, no run number: ambiguous, unchanged.
+            try local("S9", .suburban, run: nil, planned: "2026-10-06T07:09:00Z"),
+        ]
+        let localCorrected = BahnDeClient.applyingLiveTimes(locals, using: localBoard)
+        #expect(localCorrected[0].time.actual == JSONDecoding.parseISODate("2026-10-06T07:11:00Z"))
+        #expect(localCorrected[1].time.actual == JSONDecoding.parseISODate("2026-10-06T07:13:00Z"))
+        #expect(localCorrected[2] == locals[2])
+        #expect(localCorrected[3] == locals[3])
+        // Long-distance trains of other brands (NJ, FLX) by name and minute, never from a regional entry.
+        let otherJSON = #"""
+        {"entries": [
+            {"journeyId": "nj", "zeit": "2026-10-06T09:09:00", "ezZeit": "2026-10-06T09:19:00", "verkehrmittel": {"name": "NJ 40491", "produktGattung": "EC_IC"}},
+            {"journeyId": "rb", "zeit": "2026-10-06T09:09:00", "ezZeit": "2026-10-06T09:30:00", "verkehrmittel": {"name": "NJ 40491", "produktGattung": "REGIONAL"}}
+        ]}
+        """#
+        let otherBoard = try JSONDecoding.decoder.decode(BahnDeClient.Board.self, from: Data(otherJSON.utf8)).entries
+        let nightjet = try local("NJ 40491", .longDistance, run: nil, planned: "2026-10-06T07:09:00Z")
+        #expect(BahnDeClient.applyingLiveTimes([nightjet], using: otherBoard).first?.time.actual
+                == JSONDecoding.parseISODate("2026-10-06T07:19:00Z"))
+        // Subway, tram and bus are never looked up.
+        let tram = try local("M5", .tram, run: nil, planned: "2026-10-06T07:09:00Z")
+        #expect(!BahnDeClient.isLookedUp(tram.line))
+        #expect(BahnDeClient.isLookedUp(nightjet.line))
+        // A long-distance train never takes a regional entry's time, even with the same number.
+        let ice4 = try departure("ICE 4", "4", planned: "2026-10-06T07:09:00Z", actual: nil)
+        #expect(BahnDeClient.applyingLiveTimes([ice4], using: localBoard) == [ice4])
+
+        // A departures board never touches arrivals.
+        var arrival = entries[0]
+        arrival.kind = .arrivals
+        #expect(BahnDeClient.applyingLiveTimes([arrival], using: board) == [arrival])
+    }
+
     /// Arrivals are matched against bahn.de's arrivals board, by arrival time.
     @Test func takesTrainNamesFromBahnDeArrivalsBoard() throws {
         let json = #"{"entries": [{"journeyId": "a", "zeit": "2026-09-30T09:07:00", "verkehrmittel": {"name": "RJ 171"}}]}"#
@@ -3282,6 +3396,58 @@ final class RoutingMockProvider: TransitProvider, @unchecked Sendable {
     func trip(id: String) async throws -> Trip {
         guard let trip = trips[id] else { throw TransitError.notFound(id) }
         return trip
+    }
+}
+
+/// Expert option "Nur Ein-/Ausstieg ignorieren": a train you may not board at the origin that ends
+/// short of the destination, continued from where it stops (ICE 204 Harburg → Hamburg Hbf, RJ 177 on).
+@Suite struct RestrictedTrainContinuationTests {
+    let harburg = station("8000147", "Hamburg-Harburg", 53.456, 9.992)
+    let hbf = station("8002549", "Hamburg Hbf", 53.553, 10.007)
+    let altona = station("8002553", "Hamburg-Altona", 53.552, 9.935)
+    let berlin = station("8011160", "Berlin Hbf", 52.525, 13.369)
+    let base = Date(timeIntervalSince1970: 1_800_000_000)
+
+    func time(_ minutes: Double) -> TimeInfo { TimeInfo(planned: base.addingTimeInterval(minutes * 60), actual: nil) }
+
+    func trip(_ id: String, _ name: String, _ stops: [Stopover]) -> Trip {
+        Trip(id: id, line: Line(name: name, number: String(name.split(separator: " ").last!), product: .highSpeed,
+                                operatorName: nil),
+             direction: stops.last?.station.name, stopovers: stops, cancelled: false, remarks: [], source: .bahnDe)
+    }
+
+    @Test func ridesRestrictedTrainAndContinues() async throws {
+        let ice204 = trip("ice204", "ICE 204", [
+            Stopover(station: harburg, arrival: time(-2), departure: time(0), arrivalPlatform: nil, departurePlatform: nil,
+                     cancelled: false, access: .exitOnly),
+            Stopover(station: hbf, arrival: time(11), departure: time(14), arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+            Stopover(station: altona, arrival: time(22), departure: nil, arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+        ])
+        let rj177 = trip("rj177", "RJ 177", [
+            Stopover(station: hbf, arrival: nil, departure: time(28), arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+            Stopover(station: berlin, arrival: time(139), departure: nil, arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+        ])
+        let slower = trip("ice801", "ICE 801", [
+            Stopover(station: hbf, arrival: nil, departure: time(47), arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+            Stopover(station: berlin, arrival: time(167), departure: nil, arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+        ])
+        let mock = RoutingMockProvider()
+        mock.trips["ice204"] = ice204
+        mock.routes["\(hbf.name) -> \(berlin.name)"] = [Journey(legs: [slower.leg(from: hbf, to: berlin)!], source: .bahnDe),
+                                                         Journey(legs: [rj177.leg(from: hbf, to: berlin)!], source: .bahnDe)]
+        let entry = BoardEntry(kind: .departures, tripId: "ice204", station: harburg, line: ice204.line!, otherEnd: altona.name,
+                               time: time(0), platform: PlatformInfo(planned: "2", actual: nil), cancelled: false,
+                               terminatesOrOriginatesHere: false, remarks: [], access: .exitOnly, source: .bahnDe)
+        let calls = StationCalls(departuresAtOrigin: [entry], departuresAtDestination: [], arrivalsAtDestination: [])
+        let picker = TrainPicker(provider: CombinedProvider(primary: mock, bahnDe: nil, bahnExpert: nil, vagonweb: nil, bahnJetzt: nil))
+
+        let journeys = await picker.journeysContinuingFromRestrictedTrains(
+            JourneyQuery(from: harburg, to: berlin, date: base), calls: calls, end: base.addingTimeInterval(3600), maxAlightStops: 1)
+        let best = try #require(journeys.first)
+        #expect(journeys.count == 1)
+        #expect(best.transitLegs.map { $0.line?.name } == ["ICE 204", "RJ 177"])
+        #expect(best.transitLegs.first?.breaksBoardingRules == true)
+        #expect(best.arrival?.planned == time(139).planned)
     }
 }
 
