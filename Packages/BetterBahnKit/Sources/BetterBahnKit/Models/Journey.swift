@@ -115,6 +115,23 @@ public struct Line: Codable, Sendable, Hashable {
         return String(last)
     }
 
+    /// Whether `name` is this train under another brand rather than another train: the same number
+    /// ("ICE 177" for the Railjet "RJ 177", which Transitous has from both DB's and ÖBB's feed).
+    public func isSameTrain(as name: String) -> Bool {
+        guard let own = number ?? Self.trailingNumber(self.name), let other = Self.trailingNumber(name) else { return false }
+        return own.drop(while: { $0 == "0" }) == other.drop(while: { $0 == "0" })
+    }
+
+    /// `coupledTrains` without entries that are this very train under another name (see `isSameTrain(as:)`),
+    /// nil when none is left.
+    public var withoutSelfCoupling: Line {
+        guard let coupledTrains, coupledTrains.contains(where: { isSameTrain(as: $0.name) }) else { return self }
+        var line = self
+        let others = coupledTrains.filter { !isSameTrain(as: $0.name) }
+        line.coupledTrains = others.isEmpty ? nil : others
+        return line
+    }
+
     /// The number to look this train up by in DB's own feed.
     public var dispatchNumber: String? { tripNumber ?? number }
 

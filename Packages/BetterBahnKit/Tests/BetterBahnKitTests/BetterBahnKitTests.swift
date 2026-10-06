@@ -25,6 +25,41 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(first.source == .transitous)
     }
 
+    /// Real-world Transitous rows at Berlin Hbf: DELFI names the RE 3 "RE3 (3309)", VBB's own feed
+    /// only "RE3" with the run number as trip short name, so trains only VBB had showed no number.
+    /// Both are named the DELFI way, and the same run from both feeds is one board row.
+    @Test func regionalRunNumberFromVBB() throws {
+        func row(_ minute: Int, _ name: String, _ short: String, _ trip: String, live: Bool, to: String) -> String {
+            """
+            {"place": {"name": "Berlin Hbf", "lat": 52.52, "lon": 13.37,
+                       "departure": "2026-10-06T12:\(minute):00Z", "scheduledDeparture": "2026-10-06T12:\(minute):00Z"},
+             "mode": "REGIONAL_RAIL", "realTime": \(live), "tripId": "\(trip)", "headsign": "\(to)",
+             "routeShortName": "\(name.prefix { $0 != " " })", "displayName": "\(name)", "tripShortName": "\(short)"}
+            """
+        }
+        let json = """
+        {"stopTimes": [
+            \(row(41, "RE3 (3309)", "003309", "delfi-3309", live: true, to: "Lutherstadt Wittenberg Hbf")),
+            \(row(41, "RE3", "03309", "vbb-3309", live: false, to: "Lutherstadt Wittenberg, Hauptbahnhof")),
+            \(row(46, "RE8", "62018", "vbb-62018", live: true, to: "Elsterwerda, Bahnhof")),
+            \(row(46, "RE8 (62018)", "062018", "delfi-62018", live: true, to: "Elsterwerda, Bahnhof")),
+            \(row(52, "RE3", "03351", "vbb-3351", live: true, to: "Lutherstadt Wittenberg Hbf")),
+            \(row(53, "RE3", "03353", "vbb-3353", live: false, to: "Lutherstadt Wittenberg Hbf")),
+            \(row(54, "MEX18", "", "mex", live: false, to: "Sonstwo"))
+        ]}
+        """
+        let stopTimes = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(json.utf8)).stopTimes
+        let entries = stopTimes.compactMap { $0.toEntry(kind: .departures) }
+        #expect(entries[1].line.name == "RE3 (3309)")
+        #expect(entries[1].line.number == "3309" && entries[1].line.tripNumber == "3309")
+        #expect(entries[4].line.name == "RE3 (3351)")
+        #expect(entries[6].line.name == "MEX18")
+
+        let board = TransitousProvider.deduplicated(entries)
+        #expect(board.map(\.tripId) == ["delfi-3309", "vbb-62018", "vbb-3351", "vbb-3353", "mex"])
+        #expect(board.map(\.line.name) == ["RE3 (3309)", "RE8 (62018)", "RE3 (3351)", "RE3 (3353)", "MEX18"])
+    }
+
     /// Real-world response shape for the S-Bahn at Berlin Gesundbrunnen: VBB's feed leaves `track`
     /// and `scheduledTrack` both null and only encodes the platform as free text in `description`
     /// ("S-Bahnsteig Gleis 4"), unlike its U-Bahn feed which populates `track` directly - this is why
@@ -909,10 +944,10 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         defer { session.invalidateAndCancel() }
         let provider = TransitousProvider(http: HTTPClient(session: session))
 
-        let start = Date.now
         let stations = try await provider.searchStations("Po")
         #expect(stations.map(\.id) == ["potsdamHbf"])
-        #expect(Date.now.timeIntervalSince(start) < 4)
+        // Checked against the slow answer itself, not a stopwatch, so a busy test runner can't fail it.
+        #expect(!SlowExtraGeocodeProtocol.answeredSlowly.withLock { $0 })
         #expect(CombinedProvider.isShortQuery("Po "))
         #expect(!CombinedProvider.isShortQuery("Pot"))
     }
@@ -1171,6 +1206,63 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(merged.count == 2)
     }
 
+    /// ICE 146 Berlin–Amsterdam at Berlin Hbf: DB's feed has it ending in Hengelo (with realtime),
+    /// NS's feed starting in Berlin and ending in Amsterdam (without). Neither headsign goes beyond
+    /// its own trip, but same number, time and track are the same train: one row, the live one.
+    @Test func stopTimesMergeSameTrainFromTwoFeeds() throws {
+        let json = """
+        {"stopTimes": [
+            {"place": {"name": "Berlin Hbf", "stopId": "nl:1", "lat": 52.52, "lon": 13.37,
+                       "scheduledDeparture": "2026-10-06T07:09:00Z", "departure": "2026-10-06T07:09:00Z",
+                       "scheduledTrack": "6"},
+             "mode": "HIGHSPEED_RAIL", "realTime": false, "headsign": "Amsterdam Centraal",
+             "tripFrom": {"name": "Berlin Hbf", "lat": 52.52, "lon": 13.37},
+             "tripTo": {"name": "Amsterdam Centraal", "lat": 52.38, "lon": 4.9},
+             "tripId": "nl-trip", "routeShortName": "ICE", "tripShortName": "146", "displayName": "ICE 146",
+             "agencyName": "NS International"},
+            {"place": {"name": "S+U Berlin Hauptbahnhof", "stopId": "de:1", "lat": 52.52, "lon": 13.37,
+                       "scheduledDeparture": "2026-10-06T07:09:00Z", "departure": "2026-10-06T07:12:00Z",
+                       "scheduledTrack": "6", "track": "6"},
+             "mode": "HIGHSPEED_RAIL", "realTime": true, "headsign": "Hengelo",
+             "tripFrom": {"name": "S Südkreuz Bhf (Berlin)", "lat": 52.48, "lon": 13.37},
+             "tripTo": {"name": "Hengelo", "lat": 52.26, "lon": 6.79},
+             "tripId": "de-trip", "routeShortName": "77", "tripShortName": "ICE 146", "displayName": "ICE 146",
+             "agencyName": "DB Fernverkehr AG"},
+            {"place": {"name": "Berlin Hbf", "stopId": "nl:1", "lat": 52.52, "lon": 13.37,
+                       "scheduledDeparture": "2026-10-06T09:09:00Z", "scheduledTrack": "6"},
+             "mode": "HIGHSPEED_RAIL", "headsign": "Amsterdam Centraal",
+             "tripTo": {"name": "Amsterdam Centraal", "lat": 52.38, "lon": 4.9},
+             "tripId": "nl-144", "displayName": "ICE 144", "agencyName": "NS International"}
+        ]}
+        """
+        let response = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(json.utf8))
+        let merged = TransitousProvider.mergeBorderSplitDuplicates(response.stopTimes, kind: .departures)
+        #expect(merged.map(\.tripId) == ["de-trip", "nl-144"])
+        let entry = try #require(merged.first?.toEntry(kind: .departures))
+        #expect(entry.time.actual != nil)
+    }
+
+    /// Local lines share their "number" between both directions; two S5 at the same minute stay apart.
+    @Test func stopTimesKeepsLocalTrainsWithSameLineAndTime() throws {
+        let json = """
+        {"stopTimes": [
+            {"place": {"name": "Berlin Hbf", "stopId": "a:1", "lat": 52.52, "lon": 13.37,
+                       "scheduledDeparture": "2026-10-06T07:11:00Z"},
+             "mode": "SUBURBAN", "realTime": true, "headsign": "Berlin-Mahlsdorf",
+             "tripTo": {"name": "Berlin-Mahlsdorf", "lat": 52.5, "lon": 13.6},
+             "tripId": "s5-east", "displayName": "S5", "agencyName": "S-Bahn Berlin"},
+            {"place": {"name": "Berlin Hbf", "stopId": "a:2", "lat": 52.52, "lon": 13.37,
+                       "scheduledDeparture": "2026-10-06T07:11:00Z"},
+             "mode": "SUBURBAN", "headsign": "Westkreuz",
+             "tripTo": {"name": "Westkreuz", "lat": 52.5, "lon": 13.28},
+             "tripId": "s5-west", "displayName": "S5", "agencyName": "S-Bahn Berlin"}
+        ]}
+        """
+        let response = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(json.utf8))
+        let merged = TransitousProvider.mergeBorderSplitDuplicates(response.stopTimes, kind: .departures)
+        #expect(merged.count == 2)
+    }
+
     /// A single stitched itinerary leg (München–Innsbruck) riding the German feed's border-truncated
     /// trip still reaches the real destination as its `to`, but the trip's own `headsign` only names
     /// the border stop, which then shows up as one of this same leg's intermediate stops. The leg's
@@ -1305,6 +1397,29 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(entries.filter { $0.tripId == "shared-trip" }.count == 1)
     }
 
+    /// MOTIS picks stop times by their live time: at 9:08:30 DB's live row of ICE 146 (left early,
+    /// 9:08) is gone while NS's planned row (9:09) is still there, so the board showed the train
+    /// without its live time. The board asks earlier, merges both and then drops the departed train.
+    @Test func boardAsksEarlierSoAnEarlyTrainMergesWithItsPlannedTwin() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [EarlyTwinStopTimesProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let provider = TransitousProvider(http: HTTPClient(session: session))
+        let berlin = station("bln", "Berlin Hbf", source: .transitous)
+
+        let queryDate = try #require(JSONDecoding.parseISODate("2026-10-06T07:08:30Z"))
+        let entries = try await provider.board(.departures, at: berlin, date: queryDate, duration: 90, products: [.highSpeed])
+        #expect(entries.isEmpty)
+        let asked = try #require(EarlyTwinStopTimesProtocol.lastTime.withLock { $0 })
+        #expect(JSONDecoding.parseISODate(asked) == queryDate.addingTimeInterval(-10 * 60))
+
+        let earlier = try #require(JSONDecoding.parseISODate("2026-10-06T07:05:00Z"))
+        let shown = try await provider.board(.departures, at: berlin, date: earlier, duration: 90, products: [.highSpeed])
+        #expect(shown.map(\.tripId) == ["de-trip"])
+        #expect(shown.first?.time.actual != nil)
+    }
+
     /// Real-world Dresden Hbf: `arriveBy=true` alone makes Transitous search backwards from `time`,
     /// so the arrivals board showed days of past arrivals instead of the next 90 minutes.
     @Test func arrivalsBoardAsksForLaterArrivals() async throws {
@@ -1333,6 +1448,40 @@ private final class RecordingStopTimesProtocol: URLProtocol, @unchecked Sendable
         let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(#"{"stopTimes": []}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+/// ICE 146 at Berlin Hbf from DB's feed (live, leaving a minute early) and NS's feed (planned only).
+private final class EarlyTwinStopTimesProtocol: URLProtocol, @unchecked Sendable {
+    static let lastTime = Mutex<String?>(nil)
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let items = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
+        if request.url!.path.hasSuffix("v5/stoptimes"), items?.first(where: { $0.name == "arriveBy" })?.value == "false" {
+            Self.lastTime.withLock { $0 = items?.first { $0.name == "time" }?.value }
+        }
+        let body = request.url!.path.hasSuffix("v5/stoptimes") ? """
+        {"stopTimes": [
+            {"place": {"name": "S+U Berlin Hauptbahnhof", "stopId": "de:1", "lat": 52.52, "lon": 13.37,
+                       "scheduledDeparture": "2026-10-06T07:09:00Z", "departure": "2026-10-06T07:08:00Z",
+                       "scheduledTrack": "6", "track": "6"},
+             "mode": "HIGHSPEED_RAIL", "realTime": true, "headsign": "Hengelo",
+             "tripTo": {"name": "Hengelo", "lat": 52.26, "lon": 6.79},
+             "tripId": "de-trip", "tripShortName": "ICE 146", "displayName": "ICE 146"},
+            {"place": {"name": "Berlin Hbf", "stopId": "nl:1", "lat": 52.52, "lon": 13.37,
+                       "scheduledDeparture": "2026-10-06T07:09:00Z", "departure": "2026-10-06T07:09:00Z",
+                       "scheduledTrack": "6"},
+             "mode": "HIGHSPEED_RAIL", "realTime": false, "headsign": "Amsterdam Centraal",
+             "tripTo": {"name": "Amsterdam Centraal", "lat": 52.38, "lon": 4.9},
+             "tripId": "nl-trip", "tripShortName": "146", "displayName": "ICE 146"}
+        ]}
+        """ : "{}"
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
@@ -1745,8 +1894,10 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
 
     final class SlowProvider: TransitProvider, @unchecked Sendable {
         let source = DataSource.bahnDe
+        let finished = Mutex(false)
         func searchStations(_ query: String) async throws -> [Station] {
             try await Task.sleep(for: .seconds(30))
+            finished.withLock { $0 = true }
             return []
         }
         func journeys(_ query: JourneyQuery) async throws -> JourneyPage { throw TransitError.timeout }
@@ -1755,11 +1906,29 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
     }
 
     @Test func slowPrimaryFallsBackQuickly() async throws {
-        let combined = CombinedProvider(primary: SlowProvider(), fallback: MockProvider(source: .transitous), bahnDe: nil)
-        let start = Date.now
+        let slow = SlowProvider()
+        let combined = CombinedProvider(primary: slow, fallback: MockProvider(source: .transitous), bahnDe: nil)
         let result = try await combined.searchStations("Köln")
         #expect(result.first?.source == .transitous)
-        #expect(Date.now.timeIntervalSince(start) < 5)
+        // Fell back without waiting for the slow provider (checked against it, not a stopwatch).
+        #expect(!slow.finished.withLock { $0 })
+    }
+
+    /// The deadline holds even when the work is slow to stop once cancelled (a URL request winding
+    /// down), so a hanging extra query can't hold up the station search.
+    @Test func deadlineDoesntWaitForWorkSlowToStop() async {
+        let stopped = Mutex(false)
+        let result = try? await CombinedProvider.withDeadline(.milliseconds(100)) {
+            await withCheckedContinuation { continuation in
+                DispatchQueue.global().asyncAfter(deadline: .now() + 3) {
+                    stopped.withLock { $0 = true }
+                    continuation.resume()
+                }
+            }
+            return 1
+        }
+        #expect(result == nil)
+        #expect(!stopped.withLock { $0 })
     }
 }
 
@@ -1808,6 +1977,15 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(TrainModel.detect(cars(["938140110011", "938140110029"]), category: "ICE")?.name == "ICE T")
         // A single matching vehicle is inconclusive.
         #expect(TrainModel.detect(cars(["938054080011"]), category: "ICE") == nil)
+    }
+
+    @Test func tellsFlirt1430FromSBahn430() {
+        let cars = { (ids: [String]) in ids.map { Carriage(vehicleID: $0, constructionType: nil) } }
+        // FLIRT 3 (BR 1430/1830): its model digits are "430" like the S-Bahn's.
+        #expect(TrainModel.detect(cars(["948014300011", "948018300015", "948014300029"]), category: "RE")?.series == "BR 1430")
+        #expect(TrainModel.detect(cars(["948004300011", "948008300015", "948004310019"]), category: "S")?.series == "BR 430")
+        #expect(TrainModel.detect(cars(["948014400011", "948014410019"]), category: "RE")?.series == "BR 1440")
+        #expect(TrainModel.detect(cars(["948004400011", "948004410019"]), category: "RE")?.series == "BR 440")
     }
 
     @Test func detectsIntercity2FromDoubleDeckCoaches() {
@@ -1883,9 +2061,26 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         let formation = BahnDeClient.formation(from: response, category: "ICE", number: 950)
         #expect(formation.units.first?.number == "9457")
         #expect(formation.units.first?.name == "Bundesrepublik Deutschland")
+        // Asked for another train, only the group without a number is left.
         let other = BahnDeClient.formation(from: response, category: "ICE", number: 1)
-        #expect(other.units.map(\.model) == [nil, "ICE 4"])
+        #expect(other.units.map(\.model) == ["ICE 4"])
         #expect(try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data("{}".utf8)).groups == nil)
+    }
+
+    /// bahn.de answered RE 6 at Itzehoe with another train's FLIRTs: units that all name a different
+    /// train show neither as the train's type nor as its Wagenreihung.
+    @Test func ignoresAnotherTrainsSequence() throws {
+        let json = #"""
+        {"groups": [
+            {"name": "RP1", "transport": {"category": "RE", "number": 21075},
+             "vehicles": [{"vehicleID": "948014300011"}, {"vehicleID": "948014300029"}]}
+        ]}
+        """#
+        let response = try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data(json.utf8))
+        #expect(BahnDeClient.formation(from: response, category: "RE", number: 11013).units.isEmpty)
+        let sequence = BahnDeClient.coachSequence(from: response, category: "RE", number: 11013)
+        #expect(sequence.coaches.isEmpty && sequence.groups.isEmpty)
+        #expect(BahnDeClient.formation(from: response, category: "RE", number: 21075).modelSummary == "FLIRT")
     }
 
     /// A real bahn.de response (ICE 117 at Frankfurt (Main) Hbf, Gleis 12): coaches from the front,
@@ -1955,6 +2150,27 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(CoachSequence.numberList(["23", "21"]) == "21, 23")
         #expect(CoachSequence.numberList(["39", "31", "32", "33", "35", "36", "37", "38"]) == "31–33, 35–39")
         #expect(CoachSequence.numberList(["21", "22"]) == "21, 22")
+    }
+
+    /// A locomotive listed as its own group, ending where it is changed, is no train part with another destination.
+    @Test func coachSequenceIgnoresLocomotiveChange() throws {
+        let json = #"""
+        {"groups": [
+            {"name": "IC2013", "transport": {"category": "IC", "number": 2013, "destination": {"name": "Stuttgart Hbf"}},
+             "vehicles": [{"type": {"category": "LOCOMOTIVE"}}]},
+            {"name": "IC2013", "transport": {"category": "IC", "number": 2013, "destination": {"name": "Oberstdorf"}},
+             "vehicles": [{"wagonIdentificationNumber": 1, "type": {"category": "PASSENGERCARRIAGE_FIRST_CLASS"}},
+                          {"wagonIdentificationNumber": 2, "type": {"category": "PASSENGERCARRIAGE_ECONOMY_CLASS"}}]}
+        ]}
+        """#
+        let response = try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data(json.utf8))
+        let sequence = BahnDeClient.coachSequence(from: response, category: "IC", number: 2013)
+        #expect(sequence.isLocomotiveOnly(group: 0))
+        #expect(!sequence.isLocomotiveOnly(group: 1))
+        #expect(sequence.travellingGroups.compactMap(\.destination) == ["Oberstdorf"])
+        #expect(!sequence.partsGoToDifferentPlaces)
+        #expect(!sequence.hasOtherTrains)
+        #expect(!sequence.hasSeveralTrains)
     }
 
     /// Coupled trains: the other half keeps its own destination, and power cars have no coach number.
@@ -4100,6 +4316,8 @@ private final class SlowExtraGeocodeProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     private let stopped = Mutex(false)
+    /// Set once the slow "Po Bahnhof" answer is due, whether or not the request was still waiting for it.
+    static let answeredSlowly = Mutex(false)
     override func stopLoading() { stopped.withLock { $0 = true } }
 
     override func startLoading() {
@@ -4116,7 +4334,10 @@ private final class SlowExtraGeocodeProtocol: URLProtocol, @unchecked Sendable {
             client?.urlProtocolDidFinishLoading(self)
         }
         if text == "Po Bahnhof" {
-            DispatchQueue.global().asyncAfter(deadline: .now() + 5, execute: finish)
+            DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
+                Self.answeredSlowly.withLock { $0 = true }
+                finish()
+            }
         } else {
             finish()
         }

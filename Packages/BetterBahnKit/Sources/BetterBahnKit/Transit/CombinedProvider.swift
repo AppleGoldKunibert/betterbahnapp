@@ -69,16 +69,17 @@ public final class CombinedProvider: TransitProvider {
         return try await fallbackWork(fallback)
     }
 
+    /// Runs `operation`, giving up with `TransitError.timeout` after `deadline`. Returns as soon as the
+    /// deadline passes: `operation` is cancelled, but a request that is slow to stop (a URL load
+    /// winding down) doesn't hold up the caller, as waiting for it in a task group would.
     static func withDeadline<T: Sendable>(_ deadline: Duration, _ operation: @escaping @Sendable () async throws -> T) async throws -> T {
-        try await withThrowingTaskGroup(of: T.self) { group in
-            group.addTask { try await operation() }
-            group.addTask {
-                try await Task.sleep(for: deadline)
-                throw TransitError.timeout
+        let race = DeadlineRace<T>()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                race.start(continuation, deadline: deadline, operation: operation)
             }
-            defer { group.cancelAll() }
-            guard let result = try await group.next() else { throw TransitError.timeout }
-            return result
+        } onCancel: {
+            race.finish(.failure(CancellationError()))
         }
     }
 
@@ -170,7 +171,10 @@ public final class CombinedProvider: TransitProvider {
         return journeys.map { journey in
             var journey = journey
             for index in journey.legs.indices {
-                if let trains = coupled[journey.legs[index].id] { journey.legs[index].line?.coupledTrains = trains }
+                if let trains = coupled[journey.legs[index].id] {
+                    journey.legs[index].line?.coupledTrains = trains
+                    journey.legs[index].line = journey.legs[index].line?.withoutSelfCoupling
+                }
             }
             return journey
         }
@@ -262,5 +266,51 @@ public final class CombinedProvider: TransitProvider {
         let prefix = source.rawValue + ":"
         guard cursor.hasPrefix(prefix) else { return nil }
         return String(cursor.dropFirst(prefix.count))
+    }
+}
+
+/// The first of `operation`'s result, the deadline and the caller's cancellation wins
+/// (`CombinedProvider.withDeadline`); the others are cancelled and ignored.
+private final class DeadlineRace<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<T, Error>?
+    private var outcome: Result<T, Error>?
+    private var tasks: [Task<Void, Never>] = []
+
+    func start(_ continuation: CheckedContinuation<T, Error>, deadline: Duration,
+               operation: @escaping @Sendable () async throws -> T) {
+        lock.lock()
+        // Cancelled before it started.
+        if let outcome {
+            lock.unlock()
+            continuation.resume(with: outcome)
+            return
+        }
+        self.continuation = continuation
+        tasks = [
+            Task { [self] in
+                do { finish(.success(try await operation())) } catch { finish(.failure(error)) }
+            },
+            Task { [self] in
+                try? await Task.sleep(for: deadline)
+                finish(.failure(TransitError.timeout))
+            },
+        ]
+        lock.unlock()
+    }
+
+    func finish(_ result: Result<T, Error>) {
+        lock.lock()
+        guard outcome == nil else {
+            lock.unlock()
+            return
+        }
+        outcome = result
+        let continuation = continuation
+        self.continuation = nil
+        let tasks = tasks
+        lock.unlock()
+        tasks.forEach { $0.cancel() }
+        continuation?.resume(with: result)
     }
 }
