@@ -2472,6 +2472,39 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         #expect(corrected[0].time.actual == JSONDecoding.parseISODate("2026-10-06T07:12:00Z"))
         #expect(corrected[1] == entries[1])
         #expect(corrected[2] == entries[2])
+        // Regional and S-Bahn trains by their run number, which bahn.de's journey ID carries; a line
+        // name alone only at the same minute and when just one entry has it.
+        let localJSON = #"""
+        {"entries": [
+            {"journeyId": "2|#VN#1#ST#1#PI#0#ZI#1#TA#0#DA#61025#1S#1#1T#1#LS#1#LT#1#PU#80#RT#1#CA#RE#ZE#3148#ZB#RE 4#PC#3#FR#1#FT#1#TO#1#TT#1#", "zeit": "2026-10-06T09:09:00", "ezZeit": "2026-10-06T09:11:00", "verkehrmittel": {"name": "RE 4", "produktGattung": "REGIONAL"}},
+            {"journeyId": "2|#CA#S#ZE#5540#ZB#S 5#", "zeit": "2026-10-06T09:11:00", "ezZeit": "2026-10-06T09:13:00", "verkehrmittel": {"name": "S 5", "produktGattung": "SBAHN"}},
+            {"journeyId": "x", "zeit": "2026-10-06T09:09:00", "ezZeit": "2026-10-06T09:30:00", "verkehrmittel": {"name": "S 9", "produktGattung": "SBAHN"}},
+            {"journeyId": "y", "zeit": "2026-10-06T09:09:00", "ezZeit": "2026-10-06T09:40:00", "verkehrmittel": {"name": "S 9", "produktGattung": "SBAHN"}}
+        ]}
+        """#
+        let localBoard = try JSONDecoding.decoder.decode(BahnDeClient.Board.self, from: Data(localJSON.utf8)).entries
+        func local(_ name: String, _ product: Product, run: String?, planned: String) throws -> BoardEntry {
+            var entry = try departure(name, "", planned: planned, actual: planned)
+            entry.line = Line(name: name, number: nil, product: product, operatorName: nil, tripNumber: run)
+            return entry
+        }
+        let locals = [
+            try local("RE4", .regionalExpress, run: "3148", planned: "2026-10-06T07:09:00Z"),
+            try local("S5", .suburban, run: "5540", planned: "2026-10-06T07:11:00Z"),
+            // Another S5 run at the same minute: not this entry.
+            try local("S5", .suburban, run: "5541", planned: "2026-10-06T07:11:00Z"),
+            // Two S 9 at that minute on bahn.de, no run number: ambiguous, unchanged.
+            try local("S9", .suburban, run: nil, planned: "2026-10-06T07:09:00Z"),
+        ]
+        let localCorrected = BahnDeClient.applyingLiveTimes(locals, using: localBoard)
+        #expect(localCorrected[0].time.actual == JSONDecoding.parseISODate("2026-10-06T07:11:00Z"))
+        #expect(localCorrected[1].time.actual == JSONDecoding.parseISODate("2026-10-06T07:13:00Z"))
+        #expect(localCorrected[2] == locals[2])
+        #expect(localCorrected[3] == locals[3])
+        // A long-distance train never takes a regional entry's time, even with the same number.
+        let ice4 = try departure("ICE 4", "4", planned: "2026-10-06T07:09:00Z", actual: nil)
+        #expect(BahnDeClient.applyingLiveTimes([ice4], using: localBoard) == [ice4])
+
         // A departures board never touches arrivals.
         var arrival = entries[0]
         arrival.kind = .arrivals

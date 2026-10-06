@@ -156,6 +156,8 @@ extension BahnDeClient {
     /// "IR" and "REGIONAL" products, as in db-vendo-client); no filter at all for `[]`.
     static let longDistanceProducts = ["ICE", "EC_IC"]
     static let regionalProducts = ["IR", "REGIONAL"]
+    /// Local trains whose live times `applyingLiveTimes` takes from bahn.de too.
+    static let localTrainProducts: Set<Product> = [.regionalExpress, .regional, .suburban]
 
     static func boardURL(eva: String, at date: Date, kind: BoardKind = .departures, products: [String] = longDistanceProducts) -> URL {
         // Starting a minute early so the train itself is on the board even at a full minute.
@@ -212,20 +214,24 @@ extension BahnDeClient {
     // MARK: Train names
 
     /// `entries` (a departure or arrival board) with every DB long-distance train renamed to what
-    /// bahn.de's own board of the same kind calls it, and with DB's live time from there
-    /// (`applyingLiveTimes`). For some cross-border trains Transitous only has DB's GTFS entry,
+    /// bahn.de's own board of the same kind calls it, and with DB's live time from there for every
+    /// train, RE/RB and S-Bahn included (`applyingLiveTimes`). For some cross-border trains Transitous only has DB's GTFS entry,
     /// which brands them generically, e.g. the ČD Railjet "RJ 171" Hamburg–Dresden as "ICE 171".
     /// Unchanged if bahn.de can't be asked (blocked, offline).
     public func correctingFromBoard(_ entries: [BoardEntry], at station: Station) async -> [BoardEntry] {
         // A board is all departures or all arrivals; bahn.de's matching board has the same kind.
         guard let kind = entries.first?.kind else { return entries }
-        let times = entries.filter { $0.kind == kind && Self.trainReference(for: $0.line) != nil }.map(\.time.planned)
+        let trains = entries.filter { $0.kind == kind && Self.isLookedUp($0.line) }
+        let times = trains.map(\.time.planned)
         guard let first = times.min(), let last = times.max(), let eva = try? await evaNumber(for: station) else { return entries }
+        // Regional and S-Bahn rows only when the board has some, so a long-distance-only board stays small.
+        let products = trains.contains { Self.trainReference(for: $0.line) == nil }
+            ? Self.longDistanceProducts + Self.regionalProducts + ["SBAHN"] : Self.longDistanceProducts
         // One bahn.de board covers about an hour; the app's boards are 90 minutes.
         var board: [Board.Entry] = []
         var start = first
         for _ in 0..<3 {
-            guard let page = try? await get(Self.boardURL(eva: eva, at: start, kind: kind), as: Board.self) else { break }
+            guard let page = try? await get(Self.boardURL(eva: eva, at: start, kind: kind, products: products), as: Board.self) else { break }
             board += page.entries
             guard let latest = page.entries.compactMap({ $0.zeit.flatMap(Self.parseBerlinTime) }).max(), latest < last else { break }
             start = latest.addingTimeInterval(60)
@@ -255,25 +261,53 @@ extension BahnDeClient {
         return name
     }
 
-    /// The entry on `board` with `line`'s train number at `plannedDeparture` (±2 min).
+    /// The long-distance entry on `board` with `line`'s train number at `plannedDeparture` (±2 min).
     static func boardEntry(for line: Line?, plannedDeparture: Date, in board: [Board.Entry]) -> Board.Entry? {
         guard let number = trainReference(for: line)?.number else { return nil }
         return board.first { candidate in
-            guard let name = candidate.verkehrmittel?.name, trainNumber(in: name) == number,
+            guard !isLocal(candidate), let name = candidate.verkehrmittel?.name, trainNumber(in: name) == number,
                   let time = candidate.zeit.flatMap(parseBerlinTime) else { return false }
             return abs(time.timeIntervalSince(plannedDeparture)) <= 120
         }
     }
 
-    /// Each entry of `kind` with DB's live time from bahn.de's board of the same kind, where it has
-    /// one. Transitous' realtime for DB trains is DELFI's forecast, which can differ from DB's own:
-    /// ICE 146 at Berlin Hbf left at 9:08 there, a minute before its planned time, while DB had it
-    /// on time. Entries bahn.de has no live time for keep Transitous'.
+    /// Whether `applyingLiveTimes` looks `line` up on bahn.de's board.
+    static func isLookedUp(_ line: Line) -> Bool {
+        trainReference(for: line) != nil || localTrainProducts.contains(line.product)
+    }
+
+    /// bahn.de's entry for a regional or S-Bahn train: by its run number (RE 4 as 3148, S5 as 5540),
+    /// which the journey ID carries, at the same planned time (±1 min). A line's name alone ("S5") is
+    /// shared by every run, so without a run number on both sides the name must match at that minute.
+    static func localBoardEntry(for line: Line, plannedDeparture: Date, in board: [Board.Entry]) -> Board.Entry? {
+        let matches = board.filter { candidate in
+            guard isLocal(candidate), let time = candidate.zeit.flatMap(parseBerlinTime),
+                  abs(time.timeIntervalSince(plannedDeparture)) <= 60 else { return false }
+            if let run = line.tripNumber, let theirs = journeyNumber(in: candidate.journeyId) { return run == theirs }
+            let names = [candidate.verkehrmittel?.name, candidate.verkehrmittel?.mittelText].compactMap { $0 }
+            return names.contains { normalizedTrainName($0) == normalizedTrainName(line.name) }
+        }
+        return matches.count == 1 ? matches[0] : nil
+    }
+
+    /// A regional or S-Bahn entry of bahn.de's board; entries without a `produktGattung` count as
+    /// long-distance, as on the long-distance-only board.
+    static func isLocal(_ entry: Board.Entry) -> Bool {
+        ["REGIONAL", "SBAHN"].contains(entry.verkehrmittel?.produktGattung ?? "")
+    }
+
+    /// Each train of `kind` (long-distance, RE/RB, S-Bahn) with DB's live time from bahn.de's board
+    /// of the same kind, where it has one. Transitous' realtime for DB trains is DELFI's forecast,
+    /// which can differ from DB's own: ICE 146 at Berlin Hbf left at 9:08 there, a minute before its
+    /// planned time, while DB had it on time. Entries bahn.de has no live time for keep Transitous'.
     static func applyingLiveTimes(_ entries: [BoardEntry], using board: [Board.Entry], kind: BoardKind = .departures) -> [BoardEntry] {
         entries.map { entry in
-            guard entry.kind == kind,
-                  let live = boardEntry(for: entry.line, plannedDeparture: entry.time.planned, in: board)?
-                    .ezZeit.flatMap(parseBerlinTime) else { return entry }
+            guard entry.kind == kind else { return entry }
+            let match = trainReference(for: entry.line) != nil
+                ? boardEntry(for: entry.line, plannedDeparture: entry.time.planned, in: board)
+                : localTrainProducts.contains(entry.line.product)
+                    ? localBoardEntry(for: entry.line, plannedDeparture: entry.time.planned, in: board) : nil
+            guard let live = match?.ezZeit.flatMap(parseBerlinTime) else { return entry }
             var corrected = entry
             corrected.time.actual = live
             return corrected
