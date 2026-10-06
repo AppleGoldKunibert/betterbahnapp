@@ -1851,6 +1851,27 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(CoachSequence.numberList(["21", "22"]) == "21, 22")
     }
 
+    /// A locomotive listed as its own group, ending where it is changed, is no train part with another destination.
+    @Test func coachSequenceIgnoresLocomotiveChange() throws {
+        let json = #"""
+        {"groups": [
+            {"name": "IC2013", "transport": {"category": "IC", "number": 2013, "destination": {"name": "Stuttgart Hbf"}},
+             "vehicles": [{"type": {"category": "LOCOMOTIVE"}}]},
+            {"name": "IC2013", "transport": {"category": "IC", "number": 2013, "destination": {"name": "Oberstdorf"}},
+             "vehicles": [{"wagonIdentificationNumber": 1, "type": {"category": "PASSENGERCARRIAGE_FIRST_CLASS"}},
+                          {"wagonIdentificationNumber": 2, "type": {"category": "PASSENGERCARRIAGE_ECONOMY_CLASS"}}]}
+        ]}
+        """#
+        let response = try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data(json.utf8))
+        let sequence = BahnDeClient.coachSequence(from: response, category: "IC", number: 2013)
+        #expect(sequence.isLocomotiveOnly(group: 0))
+        #expect(!sequence.isLocomotiveOnly(group: 1))
+        #expect(sequence.travellingGroups.compactMap(\.destination) == ["Oberstdorf"])
+        #expect(!sequence.partsGoToDifferentPlaces)
+        #expect(!sequence.hasOtherTrains)
+        #expect(!sequence.hasSeveralTrains)
+    }
+
     /// Coupled trains: the other half keeps its own destination, and power cars have no coach number.
     @Test func coachSequenceMarksOtherTrains() throws {
         let json = #"""
