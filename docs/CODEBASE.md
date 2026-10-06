@@ -234,4 +234,4 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 - German, plain user-facing wording; DB-style station names (e.g. "Frankfurt (Oder)", "Bernau (bei Berlin)").
 - Commit titles: short imperative sentence ("Show …", "Stop …", "Keep …"), add `(fixes #N)` only
   when an issue is really fixed. No Claude co-author trailer.
-- Main branch is `prod`; work happens on version branches like `v0.1`.
+- Main branch is `prod`; branches and PR targets (`prod-features` / `prod-bugs` / `prod-other`): see `.claude/CLAUDE.md`.
