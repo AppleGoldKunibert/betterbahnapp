@@ -71,6 +71,20 @@ public enum OperatorBrand: String, CaseIterable, Sendable {
 
     /// Name of the logo's image set in the app's asset catalog.
     public var assetName: String { "Operator-\(rawValue)" }
+
+    /// Whether the logo needs a light plate in dark mode: black or dark blue lettering is unreadable on
+    /// the dark background. Logos that are bright enough sit on the background directly, as in light mode.
+    public var needsPlateInDarkMode: Bool {
+        switch self {
+        case .db, .erfurterbahn, .europeansleeper, .eurostar, .flixtrain, .gysev, .nationalexpress, .oebb,
+             .polregio, .sob, .thurbo, .transdev, .trenitalia, .westfalenbahn, .zssk:
+            false
+        case .abellio, .agilis, .alex, .arverio, .bls, .brb, .cantus, .cd, .enno, .erixx, .eurobahn, .hlb,
+             .laenderbahn, .metronom, .mrb, .nordbahn, .nordwestbahn, .ns, .odeg, .pkpic, .sbb,
+             .suedthueringenbahn, .sweg, .transregio, .vlexx:
+            true
+        }
+    }
 }
 
 extension Line {

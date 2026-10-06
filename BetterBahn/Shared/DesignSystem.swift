@@ -203,23 +203,26 @@ struct LineBadge: View {
     }
 }
 
-/// The operator of a train (e.g. "DB Fernverkehr AG") with its logo (#166), on a light plate so dark
-/// logos stay readable in dark mode. Operators without a logo (`OperatorBrand`) keep the building icon.
+/// The operator of a train (e.g. "DB Fernverkehr AG") with its logo (#166) on a transparent background.
+/// In dark mode, logos with dark lettering (`OperatorBrand.needsPlateInDarkMode`) get a soft light plate
+/// so they stay readable. Operators without a logo (`OperatorBrand`) keep the building icon.
 struct OperatorLabel: View {
     let name: String
     @ScaledMetric(relativeTo: .caption) private var logoHeight: CGFloat = 12
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         HStack(spacing: 6) {
-            if let logo = OperatorBrand(operatorName: name).flatMap({ UIImage(named: $0.assetName) }) {
+            if let brand = OperatorBrand(operatorName: name), let logo = UIImage(named: brand.assetName) {
+                let plate = colorScheme == .dark && brand.needsPlateInDarkMode
                 Image(uiImage: logo)
                     .renderingMode(.original)
                     .resizable()
                     .scaledToFit()
                     .frame(maxWidth: logoHeight * 5, maxHeight: logoHeight)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 2)
-                    .background(.white, in: .rect(cornerRadius: 4, style: .continuous))
+                    .padding(.horizontal, plate ? 4 : 0)
+                    .padding(.vertical, plate ? 2 : 0)
+                    .background(plate ? Color(white: 0.88) : .clear, in: .rect(cornerRadius: 4, style: .continuous))
                     .accessibilityHidden(true)
             } else {
                 Image(systemName: "building.2.fill")
