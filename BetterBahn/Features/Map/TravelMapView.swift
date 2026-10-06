@@ -366,22 +366,6 @@ nonisolated final class HeatPolyline: MKPolyline, @unchecked Sendable {
     var count = 1
 }
 
-/// OpenRailwayMap tiles with BetterBahn's identifying User-Agent and linked attribution in the legend.
-nonisolated final class RailwayTileOverlay: MKTileOverlay, @unchecked Sendable {
-    init() {
-        super.init(urlTemplate: "https://tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png")
-        canReplaceMapContent = false
-        maximumZ = 19
-    }
-
-    override func loadTile(at path: MKTileOverlayPath, result: @escaping (Data?, (any Error)?) -> Void) {
-        var request = URLRequest(url: url(forTilePath: path))
-        request.setValue(HTTPClient.identifyingUserAgent, forHTTPHeaderField: "User-Agent")
-        nonisolated(unsafe) let completion = result
-        URLSession.shared.dataTask(with: request) { data, _, error in completion(data, error) }.resume()
-    }
-}
-
 struct TravelMap: UIViewRepresentable {
     let runs: [SegmentHeatmap.Run]
     let version: Int
