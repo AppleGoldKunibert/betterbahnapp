@@ -1270,9 +1270,10 @@ public struct TransitousProvider: TransitProvider {
         if kind == .departures {
             // MOTIS leaves out departures nobody may board ("kein Einstieg", e.g. ICEs from Berlin Hbf on to
             // Gesundbrunnen); its arrivals still have them, with their departure time. Best-effort.
-            async let arrivals = try? boardStopTimes(.arrivals, stopId: stop.id, date: date, duration: duration, products: products)
+            async let arrivals = try? boardStopTimes(.arrivals, stopId: stop.id, date: date.addingTimeInterval(-Self.arrivalLead),
+                                                     duration: duration + Int(Self.arrivalLead / 60), products: products)
             stopTimes = try await boardStopTimes(.departures, stopId: stop.id, date: date, duration: duration, products: products)
-            stopTimes += Self.continuingWithoutBoarding(await arrivals ?? [], missingFrom: stopTimes)
+            stopTimes += Self.continuingWithoutBoarding(await arrivals ?? [], missingFrom: stopTimes, departingFrom: date)
         } else {
             stopTimes = try await boardStopTimes(.arrivals, stopId: stop.id, date: date, duration: duration, products: products)
         }
@@ -1292,22 +1293,30 @@ public struct TransitousProvider: TransitProvider {
     public func calls(at station: Station, date: Date, duration: Int) async throws -> (departures: [BoardEntry], arrivals: [BoardEntry]) {
         let stop = try await resolve(station)
         let all = Set(Product.allCases)
-        async let arriving = boardStopTimes(.arrivals, stopId: stop.id, date: date, duration: duration, products: all)
+        async let arriving = boardStopTimes(.arrivals, stopId: stop.id, date: date.addingTimeInterval(-Self.arrivalLead),
+                                            duration: duration + Int(Self.arrivalLead / 60), products: all)
         async let departing = boardStopTimes(.departures, stopId: stop.id, date: date, duration: duration, products: all)
         let arrivals = try await arriving
         let departures = try await departing
-        let allDepartures = departures + Self.continuingWithoutBoarding(arrivals, missingFrom: departures)
-        return (allDepartures.compactMap { $0.toEntry(kind: .departures) }, arrivals.compactMap { $0.toEntry(kind: .arrivals) })
+        let allDepartures = departures + Self.continuingWithoutBoarding(arrivals, missingFrom: departures, departingFrom: date)
+        let arrivalsInWindow = arrivals.filter { ($0.place.scheduledArrival ?? $0.place.arrival ?? .distantFuture) >= date }
+        return (allDepartures.compactMap { $0.toEntry(kind: .departures) }, arrivalsInWindow.compactMap { $0.toEntry(kind: .arrivals) })
     }
 
-    /// Arrivals that go on from this stop but may not be boarded here, so they're missing from the
-    /// departures MOTIS reports. Shown as departures (marked "Nur Ausstieg") so the board lists every
-    /// train leaving, like DB's own boards.
-    static func continuingWithoutBoarding(_ arrivals: [MStopTime], missingFrom departures: [MStopTime]) -> [MStopTime] {
+    /// How long before a board's start its arrivals are asked for: a train that arrives just before
+    /// and leaves after it (ICE 204 at Hamburg-Harburg arrives 13:02 and leaves 13:04) is only on the arrivals.
+    static let arrivalLead: TimeInterval = 15 * 60
+
+    /// Arrivals that go on from this stop at or after `start` but may not be boarded here, so they're
+    /// missing from the departures MOTIS reports. Shown as departures (marked "Nur Ausstieg") so the
+    /// board lists every train leaving, like DB's own boards.
+    static func continuingWithoutBoarding(_ arrivals: [MStopTime], missingFrom departures: [MStopTime],
+                                          departingFrom start: Date = .distantPast) -> [MStopTime] {
         let departing = Set(departures.map(\.tripId))
         return arrivals.filter { arrival in
-            !departing.contains(arrival.tripId) && arrival.place.access == .exitOnly
-                && arrival.place.scheduledDeparture != nil
+            guard !departing.contains(arrival.tripId), arrival.place.access == .exitOnly,
+                  let departure = arrival.place.scheduledDeparture else { return false }
+            return max(departure, arrival.place.departure ?? departure) >= start
         }
     }
 
