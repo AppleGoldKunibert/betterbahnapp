@@ -768,6 +768,45 @@ final class AppModel {
 
     func forgetCheckin(statusId: Int) {
         checkinStatusIDs = checkinStatusIDs.filter { $0.value != statusId }
+        trackedManualCheckins.removeAll { $0.statusId == statusId }
+    }
+
+    /// Deletes a check-in on Träwelling and forgets it here.
+    func deleteCheckin(statusId: Int) async throws {
+        try await traewelling.deleteStatus(id: statusId)
+        forgetCheckin(statusId: statusId)
+    }
+
+    /// The journey's legs checked in from this app, in order.
+    func checkins(in journey: Journey) -> [(leg: Leg, statusId: Int)] {
+        let journey = savedEntry(for: journey)?.journey ?? journey
+        return journey.legs.compactMap { leg in checkinStatusIDs[leg.id].map { (leg: leg, statusId: $0) } }
+    }
+
+    /// The checked-in leg of `journey` that is under way, and where checking out now would end it
+    /// (`TraewellingClient.earlyExit`). Uses the saved journey's live times.
+    func earlyCheckout(in journey: Journey, at now: Date = .now) -> (leg: Leg, statusId: Int, exit: Stopover)? {
+        for checkin in checkins(in: journey) {
+            if let exit = TraewellingClient.earlyExit(on: checkin.leg, at: now) { return (leg: checkin.leg, statusId: checkin.statusId, exit: exit) }
+        }
+        return nil
+    }
+
+    /// Deletes every check-in of `journey` made from this app.
+    func deleteCheckins(in journey: Journey) async throws {
+        for checkin in checkins(in: journey) { try await deleteCheckin(statusId: checkin.statusId) }
+    }
+
+    /// Checks out of `journey` now: the ride under way ends at the last stop reached (see
+    /// `earlyCheckout`), check-ins of legs not yet started are deleted, finished ones stay.
+    func checkOutEarly(of journey: Journey, at now: Date = .now) async throws {
+        guard let running = earlyCheckout(in: journey, at: now) else { return }
+        let status = try await traewelling.status(id: running.statusId)
+        try await traewelling.changeDestination(of: status, to: running.exit.station, arrival: running.exit.arrival?.planned)
+        forgetCheckin(statusId: running.statusId)
+        for checkin in checkins(in: journey) where checkin.leg.departure.best > now {
+            try await deleteCheckin(statusId: checkin.statusId)
+        }
     }
 
     /// The custom emojis of the Mastodon instance connected to the Träwelling account, or of
