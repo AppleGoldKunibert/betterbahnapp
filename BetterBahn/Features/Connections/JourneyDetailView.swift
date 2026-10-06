@@ -121,7 +121,8 @@ struct JourneyDetailView: View {
                 if !leg.isWalking {
                     LegCard(
                         leg: leg,
-                        transferBroken: journey.brokenTransferIndices.contains(journey.transitLegs.firstIndex(of: leg) ?? -1),
+                        transferBroken: !journey.isOver()
+                            && journey.brokenTransferIndices.contains(journey.transitLegs.firstIndex(of: leg) ?? -1),
                         onReplace: readOnly || !model.settings.trainChoiceEnabled ? nil
                             : { legToReplace = LegSelection(index: index, leg: leg) },
                         onReplan: readOnly || !model.settings.editJourneyEnabled ? nil
@@ -130,7 +131,7 @@ struct JourneyDetailView: View {
                         reservation: model.reservation(for: leg, in: journey)
                     )
                     if let info = transferInfo(after: leg) {
-                        TransferRow(from: leg, to: info.next, walk: info.walk)
+                        TransferRow(from: leg, to: info.next, walk: info.walk, isPast: journey.isOver())
                     }
                 }
             }
@@ -197,7 +198,7 @@ struct JourneyDetailView: View {
 
     @ViewBuilder
     private var issuesCard: some View {
-        let issues = journey.connectionIssues()
+        let issues = journey.currentIssues()
         if !issues.isEmpty {
             Card {
                 VStack(alignment: .leading, spacing: 12) {
@@ -372,12 +373,15 @@ struct TransferRow: View {
     let from: Leg
     let to: Leg
     var walk: Leg?
+    /// The journey is over: a transfer that looks missed only lacks a train's last delay (see
+    /// `Journey.currentIssues`), so it isn't flagged.
+    var isPast = false
 
     private var minutes: Int {
         Int((to.departure.best.timeIntervalSince(from.arrival.best) / 60).rounded())
     }
-    private var broken: Bool { minutes < 0 }
-    private var color: Color { transferColor(minutes) }
+    private var broken: Bool { minutes < 0 && !isPast }
+    private var color: Color { isPast && minutes < 0 ? .secondary : transferColor(minutes) }
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -388,7 +392,7 @@ struct TransferRow: View {
                 .background(color.opacity(0.15), in: .circle)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(broken ? "Umstieg nicht erreichbar" : "Umstieg · \(minutes) min")
+                Text(broken ? "Umstieg nicht erreichbar" : minutes < 0 ? "Umstieg" : "Umstieg · \(minutes) min")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(color)
                 if let walk {

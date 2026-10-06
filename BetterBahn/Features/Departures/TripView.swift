@@ -609,10 +609,17 @@ struct LegTripSheet: View {
 
     /// Only bahn.de's journey details report a Zusatzhalt (an unscheduled stop the train additionally
     /// picked up today) at all — Transitous and DB Timetables above only ever overlay onto stops already there.
+    /// bahn.de only reports them while the train runs, so the leg's own train also keeps the ones the
+    /// saved journey remembered (where you may have got on, off or changed).
     private func insertZusatzhalte() async {
-        guard let trip, let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: trip),
-              self.trip?.id == trip.id else { return }
-        self.trip?.stopovers = BahnDeClient.inserting(stops, into: trip.stopovers)
+        guard var updated = trip else { return }
+        let ownTrain = shownTripId == nil
+        if let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: updated) {
+            updated.stopovers = BahnDeClient.inserting(stops, into: updated.stopovers)
+        }
+        if ownTrain { updated = updated.keepingAdditionalStops(of: leg) }
+        guard self.trip?.id == updated.id, ownTrain == (shownTripId == nil) else { return }
+        self.trip?.stopovers = updated.stopovers
     }
 }
 
