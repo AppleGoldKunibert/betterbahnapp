@@ -18,13 +18,16 @@ import Testing
     @Test func slowWorkShowsWhatIsThereMeanwhile() async {
         let events = Mutex<[String]>([])
         let result = await LoadingDeadline.run({
-            try? await Task.sleep(for: .milliseconds(300))
-            events.withLock { $0.append("live") }
+            // Stays slow until the timetable has shown, so a busy test runner can't let it win the race.
+            let giveUp = ContinuousClock.now + .seconds(10)
+            while !events.withLock({ $0.contains("timetable") }), ContinuousClock.now < giveUp {
+                try? await Task.sleep(for: .milliseconds(10))
+            }
             return "live"
         }, showingAfter: .milliseconds(20)) {
             events.withLock { $0.append("timetable") }
         }
-        #expect(result == "live")
+        events.withLock { $0.append(result) }
         #expect(events.withLock { $0 } == ["timetable", "live"])
     }
 }
