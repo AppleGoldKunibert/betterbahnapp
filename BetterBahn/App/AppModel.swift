@@ -256,42 +256,62 @@ final class AppModel {
     private(set) var isSyncingTraewelling = false
     private(set) var traewellingSyncError: String?
 
-    /// Fetches new check-ins and their track geometry. Stops at the first already known status.
+    /// Fetches new check-ins and their track geometry, page by page (#170): the trips show up bit by bit,
+    /// and an import that stopped half way continues where it was (`traewellingImportNextPage`)
+    /// instead of starting over. Runs on even when the screen that started it goes away.
     func syncTraewelling(force: Bool = false) async {
+        await Task { await self.runTraewellingSync(force: force) }.value
+    }
+
+    private func runTraewellingSync(force: Bool) async {
         // Without the stored history every check-in would look new and be imported again.
         await loadTraewellingTrips()
         guard settings.traewellingEnabled, settings.syncTraewellingToMap, !isSyncingTraewelling, await traewelling.isLoggedIn else { return }
         if !force, let last = settings.lastTraewellingSync, Date.now.timeIntervalSince(last) < 15 * 60 { return }
         isSyncingTraewelling = true
         defer { isSyncingTraewelling = false }
+        var knownIDs = Set(traewellingTrips.map(\.statusID))
+        // A first import has nothing to stop at: it walks the whole history, remembering how far it got.
+        var resumePage = knownIDs.isEmpty ? (settings.traewellingImportNextPage ?? 1) : settings.traewellingImportNextPage
+        var pending: [ImportedTrip] = []
+        // Hands the loaded trips to the map now and then (saving the whole list after every page would
+        // rewrite a large file hundreds of times), and only then moves the resume point past them.
+        func commit() {
+            if !pending.isEmpty {
+                traewellingTrips = (pending + traewellingTrips).sorted { $0.statusID > $1.statusID }
+                pending = []
+            }
+            settings.traewellingImportNextPage = resumePage
+        }
+        defer { commit() }
         do {
             let username = try await traewelling.currentUser().username
-            let knownIDs = Set(traewellingTrips.map(\.statusID))
-            var newStatuses: [TraewellingStatus] = []
-            var page = 1
-            pages: while page <= 200 {
-                let result = try await traewelling.statuses(username: username, page: page)
-                for status in result.statuses {
-                    // Everything after a known status was imported before (unless a full resync is forced).
-                    if knownIDs.contains(status.id), !force { break pages }
-                    if !knownIDs.contains(status.id) { newStatuses.append(status) }
+            // New check-ins first, down to the newest one imported before; then, if an earlier import
+            // stopped half way, the older pages it didn't get to.
+            var backfilling = knownIDs.isEmpty
+            var page = backfilling ? resumePage ?? 1 : 1
+            while true {
+                let result = try await traewelling.historyPage(username: username, page: page, knownIDs: knownIDs)
+                pending += result.trips.map { ImportedTrip(statusID: $0.statusID, journey: $0.journey) }
+                knownIDs.formUnion(result.trips.map(\.statusID))
+                if !result.hasMore {
+                    resumePage = nil
+                    break
                 }
-                guard result.hasMore else { break }
-                page += 1
-                try await Task.sleep(for: .milliseconds(300)) // be gentle with the API
-            }
-
-            var imported: [ImportedTrip] = []
-            for batch in stride(from: 0, to: newStatuses.count, by: 20).map({ Array(newStatuses[$0..<min($0 + 20, newStatuses.count)]) }) {
-                let geometries = (try? await traewelling.polylines(statusIDs: batch.map(\.id))) ?? [:]
-                for status in batch {
-                    if let journey = status.journey(geometry: geometries[status.id]) {
-                        imported.append(ImportedTrip(statusID: status.id, journey: journey))
-                    }
+                if backfilling {
+                    resumePage = page + 1
+                    page += 1
+                } else if result.reachedKnown {
+                    guard let next = resumePage else { break }
+                    backfilling = true
+                    // One page back, since check-ins deleted meanwhile move the rest forward.
+                    page = max(next - 1, page + 1)
+                } else {
+                    page += 1
                 }
-            }
-            if !imported.isEmpty {
-                traewellingTrips = (imported + traewellingTrips).sorted { $0.statusID > $1.statusID }
+                if pending.count >= 100 { commit() }
+                // Two requests per page; Träwelling allows about 60 a minute (`historyPage` waits out a 429).
+                try await Task.sleep(for: .seconds(1))
             }
             settings.lastTraewellingSync = .now
             traewellingSyncError = nil
@@ -1096,6 +1116,10 @@ final class AppSettings {
     var lastTraewellingSync: Date? {
         didSet { UserDefaults.standard.set(lastTraewellingSync, forKey: "lastTraewellingSync") }
     }
+    /// The history page an unfinished Träwelling import continues with; nil once it reached the oldest check-in.
+    var traewellingImportNextPage: Int? {
+        didSet { UserDefaults.standard.set(traewellingImportNextPage, forKey: "traewellingImportNextPage") }
+    }
     /// Suggested tags offered as quick-add chips in the Träwelling check-in sheet.
     var quickTags: [QuickTag] {
         didSet {
@@ -1175,6 +1199,7 @@ final class AppSettings {
         bc100Rules = Storage.load(key: "bc100Rules") ?? .default
         syncTraewellingToMap = defaults.object(forKey: "syncTraewellingToMap") as? Bool ?? true
         lastTraewellingSync = defaults.object(forKey: "lastTraewellingSync") as? Date
+        traewellingImportNextPage = defaults.object(forKey: "traewellingImportNextPage") as? Int
         connectionWarnings = defaults.object(forKey: "connectionWarnings") as? Bool ?? true
         quickTags = Storage.load(key: "quickTags") ?? QuickTag.defaults
     }

@@ -219,11 +219,12 @@ struct SettingsView: View {
                     HStack {
                         IconLabel(title: "Jetzt synchronisieren", systemImage: "arrow.triangle.2.circlepath", color: .blue)
                         Spacer()
+                        // The count keeps growing while a long history is imported page by page.
+                        Text("\(model.traewellingTrips.count) Fahrten")
+                            .foregroundStyle(.secondary)
+                            .contentTransition(.numericText())
                         if model.isSyncingTraewelling {
                             ProgressView()
-                        } else {
-                            Text("\(model.traewellingTrips.count) Fahrten")
-                                .foregroundStyle(.secondary)
                         }
                     }
                 }
