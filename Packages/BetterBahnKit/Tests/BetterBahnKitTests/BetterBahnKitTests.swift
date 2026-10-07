@@ -4754,7 +4754,7 @@ private final class RE3318CancelledProtocol: RE3318Protocol, @unchecked Sendable
             "vlexx": .vlexx, "vlexx1": .vlexx, "Eurobahn": .eurobahn, "WestfalenBahn": .westfalenbahn,
             "NS International": .ns, "European Sleeper": .europeansleeper, "PKP Intercity": .pkpic,
             "PolRegio": .polregio, "Raaberbahn AG GYSEV Zrt.": .gysev,
-            "Železničná spoločnosť Slovensko, a.s.": .zssk, "DSB": .dsb, "DSB (Danske Statsbaner)": .dsb,
+            "Železničná spoločnosť Slovensko, a.s.": .zssk, "DSB": .dsb, "DSB (Danske Statsbaner)": .dsb, "Dänische Staatsbahnen": .dsb,
         ]
         for (name, brand) in expected {
             #expect(OperatorBrand(operatorName: name) == brand, "\(name)")
@@ -4908,6 +4908,54 @@ private final class RE3318CancelledProtocol: RE3318Protocol, @unchecked Sendable
             """#)
         #expect(BahnDeClient.operators(of: all).map(\.name) == ["DSB", "DB Fernverkehr AG", "České dráhy, a.s."])
         #expect(BahnDeClient.operators(of: all)[2].section?.from == "Děčín hl.n.")
+    }
+
+    /// Real RJ 383 København H → Praha hl.n. (bahn.de journey details, 2026-10-07, shortened): no
+    /// "BEF" attribute and no `adminID`, while bahn.de's page names DSB, DB Fernverkehr and ČD. The
+    /// stations' numbers give their country (86, 80, 54).
+    @Test func operatorsFromTheStationsCountries() throws {
+        let details = try fixture("bahnde-fahrt-rj383", as: BahnDeClient.JourneyDetails.self)
+        let operators = BahnDeClient.operators(of: details)
+        #expect(operators == [
+            TrainOperator(name: "DSB", section: .init(from: "Koebenhavn H", to: "Padborg st")),
+            TrainOperator(name: "DB Fernverkehr AG", section: .init(from: "Schleswig", to: "Bad Schandau")),
+            TrainOperator(name: "České dráhy, a.s.", section: .init(from: "Decin hl.n.", to: "Praha hl.n.")),
+        ])
+        #expect(operators.map { OperatorBrand(operatorName: $0.name) } == [.dsb, .db, .cd])
+
+        // A train ending at the first stop abroad stays its own railway's.
+        let toDecin = Array(details.halte.filter { $0.extId?.hasPrefix("80") == true }) + [details.halte[13]]
+        #expect(BahnDeClient.operators(byAdministration: toDecin, trainName: "RJ 383").isEmpty)
+    }
+
+    /// RJ 383 on 2026-10-07: Transitous had no delay at Bad Schandau (and DB Timetables none either),
+    /// bahn.de +57. Its live times win at the leg's ends and stops; a stop it doesn't know keeps its own.
+    @Test func appliesBahnDeLiveTimes() throws {
+        let details = try fixture("bahnde-fahrt-rj383", as: BahnDeClient.JourneyDetails.self)
+        let stops = details.halte.compactMap(JourneyStop.init)
+        func date(_ text: String) throws -> Date { try #require(JSONDecoding.parseISODate(text)) }
+        func station(_ name: String, _ lat: Double, _ lon: Double) -> Station {
+            Station(id: "t:\(name)", name: name, coordinate: Coordinate(latitude: lat, longitude: lon), evaNumber: nil, source: .transitous)
+        }
+        let schandau = Stopover(station: station("Bad Schandau Nationalparkbahnhof", 50.91921, 14.137704),
+                                arrival: TimeInfo(planned: try date("2026-10-07T13:35:00Z"), actual: try date("2026-10-07T13:33:00Z")),
+                                departure: TimeInfo(planned: try date("2026-10-07T13:37:00Z"), actual: try date("2026-10-07T13:35:00Z")),
+                                arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+        let elsewhere = Stopover(station: station("Pirna", 50.9622, 13.9426),
+                                 arrival: TimeInfo(planned: try date("2026-10-07T13:20:00Z"), actual: try date("2026-10-07T13:21:00Z")),
+                                 departure: nil, arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+        let leg = Leg(origin: station("S+U Berlin Hauptbahnhof", 52.5252, 13.3694), destination: station("Praha hl.n.", 50.0830, 14.4360),
+                      departure: TimeInfo(planned: try date("2026-10-07T11:28:00Z"), actual: nil),
+                      arrival: TimeInfo(planned: try date("2026-10-07T15:25:00Z"), actual: try date("2026-10-07T15:25:00Z")),
+                      departurePlatform: nil, arrivalPlatform: nil, tripId: "rj", line: Line(name: "RJ 383", number: "383", product: .highSpeed, operatorName: "DSB"),
+                      direction: nil, isWalking: false, cancelled: false, stopovers: [elsewhere, schandau], remarks: [], source: .transitous)
+
+        let live = BahnDeClient.applyingLiveTimes(from: stops, to: leg)
+        #expect(live.departure.delayMinutes == 62)
+        #expect(live.arrival.delayMinutes == 57)
+        #expect(live.stopovers[1].arrival?.delayMinutes == 57)
+        #expect(live.stopovers[1].departure?.delayMinutes == 57)
+        #expect(live.stopovers[0].arrival?.delayMinutes == 1)
     }
 
     /// Berlin → Praha is run by DB and ČD; riding only to Dresden shows DB alone, riding to Praha both.

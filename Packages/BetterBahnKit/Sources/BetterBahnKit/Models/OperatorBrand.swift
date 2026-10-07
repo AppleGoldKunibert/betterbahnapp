@@ -56,7 +56,7 @@ public enum OperatorBrand: String, CaseIterable, Sendable {
         (.polregio, ["polregio"]),
         (.gysev, ["gysev", "raaberbahn"]),
         (.zssk, ["zssk", "zeleznicna spolocnost slovensko"]),
-        (.dsb, ["dsb", "danske statsbaner"]),
+        (.dsb, ["dsb", "danske statsbaner", "danische staatsbahnen"]),
         (.sbahn, ["s bahn"]),
         (.dbregio, ["db regio"]),
         (.db, ["db", "deutsche bahn"]),
