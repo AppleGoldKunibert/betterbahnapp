@@ -1379,6 +1379,28 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(ride?.arrival.planned == secondHalf.arrival.planned)
     }
 
+    /// RJ 175 Berlin → Praha-Holešovice +31, then walk, metro C and walk on their planned times
+    /// (2026-10-07): the bar keeps the legs in order, the ones the train runs into pushed back.
+    @Test func barSpansNeverOverlap() {
+        let train = mergeTestLeg("RJ 175", number: "175", from: ("Berlin Hbf", 52.525, 13.369), to: ("Praha-Holesovice", 50.110, 14.440),
+                                 departure: "2026-10-07T09:28:00Z", arrival: "2026-10-07T13:15:00Z")
+        var late = train
+        late.departure.actual = late.departure.planned.addingTimeInterval(31 * 60)
+        late.arrival.actual = late.arrival.planned.addingTimeInterval(31 * 60)
+        let walk = mergeTestLeg(nil, from: ("Praha-Holesovice", 50.110, 14.440), to: ("Nádraží Holešovice", 50.109, 14.439),
+                                departure: "2026-10-07T13:15:00Z", arrival: "2026-10-07T13:20:00Z", isWalking: true)
+        let metro = mergeTestLeg("C", from: ("Nádraží Holešovice", 50.109, 14.439), to: ("Hlavní nádraží", 50.083, 14.435),
+                                 departure: "2026-10-07T13:20:00Z", arrival: "2026-10-07T13:25:00Z", product: .subway)
+
+        let onTime = Journey(legs: [train, walk, metro], source: .transitous).barSpans
+        #expect(onTime.map(\.start) == [train.departure.planned, walk.departure.planned, metro.departure.planned])
+
+        let spans = Journey(legs: [late, walk, metro], source: .transitous).barSpans
+        #expect(spans[0].end == late.arrival.best)
+        #expect(spans[1].start == late.arrival.best && spans[1].duration == 5 * 60)
+        #expect(spans[2].start == spans[1].end && spans[2].duration == 5 * 60)
+    }
+
     /// Real-world RJ 383 København → Praha (2026-10-07): Transitous changed at Děčín from DB's or DSB's
     /// copy of the train to the Czech feed's "Ex5 (rj 383)", which is long-distance there while DB's
     /// is high-speed. It's one train, not a change.
