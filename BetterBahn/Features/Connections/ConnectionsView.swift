@@ -110,6 +110,11 @@ struct ConnectionsView: View {
             .tabBarSafePadding()
             .background { AppBackground() }
             .navigationTitle("Verbindungen")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Zug suchen", systemImage: "train.side.front.car") { model.showsTrainSearch = true }
+                }
+            }
             .navigationDestination(for: ConnectionsRoute.self) { route in
                 switch route {
                 case .search(let search):
