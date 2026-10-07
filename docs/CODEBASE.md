@@ -160,6 +160,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `scripts/make-station-hints.py`; only names, rerun now and then for new stations; big ones from
   anywhere, for longer names only the two nearest starting with them) and aliases like "ber" → "Flughafen
   BER". German names of towns abroad ("stettin", "prag", `germanNames`) match and ask for the local name.
+  "prag" (also "prag hbf") puts a station named "Prag" first (`namedStations`, `placingNamedStation`): CZPTT's
+  Praha hlavní nádraží, replacing the other hits at that place; it isn't swapped for a "busier" stop.
   A bus stop's exact name only counts nearby, and stops abroad far away only for a train station in the
   place that was typed (train stations abroad within 100 km count like German ones). In the user's town a
   station's short name is exact ("süd" in Essen, `isLocalName`). "Hbf"/"Bahnhof" and parts of town only
