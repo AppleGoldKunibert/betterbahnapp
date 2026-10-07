@@ -4535,7 +4535,6 @@ private final class RE3318CancelledProtocol: RE3318Protocol, @unchecked Sendable
             TrainOperator(name: "DB Fernverkehr AG", section: .init(from: "Berlin Hbf", to: "Bad Schandau")),
             TrainOperator(name: "České dráhy, a.s.", section: .init(from: "Děčín hl.n.", to: "Praha hl.n.")),
         ])
-        #expect(operators[0].sectionText == "Berlin Hbf – Bad Schandau")
         #expect(BahnDeClient.section("(Berlin-Spandau - Dresden-Neustadt)") == .init(from: "Berlin-Spandau", to: "Dresden-Neustadt"))
         #expect(BahnDeClient.section("Berlin Hbf") == nil)
         // Older responses without attributes still decode.
@@ -4578,6 +4577,23 @@ private final class RE3318CancelledProtocol: RE3318Protocol, @unchecked Sendable
         let toPraha = try leg(to: station("Praha hl.n.", 50.0830, 14.4360), arriving: "2026-10-07T11:25:00")
         #expect(BahnDeClient.operators(operators, riding: toDresden, stops: stops) == [TrainOperator(name: "DB Fernverkehr AG")])
         #expect(BahnDeClient.operators(operators, riding: toPraha, stops: stops) == operators)
+
+        // The route marks where the train changes hands: DB at the start and at Bad Schandau, ČD at Děčín.
+        func stopover(_ station: Station, _ arrival: String?, _ departure: String?) throws -> Stopover {
+            Stopover(station: station, arrival: try arrival.map(time), departure: try departure.map(time),
+                     arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+        }
+        let route = [
+            try stopover(berlin, "2026-10-07T07:23:00", "2026-10-07T07:28:00"),
+            try stopover(station("Dresden Hbf", 51.0405, 13.7320), "2026-10-07T09:07:00", "2026-10-07T09:10:00"),
+            try stopover(station("Bad Schandau", 50.9193, 14.1375), "2026-10-07T09:35:00", "2026-10-07T09:37:00"),
+            try stopover(station("Děčín hl.n.", 50.7734, 14.2012), "2026-10-07T09:53:00", "2026-10-07T09:57:00"),
+            try stopover(station("Praha hl.n.", 50.0830, 14.4360), "2026-10-07T11:25:00", nil),
+        ]
+        #expect(BahnDeClient.operatorStops(operators, stops: stops, stopovers: route) == [
+            route[0].id: ["DB Fernverkehr AG"], route[2].id: ["DB Fernverkehr AG"], route[3].id: ["České dráhy, a.s."],
+        ])
+        #expect(BahnDeClient.operatorStops([TrainOperator(name: "DB Fernverkehr AG")], stops: stops, stopovers: route).isEmpty)
 
         // A train run by one railway throughout keeps the feed's operator, and an unknown code isn't guessed.
         #expect(BahnDeClient.operators(byAdministration: Array(decoded.halte.prefix(3))).isEmpty)

@@ -47,9 +47,6 @@ public struct TrainOperator: Sendable, Hashable {
         self.name = name
         self.section = section
     }
-
-    /// "Berlin Hbf – Bad Schandau".
-    public var sectionText: String? { section.map { "\($0.from) – \($0.to)" } }
 }
 
 extension Stopover {
@@ -170,6 +167,43 @@ extension BahnDeClient {
         case 1: return [TrainOperator(name: course.operators[0].name)]
         default: return course.operators
         }
+    }
+
+    /// Where a train run by several railways changes hands, for marking those stops in its route:
+    /// stopover ID → the operators to show there. RJ 171: DB at its first stop and at Bad Schandau,
+    /// ČD at Děčín. Empty for a train run by one railway; shares the request and cache of `journeyStops`.
+    public func operatorStops(for trip: Trip) async throws -> [String: [String]] {
+        guard let first = trip.stopovers.first(where: { $0.departure != nil }), let departure = first.departure,
+              let course = try await journeyCourse(line: trip.line, station: first.station, plannedDeparture: departure.planned)
+        else { return [:] }
+        return Self.operatorStops(course.operators, stops: course.stops, stopovers: trip.stopovers)
+    }
+
+    /// Each operator at the first stop of its section, and at the last one too unless it runs to the end,
+    /// placed on `stopovers` (the app's own stop list) by planned time and place.
+    static func operatorStops(_ operators: [TrainOperator], stops: [JourneyStop], stopovers: [Stopover]) -> [String: [String]] {
+        guard operators.count > 1 else { return [:] }
+        var marks: [String: [String]] = [:]
+        func mark(_ name: String, at stop: JourneyStop) {
+            guard let stopover = stopovers.first(where: { stopover in
+                guard isNear(stop, stopover.station) else { return false }
+                let times = [(stop.departure, stopover.departure), (stop.arrival, stopover.arrival)]
+                return times.contains { pair in
+                    guard let a = pair.0?.planned, let b = pair.1?.planned else { return false }
+                    return abs(a.timeIntervalSince(b)) < 60
+                }
+            }) else { return }
+            if marks[stopover.id, default: []].last != name { marks[stopover.id, default: []].append(name) }
+        }
+        for (index, entry) in operators.enumerated() {
+            guard let section = entry.section,
+                  let from = stops.firstIndex(where: { Station.normalize($0.name) == Station.normalize(section.from) }),
+                  let to = stops.indices.last(where: { $0 >= from && Station.normalize(stops[$0].name) == Station.normalize(section.to) })
+            else { continue }
+            mark(entry.name, at: stops[from])
+            if index < operators.count - 1 { mark(entry.name, at: stops[to]) }
+        }
+        return marks
     }
 
     private func journeyCourse(line: Line?, station: Station, plannedDeparture: Date,

@@ -203,47 +203,51 @@ struct LineBadge: View {
     }
 }
 
-/// The operator of a train (e.g. "DB Fernverkehr AG") with its logo (#166) on a transparent background.
-/// In dark mode, logos with dark lettering (`OperatorBrand.needsPlateInDarkMode`) get a soft light plate
-/// so they stay readable. Operators without a logo (`OperatorBrand`) keep the building icon.
-struct OperatorLabel: View {
+/// An operator's logo (#166) on a transparent background, exactly as wide as the logo itself so a
+/// narrow one like DB's doesn't sit in a wide empty box. In dark mode, logos with dark lettering
+/// (`OperatorBrand.needsPlateInDarkMode`) get a soft light plate so they stay readable. Nothing for
+/// an operator without a logo.
+struct OperatorLogo: View {
     let name: String
-    /// The part of the train it runs (first – last station), when several operators share the train.
-    var section: String? = nil
-    @ScaledMetric(relativeTo: .caption) private var logoHeight: CGFloat = 12
+    @ScaledMetric(relativeTo: .caption) private var height: CGFloat = 12
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        HStack(spacing: 6) {
-            if let brand = OperatorBrand(operatorName: name), let logo = UIImage(named: brand.assetName) {
-                let plate = colorScheme == .dark && brand.needsPlateInDarkMode
-                Image(uiImage: logo)
-                    .renderingMode(.original)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: logoHeight * 5, maxHeight: logoHeight)
-                    .padding(.horizontal, plate ? 4 : 0)
-                    .padding(.vertical, plate ? 2 : 0)
-                    .background(plate ? Color(white: 0.88) : .clear, in: .rect(cornerRadius: 4, style: .continuous))
-                    .accessibilityHidden(true)
-            } else {
-                Image(systemName: "building.2.fill")
-            }
-            if let section {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(name)
-                    Text(section).font(.caption2)
-                }
-            } else {
-                Text(name)
-            }
+        if let brand = OperatorBrand(operatorName: name), let logo = UIImage(named: brand.assetName), logo.size.height > 0 {
+            let plate = colorScheme == .dark && brand.needsPlateInDarkMode
+            Image(uiImage: logo)
+                .renderingMode(.original)
+                .resizable()
+                .frame(width: min(height * logo.size.width / logo.size.height, height * 5), height: height)
+                .padding(.horizontal, plate ? 4 : 0)
+                .padding(.vertical, plate ? 2 : 0)
+                .background(plate ? Color(white: 0.88) : .clear, in: .rect(cornerRadius: 4, style: .continuous))
+                .accessibilityLabel(name)
         }
     }
 }
 
-/// Everyone running the train you ride (#166): bahn.de lists one operator per section on international
-/// trains (Berlin → Praha: DB Fernverkehr, then České dráhy), while the feed only ever names one. Shows
-/// the feed's operator until bahn.de answered, and keeps it when bahn.de has nothing.
+/// The operator of a train (e.g. "DB Fernverkehr AG") with its logo; operators without a logo
+/// (`OperatorBrand`) keep the building icon.
+struct OperatorLabel: View {
+    let name: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if OperatorBrand(operatorName: name) != nil {
+                OperatorLogo(name: name).accessibilityHidden(true)
+            } else {
+                Image(systemName: "building.2.fill")
+            }
+            Text(name)
+        }
+    }
+}
+
+/// Everyone running the train you ride (#166): bahn.de names the railway per stop, so international
+/// trains have several (Berlin → Praha: DB Fernverkehr, then České dráhy), while the feed only ever
+/// names one. Several show as their logos next to each other (a name only where there's no logo);
+/// shows the feed's operator until bahn.de answered, and keeps it when bahn.de has nothing.
 struct TrainOperatorsLabel: View {
     enum Source { case leg(Leg), trip(Trip) }
 
@@ -266,11 +270,21 @@ struct TrainOperatorsLabel: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if let operators {
-                ForEach(operators, id: \.self) { OperatorLabel(name: $0.name, section: $0.sectionText) }
-            } else if let feedName {
-                OperatorLabel(name: feedName)
+        Group {
+            if let operators, operators.count > 1 {
+                HStack(spacing: 6) {
+                    ForEach(Array(operators.enumerated()), id: \.offset) { _, entry in
+                        if OperatorBrand(operatorName: entry.name) != nil {
+                            OperatorLogo(name: entry.name)
+                        } else {
+                            Text(entry.name)
+                        }
+                    }
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(operators.map(\.name).joined(separator: ", "))
+            } else if let name = operators?.first?.name ?? feedName {
+                OperatorLabel(name: name)
             }
         }
         .task(id: key) {
