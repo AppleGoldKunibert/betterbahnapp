@@ -205,9 +205,23 @@ public struct PlatformInfo: Codable, Sendable, Hashable {
     public var planned: String?
     public var actual: String?
 
+    /// Blank values count as none: bahn.de reports `"gleis": ""` at stations it has no platform for
+    /// (e.g. in Czechia), which showed as a "Gleis" badge without a number.
     public init(planned: String?, actual: String?) {
-        self.planned = planned
-        self.actual = actual
+        self.planned = Self.nonBlank(planned)
+        self.actual = Self.nonBlank(actual)
+    }
+
+    /// Also drops the blank platforms journeys saved before kept.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(planned: try c.decodeIfPresent(String.self, forKey: .planned),
+                  actual: try c.decodeIfPresent(String.self, forKey: .actual))
+    }
+
+    private static func nonBlank(_ value: String?) -> String? {
+        guard let value, !value.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        return value
     }
 
     public var best: String? { actual ?? planned }
@@ -380,7 +394,10 @@ public struct Leg: Codable, Sendable, Hashable, Identifiable {
 }
 
 public struct Journey: Codable, Sendable, Hashable, Identifiable {
-    public var id: String { legs.map(\.id).joined(separator: "|") }
+    /// The legs, plus where the journey ends: a leg's ID doesn't include where you get off, so Berlin →
+    /// Dresden and Berlin → Praha on the same train would otherwise be one journey (and opening one
+    /// showed the other one remembered from before).
+    public var id: String { legs.map(\.id).joined(separator: "|") + ">" + (legs.last?.destination.id ?? "") }
     public var legs: [Leg]
     public var source: DataSource
 
