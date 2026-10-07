@@ -54,7 +54,7 @@ features or data flows change (and update the privacy policy in `Cloudflare/work
   keep that email in case App Review asks. The app credits it ("Daten: vagonweb.cz").
 - Attribution (#103): Settings → Datenquellen lists every service with links (Transitous sources,
   DB Timetables under CC BY 4.0, OpenStreetMap, OpenRailwayMap, bahn.de, vagonweb, bahn.expert,
-  bahn.jetzt, Träwelling); the map legend links OSM and OpenRailwayMap. All requests except the
+  bahn.jetzt, Träwelling, zug.network for check-in emojis); the map legend links OSM and OpenRailwayMap. All requests except the
   bahn.de proxy send `HTTPClient.identifyingUserAgent` (app version + `/support` contact).
 - The share extension opens the app through the responder chain (`ShareViewController.openApp`),
   which Apple only officially allows for widgets. Common practice, but a possible review question.

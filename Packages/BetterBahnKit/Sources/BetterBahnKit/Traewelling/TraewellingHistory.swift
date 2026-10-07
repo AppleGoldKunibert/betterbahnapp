@@ -33,9 +33,46 @@ public struct TraewellingStatus: Decodable, Sendable, Hashable {
         public var destination: Stop
     }
 
+    /// Who checked in (Träwelling's `LightUser`).
+    public struct User: Decodable, Sendable, Hashable {
+        public var id: Int
+        public var displayName: String
+        public var username: String
+        public var profilePicture: URL? { profilePictureString.flatMap(URL.init(string:)) }
+        private var profilePictureString: String?
+
+        enum CodingKeys: String, CodingKey {
+            case id, displayName, username, profilePictureString = "profilePicture"
+        }
+    }
+
     public var id: Int
     public var checkin: Checkin
+    public var user: User? { userValue?.value }
     public var createdAt: Date?
+    /// The check-in's text, which may hold Mastodon `:shortcode:` emojis (`CustomEmojiText`).
+    public var body: String?
+    public var visibility: TraewellingVisibility? { visibilityValue?.value.flatMap(TraewellingVisibility.init(rawValue:)) }
+    public var business: TraewellingBusiness? { businessValue?.value.flatMap(TraewellingBusiness.init(rawValue:)) }
+    // Read leniently: a value this app doesn't know must not break loading the whole history.
+    private var visibilityValue: LenientInt?
+    private var businessValue: LenientInt?
+    private var userValue: LenientUser?
+
+    enum CodingKeys: String, CodingKey {
+        case id, checkin, createdAt, body
+        case visibilityValue = "visibility", businessValue = "business", userValue = "user"
+    }
+
+    struct LenientInt: Decodable, Sendable, Hashable {
+        var value: Int?
+        init(from decoder: Decoder) throws { value = try? decoder.singleValueContainer().decode(Int.self) }
+    }
+
+    struct LenientUser: Decodable, Sendable, Hashable {
+        var value: User?
+        init(from decoder: Decoder) throws { value = try? User(from: decoder) }
+    }
 
     public var product: Product {
         switch checkin.category {

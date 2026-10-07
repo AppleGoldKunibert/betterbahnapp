@@ -41,6 +41,7 @@ struct SavedJourneyRow: View {
     var isNext = false
     var readOnly = false
     @Environment(AppModel.self) private var model
+    @State private var journeyToRemove: Journey?
 
     var body: some View {
         let blocking = entry.issues.first(where: \.isBlocking)
@@ -84,9 +85,10 @@ struct SavedJourneyRow: View {
         .buttonStyle(.plain)
         .contextMenu {
             Button("Reise löschen", systemImage: "trash", role: .destructive) {
-                withAnimation { model.unsave(entry.journey) }
+                model.remove(entry.journey, askingToCheckOut: &journeyToRemove)
             }
         }
+        .checkoutPrompt($journeyToRemove)
     }
 
     /// The next journey is only framed once it departs within the next 24 hours (or is already
@@ -135,6 +137,7 @@ struct SaveJourneyButton: View {
     /// share/edit actions without squeezing them out.
     var shortLabel = false
     @Environment(AppModel.self) private var model
+    @State private var journeyToRemove: Journey?
 
     private var title: String {
         if shortLabel { return model.isSaved(journey) ? "Gespeichert" : "Speichern" }
@@ -154,11 +157,12 @@ struct SaveJourneyButton: View {
         .tint(saved ? Color.punctual : Color.brand)
         .controlSize(.large)
         .sensoryFeedback(.success, trigger: saved)
+        .checkoutPrompt($journeyToRemove)
     }
 
     private func toggle(_ saved: Bool) {
         withAnimation(.snappy) {
-            if saved { model.unsave(journey) } else { model.save(journey, search: search) }
+            if saved { model.remove(journey, askingToCheckOut: &journeyToRemove) } else { model.save(journey, search: search) }
         }
     }
 }
