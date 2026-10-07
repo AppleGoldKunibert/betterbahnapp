@@ -6,14 +6,16 @@ import Foundation
 /// (from Wikimedia Commons); an operator not listed here keeps the generic icon. To add one, add its case,
 /// a rule and its logo (the test `everyBrandHasALogo` checks the asset exists).
 public enum OperatorBrand: String, CaseIterable, Sendable {
-    case abellio, agilis, alex, arverio, bls, brb, cantus, cd, db, enno, erfurterbahn, erixx, eurobahn
+    case abellio, agilis, alex, arverio, bls, brb, cantus, cd, db, dbregio, dsb, enno, erfurterbahn, erixx, eurobahn
     case europeansleeper, eurostar, flixtrain, gysev, hlb, laenderbahn, metronom, mrb, nationalexpress
-    case nordbahn, nordwestbahn, ns, odeg, oebb, pkpic, polregio, sbb, sob, suedthueringenbahn, sweg
+    case nordbahn, nordwestbahn, ns, odeg, oebb, pkpic, polregio, sbahn, sbb, sob, suedthueringenbahn, sweg
     case thurbo, transdev, transregio, trenitalia, vlexx, westfalenbahn, zssk
 
     /// Whole words of the normalised name (lowercased, without diacritics, punctuation as spaces,
     /// digits stripped from word ends: "vlexx1", "DLB1"). Checked in order, so the specific ones come
-    /// first: "alex - Die Länderbahn" is alex, "S-Bahn Hannover (Transdev)" Transdev, not DB.
+    /// first: "alex - Die Länderbahn" is alex, "S-Bahn Hannover (Transdev)" Transdev, not DB. DB's S-Bahns
+    /// with a name of their own ("S-Bahn Berlin GmbH", "DB Regio AG S-Bahn München") get the S-Bahn's "S";
+    /// other DB Regio trains ("DB Regio AG NRW") DB Regio's logo, everything else of DB's DB's.
     private static let rules: [(OperatorBrand, [String])] = [
         (.transdev, ["transdev", "s bahn hannover"]),
         (.alex, ["alex"]),
@@ -54,19 +56,27 @@ public enum OperatorBrand: String, CaseIterable, Sendable {
         (.polregio, ["polregio"]),
         (.gysev, ["gysev", "raaberbahn"]),
         (.zssk, ["zssk", "zeleznicna spolocnost slovensko"]),
-        (.db, ["db", "deutsche bahn", "s bahn berlin", "s bahn hamburg"]),
+        (.dsb, ["dsb", "danske statsbaner", "danische staatsbahnen"]),
+        (.sbahn, ["s bahn"]),
+        (.dbregio, ["db regio"]),
+        (.db, ["db", "deutsche bahn"]),
     ]
 
     public init?(operatorName: String) {
+        let name = Self.normalized(operatorName)
+        guard let brand = Self.rules.first(where: { $0.1.contains { name.contains(" \($0) ") } })?.0 else { return nil }
+        self = brand
+    }
+
+    /// The name's words as the rules match them, with a space before and after.
+    private static func normalized(_ operatorName: String) -> String {
         let words = operatorName
             .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "de_DE"))
             .lowercased()
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .map { String($0.reversed().drop(while: \.isNumber).reversed()) }
             .filter { !$0.isEmpty }
-        let name = " " + words.joined(separator: " ") + " "
-        guard let brand = Self.rules.first(where: { $0.1.contains { name.contains(" \($0) ") } })?.0 else { return nil }
-        self = brand
+        return " " + words.joined(separator: " ") + " "
     }
 
     /// Name of the logo's image set in the app's asset catalog.
@@ -76,13 +86,35 @@ public enum OperatorBrand: String, CaseIterable, Sendable {
     /// the dark background. Logos that are bright enough sit on the background directly, as in light mode.
     public var needsPlateInDarkMode: Bool {
         switch self {
-        case .db, .erfurterbahn, .europeansleeper, .eurostar, .flixtrain, .gysev, .nationalexpress, .oebb,
-             .polregio, .sob, .thurbo, .transdev, .trenitalia, .westfalenbahn, .zssk:
+        case .db, .dsb, .erfurterbahn, .europeansleeper, .eurostar, .flixtrain, .gysev, .nationalexpress, .oebb,
+             .polregio, .sbahn, .sob, .thurbo, .transdev, .trenitalia, .westfalenbahn, .zssk:
             false
-        case .abellio, .agilis, .alex, .arverio, .bls, .brb, .cantus, .cd, .enno, .erixx, .eurobahn, .hlb,
+        case .abellio, .agilis, .alex, .arverio, .bls, .brb, .cantus, .cd, .dbregio, .enno, .erixx, .eurobahn, .hlb,
              .laenderbahn, .metronom, .mrb, .nordbahn, .nordwestbahn, .ns, .odeg, .pkpic, .sbb,
              .suedthueringenbahn, .sweg, .transregio, .vlexx:
             true
+        }
+    }
+
+    /// A country's national railway (DB with its S-Bahns, DSB, ČD, ÖBB, SBB, …): the railway a train's stops
+    /// in that country stand for when bahn.de names no operator (`BahnDeClient.operators(byAdministration:)`).
+    public var isNationalRailway: Bool {
+        switch self {
+        case .cd, .db, .dbregio, .dsb, .gysev, .ns, .oebb, .pkpic, .polregio, .sbahn, .sbb, .trenitalia, .zssk:
+            true
+        default:
+            false
+        }
+    }
+
+    /// `operatorName` as the app shows it, where the feed's name is long-winded or names no company:
+    /// "ODEG" for "ODEG Ostdeutsche Eisenbahn GmbH", "Transdev" for "S-Bahn Hannover (Transdev)" (the S-Bahn
+    /// Hannover is Transdev's network, not a company of its own). Other names stay as they are.
+    public static func displayName(for operatorName: String) -> String {
+        switch OperatorBrand(operatorName: operatorName) {
+        case .odeg: "ODEG"
+        case .transdev where normalized(operatorName).contains(" s bahn hannover "): "Transdev"
+        default: operatorName
         }
     }
 }

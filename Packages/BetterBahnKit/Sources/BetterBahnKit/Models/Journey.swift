@@ -434,6 +434,20 @@ public struct Journey: Codable, Sendable, Hashable, Identifiable {
     }
     public var isCancelled: Bool { legs.contains(where: \.cancelled) }
 
+    /// Where each leg sits on the journey's bar, in order and never overlapping: a late train arriving
+    /// after the next leg's departure pushes that leg (and the ones after) back, as the next metro would
+    /// be taken. RJ 175 +31 into Praha-Holešovice, then walk and metro C on their planned times, drew the
+    /// train across the whole bar with the metro as a dot on top. Empty for a journey without legs.
+    public var barSpans: [DateInterval] {
+        var spans: [DateInterval] = []
+        for leg in legs {
+            let start = max(leg.departure.best, spans.last?.end ?? leg.departure.best)
+            let length = max(leg.arrival.best.timeIntervalSince(leg.departure.best), 0)
+            spans.append(DateInterval(start: start, duration: length))
+        }
+        return spans
+    }
+
     /// Transfers where the next departure is before the previous arrival.
     public var brokenTransferIndices: [Int] {
         let transit = transitLegs

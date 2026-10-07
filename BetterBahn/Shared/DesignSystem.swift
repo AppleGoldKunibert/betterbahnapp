@@ -228,7 +228,7 @@ struct OperatorLogo: View {
 }
 
 /// The operator of a train (e.g. "DB Fernverkehr AG") with its logo; operators without a logo
-/// (`OperatorBrand`) keep the building icon.
+/// (`OperatorBrand`) keep the building icon. Some names are shortened ("ODEG", `OperatorBrand.displayName`).
 struct OperatorLabel: View {
     let name: String
 
@@ -239,7 +239,7 @@ struct OperatorLabel: View {
             } else {
                 Image(systemName: "building.2.fill")
             }
-            Text(name)
+            Text(OperatorBrand.displayName(for: name))
         }
     }
 }
@@ -277,7 +277,7 @@ struct TrainOperatorsLabel: View {
                         if OperatorBrand(operatorName: entry.name) != nil {
                             OperatorLogo(name: entry.name)
                         } else {
-                            Text(entry.name)
+                            Text(OperatorBrand.displayName(for: entry.name))
                         }
                     }
                 }
@@ -700,19 +700,21 @@ struct SourceNotice: View {
     }
 }
 
-/// Proportional bar of all legs, colored by product.
+/// Proportional bar of all legs, colored by product, laid out by `Journey.barSpans` (in order, a leg
+/// a late train runs into pushed back instead of covered).
 struct JourneySegmentBar: View {
     let journey: Journey
 
     var body: some View {
         GeometryReader { proxy in
-            let total = max(journey.duration ?? 1, 1)
-            let start = journey.departure?.best ?? .now
+            let spans = journey.barSpans
+            let start = spans.first?.start ?? .now
+            let total = max(spans.last.map { $0.end.timeIntervalSince(start) } ?? 1, 1)
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.secondary.opacity(0.1)).frame(height: 6)
-                ForEach(journey.legs) { leg in
-                    let offset = max(leg.departure.best.timeIntervalSince(start), 0) / total
-                    let length = max(leg.arrival.best.timeIntervalSince(leg.departure.best), 0) / total
+                ForEach(Array(journey.legs.enumerated()), id: \.element.id) { index, leg in
+                    let offset = spans[index].start.timeIntervalSince(start) / total
+                    let length = spans[index].duration / total
                     Capsule()
                         .fill(leg.isWalking ? AnyShapeStyle(Color.secondary.opacity(0.3))
                                             : AnyShapeStyle((leg.line?.product.color ?? .gray).gradient))

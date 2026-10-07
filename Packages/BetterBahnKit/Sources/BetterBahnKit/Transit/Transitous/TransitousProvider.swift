@@ -1244,7 +1244,7 @@ public struct TransitousProvider: TransitProvider {
     /// Index of the most recent leg in `result` that `leg` is really a direct continuation of –
     /// either truly back-to-back, or separated only by a single short walk leg bridging two stops
     /// that are really the same platform (see `mergeThroughTrainLegs` above). Recognized by the same
-    /// train number and product continuing with no real dwell time between the two train legs' own
+    /// train number and kind of train continuing with no real dwell time between the two train legs' own
     /// planned times — the walk leg's own bounds don't factor in, only that it doesn't hide an actual
     /// transfer.
     static func continuationAnchorIndex(in result: [Leg], for leg: Leg) -> Int? {
@@ -1257,11 +1257,19 @@ public struct TransitousProvider: TransitProvider {
             ? anchor.destination.isSamePlace(as: last.origin) && last.destination.isSamePlace(as: leg.origin)
             : anchor.destination.isSamePlace(as: leg.origin)
         guard bridged,
-              anchor.line?.product == leg.line?.product,
-              let anchorNumber = anchor.line?.number, anchorNumber == leg.line?.number,
+              let anchorLine = anchor.line, let line = leg.line, Self.isSameKind(anchorLine.product, line.product),
+              let anchorNumber = anchorLine.number, anchorNumber == line.number,
               leg.departure.planned.timeIntervalSince(anchor.arrival.planned) <= 5 * 60
         else { return nil }
         return anchorIndex
+    }
+
+    /// Whether two products can be the same train in two feeds. Long-distance and high-speed count as one:
+    /// the Railjet København → Praha is high-speed in DB's feed but long-distance in the Czech one
+    /// ("Ex5 (rj 383)"), which showed it as two trains with a change at Děčín.
+    private static func isSameKind(_ a: Product, _ b: Product) -> Bool {
+        let longDistance: Set<Product> = [.highSpeed, .longDistance]
+        return a == b || (longDistance.contains(a) && longDistance.contains(b))
     }
 
     /// A domestic feed sometimes genericizes an international EuroCity as a plain "IC"; when the
