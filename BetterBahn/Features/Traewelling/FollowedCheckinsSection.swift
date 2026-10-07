@@ -54,7 +54,7 @@ extension AppModel {
 /// Who of the people the user follows on Träwelling is on a train right now (#196): a small button
 /// above "Deine Reisen" that lists their check-ins (tags, train, from → to). Opening one shows its
 /// train, a small map of the ride with the train's live position and speed, a link to the check-in on
-/// Träwelling and a like button. Nothing shows while nobody is under way.
+/// Träwelling and a like button. Nothing shows while nobody is checked in.
 struct FollowedCheckinsSection: View {
     @Environment(AppModel.self) private var model
     @State private var showsList = false
@@ -84,8 +84,8 @@ struct FollowedCheckinsSection: View {
     private func toggleButton(_ statuses: [TraewellingStatus]) -> some View {
         let users = statuses.compactMap(\.user)
         let title = statuses.count == 1
-            ? "\(users.first?.displayName ?? "Jemand") ist unterwegs"
-            : "\(statuses.count) Leute sind unterwegs"
+            ? "\(users.first?.displayName ?? "Jemand") ist eingecheckt"
+            : "\(statuses.count) Leute sind eingecheckt"
         return Button {
             withAnimation(.snappy) { showsList.toggle() }
         } label: {
@@ -212,6 +212,13 @@ private struct FollowedCheckinCard: View {
                                 .font(.caption.weight(.medium))
                                 .monospacedDigit()
                                 .foregroundStyle(.secondary)
+                        }
+                        // Checked in, but the train hasn't left yet.
+                        if let start = checkin.start, start > .now {
+                            Text("fährt \(start.timeString) ab")
+                                .font(.caption.weight(.semibold))
+                                .monospacedDigit()
+                                .foregroundStyle(Color.brand)
                         }
                     }
                     HStack(alignment: .firstTextBaseline, spacing: 4) {

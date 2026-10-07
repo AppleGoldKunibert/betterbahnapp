@@ -2,7 +2,7 @@ import Foundation
 
 /// What the people the user follows on Träwelling are riding right now (#196).
 public struct FollowedCheckins: Sendable {
-    /// Others' check-ins under way, the latest departure first.
+    /// Others' check-ins on a train now or leaving soon (see `TraewellingClient.checkedIn`), the latest departure first.
     public var statuses: [TraewellingStatus]
     /// Whether the user has likes on; Träwelling asks apps to offer liking only then.
     public var likesEnabled: Bool
@@ -14,33 +14,39 @@ public struct FollowedCheckins: Sendable {
 }
 
 public extension TraewellingClient {
-    /// No ride runs longer, so the dashboard isn't paged back further for rides still under way.
+    /// No ride runs longer, so the dashboard isn't paged back further for rides still running.
     static let longestRide: TimeInterval = 12 * 3600
 
-    /// The check-ins of the people the user follows that are under way at `now`, from Träwelling's
-    /// dashboard (the last 7 days of check-ins by followed users and the user, latest departure first).
+    /// How long before the train leaves a check-in shows: the dashboard has nothing that leaves later.
+    static let boardingWindow: TimeInterval = 20 * 60
+
+    /// The check-ins of the people the user follows that are under way at `now` or leave soon, from
+    /// Träwelling's dashboard (the last 7 days of check-ins by followed users and the user, departing
+    /// before 20 minutes from now, latest departure first).
     func followedCheckins(at now: Date = .now, maxPages: Int = 3) async throws -> FollowedCheckins {
         let user = try await currentUser()
         var found: [TraewellingStatus] = []
         for page in 1...max(1, maxPages) {
             let result = try await authorized("dashboard", query: [.init(name: "page", value: String(page))], as: StatusPage.self)
             found += result.data
-            // Once a page reaches back further than any ride lasts, nothing older is still under way.
+            // Once a page reaches back further than any ride lasts, nothing older is still running.
             guard result.links?.next != nil, let oldest = result.data.last.flatMap({ $0.checkin.origin.departurePlanned ?? $0.checkin.start }),
                   oldest > now.addingTimeInterval(-Self.longestRide) else { break }
         }
-        return FollowedCheckins(statuses: Self.underway(found, excludingUser: user.id, at: now),
+        return FollowedCheckins(statuses: Self.checkedIn(found, excludingUser: user.id, at: now),
                                 likesEnabled: user.likesEnabled ?? true)
     }
 
-    /// The check-ins of others in `statuses` whose ride has started and not yet ended at `now`, each once.
+    /// The check-ins of others in `statuses` whose ride hasn't ended at `now` and that are on the train
+    /// or wait for it to leave within `boardingWindow` (by plan, so a delay doesn't hide them), each once.
     /// Ones without a user are left out too: they can't be told from the user's own.
-    static func underway(_ statuses: [TraewellingStatus], excludingUser me: Int, at now: Date) -> [TraewellingStatus] {
+    static func checkedIn(_ statuses: [TraewellingStatus], excludingUser me: Int, at now: Date) -> [TraewellingStatus] {
         var seen = Set<Int>()
         return statuses.filter { status in
             guard seen.insert(status.id).inserted, let user = status.user, user.id != me,
                   let start = status.checkin.start, let end = status.checkin.end else { return false }
-            return start <= now && now < end
+            let leaves = min(start, status.checkin.origin.departurePlanned ?? start)
+            return leaves <= now.addingTimeInterval(boardingWindow) && now < end
         }
         .sorted { ($0.checkin.start ?? .distantPast) > ($1.checkin.start ?? .distantPast) }
     }

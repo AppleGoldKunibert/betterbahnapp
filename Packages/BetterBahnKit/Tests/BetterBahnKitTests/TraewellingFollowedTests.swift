@@ -65,20 +65,31 @@ import Testing
         #expect(status.checkin.isManualTrip)
     }
 
-    @Test func keepsOthersRidesUnderWay() throws {
+    @Test func keepsOthersRidesUnderWayOrLeavingSoon() throws {
         let statuses = [
             try Self.status(id: 1, user: 11, from: 30, to: 90),            // under way
             try Self.status(id: 2, user: 10, from: 30, to: 90),            // my own
             try Self.status(id: 3, user: 12, from: 0, to: 50),             // already there
             try Self.status(id: 4, user: 13, from: 0, to: 50, delay: 20),  // there at 11:10 because of the delay
-            try Self.status(id: 5, user: 14, from: 70, to: 120),           // not left yet
+            try Self.status(id: 5, user: 14, from: 75, to: 120),           // waiting for the train at 11:15
+            try Self.status(id: 8, user: 16, from: 90, to: 120),           // leaves at 11:30, too far off
             try Self.status(id: 6, user: nil, from: 30, to: 90),           // can't tell whose
             try Self.status(id: 1, user: 11, from: 30, to: 90),            // twice on the dashboard
             try Self.status(id: 7, user: 15, from: 45, to: 90),
         ]
-        let underway = TraewellingClient.underway(statuses, excludingUser: 10, at: Self.now)
+        let checkedIn = TraewellingClient.checkedIn(statuses, excludingUser: 10, at: Self.now)
         // Latest departure first.
-        #expect(underway.map(\.id) == [7, 1, 4])
+        #expect(checkedIn.map(\.id) == [5, 7, 1, 4])
+    }
+
+    @Test func aDelayDoesntHideSomeoneWaitingForTheTrain() throws {
+        // Planned at 11:15, but leaving only at 11:45.
+        let late = try JSONDecoding.decoder.decode(TraewellingStatus.self, from: Data(#"""
+        {"id":9,"user":{"id":17,"displayName":"U","username":"u"},
+         "checkin":{"origin":{"name":"B","departurePlanned":"2026-10-06T11:15:00+00:00","departureReal":"2026-10-06T11:45:00+00:00"},
+                    "destination":{"name":"C","arrivalPlanned":"2026-10-06T12:00:00+00:00"}}}
+        """#.utf8))
+        #expect(TraewellingClient.checkedIn([late], excludingUser: 10, at: Self.now).map(\.id) == [9])
     }
 
     @Test func findsTheTrainByNameOrRunNumber() throws {
@@ -179,7 +190,7 @@ import Testing
 }
 
 /// Records "METHOD /path?query" and answers with the given status: the user (likes off), a dashboard
-/// page with the user's own and a followed user's check-in under way, or a like count.
+/// page with the user's own and a followed user's check-in on a train, or a like count.
 private final class FollowedProtocol: URLProtocol, @unchecked Sendable {
     static let requests = Mutex<[String]>([])
     nonisolated(unsafe) static var statusFor: (String) -> Int = { _ in 200 }
