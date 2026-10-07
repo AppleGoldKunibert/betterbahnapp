@@ -73,7 +73,10 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 - `Features/Departures/` – `StationBoardView`/`BoardRow`, `TripView` (single train's stops),
   `CoachSequenceView` (Wagenreihung sheet, opened from `CoachSequenceButton` in train headers or a stop's platform in `TripContent`;
   bahn.de's sequence, else vagonweb's planned one).
-- `Features/Map/` – `TravelMapView` heatmap of past trips (`TravelMapHeatmap`, `RailwayTileOverlay`: OpenRailwayMap tiles, 512 px, cached on disk 7 days, 10 min pause after 403/429, #171;
+- `Features/TrainSearch/` – `TrainSearchSheet` (#183): find a train by its number and day (train button on Verbindungen,
+  search button on the map), then `TrainSearchResultView` offers "Zugdetails anzeigen" (`TripView` without a preselected
+  stop, to save the journey/check in), the Wagenreihung and "Auf Karte zeigen" (only while bahn.jetzt has a position).
+- `Features/Map/` – `TravelMapView` heatmap of past trips (no banner when empty) (`TravelMapHeatmap`, `RailwayTileOverlay`: OpenRailwayMap tiles, 512 px, cached on disk 7 days, 10 min pause after 403/429, #171;
   a ride both saved and checked in on Träwelling is drawn from the check-in, saved journeys only add unchecked legs – `RideMatch.uncovered`),
   `LiveTrainMapView` (one train's live position on its route, opened from `LiveTrainIconTile`, the train icon on
   legs and trips bahn.jetzt has). `JourneyMapView` shows the journey's running trains too.
@@ -145,9 +148,15 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `FormationRequest.stopsBefore` or the leg's trip). bahn.de's `sequenceStatus` ("DIFFERS_FROM_SCHEDULE") is set for
   nearly every train, so "Abweichende Wagenreihung" comes from `CoachSequence.deviations(fromPlan:)` (missing/extra
   coaches, class changes; order ignored) against vagonweb's plan.
-- `Transit/BahnExpert/` – bahn.expert, only as fallback for the train type (`TrainTypeLookup`) when bahn.de
+- `Transit/BahnExpert/` – bahn.expert, as fallback for the train type (`TrainTypeLookup`) when bahn.de
   has no coach sequence and vagonweb has none either: it has DB's planned formation (`DB-plan`) for days
-  ahead; bahn.de is only asked for departures within `BahnDeClient.formationLookahead` (12 h).
+  ahead; bahn.de is only asked for departures within `BahnDeClient.formationLookahead` (12 h). Needs a
+  `Referer` and a non-curl User-Agent (else an empty 206).
+- `Transit/TrainNumberSearch.swift` – train search by number (#183): bahn.expert's `journey/find` lists the runs with
+  that number on a day (`TrainNumberQuery` reads "ICE 123"/"123"; `ranked` keeps trains only, the typed category or
+  the same kind of train, Germany first), `detailsByJourneyId` their stops; `run(of:)` then finds the run on the board
+  of one of its stops (German ones first, bahn.de's station search by EVA) by number, name or line at the planned time,
+  so the trip comes from Transitous like any other.
 - `Transit/BahnJetzt/` – live train positions from bahn.jetzt's `/api/journeys` (one shared list,
   refreshed by `AppModel.followTrainPositions()` while the map is on screen). Long-distance trains by
   number, regional/S-Bahn by run number (`Line.tripNumber`).

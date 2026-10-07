@@ -5,6 +5,9 @@ import SwiftUI
 /// or start a Live Activity.
 struct TripView: View {
     let entry: BoardEntry
+    /// Picks the board's station as where you get on (or off); off when the train was found by its
+    /// number, where that station is just where it was looked up.
+    var selectsStation = true
 
     @Environment(AppModel.self) private var model
     @State private var trip: Trip?
@@ -36,7 +39,7 @@ struct TripView: View {
                     ErrorBanner(error: error)
                 }
                 if let trip {
-                    TripContent(trip: trip, highlight: entry.station, boardingID: $boardingID, exitID: $exitID)
+                    TripContent(trip: trip, highlight: selectsStation ? entry.station : nil, boardingID: $boardingID, exitID: $exitID)
                 }
             }
             .padding(.horizontal)
@@ -162,6 +165,7 @@ struct TripView: View {
             exitID = keptStops.exit.flatMap { kept in loaded.stopovers.last { $0.station.isSamePlace(as: kept) }?.id }
             if boardingID != nil { return }
         }
+        guard selectsStation else { return }
         let here = loaded.stopovers.first { $0.station.isSamePlace(as: entry.station) }?.id
         if entry.kind == .arrivals {
             // For arrivals the selected station is where you get off; where you got on is picked by tapping.
@@ -217,7 +221,8 @@ private struct CoupledTrainPicker: View {
 /// Trip header + selectable stop timeline.
 struct TripContent: View {
     let trip: Trip
-    let highlight: Station
+    /// Shown in bold: the station the train was opened from.
+    let highlight: Station?
     @Binding var boardingID: String?
     @Binding var exitID: String?
     /// When false, stops are shown read-only (e.g. viewing the full route of a leg already booked).
@@ -369,7 +374,7 @@ struct TripContent: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(stop.station.displayName)
                                 .font(isMajor ? .headline : .subheadline)
-                                .fontWeight(stop.station.isSamePlace(as: highlight) ? .bold : nil)
+                                .fontWeight(highlight.map { stop.station.isSamePlace(as: $0) } == true ? .bold : nil)
                                 .lineLimit(2)
                             if isBoarding {
                                 InfoChip(text: "Einstieg", systemImage: "arrow.up.right.circle.fill", tint: .punctual)

@@ -2699,6 +2699,117 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
     }
 }
 
+@Suite struct TrainNumberSearchTests {
+    @Test func readsTypedTrainNumbers() {
+        #expect(TrainNumberQuery("ICE 123") == TrainNumberQuery(category: "ICE", number: 123))
+        #expect(TrainNumberQuery(" ice123 ") == TrainNumberQuery(category: "ICE", number: 123))
+        #expect(TrainNumberQuery("123") == TrainNumberQuery(category: nil, number: 123))
+        #expect(TrainNumberQuery("S 37856") == TrainNumberQuery(category: "S", number: 37856))
+        #expect(TrainNumberQuery("ICE") == nil)
+        #expect(TrainNumberQuery("") == nil)
+        #expect(TrainNumberQuery("0") == nil)
+    }
+
+    /// bahn.expert's `journey/find` for 123 on 2026-10-07 (shortened): the ICE, Swiss and Austrian
+    /// regional trains, a replacement bus filed as regional train and a tram.
+    static let found = """
+    [
+      {"journeyId":"a","train":{"line":"ZB1","category":"R","journeyNumber":123,"transportType":"REGIONAL_TRAIN"},
+       "firstStop":{"stopPlace":{"evaNumber":"8100102","name":"Jenbach"}},"lastStop":{"stopPlace":{"evaNumber":"8100541","name":"Mayrhofen im Zillertal"}}},
+      {"journeyId":"b","train":{"category":"ICE","journeyNumber":123,"transportType":"HIGH_SPEED_TRAIN"},
+       "firstStop":{"stopPlace":{"evaNumber":"8400058","name":"Amsterdam Centraal"}},"lastStop":{"stopPlace":{"evaNumber":"8000105","name":"Frankfurt(Main)Hbf"}}},
+      {"journeyId":"c","train":{"line":"S2","category":"Bus","journeyNumber":123,"transportType":"REGIONAL_TRAIN"},
+       "firstStop":{"stopPlace":{"evaNumber":"131825","name":"Bahnhof, Erding"}},"lastStop":{"stopPlace":{"evaNumber":"131826","name":"Bahnhof, Markt Schwaben"}}},
+      {"journeyId":"d","train":{"line":"S8","category":"S","journeyNumber":123,"transportType":"CITY_TRAIN"},
+       "firstStop":{"stopPlace":{"evaNumber":"8010159","name":"Halle(Saale)Hbf"}},"lastStop":{"stopPlace":{"evaNumber":"8010077","name":"Dessau Hbf"}}},
+      {"journeyId":"e","train":{"line":"63","category":"STR","journeyNumber":123,"transportType":"TRAM"},
+       "firstStop":{"stopPlace":{"evaNumber":"733388","name":"Krankenhaus Köpenick"}},"lastStop":{"stopPlace":{"evaNumber":"733587","name":"Schöneweide"}}}
+    ]
+    """
+
+    func results() throws -> [TrainSearchResult] {
+        let runs = try JSONDecoding.decoder.decode([BahnExpertClient.FoundRun].self, from: Data(Self.found.utf8))
+        return runs.compactMap(BahnExpertClient.result)
+    }
+
+    @Test func listsTrainsInGermanyFirstAndDropsBusesAndTrams() throws {
+        let ranked = TrainNumberSearch.ranked(try results(), for: TrainNumberQuery(category: nil, number: 123))
+        #expect(ranked.map(\.journeyId) == ["b", "d", "a"])
+        #expect(ranked.map(\.name) == ["ICE 123", "S 123", "R 123"])
+        #expect(ranked[1].lineName == "S8")
+        #expect(ranked[0].lineName == nil)
+    }
+
+    @Test func typedCategoryNarrowsTheResultsWhenItMatches() throws {
+        let all = try results()
+        #expect(TrainNumberSearch.ranked(all, for: TrainNumberQuery(category: "ICE", number: 123)).map(\.journeyId) == ["b"])
+        // The line counts as well ("S8").
+        #expect(TrainNumberSearch.ranked(all, for: TrainNumberQuery(category: "S8", number: 123)).map(\.journeyId) == ["d"])
+        // Without an exact match the same kind of train: feeds disagree on RE vs. RB, ICE vs. ECE.
+        #expect(TrainNumberSearch.ranked(all, for: TrainNumberQuery(category: "RE", number: 123)).map(\.journeyId) == ["d", "a"])
+        #expect(TrainNumberSearch.ranked(all, for: TrainNumberQuery(category: "ECE", number: 123)).map(\.journeyId) == ["b"])
+    }
+
+    @Test func trainWithoutCategoryGoesByItsLine() {
+        let result = TrainSearchResult(journeyId: "x", category: "-", number: 37856, line: "RS5", product: .regional,
+                                       origin: "Delfzijl", destination: "Veendam", originEVA: "8400171", destinationEVA: nil)
+        #expect(result.name == "RS5 37856")
+        #expect(result.lineName == nil)
+    }
+
+    @Test func looksTheTrainUpAtGermanStopsFirst() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let stops = [
+            TrainSearchStop(evaNumber: "8400058", name: "Amsterdam Centraal", plannedDeparture: start),
+            TrainSearchStop(evaNumber: "8400530", name: "Utrecht Centraal", plannedDeparture: start + 1800),
+            TrainSearchStop(evaNumber: "8000086", name: "Duisburg Hbf", plannedDeparture: start + 7200),
+            TrainSearchStop(evaNumber: "8000085", name: "Düsseldorf Hbf", plannedDeparture: start + 8400),
+            TrainSearchStop(evaNumber: "8000105", name: "Frankfurt(Main)Hbf", plannedDeparture: nil),
+        ]
+        #expect(TrainNumberSearch.lookupStops(stops).map(\.name) == ["Duisburg Hbf", "Düsseldorf Hbf", "Amsterdam Centraal"])
+    }
+
+    @Test func findsTheBoardEntryByNumberAndPlannedTime() {
+        let planned = Date(timeIntervalSince1970: 1_800_000_000)
+        let station = Station(id: "8000086", name: "Duisburg Hbf", coordinate: nil, evaNumber: "8000086", source: .transitous)
+        func entry(_ line: Line, _ time: Date) -> BoardEntry {
+            BoardEntry(kind: .departures, tripId: line.name, station: station, line: line, otherEnd: nil,
+                       time: TimeInfo(planned: time, actual: nil), platform: PlatformInfo(planned: "1", actual: nil),
+                       cancelled: false, terminatesOrOriginatesHere: false, remarks: [], source: .transitous)
+        }
+        let ice = TrainSearchResult(journeyId: "b", category: "ICE", number: 123, line: nil, product: .highSpeed,
+                                    origin: "Amsterdam Centraal", destination: "Frankfurt(Main)Hbf", originEVA: "8400058", destinationEVA: "8000105")
+        let entries = [
+            entry(Line(name: "RE 1", number: "1", product: .regionalExpress, operatorName: nil), planned),
+            entry(Line(name: "ICE 123", number: "123", product: .highSpeed, operatorName: nil), planned + 3600),
+            entry(Line(name: "ICE 123", number: "123", product: .highSpeed, operatorName: nil), planned + 30),
+        ]
+        #expect(TrainNumberSearch.entry(for: ice, departing: planned, in: entries)?.time.planned == planned + 30)
+        // A regional train by its run number.
+        let re = TrainSearchResult(journeyId: "r", category: "RE", number: 4711, line: "RE1", product: .regionalExpress,
+                                   origin: "", destination: "", originEVA: nil, destinationEVA: nil)
+        let run = entry(Line(name: "RE 1", number: "1", product: .regionalExpress, operatorName: nil, tripNumber: "4711"), planned)
+        #expect(TrainNumberSearch.entry(for: re, departing: planned, in: [run]) == run)
+        let otherLine = entry(Line(name: "RE 2", number: "2", product: .regionalExpress, operatorName: nil), planned)
+        #expect(TrainNumberSearch.entry(for: re, departing: planned, in: [otherLine]) == nil)
+        // An S-Bahn whose run number Transitous doesn't know, by its line.
+        let s2 = TrainSearchResult(journeyId: "s", category: "S", number: 2023, line: "S2", product: .suburban,
+                                   origin: "", destination: "", originEVA: nil, destinationEVA: nil)
+        let sBahn = entry(Line(name: "S 2", number: "2", product: .suburban, operatorName: nil), planned)
+        #expect(TrainNumberSearch.entry(for: s2, departing: planned, in: [entries[0], sBahn]) == sBahn)
+    }
+
+    @Test func mapsBahnExpertTransportTypes() {
+        #expect(BahnExpertClient.product(transportType: "HIGH_SPEED_TRAIN", category: "ICE") == .highSpeed)
+        #expect(BahnExpertClient.product(transportType: "INTERCITY_TRAIN", category: "IC") == .longDistance)
+        #expect(BahnExpertClient.product(transportType: "REGIONAL_TRAIN", category: "RE") == .regionalExpress)
+        #expect(BahnExpertClient.product(transportType: "REGIONAL_TRAIN", category: "RB") == .regional)
+        #expect(BahnExpertClient.product(transportType: "REGIONAL_TRAIN", category: "Bus") == .bus)
+        #expect(BahnExpertClient.product(transportType: "CITY_TRAIN", category: "S") == .suburban)
+        #expect(BahnExpertClient.product(transportType: "FERRY", category: "Fähre") == .ferry)
+    }
+}
+
 @Suite struct BahnDeJourneyTests {
     /// Real ICE 372 run (2026-09-22): it skipped Frankfurt (Main) Hbf and instead picked up an
     /// unscheduled stop at Frankfurt (Main) Süd. bahn.de flags that pair either directly
