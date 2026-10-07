@@ -204,19 +204,29 @@ public struct TimeInfo: Codable, Sendable, Hashable {
 public struct PlatformInfo: Codable, Sendable, Hashable {
     public var planned: String?
     public var actual: String?
+    /// Where the platform came from, when not from the train's own data (which may be live).
+    public var source: Source?
+
+    public enum Source: String, Codable, Sendable, Hashable {
+        /// The Czech national timetable (CZPTT, from Správa železnic), taken over for a train another
+        /// feed has no platforms for in Czechia: planned only, a change at short notice won't show.
+        case czechTimetable
+    }
 
     /// Blank values count as none: bahn.de reports `"gleis": ""` at stations it has no platform for
     /// (e.g. in Czechia), which showed as a "Gleis" badge without a number.
-    public init(planned: String?, actual: String?) {
+    public init(planned: String?, actual: String?, source: Source? = nil) {
         self.planned = Self.nonBlank(planned)
         self.actual = Self.nonBlank(actual)
+        self.source = source
     }
 
     /// Also drops the blank platforms journeys saved before kept.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.init(planned: try c.decodeIfPresent(String.self, forKey: .planned),
-                  actual: try c.decodeIfPresent(String.self, forKey: .actual))
+                  actual: try c.decodeIfPresent(String.self, forKey: .actual),
+                  source: try? c.decodeIfPresent(Source.self, forKey: .source))
     }
 
     private static func nonBlank(_ value: String?) -> String? {

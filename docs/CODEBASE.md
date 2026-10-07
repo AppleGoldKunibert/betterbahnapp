@@ -178,6 +178,16 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   (`FormationRequest.coupledNumbers`), each part labelled with its train, destination and Tz; a Träwelling
   check-in asks which train you sit in (`Leg.riding(_:)`). `CoupledTrain.tripId` lets `TripView`/`LegTripSheet`
   switch between the trains' own stops (`Line.runs(ownDirection:ownTripId:)`).
+- `Transit/Transitous/CzechPlatforms.swift` – platforms in Czechia for trains from feeds without any there
+  (DELFI's ICE/IC Berlin–Praha, alex, ZSSK's/ÖBB's copies). The Czech national timetable (CZPTT, Správa železnic, in
+  Transitous as `cz-CZPTT_…`) has the same train from the border on ("rj 171" for DB's "ICE 171") with planned tracks:
+  the first Czech stop (UIC number 54… in the stop ID, `isCzechStop`) is found as CZPTT's station via `v1/map/stops`
+  (other feeds write "Decin hl.n." without accents, so not by name), the train by number ±5 min on its stop times,
+  its tracks via `v5/trip`; cached 12 h. Filled in only where a platform is missing, marked
+  `PlatformInfo.source == .czechTimetable` (planned only, no CZPTT realtime in Transitous): `PlatformBadge` shows an
+  info dot and on tap `PlannedPlatformNote`. Applied in `CombinedProvider.journeys` (3 s, beside coupled trains),
+  `CombinedProvider.trip(for:)` and `JourneyRefresher.refresh`. Live Czech platforms would need Správa železnic's
+  departure boards (no API, not used).
 - `Transit/Timetables/` – official DB Timetables XML client (realtime overrides, messages), through the
   `bahnde-proxy` Worker, which holds the API key. The app only uses it where App Attest works. A train not
   found at a station's EVA is looked for at its other levels (`/station` `meta`, e.g. "Hamburg Hbf (S-Bahn)").

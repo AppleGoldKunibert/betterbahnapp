@@ -11,6 +11,8 @@ public struct TransitousProvider: TransitProvider {
     private let coupledCache = ExpiringCache<[Line.CoupledTrain]>()
     /// `withBusierStop(for:)` answers per stop ID.
     private let stopCache = ExpiringCache<Station?>()
+    /// `czechTimetableStops(number:along:)` answers per train and stop (see `CzechPlatforms.swift`).
+    let czechTimetableCache = ExpiringCache<[Stopover]?>()
 
     public init(baseURL: URL = TransitousProvider.defaultBaseURL, http: HTTPClient = HTTPClient()) {
         self.baseURL = baseURL
@@ -1288,7 +1290,7 @@ public struct TransitousProvider: TransitProvider {
     /// `board(_:at:date:duration:products:)`).
     private static let longDistanceModes: [Product] = [.highSpeed, .longDistance]
 
-    private func fetchStopTimes(stopId: String, date: Date, duration: Int, kind: BoardKind, modes: [String]?,
+    func fetchStopTimes(stopId: String, date: Date, duration: Int, kind: BoardKind, modes: [String]?,
                                 count: Int = 150) async throws -> [MStopTime] {
         var items: [URLQueryItem] = [
             .init(name: "stopId", value: stopId),

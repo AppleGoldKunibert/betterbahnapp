@@ -210,6 +210,10 @@ public struct JourneyRefresher: Sendable {
             }
             leg = BahnDeClient.fillingMissingPlatforms(in: leg, from: stops)
         }
+        // International trains from DB's feed have no platforms in Czechia; the Czech timetable has them.
+        if let transitous = provider.primary as? TransitousProvider {
+            leg = await transitous.fillingCzechPlatforms(in: leg)
+        }
         return leg
     }
 

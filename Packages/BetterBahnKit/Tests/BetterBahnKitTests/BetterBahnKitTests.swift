@@ -1662,6 +1662,141 @@ private final class CrowdedHubStopTimesProtocol: URLProtocol, @unchecked Sendabl
     override func stopLoading() {}
 }
 
+// MARK: - Platforms in Czechia
+
+/// Serialized: `lookupIsCachedPerTrain` counts the requests `CzechTimetableProtocol` sees.
+@Suite(.serialized) struct CzechPlatformTests {
+    /// Real-world ICE 171 Hamburg-Altona → Praha hl.n. on 8 Oct 2026 from DB's feed (DELFI), which has
+    /// no platform past the border, and the same train as CZPTT's "rj 171" from Bad Schandau on.
+    func ice171() throws -> Leg {
+        let itinerary = try fixture("transitous-trip-ice171-delfi", as: MItinerary.self)
+        return try #require(itinerary.legs.first { !$0.isWalking }).toLeg()
+    }
+
+    func provider() -> (TransitousProvider, URLSession) {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [CzechTimetableProtocol.self]
+        let session = URLSession(configuration: config)
+        return (TransitousProvider(http: HTTPClient(session: session)), session)
+    }
+
+    @Test func czechStopsByStationNumber() {
+        func isCzech(_ id: String) -> Bool { TransitousProvider.isCzechStop(station(id, "x", source: .transitous)) }
+        #expect(isCzech("de-DELFI_000005400003"))
+        #expect(isCzech("sk-zsr_5455659"))
+        #expect(isCzech("eu-european-sleeper_5455659"))
+        #expect(isCzech("at-Railway-Current-Reference-Data-2026_cz:0:5455659:1:1"))
+        #expect(isCzech("cz-CZPTT_czptt:stop:CZ:57076"))
+        #expect(!isCzech("cz-CZPTT_czptt:stop:DE:10533"))
+        #expect(!isCzech("de-DELFI_de:14612:28"))
+        #expect(!isCzech("de-DELFI_de:11000:900003201"))
+        #expect(!isCzech("sk-zsr_8010085"))
+    }
+
+    @Test func dbTrainGetsCzechTimetablePlatforms() async throws {
+        let (provider, session) = provider()
+        defer { session.invalidateAndCancel() }
+        let leg = try ice171()
+        #expect(TransitousProvider.lacksCzechPlatforms(leg))
+
+        let filled = await provider.fillingCzechPlatforms(in: leg)
+
+        let czech = PlatformInfo.Source.czechTimetable
+        #expect(filled.arrivalPlatform == PlatformInfo(planned: "24b", actual: nil, source: czech))
+        let decin = try #require(filled.stopovers.first { $0.station.name == "Decin hl.n." })
+        #expect(decin.arrivalPlatform == PlatformInfo(planned: "1", actual: nil, source: czech))
+        #expect(decin.departurePlatform == PlatformInfo(planned: "1", actual: nil, source: czech))
+        // CZPTT leaves Praha-Holešovice two minutes later than DELFI says; still the same stop.
+        let holesovice = try #require(filled.stopovers.first { $0.station.name == "Praha-Holesovice" })
+        #expect(holesovice.departurePlatform?.best == "1")
+        // DB's own platforms stay as they are.
+        let dresden = try #require(filled.stopovers.first { $0.station.name == "Dresden Hauptbahnhof" })
+        #expect(dresden.departurePlatform?.best == "Gl. 1")
+        #expect(dresden.departurePlatform?.source == nil)
+        #expect(!TransitousProvider.lacksCzechPlatforms(filled))
+    }
+
+    @Test func lookupIsCachedPerTrain() async throws {
+        let (provider, session) = provider()
+        defer { session.invalidateAndCancel() }
+        let leg = try ice171()
+        CzechTimetableProtocol.requests.withLock { $0 = [] }
+        _ = await provider.fillingCzechPlatforms(in: leg)
+        let first = CzechTimetableProtocol.requests.withLock { $0 }
+        #expect(first == ["map/stops", "stoptimes", "trip"])
+        _ = await provider.czechTimetableStops(for: [leg])
+        #expect(CzechTimetableProtocol.requests.withLock { $0 } == first)
+    }
+
+    /// Only CZPTT's run with the same number, within a few minutes: rj 178 leaves Děčín five minutes after rj 171.
+    @Test func sameTrainByNumberAndTime() throws {
+        let stopTimes = try fixture("transitous-czech-stoptimes-decin", as: MStopTimesResponse.self).stopTimes
+        let planned = try #require(ISO8601DateFormatter().date(from: "2026-10-08T07:57:00Z"))
+        let match = TransitousProvider.sameTrain(number: "171", kind: .departures, planned: planned, in: stopTimes)
+        #expect(match?.tripShortName == "rj 171")
+        #expect(TransitousProvider.sameTrain(number: "171", kind: .departures, planned: planned.addingTimeInterval(-20 * 60), in: stopTimes) == nil)
+        #expect(TransitousProvider.sameTrain(number: "999", kind: .departures, planned: planned, in: stopTimes) == nil)
+    }
+
+    @Test func czechTimetableStationFromMapStops() throws {
+        let stops = try fixture("transitous-czech-mapstops-decin", as: [MPlace].self)
+        let decin = Coordinate(latitude: 50.773415, longitude: 14.201247)
+        #expect(TransitousProvider.czechTimetableStation(near: decin, among: stops) == "cz-CZPTT_czptt:stop:CZ:55659")
+    }
+
+    @Test func czechTimetableTrainIsLeftAlone() throws {
+        let itinerary = try fixture("transitous-trip-rj171-czptt", as: MItinerary.self)
+        let leg = try #require(itinerary.legs.first { !$0.isWalking }).toLeg()
+        #expect(!TransitousProvider.lacksCzechPlatforms(leg))
+    }
+
+    @Test func tripGetsCzechTimetablePlatforms() async throws {
+        let (provider, session) = provider()
+        defer { session.invalidateAndCancel() }
+        let leg = try ice171()
+        let trip = Trip(id: try #require(leg.tripId), line: leg.line, direction: leg.direction, stopovers: leg.stopovers,
+                        cancelled: false, remarks: [], source: .transitous)
+        let filled = await provider.fillingCzechPlatforms(in: trip)
+        #expect(filled.stopovers.last?.arrivalPlatform == PlatformInfo(planned: "24b", actual: nil, source: .czechTimetable))
+    }
+
+    /// Journeys saved before the source existed still load, and the source survives saving.
+    @Test func platformSourceIsSaved() throws {
+        let old = try JSONDecoder().decode(PlatformInfo.self, from: Data(#"{"planned": "5"}"#.utf8))
+        #expect(old == PlatformInfo(planned: "5", actual: nil))
+        let czech = PlatformInfo(planned: "24b", actual: nil, source: .czechTimetable)
+        #expect(try JSONDecoder().decode(PlatformInfo.self, from: JSONEncoder().encode(czech)) == czech)
+    }
+}
+
+/// Transitous around Děčín hl.n.: the stops there, CZPTT's departures and both runs of ICE/rj 171.
+private final class CzechTimetableProtocol: URLProtocol, @unchecked Sendable {
+    static let requests = Mutex<[String]>([])
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let url = request.url!
+        let name: String
+        if url.path.hasSuffix("map/stops") {
+            name = "transitous-czech-mapstops-decin"
+            Self.requests.withLock { $0.append("map/stops") }
+        } else if url.path.hasSuffix("stoptimes") {
+            name = "transitous-czech-stoptimes-decin"
+            Self.requests.withLock { $0.append("stoptimes") }
+        } else {
+            let tripId = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "tripId" }?.value ?? ""
+            name = tripId.contains("cz-CZPTT") ? "transitous-trip-rj171-czptt" : "transitous-trip-ice171-delfi"
+            Self.requests.withLock { $0.append("trip") }
+        }
+        let data = Bundle.module.url(forResource: name, withExtension: "json", subdirectory: "Fixtures").flatMap { try? Data(contentsOf: $0) } ?? Data()
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
 // MARK: - Station display names
 
 @Suite struct StationDisplayNameTests {

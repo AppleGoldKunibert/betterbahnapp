@@ -147,12 +147,38 @@ public final class CombinedProvider: TransitProvider {
         page.journeys = page.journeys.filter { journey in !journey.transitLegs.contains { Self.isFlixBus($0.line) } }
         let journeys = page.journeys
         async let coupled = coupledTrains(in: journeys, deadline: .seconds(3))
+        async let czechStops = czechTimetableStops(in: journeys, deadline: .seconds(3))
         // bahn.de's own names beat Transitous' generic ones for cross-border trains, like on boards.
         if let bahnDe {
             page.journeys = (try? await Self.withDeadline(.seconds(3)) { await bahnDe.correctingTrainNames(in: journeys) }) ?? journeys
         }
         page.journeys = Self.applying(await coupled, to: page.journeys)
+        page.journeys = Self.applying(czechStops: await czechStops, to: page.journeys)
         return page
+    }
+
+    /// For the journeys' legs lacking platforms in Czechia, the Czech timetable's stops of the same
+    /// train (see `TransitousProvider.czechTimetableStops(for:)`), keyed by `Leg.id`. Like
+    /// `coupledTrains(in:deadline:)`, a lookup missing the deadline is cached for the journey's next refresh.
+    public func czechTimetableStops(in journeys: [Journey], deadline: Duration) async -> [String: [Stopover]] {
+        guard let transitous = primary as? TransitousProvider else { return [:] }
+        let legs = journeys.flatMap(\.legs).filter(TransitousProvider.lacksCzechPlatforms)
+        guard !legs.isEmpty else { return [:] }
+        let lookup = Task { await transitous.czechTimetableStops(for: legs) }
+        return (try? await Self.withDeadline(deadline) { await lookup.value }) ?? [:]
+    }
+
+    static func applying(czechStops: [String: [Stopover]], to journeys: [Journey]) -> [Journey] {
+        guard !czechStops.isEmpty else { return journeys }
+        return journeys.map { journey in
+            var journey = journey
+            for index in journey.legs.indices {
+                if let stops = czechStops[journey.legs[index].id] {
+                    journey.legs[index] = TransitousProvider.fillingCzechPlatforms(in: journey.legs[index], from: stops)
+                }
+            }
+            return journey
+        }
     }
 
     /// Trains coupled to the journeys' legs not checked yet (see `TransitousProvider.coupledTrains(for:)`),
@@ -215,7 +241,14 @@ public final class CombinedProvider: TransitProvider {
     /// (DELFI renumbers its trips), so a saved journey's leg then gets a 404 for its train. Such a run
     /// is looked up again on the board at the leg's origin, as the same train leaving at the same planned
     /// time, and its new ID remembered while the app runs. The returned trip carries the new ID.
+    /// Platforms the trip lacks in Czechia come from the Czech timetable (see `CzechPlatforms.swift`).
     public func trip(for leg: Leg) async throws -> Trip {
+        let trip = try await uncorrectedTrip(for: leg)
+        guard let transitous = primary as? TransitousProvider, trip.source == transitous.source else { return trip }
+        return await transitous.fillingCzechPlatforms(in: trip)
+    }
+
+    private func uncorrectedTrip(for leg: Leg) async throws -> Trip {
         guard let tripId = leg.tripId else { throw TransitError.notFound("Fahrt") }
         let id = await renumbered.id(for: tripId) ?? tripId
         do {
