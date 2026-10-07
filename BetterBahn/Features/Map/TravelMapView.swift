@@ -19,7 +19,6 @@ struct TravelMapView: View {
     @State private var showRangeSheet = false
     @State private var includeSaved = true
     @State private var includeTraewelling = true
-    @State private var showTrainSearch = false
     @State private var legendExpanded = true
 
     struct Stats {
@@ -52,7 +51,6 @@ struct TravelMapView: View {
                 .task { await model.syncTraewelling() }
                 .task { await model.followTrainPositions() }
                 .sheet(isPresented: $showRangeSheet) { rangeSheet }
-                .sheet(isPresented: $showTrainSearch) { TrainSearchSheet() }
         }
     }
 
@@ -134,7 +132,7 @@ struct TravelMapView: View {
                 }
                 Spacer(minLength: 0)
                 Button {
-                    showTrainSearch = true
+                    model.showsTrainSearch = true
                 } label: {
                     Image(systemName: "magnifyingglass")
                         .font(.subheadline.weight(.semibold))

@@ -2732,12 +2732,65 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         return runs.compactMap(BahnExpertClient.result)
     }
 
-    @Test func listsTrainsInGermanyFirstAndDropsBusesAndTrams() throws {
+    @Test func listsFasterTrainsFirstAndDropsBusesAndTrams() throws {
         let ranked = TrainNumberSearch.ranked(try results(), for: TrainNumberQuery(category: nil, number: 123))
-        #expect(ranked.map(\.journeyId) == ["b", "d", "a"])
-        #expect(ranked.map(\.name) == ["ICE 123", "S 123", "R 123"])
-        #expect(ranked[1].lineName == "S8")
+        #expect(ranked.map(\.journeyId) == ["b", "a", "d"])
+        #expect(ranked.map(\.name) == ["ICE 123", "R 123", "S 123"])
+        #expect(ranked[2].lineName == "S8")
         #expect(ranked[0].lineName == nil)
+    }
+
+    @Test func kindsFilterTheTrains() throws {
+        let all = try results()
+        #expect(all.map(\.kind) == [.rb, .ice, .other, .sBahn, .other])
+        let query = TrainNumberQuery(category: nil, number: 123)
+        #expect(TrainNumberSearch.ranked(all, for: query, kinds: [.sBahn, .ice]).map(\.journeyId) == ["b", "d"])
+        // "Sonstiges" brings the replacement bus and the tram back.
+        #expect(TrainNumberSearch.ranked(all, for: query, kinds: Set(TrainSearchKind.allCases)).count == 5)
+        let flx = TrainSearchResult(journeyId: "f", category: "FLX", number: 1246, line: nil, product: .longDistance,
+                                    origin: "", destination: "", originEVA: nil, destinationEVA: nil)
+        #expect(flx.kind == .flx)
+    }
+
+    @Test func readsCountriesFromIfoptAndEVANumbers() throws {
+        let all = try results()
+        #expect(all.map(\.originCountry) == ["AT", "NL", nil, "DE", nil])
+        #expect(TrainSearchCountry.code(eva: "131825", ifopt: "de:09177:3011") == "DE")
+        #expect(TrainSearchCountry.code(eva: "8500174", ifopt: "ch:1:sloid:174") == "CH")
+        #expect(TrainSearchCountry.code(eva: "8100102") == "AT")
+        #expect(TrainSearchCountry.code(eva: "733388") == nil)
+        #expect(TrainSearchCountry.all.first?.flag == "🇩🇪")
+    }
+
+    @Test func onlyTrainsThatMayCrossABorderAreLookedUp() throws {
+        let all = try results()
+        #expect(TrainNumberSearch.endsIn(["DE"], all[1]))
+        #expect(!TrainNumberSearch.endsIn(["DE"], all[0]))
+        // An ICE may run through Germany between two foreign stations, a regional train within Austria doesn't.
+        #expect(TrainNumberSearch.mayPassThrough(all[1]))
+        #expect(!TrainNumberSearch.mayPassThrough(all[0]))
+    }
+
+    /// Railjet 63 runs Salzburg – Innsbruck through Germany ("Deutsches Eck"); the Austrian regional
+    /// train and the Swiss IR don't come near it.
+    @Test func countriesFilterLooksUpStopsOfTrainsCrossingBorders() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [TrainSearchProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let expert = BahnExpertClient(http: HTTPClient(session: session))
+        let provider = CombinedProvider(primary: TransitousProvider(), bahnDe: nil, bahnExpert: expert, vagonweb: nil, bahnJetzt: nil)
+        let search = try #require(TrainNumberSearch(provider: provider))
+        let query = TrainNumberQuery(category: nil, number: 63)
+        let german = try await search.trains(query, on: .now)
+        #expect(german.map(\.journeyId) == ["rj", "s"])
+        let swiss = try await search.trains(query, on: .now, filter: TrainSearchFilter(countries: ["CH"]))
+        #expect(swiss.map(\.journeyId) == ["ir"])
+        let anywhere = try await search.trains(query, on: .now, filter: TrainSearchFilter(countries: []))
+        #expect(anywhere.count == 4)
+        // Only the Railjet and the IR had their stops looked up: the regional train stays within Austria.
+        #expect(TrainSearchProtocol.detailRequests.withLock { $0 }.isSuperset(of: ["rj", "ir"]))
+        #expect(!TrainSearchProtocol.detailRequests.withLock { $0 }.contains("r"))
     }
 
     @Test func typedCategoryNarrowsTheResultsWhenItMatches() throws {
@@ -2746,7 +2799,7 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         // The line counts as well ("S8").
         #expect(TrainNumberSearch.ranked(all, for: TrainNumberQuery(category: "S8", number: 123)).map(\.journeyId) == ["d"])
         // Without an exact match the same kind of train: feeds disagree on RE vs. RB, ICE vs. ECE.
-        #expect(TrainNumberSearch.ranked(all, for: TrainNumberQuery(category: "RE", number: 123)).map(\.journeyId) == ["d", "a"])
+        #expect(TrainNumberSearch.ranked(all, for: TrainNumberQuery(category: "RE", number: 123)).map(\.journeyId) == ["a", "d"])
         #expect(TrainNumberSearch.ranked(all, for: TrainNumberQuery(category: "ECE", number: 123)).map(\.journeyId) == ["b"])
     }
 
@@ -2799,6 +2852,24 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         #expect(TrainNumberSearch.entry(for: s2, departing: planned, in: [entries[0], sBahn]) == sBahn)
     }
 
+    static let found63 = """
+    [
+      {"journeyId":"r","train":{"category":"R","journeyNumber":63,"transportType":"REGIONAL_TRAIN"},
+       "firstStop":{"stopPlace":{"evaNumber":"8100102","name":"Jenbach"}},"lastStop":{"stopPlace":{"evaNumber":"8100541","name":"Mayrhofen"}}},
+      {"journeyId":"rj","train":{"category":"RJ","journeyNumber":63,"transportType":"HIGH_SPEED_TRAIN"},
+       "firstStop":{"stopPlace":{"evaNumber":"8100002","name":"Salzburg Hbf"}},"lastStop":{"stopPlace":{"evaNumber":"8100108","name":"Innsbruck Hbf"}}},
+      {"journeyId":"ir","train":{"category":"IR","journeyNumber":63,"transportType":"INTER_REGIONAL_TRAIN"},
+       "firstStop":{"stopPlace":{"evaNumber":"8505000","name":"Luzern"}},"lastStop":{"stopPlace":{"evaNumber":"8506302","name":"St. Gallen"}}},
+      {"journeyId":"s","train":{"line":"S1","category":"S","journeyNumber":63,"transportType":"CITY_TRAIN"},
+       "firstStop":{"stopPlace":{"evaNumber":"8000105","name":"Frankfurt(Main)Hbf"}},"lastStop":{"stopPlace":{"evaNumber":"8000250","name":"Wiesbaden Hbf"}}}
+    ]
+    """
+
+    static func details(_ journeyId: String) -> String {
+        let evas = journeyId == "rj" ? ["8100002", "8000320", "8000325", "8100108"] : ["8505000", "8506302"]
+        return #"{"stops":["# + evas.map { #"{"stopPlace":{"evaNumber":"\#($0)","name":"\#($0)"}}"# }.joined(separator: ",") + "]}"
+    }
+
     @Test func mapsBahnExpertTransportTypes() {
         #expect(BahnExpertClient.product(transportType: "HIGH_SPEED_TRAIN", category: "ICE") == .highSpeed)
         #expect(BahnExpertClient.product(transportType: "INTERCITY_TRAIN", category: "IC") == .longDistance)
@@ -2807,6 +2878,44 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         #expect(BahnExpertClient.product(transportType: "REGIONAL_TRAIN", category: "Bus") == .bus)
         #expect(BahnExpertClient.product(transportType: "CITY_TRAIN", category: "S") == .suburban)
         #expect(BahnExpertClient.product(transportType: "FERRY", category: "Fähre") == .ferry)
+    }
+}
+
+private final class TrainSearchProtocol: URLProtocol, @unchecked Sendable {
+    static let detailRequests = Mutex<Set<String>>([])
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let body: String
+        if request.url?.path.hasSuffix("journey/detailsByJourneyId") == true {
+            let input = Self.bodyData(of: request).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            let id = input?["json"] as? String ?? ""
+            Self.detailRequests.withLock { _ = $0.insert(id) }
+            body = #"{"json":"# + TrainNumberSearchTests.details(id) + "}"
+        } else {
+            body = #"{"json":"# + TrainNumberSearchTests.found63 + "}"
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+
+    /// URLSession hands a POST body to protocols as a stream.
+    static func bodyData(of request: URLRequest) -> Data? {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return nil }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while stream.hasBytesAvailable {
+            let read = stream.read(&buffer, maxLength: buffer.count)
+            guard read > 0 else { break }
+            data.append(buffer, count: read)
+        }
+        return data
     }
 }
 

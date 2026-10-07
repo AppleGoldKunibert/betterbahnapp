@@ -82,6 +82,14 @@ struct RootView: View {
             }
         }
         .tint(.brand)
+        .overlay {
+            if model.showsTrainSearch {
+                TrainSearchOverlay()
+                    .tint(.brand)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.snappy, value: model.showsTrainSearch)
         .onChange(of: scenePhase, initial: true) { _, phase in
             if phase == .active {
                 model.cancelLiveActivityBackgroundCheck()

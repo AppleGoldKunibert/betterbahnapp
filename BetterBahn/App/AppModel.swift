@@ -51,6 +51,8 @@ final class AppModel {
     /// Saved journey to open on the Verbindungen tab (set when the Live Activity is tapped);
     /// `ConnectionsView` pushes it and clears this.
     var journeyToOpen: SavedJourney?
+    /// Shows the train search (`TrainSearchOverlay`) over every tab.
+    var showsTrainSearch = false
     /// Recently picked stations, newest first (used as suggestions).
     var recentStations: [Station] {
         didSet { Storage.save(recentStations, key: "recentStations") }
@@ -1308,6 +1310,22 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(trainPositionRefresh.rawValue, forKey: "trainPositionRefresh") }
     }
 
+    /// Which kinds of trains the train search (#183) lists.
+    var trainSearchKinds: Set<TrainSearchKind> {
+        didSet {
+            UserDefaults.standard.set(trainSearchKinds.map(\.rawValue).sorted(), forKey: "trainSearchKinds")
+            uploadToCloud()
+        }
+    }
+    /// The train search only lists trains running through one of these countries (ISO codes); empty: anywhere.
+    var trainSearchCountries: Set<String> {
+        didSet {
+            UserDefaults.standard.set(trainSearchCountries.sorted(), forKey: "trainSearchCountries")
+            uploadToCloud()
+        }
+    }
+    var trainSearchFilter: TrainSearchFilter { TrainSearchFilter(kinds: trainSearchKinds, countries: trainSearchCountries) }
+
     /// Reports the regional and long-distance trains the app shows to BetterBahn's statistics server
     /// (`TrainSightings`, #169). On by default, per device.
     var shareTrainStatistics: Bool {
@@ -1391,6 +1409,9 @@ final class AppSettings {
         traewellingImportNextPage = defaults.object(forKey: "traewellingImportNextPage") as? Int
         connectionWarnings = defaults.object(forKey: "connectionWarnings") as? Bool ?? true
         quickTags = Storage.load(key: "quickTags") ?? QuickTag.defaults
+        trainSearchKinds = defaults.stringArray(forKey: "trainSearchKinds").map { Set($0.compactMap(TrainSearchKind.init)) }
+            ?? TrainSearchKind.defaults
+        trainSearchCountries = defaults.stringArray(forKey: "trainSearchCountries").map(Set.init) ?? TrainSearchCountry.defaults
     }
 
     // MARK: iCloud
@@ -1414,6 +1435,8 @@ final class AppSettings {
         /// Optional: settings synced by older versions don't have it.
         var expertIgnoreBoardingRules: Bool?
         var expertRil100: Bool?
+        var trainSearchKinds: [TrainSearchKind]?
+        var trainSearchCountries: [String]?
     }
 
     /// What iCloud stores: the settings and when they were last changed.
@@ -1427,7 +1450,9 @@ final class AppSettings {
         traewellingVisibility: TraewellingVisibility(rawValue: 0) ?? .publicVisible, bc100Rules: .default,
         syncTraewellingToMap: true, connectionWarnings: true, quickTags: QuickTag.defaults,
         liveActivitiesEnabled: true, expertMode: false, expertTraewelling: false, expertEditJourney: false,
-        expertTrainChoice: false, expertIgnoreBoardingRules: false, expertRil100: false)
+        expertTrainChoice: false, expertIgnoreBoardingRules: false, expertRil100: false,
+        trainSearchKinds: TrainSearchKind.defaults.sorted(by: { $0.rawValue < $1.rawValue }),
+        trainSearchCountries: TrainSearchCountry.defaults.sorted())
 
     @ObservationIgnored private var isApplyingCloudValue = false
 
@@ -1438,7 +1463,9 @@ final class AppSettings {
                    quickTags: quickTags, liveActivitiesEnabled: liveActivitiesEnabled, expertMode: expertMode,
                    expertTraewelling: expertTraewelling, expertEditJourney: expertEditJourney,
                    expertTrainChoice: expertTrainChoice, expertIgnoreBoardingRules: expertIgnoreBoardingRules,
-                   expertRil100: expertRil100)
+                   expertRil100: expertRil100,
+                   trainSearchKinds: trainSearchKinds.sorted(by: { $0.rawValue < $1.rawValue }),
+                   trainSearchCountries: trainSearchCountries.sorted())
     }
 
     /// When the settings were last changed on this device or taken over from iCloud. Before
@@ -1485,6 +1512,8 @@ final class AppSettings {
         expertTrainChoice = value.expertTrainChoice
         expertIgnoreBoardingRules = value.expertIgnoreBoardingRules ?? expertIgnoreBoardingRules
         expertRil100 = value.expertRil100 ?? expertRil100
+        trainSearchKinds = value.trainSearchKinds.map(Set.init) ?? trainSearchKinds
+        trainSearchCountries = value.trainSearchCountries.map(Set.init) ?? trainSearchCountries
     }
 }
 

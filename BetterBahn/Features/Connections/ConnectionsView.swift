@@ -59,7 +59,6 @@ struct ConnectionsView: View {
     @FocusState private var focused: Field?
     @State private var path: [ConnectionsRoute] = []
     @State private var swapRotation = 0.0
-    @State private var showTrainSearch = false
 
     private static let startLegID = UUID()
     private static let productsRowID = "productsRow"
@@ -111,10 +110,9 @@ struct ConnectionsView: View {
             .navigationTitle("Verbindungen")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Zug suchen", systemImage: "train.side.front.car") { showTrainSearch = true }
+                    Button("Zug suchen", systemImage: "train.side.front.car") { model.showsTrainSearch = true }
                 }
             }
-            .sheet(isPresented: $showTrainSearch) { TrainSearchSheet() }
             .navigationDestination(for: ConnectionsRoute.self) { route in
                 switch route {
                 case .search(let search):
