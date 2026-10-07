@@ -104,14 +104,19 @@ public struct CheckinDraft: Sendable, Hashable {
     public var visibility: TraewellingVisibility
     public var business: TraewellingBusiness
     public var toot: Bool
+    /// Checks in even though Träwelling has the user on another train at that time (`.collision`),
+    /// e.g. when the previous train arrived early and Träwelling still has its scheduled arrival.
+    /// Träwelling gives no points for such a check-in.
+    public var force: Bool
 
     public init(leg: Leg, message: String = "", visibility: TraewellingVisibility = .publicVisible,
-                business: TraewellingBusiness = .privateTrip, toot: Bool = false) {
+                business: TraewellingBusiness = .privateTrip, toot: Bool = false, force: Bool = false) {
         self.leg = leg
         self.message = message
         self.visibility = visibility
         self.business = business
         self.toot = toot
+        self.force = force
     }
 }
 
@@ -168,6 +173,12 @@ public enum TraewellingError: Error, LocalizedError, Equatable {
         case .collision: "Du bist zu dieser Zeit schon eingecheckt."
         case .api(let status, let message): message ?? "Träwelling-Fehler (\(status))"
         }
+    }
+
+    /// Träwelling rejected what was typed in (its validation answers 422, e.g. a text that's too long),
+    /// so the form brings the keyboard back to fix it. Other errors leave it hidden.
+    public var isInvalidInput: Bool {
+        if case .api(422, _) = self { true } else { false }
     }
 }
 
@@ -383,7 +394,7 @@ public actor TraewellingClient {
             // The user's message/toot belong on the first part only, so a split train doesn't post
             // the same note twice.
             let segmentDraft = result == nil ? draft
-                : CheckinDraft(leg: draft.leg, visibility: draft.visibility, business: draft.business)
+                : CheckinDraft(leg: draft.leg, visibility: draft.visibility, business: draft.business, force: draft.force)
             let part = try await sendCheckin(segmentDraft, tripId: segment.tripId, lineName: segment.lineName,
                                              startID: segment.startID, destinationID: segment.destinationID,
                                              departure: segment.departure, arrival: segment.arrival)
@@ -535,13 +546,15 @@ public actor TraewellingClient {
         hopLeg.stopovers = []
         // The user's message/toot belong on the main checkin below, not this short bridging hop, so
         // boarding at a Zusatzhalt doesn't post the same note to Träwelling twice.
-        let hopResult = try await checkinManualTrip(CheckinDraft(leg: hopLeg, visibility: draft.visibility, business: draft.business))
+        let hopResult = try await checkinManualTrip(CheckinDraft(leg: hopLeg, visibility: draft.visibility,
+                                                                 business: draft.business, force: draft.force))
 
         var mainLeg = leg
         mainLeg.origin = nextStation
         mainLeg.departure = nextRegular.departure ?? arrival
         mainLeg.departurePlatform = nextRegular.departurePlatform
-        let mainDraft = CheckinDraft(leg: mainLeg, message: draft.message, visibility: draft.visibility, business: draft.business, toot: draft.toot)
+        var mainDraft = draft
+        mainDraft.leg = mainLeg
 
         var result = try await checkin(mainDraft, allowManualTrip: false)
         result.points += hopResult.points
@@ -596,6 +609,7 @@ public actor TraewellingClient {
             "toot": draft.toot,
         ]
         if !draft.message.isEmpty { body["body"] = String(draft.message.prefix(280)) }
+        if draft.force { body["force"] = true }
 
         struct Response: Decodable, Sendable {
             struct Status: Decodable, Sendable { var id: Int? }
