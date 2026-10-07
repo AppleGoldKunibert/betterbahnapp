@@ -2797,7 +2797,7 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(TrainFormation(units: [.init(model: "ICE 3neo", number: "8030")]).drawing?.assetName == "Train-408")
         #expect(TrainFormation(units: [.init(model: "ICE T", number: "1190")]).drawing?.series == nil)
         #expect(TrainFormation(units: [.init(model: "ICE 3 Velaro", number: "4710")]).drawing?.series == "BR 407")
-        #expect(TrainFormation(units: [.init(model: "ICE 3", number: "302")]).drawing == TrainDrawing(assetName: "Train-403", series: nil))
+        #expect(TrainFormation(units: [.init(model: "ICE 3", number: "302")]).drawing == TrainDrawing(assetName: "Train-403", series: "BR 403"))
         let coupled = TrainFormation(units: [.init(model: "IC 2 KISS", number: "4110"), .init(model: "ICE 4", number: "9018")])
         #expect(coupled.drawing?.assetName == "Train-412")
         #expect(TrainFormation(units: [.init(model: "FLIRT", number: nil)]).drawing == nil)
@@ -2918,7 +2918,7 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
             TrainTypeLookup.Group(seriesName: name, baureihe: number, unitNumber: nil, origin: nil, destination: nil, coachCount: 0)
         }
         #expect(group("412", "ICE 4 Lang (BR412)").family == "ICE 4")
-        #expect(group("407", "ICE 3 Velaro (BR407)").family == "ICE 3")
+        #expect(group("407", "ICE 3 Velaro (BR407)").family == "ICE 3 Velaro")
         #expect(group("408", "ICE 3neo (BR408)").family == "ICE 3neo")
         #expect(group(nil, "ICE L").family == "ICE L")
         #expect(group(nil, nil).family == nil)
