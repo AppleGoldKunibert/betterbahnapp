@@ -32,6 +32,9 @@ public struct TraewellingUser: Decodable, Sendable {
     public var displayName: String
     public var username: String
     public var points: Int?
+    /// Whether the user has Träwelling's points system switched on (off by default); without it
+    /// check-ins earn 0 points, which the app then doesn't show.
+    public var pointsEnabled: Bool?
     /// The connected Mastodon profile (e.g. "https://zug.network/@name"), whose instance's
     /// custom emojis the check-in text offers.
     public var mastodonUrl: String?
