@@ -30,3 +30,27 @@ extension TrainFormation {
         units.lazy.compactMap { TrainDrawing.forModel($0.model) }.first
     }
 }
+
+extension TrainFormation {
+    /// The trainsets split by series, in the order they first appear: one part per drawing (else per
+    /// marketing name), so coupled trainsets of the same series stay one part ("2× ICE 4", also ICE 3neo
+    /// with and without Redesign). Trainsets without a series join the first part. Shown as one card
+    /// each in the Wagenreihung.
+    public var partsBySeries: [TrainFormation] {
+        var keys: [String] = []
+        var parts: [String: [Unit]] = [:]
+        var unnamed: [Unit] = []
+        for unit in units {
+            guard let name = TrainModel.name(unit.model, unit: unit.number) else {
+                unnamed.append(unit)
+                continue
+            }
+            let key = TrainDrawing.forModel(name)?.assetName ?? name
+            if parts[key] == nil { keys.append(key) }
+            parts[key, default: []].append(unit)
+        }
+        guard let first = keys.first else { return units.isEmpty ? [] : [self] }
+        parts[first]! += unnamed
+        return keys.map { TrainFormation(units: parts[$0]!) }
+    }
+}

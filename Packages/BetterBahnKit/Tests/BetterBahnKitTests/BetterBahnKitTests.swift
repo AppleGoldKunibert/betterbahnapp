@@ -2803,6 +2803,21 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(TrainFormation(units: [.init(model: "FLIRT", number: nil)]).drawing == nil)
     }
 
+    /// Coupled trainsets of one series share a card in the Wagenreihung, other series get their own (#167).
+    @Test func formationPartsBySeries() {
+        let twin = TrainFormation(units: [.init(model: "ICE 3", number: "302"), .init(model: "ICE 3", number: "330")])
+        #expect(twin.partsBySeries == [twin])
+        #expect(twin.partsBySeries.first?.modelSummary == "2× ICE 3")
+        // ICE 3neo with and without Redesign are both BR 408.
+        let neo = TrainFormation(units: [.init(model: "ICE 3neo", number: "8030"), .init(model: "ICE 3neo", number: "8005")])
+        #expect(neo.partsBySeries.count == 1)
+        let mixed = TrainFormation(units: [.init(model: "ICE 4", number: "9018"), .init(model: nil, number: "9020"),
+                                           .init(model: "ICE 3 Velaro", number: "4710")])
+        #expect(mixed.partsBySeries.map { $0.units.compactMap(\.number) } == [["9018", "9020"], ["4710"]])
+        #expect(TrainFormation(units: [.init(model: nil, number: "190")]).partsBySeries.count == 1)
+        #expect(TrainFormation(units: []).partsBySeries.isEmpty)
+    }
+
     @Test func formationURLUsesGermanDayAndUTCMilliseconds() throws {
         // 00:30 in Berlin on the 30th is still the 29th in UTC; bahn.de wants the German day (it
         // answers 404 for the 29th, e.g. ICE 1540 leaving Brandenburg Hbf at 00:41).
