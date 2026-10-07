@@ -229,6 +229,11 @@ struct SettingsView: View {
                 }
                 .foregroundStyle(.primary)
                 .disabled(model.isSyncingTraewelling)
+                NavigationLink {
+                    UncheckedRidesView()
+                } label: {
+                    IconLabel(title: "Nicht eingecheckt", systemImage: "bookmark.slash.fill", color: .orange)
+                }
             }
             Picker(selection: $settings.traewellingVisibility) {
                 ForEach(TraewellingVisibility.allCases, id: \.self) { Text($0.label).tag($0) }

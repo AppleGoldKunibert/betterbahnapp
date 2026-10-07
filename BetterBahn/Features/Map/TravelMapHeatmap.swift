@@ -55,19 +55,31 @@ extension AppModel {
     /// the app and checked in on Träwelling, or checked in twice, counts once (see `RideMatch`):
     /// the check-in wins, so saved journeys only add the legs nobody checked in.
     func mapJourneys(for selection: TravelMapSelection) -> [Journey] {
-        // Filtered before matching: `uncovered` drops legs, which can move a journey's departure.
-        func inRange(_ journey: Journey) -> Bool {
-            guard let interval = selection.interval else { return true }
-            guard let departure = journey.departure?.planned else { return false }
-            return interval.contains(departure)
-        }
-        let checkins = selection.includeTraewelling
-            ? RideMatch.deduplicated(traewellingTrips.map(\.journey).filter(inRange))
-            : []
-        let saved = selection.includeSaved
-            ? RideMatch.uncovered(savedJourneys.map(\.journey).filter(inRange), by: checkins)
-            : []
+        let checkins = selection.includeTraewelling ? mapCheckins(in: selection.interval) : []
+        let saved = selection.includeSaved ? uncheckedJourneys(in: selection.interval, checkins: checkins) : []
         return saved + checkins
+    }
+
+    /// Saved train rides already travelled that no Träwelling check-in covers, newest first: what
+    /// turning "Gespeichert" on adds to the map. Settings lists them so missing check-ins can be found.
+    func uncheckedRides(in interval: DateInterval?) -> [Leg] {
+        let journeys = uncheckedJourneys(in: interval, checkins: mapCheckins(in: interval))
+        return travelledLegs(of: journeys).map(\.leg).sorted { $0.departure.planned > $1.departure.planned }
+    }
+
+    private func mapCheckins(in interval: DateInterval?) -> [Journey] {
+        RideMatch.deduplicated(traewellingTrips.map(\.journey).filter { Self.departs($0, in: interval) })
+    }
+
+    private func uncheckedJourneys(in interval: DateInterval?, checkins: [Journey]) -> [Journey] {
+        // Filtered before matching: `uncovered` drops legs, which can move a journey's departure.
+        RideMatch.uncovered(savedJourneys.map(\.journey).filter { Self.departs($0, in: interval) }, by: checkins)
+    }
+
+    private static func departs(_ journey: Journey, in interval: DateInterval?) -> Bool {
+        guard let interval else { return true }
+        guard let departure = journey.departure?.planned else { return false }
+        return interval.contains(departure)
     }
 
     /// The train legs of these journeys that have actually been ridden: a leg counts once it has
