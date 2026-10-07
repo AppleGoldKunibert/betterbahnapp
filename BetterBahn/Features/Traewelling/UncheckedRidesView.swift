@@ -18,6 +18,11 @@ struct UncheckedRidesView: View {
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets())
             }
+            if let error = model.traewellingSyncError {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(Color.slightDelay)
+            }
             if !isLoaded {
                 ProgressView().frame(maxWidth: .infinity)
             } else {
@@ -64,7 +69,24 @@ struct UncheckedRidesView: View {
             }
             Text("\(leg.origin.name) → \(leg.destination.name)")
                 .font(.subheadline)
+            Text(checkinsSameDay(as: leg))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
         .padding(.vertical, 2)
+    }
+
+    /// The check-ins the app has for that day, so a ride listed although it was checked in shows
+    /// whether the check-in is missing locally or just doesn't line up.
+    private func checkinsSameDay(as leg: Leg) -> String {
+        let calendar = Calendar.current
+        let time = Date.FormatStyle().hour().minute()
+        let sameDay = model.traewellingTrips.flatMap(\.journey.transitLegs)
+            .filter { calendar.isDate($0.departure.planned, inSameDayAs: leg.departure.planned) }
+            .sorted { $0.departure.planned < $1.departure.planned }
+            .map { "\($0.line?.name ?? "Fahrt") \($0.departure.planned.formatted(time))–\($0.arrival.planned.formatted(time))" }
+        return sameDay.isEmpty
+            ? "Kein Träwelling-Check-in an diesem Tag in der App"
+            : "Träwelling an dem Tag: " + sameDay.joined(separator: " · ")
     }
 }

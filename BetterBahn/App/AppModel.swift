@@ -266,16 +266,21 @@ final class AppModel {
         defer { isSyncingTraewelling = false }
         do {
             let username = try await traewelling.currentUser().username
-            let knownIDs = Set(traewellingTrips.map(\.statusID))
+            let known = Dictionary(traewellingTrips.map { ($0.statusID, $0.journey) }, uniquingKeysWith: { first, _ in first })
             var newStatuses: [TraewellingStatus] = []
             var page = 1
             pages: while page <= 200 {
                 let result = try await traewelling.statuses(username: username, page: page)
                 for status in result.statuses {
-                    // Everything after a known status was imported before (unless a full resync is forced).
-                    if knownIDs.contains(status.id), !force { break pages }
+                    if let journey = known[status.id] {
+                        // Everything after a known status was imported before (unless a full resync is forced).
+                        guard force else { break pages }
+                        // An edit on Träwelling (e.g. checking out at another stop) keeps the status ID,
+                        // so a full resync re-imports a check-in whose ride changed since.
+                        guard Self.rideChanged(journey, status) else { continue }
+                    }
                     // Paging by offset can repeat a status when a check-in lands mid-sync.
-                    if !knownIDs.contains(status.id), !newStatuses.contains(where: { $0.id == status.id }) {
+                    if !newStatuses.contains(where: { $0.id == status.id }) {
                         newStatuses.append(status)
                     }
                 }
@@ -294,13 +299,24 @@ final class AppModel {
                 }
             }
             if !imported.isEmpty {
-                traewellingTrips = (imported + traewellingTrips).sorted { $0.statusID > $1.statusID }
+                let replaced = Set(imported.map(\.statusID))
+                // An edited check-in keeps its leg ID, so its old track would be drawn from the cache.
+                await forgetGeometries(of: traewellingTrips.filter { replaced.contains($0.statusID) }.flatMap(\.journey.legs))
+                traewellingTrips = (imported + traewellingTrips.filter { !replaced.contains($0.statusID) })
+                    .sorted { $0.statusID > $1.statusID }
             }
             settings.lastTraewellingSync = .now
             traewellingSyncError = nil
         } catch {
             traewellingSyncError = error.localizedDescription
         }
+    }
+
+    /// Whether a status no longer describes the ride imported for it: stops or planned times changed.
+    private static func rideChanged(_ imported: Journey, _ status: TraewellingStatus) -> Bool {
+        guard let fresh = status.journey(geometry: nil)?.legs.first, let old = imported.legs.first else { return false }
+        return fresh.origin.id != old.origin.id || fresh.destination.id != old.destination.id
+            || fresh.departure != old.departure || fresh.arrival != old.arrival
     }
 
     // MARK: Track geometry
@@ -332,6 +348,14 @@ final class AppModel {
         geometryCacheTask = Task { cache }
         Task.detached(priority: .utility) { Storage.save(cache, key: "legGeometries") }
         return geometry
+    }
+
+    private func forgetGeometries(of legs: [Leg]) async {
+        guard !legs.isEmpty else { return }
+        var cache = await loadedGeometryCache()
+        for leg in legs { cache[leg.id] = nil }
+        geometryCacheTask = Task { cache }
+        Task.detached(priority: .utility) { Storage.save(cache, key: "legGeometries") }
     }
 
     /// The already-cached geometry of many legs at once, decoded off the main thread.

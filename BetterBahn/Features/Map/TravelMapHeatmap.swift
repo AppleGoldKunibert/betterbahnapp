@@ -101,7 +101,10 @@ extension AppModel {
         // Bumped whenever the heatmap is built differently, so results cached by an older build
         // (with grid-snapped lines or the old duplicate matching) aren't shown again.
         let version = "v7"
-        return "\(version)|\(selection.range.rawValue)|\(custom)|\(savedJourneys.count)|\(traewellingTrips.count)|\(travelledLegs(of: mapJourneys(for: selection)).count)|\(selection.includeSaved)|\(selection.includeTraewelling)"
+        let legs = travelledLegs(of: mapJourneys(for: selection)).map(\.leg)
+        // A check-in edited on Träwelling (another exit) changes no count, but its arrival.
+        let arrivals = legs.reduce(0) { $0 &+ Int($1.arrival.planned.timeIntervalSince1970) }
+        return "\(version)|\(selection.range.rawValue)|\(custom)|\(savedJourneys.count)|\(traewellingTrips.count)|\(legs.count)|\(arrivals)|\(selection.includeSaved)|\(selection.includeTraewelling)"
     }
 
     /// The finished heatmap for a selection, from the cache when possible.
