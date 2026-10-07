@@ -148,13 +148,47 @@ public final class CombinedProvider: TransitProvider {
         let journeys = page.journeys
         async let coupled = coupledTrains(in: journeys, deadline: .seconds(3))
         async let czechStops = czechTimetableStops(in: journeys, deadline: .seconds(3))
+        async let twinStops = twinStops(in: journeys, deadline: .seconds(3))
         // bahn.de's own names beat Transitous' generic ones for cross-border trains, like on boards.
         if let bahnDe {
             page.journeys = (try? await Self.withDeadline(.seconds(3)) { await bahnDe.correctingTrainNames(in: journeys) }) ?? journeys
         }
         page.journeys = Self.applying(await coupled, to: page.journeys)
+        page.journeys = Self.applying(twinStops: await twinStops, to: page.journeys)
         page.journeys = Self.applying(czechStops: await czechStops, to: page.journeys)
         return page
+    }
+
+    /// `journey` with the stops its trains' own feeds leave out and the platforms they lack in Czechia
+    /// (see `twinStops(in:deadline:)`, `czechTimetableStops(in:deadline:)`), as far as found within `deadline`.
+    public func completingStopsAndPlatforms(of journey: Journey, deadline: Duration) async -> Journey {
+        async let czechStops = czechTimetableStops(in: [journey], deadline: deadline)
+        async let twinStops = twinStops(in: [journey], deadline: deadline)
+        let completed = Self.applying(twinStops: await twinStops, to: [journey])
+        return Self.applying(czechStops: await czechStops, to: completed).first ?? journey
+    }
+
+    /// For the journeys' long-distance legs from feeds that may leave out stops, the stops of the
+    /// same train from another feed (see `TransitousProvider.twinStops(for:)`), keyed by `Leg.id`.
+    public func twinStops(in journeys: [Journey], deadline: Duration) async -> [String: [Stopover]] {
+        guard let transitous = primary as? TransitousProvider else { return [:] }
+        let legs = journeys.flatMap(\.legs).filter(TransitousProvider.mayLackStops)
+        guard !legs.isEmpty else { return [:] }
+        let lookup = Task { await transitous.twinStops(for: legs) }
+        return (try? await Self.withDeadline(deadline) { await lookup.value }) ?? [:]
+    }
+
+    static func applying(twinStops: [String: [Stopover]], to journeys: [Journey]) -> [Journey] {
+        guard !twinStops.isEmpty else { return journeys }
+        return journeys.map { journey in
+            var journey = journey
+            for index in journey.legs.indices {
+                if let stops = twinStops[journey.legs[index].id] {
+                    journey.legs[index] = TransitousProvider.fillingMissingStops(in: journey.legs[index], from: stops)
+                }
+            }
+            return journey
+        }
     }
 
     /// For the journeys' legs lacking platforms in Czechia, the Czech timetable's stops of the same
@@ -241,11 +275,12 @@ public final class CombinedProvider: TransitProvider {
     /// (DELFI renumbers its trips), so a saved journey's leg then gets a 404 for its train. Such a run
     /// is looked up again on the board at the leg's origin, as the same train leaving at the same planned
     /// time, and its new ID remembered while the app runs. The returned trip carries the new ID.
-    /// Platforms the trip lacks in Czechia come from the Czech timetable (see `CzechPlatforms.swift`).
+    /// Stops its feed leaves out come from the same train in another feed (see `TwinTrainStops.swift`),
+    /// platforms it lacks in Czechia from the Czech timetable (see `CzechPlatforms.swift`).
     public func trip(for leg: Leg) async throws -> Trip {
         let trip = try await uncorrectedTrip(for: leg)
         guard let transitous = primary as? TransitousProvider, trip.source == transitous.source else { return trip }
-        return await transitous.fillingCzechPlatforms(in: trip)
+        return await transitous.fillingCzechPlatforms(in: transitous.fillingMissingStops(in: trip, of: leg))
     }
 
     private func uncorrectedTrip(for leg: Leg) async throws -> Trip {

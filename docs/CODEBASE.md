@@ -188,6 +188,13 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   info dot and on tap `PlannedPlatformNote`. Applied in `CombinedProvider.journeys` (3 s, beside coupled trains),
   `CombinedProvider.trip(for:)` and `JourneyRefresher.refresh`. Live Czech platforms would need Správa železnic's
   departure boards (no API, not used).
+- `Transit/Transitous/TwinTrainStops.swift` – stops and platforms a long-distance train's own feed leaves out
+  (ÖBB's RJ 177 Berlin → Praha lists only Südkreuz and Děčín in between; not for DELFI's or CZPTT's trains,
+  `mayLackStops`): the same train from another feed (DELFI's "ICE 177") is found on the departures at the leg's start
+  by number and planned time, and its stops between two of the leg's own are inserted, its platforms filled in where
+  the leg has none (`insertingMissingStops`, cached 12 h). Same places as the Czech platforms, before them, so
+  inserted Czech stops get theirs too; the journey view does both in its first step (`completingStopsAndPlatforms`),
+  before the live refresh, which also waits for bahn.de.
 - `Transit/Timetables/` – official DB Timetables XML client (realtime overrides, messages), through the
   `bahnde-proxy` Worker, which holds the API key. The app only uses it where App Attest works. A train not
   found at a station's EVA is looked for at its other levels (`/station` `meta`, e.g. "Hamburg Hbf (S-Bahn)").

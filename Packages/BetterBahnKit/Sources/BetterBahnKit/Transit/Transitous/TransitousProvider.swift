@@ -13,6 +13,8 @@ public struct TransitousProvider: TransitProvider {
     private let stopCache = ExpiringCache<Station?>()
     /// `czechTimetableStops(number:along:)` answers per train and stop (see `CzechPlatforms.swift`).
     let czechTimetableCache = ExpiringCache<[Stopover]?>()
+    /// `twinStops(for:)` answers per leg (see `TwinTrainStops.swift`).
+    let twinStopsCache = ExpiringCache<[Stopover]?>()
 
     public init(baseURL: URL = TransitousProvider.defaultBaseURL, http: HTTPClient = HTTPClient()) {
         self.baseURL = baseURL
