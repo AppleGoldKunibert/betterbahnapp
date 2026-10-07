@@ -2790,6 +2790,17 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(formation.unitDescription == "Tz 8030 + 8005")
     }
 
+    /// The Wagenreihung shows the front trainset's drawing; series without one show none (#167).
+    @Test func formationDrawing() {
+        #expect(TrainFormation(units: [.init(model: "ICE 1", number: "190")]).drawing
+            == TrainDrawing(assetName: "Train-401", series: "BR 401"))
+        #expect(TrainFormation(units: [.init(model: "ICE 3neo", number: "8030")]).drawing?.assetName == "Train-408")
+        #expect(TrainFormation(units: [.init(model: "ICE T", number: "1190")]).drawing?.series == nil)
+        let mixed = TrainFormation(units: [.init(model: "ICE 3", number: "4601"), .init(model: "ICE 4", number: "9018")])
+        #expect(mixed.drawing?.assetName == "Train-412")
+        #expect(TrainFormation(units: [.init(model: "FLIRT", number: nil)]).drawing == nil)
+    }
+
     @Test func formationURLUsesGermanDayAndUTCMilliseconds() throws {
         // 00:30 in Berlin on the 30th is still the 29th in UTC; bahn.de wants the German day (it
         // answers 404 for the 29th, e.g. ICE 1540 leaving Brandenburg Hbf at 00:41).
