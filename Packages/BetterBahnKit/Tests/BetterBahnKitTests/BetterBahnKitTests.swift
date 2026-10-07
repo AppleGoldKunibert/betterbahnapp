@@ -1662,6 +1662,287 @@ private final class CrowdedHubStopTimesProtocol: URLProtocol, @unchecked Sendabl
     override func stopLoading() {}
 }
 
+// MARK: - Platforms in Czechia
+
+/// Serialized: `lookupIsCachedPerTrain` counts the requests `CzechTimetableProtocol` sees.
+@Suite(.serialized) struct CzechPlatformTests {
+    /// Real-world ICE 171 Hamburg-Altona → Praha hl.n. on 8 Oct 2026 from DB's feed (DELFI), which has
+    /// no platform past the border, and the same train as CZPTT's "rj 171" from Bad Schandau on.
+    func ice171() throws -> Leg {
+        let itinerary = try fixture("transitous-trip-ice171-delfi", as: MItinerary.self)
+        return try #require(itinerary.legs.first { !$0.isWalking }).toLeg()
+    }
+
+    func provider() -> (TransitousProvider, URLSession) {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [CzechTimetableProtocol.self]
+        let session = URLSession(configuration: config)
+        return (TransitousProvider(http: HTTPClient(session: session)), session)
+    }
+
+    @Test func czechStopsByStationNumber() {
+        func isCzech(_ id: String) -> Bool { TransitousProvider.isCzechStop(station(id, "x", source: .transitous)) }
+        #expect(isCzech("de-DELFI_000005400003"))
+        #expect(isCzech("sk-zsr_5455659"))
+        #expect(isCzech("eu-european-sleeper_5455659"))
+        #expect(isCzech("at-Railway-Current-Reference-Data-2026_cz:0:5455659:1:1"))
+        #expect(isCzech("cz-CZPTT_czptt:stop:CZ:57076"))
+        #expect(!isCzech("cz-CZPTT_czptt:stop:DE:10533"))
+        #expect(!isCzech("de-DELFI_de:14612:28"))
+        #expect(!isCzech("de-DELFI_de:11000:900003201"))
+        #expect(!isCzech("sk-zsr_8010085"))
+    }
+
+    @Test func dbTrainGetsCzechTimetablePlatforms() async throws {
+        let (provider, session) = provider()
+        defer { session.invalidateAndCancel() }
+        let leg = try ice171()
+        #expect(TransitousProvider.lacksCzechPlatforms(leg))
+
+        let filled = await provider.fillingCzechPlatforms(in: leg)
+
+        let czech = PlatformInfo.Source.czechTimetable
+        #expect(filled.arrivalPlatform == PlatformInfo(planned: "24b", actual: nil, source: czech))
+        let decin = try #require(filled.stopovers.first { $0.station.name == "Decin hl.n." })
+        #expect(decin.arrivalPlatform == PlatformInfo(planned: "1", actual: nil, source: czech))
+        #expect(decin.departurePlatform == PlatformInfo(planned: "1", actual: nil, source: czech))
+        // CZPTT leaves Praha-Holešovice two minutes later than DELFI says; still the same stop.
+        let holesovice = try #require(filled.stopovers.first { $0.station.name == "Praha-Holesovice" })
+        #expect(holesovice.departurePlatform?.best == "1")
+        // DB's own platforms stay as they are.
+        let dresden = try #require(filled.stopovers.first { $0.station.name == "Dresden Hauptbahnhof" })
+        #expect(dresden.departurePlatform?.best == "Gl. 1")
+        #expect(dresden.departurePlatform?.source == nil)
+        #expect(!TransitousProvider.lacksCzechPlatforms(filled))
+    }
+
+    @Test func lookupIsCachedPerTrain() async throws {
+        let (provider, session) = provider()
+        defer { session.invalidateAndCancel() }
+        let leg = try ice171()
+        CzechTimetableProtocol.requests.withLock { $0 = [] }
+        _ = await provider.fillingCzechPlatforms(in: leg)
+        let first = CzechTimetableProtocol.requests.withLock { $0 }
+        #expect(first == ["map/stops", "stoptimes", "trip"])
+        _ = await provider.czechTimetableStops(for: [leg])
+        #expect(CzechTimetableProtocol.requests.withLock { $0 } == first)
+    }
+
+    /// Only CZPTT's run with the same number, within a few minutes: rj 178 leaves Děčín five minutes after rj 171.
+    @Test func sameTrainByNumberAndTime() throws {
+        let stopTimes = try fixture("transitous-czech-stoptimes-decin", as: MStopTimesResponse.self).stopTimes
+        let planned = try #require(ISO8601DateFormatter().date(from: "2026-10-08T07:57:00Z"))
+        let match = TransitousProvider.sameTrain(number: "171", kind: .departures, planned: planned, in: stopTimes)
+        #expect(match?.tripShortName == "rj 171")
+        #expect(TransitousProvider.sameTrain(number: "171", kind: .departures, planned: planned.addingTimeInterval(-20 * 60), in: stopTimes) == nil)
+        #expect(TransitousProvider.sameTrain(number: "999", kind: .departures, planned: planned, in: stopTimes) == nil)
+    }
+
+    @Test func czechTimetableStationFromMapStops() throws {
+        let stops = try fixture("transitous-czech-mapstops-decin", as: [MPlace].self)
+        let decin = Coordinate(latitude: 50.773415, longitude: 14.201247)
+        #expect(TransitousProvider.czechTimetableStation(near: decin, among: stops) == "cz-CZPTT_czptt:stop:CZ:55659")
+    }
+
+    @Test func czechTimetableTrainIsLeftAlone() throws {
+        let itinerary = try fixture("transitous-trip-rj171-czptt", as: MItinerary.self)
+        let leg = try #require(itinerary.legs.first { !$0.isWalking }).toLeg()
+        #expect(!TransitousProvider.lacksCzechPlatforms(leg))
+    }
+
+    @Test func tripGetsCzechTimetablePlatforms() async throws {
+        let (provider, session) = provider()
+        defer { session.invalidateAndCancel() }
+        let leg = try ice171()
+        let trip = Trip(id: try #require(leg.tripId), line: leg.line, direction: leg.direction, stopovers: leg.stopovers,
+                        cancelled: false, remarks: [], source: .transitous)
+        let filled = await provider.fillingCzechPlatforms(in: trip)
+        #expect(filled.stopovers.last?.arrivalPlatform == PlatformInfo(planned: "24b", actual: nil, source: .czechTimetable))
+    }
+
+    /// Journeys saved before the source existed still load, and the source survives saving.
+    @Test func platformSourceIsSaved() throws {
+        let old = try JSONDecoder().decode(PlatformInfo.self, from: Data(#"{"planned": "5"}"#.utf8))
+        #expect(old == PlatformInfo(planned: "5", actual: nil))
+        let czech = PlatformInfo(planned: "24b", actual: nil, source: .czechTimetable)
+        #expect(try JSONDecoder().decode(PlatformInfo.self, from: JSONEncoder().encode(czech)) == czech)
+    }
+}
+
+/// Transitous around Děčín hl.n.: the stops there, CZPTT's departures and both runs of ICE/rj 171.
+private final class CzechTimetableProtocol: URLProtocol, @unchecked Sendable {
+    static let requests = Mutex<[String]>([])
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let url = request.url!
+        let name: String
+        if url.path.hasSuffix("map/stops") {
+            name = "transitous-czech-mapstops-decin"
+            Self.requests.withLock { $0.append("map/stops") }
+        } else if url.path.hasSuffix("stoptimes") {
+            name = "transitous-czech-stoptimes-decin"
+            Self.requests.withLock { $0.append("stoptimes") }
+        } else {
+            let tripId = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "tripId" }?.value ?? ""
+            name = tripId.contains("cz-CZPTT") ? "transitous-trip-rj171-czptt" : "transitous-trip-ice171-delfi"
+            Self.requests.withLock { $0.append("trip") }
+        }
+        let data = Bundle.module.url(forResource: name, withExtension: "json", subdirectory: "Fixtures").flatMap { try? Data(contentsOf: $0) } ?? Data()
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+// MARK: - Stops from another feed
+
+/// Serialized: `TwinTrainProtocol` counts requests.
+@Suite(.serialized) struct TwinTrainStopTests {
+    /// Real-world RJ 177 Hamburg-Altona → Wien Hbf on 7 Oct 2026 from ÖBB's feed, with only nine stops,
+    /// and the same train from DB's feed (DELFI's "ICE 177") with all seventeen.
+    func trips() throws -> (oebb: Leg, delfi: Leg) {
+        let oebb = try fixture("transitous-trip-rj177-oebb", as: MItinerary.self)
+        let delfi = try fixture("transitous-trip-ice177-delfi", as: MItinerary.self)
+        return (try #require(oebb.legs.first { !$0.isWalking }).toLeg(), try #require(delfi.legs.first { !$0.isWalking }).toLeg())
+    }
+
+    /// The part Berlin Hbf → Praha-Holešovice of ÖBB's RJ 177, as a journey has it.
+    func berlinPraha() throws -> Leg {
+        let run = try trips().oebb
+        let stops = Array(run.stopovers[2...5])
+        return Leg(origin: stops[0].station, destination: stops[3].station,
+                   departure: try #require(stops[0].departure), arrival: try #require(stops[3].arrival),
+                   departurePlatform: nil, arrivalPlatform: nil, tripId: run.tripId, line: run.line, direction: run.direction,
+                   isWalking: false, cancelled: false, stopovers: stops, remarks: [], source: .transitous)
+    }
+
+    @Test func insertsStopsOnlyTheTwinHas() throws {
+        let (oebb, delfi) = try trips()
+        let stops = try #require(TransitousProvider.insertingMissingStops(into: oebb.stopovers, from: delfi.stopovers))
+        // All under DB's names, also the stops ÖBB has too ("Děčín hl.n." is DB's "Decin hl.n.").
+        #expect(stops.map(\.station.name) == delfi.stopovers.map(\.station.name))
+        // ÖBB's own stops stay, with DB's platform where ÖBB has none (planned 2, live 3).
+        let berlin = try #require(stops.first { $0.station.name == "S+U Berlin Hauptbahnhof" })
+        #expect(berlin.departurePlatform == PlatformInfo(planned: "2", actual: "3"))
+        #expect(berlin.station.id == oebb.stopovers[2].station.id)
+    }
+
+    @Test func legGetsStopsBetweenItsEnds() throws {
+        let leg = try berlinPraha()
+        let filled = TransitousProvider.fillingMissingStops(in: leg, from: try trips().delfi.stopovers)
+        #expect(filled.stopovers.map(\.station.displayName) == [
+            "Berlin Hbf", "Berlin Südkreuz", "Dresden Bahnhof Neustadt", "Dresden Hbf",
+            "Bad Schandau Nationalparkbahnhof", "Decin hl.n.", "Usti nad Labem hl.n.", "Praha-Holesovice",
+        ])
+        #expect(filled.origin.displayName == "Berlin Hbf")
+        #expect(filled.destination.displayName == "Praha-Holesovice")
+        #expect(filled.origin.id == leg.origin.id)
+        #expect(filled.departurePlatform?.best == "3")
+        #expect(filled.arrivalPlatform == nil)
+    }
+
+    /// The same stations two hours later aren't this train's stops.
+    @Test func otherRunAddsNothing() throws {
+        let leg = try berlinPraha()
+        func later(_ time: TimeInfo?) -> TimeInfo? { time.map { TimeInfo(planned: $0.planned.addingTimeInterval(7200), actual: nil) } }
+        let elsewhere = try trips().delfi.stopovers.map { stop in
+            Stopover(station: stop.station, arrival: later(stop.arrival), departure: later(stop.departure),
+                     arrivalPlatform: stop.arrivalPlatform, departurePlatform: stop.departurePlatform, cancelled: false)
+        }
+        #expect(TransitousProvider.insertingMissingStops(into: leg.stopovers, from: elsewhere) == nil)
+        #expect(TransitousProvider.fillingMissingStops(in: leg, from: elsewhere) == leg)
+    }
+
+    /// A copy with the same stops still brings the platforms its own feed lacks.
+    @Test func sameStopsGetTwinsPlatforms() throws {
+        let (_, delfi) = try trips()
+        let leg = try berlinPraha()
+        let sameStops = delfi.stopovers.filter { stop in leg.stopovers.contains { $0.station.isSamePlace(as: stop.station) } }
+        let filled = try #require(TransitousProvider.insertingMissingStops(into: leg.stopovers, from: sameStops))
+        #expect(filled.count == leg.stopovers.count)
+        #expect(filled.map { $0.departurePlatform?.best } == ["3", "3", nil, nil])
+        #expect(TransitousProvider.insertingMissingStops(into: filled, from: sameStops) == nil)
+    }
+
+    /// RJ 177 Berlin Hbf → Praha-Holešovice from ÖBB's and from DB's feed is one connection: DB's copy,
+    /// with live times, stays in the place of the first.
+    @Test func sameTrainFromTwoFeedsShowsOnce() throws {
+        let oebb = try berlinPraha()
+        let run = try trips().delfi
+        let stops = Array(run.stopovers[3...10])
+        let delfi = Leg(origin: stops[0].station, destination: stops[7].station,
+                        departure: try #require(stops[0].departure), arrival: try #require(stops[7].arrival),
+                        departurePlatform: stops[0].departurePlatform, arrivalPlatform: nil, tripId: run.tripId, line: run.line,
+                        direction: run.direction, isWalking: false, cancelled: false, stopovers: stops, remarks: [], source: .transitous)
+        let later = Leg(origin: delfi.origin, destination: delfi.destination,
+                        departure: TimeInfo(planned: delfi.departure.planned.addingTimeInterval(7200), actual: nil),
+                        arrival: TimeInfo(planned: delfi.arrival.planned.addingTimeInterval(7200), actual: nil),
+                        departurePlatform: nil, arrivalPlatform: nil, tripId: "later", line: run.line, direction: nil,
+                        isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+        let journeys = [Journey(legs: [oebb], source: .transitous), Journey(legs: [later], source: .transitous),
+                        Journey(legs: [delfi], source: .transitous)]
+        let shown = journeys.removingSameTrainDuplicates()
+        #expect(shown.map { $0.legs[0].tripId } == [delfi.tripId, "later"])
+    }
+
+    @Test func onlyTrainsFromFeedsThatLeaveOutStops() throws {
+        let (oebb, delfi) = try trips()
+        #expect(TransitousProvider.mayLackStops(oebb))
+        #expect(!TransitousProvider.mayLackStops(delfi))
+        let czech = try #require(try fixture("transitous-trip-rj171-czptt", as: MItinerary.self).legs.first { !$0.isWalking }).toLeg()
+        #expect(!TransitousProvider.mayLackStops(czech))
+    }
+
+    @Test func findsTwinOnTheDeparturesAndCachesIt() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [TwinTrainProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let provider = TransitousProvider(http: HTTPClient(session: session))
+        TwinTrainProtocol.requests.withLock { $0 = [] }
+        let leg = try berlinPraha()
+
+        let filled = await provider.fillingMissingStops(in: leg)
+        #expect(filled.stopovers.count == 8)
+        #expect(TwinTrainProtocol.requests.withLock { $0 } == ["stoptimes", "trip"])
+
+        let run = try trips().oebb
+        let fullerTrip = await provider.fillingMissingStops(
+            in: Trip(id: try #require(run.tripId), line: run.line, direction: run.direction, stopovers: run.stopovers,
+                     cancelled: false, remarks: [], source: .transitous), of: leg)
+        #expect(fullerTrip.stopovers.count == 17)
+        #expect(TwinTrainProtocol.requests.withLock { $0 } == ["stoptimes", "trip"])
+    }
+}
+
+/// Transitous at Berlin Hbf: the departures with ÖBB's RJ 177 and DB's ICE 177, and both runs.
+private final class TwinTrainProtocol: URLProtocol, @unchecked Sendable {
+    static let requests = Mutex<[String]>([])
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let url = request.url!
+        let name: String
+        if url.path.hasSuffix("stoptimes") {
+            name = "transitous-stoptimes-berlin-rj177"
+            Self.requests.withLock { $0.append("stoptimes") }
+        } else {
+            let tripId = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "tripId" }?.value ?? ""
+            name = tripId.contains("de-DELFI") ? "transitous-trip-ice177-delfi" : "transitous-trip-rj177-oebb"
+            Self.requests.withLock { $0.append("trip") }
+        }
+        let data = Bundle.module.url(forResource: name, withExtension: "json", subdirectory: "Fixtures").flatMap { try? Data(contentsOf: $0) } ?? Data()
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
 // MARK: - Named stations
 
 @Suite struct NamedStationTests {

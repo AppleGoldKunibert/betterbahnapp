@@ -549,8 +549,41 @@ struct DelayPill: View {
 struct PlatformBadge: View {
     let platform: PlatformInfo?
     var prominent = false
+    /// Opens the Wagenreihung at this stop. Only used for a platform from the Czech timetable, whose
+    /// tap shows where it comes from: the note then offers the Wagenreihung instead.
+    var onCoachSequence: (() -> Void)?
+    @State private var showsSource = false
 
     var body: some View {
+        if platform?.source == .czechTimetable, platform?.best != nil {
+            // Planned only (see `PlatformInfo.Source.czechTimetable`); tapping says so.
+            Button {
+                showsSource = true
+            } label: {
+                badge.contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Zeigt, woher das Gleis stammt")
+            .popover(isPresented: $showsSource) {
+                PlannedPlatformNote(onCoachSequence: onCoachSequence.map { open in
+                    {
+                        showsSource = false
+                        // The Wagenreihung sheet only opens once the popover is gone.
+                        Task {
+                            try? await Task.sleep(for: .milliseconds(350))
+                            open()
+                        }
+                    }
+                })
+                .presentationCompactAdaptation(.popover)
+            }
+        } else {
+            badge
+        }
+    }
+
+    @ViewBuilder
+    private var badge: some View {
         if let best = platform?.best {
             let changed = platform?.hasChanged == true
             VStack(spacing: 0) {
@@ -574,9 +607,41 @@ struct PlatformBadge: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.white, Color.heavyDelay)
                         .offset(x: 5, y: -5)
+                } else if platform?.source == .czechTimetable {
+                    Image(systemName: "info.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white, Color.secondary)
+                        .offset(x: 5, y: -5)
                 }
             }
         }
+    }
+}
+
+/// Where a platform from the Czech timetable comes from, shown by tapping its `PlatformBadge`.
+struct PlannedPlatformNote: View {
+    var onCoachSequence: (() -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Gleis laut Fahrplan", systemImage: "calendar")
+                .font(.subheadline.weight(.semibold))
+            Text("Dieses Gleis stammt aus dem tschechischen Fahrplan (Správa železnic). Es sind nur Plandaten: Kurzfristige Gleisänderungen fehlen, bitte vor Ort auf die Anzeigen achten.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let onCoachSequence {
+                Button("Wagenreihung anzeigen", systemImage: "train.side.front.car", action: onCoachSequence)
+                    .font(.caption.weight(.semibold))
+                    .tint(.brand)
+                    .padding(.top, 2)
+            }
+        }
+        .padding()
+        // A fixed width, so the popover measures the text's height at the width it shows it at
+        // (with a width range the last line was cut off).
+        .frame(width: 280, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 

@@ -400,8 +400,13 @@ struct TripContent: View {
     /// The stop's platform; tapping it opens the Wagenreihung at that stop when bahn.de can have one.
     @ViewBuilder
     private func platformButton(_ stop: Stopover) -> some View {
-        let badge = PlatformBadge(platform: stop.departurePlatform?.best != nil ? stop.departurePlatform : stop.arrivalPlatform)
-        if let request = coachSequenceRequest(at: stop) {
+        let platform = stop.departurePlatform?.best != nil ? stop.departurePlatform : stop.arrivalPlatform
+        let badge = PlatformBadge(platform: platform)
+        if platform?.source == .czechTimetable {
+            // Its tap tells where the platform comes from; that note offers the Wagenreihung.
+            let request = coachSequenceRequest(at: stop)
+            PlatformBadge(platform: platform, onCoachSequence: request.map { request in { sequenceRequest = request } })
+        } else if let request = coachSequenceRequest(at: stop) {
             Button {
                 sequenceRequest = request
             } label: {
