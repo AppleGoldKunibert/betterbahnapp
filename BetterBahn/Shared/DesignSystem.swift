@@ -204,9 +204,10 @@ struct LineBadge: View {
 }
 
 /// An operator's logo (#166) on a transparent background, exactly as wide as the logo itself so a
-/// narrow one like DB's doesn't sit in a wide empty box. In dark mode, logos with dark lettering
-/// (`OperatorBrand.needsPlateInDarkMode`) get a soft light plate so they stay readable. Nothing for
-/// an operator without a logo.
+/// narrow one like DB's doesn't sit in a wide empty box. Logos wider than 5:1 (SBB, Länderbahn,
+/// PKP IC, …) are scaled down to that width, keeping their proportions, instead of being squashed.
+/// In dark mode, logos with dark lettering (`OperatorBrand.needsPlateInDarkMode`) get a soft light
+/// plate so they stay readable. Nothing for an operator without a logo.
 struct OperatorLogo: View {
     let name: String
     @ScaledMetric(relativeTo: .caption) private var height: CGFloat = 12
@@ -218,6 +219,7 @@ struct OperatorLogo: View {
             Image(uiImage: logo)
                 .renderingMode(.original)
                 .resizable()
+                .aspectRatio(contentMode: .fit)
                 .frame(width: min(height * logo.size.width / logo.size.height, height * 5), height: height)
                 .padding(.horizontal, plate ? 4 : 0)
                 .padding(.vertical, plate ? 2 : 0)
