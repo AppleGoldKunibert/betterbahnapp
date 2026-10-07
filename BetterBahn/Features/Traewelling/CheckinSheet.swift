@@ -21,6 +21,11 @@ struct CheckinSheet: View {
     /// Träwelling knows them as separate trains. Nil until picked.
     @State private var chosenTrain: String?
     @State private var emojis: [CustomEmoji] = []
+    @FocusState private var messageFocused: Bool
+    @FocusState private var focusedTag: String?
+    /// Where the keyboard was when "Jetzt einchecken" was tapped. It goes away right then, and only
+    /// comes back there if the check-in fails, so the input can be fixed.
+    @State private var focusBeforeSend: (message: Bool, tag: String?) = (false, nil)
 
     private var coupledTrains: [Line.CoupledTrain] { leg.line?.coupledTrains ?? [] }
 
@@ -159,11 +164,13 @@ struct CheckinSheet: View {
     private var formCard: some View {
         Card {
             VStack(alignment: .leading, spacing: 14) {
-                EmojiMessageField(message: $message, emojis: emojis)
+                EmojiMessageField(message: $message, emojis: emojis, isFocused: $messageFocused)
                 Divider()
-                pickerRow("Sichtbarkeit", icon: "eye.fill", color: .purple, selection: $visibility, options: TraewellingVisibility.allCases) { $0.label }
+                MenuPickerRow(title: "Sichtbarkeit", icon: "eye.fill", color: .purple, selection: $visibility,
+                              options: TraewellingVisibility.allCases) { $0.label }
                 Divider()
-                pickerRow("Reiseart", icon: "briefcase.fill", color: .orange, selection: $business, options: TraewellingBusiness.allCases) { $0.label }
+                MenuPickerRow(title: "Reiseart", icon: "briefcase.fill", color: .orange, selection: $business,
+                              options: TraewellingBusiness.allCases) { $0.label }
                 if !model.settings.quickTags.isEmpty {
                     Divider()
                     tagsRow
@@ -177,43 +184,6 @@ struct CheckinSheet: View {
                 }
                 .tint(.brand)
             }
-        }
-    }
-
-    /// A settings row with a leading icon/title and a trailing value that opens a `Menu` to pick
-    /// from `options`. Built on `Menu` rather than a system `Picker` because a menu-style
-    /// `Picker`'s auto-generated label ignores an outer `.lineLimit(1)` and can still wrap a long
-    /// selected value onto a second line; here the label is our own `Text`, so the line limit
-    /// actually takes effect and long values truncate with "…" instead.
-    private func pickerRow<T: Hashable>(_ title: String, icon: String, color: Color,
-                                        selection: Binding<T>, options: [T], label: @escaping (T) -> String) -> some View {
-        HStack(spacing: 12) {
-            IconTile(systemImage: icon, color: color, size: 32)
-            Text(title)
-                .font(.subheadline.weight(.medium))
-                .lineLimit(1)
-                .layoutPriority(1)
-            Spacer(minLength: 8)
-            Menu {
-                ForEach(options, id: \.self) { option in
-                    Button {
-                        selection.wrappedValue = option
-                    } label: {
-                        if option == selection.wrappedValue {
-                            Label(label(option), systemImage: "checkmark")
-                        } else {
-                            Text(label(option))
-                        }
-                    }
-                }
-            } label: {
-                Text(label(selection.wrappedValue))
-                    .font(.subheadline)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: 150, alignment: .trailing)
         }
     }
 
@@ -235,6 +205,7 @@ struct CheckinSheet: View {
                 TextField(tag.label, text: valueBinding(for: tag))
                     .textFieldStyle(.roundedBorder)
                     .font(.subheadline)
+                    .focused($focusedTag, equals: tag.id)
             }
         }
     }
@@ -261,7 +232,12 @@ struct CheckinSheet: View {
     }
 
     private var sendButton: some View {
-        Button(action: { send() }) {
+        Button {
+            focusBeforeSend = (messageFocused, focusedTag)
+            messageFocused = false
+            focusedTag = nil
+            send()
+        } label: {
             Group {
                 if isSending {
                     ProgressView()
@@ -313,6 +289,8 @@ struct CheckinSheet: View {
                 offerManualTrip = true
             } catch {
                 self.error = error
+                messageFocused = focusBeforeSend.message
+                focusedTag = focusBeforeSend.tag
             }
         }
     }
@@ -362,6 +340,57 @@ struct CheckinSheet: View {
             let value = tag.value ?? tagValues[tag.id]?.trimmingCharacters(in: .whitespaces) ?? ""
             guard !value.isEmpty else { continue }
             _ = try? await model.traewelling.addTag(statusId: statusId, key: tag.key, value: value, visibility: visibility)
+        }
+    }
+}
+
+/// A form row with a leading icon/title and a trailing value that opens a `Menu` to pick from
+/// `options` (check-in form and `CheckinDetailSheet`). Built on `Menu` rather than a system `Picker`
+/// because a menu-style `Picker`'s auto-generated label ignores an outer `.lineLimit(1)` and can
+/// still wrap a long selected value onto a second line; here the label is our own `Text`, so the
+/// line limit actually takes effect and long values truncate with "…" instead.
+///
+/// The menu keeps the same width whatever is picked: if it shrank with its label ("Vertraute Nutzer"
+/// → "Öffentlich"), iOS animates the closing menu back to the old frame and the new value sits in the
+/// wrong place for about a second before snapping into place.
+struct MenuPickerRow<T: Hashable>: View {
+    let title: String
+    let icon: String
+    let color: Color
+    @Binding var selection: T
+    let options: [T]
+    let label: (T) -> String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            IconTile(systemImage: icon, color: color, size: 32)
+            Text(title)
+                .font(.subheadline.weight(.medium))
+                .lineLimit(1)
+                .layoutPriority(1)
+            Spacer(minLength: 8)
+            Menu {
+                ForEach(options, id: \.self) { option in
+                    Button {
+                        selection = option
+                    } label: {
+                        if option == selection {
+                            Label(label(option), systemImage: "checkmark")
+                        } else {
+                            Text(label(option))
+                        }
+                    }
+                }
+            } label: {
+                Text(label(selection))
+                    .font(.subheadline)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .contentShape(.rect)
+            }
+            .frame(maxWidth: 150)
         }
     }
 }
