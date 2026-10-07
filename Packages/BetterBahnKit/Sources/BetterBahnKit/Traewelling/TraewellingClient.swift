@@ -35,6 +35,12 @@ public struct TraewellingUser: Decodable, Sendable {
     /// The connected Mastodon profile (e.g. "https://zug.network/@name"), whose instance's
     /// custom emojis the check-in text offers.
     public var mastodonUrl: String?
+    /// Whether the user has likes on; Träwelling answers 403 to their likes otherwise.
+    public var likesEnabled: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case id, displayName, username, points, mastodonUrl, likesEnabled = "likes_enabled"
+    }
 }
 
 public struct TraewellingStation: Decodable, Sendable, Hashable {
@@ -154,6 +160,8 @@ public enum TraewellingError: Error, LocalizedError, Equatable {
     case stopNotOnTrip(String, tripStops: [String])
     case tripNotFound(String)
     case collision
+    /// Liking was refused (403): the login predates the "write-likes" scope, or likes are off.
+    case likeNotAllowed
     case api(status: Int, message: String?)
 
     public var errorDescription: String? {
@@ -163,6 +171,8 @@ public enum TraewellingError: Error, LocalizedError, Equatable {
             "„\(name)“ ist auf der Träwelling-Fahrt nicht enthalten. Halte dort: \(stops.joined(separator: ", "))."
         case .tripNotFound(let line): "\(line) wurde auf Träwelling nicht gefunden."
         case .collision: "Du bist zu dieser Zeit schon eingecheckt."
+        case .likeNotAllowed:
+            "Träwelling lässt das Liken nicht zu. Melde dich in den Einstellungen einmal ab und wieder bei Träwelling an, damit BetterBahn Likes vergeben darf."
         case .api(let status, let message): message ?? "Träwelling-Fehler (\(status))"
         }
     }
@@ -238,11 +248,12 @@ public actor TraewellingClient {
         token = store.load()
         guard let token else { throw OAuthError.notLoggedIn }
         if token.isExpired, let refresh = token.refreshToken {
+            // No `scope`: the new token keeps what the login granted. Asking for scopes added since
+            // (e.g. "write-likes") would make Träwelling reject the refresh and end older logins.
             try await requestToken([
                 "grant_type": "refresh_token",
                 "client_id": config.clientID,
                 "refresh_token": refresh,
-                "scope": config.scopes.joined(separator: " "),
             ])
         }
         guard let access = self.token?.accessToken else { throw OAuthError.notLoggedIn }

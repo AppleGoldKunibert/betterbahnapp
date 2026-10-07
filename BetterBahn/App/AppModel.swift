@@ -243,6 +243,17 @@ final class AppModel {
 
     // MARK: Träwelling sync
 
+    /// Check-ins of the people the user follows on Träwelling on a train or leaving soon (#196), kept fresh by
+    /// `keepFollowedCheckinsFresh()` while the Verbindungen tab is shown.
+    var followedCheckins: FollowedCheckins?
+    @ObservationIgnored var followedCheckinsLoadedAt: Date?
+    /// What opening a followed check-in looked up, by status ID, so opening it again shows it at once:
+    /// Träwelling's track of the ride (empty: it has none) and the train found in the timetable (nil: none).
+    @ObservationIgnored var followedTracks: [Int: [Coordinate]] = [:]
+    @ObservationIgnored var followedTrains: [Int: Leg?] = [:]
+    /// The custom emojis for each followed check-in's text, loaded with the list so its pictures are ready on opening.
+    @ObservationIgnored var followedEmojis: [Int: [CustomEmoji]] = [:]
+
     /// Check-ins imported from Träwelling (newest first), shown on the travel map. Empty until
     /// loaded from disk after launch; `loadTraewellingTrips()` waits for that.
     var traewellingTrips: [ImportedTrip] = [] {

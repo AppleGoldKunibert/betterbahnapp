@@ -274,17 +274,9 @@ struct CheckinDetailSheet: View {
     }
 
     /// A tag's name: the quick tag's label for its key, else the key without Träwelling's prefix.
-    private func tagLabel(_ key: String) -> String {
-        quickTag(for: key)?.label ?? (key.hasPrefix("trwl:") ? String(key.dropFirst(5)) : key)
-    }
+    private func tagLabel(_ key: String) -> String { model.statusTagLabel(key) }
 
-    private func tagIcon(_ key: String) -> String {
-        quickTag(for: key)?.systemImage ?? "tag.fill"
-    }
-
-    private func quickTag(for key: String) -> QuickTag? {
-        (model.settings.quickTags + QuickTag.defaults).first { $0.key == key }
-    }
+    private func tagIcon(_ key: String) -> String { model.statusTagIcon(key) }
 
     private var goneCard: some View {
         Card {
