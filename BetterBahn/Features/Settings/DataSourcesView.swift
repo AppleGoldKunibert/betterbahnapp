@@ -21,7 +21,7 @@ struct DataSourcesView: View {
         Source(name: "Deutsche Bahn – Infrastrukturdaten der DB InfraGO", usage: "RIL100-Codes der Bahnhöfe",
                url: URL(string: "https://mobilithek.info/offers/922109165921083392")!,
                license: ("Lizenz: CC BY 4.0", URL(string: "https://creativecommons.org/licenses/by/4.0/deed.de")!)),
-        Source(name: "bahn.de", usage: "Wagenreihung, Zusatzhalte, Gleise und Zugnamen; Zeichnungen der ICE-Baureihen aus dem Fahrzeuglexikon, © Deutsche Bahn AG",
+        Source(name: "bahn.de", usage: "Wagenreihung, Zusatzhalte, Gleise und Zugnamen",
                url: URL(string: "https://www.bahn.de")!),
         Source(name: "vagonweb.cz", usage: "Geplante Wagenreihungen und Zugtypen, mit Erlaubnis von vagonweb",
                url: URL(string: "https://www.vagonweb.cz")!),

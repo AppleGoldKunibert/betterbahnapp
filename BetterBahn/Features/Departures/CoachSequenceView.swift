@@ -99,9 +99,7 @@ struct CoachSequenceView: View {
             if case .vagonweb(let from, let until) = sequence.source {
                 plannedNote(sequence, from: from, until: until)
             }
-            if let drawing = sequence.formation.drawing {
-                TrainDrawingRow(formation: sequence.formation, drawing: drawing)
-            } else if let units = sequence.formation.unitDescription ?? sequence.formation.modelSummary {
+            if let units = sequence.formation.unitDescription ?? sequence.formation.modelSummary {
                 Label(units, systemImage: "tram.fill")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -161,55 +159,6 @@ struct CoachSequenceView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-    }
-}
-
-/// "ICE 1 BR 401" with the Tz below and the series' side view next to it, cut off at the edge like
-/// on vagonweb (#167). Drawings: DB Fahrzeuglexikon, © Deutsche Bahn AG.
-private struct TrainDrawingRow: View {
-    let formation: TrainFormation
-    let drawing: TrainDrawing
-
-    private static let height: CGFloat = 46
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                if let model = formation.modelSummary {
-                    HStack(spacing: 4) {
-                        Text(model).bold()
-                        if let series = drawing.series {
-                            Text(series).foregroundStyle(.secondary)
-                        }
-                    }
-                    .font(.subheadline)
-                }
-                if let units = formation.unitDescription {
-                    Text(units)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .layoutPriority(1)
-            VStack(alignment: .trailing, spacing: 2) {
-                // As wide as its height allows, cut off at the trailing edge.
-                Color.clear
-                    .frame(maxWidth: .infinity, minHeight: Self.height, maxHeight: Self.height)
-                    .overlay(alignment: .leading) {
-                        Image(drawing.assetName)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(height: Self.height)
-                            .fixedSize(horizontal: true, vertical: false)
-                    }
-                    .clipped()
-                    .accessibilityHidden(true)
-                Text("Quelle: Deutsche Bahn")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .accessibilityElement(children: .combine)
     }
 }
 

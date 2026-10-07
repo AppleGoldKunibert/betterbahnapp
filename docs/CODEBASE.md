@@ -72,8 +72,10 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `JourneyReplanSheet` (replan from mid-journey).
 - `Features/Departures/` – `StationBoardView`/`BoardRow`, `TripView` (single train's stops),
   `CoachSequenceView` (Wagenreihung sheet, opened from `CoachSequenceButton` in train headers or a stop's platform in `TripContent`;
-  bahn.de's sequence, else vagonweb's planned one; the header shows the front trainset's side view, Kit `TrainDrawing`,
-  images `Assets.xcassets/Trains/Train-<BR>` cut from DB's Fahrzeuglexikon PDFs, © DB AG, #167).
+  bahn.de's sequence, else vagonweb's planned one). Side views of the ICE series for it (#167, not shown anywhere yet):
+  `Assets.xcassets/Trains/Train-<BR>` (401, 402, 403, 407, 408, 411, 412; cut from DB's Fahrzeuglexikon PDFs, © DB AG:
+  show "Quelle: Deutsche Bahn" with them and name them under bahn.de in Datenquellen), picked by Kit `TrainDrawing` /
+  `TrainFormation.drawing`.
 - `Features/TrainSearch/` – `TrainSearchOverlay` (#183): Spotlight-style bar over every tab (`AppModel.showsTrainSearch`, set
   by the train button on Verbindungen and the search button on the map, shown from `RootView`); searches while typing, the day
   behind a calendar button (graphical picker below the bar), filtered by Settings → Zugschnellsuche (`AppSettings.trainSearchKinds`:
