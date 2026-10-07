@@ -535,13 +535,19 @@ extension BahnDeClient {
         return JourneyCourse(stops: details.halte.compactMap(JourneyStop.init), operators: Self.operators(of: details))
     }
 
-    /// The operators bahn.de names in the train's attributes, unless its stops' railways (`adminID`) name
-    /// more: then the attributes only list some of them, and the Railjet København → Praha, run by DSB,
-    /// DB and ČD, showed as DSB's alone.
+    /// The operators bahn.de names in the train's attributes, unless its stops' railways (`adminID`, else
+    /// their country) name more: then the attributes only list some of them, and the Railjet København →
+    /// Praha, run by DSB, DB and ČD, showed as DSB's alone. The stops' version also wins when it names as
+    /// many and the attributes have no sections, since it knows where each railway takes over.
     static func operators(of details: JourneyDetails) -> [TrainOperator] {
         let named = operators(in: details.zugattribute ?? [])
         let byAdministration = operators(byAdministration: details.halte, trainName: details.zugName)
-        return Set(byAdministration.map(\.name)).count > Set(named.map(\.name)).count ? byAdministration : named
+        let namedCount = Set(named.map(\.name)).count, stopsCount = Set(byAdministration.map(\.name)).count
+        // As many but without sections (one comma-separated attribute): the stops' version knows where each runs.
+        if stopsCount > namedCount || (stopsCount > 0 && stopsCount == namedCount && !named.contains { $0.section != nil }) {
+            return byAdministration
+        }
+        return named
     }
 
     /// The operators of a train run by several railways, from its stops' `adminID`s: one per run of
@@ -622,15 +628,34 @@ extension BahnDeClient {
     // MARK: Operators
 
     /// The "BEF" (or "OP") attributes as operators, in bahn.de's order and without repeats. A section
-    /// hint like "(Berlin Hbf - Bad Schandau)" becomes the operator's section.
+    /// hint like "(Berlin Hbf - Bad Schandau)" becomes the operator's section. One attribute can name
+    /// several, comma-separated, as bahn.de's connections do: "Dänische Staatsbahnen, DB Fernverkehr AG,
+    /// Ceske Drahy" (RJ 385, 2026-10-07).
     static func operators(in attributes: [JourneyDetails.Attribute]) -> [TrainOperator] {
         var operators: [TrainOperator] = []
         for attribute in attributes where attribute.key == "BEF" || attribute.key == "OP" {
-            guard let name = attribute.value?.trimmingCharacters(in: .whitespaces), !name.isEmpty else { continue }
-            let entry = TrainOperator(name: name, section: attribute.teilstreckenHinweis.flatMap(section))
-            if !operators.contains(entry) { operators.append(entry) }
+            let section = attribute.teilstreckenHinweis.flatMap(section)
+            for name in operatorNames(in: attribute.value ?? "") {
+                let entry = TrainOperator(name: name, section: section)
+                if !operators.contains(entry) { operators.append(entry) }
+            }
         }
         return operators
+    }
+
+    /// "Dänische Staatsbahnen, DB Fernverkehr AG, Ceske Drahy" → its three names. A company's legal form
+    /// after a comma stays with it: "České dráhy, a.s." is one name.
+    static func operatorNames(in value: String) -> [String] {
+        var names: [String] = []
+        for part in value.components(separatedBy: ",").map({ $0.trimmingCharacters(in: .whitespaces) }) where !part.isEmpty {
+            let isLegalForm = part.contains(".") && !part.contains(" ") && part.count <= 7
+            if isLegalForm, let last = names.popLast() {
+                names.append("\(last), \(part)")
+            } else {
+                names.append(part)
+            }
+        }
+        return names
     }
 
     /// "(Berlin Hbf - Bad Schandau)" → Berlin Hbf … Bad Schandau. Only " - " with spaces separates,

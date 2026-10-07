@@ -1379,6 +1379,23 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(ride?.arrival.planned == secondHalf.arrival.planned)
     }
 
+    /// bahn.de's connections name all operators in one "BEF" attribute (RJ 385, ECE 393, 2026-10-07).
+    @Test func splitsCommaSeparatedOperators() throws {
+        #expect(BahnDeClient.operatorNames(in: "Dänische Staatsbahnen, DB Fernverkehr AG, Ceske Drahy")
+                == ["Dänische Staatsbahnen", "DB Fernverkehr AG", "Ceske Drahy"])
+        #expect(BahnDeClient.operatorNames(in: "České dráhy, a.s.") == ["České dráhy, a.s."])
+        #expect(BahnDeClient.operatorNames(in: "DB Regio AG Südost, Ceske Drahy") == ["DB Regio AG Südost", "Ceske Drahy"])
+        let attributes = [BahnDeClient.JourneyDetails.Attribute(key: "BEF", value: "Dänische Staatsbahnen, DB Fernverkehr AG, Ceske Drahy",
+                                                                teilstreckenHinweis: nil)]
+        let operators = BahnDeClient.operators(in: attributes)
+        #expect(operators.map { OperatorBrand(operatorName: $0.name) } == [.dsb, .db, .cd])
+
+        // With the stops naming the same three, their sections win.
+        var details = try fixture("bahnde-fahrt-rj383", as: BahnDeClient.JourneyDetails.self)
+        details.zugattribute = attributes
+        #expect(BahnDeClient.operators(of: details).map(\.section?.from) == ["Koebenhavn H", "Schleswig", "Decin hl.n."])
+    }
+
     /// RJ 175 Berlin → Praha-Holešovice +31, then walk, metro C and walk on their planned times
     /// (2026-10-07): the bar keeps the legs in order, the ones the train runs into pushed back.
     @Test func barSpansNeverOverlap() {
