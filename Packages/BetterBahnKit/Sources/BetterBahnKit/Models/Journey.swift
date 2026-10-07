@@ -380,7 +380,10 @@ public struct Leg: Codable, Sendable, Hashable, Identifiable {
 }
 
 public struct Journey: Codable, Sendable, Hashable, Identifiable {
-    public var id: String { legs.map(\.id).joined(separator: "|") }
+    /// The legs, plus where the journey ends: a leg's ID doesn't include where you get off, so Berlin →
+    /// Dresden and Berlin → Praha on the same train would otherwise be one journey (and opening one
+    /// showed the other one remembered from before).
+    public var id: String { legs.map(\.id).joined(separator: "|") + ">" + (legs.last?.destination.id ?? "") }
     public var legs: [Leg]
     public var source: DataSource
 
