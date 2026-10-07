@@ -1662,6 +1662,25 @@ private final class CrowdedHubStopTimesProtocol: URLProtocol, @unchecked Sendabl
     override func stopLoading() {}
 }
 
+// MARK: - Named stations
+
+@Suite struct NamedStationTests {
+    /// "prag" lists "Prag" (Praha hlavní nádraží) first, instead of the other hits at the same station.
+    @Test func pragIsPrahaMainStation() {
+        let hits = [
+            station("cz-JDF-merged_JDFS-638", "Praha,Hlavní nádraží", 50.0825, 14.4341, source: .transitous),
+            station("cz-CZPTT_czptt:stop:CZ:57066", "Praha-Libeň", 50.1012, 14.4922, source: .transitous),
+        ]
+        for text in ["prag", "Prag", "prag hbf", "Prag Hauptbahnhof"] {
+            let placed = TransitousProvider.placingNamedStation(for: StationSearch(text: text), in: hits)
+            #expect(placed.map(\.name) == ["Prag", "Praha-Libeň"], "\(text)")
+            #expect(placed.first?.id == "cz-CZPTT_czptt:stop:CZ:57076")
+        }
+        #expect(TransitousProvider.placingNamedStation(for: StationSearch(text: "praha"), in: hits) == hits)
+        #expect(TransitousProvider.placingNamedStation(for: StationSearch(text: "prag", modes: [.bus]), in: hits) == hits)
+    }
+}
+
 // MARK: - Station display names
 
 @Suite struct StationDisplayNameTests {

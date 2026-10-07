@@ -27,6 +27,14 @@ struct StationInput<Focus: Hashable>: View {
     @State private var error: Error?
     /// Enter was pressed before results arrived – pick the first one once they do.
     @State private var submitPending = false
+    /// Whether the suggestions are on screen. Follows focus, but stays a moment after focus is lost
+    /// without a pick: a touch on a suggestion can end the editing (the scroll view dismissing the
+    /// keyboard) before the finger is lifted, and if the list collapsed or changed right away, lifting
+    /// it would tap whatever slid underneath – often a different station.
+    @State private var showsSuggestions = false
+
+    /// How long the suggestions stay after focus is lost without a pick.
+    static var suggestionsLinger: Duration { .milliseconds(600) }
 
     private var isFocused: Bool { focus.wrappedValue == focusValue }
 
@@ -70,9 +78,9 @@ struct StationInput<Focus: Hashable>: View {
                             }
                         }
                 }
-                if isSearching, isFocused {
+                if isSearching, showsSuggestions {
                     ProgressView().controlSize(.small)
-                } else if !query.isEmpty, isFocused {
+                } else if !query.isEmpty, showsSuggestions {
                     Button("Leeren", systemImage: "xmark.circle.fill") {
                         query = ""
                         station = nil
@@ -84,30 +92,41 @@ struct StationInput<Focus: Hashable>: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
 
-            if isFocused {
+            if showsSuggestions {
                 suggestionList
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .animation(.snappy(duration: 0.25), value: isFocused)
+        .preference(key: StationSuggestionsShownKey.self, value: showsSuggestions)
+        .animation(.snappy(duration: 0.25), value: showsSuggestions)
         .animation(.snappy(duration: 0.25), value: suggestions.map(\.id))
         .onAppear { query = station?.displayName ?? "" }
         .onChange(of: station) { _, new in
-            if !isFocused { query = new?.displayName ?? "" }
+            if !showsSuggestions { query = new?.displayName ?? "" }
         }
         .onChange(of: isFocused) { _, focused in
-            if focused {
-                // Nearer train stations come first in search, so get a location ready while typing.
-                LocationService.shared.refresh()
-                // Select all-ish behaviour: start fresh search when a station is set.
-                if station != nil { query = "" }
-            } else if !submitPending {
-                query = station?.displayName ?? ""
+            guard focused, !showsSuggestions else { return }
+            showsSuggestions = true
+            // Nearer train stations come first in search, so get a location ready while typing.
+            LocationService.shared.refresh()
+            // Select all-ish behaviour: start fresh search when a station is set.
+            if station != nil { query = "" }
+        }
+        .task(id: isFocused) {
+            // Focus lost without a pick: keep the list (and its rows) as they are for a moment, so a
+            // finger still on a suggestion picks that one when lifted, then close.
+            guard !isFocused, showsSuggestions else { return }
+            // Another field took the focus: that was a tap on it, not on a suggestion.
+            if focus.wrappedValue == nil {
+                try? await Task.sleep(for: Self.suggestionsLinger)
+                guard !Task.isCancelled, !isFocused else { return }
             }
+            showsSuggestions = false
+            if !submitPending { query = station?.displayName ?? "" }
         }
         .task(id: search) {
             let search = self.search
-            guard isFocused, search.text.count >= 2 else { results = []; return }
+            guard showsSuggestions, search.text.count >= 2 else { results = []; return }
             if search.hasShortcuts { usedShortcuts = true }
             try? await Task.sleep(for: .milliseconds(250)) // debounce
             guard !Task.isCancelled else { return }
@@ -267,10 +286,20 @@ struct StationInput<Focus: Hashable>: View {
 
     private func select(_ suggestion: Station) {
         submitPending = false
+        showsSuggestions = false
         station = suggestion
         query = suggestion.displayName
         model.rememberStation(suggestion)
         focus.wrappedValue = nil
+    }
+}
+
+/// Whether any `StationInput` in the view shows its suggestions, so a screen can keep its layout
+/// around the field still while it does (see `StationInput.showsSuggestions`).
+struct StationSuggestionsShownKey: PreferenceKey {
+    static let defaultValue = false
+    static func reduce(value: inout Bool, nextValue: () -> Bool) {
+        value = value || nextValue()
     }
 }
 

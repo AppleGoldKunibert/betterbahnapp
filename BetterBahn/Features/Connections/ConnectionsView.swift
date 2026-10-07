@@ -57,6 +57,8 @@ struct ConnectionsView: View {
     @State private var showProductsPopover = false
     @State private var productsTapCount = 0
     @FocusState private var focused: Field?
+    /// A station field shows its suggestions (they stay a moment after it loses focus).
+    @State private var suggestionsShown = false
     @State private var path: [ConnectionsRoute] = []
     @State private var swapRotation = 0.0
 
@@ -159,14 +161,19 @@ struct ConnectionsView: View {
             }
             .clipShape(.rect(cornerRadius: 22, style: .continuous))
         }
+        .onPreferenceChange(StationSuggestionsShownKey.self) { shown in
+            withAnimation(.snappy(duration: 0.25)) { suggestionsShown = shown }
+        }
     }
 
     /// A divider row between two stops, optionally carrying the leading "add via point" button
-    /// and/or the trailing "swap" button (both hidden while any field is focused).
+    /// and/or the trailing "swap" button (both hidden while suggestions are shown). Follows the
+    /// suggestions rather than focus: the buttons make the row taller, which would push the
+    /// suggestions below it away from a finger still on one.
     private func routeDivider(showAdd: Bool, showSwap: Bool) -> some View {
         ZStack {
-            Divider().padding(.leading, 54).padding(.trailing, focused == nil && showSwap ? 72 : 0)
-            if focused == nil {
+            Divider().padding(.leading, 54).padding(.trailing, !suggestionsShown && showSwap ? 72 : 0)
+            if !suggestionsShown {
                 if showAdd, viaRows.count < Self.maxViaPoints {
                     HStack {
                         addViaButton.padding(.leading, 20)
