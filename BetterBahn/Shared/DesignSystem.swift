@@ -206,15 +206,14 @@ struct LineBadge: View {
 /// An operator's logo (#166) on a transparent background, exactly as wide as the logo itself so a
 /// narrow one like DB's doesn't sit in a wide empty box. In dark mode, logos with dark lettering
 /// (`OperatorBrand.needsPlateInDarkMode`) get a soft light plate so they stay readable. Nothing for
-/// an operator without a logo. `brand` overrides the one found by name (the S for an S-Bahn train).
+/// an operator without a logo.
 struct OperatorLogo: View {
     let name: String
-    var brand: OperatorBrand?
     @ScaledMetric(relativeTo: .caption) private var height: CGFloat = 12
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        if let brand = brand ?? OperatorBrand(operatorName: name), let logo = UIImage(named: brand.assetName), logo.size.height > 0 {
+        if let brand = OperatorBrand(operatorName: name), let logo = UIImage(named: brand.assetName), logo.size.height > 0 {
             let plate = colorScheme == .dark && brand.needsPlateInDarkMode
             Image(uiImage: logo)
                 .renderingMode(.original)
@@ -229,16 +228,14 @@ struct OperatorLogo: View {
 }
 
 /// The operator of a train (e.g. "DB Fernverkehr AG") with its logo; operators without a logo
-/// (`OperatorBrand`) keep the building icon. Long names are shortened ("ODEG", `OperatorBrand.displayName`).
-/// `brand` overrides the logo found by name: S-Bahn trains show the S whoever runs them.
+/// (`OperatorBrand`) keep the building icon. Some names are shortened ("ODEG", `OperatorBrand.displayName`).
 struct OperatorLabel: View {
     let name: String
-    var brand: OperatorBrand?
 
     var body: some View {
         HStack(spacing: 6) {
-            if let brand = brand ?? OperatorBrand(operatorName: name) {
-                OperatorLogo(name: name, brand: brand).accessibilityHidden(true)
+            if OperatorBrand(operatorName: name) != nil {
+                OperatorLogo(name: name).accessibilityHidden(true)
             } else {
                 Image(systemName: "building.2.fill")
             }
@@ -258,14 +255,12 @@ struct TrainOperatorsLabel: View {
     @Environment(AppModel.self) private var model
     @State private var operators: [TrainOperator]?
 
-    private var line: Line? {
+    private var feedName: String? {
         switch source {
-        case .leg(let leg): leg.line
-        case .trip(let trip): trip.line
+        case .leg(let leg): leg.line?.operatorName
+        case .trip(let trip): trip.line?.operatorName
         }
     }
-
-    private var feedName: String? { line?.operatorName }
 
     private var key: String {
         switch source {
@@ -289,7 +284,7 @@ struct TrainOperatorsLabel: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(operators.map(\.name).joined(separator: ", "))
             } else if let name = operators?.first?.name ?? feedName {
-                OperatorLabel(name: name, brand: OperatorBrand.brand(operatorName: name, product: line?.product))
+                OperatorLabel(name: name)
             }
         }
         .task(id: key) {

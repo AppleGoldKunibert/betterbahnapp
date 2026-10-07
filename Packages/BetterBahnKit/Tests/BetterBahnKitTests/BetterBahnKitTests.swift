@@ -4733,8 +4733,10 @@ private final class RE3318CancelledProtocol: RE3318Protocol, @unchecked Sendable
     @Test func recognisesFeedAgencyNames() {
         let expected: [String: OperatorBrand] = [
             "DB Fernverkehr AG": .db, "DB Fernverkehr (Codesharing)": .db, "DB Regio AG NRW": .db,
-            "DB Regio AG S-Bahn München": .db, "DB RegioNetz Verkehrs GmbH Kurhessenbahn": .db,
-            "Deutsche Bahn AG": .db, "S-Bahn Hamburg": .db, "S-Bahn Berlin GmbH": .sbahn,
+            "DB Regio AG S-Bahn München": .sbahn, "DB RegioNetz Verkehrs GmbH Kurhessenbahn": .db,
+            "Deutsche Bahn AG": .db, "S-Bahn Hamburg": .sbahn, "S-Bahn Berlin GmbH": .sbahn,
+            "DB Regio AG S-Bahn Rhein-Main": .sbahn, "DB Regio AG S-Bahn Stuttgart": .sbahn,
+            "DB Regio AG Südost": .db, "DB Regio AG Bayern": .db,
             "S-Bahn Hannover (Transdev)": .transdev, "S-Bahn Hannover": .transdev,
             "Schweizerische Bundesbahnen SBB": .sbb, "SBB GmbH (Grenzverkehr)": .sbb,
             "Schweizerische Südostbahn (sob)": .sob, "THURBO": .thurbo, "BLS AG (bls)": .bls,
@@ -4767,26 +4769,13 @@ private final class RE3318CancelledProtocol: RE3318Protocol, @unchecked Sendable
         #expect(Line(name: "ICE 1", number: "1", product: .highSpeed, operatorName: "DB Fernverkehr AG").operatorBrand == .db)
     }
 
-    /// Every S-Bahn train shows the S, whoever runs it; S-Bahn trains of railways abroad and all other
-    /// trains keep their operator's logo.
-    @Test func sBahnTrainsShowTheSWhoeverRunsThem() {
-        func line(_ operatorName: String?, _ product: Product) -> Line {
-            Line(name: "S 1", number: nil, product: product, operatorName: operatorName)
-        }
-        for name in ["DB Regio AG S-Bahn München", "DB Regio AG, S-Bahn Rhein-Main", "S-Bahn Hamburg", "S-Bahn Berlin GmbH",
-                     "S-Bahn Hannover (Transdev)", "NordWestBahn", "SWEG Südwestdeutsche Landesverkehrs-GmbH", "VIAS Rail GmbH"] {
-            #expect(line(name, .suburban).operatorBrand == .sbahn, "\(name)")
-        }
-        #expect(line("Schweizerische Bundesbahnen SBB", .suburban).operatorBrand == .sbb)
-        #expect(line("OEBB Personenverkehr AG Kundenservice", .suburban).operatorBrand == .oebb)
-        #expect(line("DB Regio AG Bayern", .regional).operatorBrand == .db)
-        #expect(line("NordWestBahn", .regional).operatorBrand == .nordwestbahn)
-        #expect(OperatorBrand.brand(operatorName: "S-Bahn Berlin GmbH", product: nil) == .sbahn)
-    }
-
     @Test func shortensLongOperatorNames() {
         #expect(OperatorBrand.displayName(for: "ODEG Ostdeutsche Eisenbahn GmbH") == "ODEG")
         #expect(OperatorBrand.displayName(for: "Ostdeutsche Eisenbahn GmbH") == "ODEG")
+        #expect(OperatorBrand.displayName(for: "S-Bahn Hannover (Transdev)") == "Transdev")
+        #expect(OperatorBrand.displayName(for: "S-Bahn Hannover") == "Transdev")
+        #expect(OperatorBrand.displayName(for: "Transdev Rhein-Ruhr") == "Transdev Rhein-Ruhr")
+        #expect(OperatorBrand.displayName(for: "DB Regio AG S-Bahn München") == "DB Regio AG S-Bahn München")
         #expect(OperatorBrand.displayName(for: "DB Regio AG Nordost") == "DB Regio AG Nordost")
         #expect(OperatorBrand.displayName(for: "VIAS Rail GmbH") == "VIAS Rail GmbH")
     }

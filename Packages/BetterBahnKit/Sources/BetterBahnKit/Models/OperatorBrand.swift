@@ -13,8 +13,9 @@ public enum OperatorBrand: String, CaseIterable, Sendable {
 
     /// Whole words of the normalised name (lowercased, without diacritics, punctuation as spaces,
     /// digits stripped from word ends: "vlexx1", "DLB1"). Checked in order, so the specific ones come
-    /// first: "alex - Die Länderbahn" is alex, "S-Bahn Hannover (Transdev)" Transdev, "S-Bahn Berlin GmbH"
-    /// the S-Bahn's own logo, not DB.
+    /// first: "alex - Die Länderbahn" is alex, "S-Bahn Hannover (Transdev)" Transdev, not DB. DB's S-Bahns
+    /// with a name of their own ("S-Bahn Berlin GmbH", "DB Regio AG S-Bahn München") get the S-Bahn's "S";
+    /// those the feed only names "DB Regio AG NRW" keep DB's logo.
     private static let rules: [(OperatorBrand, [String])] = [
         (.transdev, ["transdev", "s bahn hannover"]),
         (.alex, ["alex"]),
@@ -56,20 +57,25 @@ public enum OperatorBrand: String, CaseIterable, Sendable {
         (.gysev, ["gysev", "raaberbahn"]),
         (.zssk, ["zssk", "zeleznicna spolocnost slovensko"]),
         (.dsb, ["dsb", "danske statsbaner"]),
-        (.sbahn, ["s bahn berlin"]),
-        (.db, ["db", "deutsche bahn", "s bahn hamburg"]),
+        (.sbahn, ["s bahn"]),
+        (.db, ["db", "deutsche bahn"]),
     ]
 
     public init?(operatorName: String) {
+        let name = Self.normalized(operatorName)
+        guard let brand = Self.rules.first(where: { $0.1.contains { name.contains(" \($0) ") } })?.0 else { return nil }
+        self = brand
+    }
+
+    /// The name's words as the rules match them, with a space before and after.
+    private static func normalized(_ operatorName: String) -> String {
         let words = operatorName
             .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "de_DE"))
             .lowercased()
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .map { String($0.reversed().drop(while: \.isNumber).reversed()) }
             .filter { !$0.isEmpty }
-        let name = " " + words.joined(separator: " ") + " "
-        guard let brand = Self.rules.first(where: { $0.1.contains { name.contains(" \($0) ") } })?.0 else { return nil }
-        self = brand
+        return " " + words.joined(separator: " ") + " "
     }
 
     /// Name of the logo's image set in the app's asset catalog.
@@ -89,42 +95,19 @@ public enum OperatorBrand: String, CaseIterable, Sendable {
         }
     }
 
-    /// The name to show for operators whose feed name is long-winded: "ODEG" for
-    /// "ODEG Ostdeutsche Eisenbahn GmbH". `nil` keeps the feed's name.
-    public var shortName: String? {
-        switch self {
-        case .odeg: "ODEG"
-        default: nil
-        }
-    }
-
-    /// Railways from abroad. Their S-Bahn trains (Zürich, Salzburg, …) don't carry Germany's S-Bahn logo.
-    public var isForeign: Bool {
-        switch self {
-        case .bls, .cd, .dsb, .eurostar, .gysev, .ns, .oebb, .pkpic, .polregio, .sbb, .sob, .thurbo, .trenitalia, .zssk:
-            true
-        default:
-            false
-        }
-    }
-
-    /// The logo for a train run by `operatorName`: every S-Bahn train shows the S-Bahn's "S", whoever runs
-    /// it (DB Regio in München, Transdev in Hannover, NordWestBahn in Bremen), unless a railway from abroad
-    /// does; other trains their operator's logo.
-    public static func brand(operatorName: String?, product: Product?) -> OperatorBrand? {
-        let brand = operatorName.flatMap(OperatorBrand.init(operatorName:))
-        if product == .suburban, brand?.isForeign != true { return .sbahn }
-        return brand
-    }
-
-    /// `operatorName` as the app shows it, shortened where the brand has a short name.
+    /// `operatorName` as the app shows it, where the feed's name is long-winded or names no company:
+    /// "ODEG" for "ODEG Ostdeutsche Eisenbahn GmbH", "Transdev" for "S-Bahn Hannover (Transdev)" (the S-Bahn
+    /// Hannover is Transdev's network, not a company of its own). Other names stay as they are.
     public static func displayName(for operatorName: String) -> String {
-        OperatorBrand(operatorName: operatorName)?.shortName ?? operatorName
+        switch OperatorBrand(operatorName: operatorName) {
+        case .odeg: "ODEG"
+        case .transdev where normalized(operatorName).contains(" s bahn hannover "): "Transdev"
+        default: operatorName
+        }
     }
 }
 
 extension Line {
-    /// The logo the app shows next to `operatorName`, if there is one: the S-Bahn's for S-Bahn trains
-    /// (`OperatorBrand.brand(operatorName:product:)`), else the operator's.
-    public var operatorBrand: OperatorBrand? { OperatorBrand.brand(operatorName: operatorName, product: product) }
+    /// The operator whose logo the app shows next to `operatorName`, if it has one.
+    public var operatorBrand: OperatorBrand? { operatorName.flatMap(OperatorBrand.init(operatorName:)) }
 }
