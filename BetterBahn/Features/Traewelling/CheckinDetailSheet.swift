@@ -31,7 +31,7 @@ struct CheckinDetailSheet: View {
     @FocusState private var messageFocused: Bool
     @FocusState private var focusedTag: String?
     /// Where the keyboard was when "Speichern" was tapped: it goes away right then and only comes
-    /// back there if saving fails.
+    /// back there if Träwelling rejects the input (`isInvalidInput`).
     @State private var focusBeforeSave: (message: Bool, tag: String?) = (false, nil)
 
     private var statusURL: URL {
@@ -384,8 +384,10 @@ struct CheckinDetailSheet: View {
                 withAnimation(.snappy) { isEditing = false }
             } catch {
                 self.error = error
-                messageFocused = focusBeforeSave.message
-                focusedTag = focusBeforeSave.tag
+                if (error as? TraewellingError)?.isInvalidInput == true {
+                    messageFocused = focusBeforeSave.message
+                    focusedTag = focusBeforeSave.tag
+                }
                 // Some tag changes may have gone through; the next try starts from what Träwelling has.
                 if let current = try? await model.traewelling.tags(statusId: statusId) { tags = current }
             }

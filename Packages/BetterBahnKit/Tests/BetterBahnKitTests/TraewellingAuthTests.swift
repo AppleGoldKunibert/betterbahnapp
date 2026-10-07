@@ -141,6 +141,15 @@ import Testing
     }
 }
 
+@Suite struct TraewellingErrorTests {
+    @Test func onlyAValidationErrorAsksToFixTheInput() {
+        #expect(TraewellingError.api(status: 422, message: "The body field must not be greater than 280 characters.").isInvalidInput)
+        #expect(!TraewellingError.api(status: 500, message: nil).isInvalidInput)
+        #expect(!TraewellingError.collision.isInvalidInput)
+        #expect(!TraewellingError.tripNotFound("ICE 594").isInvalidInput)
+    }
+}
+
 /// Real-world case: a manual trip from Hamburg Hbf started at the U-Bahn stop "Hauptbahnhof Süd",
 /// because that stop lay closer to Transitous' coordinate than Träwelling's Hbf.
 @Suite struct TraewellingStationMatchTests {

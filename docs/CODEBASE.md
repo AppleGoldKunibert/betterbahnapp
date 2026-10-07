@@ -85,7 +85,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `SeatReservationViews` (`ReservationRow` in `LegCard` above "Mehr", read-only). Reservations come from the journey's
   tickets (`AppModel.reservations(for:)`) and only show on the leg whose train matches.
 - `Features/Trips/TripsView.swift` – upcoming/past saved journeys, `SaveJourneyButton`.
-- `Features/Traewelling/` – `CheckinSheet` (`MenuPickerRow`: the Sichtbarkeit/Reiseart menus of both check-in sheets, constant width so the closing menu doesn't jump; the keyboard goes away as soon as the check-in/save is tapped and only comes back on an error), `TraewellingLoginButton`, `CustomEmojiViews` (`EmojiMessageField`: text field
+- `Features/Traewelling/` – `CheckinSheet` (`MenuPickerRow`: the Sichtbarkeit/Reiseart menus of both check-in sheets, constant width so the closing menu doesn't jump; the keyboard goes away as soon as the check-in/save is tapped and only comes back when Träwelling rejects the input, `TraewellingError.isInvalidInput`), `TraewellingLoginButton`, `CustomEmojiViews` (`EmojiMessageField`: text field
   with emoji suggestions + preview, `EmojiText`), `CheckinDetailSheet` ("Check-in ansehen" in a leg's "Mehr" once the leg was
   checked in from the app, `AppModel.checkinStatusIDs`; shows and edits text, visibility, trip type and tags, deletes the
   check-in, lists the "Mitreisende" on the same train (#184)), `CheckoutPrompt` (removing a saved journey with such check-ins asks: check out at the last stop reached

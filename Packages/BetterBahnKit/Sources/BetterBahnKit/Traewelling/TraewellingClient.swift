@@ -169,6 +169,12 @@ public enum TraewellingError: Error, LocalizedError, Equatable {
         case .api(let status, let message): message ?? "Träwelling-Fehler (\(status))"
         }
     }
+
+    /// Träwelling rejected what was typed in (its validation answers 422, e.g. a text that's too long),
+    /// so the form brings the keyboard back to fix it. Other errors leave it hidden.
+    public var isInvalidInput: Bool {
+        if case .api(422, _) = self { true } else { false }
+    }
 }
 
 public actor TraewellingClient {

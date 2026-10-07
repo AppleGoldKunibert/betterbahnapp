@@ -26,7 +26,7 @@ struct CheckinSheet: View {
     @FocusState private var messageFocused: Bool
     @FocusState private var focusedTag: String?
     /// Where the keyboard was when "Jetzt einchecken" was tapped. It goes away right then, and only
-    /// comes back there if the check-in fails, so the input can be fixed.
+    /// comes back there if Träwelling rejects the input (`isInvalidInput`), so it can be fixed.
     @State private var focusBeforeSend: (message: Bool, tag: String?) = (false, nil)
 
     private var coupledTrains: [Line.CoupledTrain] { leg.line?.coupledTrains ?? [] }
@@ -304,8 +304,10 @@ struct CheckinSheet: View {
                 offerManualTrip = true
             } catch {
                 self.error = error
-                messageFocused = focusBeforeSend.message
-                focusedTag = focusBeforeSend.tag
+                if (error as? TraewellingError)?.isInvalidInput == true {
+                    messageFocused = focusBeforeSend.message
+                    focusedTag = focusBeforeSend.tag
+                }
             }
         }
     }
