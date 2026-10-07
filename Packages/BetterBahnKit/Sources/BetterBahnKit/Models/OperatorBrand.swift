@@ -96,6 +96,17 @@ public enum OperatorBrand: String, CaseIterable, Sendable {
         }
     }
 
+    /// A country's national railway (DB with its S-Bahns, DSB, ČD, ÖBB, SBB, …): the railway a train's stops
+    /// in that country stand for when bahn.de names no operator (`BahnDeClient.operators(byAdministration:)`).
+    public var isNationalRailway: Bool {
+        switch self {
+        case .cd, .db, .dbregio, .dsb, .gysev, .ns, .oebb, .pkpic, .polregio, .sbahn, .sbb, .trenitalia, .zssk:
+            true
+        default:
+            false
+        }
+    }
+
     /// `operatorName` as the app shows it, where the feed's name is long-winded or names no company:
     /// "ODEG" for "ODEG Ostdeutsche Eisenbahn GmbH", "Transdev" for "S-Bahn Hannover (Transdev)" (the S-Bahn
     /// Hannover is Transdev's network, not a company of its own). Other names stay as they are.

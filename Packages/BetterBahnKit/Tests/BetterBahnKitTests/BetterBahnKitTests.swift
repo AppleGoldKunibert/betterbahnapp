@@ -4961,6 +4961,14 @@ private final class RE3318CancelledProtocol: RE3318Protocol, @unchecked Sendable
             TrainOperator(name: "České dráhy, a.s.", section: .init(from: "Decin hl.n.", to: "Praha hl.n.")),
         ])
         #expect(operators.map { OperatorBrand(operatorName: $0.name) } == [.dsb, .db, .cd])
+        #expect(BahnDeClient.operators(of: details, feedOperator: "DSB") == operators)
+        #expect(BahnDeClient.operators(of: details, feedOperator: "Dänische Staatsbahnen") == operators)
+
+        // A train the feed says someone else runs (Die Länderbahn's trilex to Liberec, RegioJet, an operator
+        // the app doesn't know) keeps the feed's operator: the countries only stand for national railways.
+        #expect(BahnDeClient.operators(of: details, feedOperator: "trilex - Die Länderbahn GmbH DLB").isEmpty)
+        #expect(BahnDeClient.operators(of: details, feedOperator: "RegioJet a.s.").isEmpty)
+        #expect(BahnDeClient.operators(of: details, feedOperator: "European Sleeper").isEmpty)
 
         // A train ending at the first stop abroad stays its own railway's.
         let toDecin = Array(details.halte.filter { $0.extId?.hasPrefix("80") == true }) + [details.halte[13]]

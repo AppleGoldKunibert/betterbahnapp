@@ -214,7 +214,7 @@ extension BahnDeClient {
         let journeyKey = "\(ref.category) \(ref.number)|\(station.id)|\(plannedDeparture.timeIntervalSince1970)"
         guard usesSharedCaches else {
             let id = try await findJourneyId(line: line, station: station, plannedDeparture: plannedDeparture)
-            return try await fetchJourneyCourse(journeyId: id)
+            return try await fetchJourneyCourse(journeyId: id, feedOperator: line.operatorName)
         }
         // The journey ID of a run never changes, so resolving it (a departure board request) only
         // happens once; the stops themselves are refreshed every few minutes.
@@ -222,7 +222,7 @@ extension BahnDeClient {
             try await self.findJourneyId(line: line, station: station, plannedDeparture: plannedDeparture)
         }
         return try await Self.journeyCourseCache.value(for: id, maxAge: maxAge) {
-            try await self.fetchJourneyCourse(journeyId: id)
+            try await self.fetchJourneyCourse(journeyId: id, feedOperator: line.operatorName)
         }
     }
 
@@ -530,18 +530,25 @@ extension BahnDeClient {
 
     private static let trainNameCache = ExpiringCache<String?>()
 
-    private func fetchJourneyCourse(journeyId: String) async throws -> JourneyCourse {
+    private func fetchJourneyCourse(journeyId: String, feedOperator: String?) async throws -> JourneyCourse {
         let details = try await get(Self.journeyURL(journeyId), as: JourneyDetails.self)
-        return JourneyCourse(stops: details.halte.compactMap(JourneyStop.init), operators: Self.operators(of: details))
+        return JourneyCourse(stops: details.halte.compactMap(JourneyStop.init),
+                             operators: Self.operators(of: details, feedOperator: feedOperator))
     }
 
     /// The operators bahn.de names in the train's attributes, unless its stops' railways (`adminID`, else
     /// their country) name more: then the attributes only list some of them, and the Railjet København →
     /// Praha, run by DSB, DB and ČD, showed as DSB's alone. The stops' version also wins when it names as
     /// many and the attributes have no sections, since it knows where each railway takes over.
-    static func operators(of details: JourneyDetails) -> [TrainOperator] {
+    ///
+    /// The stations' countries only stand for national railways, so they are only asked when the feed
+    /// names one (`feedOperator`, or none at all): Die Länderbahn's trilex to Liberec or RegioJet to
+    /// Bratislava would otherwise show DB Regio and ČD, ČD and ZSSK. Then the feed's operator stays.
+    static func operators(of details: JourneyDetails, feedOperator: String? = nil) -> [TrainOperator] {
         let named = operators(in: details.zugattribute ?? [])
-        let byAdministration = operators(byAdministration: details.halte, trainName: details.zugName)
+        let byCountry = !details.halte.contains { $0.adminID != nil }
+        let countriesFit = feedOperator.map { OperatorBrand(operatorName: $0)?.isNationalRailway == true } ?? true
+        let byAdministration = byCountry && !countriesFit ? [] : operators(byAdministration: details.halte, trainName: details.zugName)
         let namedCount = Set(named.map(\.name)).count, stopsCount = Set(byAdministration.map(\.name)).count
         // As many but without sections (one comma-separated attribute): the stops' version knows where each runs.
         if stopsCount > namedCount || (stopsCount > 0 && stopsCount == namedCount && !named.contains { $0.section != nil }) {
