@@ -31,17 +31,26 @@ struct UncheckedRidesView: View {
                     } header: {
                         Text(rides.count == 1 ? "1 Fahrt" : "\(rides.count) Fahrten")
                     } footer: {
-                        Text("Gespeicherte Fahrten, zu denen es keinen Träwelling-Check-in zur selben Zeit gibt. Auf der Karte erscheinen sie nur mit „Gespeichert“.")
+                        Text("Gespeicherte Fahrten, zu denen es keinen Träwelling-Check-in zur selben Zeit gibt. Auf der Karte erscheinen sie nur mit „Gespeichert“. Zum vollständigen Abgleich mit Träwelling nach unten ziehen.")
                     }
                 }
             }
         }
         .navigationTitle("Nicht eingecheckt")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if model.isSyncingTraewelling {
+                ToolbarItem(placement: .topBarTrailing) { ProgressView() }
+            }
+        }
         .task {
             await model.loadTraewellingTrips()
             isLoaded = true
+            // Otherwise a check-in made since the map was last opened would be listed as missing.
+            await model.syncTraewelling()
         }
+        // A full resync also finds check-ins the incremental sync stopped short of.
+        .refreshable { await model.syncTraewelling(force: true) }
     }
 
     private func row(_ leg: Leg) -> some View {
