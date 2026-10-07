@@ -2097,6 +2097,10 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(!calls.isDetour(normal))
         #expect(!calls.isDetour(Journey(legs: [leg("594", hbf, gesundbrunnen, 150, 158)], source: .transitous)))
 
+        // Bad feed data: the last leg arrives before the first one leaves. Must not trap (`start...end`).
+        let backwards = Journey(legs: [leg("10", hbf, halle, 100, 170), leg("12", halle, leipzig, 180, 60)], source: .transitous)
+        #expect(!calls.isDetour(backwards))
+
         // Transitous' routing offers ICE 594 from Hbf as a normal ride; the stop times mark it "Nur Ausstieg".
         var direct = leg("594", hbf, gesundbrunnen, 150, 158)
         direct.stopovers = [Stopover(station: hbf, arrival: nil, departure: direct.departure, arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
