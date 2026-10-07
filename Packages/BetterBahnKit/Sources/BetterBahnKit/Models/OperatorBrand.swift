@@ -6,14 +6,15 @@ import Foundation
 /// (from Wikimedia Commons); an operator not listed here keeps the generic icon. To add one, add its case,
 /// a rule and its logo (the test `everyBrandHasALogo` checks the asset exists).
 public enum OperatorBrand: String, CaseIterable, Sendable {
-    case abellio, agilis, alex, arverio, bls, brb, cantus, cd, db, enno, erfurterbahn, erixx, eurobahn
+    case abellio, agilis, alex, arverio, bls, brb, cantus, cd, db, dsb, enno, erfurterbahn, erixx, eurobahn
     case europeansleeper, eurostar, flixtrain, gysev, hlb, laenderbahn, metronom, mrb, nationalexpress
-    case nordbahn, nordwestbahn, ns, odeg, oebb, pkpic, polregio, sbb, sob, suedthueringenbahn, sweg
+    case nordbahn, nordwestbahn, ns, odeg, oebb, pkpic, polregio, sbahn, sbb, sob, suedthueringenbahn, sweg
     case thurbo, transdev, transregio, trenitalia, vlexx, westfalenbahn, zssk
 
     /// Whole words of the normalised name (lowercased, without diacritics, punctuation as spaces,
     /// digits stripped from word ends: "vlexx1", "DLB1"). Checked in order, so the specific ones come
-    /// first: "alex - Die Länderbahn" is alex, "S-Bahn Hannover (Transdev)" Transdev, not DB.
+    /// first: "alex - Die Länderbahn" is alex, "S-Bahn Hannover (Transdev)" Transdev, "S-Bahn Berlin GmbH"
+    /// the S-Bahn's own logo, not DB.
     private static let rules: [(OperatorBrand, [String])] = [
         (.transdev, ["transdev", "s bahn hannover"]),
         (.alex, ["alex"]),
@@ -54,7 +55,9 @@ public enum OperatorBrand: String, CaseIterable, Sendable {
         (.polregio, ["polregio"]),
         (.gysev, ["gysev", "raaberbahn"]),
         (.zssk, ["zssk", "zeleznicna spolocnost slovensko"]),
-        (.db, ["db", "deutsche bahn", "s bahn berlin", "s bahn hamburg"]),
+        (.dsb, ["dsb", "danske statsbaner"]),
+        (.sbahn, ["s bahn berlin"]),
+        (.db, ["db", "deutsche bahn", "s bahn hamburg"]),
     ]
 
     public init?(operatorName: String) {
@@ -76,8 +79,8 @@ public enum OperatorBrand: String, CaseIterable, Sendable {
     /// the dark background. Logos that are bright enough sit on the background directly, as in light mode.
     public var needsPlateInDarkMode: Bool {
         switch self {
-        case .db, .erfurterbahn, .europeansleeper, .eurostar, .flixtrain, .gysev, .nationalexpress, .oebb,
-             .polregio, .sob, .thurbo, .transdev, .trenitalia, .westfalenbahn, .zssk:
+        case .db, .dsb, .erfurterbahn, .europeansleeper, .eurostar, .flixtrain, .gysev, .nationalexpress, .oebb,
+             .polregio, .sbahn, .sob, .thurbo, .transdev, .trenitalia, .westfalenbahn, .zssk:
             false
         case .abellio, .agilis, .alex, .arverio, .bls, .brb, .cantus, .cd, .enno, .erixx, .eurobahn, .hlb,
              .laenderbahn, .metronom, .mrb, .nordbahn, .nordwestbahn, .ns, .odeg, .pkpic, .sbb,
@@ -85,9 +88,43 @@ public enum OperatorBrand: String, CaseIterable, Sendable {
             true
         }
     }
+
+    /// The name to show for operators whose feed name is long-winded: "ODEG" for
+    /// "ODEG Ostdeutsche Eisenbahn GmbH". `nil` keeps the feed's name.
+    public var shortName: String? {
+        switch self {
+        case .odeg: "ODEG"
+        default: nil
+        }
+    }
+
+    /// Railways from abroad. Their S-Bahn trains (Zürich, Salzburg, …) don't carry Germany's S-Bahn logo.
+    public var isForeign: Bool {
+        switch self {
+        case .bls, .cd, .dsb, .eurostar, .gysev, .ns, .oebb, .pkpic, .polregio, .sbb, .sob, .thurbo, .trenitalia, .zssk:
+            true
+        default:
+            false
+        }
+    }
+
+    /// The logo for a train run by `operatorName`: every S-Bahn train shows the S-Bahn's "S", whoever runs
+    /// it (DB Regio in München, Transdev in Hannover, NordWestBahn in Bremen), unless a railway from abroad
+    /// does; other trains their operator's logo.
+    public static func brand(operatorName: String?, product: Product?) -> OperatorBrand? {
+        let brand = operatorName.flatMap(OperatorBrand.init(operatorName:))
+        if product == .suburban, brand?.isForeign != true { return .sbahn }
+        return brand
+    }
+
+    /// `operatorName` as the app shows it, shortened where the brand has a short name.
+    public static func displayName(for operatorName: String) -> String {
+        OperatorBrand(operatorName: operatorName)?.shortName ?? operatorName
+    }
 }
 
 extension Line {
-    /// The operator whose logo the app shows next to `operatorName`, if it has one.
-    public var operatorBrand: OperatorBrand? { operatorName.flatMap(OperatorBrand.init(operatorName:)) }
+    /// The logo the app shows next to `operatorName`, if there is one: the S-Bahn's for S-Bahn trains
+    /// (`OperatorBrand.brand(operatorName:product:)`), else the operator's.
+    public var operatorBrand: OperatorBrand? { OperatorBrand.brand(operatorName: operatorName, product: product) }
 }

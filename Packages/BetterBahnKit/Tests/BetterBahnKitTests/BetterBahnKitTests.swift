@@ -1342,7 +1342,7 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
 
     private func mergeTestLeg(_ line: String?, number: String? = nil, from: (String, Double, Double),
                               to: (String, Double, Double), departure: String, arrival: String,
-                              isWalking: Bool = false) -> Leg {
+                              isWalking: Bool = false, product: Product = .highSpeed) -> Leg {
         func date(_ value: String) -> Date { ISO8601DateFormatter().date(from: value)! }
         func station(_ place: (String, Double, Double)) -> Station {
             Station(id: place.0, name: place.0, coordinate: Coordinate(latitude: place.1, longitude: place.2),
@@ -1352,7 +1352,7 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
                    departure: TimeInfo(planned: date(departure), actual: nil),
                    arrival: TimeInfo(planned: date(arrival), actual: nil),
                    departurePlatform: nil, arrivalPlatform: nil, tripId: nil,
-                   line: line.map { Line(name: $0, number: number, product: .highSpeed, operatorName: nil) },
+                   line: line.map { Line(name: $0, number: number, product: product, operatorName: nil) },
                    direction: nil, isWalking: isWalking, cancelled: false, stopovers: [], remarks: [],
                    source: .transitous)
     }
@@ -1377,6 +1377,64 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(ride?.origin.name == "Amsterdam Centraal")
         #expect(ride?.destination.name == "Hannover Hbf")
         #expect(ride?.arrival.planned == secondHalf.arrival.planned)
+    }
+
+    /// Real-world RJ 383 København → Praha (2026-10-07): Transitous changed at Děčín from DB's or DSB's
+    /// copy of the train to the Czech feed's "Ex5 (rj 383)", which is long-distance there while DB's
+    /// is high-speed. It's one train, not a change.
+    @Test func mergeThroughTrainLegsJoinsHighSpeedAndLongDistanceCopiesOfOneTrain() {
+        let german = mergeTestLeg("RJ 383", number: "383", from: ("Berlin Hbf", 52.525, 13.369),
+                                  to: ("Decin hl.n.", 50.77341, 14.20125), departure: "2026-10-07T11:28:00Z", arrival: "2026-10-07T13:53:00Z")
+        let czech = mergeTestLeg("RJ 383", number: "383", from: ("Děčín hlavní nádraží", 50.77346, 14.20110),
+                                 to: ("Praha hlavní nádraží", 50.08309, 14.43598), departure: "2026-10-07T13:57:00Z",
+                                 arrival: "2026-10-07T15:25:00Z", product: .longDistance)
+
+        let merged = TransitousProvider.mergeThroughTrainLegs([german, czech])
+
+        #expect(merged.count == 1)
+        #expect(merged.first?.origin.name == "Berlin Hbf")
+        #expect(merged.first?.destination.name == "Praha hlavní nádraží")
+        #expect(merged.first?.line?.product == .highSpeed)
+    }
+
+    /// The same number as a regional train is still another train.
+    @Test func mergeThroughTrainLegsKeepsRegionalTrainWithSameNumber() {
+        let train = mergeTestLeg("RJ 383", number: "383", from: ("Berlin Hbf", 52.525, 13.369),
+                                 to: ("Decin hl.n.", 50.77341, 14.20125), departure: "2026-10-07T11:28:00Z", arrival: "2026-10-07T13:53:00Z")
+        let regional = mergeTestLeg("Os 383", number: "383", from: ("Decin hl.n.", 50.77341, 14.20125),
+                                    to: ("Usti nad Labem hl.n.", 50.6596, 14.0446), departure: "2026-10-07T13:57:00Z",
+                                    arrival: "2026-10-07T14:20:00Z", product: .regional)
+
+        #expect(TransitousProvider.mergeThroughTrainLegs([train, regional]).count == 2)
+    }
+
+    /// The Railjet København → Praha as two feeds in Transitous name it: DSB's (Rejseplanen) a regional
+    /// "RJ" with the number only in the trip code, the Czech one (CZPTT) after its line, "Ex5 (rj 383)".
+    /// Both are the high-speed/long-distance "RJ 383"; Czech lines with other trains keep their name.
+    @Test func lineNamesOfTheRailjetFromKobenhavn() {
+        let dsb = MLineInfo(mode: "REGIONAL_RAIL", displayName: "RJ", routeShortName: "RJ", tripShortName: "000383", agencyName: "DSB").toLine()
+        #expect(dsb.name == "RJ 383")
+        #expect(dsb.number == "383")
+        #expect(dsb.product == .highSpeed)
+
+        let czech = MLineInfo(mode: "LONG_DISTANCE", displayName: "Ex5 (rj 383)", routeShortName: "Ex5", tripShortName: "rj 383",
+                              agencyName: "České dráhy, a.s.").toLine()
+        #expect(czech.name == "RJ 383")
+        #expect(czech.number == "383")
+        #expect(czech.product == .longDistance)
+
+        let euroCity = MLineInfo(mode: "LONG_DISTANCE", displayName: "Ex2 (EC 223)", routeShortName: "Ex2", tripShortName: "EC 223",
+                                 agencyName: "České dráhy, a.s.").toLine()
+        #expect(euroCity.name == "EC 223")
+
+        let fastTrain = MLineInfo(mode: "REGIONAL_RAIL", displayName: "R10 (R 951)", routeShortName: "R10", tripShortName: "R 951",
+                                  agencyName: "České dráhy, a.s.").toLine()
+        #expect(fastTrain.name == "R10 (R 951)")
+        #expect(fastTrain.product == .regional)
+
+        let regional = MLineInfo(mode: "REGIONAL_RAIL", displayName: "RE3 (3349)", routeShortName: "RE3", tripShortName: "003349",
+                                 agencyName: "DB Regio AG Nordost").toLine()
+        #expect(regional.name == "RE3 (3349)")
     }
 
     /// A short walk between two nearby stops is only folded away when the numbered train actually
@@ -4676,7 +4734,7 @@ private final class RE3318CancelledProtocol: RE3318Protocol, @unchecked Sendable
         let expected: [String: OperatorBrand] = [
             "DB Fernverkehr AG": .db, "DB Fernverkehr (Codesharing)": .db, "DB Regio AG NRW": .db,
             "DB Regio AG S-Bahn München": .db, "DB RegioNetz Verkehrs GmbH Kurhessenbahn": .db,
-            "Deutsche Bahn AG": .db, "S-Bahn Hamburg": .db, "S-Bahn Berlin GmbH": .db,
+            "Deutsche Bahn AG": .db, "S-Bahn Hamburg": .db, "S-Bahn Berlin GmbH": .sbahn,
             "S-Bahn Hannover (Transdev)": .transdev, "S-Bahn Hannover": .transdev,
             "Schweizerische Bundesbahnen SBB": .sbb, "SBB GmbH (Grenzverkehr)": .sbb,
             "Schweizerische Südostbahn (sob)": .sob, "THURBO": .thurbo, "BLS AG (bls)": .bls,
@@ -4694,7 +4752,7 @@ private final class RE3318CancelledProtocol: RE3318Protocol, @unchecked Sendable
             "vlexx": .vlexx, "vlexx1": .vlexx, "Eurobahn": .eurobahn, "WestfalenBahn": .westfalenbahn,
             "NS International": .ns, "European Sleeper": .europeansleeper, "PKP Intercity": .pkpic,
             "PolRegio": .polregio, "Raaberbahn AG GYSEV Zrt.": .gysev,
-            "Železničná spoločnosť Slovensko, a.s.": .zssk,
+            "Železničná spoločnosť Slovensko, a.s.": .zssk, "DSB": .dsb, "DSB (Danske Statsbaner)": .dsb,
         ]
         for (name, brand) in expected {
             #expect(OperatorBrand(operatorName: name) == brand, "\(name)")
@@ -4707,6 +4765,30 @@ private final class RE3318CancelledProtocol: RE3318Protocol, @unchecked Sendable
         }
         #expect(Line(name: "RE 1", number: nil, product: .regionalExpress, operatorName: nil).operatorBrand == nil)
         #expect(Line(name: "ICE 1", number: "1", product: .highSpeed, operatorName: "DB Fernverkehr AG").operatorBrand == .db)
+    }
+
+    /// Every S-Bahn train shows the S, whoever runs it; S-Bahn trains of railways abroad and all other
+    /// trains keep their operator's logo.
+    @Test func sBahnTrainsShowTheSWhoeverRunsThem() {
+        func line(_ operatorName: String?, _ product: Product) -> Line {
+            Line(name: "S 1", number: nil, product: product, operatorName: operatorName)
+        }
+        for name in ["DB Regio AG S-Bahn München", "DB Regio AG, S-Bahn Rhein-Main", "S-Bahn Hamburg", "S-Bahn Berlin GmbH",
+                     "S-Bahn Hannover (Transdev)", "NordWestBahn", "SWEG Südwestdeutsche Landesverkehrs-GmbH", "VIAS Rail GmbH"] {
+            #expect(line(name, .suburban).operatorBrand == .sbahn, "\(name)")
+        }
+        #expect(line("Schweizerische Bundesbahnen SBB", .suburban).operatorBrand == .sbb)
+        #expect(line("OEBB Personenverkehr AG Kundenservice", .suburban).operatorBrand == .oebb)
+        #expect(line("DB Regio AG Bayern", .regional).operatorBrand == .db)
+        #expect(line("NordWestBahn", .regional).operatorBrand == .nordwestbahn)
+        #expect(OperatorBrand.brand(operatorName: "S-Bahn Berlin GmbH", product: nil) == .sbahn)
+    }
+
+    @Test func shortensLongOperatorNames() {
+        #expect(OperatorBrand.displayName(for: "ODEG Ostdeutsche Eisenbahn GmbH") == "ODEG")
+        #expect(OperatorBrand.displayName(for: "Ostdeutsche Eisenbahn GmbH") == "ODEG")
+        #expect(OperatorBrand.displayName(for: "DB Regio AG Nordost") == "DB Regio AG Nordost")
+        #expect(OperatorBrand.displayName(for: "VIAS Rail GmbH") == "VIAS Rail GmbH")
     }
 
     /// Every brand needs its logo in the app's asset catalog, else it would silently keep the icon.
@@ -4804,6 +4886,39 @@ private final class RE3318CancelledProtocol: RE3318Protocol, @unchecked Sendable
         var unknown = decoded.halte
         unknown[4].adminID = "99"
         #expect(BahnDeClient.operators(byAdministration: unknown).isEmpty)
+    }
+
+    /// RJ 383 København H → Praha hl.n. is run by DSB, DB and ČD. Attributes naming only one of them
+    /// don't hide the others the stops' railways name; attributes naming them all are kept.
+    @Test func operatorsFromTheStopsWhenTheAttributesNameFewer() throws {
+        func details(_ attributes: String) throws -> BahnDeClient.JourneyDetails {
+            let json = """
+            {"zugattribute": [\(attributes)], "halte": [
+              {"name": "København H", "adminID": "86", "kategorie": "RJ", "abfahrt": {"sollzeit": "2026-10-07T06:22:00"}},
+              {"name": "Padborg st", "adminID": "86", "kategorie": "RJ", "ankunft": {"sollzeit": "2026-10-07T09:03:00"}, "abfahrt": {"sollzeit": "2026-10-07T09:13:00"}},
+              {"name": "Flensburg", "adminID": "80", "kategorie": "RJ", "ankunft": {"sollzeit": "2026-10-07T09:25:00"}, "abfahrt": {"sollzeit": "2026-10-07T09:27:00"}},
+              {"name": "Bad Schandau", "adminID": "80", "kategorie": "RJ", "ankunft": {"sollzeit": "2026-10-07T15:35:00"}, "abfahrt": {"sollzeit": "2026-10-07T15:37:00"}},
+              {"name": "Decin hl.n.", "adminID": "54", "kategorie": "RJ", "ankunft": {"sollzeit": "2026-10-07T15:53:00"}, "abfahrt": {"sollzeit": "2026-10-07T15:57:00"}},
+              {"name": "Praha hl.n.", "adminID": "54", "kategorie": "RJ", "ankunft": {"sollzeit": "2026-10-07T17:25:00"}}
+            ]}
+            """
+            return try JSONDecoding.decoder.decode(BahnDeClient.JourneyDetails.self, from: Data(json.utf8))
+        }
+        let onlyDSB = try details(#"{"key": "BEF", "value": "DSB", "teilstreckenHinweis": "(København H - Padborg st)"}"#)
+        #expect(BahnDeClient.operators(of: onlyDSB) == [
+            TrainOperator(name: "DSB", section: .init(from: "København H", to: "Padborg st")),
+            TrainOperator(name: "DB Fernverkehr AG", section: .init(from: "Flensburg", to: "Bad Schandau")),
+            TrainOperator(name: "České dráhy, a.s.", section: .init(from: "Decin hl.n.", to: "Praha hl.n.")),
+        ])
+        #expect(BahnDeClient.operators(of: onlyDSB).map { OperatorBrand(operatorName: $0.name) } == [.dsb, .db, .cd])
+
+        let all = try details(#"""
+            {"key": "BEF", "value": "DSB", "teilstreckenHinweis": "(København H - Padborg st)"},
+            {"key": "BEF", "value": "DB Fernverkehr AG", "teilstreckenHinweis": "(Flensburg - Bad Schandau)"},
+            {"key": "BEF", "value": "České dráhy, a.s.", "teilstreckenHinweis": "(Děčín hl.n. - Praha hl.n.)"}
+            """#)
+        #expect(BahnDeClient.operators(of: all).map(\.name) == ["DSB", "DB Fernverkehr AG", "České dráhy, a.s."])
+        #expect(BahnDeClient.operators(of: all)[2].section?.from == "Děčín hl.n.")
     }
 
     /// Berlin → Praha is run by DB and ČD; riding only to Dresden shows DB alone, riding to Praha both.

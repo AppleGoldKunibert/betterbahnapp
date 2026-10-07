@@ -530,9 +530,16 @@ extension BahnDeClient {
 
     private func fetchJourneyCourse(journeyId: String) async throws -> JourneyCourse {
         let details = try await get(Self.journeyURL(journeyId), as: JourneyDetails.self)
-        let named = Self.operators(in: details.zugattribute ?? [])
-        return JourneyCourse(stops: details.halte.compactMap(JourneyStop.init),
-                             operators: named.isEmpty ? Self.operators(byAdministration: details.halte) : named)
+        return JourneyCourse(stops: details.halte.compactMap(JourneyStop.init), operators: Self.operators(of: details))
+    }
+
+    /// The operators bahn.de names in the train's attributes, unless its stops' railways (`adminID`) name
+    /// more: then the attributes only list some of them, and the Railjet København → Praha, run by DSB,
+    /// DB and ČD, showed as DSB's alone.
+    static func operators(of details: JourneyDetails) -> [TrainOperator] {
+        let named = operators(in: details.zugattribute ?? [])
+        let byAdministration = operators(byAdministration: details.halte)
+        return Set(byAdministration.map(\.name)).count > Set(named.map(\.name)).count ? byAdministration : named
     }
 
     /// The operators of a train run by several railways, from its stops' `adminID`s: one per run of
