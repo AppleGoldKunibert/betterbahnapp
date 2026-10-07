@@ -183,10 +183,16 @@ struct JourneyDetailView: View {
         return entry
     }
 
-    /// Saved or imported journeys may still lack a Gleis Transitous didn't have; DB's schedule fills it.
+    /// Saved or imported journeys may still lack a Gleis Transitous didn't have; DB's schedule fills it,
+    /// the Czech timetable those in Czechia. Before the live refresh, which also waits for bahn.de and
+    /// can take a while: the Czech lookup is usually cached from the search already.
     private func fillMissingPlatforms() async {
-        guard !readOnly, let timetables = model.timetablesClient else { return }
-        let filled = await timetables.fillMissingPlatforms(in: journey)
+        guard !readOnly else { return }
+        let czechStops = await model.provider.czechTimetableStops(in: [journey], deadline: .seconds(3))
+        var filled = CombinedProvider.applying(czechStops: czechStops, to: [journey]).first ?? journey
+        if let timetables = model.timetablesClient {
+            filled = await timetables.fillMissingPlatforms(in: filled)
+        }
         guard filled != journey else { return }
         if let entry = model.savedEntry(for: journey) {
             model.updateSavedJourneyData(id: entry.id, journey: filled)

@@ -168,7 +168,7 @@ public final class CombinedProvider: TransitProvider {
         return (try? await Self.withDeadline(deadline) { await lookup.value }) ?? [:]
     }
 
-    static func applying(czechStops: [String: [Stopover]], to journeys: [Journey]) -> [Journey] {
+    public static func applying(czechStops: [String: [Stopover]], to journeys: [Journey]) -> [Journey] {
         guard !czechStops.isEmpty else { return journeys }
         return journeys.map { journey in
             var journey = journey
