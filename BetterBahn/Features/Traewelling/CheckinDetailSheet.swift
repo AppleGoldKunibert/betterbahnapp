@@ -3,7 +3,7 @@ import SwiftUI
 
 /// A leg's Träwelling check-in, opened from "Check-in ansehen" in the leg's "Mehr": shows its text
 /// (with the Mastodon instance's emojis) and tags, lets text, visibility, trip type and tags be changed
-/// and the check-in be deleted.
+/// and the check-in be deleted. Below it, the others checked in to the same train ("Mitreisende").
 struct CheckinDetailSheet: View {
     let leg: Leg
     let statusId: Int
@@ -25,6 +25,7 @@ struct CheckinDetailSheet: View {
     @State private var editedTags: [StatusTag] = []
     @State private var confirmDelete = false
     @State private var isDeleting = false
+    @State private var fellowTravellers: [TraewellingStatus] = []
 
     private var statusURL: URL {
         model.traewelling.config.baseURL.appending(path: "status/\(statusId)")
@@ -45,6 +46,7 @@ struct CheckinDetailSheet: View {
                         saveButton
                     } else if let status {
                         statusCard(status)
+                        if !fellowTravellers.isEmpty { fellowTravellersSection }
                         if let error { ErrorBanner(error: error) }
                         deleteButton
                     } else if let error {
@@ -116,6 +118,65 @@ struct CheckinDetailSheet: View {
                 .tint(.brand)
             }
         }
+    }
+
+    private var fellowTravellersSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionHeader(title: "Mitreisende", systemImage: "person.2.fill", trailing: "\(fellowTravellers.count)")
+            Card {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(Array(fellowTravellers.enumerated()), id: \.element.id) { index, fellow in
+                        if index > 0 { Divider() }
+                        fellowTravellerRow(fellow)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Someone else on this train: who, and from where to where; opens their profile on Träwelling.
+    private func fellowTravellerRow(_ fellow: TraewellingStatus) -> some View {
+        let baseURL = model.traewelling.config.baseURL
+        let url = fellow.user.map { baseURL.appending(path: "@\($0.username)") } ?? baseURL.appending(path: "status/\(fellow.id)")
+        let origin = fellow.checkin.origin.station?.name ?? fellow.checkin.origin.name ?? "?"
+        let destination = fellow.checkin.destination.station?.name ?? fellow.checkin.destination.name ?? "?"
+        return Button {
+            openURL(url)
+        } label: {
+            HStack(spacing: 12) {
+                AsyncImage(url: fellow.user?.profilePicture) { image in
+                    image.resizable().scaledToFill()
+                } placeholder: {
+                    Image(systemName: "person.crop.circle.fill")
+                        .resizable()
+                        .foregroundStyle(.secondary)
+                }
+                .frame(width: 36, height: 36)
+                .clipShape(.circle)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 4) {
+                        Text(fellow.user?.displayName ?? "Träwelling-Nutzer")
+                            .font(.subheadline.weight(.semibold))
+                        if let username = fellow.user?.username {
+                            Text("@\(username)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .lineLimit(1)
+                    Text("\(origin) → \(destination)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
     }
 
     private var editCard: some View {
@@ -304,6 +365,8 @@ struct CheckinDetailSheet: View {
         emojis = await emojiList
         tags = await tagList
         isLoading = false
+        // Extra too: the section only shows once someone else is on the train.
+        if let status { fellowTravellers = (try? await model.traewelling.fellowTravellers(of: status)) ?? [] }
     }
 
     /// Tags are extra: the check-in still shows when they can't be loaded.
