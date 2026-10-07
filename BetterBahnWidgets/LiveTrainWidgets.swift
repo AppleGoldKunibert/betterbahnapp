@@ -59,15 +59,20 @@ struct LiveTrainProvider: TimelineProvider {
         Task {
             let first = await currentEntry(mapSize: size)
             var entries = [first]
-            // Later entries keep the fetched position (shown with its time) but move the next stop on.
+            // While riding, ask WidgetKit for a fresh position soon; iOS decides how often it really reloads.
+            let reload = Date.now.addingTimeInterval(first.position != nil ? 10 * 60 : 30 * 60)
+            // Later entries keep the fetched position (shown with its time) but move the next stop on,
+            // and more than 12 hours ahead the timer's "2d 3h 49m" on every minute until the reload.
             if let journey = WidgetStore.load()?.journey {
-                for date in JourneyWidgetState.changeDates(of: journey, after: first.date).prefix(30) {
+                var dates = Set(JourneyWidgetState.changeDates(of: journey, after: first.date).prefix(30))
+                if let state = first.state {
+                    dates.formUnion(WidgetTimer.tickDates(to: state.nextStopTime, after: first.date, until: reload))
+                }
+                for date in dates.sorted() {
                     entries.append(LiveTrainEntry(date: date, state: JourneyWidgetState.from(journey, now: date),
                                                   journeyID: first.journeyID, position: first.position, map: first.map))
                 }
             }
-            // While riding, ask WidgetKit for a fresh position soon; iOS decides how often it really reloads.
-            let reload = Date.now.addingTimeInterval(first.position != nil ? 10 * 60 : 30 * 60)
             completion(Timeline(entries: entries, policy: .after(reload)))
         }
     }
@@ -215,7 +220,7 @@ struct LiveSpeedView: View {
             } else {
                 VStack(spacing: -2) {
                     Text("+\(max(0, state.nextStopDelayMinutes ?? 0))").font(.title3.weight(.bold)).monospacedDigit()
-                    Text(timerInterval: entry.date...max(entry.date, state.nextStopTime), countsDown: true)
+                    CountdownText(date: entry.date, end: state.nextStopTime)
                         .font(.caption2).monospacedDigit().multilineTextAlignment(.center).minimumScaleFactor(0.5)
                 }
             }
@@ -231,7 +236,7 @@ struct LiveSpeedView: View {
             .lineLimit(1)
             Text(state.nextStopName).font(.caption).lineLimit(1)
             HStack(spacing: 4) {
-                Text(timerInterval: entry.date...max(entry.date, state.nextStopTime), countsDown: true).monospacedDigit()
+                CountdownText(date: entry.date, end: state.nextStopTime).monospacedDigit()
                 if let delay = state.nextStopDelayMinutes { Text("+\(max(0, delay))").monospacedDigit() }
             }
             .font(.caption.weight(.semibold))
@@ -370,7 +375,7 @@ private struct NextStopFallback: View {
             Text(state.nextStopName).font(.subheadline.weight(.bold)).lineLimit(2).minimumScaleFactor(0.8)
             HStack(spacing: 4) {
                 Image(systemName: "timer")
-                Text(timerInterval: date...max(date, state.nextStopTime), countsDown: true).monospacedDigit()
+                CountdownText(date: date, end: state.nextStopTime).monospacedDigit()
                 Spacer(minLength: 0)
                 DelayBadge(minutes: state.nextStopDelayMinutes, cancelled: state.cancelled)
             }

@@ -197,7 +197,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   (parse DB Navigator/bahn.de shared text, resolve via `betterbahn://import`).
 - `Widgets/` – `WidgetSnapshot` + `WidgetStore` (JSON in the App Group container), `JourneyWidgetState` (what the
   journey widget shows at a moment: phase, next stop and its delay, transfer "RE 5 → ICE 645, Gl. 4 → Gl. 7", final
-  delay, countdown target; `changeDates` for the widget's timeline entries), `TrainMapLink` (`betterbahn://map`).
+  delay, countdown target; `changeDates` for the widget's timeline entries), `WidgetTimer` (countdowns more than 12 h ahead read
+  "2d 3h 49m" instead of a running timer, with a timeline entry every minute), `TrainMapLink` (`betterbahn://map`).
 - `Geometry/` – polyline decode, `RouteGeometryService`, `SegmentHeatmap`.
 - `Support/HTTPClient.swift` – shared HTTP + `TransitError`, `JSONDecoding`. Every request sends `identifyingUserAgent` (app version + `/support` contact, as Transitous/OpenRailwayMap/Träwelling ask); only `BahnDeClient` sends browser agents. `ProductStyle` colors.
 - `Support/LoadingDeadline.swift` – waits up to 4 s for live data before a screen shows a journey or train
