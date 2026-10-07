@@ -30,6 +30,28 @@ public struct JourneyStop: Sendable, Hashable {
     }
 }
 
+/// A railway undertaking running (part of) a train, as bahn.de lists it. International trains are run by
+/// several, one per section, e.g. Berlin → Praha by DB Fernverkehr in Germany and České dráhy in Czechia.
+public struct TrainOperator: Sendable, Hashable {
+    public struct Section: Sendable, Hashable {
+        public var from: String
+        public var to: String
+        public init(from: String, to: String) { self.from = from; self.to = to }
+    }
+
+    public var name: String
+    /// First and last station of its section, as bahn.de names them; `nil` when it runs the whole train.
+    public var section: Section?
+
+    public init(name: String, section: Section? = nil) {
+        self.name = name
+        self.section = section
+    }
+
+    /// "Berlin Hbf – Bad Schandau".
+    public var sectionText: String? { section.map { "\($0.from) – \($0.to)" } }
+}
+
 extension Stopover {
     /// A `Stopover` for a Zusatzhalt bahn.de reported (see `BahnDeClient.inserting(_:into:)`). Only
     /// ever used for display; a Zusatzhalt's Träwelling checkin goes through
@@ -85,7 +107,18 @@ extension BahnDeClient {
             var priorisierteMeldungen: [Message]?
             var risMeldungen: [RISMessage]?
         }
+        /// The train's attributes; its operators are the "BEF" (Beförderer) entries, one per section on
+        /// trains run by several, e.g. `{"key": "BEF", "value": "DB Fernverkehr AG",
+        /// "teilstreckenHinweis": "(Berlin Hbf - Bad Schandau)"}` (as parsed by db-vendo-client).
+        struct Attribute: Decodable { var key: String?; var value: String?; var teilstreckenHinweis: String? }
         var halte: [Stop]
+        var zugattribute: [Attribute]?
+    }
+
+    /// A train's journey details: its realtime stops and the operators running it.
+    struct JourneyCourse: Sendable {
+        var stops: [JourneyStop]
+        var operators: [TrainOperator]
     }
 
     // MARK: Journey stops
@@ -109,24 +142,50 @@ extension BahnDeClient {
 
     private func journeyStops(line: Line?, station: Station, plannedDeparture: Date,
                               maxAge: TimeInterval = BahnDeClient.journeyStopsMaxAge) async throws -> [JourneyStop]? {
+        try await journeyCourse(line: line, station: station, plannedDeparture: plannedDeparture, maxAge: maxAge)?.stops
+    }
+
+    /// The operators bahn.de lists for the part of `leg`'s train you ride: on an international train run
+    /// by several (one per section), only those whose section overlaps the leg. `nil` under the same
+    /// conditions as `journeyStops(for:)` or when bahn.de names none; shares its request and cache.
+    public func trainOperators(for leg: Leg) async throws -> [TrainOperator]? {
+        guard let course = try await journeyCourse(line: leg.line, station: leg.origin, plannedDeparture: leg.departure.planned) else { return nil }
+        let operators = Self.operators(course.operators, riding: leg, stops: course.stops)
+        return operators.isEmpty ? nil : operators
+    }
+
+    /// Every operator bahn.de lists for `trip`'s train, each with its section when there are several.
+    public func trainOperators(for trip: Trip) async throws -> [TrainOperator]? {
+        guard let first = trip.stopovers.first(where: { $0.departure != nil }), let departure = first.departure,
+              let course = try await journeyCourse(line: trip.line, station: first.station, plannedDeparture: departure.planned)
+        else { return nil }
+        switch course.operators.count {
+        case 0: return nil
+        case 1: return [TrainOperator(name: course.operators[0].name)]
+        default: return course.operators
+        }
+    }
+
+    private func journeyCourse(line: Line?, station: Station, plannedDeparture: Date,
+                               maxAge: TimeInterval = BahnDeClient.journeyStopsMaxAge) async throws -> JourneyCourse? {
         guard let ref = Self.journeyReference(for: line), let line else { return nil }
         let journeyKey = "\(ref.category) \(ref.number)|\(station.id)|\(plannedDeparture.timeIntervalSince1970)"
         guard usesSharedCaches else {
             let id = try await findJourneyId(line: line, station: station, plannedDeparture: plannedDeparture)
-            return try await fetchJourneyStops(journeyId: id)
+            return try await fetchJourneyCourse(journeyId: id)
         }
         // The journey ID of a run never changes, so resolving it (a departure board request) only
         // happens once; the stops themselves are refreshed every few minutes.
         let id = try await Self.journeyIdCache.value(for: journeyKey, maxAge: 12 * 3600) {
             try await self.findJourneyId(line: line, station: station, plannedDeparture: plannedDeparture)
         }
-        return try await Self.journeyStopsCache.value(for: id, maxAge: maxAge) {
-            try await self.fetchJourneyStops(journeyId: id)
+        return try await Self.journeyCourseCache.value(for: id, maxAge: maxAge) {
+            try await self.fetchJourneyCourse(journeyId: id)
         }
     }
 
     private static let journeyIdCache = ExpiringCache<String>()
-    private static let journeyStopsCache = ExpiringCache<[JourneyStop]>()
+    private static let journeyCourseCache = ExpiringCache<JourneyCourse>()
     /// Matches `TimetablesClient.changesMaxAge`: short enough that a realtime refresh still sees
     /// changes soon, long enough that reopening the same view right after doesn't wait again.
     public static let journeyStopsMaxAge: TimeInterval = 4 * 60
@@ -422,8 +481,63 @@ extension BahnDeClient {
 
     private static let trainNameCache = ExpiringCache<String?>()
 
-    private func fetchJourneyStops(journeyId: String) async throws -> [JourneyStop] {
-        try await get(Self.journeyURL(journeyId), as: JourneyDetails.self).halte.compactMap(JourneyStop.init)
+    private func fetchJourneyCourse(journeyId: String) async throws -> JourneyCourse {
+        let details = try await get(Self.journeyURL(journeyId), as: JourneyDetails.self)
+        return JourneyCourse(stops: details.halte.compactMap(JourneyStop.init), operators: Self.operators(in: details.zugattribute ?? []))
+    }
+
+    // MARK: Operators
+
+    /// The "BEF" (or "OP") attributes as operators, in bahn.de's order and without repeats. A section
+    /// hint like "(Berlin Hbf - Bad Schandau)" becomes the operator's section.
+    static func operators(in attributes: [JourneyDetails.Attribute]) -> [TrainOperator] {
+        var operators: [TrainOperator] = []
+        for attribute in attributes where attribute.key == "BEF" || attribute.key == "OP" {
+            guard let name = attribute.value?.trimmingCharacters(in: .whitespaces), !name.isEmpty else { continue }
+            let entry = TrainOperator(name: name, section: attribute.teilstreckenHinweis.flatMap(section))
+            if !operators.contains(entry) { operators.append(entry) }
+        }
+        return operators
+    }
+
+    /// "(Berlin Hbf - Bad Schandau)" → Berlin Hbf … Bad Schandau. Only " - " with spaces separates,
+    /// so hyphenated names like "Berlin-Spandau" stay whole.
+    static func section(_ hint: String) -> TrainOperator.Section? {
+        let trimmed = hint.trimmingCharacters(in: CharacterSet(charactersIn: "() ").union(.whitespaces))
+        let parts = trimmed.components(separatedBy: " - ").map { $0.trimmingCharacters(in: .whitespaces) }
+        guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else { return nil }
+        return TrainOperator.Section(from: parts[0], to: parts[1])
+    }
+
+    /// `operators` narrowed to those running some part of `leg`, located by bahn.de's own stop order:
+    /// an operator whose section ends before the leg starts or starts after it ends is left out.
+    /// Anything that can't be placed (no section, a station not found) is kept. Once only one operator
+    /// is left, its section is dropped: it runs everything you ride.
+    static func operators(_ operators: [TrainOperator], riding leg: Leg, stops: [JourneyStop]) -> [TrainOperator] {
+        guard operators.count > 1,
+              let legStart = stops.firstIndex(where: { stop in
+                  stop.departure.map { abs($0.planned.timeIntervalSince(leg.departure.planned)) < 60 } == true && isNear(stop, leg.origin) }),
+              let legEnd = stops.indices.last(where: { index in
+                  index > legStart && stops[index].arrival.map { abs($0.planned.timeIntervalSince(leg.arrival.planned)) < 60 } == true
+                      && isNear(stops[index], leg.destination) })
+        else { return operators.count == 1 ? [TrainOperator(name: operators[0].name)] : operators }
+        let riding = operators.filter { entry in
+            guard let section = entry.section,
+                  let from = stops.firstIndex(where: { Station.normalize($0.name) == Station.normalize(section.from) }),
+                  let to = stops.indices.last(where: { $0 > from && Station.normalize(stops[$0].name) == Station.normalize(section.to) })
+            else { return true }
+            return from < legEnd && to > legStart
+        }
+        var seen = Set<String>()
+        let unique = riding.filter { seen.insert($0.name).inserted }
+        return unique.count == 1 ? [TrainOperator(name: unique[0].name)] : riding
+    }
+
+    /// Same place test as `stop(in:at:planned:side:)`, without the time.
+    private static func isNear(_ stop: JourneyStop, _ station: Station) -> Bool {
+        if matches(stop, station) || Station.normalize(stop.name) == Station.normalize(station.displayName) { return true }
+        guard let a = stop.coordinate, let b = station.coordinate else { return false }
+        return a.distance(to: b) < 1_000
     }
 
     static func journeyURL(_ journeyId: String) -> URL {

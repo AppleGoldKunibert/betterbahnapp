@@ -4493,6 +4493,60 @@ private final class RE3318CancelledProtocol: RE3318Protocol, @unchecked Sendable
             #expect(FileManager.default.fileExists(atPath: png.path), "\(brand)")
         }
     }
+
+    /// bahn.de lists one "BEF" attribute per operator, with its section on trains run by several.
+    @Test func parsesOperatorsFromBahnDeAttributes() throws {
+        let details = """
+        {"halte": [], "zugattribute": [
+          {"kategorie": "BEFÖRDERER", "key": "BEF", "value": "DB Fernverkehr AG", "teilstreckenHinweis": "(Berlin Hbf - Bad Schandau)"},
+          {"kategorie": "BORDBISTRO", "key": "BR", "value": "Bordrestaurant"},
+          {"kategorie": "BEFÖRDERER", "key": "BEF", "value": "České dráhy, a.s.", "teilstreckenHinweis": "(Děčín hl.n. - Praha hl.n.)"},
+          {"kategorie": "BEFÖRDERER", "key": "BEF", "value": "DB Fernverkehr AG", "teilstreckenHinweis": "(Berlin Hbf - Bad Schandau)"}
+        ]}
+        """
+        let decoded = try JSONDecoding.decoder.decode(BahnDeClient.JourneyDetails.self, from: Data(details.utf8))
+        let operators = BahnDeClient.operators(in: decoded.zugattribute ?? [])
+        #expect(operators == [
+            TrainOperator(name: "DB Fernverkehr AG", section: .init(from: "Berlin Hbf", to: "Bad Schandau")),
+            TrainOperator(name: "České dráhy, a.s.", section: .init(from: "Děčín hl.n.", to: "Praha hl.n.")),
+        ])
+        #expect(operators[0].sectionText == "Berlin Hbf – Bad Schandau")
+        #expect(BahnDeClient.section("(Berlin-Spandau - Dresden-Neustadt)") == .init(from: "Berlin-Spandau", to: "Dresden-Neustadt"))
+        #expect(BahnDeClient.section("Berlin Hbf") == nil)
+        // Older responses without attributes still decode.
+        #expect(try JSONDecoding.decoder.decode(BahnDeClient.JourneyDetails.self, from: Data(#"{"halte": []}"#.utf8)).zugattribute == nil)
+    }
+
+    /// Berlin → Praha is run by DB and ČD; riding only to Dresden shows DB alone, riding to Praha both.
+    @Test func narrowsOperatorsToTheLegsSection() throws {
+        let start = try #require(JSONDecoding.parseISODate("2026-10-08T07:00:00Z"))
+        func at(_ minutes: Double) -> TimeInfo { TimeInfo(planned: start.addingTimeInterval(minutes * 60), actual: nil) }
+        func station(_ name: String) -> Station { Station(id: "t:\(name)", name: name, coordinate: nil, evaNumber: nil, source: .transitous) }
+        let stops = [
+            JourneyStop(evaNumber: "8011160", name: "Berlin Hbf", departure: at(0)),
+            JourneyStop(evaNumber: "8010085", name: "Dresden Hbf", arrival: at(110), departure: at(115)),
+            JourneyStop(evaNumber: "8010022", name: "Bad Schandau", arrival: at(140), departure: at(141)),
+            JourneyStop(evaNumber: "5400019", name: "Děčín hl.n.", arrival: at(155), departure: at(157)),
+            JourneyStop(evaNumber: "5400014", name: "Praha hl.n.", arrival: at(250)),
+        ]
+        let operators = [
+            TrainOperator(name: "DB Fernverkehr AG", section: .init(from: "Berlin Hbf", to: "Bad Schandau")),
+            TrainOperator(name: "České dráhy, a.s.", section: .init(from: "Bad Schandau", to: "Praha hl.n.")),
+        ]
+        func leg(_ from: String, _ fromMinutes: Double, _ to: String, _ toMinutes: Double) -> Leg {
+            Leg(origin: station(from), destination: station(to), departure: at(fromMinutes), arrival: at(toMinutes),
+                departurePlatform: nil, arrivalPlatform: nil, tripId: "ec", line: Line(name: "EC 171", number: "171", product: .longDistance, operatorName: "DB Fernverkehr AG"),
+                direction: nil, isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+        }
+
+        #expect(BahnDeClient.operators(operators, riding: leg("Berlin Hbf", 0, "Praha hl.n.", 250), stops: stops) == operators)
+        #expect(BahnDeClient.operators(operators, riding: leg("Berlin Hbf", 0, "Dresden Hbf", 110), stops: stops)
+                    == [TrainOperator(name: "DB Fernverkehr AG")])
+        #expect(BahnDeClient.operators(operators, riding: leg("Děčín hl.n.", 157, "Praha hl.n.", 250), stops: stops)
+                    == [TrainOperator(name: "České dráhy, a.s.")])
+        // A leg bahn.de's stops don't show keeps every operator rather than guessing.
+        #expect(BahnDeClient.operators(operators, riding: leg("Wien Hbf", 0, "Praha hl.n.", 250), stops: stops) == operators)
+    }
 }
 
 private final class RE3318NoChangesProtocol: RE3318Protocol, @unchecked Sendable {

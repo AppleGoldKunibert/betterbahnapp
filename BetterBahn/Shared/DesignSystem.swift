@@ -208,6 +208,8 @@ struct LineBadge: View {
 /// so they stay readable. Operators without a logo (`OperatorBrand`) keep the building icon.
 struct OperatorLabel: View {
     let name: String
+    /// The part of the train it runs (first – last station), when several operators share the train.
+    var section: String? = nil
     @ScaledMetric(relativeTo: .caption) private var logoHeight: CGFloat = 12
     @Environment(\.colorScheme) private var colorScheme
 
@@ -227,7 +229,58 @@ struct OperatorLabel: View {
             } else {
                 Image(systemName: "building.2.fill")
             }
-            Text(name)
+            if let section {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(name)
+                    Text(section).font(.caption2)
+                }
+            } else {
+                Text(name)
+            }
+        }
+    }
+}
+
+/// Everyone running the train you ride (#166): bahn.de lists one operator per section on international
+/// trains (Berlin → Praha: DB Fernverkehr, then České dráhy), while the feed only ever names one. Shows
+/// the feed's operator until bahn.de answered, and keeps it when bahn.de has nothing.
+struct TrainOperatorsLabel: View {
+    enum Source { case leg(Leg), trip(Trip) }
+
+    let source: Source
+    @Environment(AppModel.self) private var model
+    @State private var operators: [TrainOperator]?
+
+    private var feedName: String? {
+        switch source {
+        case .leg(let leg): leg.line?.operatorName
+        case .trip(let trip): trip.line?.operatorName
+        }
+    }
+
+    private var key: String {
+        switch source {
+        case .leg(let leg): leg.id
+        case .trip(let trip): trip.id
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let operators {
+                ForEach(operators, id: \.self) { OperatorLabel(name: $0.name, section: $0.sectionText) }
+            } else if let feedName {
+                OperatorLabel(name: feedName)
+            }
+        }
+        .task(id: key) {
+            guard let bahnDe = model.provider.bahnDe else { return }
+            let found: [TrainOperator]?
+            switch source {
+            case .leg(let leg): found = try? await bahnDe.trainOperators(for: leg)
+            case .trip(let trip): found = try? await bahnDe.trainOperators(for: trip)
+            }
+            if let found { operators = found }
         }
     }
 }

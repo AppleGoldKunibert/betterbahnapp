@@ -255,8 +255,8 @@ struct TripContent: View {
                                 .foregroundStyle(.secondary)
                                 .fullTextPopup("\(origin.displayName) → \(destination.displayName)", lines: 2)
                         }
-                        if let op = trip.line?.operatorName {
-                            OperatorLabel(name: op).font(.caption).foregroundStyle(.tertiary)
+                        if trip.line?.operatorName != nil {
+                            TrainOperatorsLabel(source: .trip(trip)).font(.caption).foregroundStyle(.tertiary)
                         }
                         TrainFormationLabel(trip: trip, savedLeg: savedLeg)
                     }
