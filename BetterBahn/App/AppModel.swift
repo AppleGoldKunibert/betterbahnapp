@@ -277,12 +277,21 @@ final class AppModel {
         var knownIDs = Set(traewellingTrips.map(\.statusID))
         // A first import has nothing to stop at: it walks the whole history, remembering how far it got.
         var resumePage = knownIDs.isEmpty ? (settings.traewellingImportNextPage ?? 1) : settings.traewellingImportNextPage
+        // A full resync walks every page and compares each check-in with the ride imported for it: an
+        // edit on Träwelling (e.g. checking out at another stop) keeps the status ID.
+        let walkingAll = force && !knownIDs.isEmpty
+        var refreshing: [Int: Journey] = walkingAll
+            ? Dictionary(traewellingTrips.map { ($0.statusID, $0.journey) }, uniquingKeysWith: { first, _ in first })
+            : [:]
+        var seen: Set<Int> = []
         var pending: [ImportedTrip] = []
         // Hands the loaded trips to the map now and then (saving the whole list after every page would
         // rewrite a large file hundreds of times), and only then moves the resume point past them.
         func commit() {
             if !pending.isEmpty {
-                traewellingTrips = (pending + traewellingTrips).sorted { $0.statusID > $1.statusID }
+                let replaced = Set(pending.map(\.statusID))
+                traewellingTrips = (pending + traewellingTrips.filter { !replaced.contains($0.statusID) })
+                    .sorted { $0.statusID > $1.statusID }
                 pending = []
             }
             settings.traewellingImportNextPage = resumePage
@@ -295,18 +304,42 @@ final class AppModel {
             var backfilling = knownIDs.isEmpty
             var page = backfilling ? resumePage ?? 1 : 1
             while true {
-                let result = try await traewelling.historyPage(username: username, page: page, knownIDs: knownIDs)
+                let result = try await traewelling.historyPage(username: username, page: page, knownIDs: knownIDs,
+                                                               refreshing: refreshing)
+                seen.formUnion(result.statusIDs)
                 let trips = result.trips.map { ImportedTrip(statusID: $0.statusID, journey: $0.journey) }
+                let edited = Set(trips.map(\.statusID)).intersection(refreshing.keys)
+                if !edited.isEmpty {
+                    // An edited check-in keeps its leg ID, so its old track would be drawn from the cache.
+                    await forgetGeometries(of: traewellingTrips.filter { edited.contains($0.statusID) }.flatMap(\.journey.legs))
+                    // Paging by offset can repeat a status when a check-in lands mid-sync.
+                    for id in edited { refreshing[id] = nil }
+                }
                 let (stripped, geometries) = ImportedTrip.movingGeometryOut(of: trips)
                 await rememberGeometries(geometries)
                 pending += stripped
                 knownIDs.formUnion(result.trips.map(\.statusID))
                 if !result.hasMore {
                     resumePage = nil
+                    commit()
+                    // A full resync that got through every page has seen every status there is. A check-in
+                    // deleted on Träwelling (e.g. a cancelled ride) would otherwise stay in the local copy
+                    // forever and keep counting on the map.
+                    if walkingAll, !seen.isEmpty {
+                        let deleted = traewellingTrips.filter { !seen.contains($0.statusID) }
+                        if !deleted.isEmpty {
+                            await forgetGeometries(of: deleted.flatMap(\.journey.legs))
+                            traewellingTrips.removeAll { !seen.contains($0.statusID) }
+                        }
+                    }
                     break
                 }
                 if backfilling {
                     resumePage = page + 1
+                    page += 1
+                } else if walkingAll {
+                    // Pages an earlier import didn't get to are imported on the way.
+                    if let next = resumePage { resumePage = max(next, page + 1) }
                     page += 1
                 } else if result.reachedKnown {
                     guard let next = resumePage else { break }
@@ -382,6 +415,13 @@ final class AppModel {
         }.value
         _ = await loadedGeometryCache()
         geometryCache?.merge(encoded) { _, new in new }
+        saveGeometryCache()
+    }
+
+    private func forgetGeometries(of legs: [Leg]) async {
+        guard !legs.isEmpty else { return }
+        _ = await loadedGeometryCache()
+        for leg in legs { geometryCache?[leg.id] = nil }
         saveGeometryCache()
     }
 

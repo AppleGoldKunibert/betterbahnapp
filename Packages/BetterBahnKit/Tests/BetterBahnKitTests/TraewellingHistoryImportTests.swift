@@ -23,6 +23,22 @@ import Testing
         ])
     }
 
+    @Test func returnsAKnownCheckinAgainWhenItsRideChanged() async throws {
+        HistoryPageProtocol.requests = []
+        HistoryPageProtocol.rateLimitsLeft = 0
+        let fresh = try await client().historyPage(username: "alfred", page: 1, knownIDs: [])
+        let journey = try #require(fresh.trips.first?.journey)
+        // Checked out at another stop on Träwelling since it was imported.
+        var edited = journey
+        edited.legs[0].destination = edited.legs[0].origin
+
+        let page = try await client().historyPage(username: "alfred", page: 1, knownIDs: [103, 102, 101],
+                                                  refreshing: [102: journey, 101: edited])
+        #expect(page.trips.map(\.statusID) == [101])
+        #expect(page.statusIDs == [103, 102, 101])
+        #expect(page.reachedKnown)
+    }
+
     @Test func givesUpWhenStillRateLimitedAfterWaiting() async throws {
         HistoryPageProtocol.requests = []
         HistoryPageProtocol.rateLimitsLeft = 5

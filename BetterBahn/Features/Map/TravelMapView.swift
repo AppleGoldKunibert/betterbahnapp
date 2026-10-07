@@ -23,7 +23,8 @@ struct TravelMapView: View {
     @State private var legendExpanded = true
 
     struct Stats {
-        var journeys = 0
+        /// Train rides (legs), not journeys: a check-in is one ride, so a saved journey counts
+        /// once per train too and both sources are counted alike.
         var legs = 0
         var kilometers = 0.0
         var hours = 0.0
@@ -107,7 +108,7 @@ struct TravelMapView: View {
             }
 
             HStack(spacing: 0) {
-                stat(value: "\(stats.journeys)", label: "Reisen", icon: "bookmark.fill")
+                stat(value: "\(stats.legs)", label: "Fahrten", icon: "tram.fill")
                 Divider().frame(height: 28)
                 stat(value: stats.kilometers.formatted(.number.precision(.fractionLength(0))), label: "km", icon: "point.topleft.down.to.point.bottomright.curvepath.fill")
                 Divider().frame(height: 28)
@@ -302,8 +303,7 @@ struct TravelMapView: View {
         withAnimation {
             runs = heatmap.runs
             runsVersion += 1
-            stats = Stats(journeys: heatmap.journeysCount, legs: heatmap.legsCount,
-                          kilometers: heatmap.kilometers, hours: heatmap.hours)
+            stats = Stats(legs: heatmap.legsCount, kilometers: heatmap.kilometers, hours: heatmap.hours)
         }
         progress = nil
     }
@@ -364,22 +364,6 @@ private extension Coordinate {
 
 nonisolated final class HeatPolyline: MKPolyline, @unchecked Sendable {
     var count = 1
-}
-
-/// OpenRailwayMap tiles with BetterBahn's identifying User-Agent and linked attribution in the legend.
-nonisolated final class RailwayTileOverlay: MKTileOverlay, @unchecked Sendable {
-    init() {
-        super.init(urlTemplate: "https://tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png")
-        canReplaceMapContent = false
-        maximumZ = 19
-    }
-
-    override func loadTile(at path: MKTileOverlayPath, result: @escaping (Data?, (any Error)?) -> Void) {
-        var request = URLRequest(url: url(forTilePath: path))
-        request.setValue(HTTPClient.identifyingUserAgent, forHTTPHeaderField: "User-Agent")
-        nonisolated(unsafe) let completion = result
-        URLSession.shared.dataTask(with: request) { data, _, error in completion(data, error) }.resume()
-    }
 }
 
 struct TravelMap: UIViewRepresentable {
