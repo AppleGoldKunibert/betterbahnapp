@@ -560,9 +560,14 @@ struct PlatformBadge: View {
                     .font(.system(size: 8, weight: .semibold))
                     .textCase(.uppercase)
                     .opacity(0.8)
+                // One line: a range like "2 A - D" widens the badge a little instead of wrapping,
+                // and only shrinks once it reaches the cap.
                 Text(best)
                     .font(prominent ? .headline : .subheadline.weight(.bold))
                     .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .frame(maxWidth: prominent ? 84 : 72)
             }
             .frame(minWidth: prominent ? 46 : 38)
             .padding(.vertical, 4)
