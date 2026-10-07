@@ -3230,6 +3230,16 @@ private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
         #expect(journey.connectionIssues().isEmpty)
     }
 
+    /// The same train to Dresden or on to Praha are different journeys: opening the one to Praha
+    /// showed the one to Dresden remembered from before, since only the legs' starts counted.
+    @Test func journeysToDifferentDestinationsOnTheSameTrainDiffer() {
+        let toDresden = Journey(legs: [leg("RJ 171", "Berlin Hbf", "Dresden Hbf", dep: 0, arr: 99)], source: .transitous)
+        let toPraha = Journey(legs: [leg("RJ 171", "Berlin Hbf", "Praha hl.n.", dep: 0, arr: 237)], source: .transitous)
+        #expect(toDresden.id != toPraha.id)
+        #expect(toDresden.id == Journey(legs: [leg("RJ 171", "Berlin Hbf", "Dresden Hbf", dep: 0, arr: 99)], source: .transitous).id)
+        #expect(LiveActivityLink.journeyID(from: LiveActivityLink.url(journeyID: toPraha.id)) == toPraha.id)
+    }
+
     @Test func delayBreaksTransfer() {
         let journey = Journey(legs: [
             leg("ICE 1", "A", "B", dep: 0, arr: 60, arrDelay: 12),
