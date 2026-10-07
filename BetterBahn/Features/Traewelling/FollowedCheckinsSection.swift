@@ -18,6 +18,8 @@ extension AppModel {
                     let current = Set(fresh.statuses.map(\.id))
                     followedTracks = followedTracks.filter { current.contains($0.key) }
                     followedTrains = followedTrains.filter { current.contains($0.key) }
+                    followedEmojis = followedEmojis.filter { current.contains($0.key) }
+                    await prepareEmojis(for: fresh.statuses)
                 }
             } else {
                 followedCheckins = nil
@@ -35,6 +37,19 @@ extension AppModel {
             return theirs
         }
         return (try? await customEmojis.emojis(instance: CustomEmojiText.defaultInstance)) ?? []
+    }
+
+    /// Loads the emojis of the check-in texts and their pictures ahead, so a text shows them as soon as
+    /// it is opened instead of its `:shortcodes:` first.
+    private func prepareEmojis(for statuses: [TraewellingStatus]) async {
+        for status in statuses where followedEmojis[status.id] == nil {
+            guard let body = status.body, body.contains(":") else { continue }
+            let emojis = await emojis(forTextOf: status)
+            followedEmojis[status.id] = emojis
+            CustomEmojiImages.shared.load(CustomEmojiText.segments(of: body, emojis: emojis).compactMap { segment -> URL? in
+                if case .emoji(let emoji) = segment { emoji.url } else { nil }
+            })
+        }
     }
 
     /// A Träwelling status tag's name: the quick tag's for a known key, else the key itself.
@@ -179,7 +194,8 @@ private struct FollowedCheckinCard: View {
             await findTrain()
         }
         .task(id: isOpen) {
-            guard isOpen, emojis.isEmpty, status.body?.contains(":") ?? false else { return }
+            guard isOpen, emojis.isEmpty, model.followedEmojis[status.id] == nil,
+                  status.body?.contains(":") ?? false else { return }
             emojis = await model.emojis(forTextOf: status)
         }
         .onChange(of: status.liked) {
@@ -259,7 +275,7 @@ private struct FollowedCheckinCard: View {
     private var details: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let body = status.body?.trimmingCharacters(in: .whitespacesAndNewlines), !body.isEmpty {
-                EmojiText(text: body, emojis: emojis)
+                EmojiText(text: body, emojis: emojis.isEmpty ? model.followedEmojis[status.id] ?? [] : emojis)
                     .font(.subheadline)
                     .textSelection(.enabled)
             }
