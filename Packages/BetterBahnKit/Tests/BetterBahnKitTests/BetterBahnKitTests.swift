@@ -2522,6 +2522,21 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         try JSONDecoding.decoder.decode(BahnDeClient.JourneyDetails.self, from: Data(details.utf8)).halte.compactMap(JourneyStop.init)
     }
 
+    /// Stations without a platform (bahn.de's `"gleis": ""` in Czechia) show no empty "Gleis" badge,
+    /// and journeys saved with one drop it too; a missing platform can then still be filled in.
+    @Test func blankPlatformsCountAsNone() throws {
+        let details = #"{"halte": [{"extId": "5400014", "name": "Praha hl.n.", "ankunftsZeitpunkt": "2026-10-07T11:25:00", "gleis": "", "ezGleis": " "}]}"#
+        let stop = try #require(try JSONDecoding.decoder.decode(BahnDeClient.JourneyDetails.self, from: Data(details.utf8))
+            .halte.compactMap(JourneyStop.init).first)
+        #expect(stop.arrivalPlatform?.best == nil)
+        #expect(stop.arrivalPlatform?.hasChanged == false)
+        let saved = try JSONDecoding.decoder.decode(PlatformInfo.self, from: Data(#"{"planned": "", "actual": "7"}"#.utf8))
+        #expect(saved == PlatformInfo(planned: nil, actual: "7"))
+        #expect(PlatformInfo(planned: "3", actual: "").best == "3")
+        let reencoded = try JSONDecoder().decode(PlatformInfo.self, from: JSONEncoder().encode(PlatformInfo(planned: "3", actual: "4")))
+        #expect(reencoded == PlatformInfo(planned: "3", actual: "4"))
+    }
+
     @Test func decodesStopsLikeDBRIS() throws {
         let stops = try Self.stops()
         #expect(stops.map(\.evaNumber) == ["8000244", "8000105", "8002041", "8000150", "8000152"])
