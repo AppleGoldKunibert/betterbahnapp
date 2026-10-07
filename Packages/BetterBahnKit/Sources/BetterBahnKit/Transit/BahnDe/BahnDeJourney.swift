@@ -149,6 +149,7 @@ extension BahnDeClient {
         guard let id = Self.journeyId(in: board, for: line, plannedDeparture: plannedDeparture) else {
             throw TransitError.notFound(line.name)
         }
+        reportSightings(board.entries.filter { $0.journeyId == id })
         return id
     }
 
@@ -236,6 +237,7 @@ extension BahnDeClient {
             guard let latest = page.entries.compactMap({ $0.zeit.flatMap(Self.parseBerlinTime) }).max(), latest < last else { break }
             start = latest.addingTimeInterval(60)
         }
+        reportSightings(trains.compactMap { Self.boardMatch(for: $0, in: board) })
         return Self.applyingLiveTimes(Self.correctingTrainNames(entries, using: board, kind: kind), using: board, kind: kind)
     }
 
@@ -305,16 +307,20 @@ extension BahnDeClient {
     /// planned time, while DB had it on time. Entries bahn.de has no live time for keep Transitous'.
     static func applyingLiveTimes(_ entries: [BoardEntry], using board: [Board.Entry], kind: BoardKind = .departures) -> [BoardEntry] {
         entries.map { entry in
-            guard entry.kind == kind else { return entry }
-            let match = trainReference(for: entry.line) != nil
-                ? boardEntry(for: entry.line, plannedDeparture: entry.time.planned, in: board)
-                : isLookedUp(entry.line)
-                    ? otherBoardEntry(for: entry.line, plannedDeparture: entry.time.planned, in: board) : nil
-            guard let live = match?.ezZeit.flatMap(parseBerlinTime) else { return entry }
+            guard entry.kind == kind, let live = boardMatch(for: entry, in: board)?.ezZeit.flatMap(parseBerlinTime) else { return entry }
             var corrected = entry
             corrected.time.actual = live
             return corrected
         }
+    }
+
+    /// bahn.de's board entry for `entry`'s train: long-distance trains by number, other trains by run
+    /// number or name (`otherBoardEntry`); nil for subway, tram and bus.
+    static func boardMatch(for entry: BoardEntry, in board: [Board.Entry]) -> Board.Entry? {
+        trainReference(for: entry.line) != nil
+            ? boardEntry(for: entry.line, plannedDeparture: entry.time.planned, in: board)
+            : isLookedUp(entry.line)
+                ? otherBoardEntry(for: entry.line, plannedDeparture: entry.time.planned, in: board) : nil
     }
 
     /// `entries` whose line is still unknown ("?", see `TransitousProvider.namingUnknownLines`) named
@@ -409,6 +415,7 @@ extension BahnDeClient {
         let fetch: @Sendable () async throws -> String? = {
             guard let eva = try await self.evaNumber(for: station) else { return nil }
             let board = try await self.get(Self.boardURL(eva: eva, at: plannedDeparture), as: Board.self)
+            self.reportSightings([Self.boardEntry(for: line, plannedDeparture: plannedDeparture, in: board.entries)].compactMap { $0 })
             // "" for "same name" so that answer is cached too.
             return Self.bahnDeName(for: line, plannedDeparture: plannedDeparture, in: board.entries) ?? ""
         }
