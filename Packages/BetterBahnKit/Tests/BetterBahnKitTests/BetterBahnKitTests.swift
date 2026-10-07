@@ -3256,6 +3256,31 @@ private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
                                     by: [Journey(legs: [checkin], source: .traewelling)], calendar: utc).isEmpty)
     }
 
+    /// Checked out at Itzehoe and in again on the same train a bit later: two rides, not a repeat.
+    @Test func checkinsOnTheSameTrainOneAfterAnotherAreKept() {
+        let first = leg("ICE 2074", from: "Berlin Gesundbrunnen", to: "Itzehoe",
+                        departure: "2026-10-06T06:09:00Z", arrival: "2026-10-06T09:00:00Z")
+        let second = leg("ICE 2074", from: "Itzehoe", to: "Westerland(Sylt)",
+                         departure: "2026-10-06T09:02:00Z", arrival: "2026-10-06T11:31:00Z")
+        let checkins = [second, first].map { Journey(legs: [$0], source: .traewelling) }
+        #expect(RideMatch.deduplicated(checkins).count == 2)
+    }
+
+    /// The local copy still has a check-in's first version (to the train's last stop) next to a
+    /// later, since cancelled check-in on the same train: one is drawn, but the saved ride is
+    /// covered either way.
+    @Test func savedRideCoveredByCheckinDroppedAsDuplicate() {
+        let saved = leg("ICE 2074", from: "Berlin Gesundbrunnen", to: "Itzehoe",
+                        departure: "2026-10-06T06:09:00Z", arrival: "2026-10-06T09:00:00Z")
+        let stale = leg("ICE 2074", from: "Berlin Gesundbrunnen", to: "Westerland(Sylt)",
+                        departure: "2026-10-06T06:09:00Z", arrival: "2026-10-06T11:31:00Z")
+        let later = leg("ICE 2074", from: "Heide (Holst)", to: "Westerland(Sylt)",
+                        departure: "2026-10-06T09:16:00Z", arrival: "2026-10-06T11:31:00Z")
+        let checkins = [later, stale].map { Journey(legs: [$0], source: .traewelling) }
+        #expect(RideMatch.deduplicated(checkins).map { $0.legs[0].origin.name } == ["Heide (Holst)"])
+        #expect(RideMatch.uncovered([Journey(legs: [saved], source: .transitous)], by: checkins).isEmpty)
+    }
+
     @Test func sameRideSavedTwiceCountsOnce() {
         let ride = leg("ICE 645", from: "Köln Hbf", to: "Hannover Hbf",
                        departure: "2026-03-04T09:00:00Z", arrival: "2026-03-04T11:30:00Z")

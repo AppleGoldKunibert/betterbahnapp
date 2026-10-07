@@ -54,8 +54,12 @@ struct UncheckedRidesView: View {
             // Otherwise a check-in made since the map was last opened would be listed as missing.
             await model.syncTraewelling()
         }
-        // A full resync also finds check-ins the incremental sync stopped short of.
-        .refreshable { await model.syncTraewelling(force: true) }
+        // A full resync also finds check-ins the incremental sync stopped short of and takes over
+        // edits. It waits for the sync started on open, which would otherwise make it a no-op.
+        .refreshable {
+            while model.isSyncingTraewelling { try? await Task.sleep(for: .milliseconds(200)) }
+            await model.syncTraewelling(force: true)
+        }
     }
 
     private func row(_ leg: Leg) -> some View {

@@ -55,25 +55,27 @@ extension AppModel {
     /// the app and checked in on Träwelling, or checked in twice, counts once (see `RideMatch`):
     /// the check-in wins, so saved journeys only add the legs nobody checked in.
     func mapJourneys(for selection: TravelMapSelection) -> [Journey] {
-        let checkins = selection.includeTraewelling ? mapCheckins(in: selection.interval) : []
-        let saved = selection.includeSaved ? uncheckedJourneys(in: selection.interval, checkins: checkins) : []
+        let checkins = selection.includeTraewelling ? RideMatch.deduplicated(checkins(in: selection.interval)) : []
+        let saved = selection.includeSaved ? uncheckedJourneys(in: selection.interval) : []
         return saved + checkins
     }
 
     /// Saved train rides already travelled that no Träwelling check-in covers, newest first: what
     /// turning "Gespeichert" on adds to the map. Settings lists them so missing check-ins can be found.
     func uncheckedRides(in interval: DateInterval?) -> [Leg] {
-        let journeys = uncheckedJourneys(in: interval, checkins: mapCheckins(in: interval))
-        return travelledLegs(of: journeys).map(\.leg).sorted { $0.departure.planned > $1.departure.planned }
+        travelledLegs(of: uncheckedJourneys(in: interval)).map(\.leg).sorted { $0.departure.planned > $1.departure.planned }
     }
 
-    private func mapCheckins(in interval: DateInterval?) -> [Journey] {
-        RideMatch.deduplicated(traewellingTrips.map(\.journey).filter { Self.departs($0, in: interval) })
+    private func checkins(in interval: DateInterval?) -> [Journey] {
+        traewellingTrips.map(\.journey).filter { Self.departs($0, in: interval) }
     }
 
-    private func uncheckedJourneys(in interval: DateInterval?, checkins: [Journey]) -> [Journey] {
+    /// Matched against every check-in, duplicates included: even one that isn't drawn proves that
+    /// train was ridden then (e.g. the first version of a check-in redone or edited since).
+    private func uncheckedJourneys(in interval: DateInterval?) -> [Journey] {
         // Filtered before matching: `uncovered` drops legs, which can move a journey's departure.
-        RideMatch.uncovered(savedJourneys.map(\.journey).filter { Self.departs($0, in: interval) }, by: checkins)
+        RideMatch.uncovered(savedJourneys.map(\.journey).filter { Self.departs($0, in: interval) },
+                            by: checkins(in: interval))
     }
 
     private static func departs(_ journey: Journey, in interval: DateInterval?) -> Bool {

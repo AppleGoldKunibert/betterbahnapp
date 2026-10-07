@@ -268,10 +268,13 @@ final class AppModel {
             let username = try await traewelling.currentUser().username
             let known = Dictionary(traewellingTrips.map { ($0.statusID, $0.journey) }, uniquingKeysWith: { first, _ in first })
             var newStatuses: [TraewellingStatus] = []
+            var seen: Set<Int> = []
+            var reachedEnd = false
             var page = 1
             pages: while page <= 200 {
                 let result = try await traewelling.statuses(username: username, page: page)
                 for status in result.statuses {
+                    seen.insert(status.id)
                     if let journey = known[status.id] {
                         // Everything after a known status was imported before (unless a full resync is forced).
                         guard force else { break pages }
@@ -284,7 +287,7 @@ final class AppModel {
                         newStatuses.append(status)
                     }
                 }
-                guard result.hasMore else { break }
+                guard result.hasMore else { reachedEnd = true; break }
                 page += 1
                 try await Task.sleep(for: .milliseconds(300)) // be gentle with the API
             }
@@ -304,6 +307,16 @@ final class AppModel {
                 await forgetGeometries(of: traewellingTrips.filter { replaced.contains($0.statusID) }.flatMap(\.journey.legs))
                 traewellingTrips = (imported + traewellingTrips.filter { !replaced.contains($0.statusID) })
                     .sorted { $0.statusID > $1.statusID }
+            }
+            // A full resync that got through every page has seen every status there is. A check-in
+            // deleted on Träwelling (e.g. a cancelled ride) would otherwise stay in the local copy
+            // forever and keep counting on the map.
+            if force, reachedEnd, !seen.isEmpty {
+                let deleted = traewellingTrips.filter { !seen.contains($0.statusID) }
+                if !deleted.isEmpty {
+                    await forgetGeometries(of: deleted.flatMap(\.journey.legs))
+                    traewellingTrips.removeAll { !seen.contains($0.statusID) }
+                }
             }
             settings.lastTraewellingSync = .now
             traewellingSyncError = nil
