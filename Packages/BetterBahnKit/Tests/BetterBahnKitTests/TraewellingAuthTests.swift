@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import BetterBahnKit
 
@@ -137,6 +138,45 @@ import Testing
         #expect(result.zusatzhaltHop?.statusId == 9001)
         #expect(result.zusatzhaltHop?.leg.origin.name == "Frankfurt (Main) Süd")
         #expect(result.zusatzhaltHop?.leg.destination.name == "Hanau Hbf")
+    }
+}
+
+/// Real-world case: a manual trip from Hamburg Hbf started at the U-Bahn stop "Hauptbahnhof Süd",
+/// because that stop lay closer to Transitous' coordinate than Träwelling's Hbf.
+@Suite struct TraewellingStationMatchTests {
+    static let hbf = TraewellingStation(id: 1, name: "Hamburg Hbf", latitude: 53.5530, longitude: 10.0060)
+    static let uSued = TraewellingStation(id: 2, name: "Hauptbahnhof Süd, Hamburg", latitude: 53.5526, longitude: 10.0077)
+    static let dammtor = TraewellingStation(id: 3, name: "Hamburg Dammtor", latitude: 53.5605, longitude: 9.9896)
+
+    @Test func prefersTheSameNameOverACloserStop() {
+        let ours = station("hh", "Hamburg Hbf", 53.5527, 10.0075, source: .transitous)
+        let ranked = TraewellingClient.ranked([Self.dammtor, Self.uSued, Self.hbf], for: ours)
+        #expect(ranked.map(\.0.id) == [1, 2, 3])
+    }
+
+    @Test func prefersTheSameEvaNumber() {
+        var hbf = Self.hbf
+        hbf.name = "Hamburg Hauptbahnhof (tief)"
+        hbf.ibnr = "8002549"
+        let ranked = TraewellingClient.ranked([Self.uSued, hbf], for: station("8002549", "Hamburg Hbf", 53.5527, 10.0075))
+        #expect(ranked.first?.0.id == 1)
+    }
+
+    @Test func fallsBackToTheNearestStop() {
+        // A same-named station far away doesn't count; without a name match the nearest wins.
+        let elsewhere = TraewellingStation(id: 4, name: "Neustadt", latitude: 49.35, longitude: 8.14)
+        let near = TraewellingStation(id: 5, name: "Neustadt (Holst)", latitude: 54.10, longitude: 10.81)
+        let ranked = TraewellingClient.ranked([elsewhere, near], for: station("x", "Neustadt", 54.101, 10.812, source: .transitous))
+        #expect(ranked.map(\.0.id) == [5, 4])
+    }
+
+    @Test func decodesTheIbnrAsNumberOrString() throws {
+        let number = try JSONDecoding.decoder.decode(TraewellingStation.self, from: Data(#"{"id":1,"name":"Hamburg Hbf","ibnr":8002549}"#.utf8))
+        #expect(number.ibnr == "8002549")
+        let text = try JSONDecoding.decoder.decode(TraewellingStation.self, from: Data(#"{"id":1,"name":"Hamburg Hbf","ibnr":"8002549"}"#.utf8))
+        #expect(text.ibnr == "8002549")
+        let none = try JSONDecoding.decoder.decode(TraewellingStation.self, from: Data(#"{"id":1,"name":"Hamburg Hbf","ibnr":null}"#.utf8))
+        #expect(none.ibnr == nil)
     }
 }
 
@@ -498,6 +538,93 @@ private final class RotatedTokenProtocol: URLProtocol, @unchecked Sendable {
         }
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data("{}".utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+/// #106: a train Träwelling doesn't know in a big city (here Berlin, six stations within 8 km) asked
+/// every station's departures one after the other, twice, then again under another name and once
+/// more when creating the manual trip, so it took minutes. Now only the nearest few are asked, at
+/// once, and nothing is asked twice.
+@Suite(.serialized) struct TraewellingUnknownTrainCheckinTests {
+    @Test func searchesTheNearestStationsOnceThenChecksInManually() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [UnknownTrainCheckinProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        UnknownTrainCheckinProtocol.paths.withLock { $0 = [] }
+        let store = TokenStore(service: "BetterBahnKitTests.\(UUID().uuidString)")
+        store.save(OAuthToken(accessToken: "test-token", refreshToken: nil, expiresAt: .distantFuture))
+        let client = TraewellingClient(config: TraewellingConfig(clientID: "public-client"), http: HTTPClient(session: session), store: store)
+
+        let departure = Date(timeIntervalSince1970: 1_790_000_000)
+        let leg = Leg(origin: station("8011160", "Berlin Hbf", 52.5251, 13.3694),
+                      destination: station("8011102", "Berlin Gesundbrunnen", 52.5487, 13.3881),
+                      departure: TimeInfo(planned: departure, actual: nil),
+                      arrival: TimeInfo(planned: departure.addingTimeInterval(8 * 60), actual: nil),
+                      departurePlatform: nil, arrivalPlatform: nil, tripId: "transitous-trip",
+                      line: Line(name: "ICE 594", number: "594", product: .highSpeed, operatorName: "DB Fernverkehr AG"),
+                      direction: "Berlin Gesundbrunnen", isWalking: false, cancelled: false,
+                      stopovers: [], remarks: [], source: .transitous)
+        let draft = CheckinDraft(leg: leg)
+
+        await #expect(throws: TraewellingError.tripNotFound("ICE 594")) { try await client.checkin(draft) }
+        let departureRequests = { UnknownTrainCheckinProtocol.paths.withLock { $0.filter { $0.hasSuffix("/departures") }.count } }
+        // 3 nearest within 1.5 km, then the 4 nearest within 8 km with the wider time window.
+        #expect(departureRequests() == 7)
+
+        // Trying again under another name reuses what was just loaded.
+        var renamed = draft
+        renamed.leg.line?.name = "ICE 1594"
+        await #expect(throws: TraewellingError.tripNotFound("ICE 1594")) { try await client.checkin(renamed) }
+        #expect(departureRequests() == 7)
+
+        let result = try await client.checkinAsManualTrip(draft)
+        #expect(result.isManualTrip)
+        #expect(result.statusId == 7001)
+        #expect(departureRequests() == 7)
+        #expect(UnknownTrainCheckinProtocol.paths.withLock { $0.filter { $0.contains("autocomplete") }.count } == 2)
+    }
+}
+
+private final class UnknownTrainCheckinProtocol: URLProtocol, @unchecked Sendable {
+    static let paths = Mutex<[String]>([])
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let path = request.url!.path
+        Self.paths.withLock { $0.append(path) }
+        let json: String
+        switch true {
+        case path.contains("autocomplete") && path.contains("Gesundbrunnen"):
+            json = #"{"data":[{"id":20,"name":"Berlin Gesundbrunnen","latitude":52.5487,"longitude":13.3881}]}"#
+        case path.contains("autocomplete"):
+            // Hbf itself, three more within 1.5 km and two further out (all within 8 km).
+            json = """
+            {"data":[{"id":1,"name":"Berlin Hbf","latitude":52.5251,"longitude":13.3694},
+                     {"id":2,"name":"Berlin Hbf (tief)","latitude":52.5252,"longitude":13.3695},
+                     {"id":3,"name":"Berlin Hbf (S-Bahn)","latitude":52.5253,"longitude":13.3696},
+                     {"id":4,"name":"Berlin Hbf (Europaplatz)","latitude":52.5262,"longitude":13.3680},
+                     {"id":5,"name":"Berlin Friedrichstraße","latitude":52.5203,"longitude":13.3869},
+                     {"id":6,"name":"Berlin Alexanderplatz","latitude":52.5215,"longitude":13.4110}]}
+            """
+        case path.hasSuffix("/departures"):
+            json = #"{"data":[{"tripId":"other","plannedWhen":"2026-09-21T14:00:00Z","line":{"name":"RE 1","fahrtNr":"1"}}]}"#
+        case path == "/api/v1/trips":
+            json = #"{"data":{"tripId":"manual-trip","lineName":"ICE 594","origin":{"id":1},"destination":{"id":20}}}"#
+        case path == "/api/v1/trains/checkin":
+            json = #"{"data":{"status":{"id":7001},"points":{"points":3},"alsoOnThisConnection":[]}}"#
+        default:
+            client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
+            return
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(json.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
 

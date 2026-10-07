@@ -15,6 +15,7 @@ struct JourneyDetailView: View {
     @State private var legToReplace: LegSelection?
     @State private var legToReplan: LegSelection?
     @State private var checkinLeg: Leg?
+    @State private var shownCheckin: ShownCheckin?
     @State private var showAlternatives = false
     @State private var showJourneyMap = false
     @State private var showJourneyEditor = false
@@ -97,6 +98,7 @@ struct JourneyDetailView: View {
             }
         }
         .sheet(item: $checkinLeg) { CheckinSheet(leg: $0) }
+        .sheet(item: $shownCheckin) { CheckinDetailSheet(leg: $0.leg, statusId: $0.statusId) }
         .sheet(isPresented: $showAlternatives) {
             if let entry = model.savedEntry(for: journey) {
                 AlternativeJourneySheet(entry: entry) { newJourney in
@@ -121,16 +123,21 @@ struct JourneyDetailView: View {
                 if !leg.isWalking {
                     LegCard(
                         leg: leg,
-                        transferBroken: journey.brokenTransferIndices.contains(journey.transitLegs.firstIndex(of: leg) ?? -1),
+                        transferBroken: !journey.isOver()
+                            && journey.brokenTransferIndices.contains(journey.transitLegs.firstIndex(of: leg) ?? -1),
                         onReplace: readOnly || !model.settings.trainChoiceEnabled ? nil
                             : { legToReplace = LegSelection(index: index, leg: leg) },
                         onReplan: readOnly || !model.settings.editJourneyEnabled ? nil
                             : { legToReplan = LegSelection(index: index, leg: leg) },
                         onCheckin: readOnly || !model.settings.traewellingEnabled ? nil : { checkinLeg = leg },
+                        // Viewing a check-in is no change to the plan, so old plans offer it too.
+                        onShowCheckin: model.settings.traewellingEnabled
+                            ? model.checkinStatusIDs[leg.id].map { id -> () -> Void in { shownCheckin = ShownCheckin(leg: leg, statusId: id) } }
+                            : nil,
                         reservation: model.reservation(for: leg, in: journey)
                     )
                     if let info = transferInfo(after: leg) {
-                        TransferRow(from: leg, to: info.next, walk: info.walk)
+                        TransferRow(from: leg, to: info.next, walk: info.walk, isPast: journey.isOver())
                     }
                 }
             }
@@ -197,7 +204,7 @@ struct JourneyDetailView: View {
 
     @ViewBuilder
     private var issuesCard: some View {
-        let issues = journey.connectionIssues()
+        let issues = journey.currentIssues()
         if !issues.isEmpty {
             Card {
                 VStack(alignment: .leading, spacing: 12) {
@@ -320,11 +327,6 @@ struct JourneyDetailView: View {
         return "\(origin) → \(destination)"
     }
 
-    private var shareIcon: Image {
-        guard let icon = UIImage.appIcon else { return Image(systemName: "train.side.front.car") }
-        return Image(uiImage: icon)
-    }
-
     private var liveActivityButton: some View {
         VStack(spacing: 8) {
             HStack(spacing: 10) {
@@ -332,19 +334,7 @@ struct JourneyDetailView: View {
                 if !model.tickets(for: journey).isEmpty {
                     TicketButton(tickets: model.tickets(for: journey), journey: journey)
                 }
-                if let shareURL = journey.shareURL {
-                    ShareLink(
-                        item: shareURL,
-                        preview: SharePreview(shareTitle, image: shareIcon)
-                    ) {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(width: 40, height: 40)
-                    }
-                    .buttonStyle(.plain)
-                    .glassEffect(.regular, in: .circle)
-                    .accessibilityLabel("Reise teilen")
-                }
+                JourneyShareButton(journey: journey, title: shareTitle)
                 if model.settings.editJourneyEnabled {
                     Button {
                         showJourneyEditor = true
@@ -373,7 +363,7 @@ struct JourneyDetailView: View {
                             && (model.manualLiveActivityJourneyID == entry.id || model.liveActivities.isActive(journey)) },
                         set: { model.setLiveActivity($0, for: entry.id) }
                     )) {
-                        Label("Als Live-Aktivität zeigen", systemImage: "arrow.left.arrow.right.circle.fill")
+                        Label("Als Widget und Live-Aktivität zeigen", systemImage: "arrow.left.arrow.right.circle.fill")
                             .font(.caption.weight(.semibold))
                     }
                     .tint(.brand)
@@ -389,12 +379,15 @@ struct TransferRow: View {
     let from: Leg
     let to: Leg
     var walk: Leg?
+    /// The journey is over: a transfer that looks missed only lacks a train's last delay (see
+    /// `Journey.currentIssues`), so it isn't flagged.
+    var isPast = false
 
     private var minutes: Int {
         Int((to.departure.best.timeIntervalSince(from.arrival.best) / 60).rounded())
     }
-    private var broken: Bool { minutes < 0 }
-    private var color: Color { transferColor(minutes) }
+    private var broken: Bool { minutes < 0 && !isPast }
+    private var color: Color { isPast && minutes < 0 ? .secondary : transferColor(minutes) }
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -405,7 +398,7 @@ struct TransferRow: View {
                 .background(color.opacity(0.15), in: .circle)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(broken ? "Umstieg nicht erreichbar" : "Umstieg · \(minutes) min")
+                Text(broken ? "Umstieg nicht erreichbar" : minutes < 0 ? "Umstieg" : "Umstieg · \(minutes) min")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(color)
                 if let walk {
@@ -440,6 +433,13 @@ struct TransferRow: View {
     }
 }
 
+/// A leg's remembered Träwelling check-in, for `CheckinDetailSheet`.
+struct ShownCheckin: Identifiable {
+    let leg: Leg
+    let statusId: Int
+    var id: Int { statusId }
+}
+
 struct LegCard: View {
     /// Shared with the trip view: show scheduled instead of live times at intermediate stops.
     @AppStorage("showPlannedTimes") private var showPlannedTimes = false
@@ -448,6 +448,8 @@ struct LegCard: View {
     var onReplace: (() -> Void)?
     var onReplan: (() -> Void)?
     var onCheckin: (() -> Void)?
+    /// Set once this leg was checked in from the app; replaces the check-in tile with "Check-in ansehen".
+    var onShowCheckin: (() -> Void)?
     /// The seat reserved on this train (from the journey's ticket), if any.
     var reservation: SeatReservation?
 
@@ -570,7 +572,7 @@ struct LegCard: View {
                     ReservationRow(reservation: reservation)
                 }
 
-                if leg.line?.operatorName != nil || onReplace != nil || onReplan != nil || onCheckin != nil {
+                if leg.line?.operatorName != nil || onReplace != nil || onReplan != nil || onCheckin != nil || onShowCheckin != nil {
                     Button {
                         withAnimation(.snappy) { showDetails.toggle() }
                     } label: {
@@ -585,13 +587,13 @@ struct LegCard: View {
                     .buttonStyle(.plain)
 
                     if showDetails {
-                        if let operatorName = leg.line?.operatorName {
-                            Label(operatorName, systemImage: "building.2.fill")
+                        if leg.line?.operatorName != nil {
+                            TrainOperatorsLabel(source: .leg(leg))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
 
-                        if onReplace != nil || onReplan != nil || onCheckin != nil {
+                        if onReplace != nil || onReplan != nil || onCheckin != nil || onShowCheckin != nil {
                             LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)],
                                       spacing: 10) {
                                 if let onReplace {
@@ -600,7 +602,9 @@ struct LegCard: View {
                                 if let onReplan {
                                     ActionTileButton(title: "Ausstieg wechseln", systemImage: "arrow.down.right.circle.fill", tint: .brand, action: onReplan)
                                 }
-                                if let onCheckin {
+                                if let onShowCheckin {
+                                    ActionTileButton(title: "Check-in ansehen", systemImage: "text.bubble.fill", tint: .brand, action: onShowCheckin)
+                                } else if let onCheckin {
                                     ActionTileButton(title: "Träwelling", systemImage: "checkmark.seal.fill", tint: .brand, action: onCheckin)
                                 }
                             }

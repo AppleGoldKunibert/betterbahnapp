@@ -110,18 +110,42 @@ struct MLineInfo {
     var agencyName: String?
 
     func toLine() -> Line {
-        let name = displayName ?? tripShortName ?? routeShortName ?? mode
+        let name = trainNameInsteadOfLine ?? displayName ?? tripShortName ?? routeShortName ?? mode
         let prefix = name.split(separator: " ").first.map { String($0).uppercased() } ?? ""
         let product = MLineInfo.product(mode: mode, prefix: prefix)
         let digitsInName = name.split(separator: " ").last.map(String.init)?.filter(\.isNumber)
-        let number = (digitsInName?.isEmpty == false ? digitsInName : tripShortName?.filter(\.isNumber))
+        var number = (digitsInName?.isEmpty == false ? digitsInName : tripShortName?.filter(\.isNumber))
             .map { String($0.drop(while: { $0 == "0" })) }
         // Some feeds only give a bare product code ("RJ") with the actual run number buried in a raw
         // trip code ("000385") instead of the display name — fold it in, otherwise unrelated
         // departures under the same product all look identically labeled.
-        let displayedName = (digitsInName?.isEmpty != false) ? number.map { "\(name) \($0)" } ?? name : name
+        var displayedName = (digitsInName?.isEmpty != false) ? number.map { "\(name) \($0)" } ?? name : name
         let tripNumber = tripShortName.map { String($0.filter(\.isNumber).drop(while: { $0 == "0" })) }.flatMap { $0.isEmpty ? nil : $0 }
+        // DELFI names a regional run "RE3 (3309)", but VBB's own feed (Berlin/Brandenburg) only "RE3",
+        // with the run number as trip short name ("03309"). Name those the DELFI way, so the number
+        // shows whichever feed the train comes from.
+        if ["REGIONAL_RAIL", "REGIONAL_FAST_RAIL"].contains(mode), digitsInName?.isEmpty == false, !name.contains("("),
+           let tripNumber, tripNumber != number, tripShortName?.allSatisfy(\.isNumber) == true {
+            displayedName = "\(name) (\(tripNumber))"
+            number = tripNumber
+        }
         return Line(name: displayedName, number: number, product: product, operatorName: agencyName, tripNumber: tripNumber)
+    }
+
+    /// Long-distance train categories a Czech feed puts behind its line name.
+    private static let bracketedTrainCategories: Set<String> = ["ICE", "ECE", "RJ", "RJX", "EC", "IC", "EN", "NJ"]
+
+    /// Czech feeds (CZPTT) name a long-distance train after its line, with the train in brackets:
+    /// "Ex5 (rj 383)" for the Railjet København → Praha, "Ex2 (EC 223)". It's the train passengers and
+    /// bahn.de know ("RJ 383"; Czech writes ČD's railjet "rj"), and only under that name does it match
+    /// the same train from DB's or DSB's feed.
+    var trainNameInsteadOfLine: String? {
+        guard let displayName, let tripShortName else { return nil }
+        let parts = tripShortName.split(separator: " ")
+        guard parts.count == 2, parts[1].allSatisfy(\.isNumber), displayName.hasSuffix("(\(tripShortName))") else { return nil }
+        let category = parts[0].uppercased()
+        guard Self.bracketedTrainCategories.contains(category) else { return nil }
+        return "\(category) \(parts[1])"
     }
 
     /// Whether this is a train (as opposed to bus, tram, subway, ferry, …).
@@ -131,6 +155,11 @@ struct MLineInfo {
     }
 
     static func product(mode: String, prefix: String) -> Product {
+        // A high-speed train is never regional, whatever its feed says: DSB's feed (Rejseplanen) has the
+        // Railjet København → Praha as a regional "RJ".
+        if ["REGIONAL_FAST_RAIL", "REGIONAL_RAIL"].contains(mode), ProductGuess.fromLinePrefix(prefix) == .highSpeed {
+            return .highSpeed
+        }
         switch mode {
         case "HIGHSPEED_RAIL": return .highSpeed
         case "LONG_DISTANCE", "NIGHT_RAIL": return .longDistance

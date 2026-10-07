@@ -115,8 +115,33 @@ public struct Line: Codable, Sendable, Hashable {
         return String(last)
     }
 
+    /// Whether `name` is this train under another brand rather than another train: the same number
+    /// ("ICE 177" for the Railjet "RJ 177", which Transitous has from both DB's and ÖBB's feed).
+    public func isSameTrain(as name: String) -> Bool {
+        guard let own = number ?? Self.trailingNumber(self.name), let other = Self.trailingNumber(name) else { return false }
+        return own.drop(while: { $0 == "0" }) == other.drop(while: { $0 == "0" })
+    }
+
+    /// `coupledTrains` without entries that are this very train under another name (see `isSameTrain(as:)`),
+    /// nil when none is left.
+    public var withoutSelfCoupling: Line {
+        guard let coupledTrains, coupledTrains.contains(where: { isSameTrain(as: $0.name) }) else { return self }
+        var line = self
+        let others = coupledTrains.filter { !isSameTrain(as: $0.name) }
+        line.coupledTrains = others.isEmpty ? nil : others
+        return line
+    }
+
     /// The number to look this train up by in DB's own feed.
     public var dispatchNumber: String? { tripNumber ?? number }
+
+    /// An S-Bahn's name with its run number, the way DB names an RE: "S 8 (37856)". Only for the train
+    /// view, the numbers are long. Other trains keep `name` (an ICE's name is its number already).
+    public var nameWithTripNumber: String {
+        guard product == .suburban, let tripNumber, tripNumber != number,
+              !name.split(whereSeparator: { !$0.isNumber }).contains(where: { $0 == tripNumber }) else { return name }
+        return "\(name) (\(tripNumber))"
+    }
 
     /// `name`, or for coupled trains every train's name, lowest number first: "ICE 940 / 950".
     public var displayName: String {
@@ -180,9 +205,23 @@ public struct PlatformInfo: Codable, Sendable, Hashable {
     public var planned: String?
     public var actual: String?
 
+    /// Blank values count as none: bahn.de reports `"gleis": ""` at stations it has no platform for
+    /// (e.g. in Czechia), which showed as a "Gleis" badge without a number.
     public init(planned: String?, actual: String?) {
-        self.planned = planned
-        self.actual = actual
+        self.planned = Self.nonBlank(planned)
+        self.actual = Self.nonBlank(actual)
+    }
+
+    /// Also drops the blank platforms journeys saved before kept.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(planned: try c.decodeIfPresent(String.self, forKey: .planned),
+                  actual: try c.decodeIfPresent(String.self, forKey: .actual))
+    }
+
+    private static func nonBlank(_ value: String?) -> String? {
+        guard let value, !value.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        return value
     }
 
     public var best: String? { actual ?? planned }
@@ -355,7 +394,10 @@ public struct Leg: Codable, Sendable, Hashable, Identifiable {
 }
 
 public struct Journey: Codable, Sendable, Hashable, Identifiable {
-    public var id: String { legs.map(\.id).joined(separator: "|") }
+    /// The legs, plus where the journey ends: a leg's ID doesn't include where you get off, so Berlin →
+    /// Dresden and Berlin → Praha on the same train would otherwise be one journey (and opening one
+    /// showed the other one remembered from before).
+    public var id: String { legs.map(\.id).joined(separator: "|") + ">" + (legs.last?.destination.id ?? "") }
     public var legs: [Leg]
     public var source: DataSource
 
@@ -392,6 +434,20 @@ public struct Journey: Codable, Sendable, Hashable, Identifiable {
     }
     public var isCancelled: Bool { legs.contains(where: \.cancelled) }
 
+    /// Where each leg sits on the journey's bar, in order and never overlapping: a late train arriving
+    /// after the next leg's departure pushes that leg (and the ones after) back, as the next metro would
+    /// be taken. RJ 175 +31 into Praha-Holešovice, then walk and metro C on their planned times, drew the
+    /// train across the whole bar with the metro as a dot on top. Empty for a journey without legs.
+    public var barSpans: [DateInterval] {
+        var spans: [DateInterval] = []
+        for leg in legs {
+            let start = max(leg.departure.best, spans.last?.end ?? leg.departure.best)
+            let length = max(leg.arrival.best.timeIntervalSince(leg.departure.best), 0)
+            spans.append(DateInterval(start: start, duration: length))
+        }
+        return spans
+    }
+
     /// Transfers where the next departure is before the previous arrival.
     public var brokenTransferIndices: [Int] {
         let transit = transitLegs
@@ -424,9 +480,13 @@ public struct Trip: Codable, Sendable, Hashable {
     /// Delay reasons and notices from DB's own feed along the whole trip (see `TrainMessage`).
     public var messages: [TrainMessage]
     public var source: DataSource
+    /// Track geometry of the whole run, if known.
+    public var geometry: [Coordinate]?
 
     public init(id: String, line: Line?, direction: String?, stopovers: [Stopover],
-                cancelled: Bool, remarks: [String], messages: [TrainMessage] = [], source: DataSource) {
+                cancelled: Bool, remarks: [String], messages: [TrainMessage] = [], source: DataSource,
+                geometry: [Coordinate]? = nil) {
+        self.geometry = geometry
         self.messages = messages
         self.id = id
         self.line = line
@@ -438,10 +498,10 @@ public struct Trip: Codable, Sendable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, line, direction, stopovers, cancelled, remarks, messages, source
+        case id, line, direction, stopovers, cancelled, remarks, messages, source, geometry
     }
 
-    /// Custom-decoded so data saved before `messages` existed still loads.
+    /// Custom-decoded so data saved before `messages` or `geometry` existed still loads.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -452,6 +512,7 @@ public struct Trip: Codable, Sendable, Hashable {
         remarks = try c.decode([String].self, forKey: .remarks)
         messages = try c.decodeIfPresent([TrainMessage].self, forKey: .messages) ?? []
         source = try c.decode(DataSource.self, forKey: .source)
+        geometry = try c.decodeIfPresent([Coordinate].self, forKey: .geometry)
     }
 
     public var origin: Station? { stopovers.first?.station }

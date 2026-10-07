@@ -25,6 +25,41 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(first.source == .transitous)
     }
 
+    /// Real-world Transitous rows at Berlin Hbf: DELFI names the RE 3 "RE3 (3309)", VBB's own feed
+    /// only "RE3" with the run number as trip short name, so trains only VBB had showed no number.
+    /// Both are named the DELFI way, and the same run from both feeds is one board row.
+    @Test func regionalRunNumberFromVBB() throws {
+        func row(_ minute: Int, _ name: String, _ short: String, _ trip: String, live: Bool, to: String) -> String {
+            """
+            {"place": {"name": "Berlin Hbf", "lat": 52.52, "lon": 13.37,
+                       "departure": "2026-10-06T12:\(minute):00Z", "scheduledDeparture": "2026-10-06T12:\(minute):00Z"},
+             "mode": "REGIONAL_RAIL", "realTime": \(live), "tripId": "\(trip)", "headsign": "\(to)",
+             "routeShortName": "\(name.prefix { $0 != " " })", "displayName": "\(name)", "tripShortName": "\(short)"}
+            """
+        }
+        let json = """
+        {"stopTimes": [
+            \(row(41, "RE3 (3309)", "003309", "delfi-3309", live: true, to: "Lutherstadt Wittenberg Hbf")),
+            \(row(41, "RE3", "03309", "vbb-3309", live: false, to: "Lutherstadt Wittenberg, Hauptbahnhof")),
+            \(row(46, "RE8", "62018", "vbb-62018", live: true, to: "Elsterwerda, Bahnhof")),
+            \(row(46, "RE8 (62018)", "062018", "delfi-62018", live: true, to: "Elsterwerda, Bahnhof")),
+            \(row(52, "RE3", "03351", "vbb-3351", live: true, to: "Lutherstadt Wittenberg Hbf")),
+            \(row(53, "RE3", "03353", "vbb-3353", live: false, to: "Lutherstadt Wittenberg Hbf")),
+            \(row(54, "MEX18", "", "mex", live: false, to: "Sonstwo"))
+        ]}
+        """
+        let stopTimes = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(json.utf8)).stopTimes
+        let entries = stopTimes.compactMap { $0.toEntry(kind: .departures) }
+        #expect(entries[1].line.name == "RE3 (3309)")
+        #expect(entries[1].line.number == "3309" && entries[1].line.tripNumber == "3309")
+        #expect(entries[4].line.name == "RE3 (3351)")
+        #expect(entries[6].line.name == "MEX18")
+
+        let board = TransitousProvider.deduplicated(entries)
+        #expect(board.map(\.tripId) == ["delfi-3309", "vbb-62018", "vbb-3351", "vbb-3353", "mex"])
+        #expect(board.map(\.line.name) == ["RE3 (3309)", "RE8 (62018)", "RE3 (3351)", "RE3 (3353)", "MEX18"])
+    }
+
     /// Real-world response shape for the S-Bahn at Berlin Gesundbrunnen: VBB's feed leaves `track`
     /// and `scheduledTrack` both null and only encodes the platform as free text in `description`
     /// ("S-Bahnsteig Gleis 4"), unlike its U-Bahn feed which populates `track` directly - this is why
@@ -45,6 +80,71 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         let entry = try #require(response.stopTimes.first?.toEntry(kind: .departures))
 
         #expect(entry.platform.planned == "4")
+    }
+
+    /// Real-world Transitous data for Berlin Hbf (#105): ICEs going on to Gesundbrunnen may not be
+    /// boarded there, so MOTIS leaves them out of the departures and only lists them as arrivals. They
+    /// show as departures marked "Nur Ausstieg"; trains ending here and ones already departing don't.
+    @Test func continuingArrivalsWithoutBoardingBecomeDepartures() throws {
+        let arrivalsJSON = """
+        {"stopTimes": [
+          {"place": {"name": "S+U Berlin Hauptbahnhof", "lat": 52.525, "lon": 13.369,
+             "scheduledArrival": "2026-10-05T20:33:00Z", "scheduledDeparture": "2026-10-05T20:37:00Z",
+             "arrival": "2026-10-05T20:33:00Z", "departure": "2026-10-05T20:37:00Z",
+             "pickupType": "NOT_ALLOWED", "dropoffType": "NORMAL"},
+           "mode": "HIGHSPEED_RAIL", "tripId": "ice594", "displayName": "ICE 594", "tripShortName": "594",
+           "headsign": "S+U Gesundbrunnen Bhf (Berlin)",
+           "tripTo": {"name": "S+U Gesundbrunnen Bhf (Berlin)", "lat": 52.548, "lon": 13.388}},
+          {"place": {"name": "S+U Berlin Hauptbahnhof", "lat": 52.525, "lon": 13.369,
+             "scheduledArrival": "2026-10-05T21:29:00Z", "arrival": "2026-10-05T21:29:00Z"},
+           "mode": "HIGHSPEED_RAIL", "tripId": "ice500", "displayName": "ICE 500", "tripShortName": "500",
+           "tripTo": {"name": "S+U Berlin Hauptbahnhof", "lat": 52.525, "lon": 13.369}},
+          {"place": {"name": "S+U Berlin Hauptbahnhof", "lat": 52.525, "lon": 13.369,
+             "scheduledArrival": "2026-10-05T21:25:00Z", "scheduledDeparture": "2026-10-05T21:28:00Z"},
+           "mode": "HIGHSPEED_RAIL", "tripId": "ice870", "displayName": "ICE 870", "tripShortName": "870",
+           "tripTo": {"name": "Hamburg-Altona", "lat": 53.55, "lon": 9.93}}
+        ]}
+        """
+        let departuresJSON = """
+        {"stopTimes": [
+          {"place": {"name": "S+U Berlin Hauptbahnhof", "lat": 52.525, "lon": 13.369,
+             "scheduledArrival": "2026-10-05T21:25:00Z", "scheduledDeparture": "2026-10-05T21:28:00Z"},
+           "mode": "HIGHSPEED_RAIL", "tripId": "ice870", "displayName": "ICE 870", "tripShortName": "870",
+           "tripTo": {"name": "Hamburg-Altona", "lat": 53.55, "lon": 9.93}}
+        ]}
+        """
+        let arrivals = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(arrivalsJSON.utf8)).stopTimes
+        let departures = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(departuresJSON.utf8)).stopTimes
+
+        let added = TransitousProvider.continuingWithoutBoarding(arrivals, missingFrom: departures)
+        #expect(added.map(\.tripId) == ["ice594"])
+        let entry = try #require(added.first?.toEntry(kind: .departures))
+        #expect(entry.kind == .departures)
+        #expect(entry.access == .exitOnly)
+        #expect(entry.time.planned == ISO8601DateFormatter().date(from: "2026-10-05T20:37:00Z"))
+        #expect(entry.otherEnd == Station.displayName(for: "S+U Gesundbrunnen Bhf (Berlin)"))
+        #expect(BoardFilter().includes(entry))
+    }
+
+    /// ICE 204 arrives at Hamburg-Harburg at 13:02 and leaves at 13:04, only to let people off. A
+    /// search from 13:04 must still see it (its arrival lies before the start), one from 13:05 not.
+    @Test func noBoardingTrainArrivingBeforeStartStillLeaves() throws {
+        let arrivalsJSON = """
+        {"stopTimes": [
+          {"place": {"name": "Hamburg-Harburg", "lat": 53.456, "lon": 9.992,
+             "scheduledArrival": "2026-10-06T11:02:00Z", "arrival": "2026-10-06T11:01:00Z",
+             "scheduledDeparture": "2026-10-06T11:04:00Z", "departure": "2026-10-06T11:04:00Z",
+             "pickupType": "NOT_ALLOWED", "dropoffType": "NORMAL"},
+           "mode": "HIGHSPEED_RAIL", "tripId": "ice204", "displayName": "ICE 204", "tripShortName": "204",
+           "tripTo": {"name": "Hamburg-Altona", "lat": 53.552, "lon": 9.935}}
+        ]}
+        """
+        let arrivals = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(arrivalsJSON.utf8)).stopTimes
+        let start = try #require(ISO8601DateFormatter().date(from: "2026-10-06T11:04:00Z"))
+        #expect(TransitousProvider.continuingWithoutBoarding(arrivals, missingFrom: [], departingFrom: start)
+            .map(\.tripId) == ["ice204"])
+        #expect(TransitousProvider.continuingWithoutBoarding(arrivals, missingFrom: [], departingFrom: start.addingTimeInterval(60))
+            .isEmpty)
     }
 
     /// Real-world Transitous response for Hanau Hbf: DELFI puts some trains (ICE 12, RE50, …) at the
@@ -865,10 +965,10 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         defer { session.invalidateAndCancel() }
         let provider = TransitousProvider(http: HTTPClient(session: session))
 
-        let start = Date.now
         let stations = try await provider.searchStations("Po")
         #expect(stations.map(\.id) == ["potsdamHbf"])
-        #expect(Date.now.timeIntervalSince(start) < 4)
+        // Checked against the slow answer itself, not a stopwatch, so a busy test runner can't fail it.
+        #expect(!SlowExtraGeocodeProtocol.answeredSlowly.withLock { $0 })
         #expect(CombinedProvider.isShortQuery("Po "))
         #expect(!CombinedProvider.isShortQuery("Pot"))
     }
@@ -1127,6 +1227,63 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(merged.count == 2)
     }
 
+    /// ICE 146 Berlin–Amsterdam at Berlin Hbf: DB's feed has it ending in Hengelo (with realtime),
+    /// NS's feed starting in Berlin and ending in Amsterdam (without). Neither headsign goes beyond
+    /// its own trip, but same number, time and track are the same train: one row, the live one.
+    @Test func stopTimesMergeSameTrainFromTwoFeeds() throws {
+        let json = """
+        {"stopTimes": [
+            {"place": {"name": "Berlin Hbf", "stopId": "nl:1", "lat": 52.52, "lon": 13.37,
+                       "scheduledDeparture": "2026-10-06T07:09:00Z", "departure": "2026-10-06T07:09:00Z",
+                       "scheduledTrack": "6"},
+             "mode": "HIGHSPEED_RAIL", "realTime": false, "headsign": "Amsterdam Centraal",
+             "tripFrom": {"name": "Berlin Hbf", "lat": 52.52, "lon": 13.37},
+             "tripTo": {"name": "Amsterdam Centraal", "lat": 52.38, "lon": 4.9},
+             "tripId": "nl-trip", "routeShortName": "ICE", "tripShortName": "146", "displayName": "ICE 146",
+             "agencyName": "NS International"},
+            {"place": {"name": "S+U Berlin Hauptbahnhof", "stopId": "de:1", "lat": 52.52, "lon": 13.37,
+                       "scheduledDeparture": "2026-10-06T07:09:00Z", "departure": "2026-10-06T07:12:00Z",
+                       "scheduledTrack": "6", "track": "6"},
+             "mode": "HIGHSPEED_RAIL", "realTime": true, "headsign": "Hengelo",
+             "tripFrom": {"name": "S Südkreuz Bhf (Berlin)", "lat": 52.48, "lon": 13.37},
+             "tripTo": {"name": "Hengelo", "lat": 52.26, "lon": 6.79},
+             "tripId": "de-trip", "routeShortName": "77", "tripShortName": "ICE 146", "displayName": "ICE 146",
+             "agencyName": "DB Fernverkehr AG"},
+            {"place": {"name": "Berlin Hbf", "stopId": "nl:1", "lat": 52.52, "lon": 13.37,
+                       "scheduledDeparture": "2026-10-06T09:09:00Z", "scheduledTrack": "6"},
+             "mode": "HIGHSPEED_RAIL", "headsign": "Amsterdam Centraal",
+             "tripTo": {"name": "Amsterdam Centraal", "lat": 52.38, "lon": 4.9},
+             "tripId": "nl-144", "displayName": "ICE 144", "agencyName": "NS International"}
+        ]}
+        """
+        let response = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(json.utf8))
+        let merged = TransitousProvider.mergeBorderSplitDuplicates(response.stopTimes, kind: .departures)
+        #expect(merged.map(\.tripId) == ["de-trip", "nl-144"])
+        let entry = try #require(merged.first?.toEntry(kind: .departures))
+        #expect(entry.time.actual != nil)
+    }
+
+    /// Local lines share their "number" between both directions; two S5 at the same minute stay apart.
+    @Test func stopTimesKeepsLocalTrainsWithSameLineAndTime() throws {
+        let json = """
+        {"stopTimes": [
+            {"place": {"name": "Berlin Hbf", "stopId": "a:1", "lat": 52.52, "lon": 13.37,
+                       "scheduledDeparture": "2026-10-06T07:11:00Z"},
+             "mode": "SUBURBAN", "realTime": true, "headsign": "Berlin-Mahlsdorf",
+             "tripTo": {"name": "Berlin-Mahlsdorf", "lat": 52.5, "lon": 13.6},
+             "tripId": "s5-east", "displayName": "S5", "agencyName": "S-Bahn Berlin"},
+            {"place": {"name": "Berlin Hbf", "stopId": "a:2", "lat": 52.52, "lon": 13.37,
+                       "scheduledDeparture": "2026-10-06T07:11:00Z"},
+             "mode": "SUBURBAN", "headsign": "Westkreuz",
+             "tripTo": {"name": "Westkreuz", "lat": 52.5, "lon": 13.28},
+             "tripId": "s5-west", "displayName": "S5", "agencyName": "S-Bahn Berlin"}
+        ]}
+        """
+        let response = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(json.utf8))
+        let merged = TransitousProvider.mergeBorderSplitDuplicates(response.stopTimes, kind: .departures)
+        #expect(merged.count == 2)
+    }
+
     /// A single stitched itinerary leg (München–Innsbruck) riding the German feed's border-truncated
     /// trip still reaches the real destination as its `to`, but the trip's own `headsign` only names
     /// the border stop, which then shows up as one of this same leg's intermediate stops. The leg's
@@ -1185,7 +1342,7 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
 
     private func mergeTestLeg(_ line: String?, number: String? = nil, from: (String, Double, Double),
                               to: (String, Double, Double), departure: String, arrival: String,
-                              isWalking: Bool = false) -> Leg {
+                              isWalking: Bool = false, product: Product = .highSpeed) -> Leg {
         func date(_ value: String) -> Date { ISO8601DateFormatter().date(from: value)! }
         func station(_ place: (String, Double, Double)) -> Station {
             Station(id: place.0, name: place.0, coordinate: Coordinate(latitude: place.1, longitude: place.2),
@@ -1195,7 +1352,7 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
                    departure: TimeInfo(planned: date(departure), actual: nil),
                    arrival: TimeInfo(planned: date(arrival), actual: nil),
                    departurePlatform: nil, arrivalPlatform: nil, tripId: nil,
-                   line: line.map { Line(name: $0, number: number, product: .highSpeed, operatorName: nil) },
+                   line: line.map { Line(name: $0, number: number, product: product, operatorName: nil) },
                    direction: nil, isWalking: isWalking, cancelled: false, stopovers: [], remarks: [],
                    source: .transitous)
     }
@@ -1220,6 +1377,103 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(ride?.origin.name == "Amsterdam Centraal")
         #expect(ride?.destination.name == "Hannover Hbf")
         #expect(ride?.arrival.planned == secondHalf.arrival.planned)
+    }
+
+    /// bahn.de's connections name all operators in one "BEF" attribute (RJ 385, ECE 393, 2026-10-07).
+    @Test func splitsCommaSeparatedOperators() throws {
+        #expect(BahnDeClient.operatorNames(in: "Dänische Staatsbahnen, DB Fernverkehr AG, Ceske Drahy")
+                == ["Dänische Staatsbahnen", "DB Fernverkehr AG", "Ceske Drahy"])
+        #expect(BahnDeClient.operatorNames(in: "České dráhy, a.s.") == ["České dráhy, a.s."])
+        #expect(BahnDeClient.operatorNames(in: "DB Regio AG Südost, Ceske Drahy") == ["DB Regio AG Südost", "Ceske Drahy"])
+        let attributes = [BahnDeClient.JourneyDetails.Attribute(key: "BEF", value: "Dänische Staatsbahnen, DB Fernverkehr AG, Ceske Drahy",
+                                                                teilstreckenHinweis: nil)]
+        let operators = BahnDeClient.operators(in: attributes)
+        #expect(operators.map { OperatorBrand(operatorName: $0.name) } == [.dsb, .db, .cd])
+
+        // With the stops naming the same three, their sections win.
+        var details = try fixture("bahnde-fahrt-rj383", as: BahnDeClient.JourneyDetails.self)
+        details.zugattribute = attributes
+        #expect(BahnDeClient.operators(of: details).map(\.section?.from) == ["Koebenhavn H", "Schleswig", "Decin hl.n."])
+    }
+
+    /// RJ 175 Berlin → Praha-Holešovice +31, then walk, metro C and walk on their planned times
+    /// (2026-10-07): the bar keeps the legs in order, the ones the train runs into pushed back.
+    @Test func barSpansNeverOverlap() {
+        let train = mergeTestLeg("RJ 175", number: "175", from: ("Berlin Hbf", 52.525, 13.369), to: ("Praha-Holesovice", 50.110, 14.440),
+                                 departure: "2026-10-07T09:28:00Z", arrival: "2026-10-07T13:15:00Z")
+        var late = train
+        late.departure.actual = late.departure.planned.addingTimeInterval(31 * 60)
+        late.arrival.actual = late.arrival.planned.addingTimeInterval(31 * 60)
+        let walk = mergeTestLeg(nil, from: ("Praha-Holesovice", 50.110, 14.440), to: ("Nádraží Holešovice", 50.109, 14.439),
+                                departure: "2026-10-07T13:15:00Z", arrival: "2026-10-07T13:20:00Z", isWalking: true)
+        let metro = mergeTestLeg("C", from: ("Nádraží Holešovice", 50.109, 14.439), to: ("Hlavní nádraží", 50.083, 14.435),
+                                 departure: "2026-10-07T13:20:00Z", arrival: "2026-10-07T13:25:00Z", product: .subway)
+
+        let onTime = Journey(legs: [train, walk, metro], source: .transitous).barSpans
+        #expect(onTime.map(\.start) == [train.departure.planned, walk.departure.planned, metro.departure.planned])
+
+        let spans = Journey(legs: [late, walk, metro], source: .transitous).barSpans
+        #expect(spans[0].end == late.arrival.best)
+        #expect(spans[1].start == late.arrival.best && spans[1].duration == 5 * 60)
+        #expect(spans[2].start == spans[1].end && spans[2].duration == 5 * 60)
+    }
+
+    /// Real-world RJ 383 København → Praha (2026-10-07): Transitous changed at Děčín from DB's or DSB's
+    /// copy of the train to the Czech feed's "Ex5 (rj 383)", which is long-distance there while DB's
+    /// is high-speed. It's one train, not a change.
+    @Test func mergeThroughTrainLegsJoinsHighSpeedAndLongDistanceCopiesOfOneTrain() {
+        let german = mergeTestLeg("RJ 383", number: "383", from: ("Berlin Hbf", 52.525, 13.369),
+                                  to: ("Decin hl.n.", 50.77341, 14.20125), departure: "2026-10-07T11:28:00Z", arrival: "2026-10-07T13:53:00Z")
+        let czech = mergeTestLeg("RJ 383", number: "383", from: ("Děčín hlavní nádraží", 50.77346, 14.20110),
+                                 to: ("Praha hlavní nádraží", 50.08309, 14.43598), departure: "2026-10-07T13:57:00Z",
+                                 arrival: "2026-10-07T15:25:00Z", product: .longDistance)
+
+        let merged = TransitousProvider.mergeThroughTrainLegs([german, czech])
+
+        #expect(merged.count == 1)
+        #expect(merged.first?.origin.name == "Berlin Hbf")
+        #expect(merged.first?.destination.name == "Praha hlavní nádraží")
+        #expect(merged.first?.line?.product == .highSpeed)
+    }
+
+    /// The same number as a regional train is still another train.
+    @Test func mergeThroughTrainLegsKeepsRegionalTrainWithSameNumber() {
+        let train = mergeTestLeg("RJ 383", number: "383", from: ("Berlin Hbf", 52.525, 13.369),
+                                 to: ("Decin hl.n.", 50.77341, 14.20125), departure: "2026-10-07T11:28:00Z", arrival: "2026-10-07T13:53:00Z")
+        let regional = mergeTestLeg("Os 383", number: "383", from: ("Decin hl.n.", 50.77341, 14.20125),
+                                    to: ("Usti nad Labem hl.n.", 50.6596, 14.0446), departure: "2026-10-07T13:57:00Z",
+                                    arrival: "2026-10-07T14:20:00Z", product: .regional)
+
+        #expect(TransitousProvider.mergeThroughTrainLegs([train, regional]).count == 2)
+    }
+
+    /// The Railjet København → Praha as two feeds in Transitous name it: DSB's (Rejseplanen) a regional
+    /// "RJ" with the number only in the trip code, the Czech one (CZPTT) after its line, "Ex5 (rj 383)".
+    /// Both are the high-speed/long-distance "RJ 383"; Czech lines with other trains keep their name.
+    @Test func lineNamesOfTheRailjetFromKobenhavn() {
+        let dsb = MLineInfo(mode: "REGIONAL_RAIL", displayName: "RJ", routeShortName: "RJ", tripShortName: "000383", agencyName: "DSB").toLine()
+        #expect(dsb.name == "RJ 383")
+        #expect(dsb.number == "383")
+        #expect(dsb.product == .highSpeed)
+
+        let czech = MLineInfo(mode: "LONG_DISTANCE", displayName: "Ex5 (rj 383)", routeShortName: "Ex5", tripShortName: "rj 383",
+                              agencyName: "České dráhy, a.s.").toLine()
+        #expect(czech.name == "RJ 383")
+        #expect(czech.number == "383")
+        #expect(czech.product == .longDistance)
+
+        let euroCity = MLineInfo(mode: "LONG_DISTANCE", displayName: "Ex2 (EC 223)", routeShortName: "Ex2", tripShortName: "EC 223",
+                                 agencyName: "České dráhy, a.s.").toLine()
+        #expect(euroCity.name == "EC 223")
+
+        let fastTrain = MLineInfo(mode: "REGIONAL_RAIL", displayName: "R10 (R 951)", routeShortName: "R10", tripShortName: "R 951",
+                                  agencyName: "České dráhy, a.s.").toLine()
+        #expect(fastTrain.name == "R10 (R 951)")
+        #expect(fastTrain.product == .regional)
+
+        let regional = MLineInfo(mode: "REGIONAL_RAIL", displayName: "RE3 (3349)", routeShortName: "RE3", tripShortName: "003349",
+                                 agencyName: "DB Regio AG Nordost").toLine()
+        #expect(regional.name == "RE3 (3349)")
     }
 
     /// A short walk between two nearby stops is only folded away when the numbered train actually
@@ -1261,6 +1515,29 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(entries.filter { $0.tripId == "shared-trip" }.count == 1)
     }
 
+    /// MOTIS picks stop times by their live time: at 9:08:30 DB's live row of ICE 146 (left early,
+    /// 9:08) is gone while NS's planned row (9:09) is still there, so the board showed the train
+    /// without its live time. The board asks earlier, merges both and then drops the departed train.
+    @Test func boardAsksEarlierSoAnEarlyTrainMergesWithItsPlannedTwin() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [EarlyTwinStopTimesProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let provider = TransitousProvider(http: HTTPClient(session: session))
+        let berlin = station("bln", "Berlin Hbf", source: .transitous)
+
+        let queryDate = try #require(JSONDecoding.parseISODate("2026-10-06T07:08:30Z"))
+        let entries = try await provider.board(.departures, at: berlin, date: queryDate, duration: 90, products: [.highSpeed])
+        #expect(entries.isEmpty)
+        let asked = try #require(EarlyTwinStopTimesProtocol.lastTime.withLock { $0 })
+        #expect(JSONDecoding.parseISODate(asked) == queryDate.addingTimeInterval(-10 * 60))
+
+        let earlier = try #require(JSONDecoding.parseISODate("2026-10-06T07:05:00Z"))
+        let shown = try await provider.board(.departures, at: berlin, date: earlier, duration: 90, products: [.highSpeed])
+        #expect(shown.map(\.tripId) == ["de-trip"])
+        #expect(shown.first?.time.actual != nil)
+    }
+
     /// Real-world Dresden Hbf: `arriveBy=true` alone makes Transitous search backwards from `time`,
     /// so the arrivals board showed days of past arrivals instead of the next 90 minutes.
     @Test func arrivalsBoardAsksForLaterArrivals() async throws {
@@ -1289,6 +1566,40 @@ private final class RecordingStopTimesProtocol: URLProtocol, @unchecked Sendable
         let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(#"{"stopTimes": []}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+/// ICE 146 at Berlin Hbf from DB's feed (live, leaving a minute early) and NS's feed (planned only).
+private final class EarlyTwinStopTimesProtocol: URLProtocol, @unchecked Sendable {
+    static let lastTime = Mutex<String?>(nil)
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let items = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
+        if request.url!.path.hasSuffix("v5/stoptimes"), items?.first(where: { $0.name == "arriveBy" })?.value == "false" {
+            Self.lastTime.withLock { $0 = items?.first { $0.name == "time" }?.value }
+        }
+        let body = request.url!.path.hasSuffix("v5/stoptimes") ? """
+        {"stopTimes": [
+            {"place": {"name": "S+U Berlin Hauptbahnhof", "stopId": "de:1", "lat": 52.52, "lon": 13.37,
+                       "scheduledDeparture": "2026-10-06T07:09:00Z", "departure": "2026-10-06T07:08:00Z",
+                       "scheduledTrack": "6", "track": "6"},
+             "mode": "HIGHSPEED_RAIL", "realTime": true, "headsign": "Hengelo",
+             "tripTo": {"name": "Hengelo", "lat": 52.26, "lon": 6.79},
+             "tripId": "de-trip", "tripShortName": "ICE 146", "displayName": "ICE 146"},
+            {"place": {"name": "Berlin Hbf", "stopId": "nl:1", "lat": 52.52, "lon": 13.37,
+                       "scheduledDeparture": "2026-10-06T07:09:00Z", "departure": "2026-10-06T07:09:00Z",
+                       "scheduledTrack": "6"},
+             "mode": "HIGHSPEED_RAIL", "realTime": false, "headsign": "Amsterdam Centraal",
+             "tripTo": {"name": "Amsterdam Centraal", "lat": 52.38, "lon": 4.9},
+             "tripId": "nl-trip", "tripShortName": "146", "displayName": "ICE 146"}
+        ]}
+        """ : "{}"
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
@@ -1368,6 +1679,111 @@ private final class CrowdedHubStopTimesProtocol: URLProtocol, @unchecked Sendabl
     }
 }
 
+// MARK: - RIL100 codes
+
+@Suite struct Ril100Tests {
+    func station(_ id: String, _ name: String, _ lat: Double, _ lon: Double) -> Station {
+        Station(id: id, name: name, coordinate: Coordinate(latitude: lat, longitude: lon), evaNumber: nil, source: .transitous)
+    }
+
+    /// A code finds its station in any case, also with the double spaces DB writes some with (#165).
+    @Test func findsStationsByCodeInAnyCase() {
+        #expect(Ril100.entry(forCode: "ff")?.name == "Frankfurt (Main) Hbf")
+        #expect(Ril100.entry(forCode: "FfT")?.name == "Frankfurt (Main) Hbf (tief)")
+        #expect(Ril100.entry(forCode: " ah ")?.name == "Hamburg Hbf")
+        #expect(Ril100.entry(forCode: "ll t")?.name == "Leipzig Hbf (Tiefgleise)")
+        #expect(Ril100.entry(forCode: "f") == nil)
+        #expect(Ril100.entry(forCode: "Frankfurt") == nil)
+    }
+
+    /// Stops are matched by position and name, also on another level of the station (which shows the
+    /// station's shortest code), but not a different station nearby.
+    @Test func matchesStopsToStationsByPositionAndName() {
+        #expect(Ril100.code(for: station("a", "Frankfurt (Main) Hauptbahnhof", 50.1069, 8.6625)) == "FF")
+        #expect(Ril100.code(for: station("b", "Frankfurt (Main) Hbf tief", 50.1072, 8.6650)) == "FF")
+        #expect(Ril100.code(for: station("c", "S+U Alexanderplatz Bhf (Berlin)", 52.5215, 13.4115)) == "BALE")
+        #expect(Ril100.code(for: station("d", "Berlin Hbf (tief)", 52.5250, 13.3690)) == "BL")
+        #expect(Ril100.code(for: station("e", "Hamburg Hbf (S-Bahn)", 53.5530, 10.0070)) == "AH")
+        // A tram stop named otherwise 300 m away isn't the station.
+        #expect(Ril100.code(for: station("f", "Frankfurt, Platz der Republik", 50.1095, 8.6660)) == nil)
+        // Far from DB's positions the same name isn't enough.
+        #expect(Ril100.code(for: station("g", "Frankfurt (Main) Hbf", 50.12, 8.70)) == nil)
+        let bls = Ril100.entry(forCode: "bls")!
+        #expect(Ril100.matches(station("h", "Berlin Hbf", 52.5251, 13.3692), bls))
+    }
+
+    /// The station the code belongs to comes first and only once; behind a first hit whose name starts
+    /// with the typed word.
+    @Test func placesTheCodesStationFirstAndOnce() throws {
+        let ff = try #require(Ril100.entry(forCode: "ff"))
+        let hbf = station("hbf", "Frankfurt (Main) Hauptbahnhof", 50.1069, 8.6625)
+        let tief = station("tief", "Frankfurt (Main) Hbf tief", 50.1072, 8.6650)
+        let other = station("other", "Fulda", 50.554, 9.684)
+        #expect(Ril100.placing(hbf, for: ff, typed: "ff", in: [other, tief, hbf]).map(\.id) == ["hbf", "other"])
+        // Without the looked-up stop, the first hit that is the station moves up.
+        #expect(Ril100.placing(nil, for: ff, typed: "ff", in: [other, tief, hbf]).map(\.id) == ["tief", "other"])
+        #expect(Ril100.placing(nil, for: ff, typed: "ff", in: [other]).map(\.id) == ["other"])
+
+        let harblek = try #require(Ril100.entry(forCode: "aha"))
+        let aha = station("aha", "Aha", 47.8331, 8.1347)
+        let harblekStop = station("harblek", "Harblek", 54.3619, 8.9625)
+        #expect(Ril100.placing(harblekStop, for: harblek, typed: "Aha", in: [aha]).map(\.id) == ["aha", "harblek"])
+        let altdoebern = try #require(Ril100.entry(forCode: "bad"))
+        let altdoebernStop = station("altdoebern", "Altdöbern", 51.6528, 14.0092)
+        let ragaz = station("ragaz", "Bad Ragaz", 47.0, 9.5)
+        let toelz = station("toelz", "Bad Tölz", 47.76, 11.56)
+        #expect(Ril100.placing(altdoebernStop, for: altdoebern, typed: "bad", in: [ragaz, toelz]).map(\.id)
+            == ["ragaz", "altdoebern", "toelz"])
+        let canyon = station("canyon", "Canyon MHP", 40.0, -100.0)
+        let heimeranplatz = station("heimeranplatz", "München Heimeranplatz", 48.1330, 11.5315)
+        #expect(Ril100.placing(heimeranplatz, for: try #require(Ril100.entry(forCode: "mhp")), typed: "mhp", in: [canyon])
+            .map(\.id) == ["heimeranplatz", "canyon"])
+    }
+
+    /// The geocoder misses many of DB's full names, so the station is also looked up by their first
+    /// part and the town.
+    @Test func searchTextsForDBsNames() {
+        #expect(Ril100.searchTexts(for: "Hof Hbf") == ["Hof Hbf", "Hof"])
+        #expect(Ril100.searchTexts(for: "Frankfurt (Main) Hbf") == ["Frankfurt (Main) Hbf", "Frankfurt"])
+        #expect(Ril100.searchTexts(for: "Berlin Hauptbahnhof - Lehrter Bahnhof")
+            == ["Berlin Hauptbahnhof - Lehrter Bahnhof", "Berlin Hauptbahnhof", "Berlin"])
+        #expect(Ril100.searchTexts(for: "Alexanderplatz") == ["Alexanderplatz"])
+    }
+
+    /// "ff" in the picker: Frankfurt (Main) Hbf, looked up by DB's name, first; its lower level, which
+    /// the geocoder found for "ff" itself, left out.
+    @Test func searchFindsTheStationForATypedCode() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [Ril100GeocodeProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let provider = TransitousProvider(http: HTTPClient(session: session))
+
+        let stations = try await provider.searchStations(StationSearch(parsing: "ff"), near: nil)
+
+        #expect(stations.map(\.id) == ["frankfurtHbf", "fulda"])
+    }
+}
+
+/// "Frankfurt (Main) Hbf" gives the station, anything else ("ff" and its extras) its lower level and Fulda.
+private final class Ril100GeocodeProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let text = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+            .queryItems?.first { $0.name == "text" }?.value
+        let body = text == "Frankfurt (Main) Hbf"
+            ? #"[{"type":"STOP","id":"frankfurtHbf","name":"Frankfurt (Main) Hauptbahnhof","lat":50.1069,"lon":8.6625,"country":"DE","modes":["HIGHSPEED_RAIL","REGIONAL_RAIL"],"importance":0.02}]"#
+            : #"[{"type":"STOP","id":"fulda","name":"Fulda","lat":50.554,"lon":9.684,"country":"DE","modes":["HIGHSPEED_RAIL"],"importance":0.004},"#
+                + #"{"type":"STOP","id":"tief","name":"Frankfurt (Main) Hbf tief","lat":50.1072,"lon":8.665,"country":"DE","modes":["SUBURBAN"],"importance":0.01}]"#
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
 // MARK: - Rules & filters
 
 @Suite struct RulesTests {
@@ -1428,6 +1844,14 @@ private final class CrowdedHubStopTimesProtocol: URLProtocol, @unchecked Sendabl
 
     @Test func lineNormalize() {
         #expect(Line.normalize("ICE  423") == Line.normalize("ice423"))
+    }
+
+    @Test func sBahnNameWithTripNumber() {
+        #expect(Line(name: "S 8", number: "8", product: .suburban, operatorName: nil, tripNumber: "37856").nameWithTripNumber == "S 8 (37856)")
+        #expect(Line(name: "S 8", number: "8", product: .suburban, operatorName: nil).nameWithTripNumber == "S 8")
+        #expect(Line(name: "S 8 (37856)", number: "8", product: .suburban, operatorName: nil, tripNumber: "37856").nameWithTripNumber == "S 8 (37856)")
+        #expect(Line(name: "RE 14a", number: "14", product: .regionalExpress, operatorName: nil, tripNumber: "17677").nameWithTripNumber == "RE 14a")
+        #expect(Line(name: "U 2", number: "2", product: .subway, operatorName: nil, tripNumber: "12").nameWithTripNumber == "U 2")
     }
 }
 
@@ -1637,10 +2061,74 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(StopAccess(pickupAllowed: false, dropoffAllowed: true) == .exitOnly)
     }
 
+    /// Alfred's example: Berlin Hbf → Halle → back to Gesundbrunnen on an ICE that also stops at Hbf
+    /// (no boarding there) is a detour and gets hidden; so is leaving a train that goes on to the
+    /// destination. A change onto a train that doesn't call at either station stays.
+    @Test func detoursOntoATrainCallingAtTheOriginOrDestination() {
+        let hbf = station("8011160", "Berlin Hbf"), halle = station("8010159", "Halle (Saale) Hbf")
+        let gesundbrunnen = station("8011102", "Berlin Gesundbrunnen"), leipzig = station("8010205", "Leipzig Hbf")
+        let base = Date(timeIntervalSince1970: 1_790_000_000)
+        func t(_ minutes: Double) -> Date { base.addingTimeInterval(minutes * 60) }
+        func leg(_ trip: String, _ from: Station, _ to: Station, _ dep: Double, _ arr: Double) -> Leg {
+            Leg(origin: from, destination: to, departure: TimeInfo(planned: t(dep), actual: nil),
+                arrival: TimeInfo(planned: t(arr), actual: nil), departurePlatform: nil, arrivalPlatform: nil,
+                tripId: trip, line: Line(name: "ICE \(trip)", number: trip, product: .highSpeed, operatorName: nil),
+                direction: nil, isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+        }
+        func entry(_ trip: String, _ kind: BoardKind, _ minutes: Double, _ access: StopAccess = .normal) -> BoardEntry {
+            BoardEntry(kind: kind, tripId: trip, station: hbf,
+                       line: Line(name: "ICE \(trip)", number: trip, product: .highSpeed, operatorName: nil), otherEnd: nil,
+                       time: TimeInfo(planned: t(minutes), actual: nil), platform: PlatformInfo(planned: nil, actual: nil),
+                       cancelled: false, terminatesOrOriginatesHere: false, remarks: [], access: access, source: .transitous)
+        }
+        // ICE 594 runs Halle → Berlin Hbf (no boarding, minute 150) → Gesundbrunnen (minute 158).
+        let calls = StationCalls(departuresAtOrigin: [entry("594", .departures, 150, .exitOnly), entry("10", .departures, 0)],
+                                 departuresAtDestination: [entry("700", .departures, 50)],
+                                 arrivalsAtDestination: [entry("594", .arrivals, 158), entry("700", .arrivals, 48)])
+
+        let viaHalle = Journey(legs: [leg("10", hbf, halle, 0, 70), leg("594", halle, gesundbrunnen, 80, 158)], source: .transitous)
+        #expect(calls.isDetour(viaHalle))
+
+        // ICE 700 reaches Gesundbrunnen at minute 48, but the route leaves it earlier and goes on by another train.
+        let offEarly = Journey(legs: [leg("700", hbf, leipzig, 0, 20), leg("11", leipzig, gesundbrunnen, 30, 60)], source: .transitous)
+        #expect(calls.isDetour(offEarly))
+
+        let normal = Journey(legs: [leg("10", hbf, halle, 0, 70), leg("12", halle, leipzig, 80, 110)], source: .transitous)
+        #expect(!calls.isDetour(normal))
+        #expect(!calls.isDetour(Journey(legs: [leg("594", hbf, gesundbrunnen, 150, 158)], source: .transitous)))
+
+        // Transitous' routing offers ICE 594 from Hbf as a normal ride; the stop times mark it "Nur Ausstieg".
+        var direct = leg("594", hbf, gesundbrunnen, 150, 158)
+        direct.stopovers = [Stopover(station: hbf, arrival: nil, departure: direct.departure, arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+                            Stopover(station: gesundbrunnen, arrival: direct.arrival, departure: nil, arrivalPlatform: nil, departurePlatform: nil, cancelled: false)]
+        let marked = calls.marking(Journey(legs: [direct], source: .transitous))
+        #expect(marked.legs[0].stopovers.first?.access == .exitOnly)
+        #expect(marked.legs[0].stopovers.last?.access == .normal)
+        #expect(StationCalls.directTripIds([marked, viaHalle]) == ["594"])
+    }
+
+    /// Expert option "Nur Ein-/Ausstieg ignorieren": only trains you may not board at the origin, or
+    /// not leave at the destination, are looked up; normal ones the search already has.
+    @Test func restrictedCandidatesAreTrainsWithoutBoardingOrAlighting() {
+        func entry(_ tripId: String, _ access: StopAccess, product: Product = .highSpeed, cancelled: Bool = false) -> BoardEntry {
+            BoardEntry(kind: .departures, tripId: tripId, station: station("1", "Berlin Hbf"),
+                       line: Line(name: "ICE \(tripId)", number: tripId, product: product, operatorName: nil), otherEnd: nil,
+                       time: TimeInfo(planned: .now, actual: nil), platform: PlatformInfo(planned: nil, actual: nil),
+                       cancelled: cancelled, terminatesOrOriginatesHere: false, remarks: [], access: access, source: .transitous)
+        }
+        let atOrigin = [entry("1", .exitOnly), entry("2", .normal), entry("3", .normal), entry("4", .exitOnly, cancelled: true),
+                        entry("5", .exitOnly, product: .bus), entry("1", .exitOnly)]
+        let atDestination = [entry("3", .entryOnly), entry("2", .normal)]
+        let candidates = TrainPicker.restrictedCandidates(departures: atOrigin, atDestination: atDestination)
+        #expect(candidates.map(\.tripId) == ["1", "3"])
+    }
+
     final class SlowProvider: TransitProvider, @unchecked Sendable {
         let source = DataSource.bahnDe
+        let finished = Mutex(false)
         func searchStations(_ query: String) async throws -> [Station] {
             try await Task.sleep(for: .seconds(30))
+            finished.withLock { $0 = true }
             return []
         }
         func journeys(_ query: JourneyQuery) async throws -> JourneyPage { throw TransitError.timeout }
@@ -1649,11 +2137,29 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
     }
 
     @Test func slowPrimaryFallsBackQuickly() async throws {
-        let combined = CombinedProvider(primary: SlowProvider(), fallback: MockProvider(source: .transitous), bahnDe: nil)
-        let start = Date.now
+        let slow = SlowProvider()
+        let combined = CombinedProvider(primary: slow, fallback: MockProvider(source: .transitous), bahnDe: nil)
         let result = try await combined.searchStations("Köln")
         #expect(result.first?.source == .transitous)
-        #expect(Date.now.timeIntervalSince(start) < 5)
+        // Fell back without waiting for the slow provider (checked against it, not a stopwatch).
+        #expect(!slow.finished.withLock { $0 })
+    }
+
+    /// The deadline holds even when the work is slow to stop once cancelled (a URL request winding
+    /// down), so a hanging extra query can't hold up the station search.
+    @Test func deadlineDoesntWaitForWorkSlowToStop() async {
+        let stopped = Mutex(false)
+        let result = try? await CombinedProvider.withDeadline(.milliseconds(100)) {
+            await withCheckedContinuation { continuation in
+                DispatchQueue.global().asyncAfter(deadline: .now() + 3) {
+                    stopped.withLock { $0 = true }
+                    continuation.resume()
+                }
+            }
+            return 1
+        }
+        #expect(result == nil)
+        #expect(!stopped.withLock { $0 })
     }
 }
 
@@ -1702,6 +2208,15 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(TrainModel.detect(cars(["938140110011", "938140110029"]), category: "ICE")?.name == "ICE T")
         // A single matching vehicle is inconclusive.
         #expect(TrainModel.detect(cars(["938054080011"]), category: "ICE") == nil)
+    }
+
+    @Test func tellsFlirt1430FromSBahn430() {
+        let cars = { (ids: [String]) in ids.map { Carriage(vehicleID: $0, constructionType: nil) } }
+        // FLIRT 3 (BR 1430/1830): its model digits are "430" like the S-Bahn's.
+        #expect(TrainModel.detect(cars(["948014300011", "948018300015", "948014300029"]), category: "RE")?.series == "BR 1430")
+        #expect(TrainModel.detect(cars(["948004300011", "948008300015", "948004310019"]), category: "S")?.series == "BR 430")
+        #expect(TrainModel.detect(cars(["948014400011", "948014410019"]), category: "RE")?.series == "BR 1440")
+        #expect(TrainModel.detect(cars(["948004400011", "948004410019"]), category: "RE")?.series == "BR 440")
     }
 
     @Test func detectsIntercity2FromDoubleDeckCoaches() {
@@ -1777,9 +2292,26 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         let formation = BahnDeClient.formation(from: response, category: "ICE", number: 950)
         #expect(formation.units.first?.number == "9457")
         #expect(formation.units.first?.name == "Bundesrepublik Deutschland")
+        // Asked for another train, only the group without a number is left.
         let other = BahnDeClient.formation(from: response, category: "ICE", number: 1)
-        #expect(other.units.map(\.model) == [nil, "ICE 4"])
+        #expect(other.units.map(\.model) == ["ICE 4"])
         #expect(try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data("{}".utf8)).groups == nil)
+    }
+
+    /// bahn.de answered RE 6 at Itzehoe with another train's FLIRTs: units that all name a different
+    /// train show neither as the train's type nor as its Wagenreihung.
+    @Test func ignoresAnotherTrainsSequence() throws {
+        let json = #"""
+        {"groups": [
+            {"name": "RP1", "transport": {"category": "RE", "number": 21075},
+             "vehicles": [{"vehicleID": "948014300011"}, {"vehicleID": "948014300029"}]}
+        ]}
+        """#
+        let response = try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data(json.utf8))
+        #expect(BahnDeClient.formation(from: response, category: "RE", number: 11013).units.isEmpty)
+        let sequence = BahnDeClient.coachSequence(from: response, category: "RE", number: 11013)
+        #expect(sequence.coaches.isEmpty && sequence.groups.isEmpty)
+        #expect(BahnDeClient.formation(from: response, category: "RE", number: 21075).modelSummary == "FLIRT")
     }
 
     /// A real bahn.de response (ICE 117 at Frankfurt (Main) Hbf, Gleis 12): coaches from the front,
@@ -1807,6 +2339,69 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(sequence.coaches[4].amenities.contains(.wheelchairSpace))
         #expect(sequence.coaches[5].kind == .halfDiningCar && sequence.coaches[5].firstClass)
         #expect(sequence.formation.units.first?.number == "9226")
+    }
+
+    /// bahn.de flags this ordinary ICE T as differing; compared with the plan nothing does, whichever
+    /// way round the plan stands.
+    @Test func coachSequenceDeviationsFromThePlan() throws {
+        let response = try fixture("bahnde-vehicle-sequence", as: BahnDeClient.SequenceResponse.self)
+        let actual = BahnDeClient.coachSequence(from: response, category: "ICE", number: 117)
+        var plan = actual
+        plan.source = .vagonweb(validFrom: nil, validUntil: nil)
+        plan.coaches = actual.coaches.reversed()
+        #expect(actual.differsFromSchedule)
+        #expect(actual.deviations(fromPlan: plan).isEmpty)
+        #expect(actual.deviations(fromPlan: plan.turned(after: ["Frankfurt (Main) Hbf"])).isEmpty)
+
+        // A second trainset in the plan that didn't come, and a coach in the other class.
+        var double = plan
+        double.coaches += (31...37).map { number in
+            var coach = actual.coaches[1]
+            coach.number = String(number)
+            return coach
+        }
+        double.coaches[6].firstClass = true
+        #expect(actual.deviations(fromPlan: double) == ["Wagen 31–37 fehlen", "Wagen 21: 2. statt 1. Klasse"])
+
+        // A shorter plan: the extra coaches are named.
+        var short = plan
+        short.coaches.removeAll { $0.number == "23" }
+        #expect(actual.deviations(fromPlan: short) == ["Zusätzlich Wagen 23"])
+
+        // Numbered differently: only the counts are compared.
+        var renumbered = plan
+        for index in renumbered.coaches.indices { renumbered.coaches[index].number = "\(index + 1)" }
+        #expect(actual.deviations(fromPlan: renumbered).isEmpty)
+        renumbered.coaches.removeLast()
+        #expect(actual.deviations(fromPlan: renumbered).first == "7 statt 6 Wagen")
+    }
+
+    @Test func coachNumberList() {
+        #expect(CoachSequence.numberList(["25"]) == "25")
+        #expect(CoachSequence.numberList(["23", "21"]) == "21, 23")
+        #expect(CoachSequence.numberList(["39", "31", "32", "33", "35", "36", "37", "38"]) == "31–33, 35–39")
+        #expect(CoachSequence.numberList(["21", "22"]) == "21, 22")
+    }
+
+    /// A locomotive listed as its own group, ending where it is changed, is no train part with another destination.
+    @Test func coachSequenceIgnoresLocomotiveChange() throws {
+        let json = #"""
+        {"groups": [
+            {"name": "IC2013", "transport": {"category": "IC", "number": 2013, "destination": {"name": "Stuttgart Hbf"}},
+             "vehicles": [{"type": {"category": "LOCOMOTIVE"}}]},
+            {"name": "IC2013", "transport": {"category": "IC", "number": 2013, "destination": {"name": "Oberstdorf"}},
+             "vehicles": [{"wagonIdentificationNumber": 1, "type": {"category": "PASSENGERCARRIAGE_FIRST_CLASS"}},
+                          {"wagonIdentificationNumber": 2, "type": {"category": "PASSENGERCARRIAGE_ECONOMY_CLASS"}}]}
+        ]}
+        """#
+        let response = try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data(json.utf8))
+        let sequence = BahnDeClient.coachSequence(from: response, category: "IC", number: 2013)
+        #expect(sequence.isLocomotiveOnly(group: 0))
+        #expect(!sequence.isLocomotiveOnly(group: 1))
+        #expect(sequence.travellingGroups.compactMap(\.destination) == ["Oberstdorf"])
+        #expect(!sequence.partsGoToDifferentPlaces)
+        #expect(!sequence.hasOtherTrains)
+        #expect(!sequence.hasSeveralTrains)
     }
 
     /// Coupled trains: the other half keeps its own destination, and power cars have no coach number.
@@ -1890,7 +2485,7 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
 
     @Test func formationSummary() {
         let formation = TrainFormation(units: [.init(model: "ICE 3neo", number: "8030"), .init(model: "ICE 3neo", number: "8005")])
-        #expect(formation.modelSummary == "2× ICE 3neo")
+        #expect(formation.modelSummary == "ICE 3neo Redesign + ICE 3neo")
         #expect(formation.unitSummary == "Tz 8030 + 8005")
         #expect(formation.unitDescription == "Tz 8030 + 8005")
     }
@@ -2039,6 +2634,16 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         #expect(lookup([group("8020")]).formation.modelSummary == "ICE 3neo Redesign")
         #expect(lookup([group("8020"), group("8005")]).summary == "ICE 3neo Redesign + ICE 3neo")
         #expect(lookup([group(nil)]).summary == "ICE 3neo")
+        #expect(lookup([group("8039")]).hasUnitNumbers)
+        #expect(!lookup([group(nil)]).hasUnitNumbers)
+    }
+
+    /// Formations remembered before the Redesign rule stored plain "ICE 3neo" for Tz 8039.
+    @Test func rememberedFormationMarksRedesignedICE3neo() {
+        let formation = TrainFormation(units: [.init(model: "ICE 3neo", number: "8039"), .init(model: "ICE 3neo", number: "8005")])
+        #expect(formation.modelSummary == "ICE 3neo Redesign + ICE 3neo")
+        #expect(TrainFormation(units: [.init(model: "ICE 3neo Redesign", number: "8039")]).modelSummary == "ICE 3neo Redesign")
+        #expect(TrainFormation(units: [.init(model: "ICE 3neo", number: nil)]).modelSummary == "ICE 3neo")
     }
 
     /// Real response for IC 2271 (2026-10-01): bahn.expert has no Baureihe for IC 2 Twindexx sets.
@@ -2117,6 +2722,21 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
 
     static func stops() throws -> [JourneyStop] {
         try JSONDecoding.decoder.decode(BahnDeClient.JourneyDetails.self, from: Data(details.utf8)).halte.compactMap(JourneyStop.init)
+    }
+
+    /// Stations without a platform (bahn.de's `"gleis": ""` in Czechia) show no empty "Gleis" badge,
+    /// and journeys saved with one drop it too; a missing platform can then still be filled in.
+    @Test func blankPlatformsCountAsNone() throws {
+        let details = #"{"halte": [{"extId": "5400014", "name": "Praha hl.n.", "ankunftsZeitpunkt": "2026-10-07T11:25:00", "gleis": "", "ezGleis": " "}]}"#
+        let stop = try #require(try JSONDecoding.decoder.decode(BahnDeClient.JourneyDetails.self, from: Data(details.utf8))
+            .halte.compactMap(JourneyStop.init).first)
+        #expect(stop.arrivalPlatform?.best == nil)
+        #expect(stop.arrivalPlatform?.hasChanged == false)
+        let saved = try JSONDecoding.decoder.decode(PlatformInfo.self, from: Data(#"{"planned": "", "actual": "7"}"#.utf8))
+        #expect(saved == PlatformInfo(planned: nil, actual: "7"))
+        #expect(PlatformInfo(planned: "3", actual: "").best == "3")
+        let reencoded = try JSONDecoder().decode(PlatformInfo.self, from: JSONEncoder().encode(PlatformInfo(planned: "3", actual: "4")))
+        #expect(reencoded == PlatformInfo(planned: "3", actual: "4"))
     }
 
     @Test func decodesStopsLikeDBRIS() throws {
@@ -2335,6 +2955,91 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         #expect(corrected[1] == entries[1])
     }
 
+    /// DB's live time from bahn.de's board replaces Transitous' (DELFI's forecast had ICE 146 leave
+    /// Berlin Hbf at 9:08, a minute early); trains without one there keep Transitous' time.
+    @Test func takesLiveTimesFromBahnDeBoard() throws {
+        let json = #"""
+        {"entries": [
+            {"journeyId": "a", "zeit": "2026-10-06T09:09:00", "ezZeit": "2026-10-06T09:12:00", "verkehrmittel": {"name": "ICE 146"}},
+            {"journeyId": "b", "zeit": "2026-10-06T09:20:00", "verkehrmittel": {"name": "ICE 1005"}}
+        ]}
+        """#
+        let board = try JSONDecoding.decoder.decode(BahnDeClient.Board.self, from: Data(json.utf8)).entries
+        let berlin = station("8011160", "Berlin Hbf")
+        func departure(_ name: String, _ number: String, planned: String, actual: String?) throws -> BoardEntry {
+            BoardEntry(kind: .departures, tripId: name, station: berlin,
+                       line: Line(name: name, number: number, product: .highSpeed, operatorName: nil),
+                       otherEnd: "Amsterdam Centraal",
+                       time: TimeInfo(planned: try #require(JSONDecoding.parseISODate(planned)),
+                                      actual: actual.flatMap(JSONDecoding.parseISODate)),
+                       platform: PlatformInfo(planned: "6", actual: nil), cancelled: false,
+                       terminatesOrOriginatesHere: false, remarks: [], source: .transitous)
+        }
+        let entries = [
+            try departure("ICE 146", "146", planned: "2026-10-06T07:09:00Z", actual: "2026-10-06T07:08:00Z"),
+            try departure("ICE 1005", "1005", planned: "2026-10-06T07:20:00Z", actual: "2026-10-06T07:25:00Z"),
+            try departure("ICE 148", "148", planned: "2026-10-06T07:30:00Z", actual: nil),
+        ]
+
+        let corrected = BahnDeClient.applyingLiveTimes(entries, using: board)
+
+        #expect(corrected[0].time.actual == JSONDecoding.parseISODate("2026-10-06T07:12:00Z"))
+        #expect(corrected[1] == entries[1])
+        #expect(corrected[2] == entries[2])
+        // Regional and S-Bahn trains by their run number, which bahn.de's journey ID carries; a line
+        // name alone only at the same minute and when just one entry has it.
+        let localJSON = #"""
+        {"entries": [
+            {"journeyId": "2|#VN#1#ST#1#PI#0#ZI#1#TA#0#DA#61025#1S#1#1T#1#LS#1#LT#1#PU#80#RT#1#CA#RE#ZE#3148#ZB#RE 4#PC#3#FR#1#FT#1#TO#1#TT#1#", "zeit": "2026-10-06T09:09:00", "ezZeit": "2026-10-06T09:11:00", "verkehrmittel": {"name": "RE 4", "produktGattung": "REGIONAL"}},
+            {"journeyId": "2|#CA#S#ZE#5540#ZB#S 5#", "zeit": "2026-10-06T09:11:00", "ezZeit": "2026-10-06T09:13:00", "verkehrmittel": {"name": "S 5", "produktGattung": "SBAHN"}},
+            {"journeyId": "x", "zeit": "2026-10-06T09:09:00", "ezZeit": "2026-10-06T09:30:00", "verkehrmittel": {"name": "S 9", "produktGattung": "SBAHN"}},
+            {"journeyId": "y", "zeit": "2026-10-06T09:09:00", "ezZeit": "2026-10-06T09:40:00", "verkehrmittel": {"name": "S 9", "produktGattung": "SBAHN"}}
+        ]}
+        """#
+        let localBoard = try JSONDecoding.decoder.decode(BahnDeClient.Board.self, from: Data(localJSON.utf8)).entries
+        func local(_ name: String, _ product: Product, run: String?, planned: String) throws -> BoardEntry {
+            var entry = try departure(name, "", planned: planned, actual: planned)
+            entry.line = Line(name: name, number: nil, product: product, operatorName: nil, tripNumber: run)
+            return entry
+        }
+        let locals = [
+            try local("RE4", .regionalExpress, run: "3148", planned: "2026-10-06T07:09:00Z"),
+            try local("S5", .suburban, run: "5540", planned: "2026-10-06T07:11:00Z"),
+            // Another S5 run at the same minute: not this entry.
+            try local("S5", .suburban, run: "5541", planned: "2026-10-06T07:11:00Z"),
+            // Two S 9 at that minute on bahn.de, no run number: ambiguous, unchanged.
+            try local("S9", .suburban, run: nil, planned: "2026-10-06T07:09:00Z"),
+        ]
+        let localCorrected = BahnDeClient.applyingLiveTimes(locals, using: localBoard)
+        #expect(localCorrected[0].time.actual == JSONDecoding.parseISODate("2026-10-06T07:11:00Z"))
+        #expect(localCorrected[1].time.actual == JSONDecoding.parseISODate("2026-10-06T07:13:00Z"))
+        #expect(localCorrected[2] == locals[2])
+        #expect(localCorrected[3] == locals[3])
+        // Long-distance trains of other brands (NJ, FLX) by name and minute, never from a regional entry.
+        let otherJSON = #"""
+        {"entries": [
+            {"journeyId": "nj", "zeit": "2026-10-06T09:09:00", "ezZeit": "2026-10-06T09:19:00", "verkehrmittel": {"name": "NJ 40491", "produktGattung": "EC_IC"}},
+            {"journeyId": "rb", "zeit": "2026-10-06T09:09:00", "ezZeit": "2026-10-06T09:30:00", "verkehrmittel": {"name": "NJ 40491", "produktGattung": "REGIONAL"}}
+        ]}
+        """#
+        let otherBoard = try JSONDecoding.decoder.decode(BahnDeClient.Board.self, from: Data(otherJSON.utf8)).entries
+        let nightjet = try local("NJ 40491", .longDistance, run: nil, planned: "2026-10-06T07:09:00Z")
+        #expect(BahnDeClient.applyingLiveTimes([nightjet], using: otherBoard).first?.time.actual
+                == JSONDecoding.parseISODate("2026-10-06T07:19:00Z"))
+        // Subway, tram and bus are never looked up.
+        let tram = try local("M5", .tram, run: nil, planned: "2026-10-06T07:09:00Z")
+        #expect(!BahnDeClient.isLookedUp(tram.line))
+        #expect(BahnDeClient.isLookedUp(nightjet.line))
+        // A long-distance train never takes a regional entry's time, even with the same number.
+        let ice4 = try departure("ICE 4", "4", planned: "2026-10-06T07:09:00Z", actual: nil)
+        #expect(BahnDeClient.applyingLiveTimes([ice4], using: localBoard) == [ice4])
+
+        // A departures board never touches arrivals.
+        var arrival = entries[0]
+        arrival.kind = .arrivals
+        #expect(BahnDeClient.applyingLiveTimes([arrival], using: board) == [arrival])
+    }
+
     /// Arrivals are matched against bahn.de's arrivals board, by arrival time.
     @Test func takesTrainNamesFromBahnDeArrivalsBoard() throws {
         let json = #"{"entries": [{"journeyId": "a", "zeit": "2026-09-30T09:07:00", "verkehrmittel": {"name": "RJ 171"}}]}"#
@@ -2492,6 +3197,20 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
     }
 }
 
+/// Answers `/v5/trip` with the Köln–Duisburg ICE leg that has its `legGeometry`.
+private final class TripGeometryProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let url = Bundle.module.url(forResource: "transitous-leg-geometry", withExtension: "json", subdirectory: "Fixtures")!
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: (try? Data(contentsOf: url)) ?? Data())
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
 private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
     static let requests = Mutex(0)
     static let userAgent = Mutex<String?>(nil)
@@ -2525,6 +3244,23 @@ private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
         let straight = try #require(ice.origin.coordinate).distance(to: try #require(ice.destination.coordinate))
         #expect(geometry.count > 50)
         #expect(Polyline.length(geometry) > straight)
+    }
+
+    /// A train opened from the board (not a journey) keeps its track geometry, so its live map
+    /// follows the tracks instead of joining the stops with straight lines.
+    @Test func transitousTripHasTrackGeometry() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [TripGeometryProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let provider = TransitousProvider(http: HTTPClient(session: session))
+
+        let trip = try await provider.trip(id: "ice")
+
+        let geometry = try #require(trip.geometry)
+        #expect(geometry.count > 50)
+        let decoded = try JSONDecoder().decode(Trip.self, from: JSONEncoder().encode(trip))
+        #expect(decoded.geometry == geometry)
     }
 
     @Test func slice() {
@@ -2673,6 +3409,101 @@ private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
                           departure: "2026-03-04T12:00:00Z", arrival: "2026-03-04T13:00:00Z")
         #expect(!RideMatch.isSameRide(checkin, saved))
     }
+
+    /// A ride checked in twice must count once even with saved journeys hidden; before, the
+    /// duplicate only collapsed against a saved journey and the map showed the stretch twice.
+    @Test func duplicateCheckinsCountOnce() {
+        let first = leg("RE 6", from: "Hamburg-Altona", to: "Husum",
+                        departure: "2026-03-04T09:00:00Z", arrival: "2026-03-04T11:00:00Z")
+        let again = leg("RE6", from: "Hamburg-Altona", to: "Husum",
+                        departure: "2026-03-04T09:01:00Z", arrival: "2026-03-04T11:02:00Z")
+        let other = leg("RE 6", from: "Husum", to: "Hamburg-Altona",
+                        departure: "2026-03-04T15:00:00Z", arrival: "2026-03-04T17:00:00Z")
+        let checkins = [first, again, other].map { Journey(legs: [$0], source: .traewelling) }
+        #expect(RideMatch.deduplicated(checkins).count == 2)
+        #expect(RideMatch.deduplicated(checkins, against: [Journey(legs: [first], source: .transitous)]).count == 1)
+    }
+
+    /// A saved journey with a checked-in leg keeps only its other legs, so turning saved journeys
+    /// on adds rides to the Träwelling map instead of trading check-ins for a saved copy.
+    @Test func checkinWinsOverSavedLeg() {
+        let ice = leg("ICE 645", from: "Köln Hbf", to: "Hannover Hbf",
+                      departure: "2026-03-04T09:00:00Z", arrival: "2026-03-04T11:30:00Z")
+        let regional = leg("RE 1", from: "Hannover Hbf", to: "Bremen Hbf",
+                           departure: "2026-03-04T11:45:00Z", arrival: "2026-03-04T13:00:00Z")
+        let checkin = leg("ICE645", from: "Köln Messe/Deutz", to: "Hannover Hbf",
+                          departure: "2026-03-04T09:12:00Z", arrival: "2026-03-04T11:34:00Z")
+        let result = RideMatch.uncovered([Journey(legs: [ice, regional], source: .transitous)],
+                                         by: [Journey(legs: [checkin], source: .traewelling)])
+        #expect(result.map { $0.legs.map(\.line?.name) } == [["RE 1"]])
+
+        let both = Journey(legs: [checkin, leg("RE1", from: "Hannover Hbf", to: "Bremen Hbf",
+                                               departure: "2026-03-04T11:45:00Z", arrival: "2026-03-04T13:01:00Z")],
+                           source: .traewelling)
+        #expect(RideMatch.uncovered([Journey(legs: [ice, regional], source: .transitous)], by: [both]).isEmpty)
+    }
+
+    /// Saved, but another train taken at that time: the plan isn't drawn next to the real ride.
+    @Test func savedPlanNotTakenIsDropped() {
+        let saved = leg("ICE 1000", from: "Hamburg Hbf", to: "Berlin Hbf",
+                        departure: "2026-03-04T10:00:00Z", arrival: "2026-03-04T11:45:00Z")
+        let checkin = leg("RE 8", from: "Hamburg Hbf", to: "Wittenberge",
+                          departure: "2026-03-04T10:10:00Z", arrival: "2026-03-04T12:00:00Z")
+        #expect(RideMatch.uncovered([Journey(legs: [saved], source: .transitous)],
+                                    by: [Journey(legs: [checkin], source: .traewelling)]).isEmpty)
+    }
+
+    @Test func connectionAfterCheckinIsKept() {
+        let checkin = leg("ICE 645", from: "Köln Hbf", to: "Hannover Hbf",
+                          departure: "2026-03-04T09:00:00Z", arrival: "2026-03-04T11:30:00Z")
+        let connection = leg("RE 1", from: "Hannover Hbf", to: "Bremen Hbf",
+                             departure: "2026-03-04T11:30:00Z", arrival: "2026-03-04T12:45:00Z")
+        #expect(RideMatch.uncovered([Journey(legs: [connection], source: .transitous)],
+                                    by: [Journey(legs: [checkin], source: .traewelling)]).count == 1)
+    }
+
+    @Test func rideOverMidnightMatches() {
+        let saved = leg("ICE 1000", from: "München Hbf", to: "Nürnberg Hbf",
+                        departure: "2026-03-04T23:30:00Z", arrival: "2026-03-05T00:40:00Z")
+        let checkin = leg("ICE 1000", from: "Ingolstadt Hbf", to: "Nürnberg Hbf",
+                          departure: "2026-03-05T00:05:00Z", arrival: "2026-03-05T00:40:00Z")
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        #expect(RideMatch.uncovered([Journey(legs: [saved], source: .transitous)],
+                                    by: [Journey(legs: [checkin], source: .traewelling)], calendar: utc).isEmpty)
+    }
+
+    /// Checked out at Itzehoe and in again on the same train a bit later: two rides, not a repeat.
+    @Test func checkinsOnTheSameTrainOneAfterAnotherAreKept() {
+        let first = leg("ICE 2074", from: "Berlin Gesundbrunnen", to: "Itzehoe",
+                        departure: "2026-10-06T06:09:00Z", arrival: "2026-10-06T09:00:00Z")
+        let second = leg("ICE 2074", from: "Itzehoe", to: "Westerland(Sylt)",
+                         departure: "2026-10-06T09:02:00Z", arrival: "2026-10-06T11:31:00Z")
+        let checkins = [second, first].map { Journey(legs: [$0], source: .traewelling) }
+        #expect(RideMatch.deduplicated(checkins).count == 2)
+    }
+
+    /// The local copy still has a check-in's first version (to the train's last stop) next to a
+    /// later, since cancelled check-in on the same train: one is drawn, but the saved ride is
+    /// covered either way.
+    @Test func savedRideCoveredByCheckinDroppedAsDuplicate() {
+        let saved = leg("ICE 2074", from: "Berlin Gesundbrunnen", to: "Itzehoe",
+                        departure: "2026-10-06T06:09:00Z", arrival: "2026-10-06T09:00:00Z")
+        let stale = leg("ICE 2074", from: "Berlin Gesundbrunnen", to: "Westerland(Sylt)",
+                        departure: "2026-10-06T06:09:00Z", arrival: "2026-10-06T11:31:00Z")
+        let later = leg("ICE 2074", from: "Heide (Holst)", to: "Westerland(Sylt)",
+                        departure: "2026-10-06T09:16:00Z", arrival: "2026-10-06T11:31:00Z")
+        let checkins = [later, stale].map { Journey(legs: [$0], source: .traewelling) }
+        #expect(RideMatch.deduplicated(checkins).map { $0.legs[0].origin.name } == ["Heide (Holst)"])
+        #expect(RideMatch.uncovered([Journey(legs: [saved], source: .transitous)], by: checkins).isEmpty)
+    }
+
+    @Test func sameRideSavedTwiceCountsOnce() {
+        let ride = leg("ICE 645", from: "Köln Hbf", to: "Hannover Hbf",
+                       departure: "2026-03-04T09:00:00Z", arrival: "2026-03-04T11:30:00Z")
+        let saved = [ride, ride].map { Journey(legs: [$0], source: .transitous) }
+        #expect(RideMatch.uncovered(saved, by: []).count == 1)
+    }
 }
 
 @Suite struct TraewellingHistoryTests {
@@ -2690,6 +3521,10 @@ private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
         #expect(leg.geometry?.count == 2)
         #expect(leg.source == .traewelling)
         #expect(page.data[1].product == .suburban)
+        #expect(status.body == "Mit :ice: unterwegs")
+        #expect(status.visibility == .unlisted)
+        #expect(status.business == .commute)
+        #expect(page.data[1].body == nil)
     }
 }
 
@@ -2709,6 +3544,16 @@ private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
     @Test func onTimeHasNoIssues() {
         let journey = Journey(legs: [leg("ICE 1", "A", "B", dep: 0, arr: 60), leg("ICE 2", "B", "C", dep: 70, arr: 120)], source: .bahnDe)
         #expect(journey.connectionIssues().isEmpty)
+    }
+
+    /// The same train to Dresden or on to Praha are different journeys: opening the one to Praha
+    /// showed the one to Dresden remembered from before, since only the legs' starts counted.
+    @Test func journeysToDifferentDestinationsOnTheSameTrainDiffer() {
+        let toDresden = Journey(legs: [leg("RJ 171", "Berlin Hbf", "Dresden Hbf", dep: 0, arr: 99)], source: .transitous)
+        let toPraha = Journey(legs: [leg("RJ 171", "Berlin Hbf", "Praha hl.n.", dep: 0, arr: 237)], source: .transitous)
+        #expect(toDresden.id != toPraha.id)
+        #expect(toDresden.id == Journey(legs: [leg("RJ 171", "Berlin Hbf", "Dresden Hbf", dep: 0, arr: 99)], source: .transitous).id)
+        #expect(LiveActivityLink.journeyID(from: LiveActivityLink.url(journeyID: toPraha.id)) == toPraha.id)
     }
 
     @Test func delayBreaksTransfer() {
@@ -2877,6 +3722,58 @@ final class RoutingMockProvider: TransitProvider, @unchecked Sendable {
     func trip(id: String) async throws -> Trip {
         guard let trip = trips[id] else { throw TransitError.notFound(id) }
         return trip
+    }
+}
+
+/// Expert option "Nur Ein-/Ausstieg ignorieren": a train you may not board at the origin that ends
+/// short of the destination, continued from where it stops (ICE 204 Harburg → Hamburg Hbf, RJ 177 on).
+@Suite struct RestrictedTrainContinuationTests {
+    let harburg = station("8000147", "Hamburg-Harburg", 53.456, 9.992)
+    let hbf = station("8002549", "Hamburg Hbf", 53.553, 10.007)
+    let altona = station("8002553", "Hamburg-Altona", 53.552, 9.935)
+    let berlin = station("8011160", "Berlin Hbf", 52.525, 13.369)
+    let base = Date(timeIntervalSince1970: 1_800_000_000)
+
+    func time(_ minutes: Double) -> TimeInfo { TimeInfo(planned: base.addingTimeInterval(minutes * 60), actual: nil) }
+
+    func trip(_ id: String, _ name: String, _ stops: [Stopover]) -> Trip {
+        Trip(id: id, line: Line(name: name, number: String(name.split(separator: " ").last!), product: .highSpeed,
+                                operatorName: nil),
+             direction: stops.last?.station.name, stopovers: stops, cancelled: false, remarks: [], source: .bahnDe)
+    }
+
+    @Test func ridesRestrictedTrainAndContinues() async throws {
+        let ice204 = trip("ice204", "ICE 204", [
+            Stopover(station: harburg, arrival: time(-2), departure: time(0), arrivalPlatform: nil, departurePlatform: nil,
+                     cancelled: false, access: .exitOnly),
+            Stopover(station: hbf, arrival: time(11), departure: time(14), arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+            Stopover(station: altona, arrival: time(22), departure: nil, arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+        ])
+        let rj177 = trip("rj177", "RJ 177", [
+            Stopover(station: hbf, arrival: nil, departure: time(28), arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+            Stopover(station: berlin, arrival: time(139), departure: nil, arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+        ])
+        let slower = trip("ice801", "ICE 801", [
+            Stopover(station: hbf, arrival: nil, departure: time(47), arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+            Stopover(station: berlin, arrival: time(167), departure: nil, arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+        ])
+        let mock = RoutingMockProvider()
+        mock.trips["ice204"] = ice204
+        mock.routes["\(hbf.name) -> \(berlin.name)"] = [Journey(legs: [slower.leg(from: hbf, to: berlin)!], source: .bahnDe),
+                                                         Journey(legs: [rj177.leg(from: hbf, to: berlin)!], source: .bahnDe)]
+        let entry = BoardEntry(kind: .departures, tripId: "ice204", station: harburg, line: ice204.line!, otherEnd: altona.name,
+                               time: time(0), platform: PlatformInfo(planned: "2", actual: nil), cancelled: false,
+                               terminatesOrOriginatesHere: false, remarks: [], access: .exitOnly, source: .bahnDe)
+        let calls = StationCalls(departuresAtOrigin: [entry], departuresAtDestination: [], arrivalsAtDestination: [])
+        let picker = TrainPicker(provider: CombinedProvider(primary: mock, bahnDe: nil, bahnExpert: nil, vagonweb: nil, bahnJetzt: nil))
+
+        let journeys = await picker.journeysContinuingFromRestrictedTrains(
+            JourneyQuery(from: harburg, to: berlin, date: base), calls: calls, end: base.addingTimeInterval(3600), maxAlightStops: 1)
+        let best = try #require(journeys.first)
+        #expect(journeys.count == 1)
+        #expect(best.transitLegs.map { $0.line?.name } == ["ICE 204", "RJ 177"])
+        #expect(best.transitLegs.first?.breaksBoardingRules == true)
+        #expect(best.arrival?.planned == time(139).planned)
     }
 }
 
@@ -3167,6 +4064,46 @@ private final class TimetablesPlanProtocol: URLProtocol, @unchecked Sendable {
         let override = await timetables.realtime(for: leg(departurePlatform: PlatformInfo(planned: "3", actual: nil)))
 
         #expect(override?.departurePlatform == PlatformInfo(planned: "3", actual: "14"))
+    }
+
+    /// DB lists only changes, so a scheduled stop without one is on time, once the train is about to run.
+    @Test func unchangedTrainAboutToRunIsOnTime() async throws {
+        let (timetables, session) = client(UnchangedS15Protocol.self)
+        defer { session.invalidateAndCancel() }
+
+        let override = await timetables.realtime(for: leg(departurePlatform: nil), now: departure.addingTimeInterval(-600))
+
+        #expect(override?.departure?.actual == departure)
+        #expect(override?.departure?.delayMinutes == 0)
+    }
+
+    /// A journey tomorrow: DB has the schedule but nothing live yet, so no made-up "pünktlich".
+    @Test func unchangedTrainTomorrowHasNoLiveTime() async throws {
+        let (timetables, session) = client(UnchangedS15Protocol.self)
+        defer { session.invalidateAndCancel() }
+
+        let override = await timetables.realtime(for: leg(departurePlatform: nil), now: departure.addingTimeInterval(-86_400))
+
+        #expect(override?.departure?.actual == nil)
+        #expect(override?.departure?.delayMinutes == nil)
+        #expect(override?.departurePlatform?.planned == "12")
+    }
+
+    /// Saved journeys keep an earlier refresh's made-up "on time" until the train is close.
+    @Test func refreshDropsInferredOnTimeForTrainsHoursAhead() {
+        var saved = leg(departurePlatform: nil)
+        saved.departure.actual = departure
+        saved.arrival.actual = departure.addingTimeInterval(720)
+        saved.stopovers = [Stopover(station: berlinHbf, arrival: nil, departure: TimeInfo(planned: departure, actual: departure),
+                                    arrivalPlatform: nil, departurePlatform: nil, cancelled: false)]
+
+        let tomorrow = JourneyRefresher.droppingInferredOnTime(saved, now: departure.addingTimeInterval(-86_400))
+        #expect(tomorrow.departure.actual == nil)
+        #expect(tomorrow.arrival.actual == departure.addingTimeInterval(720))
+        #expect(tomorrow.stopovers[0].departure?.actual == nil)
+
+        let soon = JourneyRefresher.droppingInferredOnTime(saved, now: departure.addingTimeInterval(-600))
+        #expect(soon == saved)
     }
 }
 
@@ -3830,6 +4767,276 @@ private final class RE3318CancelledProtocol: RE3318Protocol, @unchecked Sendable
     }
 }
 
+@Suite struct OperatorBrandTests {
+    /// Agency names as Transitous reports them on German, Swiss and Austrian boards (#166).
+    @Test func recognisesFeedAgencyNames() {
+        let expected: [String: OperatorBrand] = [
+            "DB Fernverkehr AG": .db, "DB Fernverkehr (Codesharing)": .db, "DB Regio AG NRW": .dbregio, "DB Regio AG": .dbregio,
+            "DB Regio AG S-Bahn München": .sbahn, "DB RegioNetz Verkehrs GmbH Kurhessenbahn": .db,
+            "Deutsche Bahn AG": .db, "S-Bahn Hamburg": .sbahn, "S-Bahn Berlin GmbH": .sbahn,
+            "DB Regio AG S-Bahn Rhein-Main": .sbahn, "DB Regio AG S-Bahn Stuttgart": .sbahn,
+            "DB Regio AG Südost": .dbregio, "DB Regio AG Bayern": .dbregio,
+            "S-Bahn Hannover (Transdev)": .transdev, "S-Bahn Hannover": .transdev,
+            "Schweizerische Bundesbahnen SBB": .sbb, "SBB GmbH (Grenzverkehr)": .sbb,
+            "Schweizerische Südostbahn (sob)": .sob, "THURBO": .thurbo, "BLS AG (bls)": .bls,
+            "OEBB Personenverkehr AG Kundenservice": .oebb, "Österreichische Bundesbahnen": .oebb, "ÖBB": .oebb,
+            "FlixTrain-de": .flixtrain, "National Express": .nationalexpress, "NordWestBahn": .nordwestbahn,
+            "Nordbahn Eisenbahngesellschaft": .nordbahn, "erixx": .erixx, "metronom": .metronom, "enno": .enno,
+            "Ostdeutsche Eisenbahn GmbH": .odeg, "ODEG Ostdeutsche Eisenbahn GmbH": .odeg,
+            "cantus Verkehrsgesellschaft": .cantus, "agilis": .agilis, "agilis-Schnellzug": .agilis,
+            "Arverio Bayern GmbH": .arverio, "Südwestdeutsche Verkehrs-AG": .sweg,
+            "alex - Die Länderbahn GmbH DLB": .alex, "trilex - Die Länderbahn GmbH DLB1": .laenderbahn,
+            "oberpfalzbahn - Die Länderbahn GmbH DLB": .laenderbahn, "MittelrheinBahn (Trans Regio)": .transregio,
+            "Süd-Thüringen-Bahn": .suedthueringenbahn, "Süd-Thüringen-Bahn Express": .suedthueringenbahn,
+            "Erfurter Bahn": .erfurterbahn, "Hessische Landesbahn GmbH": .hlb, "Bayerische Regiobahn": .brb,
+            "Mitteldeutsche Regiobahn": .mrb, "Abellio Rail Mitteldeutschland GmbH": .abellio,
+            "vlexx": .vlexx, "vlexx1": .vlexx, "Eurobahn": .eurobahn, "WestfalenBahn": .westfalenbahn,
+            "NS International": .ns, "European Sleeper": .europeansleeper, "PKP Intercity": .pkpic,
+            "PolRegio": .polregio, "Raaberbahn AG GYSEV Zrt.": .gysev,
+            "Železničná spoločnosť Slovensko, a.s.": .zssk, "DSB": .dsb, "DSB (Danske Statsbaner)": .dsb, "Dänische Staatsbahnen": .dsb,
+        ]
+        for (name, brand) in expected {
+            #expect(OperatorBrand(operatorName: name) == brand, "\(name)")
+        }
+    }
+
+    @Test func unknownOperatorsKeepTheIcon() {
+        for name in ["SÜWEX", "KVG Tram", "VIAS Rail GmbH", "BördeBus Verkehrsgesellschaft mbH", "MAV", "", "Transnetz"] {
+            #expect(OperatorBrand(operatorName: name) == nil, "\(name)")
+        }
+        #expect(Line(name: "RE 1", number: nil, product: .regionalExpress, operatorName: nil).operatorBrand == nil)
+        #expect(Line(name: "ICE 1", number: "1", product: .highSpeed, operatorName: "DB Fernverkehr AG").operatorBrand == .db)
+    }
+
+    @Test func shortensLongOperatorNames() {
+        #expect(OperatorBrand.displayName(for: "ODEG Ostdeutsche Eisenbahn GmbH") == "ODEG")
+        #expect(OperatorBrand.displayName(for: "Ostdeutsche Eisenbahn GmbH") == "ODEG")
+        #expect(OperatorBrand.displayName(for: "S-Bahn Hannover (Transdev)") == "Transdev")
+        #expect(OperatorBrand.displayName(for: "S-Bahn Hannover") == "Transdev")
+        #expect(OperatorBrand.displayName(for: "Transdev Rhein-Ruhr") == "Transdev Rhein-Ruhr")
+        #expect(OperatorBrand.displayName(for: "DB Regio AG S-Bahn München") == "DB Regio AG S-Bahn München")
+        #expect(OperatorBrand.displayName(for: "DB Regio AG Nordost") == "DB Regio AG Nordost")
+        #expect(OperatorBrand.displayName(for: "VIAS Rail GmbH") == "VIAS Rail GmbH")
+    }
+
+    /// Every brand needs its logo in the app's asset catalog, else it would silently keep the icon.
+    @Test func everyBrandHasALogo() throws {
+        var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        while !FileManager.default.fileExists(atPath: dir.appending(path: "BetterBahn/Assets.xcassets").path) {
+            try #require(dir.path != "/", "repository root not found")
+            dir.deleteLastPathComponent()
+        }
+        let operators = dir.appending(path: "BetterBahn/Assets.xcassets/Operators")
+        for brand in OperatorBrand.allCases {
+            let png = operators.appending(path: "\(brand.assetName).imageset/\(brand.assetName)@3x.png")
+            #expect(FileManager.default.fileExists(atPath: png.path), "\(brand)")
+        }
+    }
+
+    /// bahn.de lists one "BEF" attribute per operator, with its section on trains run by several.
+    @Test func parsesOperatorsFromBahnDeAttributes() throws {
+        let details = """
+        {"halte": [], "zugattribute": [
+          {"kategorie": "BEFÖRDERER", "key": "BEF", "value": "DB Fernverkehr AG", "teilstreckenHinweis": "(Berlin Hbf - Bad Schandau)"},
+          {"kategorie": "BORDBISTRO", "key": "BR", "value": "Bordrestaurant"},
+          {"kategorie": "BEFÖRDERER", "key": "BEF", "value": "České dráhy, a.s.", "teilstreckenHinweis": "(Děčín hl.n. - Praha hl.n.)"},
+          {"kategorie": "BEFÖRDERER", "key": "BEF", "value": "DB Fernverkehr AG", "teilstreckenHinweis": "(Berlin Hbf - Bad Schandau)"}
+        ]}
+        """
+        let decoded = try JSONDecoding.decoder.decode(BahnDeClient.JourneyDetails.self, from: Data(details.utf8))
+        let operators = BahnDeClient.operators(in: decoded.zugattribute ?? [])
+        #expect(operators == [
+            TrainOperator(name: "DB Fernverkehr AG", section: .init(from: "Berlin Hbf", to: "Bad Schandau")),
+            TrainOperator(name: "České dráhy, a.s.", section: .init(from: "Děčín hl.n.", to: "Praha hl.n.")),
+        ])
+        #expect(BahnDeClient.section("(Berlin-Spandau - Dresden-Neustadt)") == .init(from: "Berlin-Spandau", to: "Dresden-Neustadt"))
+        #expect(BahnDeClient.section("Berlin Hbf") == nil)
+        // Older responses without attributes still decode.
+        #expect(try JSONDecoding.decoder.decode(BahnDeClient.JourneyDetails.self, from: Data(#"{"halte": []}"#.utf8)).zugattribute == nil)
+    }
+
+    /// Real RJ 171 Hamburg-Altona → Praha hl.n. (bahn.de journey details, 2026-10-07, shortened): no
+    /// "BEF" attribute at all, but each stop's `adminID` – "80" (DB) up to Bad Schandau, "54" (ČD) after.
+    @Test func operatorsFromTheStopsAdministration() throws {
+        let details = #"""
+        {"zugName": "RJ 171", "zugattribute": [{"kategorie": "BORDBISTRO", "key": "BR", "value": "Bordrestaurant"}], "halte": [
+          {"id": "A=1@O=Berlin Hbf@X=13369549@Y=52525589@U=80@L=8098160@", "extId": "8098160", "name": "Berlin Hbf", "adminID": "80", "kategorie": "RJ", "ankunft": {"sollzeit": "2026-10-07T07:23:00"}, "abfahrt": {"sollzeit": "2026-10-07T07:28:00"}},
+          {"id": "A=1@O=Dresden Hbf@X=13732039@Y=51040562@U=80@L=8010085@", "extId": "8010085", "name": "Dresden Hbf", "adminID": "80", "kategorie": "RJ", "ankunft": {"sollzeit": "2026-10-07T09:07:00"}, "abfahrt": {"sollzeit": "2026-10-07T09:10:00"}},
+          {"id": "A=1@O=Bad Schandau@X=14137542@Y=50919289@U=80@L=8010022@", "extId": "8010022", "name": "Bad Schandau", "adminID": "80", "kategorie": "RJ", "ankunft": {"sollzeit": "2026-10-07T09:35:00"}, "abfahrt": {"sollzeit": "2026-10-07T09:37:00"}},
+          {"id": "A=1@O=Decin hl.n.@X=14201249@Y=50773412@U=80@L=5400003@", "extId": "5400003", "name": "Decin hl.n.", "adminID": "54", "kategorie": "RJ", "ankunft": {"sollzeit": "2026-10-07T09:53:00"}, "abfahrt": {"sollzeit": "2026-10-07T09:57:00"}},
+          {"id": "A=1@O=Praha hl.n.@X=14436038@Y=50083058@U=80@L=5400014@", "extId": "5400014", "name": "Praha hl.n.", "adminID": "54", "kategorie": "RJ", "ankunft": {"sollzeit": "2026-10-07T11:25:00"}}
+        ]}
+        """#
+        let decoded = try JSONDecoding.decoder.decode(BahnDeClient.JourneyDetails.self, from: Data(details.utf8))
+        #expect(BahnDeClient.operators(in: decoded.zugattribute ?? []).isEmpty)
+        let operators = BahnDeClient.operators(byAdministration: decoded.halte)
+        #expect(operators == [
+            TrainOperator(name: "DB Fernverkehr AG", section: .init(from: "Berlin Hbf", to: "Bad Schandau")),
+            TrainOperator(name: "České dráhy, a.s.", section: .init(from: "Decin hl.n.", to: "Praha hl.n.")),
+        ])
+        #expect(operators.map { OperatorBrand(operatorName: $0.name) } == [.db, .cd])
+
+        let stops = decoded.halte.compactMap(JourneyStop.init)
+        func time(_ text: String) throws -> TimeInfo { TimeInfo(planned: try #require(BahnDeClient.parseBerlinTime(text)), actual: nil) }
+        func station(_ name: String, _ lat: Double, _ lon: Double) -> Station {
+            Station(id: "t:\(name)", name: name, coordinate: Coordinate(latitude: lat, longitude: lon), evaNumber: nil, source: .transitous)
+        }
+        let berlin = station("S+U Berlin Hauptbahnhof", 52.5252, 13.3694)
+        func leg(to destination: Station, arriving: String) throws -> Leg {
+            Leg(origin: berlin, destination: destination, departure: try time("2026-10-07T07:28:00"), arrival: try time(arriving),
+                departurePlatform: nil, arrivalPlatform: nil, tripId: "rj", line: Line(name: "RJ 171", number: "171", product: .highSpeed, operatorName: "DB Fernverkehr AG"),
+                direction: nil, isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+        }
+        let toDresden = try leg(to: station("Dresden Hbf", 51.0405, 13.7320), arriving: "2026-10-07T09:07:00")
+        let toPraha = try leg(to: station("Praha hl.n.", 50.0830, 14.4360), arriving: "2026-10-07T11:25:00")
+        #expect(BahnDeClient.operators(operators, riding: toDresden, stops: stops) == [TrainOperator(name: "DB Fernverkehr AG")])
+        #expect(BahnDeClient.operators(operators, riding: toPraha, stops: stops) == operators)
+
+        // The route marks where the train changes hands: DB at the start and at Bad Schandau, ČD at Děčín.
+        func stopover(_ station: Station, _ arrival: String?, _ departure: String?) throws -> Stopover {
+            Stopover(station: station, arrival: try arrival.map(time), departure: try departure.map(time),
+                     arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+        }
+        let route = [
+            try stopover(berlin, "2026-10-07T07:23:00", "2026-10-07T07:28:00"),
+            try stopover(station("Dresden Hbf", 51.0405, 13.7320), "2026-10-07T09:07:00", "2026-10-07T09:10:00"),
+            try stopover(station("Bad Schandau", 50.9193, 14.1375), "2026-10-07T09:35:00", "2026-10-07T09:37:00"),
+            try stopover(station("Děčín hl.n.", 50.7734, 14.2012), "2026-10-07T09:53:00", "2026-10-07T09:57:00"),
+            try stopover(station("Praha hl.n.", 50.0830, 14.4360), "2026-10-07T11:25:00", nil),
+        ]
+        #expect(BahnDeClient.operatorStops(operators, stops: stops, stopovers: route) == [
+            route[0].id: ["DB Fernverkehr AG"], route[2].id: ["DB Fernverkehr AG"], route[3].id: ["České dráhy, a.s."],
+        ])
+        #expect(BahnDeClient.operatorStops([TrainOperator(name: "DB Fernverkehr AG")], stops: stops, stopovers: route).isEmpty)
+
+        // A train run by one railway throughout keeps the feed's operator, and an unknown code isn't guessed.
+        #expect(BahnDeClient.operators(byAdministration: Array(decoded.halte.prefix(3))).isEmpty)
+        var unknown = decoded.halte
+        unknown[4].adminID = "99"
+        #expect(BahnDeClient.operators(byAdministration: unknown).isEmpty)
+    }
+
+    /// RJ 383 København H → Praha hl.n. is run by DSB, DB and ČD. Attributes naming only one of them
+    /// don't hide the others the stops' railways name; attributes naming them all are kept.
+    @Test func operatorsFromTheStopsWhenTheAttributesNameFewer() throws {
+        func details(_ attributes: String) throws -> BahnDeClient.JourneyDetails {
+            let json = """
+            {"zugattribute": [\(attributes)], "halte": [
+              {"name": "København H", "adminID": "86", "kategorie": "RJ", "abfahrt": {"sollzeit": "2026-10-07T06:22:00"}},
+              {"name": "Padborg st", "adminID": "86", "kategorie": "RJ", "ankunft": {"sollzeit": "2026-10-07T09:03:00"}, "abfahrt": {"sollzeit": "2026-10-07T09:13:00"}},
+              {"name": "Flensburg", "adminID": "80", "kategorie": "RJ", "ankunft": {"sollzeit": "2026-10-07T09:25:00"}, "abfahrt": {"sollzeit": "2026-10-07T09:27:00"}},
+              {"name": "Bad Schandau", "adminID": "80", "kategorie": "RJ", "ankunft": {"sollzeit": "2026-10-07T15:35:00"}, "abfahrt": {"sollzeit": "2026-10-07T15:37:00"}},
+              {"name": "Decin hl.n.", "adminID": "54", "kategorie": "RJ", "ankunft": {"sollzeit": "2026-10-07T15:53:00"}, "abfahrt": {"sollzeit": "2026-10-07T15:57:00"}},
+              {"name": "Praha hl.n.", "adminID": "54", "kategorie": "RJ", "ankunft": {"sollzeit": "2026-10-07T17:25:00"}}
+            ]}
+            """
+            return try JSONDecoding.decoder.decode(BahnDeClient.JourneyDetails.self, from: Data(json.utf8))
+        }
+        let onlyDSB = try details(#"{"key": "BEF", "value": "DSB", "teilstreckenHinweis": "(København H - Padborg st)"}"#)
+        #expect(BahnDeClient.operators(of: onlyDSB) == [
+            TrainOperator(name: "DSB", section: .init(from: "København H", to: "Padborg st")),
+            TrainOperator(name: "DB Fernverkehr AG", section: .init(from: "Flensburg", to: "Bad Schandau")),
+            TrainOperator(name: "České dráhy, a.s.", section: .init(from: "Decin hl.n.", to: "Praha hl.n.")),
+        ])
+        #expect(BahnDeClient.operators(of: onlyDSB).map { OperatorBrand(operatorName: $0.name) } == [.dsb, .db, .cd])
+
+        let all = try details(#"""
+            {"key": "BEF", "value": "DSB", "teilstreckenHinweis": "(København H - Padborg st)"},
+            {"key": "BEF", "value": "DB Fernverkehr AG", "teilstreckenHinweis": "(Flensburg - Bad Schandau)"},
+            {"key": "BEF", "value": "České dráhy, a.s.", "teilstreckenHinweis": "(Děčín hl.n. - Praha hl.n.)"}
+            """#)
+        #expect(BahnDeClient.operators(of: all).map(\.name) == ["DSB", "DB Fernverkehr AG", "České dráhy, a.s."])
+        #expect(BahnDeClient.operators(of: all)[2].section?.from == "Děčín hl.n.")
+    }
+
+    /// Real RJ 383 København H → Praha hl.n. (bahn.de journey details, 2026-10-07, shortened): no
+    /// "BEF" attribute and no `adminID`, while bahn.de's page names DSB, DB Fernverkehr and ČD. The
+    /// stations' numbers give their country (86, 80, 54).
+    @Test func operatorsFromTheStationsCountries() throws {
+        let details = try fixture("bahnde-fahrt-rj383", as: BahnDeClient.JourneyDetails.self)
+        let operators = BahnDeClient.operators(of: details)
+        #expect(operators == [
+            TrainOperator(name: "DSB", section: .init(from: "Koebenhavn H", to: "Padborg st")),
+            TrainOperator(name: "DB Fernverkehr AG", section: .init(from: "Schleswig", to: "Bad Schandau")),
+            TrainOperator(name: "České dráhy, a.s.", section: .init(from: "Decin hl.n.", to: "Praha hl.n.")),
+        ])
+        #expect(operators.map { OperatorBrand(operatorName: $0.name) } == [.dsb, .db, .cd])
+        #expect(BahnDeClient.operators(of: details, feedOperator: "DSB") == operators)
+        #expect(BahnDeClient.operators(of: details, feedOperator: "Dänische Staatsbahnen") == operators)
+
+        // A train the feed says someone else runs (Die Länderbahn's trilex to Liberec, RegioJet, an operator
+        // the app doesn't know) keeps the feed's operator: the countries only stand for national railways.
+        #expect(BahnDeClient.operators(of: details, feedOperator: "trilex - Die Länderbahn GmbH DLB").isEmpty)
+        #expect(BahnDeClient.operators(of: details, feedOperator: "RegioJet a.s.").isEmpty)
+        #expect(BahnDeClient.operators(of: details, feedOperator: "European Sleeper").isEmpty)
+
+        // A train ending at the first stop abroad stays its own railway's.
+        let toDecin = Array(details.halte.filter { $0.extId?.hasPrefix("80") == true }) + [details.halte[13]]
+        #expect(BahnDeClient.operators(byAdministration: toDecin, trainName: "RJ 383").isEmpty)
+    }
+
+    /// RJ 383 on 2026-10-07: Transitous had no delay at Bad Schandau (and DB Timetables none either),
+    /// bahn.de +57. Its live times win at the leg's ends and stops; a stop it doesn't know keeps its own.
+    @Test func appliesBahnDeLiveTimes() throws {
+        let details = try fixture("bahnde-fahrt-rj383", as: BahnDeClient.JourneyDetails.self)
+        let stops = details.halte.compactMap(JourneyStop.init)
+        func date(_ text: String) throws -> Date { try #require(JSONDecoding.parseISODate(text)) }
+        func station(_ name: String, _ lat: Double, _ lon: Double) -> Station {
+            Station(id: "t:\(name)", name: name, coordinate: Coordinate(latitude: lat, longitude: lon), evaNumber: nil, source: .transitous)
+        }
+        let schandau = Stopover(station: station("Bad Schandau Nationalparkbahnhof", 50.91921, 14.137704),
+                                arrival: TimeInfo(planned: try date("2026-10-07T13:35:00Z"), actual: try date("2026-10-07T13:33:00Z")),
+                                departure: TimeInfo(planned: try date("2026-10-07T13:37:00Z"), actual: try date("2026-10-07T13:35:00Z")),
+                                arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+        let elsewhere = Stopover(station: station("Pirna", 50.9622, 13.9426),
+                                 arrival: TimeInfo(planned: try date("2026-10-07T13:20:00Z"), actual: try date("2026-10-07T13:21:00Z")),
+                                 departure: nil, arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+        let leg = Leg(origin: station("S+U Berlin Hauptbahnhof", 52.5252, 13.3694), destination: station("Praha hl.n.", 50.0830, 14.4360),
+                      departure: TimeInfo(planned: try date("2026-10-07T11:28:00Z"), actual: nil),
+                      arrival: TimeInfo(planned: try date("2026-10-07T15:25:00Z"), actual: try date("2026-10-07T15:25:00Z")),
+                      departurePlatform: nil, arrivalPlatform: nil, tripId: "rj", line: Line(name: "RJ 383", number: "383", product: .highSpeed, operatorName: "DSB"),
+                      direction: nil, isWalking: false, cancelled: false, stopovers: [elsewhere, schandau], remarks: [], source: .transitous)
+
+        let live = BahnDeClient.applyingLiveTimes(from: stops, to: leg)
+        #expect(live.departure.delayMinutes == 62)
+        #expect(live.arrival.delayMinutes == 57)
+        #expect(live.stopovers[1].arrival?.delayMinutes == 57)
+        #expect(live.stopovers[1].departure?.delayMinutes == 57)
+        #expect(live.stopovers[0].arrival?.delayMinutes == 1)
+    }
+
+    /// Berlin → Praha is run by DB and ČD; riding only to Dresden shows DB alone, riding to Praha both.
+    @Test func narrowsOperatorsToTheLegsSection() throws {
+        let start = try #require(JSONDecoding.parseISODate("2026-10-08T07:00:00Z"))
+        func at(_ minutes: Double) -> TimeInfo { TimeInfo(planned: start.addingTimeInterval(minutes * 60), actual: nil) }
+        func station(_ name: String) -> Station { Station(id: "t:\(name)", name: name, coordinate: nil, evaNumber: nil, source: .transitous) }
+        let stops = [
+            JourneyStop(evaNumber: "8011160", name: "Berlin Hbf", departure: at(0)),
+            JourneyStop(evaNumber: "8010085", name: "Dresden Hbf", arrival: at(110), departure: at(115)),
+            JourneyStop(evaNumber: "8010022", name: "Bad Schandau", arrival: at(140), departure: at(141)),
+            JourneyStop(evaNumber: "5400019", name: "Děčín hl.n.", arrival: at(155), departure: at(157)),
+            JourneyStop(evaNumber: "5400014", name: "Praha hl.n.", arrival: at(250)),
+        ]
+        let operators = [
+            TrainOperator(name: "DB Fernverkehr AG", section: .init(from: "Berlin Hbf", to: "Bad Schandau")),
+            TrainOperator(name: "České dráhy, a.s.", section: .init(from: "Bad Schandau", to: "Praha hl.n.")),
+        ]
+        func leg(_ from: String, _ fromMinutes: Double, _ to: String, _ toMinutes: Double) -> Leg {
+            Leg(origin: station(from), destination: station(to), departure: at(fromMinutes), arrival: at(toMinutes),
+                departurePlatform: nil, arrivalPlatform: nil, tripId: "ec", line: Line(name: "EC 171", number: "171", product: .longDistance, operatorName: "DB Fernverkehr AG"),
+                direction: nil, isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+        }
+
+        #expect(BahnDeClient.operators(operators, riding: leg("Berlin Hbf", 0, "Praha hl.n.", 250), stops: stops) == operators)
+        #expect(BahnDeClient.operators(operators, riding: leg("Berlin Hbf", 0, "Dresden Hbf", 110), stops: stops)
+                    == [TrainOperator(name: "DB Fernverkehr AG")])
+        #expect(BahnDeClient.operators(operators, riding: leg("Děčín hl.n.", 157, "Praha hl.n.", 250), stops: stops)
+                    == [TrainOperator(name: "České dráhy, a.s.")])
+        // A leg bahn.de's stops don't show keeps every operator rather than guessing.
+        #expect(BahnDeClient.operators(operators, riding: leg("Wien Hbf", 0, "Praha hl.n.", 250), stops: stops) == operators)
+    }
+}
+
 private final class RE3318NoChangesProtocol: RE3318Protocol, @unchecked Sendable {
     override class var fchgPasewalk: String? { nil }
 }
@@ -3871,6 +5078,8 @@ private final class SlowExtraGeocodeProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     private let stopped = Mutex(false)
+    /// Set once the slow "Po Bahnhof" answer is due, whether or not the request was still waiting for it.
+    static let answeredSlowly = Mutex(false)
     override func stopLoading() { stopped.withLock { $0 = true } }
 
     override func startLoading() {
@@ -3887,7 +5096,10 @@ private final class SlowExtraGeocodeProtocol: URLProtocol, @unchecked Sendable {
             client?.urlProtocolDidFinishLoading(self)
         }
         if text == "Po Bahnhof" {
-            DispatchQueue.global().asyncAfter(deadline: .now() + 5, execute: finish)
+            DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
+                Self.answeredSlowly.withLock { $0 = true }
+                finish()
+            }
         } else {
             finish()
         }

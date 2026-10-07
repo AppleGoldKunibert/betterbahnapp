@@ -1,0 +1,285 @@
+{
+ "reisetag": "2026-10-07",
+ "zugName": "RJ 383",
+ "halte": [
+  {
+   "id": "A=1@O=Koebenhavn H@X=12564618@Y=55672722@U=80@L=8601309@",
+   "name": "Koebenhavn H",
+   "extId": "8601309",
+   "risNotizen": [],
+   "priorisierteMeldungen": [],
+   "abfahrt": {
+    "sollzeit": "2026-10-07T06:22:00",
+    "echtzeit": "2026-10-07T06:23:00"
+   },
+   "gleis": "5"
+  },
+  {
+   "id": "A=1@O=Ringsted st@X=11786153@Y=55438040@U=80@L=8601979@",
+   "name": "Ringsted st",
+   "extId": "8601979",
+   "risNotizen": [],
+   "priorisierteMeldungen": [],
+   "ankunft": {
+    "sollzeit": "2026-10-07T06:50:00",
+    "echtzeit": "2026-10-07T06:53:00"
+   },
+   "abfahrt": {
+    "sollzeit": "2026-10-07T06:52:00",
+    "echtzeit": "2026-10-07T06:56:00"
+   },
+   "gleis": "1"
+  },
+  {
+   "id": "A=1@O=Odense st@X=10386002@Y=55401778@U=80@L=8601770@",
+   "name": "Odense st",
+   "extId": "8601770",
+   "risNotizen": [],
+   "priorisierteMeldungen": [],
+   "ankunft": {
+    "sollzeit": "2026-10-07T07:33:00",
+    "echtzeit": "2026-10-07T07:40:00"
+   },
+   "abfahrt": {
+    "sollzeit": "2026-10-07T07:36:00",
+    "echtzeit": "2026-10-07T07:44:00"
+   },
+   "gleis": "5"
+  },
+  {
+   "id": "A=1@O=Kolding st@X=9481525@Y=55490843@U=80@L=8601318@",
+   "name": "Kolding st",
+   "extId": "8601318",
+   "risNotizen": [],
+   "priorisierteMeldungen": [],
+   "ankunft": {
+    "sollzeit": "2026-10-07T08:12:00",
+    "echtzeit": "2026-10-07T08:25:00"
+   },
+   "abfahrt": {
+    "sollzeit": "2026-10-07T08:15:00",
+    "echtzeit": "2026-10-07T08:29:00"
+   },
+   "gleis": "1"
+  },
+  {
+   "id": "A=1@O=Padborg st@X=9358804@Y=54824248@U=80@L=8601899@",
+   "name": "Padborg st",
+   "extId": "8601899",
+   "risNotizen": [],
+   "priorisierteMeldungen": [],
+   "ankunft": {
+    "sollzeit": "2026-10-07T08:57:00",
+    "echtzeit": "2026-10-07T09:04:00"
+   },
+   "abfahrt": {
+    "sollzeit": "2026-10-07T09:02:00",
+    "echtzeit": "2026-10-07T09:13:00"
+   },
+   "gleis": "1"
+  },
+  {
+   "id": "A=1@O=Schleswig@X=9538139@Y=54499459@U=80@L=8005362@",
+   "name": "Schleswig",
+   "extId": "8005362",
+   "risNotizen": [],
+   "priorisierteMeldungen": [],
+   "ankunft": {
+    "sollzeit": "2026-10-07T09:29:00",
+    "echtzeit": "2026-10-07T09:38:00"
+   },
+   "abfahrt": {
+    "sollzeit": "2026-10-07T09:31:00",
+    "echtzeit": "2026-10-07T09:40:00"
+   },
+   "gleis": "3"
+  },
+  {
+   "id": "A=1@O=Hamburg-Altona@X=9935175@Y=53552697@U=80@L=8002553@",
+   "name": "Hamburg-Altona",
+   "extId": "8002553",
+   "risNotizen": [],
+   "priorisierteMeldungen": [],
+   "ankunft": {
+    "sollzeit": "2026-10-07T10:48:00",
+    "echtzeit": "2026-10-07T10:52:00"
+   },
+   "abfahrt": {
+    "sollzeit": "2026-10-07T11:19:00",
+    "echtzeit": "2026-10-07T11:54:00"
+   },
+   "gleis": "10"
+  },
+  {
+   "id": "A=1@O=Hamburg Hbf@X=10006909@Y=53552733@U=80@L=8002549@",
+   "name": "Hamburg Hbf",
+   "extId": "8002549",
+   "risNotizen": [],
+   "priorisierteMeldungen": [],
+   "ankunft": {
+    "sollzeit": "2026-10-07T11:28:00",
+    "echtzeit": "2026-10-07T12:18:00"
+   },
+   "abfahrt": {
+    "sollzeit": "2026-10-07T11:33:00",
+    "echtzeit": "2026-10-07T12:23:00"
+   },
+   "gleis": "8A-F"
+  },
+  {
+   "id": "A=1@O=Berlin Hbf@X=13369549@Y=52525589@U=80@L=8098160@",
+   "name": "Berlin Hbf",
+   "extId": "8098160",
+   "risNotizen": [],
+   "priorisierteMeldungen": [],
+   "ankunft": {
+    "sollzeit": "2026-10-07T13:23:00",
+    "echtzeit": "2026-10-07T14:24:00"
+   },
+   "abfahrt": {
+    "sollzeit": "2026-10-07T13:28:00",
+    "echtzeit": "2026-10-07T14:30:00"
+   },
+   "gleis": "3"
+  },
+  {
+   "id": "A=1@O=Berlin Südkreuz@X=13365315@Y=52475043@U=80@L=8011113@",
+   "name": "Berlin Südkreuz",
+   "extId": "8011113",
+   "risNotizen": [],
+   "priorisierteMeldungen": [],
+   "ankunft": {
+    "sollzeit": "2026-10-07T13:35:00",
+    "echtzeit": "2026-10-07T14:34:00"
+   },
+   "abfahrt": {
+    "sollzeit": "2026-10-07T13:40:00",
+    "echtzeit": "2026-10-07T14:37:00"
+   },
+   "gleis": "3"
+  },
+  {
+   "id": "A=1@O=Dresden-Neustadt@X=13740704@Y=51065903@U=80@L=8010089@",
+   "name": "Dresden-Neustadt",
+   "extId": "8010089",
+   "risNotizen": [],
+   "priorisierteMeldungen": [],
+   "ankunft": {
+    "sollzeit": "2026-10-07T15:00:00",
+    "echtzeit": "2026-10-07T15:59:00"
+   },
+   "abfahrt": {
+    "sollzeit": "2026-10-07T15:02:00",
+    "echtzeit": "2026-10-07T16:01:00"
+   },
+   "gleis": "7"
+  },
+  {
+   "id": "A=1@O=Dresden Hbf@X=13732039@Y=51040562@U=80@L=8010085@",
+   "name": "Dresden Hbf",
+   "extId": "8010085",
+   "risNotizen": [],
+   "priorisierteMeldungen": [],
+   "ankunft": {
+    "sollzeit": "2026-10-07T15:07:00",
+    "echtzeit": "2026-10-07T16:06:00"
+   },
+   "abfahrt": {
+    "sollzeit": "2026-10-07T15:10:00",
+    "echtzeit": "2026-10-07T16:09:00"
+   },
+   "gleis": "1"
+  },
+  {
+   "id": "A=1@O=Bad Schandau@X=14137542@Y=50919289@U=80@L=8010022@",
+   "name": "Bad Schandau",
+   "extId": "8010022",
+   "risNotizen": [],
+   "priorisierteMeldungen": [],
+   "ankunft": {
+    "sollzeit": "2026-10-07T15:35:00",
+    "echtzeit": "2026-10-07T16:32:00"
+   },
+   "abfahrt": {
+    "sollzeit": "2026-10-07T15:37:00",
+    "echtzeit": "2026-10-07T16:34:00"
+   },
+   "gleis": "3"
+  },
+  {
+   "id": "A=1@O=Decin hl.n.@X=14201249@Y=50773412@U=80@L=5400003@",
+   "name": "Decin hl.n.",
+   "extId": "5400003",
+   "risNotizen": [],
+   "priorisierteMeldungen": [],
+   "ankunft": {
+    "sollzeit": "2026-10-07T15:53:00",
+    "echtzeit": "2026-10-07T16:49:00"
+   },
+   "abfahrt": {
+    "sollzeit": "2026-10-07T15:57:00",
+    "echtzeit": "2026-10-07T16:52:00"
+   }
+  },
+  {
+   "id": "A=1@O=Usti nad Labem hl.n.@X=14044728@Y=50659564@U=80@L=5400019@",
+   "name": "Usti nad Labem hl.n.",
+   "extId": "5400019",
+   "risNotizen": [],
+   "priorisierteMeldungen": [],
+   "ankunft": {
+    "sollzeit": "2026-10-07T16:11:00",
+    "echtzeit": "2026-10-07T17:06:00"
+   },
+   "abfahrt": {
+    "sollzeit": "2026-10-07T16:13:00",
+    "echtzeit": "2026-10-07T17:08:00"
+   }
+  },
+  {
+   "id": "A=1@O=Praha-Holesovice@X=14440011@Y=50110215@U=80@L=5400201@",
+   "name": "Praha-Holesovice",
+   "extId": "5400201",
+   "risNotizen": [],
+   "priorisierteMeldungen": [],
+   "ankunft": {
+    "sollzeit": "2026-10-07T17:15:00",
+    "echtzeit": "2026-10-07T18:11:00"
+   },
+   "abfahrt": {
+    "sollzeit": "2026-10-07T17:15:00",
+    "echtzeit": "2026-10-07T18:13:00"
+   }
+  },
+  {
+   "id": "A=1@O=Praha hl.n.@X=14436038@Y=50083058@U=80@L=5400014@",
+   "name": "Praha hl.n.",
+   "extId": "5400014",
+   "risNotizen": [],
+   "priorisierteMeldungen": [],
+   "ankunft": {
+    "sollzeit": "2026-10-07T17:25:00",
+    "echtzeit": "2026-10-07T18:22:00"
+   }
+  }
+ ],
+ "zugattribute": [
+  {
+   "kategorie": "BORDBISTRO",
+   "key": "BR",
+   "value": "Bordrestaurant"
+  },
+  {
+   "kategorie": "INFORMATION",
+   "key": "RE",
+   "value": "Bitte reservieren",
+   "teilstreckenHinweis": "(Koebenhavn H - Schleswig)"
+  },
+  {
+   "kategorie": "INFORMATION",
+   "key": "WI",
+   "value": "kostenloses WLAN im In- und Ausland"
+  }
+ ],
+ "cancelled": false
+}

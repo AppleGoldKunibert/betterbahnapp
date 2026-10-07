@@ -53,11 +53,53 @@ public struct VagonwebClient: Sendable {
         return composition.coachSequence(trainName: "\(category.uppercased()) \(number)")
     }
 
-    /// The planned Wagenreihung for a long-distance train at a stop (vagonweb has the whole train,
-    /// not per stop); nil for regional trains.
-    public func coachSequence(for request: BahnDeClient.FormationRequest) async throws -> CoachSequence? {
-        guard BahnDeClient.longDistanceCategories.contains(request.category.uppercased()) else { return nil }
-        return try await coachSequence(category: request.category, number: request.number, on: request.plannedDeparture)
+    /// The planned Wagenreihung for a long-distance train at a stop; nil for regional trains. vagonweb
+    /// has the whole train as it leaves its first station, so it is turned round when the train
+    /// changed direction on the way (`reversals(at:route:in:)`).
+    /// - Parameter route: the train's stops from its first one up to the request's station. Without
+    ///   it the direction stays unknown.
+    public func coachSequence(for request: BahnDeClient.FormationRequest, route: [String]? = nil) async throws -> CoachSequence? {
+        guard BahnDeClient.longDistanceCategories.contains(request.category.uppercased()),
+              let composition = try await composition(category: request.category, number: request.number, on: request.plannedDeparture)
+        else { return nil }
+        var sequence = composition.coachSequence(trainName: "\(request.category.uppercased()) \(request.number)")
+        let candidates = composition.reversalStations + Self.terminusStations
+        if let route, let reversals = Self.reversals(at: request.station.name, route: route, in: candidates) {
+            sequence = sequence.turned(after: reversals)
+            // vagonweb draws the front of the train first, which the diagram puts at the top.
+            sequence.travelsTowardsPlatformEnd = false
+        }
+        return sequence
+    }
+
+    /// Stations where trains always change direction (terminus stations they go on from), for
+    /// compositions whose vagonweb note doesn't say.
+    static let terminusStations = [
+        "Frankfurt (Main) Hbf", "Leipzig Hbf", "Stuttgart Hbf", "München Hbf", "Wiesbaden Hbf", "Kiel Hbf",
+        "Lindau-Insel", "Lindau Hbf", "Hamburg-Altona", "Basel SBB", "Zürich HB",
+    ]
+
+    /// The stations of `route` (its first stop left out, `station` included) where the train changes
+    /// direction; nil when `station` isn't on the route.
+    static func reversals(at station: String, route: [String], in candidates: [String]) -> [String]? {
+        let key = stationKey(station)
+        guard let index = route.lastIndex(where: { stationKey($0) == key }) else { return nil }
+        let reversing = Set(candidates.map(stationKey))
+        return route[..<route.index(after: index)].dropFirst().filter { reversing.contains(stationKey($0)) }
+    }
+
+    /// Station names reduced to compare vagonweb's with DB's and Transitous's: "Frankfurt(Main)Hbf",
+    /// "Frankfurt (Main) Hauptbahnhof" and "Frankfurt (M) Hbf" all become "frankfurtmain".
+    public static func stationKey(_ name: String) -> String {
+        var key = name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "de_DE"))
+            .replacingOccurrences(of: "hauptbahnhof", with: "hbf")
+            .replacingOccurrences(of: "(m)", with: "(main)")
+        key = String(key.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) })
+        for suffix in ["hbf", "hb"] where key.hasSuffix(suffix) && key.count > suffix.count {
+            key.removeLast(suffix.count)
+            break
+        }
+        return key
     }
 
     // MARK: Fetching

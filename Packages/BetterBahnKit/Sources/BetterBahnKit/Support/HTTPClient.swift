@@ -18,6 +18,14 @@ public enum TransitError: Error, Sendable, Equatable, LocalizedError {
         case .timeout: "Keine Antwort. Bitte versuch es später noch mal."
         }
     }
+
+    /// The server doesn't know what was asked for (any longer), e.g. a trip ID from before a feed import.
+    public var isNotFound: Bool {
+        switch self {
+        case .http(status: 404, _), .notFound: true
+        default: false
+        }
+    }
 }
 
 public struct HTTPClient: Sendable {

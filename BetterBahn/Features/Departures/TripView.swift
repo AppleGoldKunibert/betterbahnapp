@@ -156,7 +156,7 @@ struct TripView: View {
 
     private func show(_ loaded: Trip) {
         trip = loaded
-        guard boardingID == nil else { return }
+        guard boardingID == nil, exitID == nil else { return }
         if let keptStops {
             boardingID = keptStops.boarding.flatMap { kept in loaded.stopovers.first { $0.station.isSamePlace(as: kept) }?.id }
             exitID = keptStops.exit.flatMap { kept in loaded.stopovers.last { $0.station.isSamePlace(as: kept) }?.id }
@@ -164,9 +164,8 @@ struct TripView: View {
         }
         let here = loaded.stopovers.first { $0.station.isSamePlace(as: entry.station) }?.id
         if entry.kind == .arrivals {
-            // For arrivals the selected station is where you get off.
+            // For arrivals the selected station is where you get off; where you got on is picked by tapping.
             exitID = here
-            boardingID = loaded.stopovers.first?.id
         } else {
             boardingID = here
         }
@@ -174,10 +173,11 @@ struct TripView: View {
 
     /// Only bahn.de's journey details report a Zusatzhalt (an unscheduled stop the train additionally
     /// picked up today) at all — Transitous and DB Timetables above only ever overlay onto stops already there.
+    /// Their live times also beat both where bahn.de has one (`BahnDeClient.applyingLiveTimes`).
     private func insertZusatzhalte() async {
         guard let trip, let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: trip),
               self.trip?.id == trip.id else { return }
-        self.trip?.stopovers = BahnDeClient.inserting(stops, into: trip.stopovers)
+        self.trip?.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: BahnDeClient.inserting(stops, into: trip.stopovers))
     }
 }
 
@@ -228,6 +228,8 @@ struct TripContent: View {
     /// Called when the user taps a stop, so callers can react to a hand-picked change only (the
     /// bindings also move when a caller seeds them itself).
     var onSelectStop: ((Stopover) -> Void)?
+    /// The saved journey's leg riding this train, whose remembered Tz shows once nothing answers any more.
+    var savedLeg: Leg? = nil
     /// Tapping any stop time flips every stop between real-time and scheduled times — app-wide, and remembered.
     @AppStorage("showPlannedTimes") private var showPlannedTimes = false
     /// Set once a boarding/exit stop was picked by hand; from then on the "Tippe auf Halte" tip stays hidden.
@@ -235,6 +237,10 @@ struct TripContent: View {
     /// Read when the view appears, so the tip doesn't vanish (and move the stops) while picking them.
     @State private var showsStopTip = !UserDefaults.standard.bool(forKey: "pickedTripStop")
     @State private var sequenceRequest: BahnDeClient.FormationRequest?
+    /// Where a train run by several railways changes hands (stopover ID → operators), e.g. DB at the
+    /// start and at Bad Schandau, ČD at Děčín; empty for one railway throughout.
+    @State private var operatorStops: [String: [String]] = [:]
+    @Environment(AppModel.self) private var model
 
     private var color: Color { trip.line?.product.color ?? .gray }
 
@@ -245,8 +251,8 @@ struct TripContent: View {
                     LiveTrainIconTile(route: LiveTrainRoute(trip: trip), systemImage: trip.line?.product.symbolName ?? "tram.fill",
                                       color: color, size: 46)
                     VStack(alignment: .leading, spacing: 3) {
-                        TrainNameRow(name: trip.line?.name ?? "Zug", font: .title3.weight(.bold), spacing: 8) {
-                            TrainSeriesTag(trip: trip)
+                        TrainNameRow(name: trip.line?.nameWithTripNumber ?? "Zug", font: .title3.weight(.bold), spacing: 8) {
+                            TrainSeriesTag(trip: trip, savedLeg: savedLeg)
                         }
                         if let origin = trip.origin, let destination = trip.destination {
                             Text("\(origin.displayName) → \(destination.displayName)")
@@ -254,10 +260,10 @@ struct TripContent: View {
                                 .foregroundStyle(.secondary)
                                 .fullTextPopup("\(origin.displayName) → \(destination.displayName)", lines: 2)
                         }
-                        if let op = trip.line?.operatorName {
-                            Label(op, systemImage: "building.2.fill").font(.caption).foregroundStyle(.tertiary)
+                        if trip.line?.operatorName != nil {
+                            TrainOperatorsLabel(source: .trip(trip)).font(.caption).foregroundStyle(.tertiary)
                         }
-                        TrainFormationLabel(trip: trip)
+                        TrainFormationLabel(trip: trip, savedLeg: savedLeg)
                     }
                     Spacer()
                     VStack(alignment: .trailing, spacing: 6) {
@@ -267,15 +273,16 @@ struct TripContent: View {
                 }
             }
 
-            if interactive, exitOnly || showsStopTip || boardingID != nil {
+            if interactive, exitOnly || showsStopTip || picksBoarding || boardingID != nil {
                 HStack(spacing: 8) {
-                    if exitOnly || showsStopTip {
+                    if exitOnly || showsStopTip || picksBoarding {
                         Image(systemName: "hand.tap.fill").foregroundStyle(Color.brand)
                         Text(exitOnly ? "Tippe auf einen Halt, um dort auszusteigen."
-                                      : "Tippe auf Halte, um Ein- und Ausstieg zu wählen.")
+                             : picksBoarding ? "Tippe auf den Halt, an dem du einsteigst."
+                             : "Tippe auf Halte, um Ein- und Ausstieg zu wählen.")
                     }
                     Spacer()
-                    if !exitOnly, boardingID != nil {
+                    if !exitOnly, boardingID != nil || exitID != nil {
                         Button("Zurücksetzen", systemImage: "xmark.circle.fill") {
                             withAnimation(.snappy) {
                                 boardingID = nil
@@ -308,10 +315,16 @@ struct TripContent: View {
                 CoachSequenceView(request: sequenceRequest, trainName: trip.line?.name)
             }
         }
+        .task(id: trip.stopovers.map(\.id)) {
+            guard let bahnDe = model.provider.bahnDe, let found = try? await bahnDe.operatorStops(for: trip) else { return }
+            operatorStops = found
+        }
     }
 
     private var boardingIndex: Int? { trip.stopovers.firstIndex { $0.id == boardingID } }
     private var exitIndex: Int? { trip.stopovers.firstIndex { $0.id == exitID } }
+    /// Only the exit is known (opened from the arrivals board), so the next tap picks where you got on.
+    private var picksBoarding: Bool { !exitOnly && boardingID == nil && exitID != nil }
 
     private func isRidden(_ index: Int) -> Bool {
         guard let b = boardingIndex else { return false }
@@ -366,6 +379,11 @@ struct TripContent: View {
                             if stop.isAdditional {
                                 InfoChip(text: "Zusatzhalt", systemImage: "plus.circle.fill", tint: .brand)
                             }
+                            if let operators = operatorStops[stop.id] {
+                                HStack(spacing: 6) {
+                                    ForEach(operators, id: \.self) { OperatorLogo(name: $0) }
+                                }
+                            }
                         }
                         Spacer()
                     }
@@ -400,7 +418,8 @@ struct TripContent: View {
         guard let ref = BahnDeClient.sequenceReference(for: trip.line), !stop.cancelled,
               let time = (stop.departure ?? stop.arrival)?.planned,
               (stop.departurePlatform ?? stop.arrivalPlatform)?.best != nil else { return nil }
-        return BahnDeClient.FormationRequest(category: ref.category, number: ref.number, station: stop.station, plannedDeparture: time)
+        return BahnDeClient.FormationRequest(category: ref.category, number: ref.number, station: stop.station, plannedDeparture: time,
+                                             stopsBefore: BahnDeClient.stopsBefore(stop.station, in: trip))
     }
 
     private func select(_ index: Int) {
@@ -415,6 +434,8 @@ struct TripContent: View {
                 exitID = nil
             } else if let boardingIndex, index > boardingIndex {
                 exitID = stop.id
+            } else if picksBoarding, let exitIndex, index < exitIndex {
+                boardingID = stop.id
             } else if !exitOnly {
                 boardingID = stop.id
                 exitID = nil
@@ -480,6 +501,8 @@ struct LegTripSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var trip: Trip?
     @State private var error: Error?
+    /// The full run couldn't be loaded, so only the leg's own saved stops show.
+    @State private var showsSavedStops = false
     /// The coupled train whose stops are shown instead of this one's (nil: this one).
     @State private var shownTripId: String?
 
@@ -504,10 +527,15 @@ struct LegTripSheet: View {
                     if let error {
                         ErrorBanner(error: error)
                     }
+                    if showsSavedStops {
+                        InfoChip(text: "Der ganze Zuglauf ist nicht mehr abrufbar. Hier siehst du die gespeicherten Halte deiner Fahrt.",
+                                 systemImage: "clock.arrow.circlepath", tint: .secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                     if let trip {
                         TripContent(trip: trip, highlight: leg.origin,
                                     boardingID: .constant(boardingID(in: trip)), exitID: .constant(exitID(in: trip)),
-                                    interactive: false)
+                                    interactive: false, savedLeg: tripId == leg.tripId ? leg : nil)
                     }
                 }
                 .padding(.horizontal)
@@ -546,6 +574,7 @@ struct LegTripSheet: View {
     private func switchTrain(to id: String) {
         guard id != tripId else { return }
         error = nil
+        showsSavedStops = false
         shownTripId = id == leg.tripId ? nil : id
         trip = model.liveTrips.value(for: id)
     }
@@ -556,7 +585,10 @@ struct LegTripSheet: View {
             return
         }
         do {
-            var loaded = try await model.provider.trip(id: tripId, source: leg.source)
+            // The leg's own run is looked up again if a feed import renumbered it (a saved journey's).
+            var loaded = tripId == leg.tripId
+                ? try await model.provider.trip(for: leg)
+                : try await model.provider.trip(id: tripId, source: leg.source)
             guard tripId == self.tripId else { return }
             // The leg's own line knows the trains coupled to it, so the trainsets of both show.
             if tripId == leg.tripId {
@@ -565,6 +597,7 @@ struct LegTripSheet: View {
                 loaded.line = leg.line?.riding(train, ownDirection: leg.direction, ownTripId: leg.tripId) ?? loaded.line
             }
             error = nil
+            showsSavedStops = false
             // Live data first, like `TripView.load()`.
             if let timetables = model.timetablesClient {
                 let timetable = loaded
@@ -581,16 +614,31 @@ struct LegTripSheet: View {
             if let trip { model.rememberLive(trip) }
         } catch is CancellationError {
         } catch {
-            self.error = error
+            // The leg's own train, gone from Transitous (long past) or not reachable: its saved stops
+            // rather than an error. Seen live before, that version stays.
+            if tripId == leg.tripId, let saved = leg.savedTrip {
+                if trip == nil { trip = saved }
+                showsSavedStops = trip == saved
+            } else {
+                self.error = error
+            }
         }
     }
 
     /// Only bahn.de's journey details report a Zusatzhalt (an unscheduled stop the train additionally
     /// picked up today) at all — Transitous and DB Timetables above only ever overlay onto stops already there.
+    /// bahn.de only reports them while the train runs, so the leg's own train also keeps the ones the
+    /// saved journey remembered (where you may have got on, off or changed). bahn.de's live times also
+    /// beat Transitous' and DB Timetables' where it has one (`BahnDeClient.applyingLiveTimes`).
     private func insertZusatzhalte() async {
-        guard let trip, let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: trip),
-              self.trip?.id == trip.id else { return }
-        self.trip?.stopovers = BahnDeClient.inserting(stops, into: trip.stopovers)
+        guard var updated = trip else { return }
+        let ownTrain = shownTripId == nil
+        if let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: updated) {
+            updated.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: BahnDeClient.inserting(stops, into: updated.stopovers))
+        }
+        if ownTrain { updated = updated.keepingAdditionalStops(of: leg) }
+        guard self.trip?.id == updated.id, ownTrain == (shownTripId == nil) else { return }
+        self.trip?.stopovers = updated.stopovers
     }
 }
 

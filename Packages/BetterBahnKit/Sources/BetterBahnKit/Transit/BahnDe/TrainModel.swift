@@ -152,6 +152,9 @@ struct TrainModel: Sendable, Hashable {
     private static func germanSubtype(model: Int, carriage: Carriage, category: String) -> String? {
         let serial = Int(carriage.digits(9, 2)) ?? 0
         let block = carriage.digits(5, 4)
+        // The four-digit type number, "1430" for "94 80 1430 001-1". DBRIS compares 1430/1440 with `block`
+        // (one digit further on), which never matches, so a FLIRT of BR 1430 came out as the S-Bahn BR 430.
+        let type = carriage.digits(4, 4)
         switch model {
         case 91, 491, 791, 891: return "091"
         case 401, 801...804: return "401"
@@ -173,9 +176,9 @@ struct TrainModel: Sendable, Hashable {
         case 429, 829: return "429"
         default: break
         }
-        if block == "1430" || block == "1830" { return "1430" }
+        if type == "1430" || type == "1830" { return "1430" }
         if model == 430 || model == 431 { return "430" }
-        if block == "1440" || block == "1441" { return "1440" }
+        if type == "1440" || type == "1441" { return "1440" }
         switch model {
         case 440, 441, 841: return "440"
         case 442, 443: return "442"

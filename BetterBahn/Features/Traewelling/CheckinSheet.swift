@@ -20,6 +20,7 @@ struct CheckinSheet: View {
     /// For coupled trains (`Line.coupledTrains`): which of them the user sits in, picked by hand since
     /// Träwelling knows them as separate trains. Nil until picked.
     @State private var chosenTrain: String?
+    @State private var emojis: [CustomEmoji] = []
 
     private var coupledTrains: [Line.CoupledTrain] { leg.line?.coupledTrains ?? [] }
 
@@ -67,9 +68,10 @@ struct CheckinSheet: View {
             .task {
                 isLoggedIn = await model.traewelling.isLoggedIn
                 visibility = model.settings.traewellingVisibility
+                emojis = await model.checkinEmojis()
             }
             .alert("Zug nicht gefunden", isPresented: $offerManualTrip) {
-                Button("Manuell eintragen") { send(allowManualTrip: true) }
+                Button("Manuell eintragen") { send(asManualTrip: true) }
                 Button("Abbrechen", role: .cancel) {}
             } message: {
                 Text("Träwelling kennt \(rideLeg.line?.name ?? "diesen Zug") nicht. Du kannst ihn selbst eintragen.")
@@ -157,18 +159,7 @@ struct CheckinSheet: View {
     private var formCard: some View {
         Card {
             VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .top, spacing: 12) {
-                    IconTile(systemImage: "text.bubble.fill", color: .blue, size: 32)
-                    TextField("Was geht ab? (optional)", text: $message, axis: .vertical)
-                        .lineLimit(3...6)
-                        .padding(.top, 5)
-                }
-                if !message.isEmpty {
-                    Text("\(message.count)/280")
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(message.count > 280 ? Color.heavyDelay : .secondary)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                }
+                EmojiMessageField(message: $message, emojis: emojis)
                 Divider()
                 pickerRow("Sichtbarkeit", icon: "eye.fill", color: .purple, selection: $visibility, options: TraewellingVisibility.allCases) { $0.label }
                 Divider()
@@ -287,24 +278,26 @@ struct CheckinSheet: View {
         .disabled(isSending || message.count > 280 || needsTrainChoice)
     }
 
-    private func send(allowManualTrip: Bool = false) {
+    private func send(asManualTrip: Bool = false) {
         isSending = true
         Task {
             defer { isSending = false }
             do {
                 let leg = rideLeg
-                let checkin = try await attemptCheckin(leg: leg, allowManualTrip: allowManualTrip)
+                // The search for the train already failed before a manual trip is offered; don't run it again.
+                let checkin = asManualTrip ? try await model.traewelling.checkinAsManualTrip(draft(for: leg))
+                                           : try await attemptCheckin(leg: leg)
                 await finishSuccess(checkin, leg: leg)
             } catch OAuthError.notLoggedIn {
                 isLoggedIn = false
-            } catch TraewellingError.tripNotFound where !allowManualTrip {
+            } catch TraewellingError.tripNotFound where !asManualTrip {
                 // Some international trains are listed under two names by separate feeds (e.g. an
                 // ÖBB "RJ 177" that Deutsche Bahn's own live feed calls "ICE 177") — try the other
                 // name Transitous knows about before asking to create a manual entry.
-                if let alternate = await model.provider.alternateLineName(for: rideLeg) {
+                if let alternate = await model.provider.alternateLineName(for: rideLeg), alternate != rideLeg.line?.name {
                     var altLeg = rideLeg
                     altLeg.line?.name = alternate
-                    if let checkin = try? await attemptCheckin(leg: altLeg, allowManualTrip: false) {
+                    if let checkin = try? await attemptCheckin(leg: altLeg) {
                         await finishSuccess(checkin, leg: altLeg)
                         return
                     }
@@ -324,9 +317,12 @@ struct CheckinSheet: View {
         }
     }
 
-    private func attemptCheckin(leg: Leg, allowManualTrip: Bool) async throws -> CheckinResult {
-        let draft = CheckinDraft(leg: leg, message: message, visibility: visibility, business: business, toot: toot)
-        return try await model.traewelling.checkin(draft, allowManualTrip: allowManualTrip)
+    private func attemptCheckin(leg: Leg) async throws -> CheckinResult {
+        try await model.traewelling.checkin(draft(for: leg))
+    }
+
+    private func draft(for leg: Leg) -> CheckinDraft {
+        CheckinDraft(leg: leg, message: message, visibility: visibility, business: business, toot: toot)
     }
 
     /// If `leg` boards at a Zusatzhalt bahn.de's journey details know about, checks in the hop up
@@ -338,13 +334,14 @@ struct CheckinSheet: View {
               let stops = try await bahnDe.journeyStops(for: rideLeg),
               let (zusatzhalt, nextRegular) = BahnDeClient.nextRegularStop(after: rideLeg.origin, in: stops)
         else { return nil }
-        let draft = CheckinDraft(leg: rideLeg, message: message, visibility: visibility, business: business, toot: toot)
-        return try await model.traewelling.checkin(draft, fromZusatzhalt: zusatzhalt, toNextRegularStop: nextRegular)
+        return try await model.traewelling.checkin(draft(for: rideLeg), fromZusatzhalt: zusatzhalt, toNextRegularStop: nextRegular)
     }
 
     private func finishSuccess(_ checkin: CheckinResult, leg: Leg) async {
         withAnimation(.bouncy) { result = checkin }
         error = nil
+        // Remembered for the leg as shown in the journey (not a picked coupled train), so its "Mehr" finds it.
+        if let statusId = checkin.statusId { model.rememberCheckin(statusId: statusId, leg: self.leg) }
         if checkin.isManualTrip, let statusId = checkin.statusId {
             model.trackManualCheckin(statusId: statusId, leg: leg)
         }

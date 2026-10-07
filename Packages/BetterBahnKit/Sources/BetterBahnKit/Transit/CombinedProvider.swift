@@ -13,6 +13,7 @@ public final class CombinedProvider: TransitProvider {
     public let vagonweb: VagonwebClient?
     public let bahnJetzt: BahnJetztClient?
     private let health: Health
+    private let renumbered = RenumberedTrips()
 
     public init(primary: any TransitProvider = TransitousProvider(),
                 fallback: (any TransitProvider)? = nil,
@@ -68,16 +69,17 @@ public final class CombinedProvider: TransitProvider {
         return try await fallbackWork(fallback)
     }
 
+    /// Runs `operation`, giving up with `TransitError.timeout` after `deadline`. Returns as soon as the
+    /// deadline passes: `operation` is cancelled, but a request that is slow to stop (a URL load
+    /// winding down) doesn't hold up the caller, as waiting for it in a task group would.
     static func withDeadline<T: Sendable>(_ deadline: Duration, _ operation: @escaping @Sendable () async throws -> T) async throws -> T {
-        try await withThrowingTaskGroup(of: T.self) { group in
-            group.addTask { try await operation() }
-            group.addTask {
-                try await Task.sleep(for: deadline)
-                throw TransitError.timeout
+        let race = DeadlineRace<T>()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                race.start(continuation, deadline: deadline, operation: operation)
             }
-            defer { group.cancelAll() }
-            guard let result = try await group.next() else { throw TransitError.timeout }
-            return result
+        } onCancel: {
+            race.finish(.failure(CancellationError()))
         }
     }
 
@@ -169,7 +171,10 @@ public final class CombinedProvider: TransitProvider {
         return journeys.map { journey in
             var journey = journey
             for index in journey.legs.indices {
-                if let trains = coupled[journey.legs[index].id] { journey.legs[index].line?.coupledTrains = trains }
+                if let trains = coupled[journey.legs[index].id] {
+                    journey.legs[index].line?.coupledTrains = trains
+                    journey.legs[index].line = journey.legs[index].line?.withoutSelfCoupling
+                }
             }
             return journey
         }
@@ -180,14 +185,15 @@ public final class CombinedProvider: TransitProvider {
                                { try await $0.board(kind, at: station, date: date, duration: duration, products: products) },
                                { try await $0.board(kind, at: station, date: date, duration: duration, products: products) })
         let filtered = entries.filter { !Self.isFlixBus($0.line) }
-        // bahn.de's own names beat Transitous' generic ones for cross-border trains (see
-        // `BahnDeClient.correctingTrainNames`); a slow bahn.de mustn't hold up the board for long.
+        // bahn.de's own names beat Transitous' generic ones for cross-border trains, and DB's live
+        // times beat DELFI's forecasts (see `BahnDeClient.correctingFromBoard`); a slow bahn.de
+        // mustn't hold up the board for long.
         guard let bahnDe else { return filtered }
         // Lines Transitous didn't know ("?") come from bahn.de's board too, in the same 3 s.
         return (try? await Self.withDeadline(.seconds(3)) {
             let named = filtered.contains { TransitousProvider.isUnknown($0.line) }
                 ? await bahnDe.namingUnknownLines(filtered, at: station) : filtered
-            return await bahnDe.correctingTrainNames(named, at: station)
+            return await bahnDe.correctingFromBoard(named, at: station)
         }) ?? filtered
     }
 
@@ -205,6 +211,47 @@ public final class CombinedProvider: TransitProvider {
         try await provider(for: source).trip(id: id)
     }
 
+    /// The run of a journey's leg. Transitous' trip IDs only last until the feed is next imported
+    /// (DELFI renumbers its trips), so a saved journey's leg then gets a 404 for its train. Such a run
+    /// is looked up again on the board at the leg's origin, as the same train leaving at the same planned
+    /// time, and its new ID remembered while the app runs. The returned trip carries the new ID.
+    public func trip(for leg: Leg) async throws -> Trip {
+        guard let tripId = leg.tripId else { throw TransitError.notFound("Fahrt") }
+        let id = await renumbered.id(for: tripId) ?? tripId
+        do {
+            return try await trip(id: id, source: leg.source)
+        } catch let error as TransitError where error.isNotFound {
+            guard leg.source == primary.source, let line = leg.line,
+                  let entries = try? await primary.board(.departures, at: leg.origin,
+                                                         date: leg.departure.planned.addingTimeInterval(-5 * 60),
+                                                         duration: 15, products: [line.product]),
+                  let current = Self.sameTrain(as: leg, in: entries)?.tripId, current != id else { throw error }
+            await renumbered.remember(current, for: tripId)
+            return try await trip(id: current, source: leg.source)
+        }
+    }
+
+    /// The board entry for `leg`'s train: leaving at its planned time, by name or number.
+    static func sameTrain(as leg: Leg, in entries: [BoardEntry]) -> BoardEntry? {
+        guard let line = leg.line else { return nil }
+        let names = Set([line.name, line.alternateName].compactMap { $0 }.map(Line.normalize))
+        return entries.first { entry in
+            guard entry.time.planned == leg.departure.planned else { return false }
+            if [entry.line.name, entry.line.alternateName].compactMap({ $0 }).map(Line.normalize).contains(where: names.contains) {
+                return true
+            }
+            return entry.line.product == line.product && line.dispatchNumber != nil
+                && entry.line.dispatchNumber == line.dispatchNumber
+        }
+    }
+
+    /// Trip IDs a feed import replaced: old ID → current one.
+    actor RenumberedTrips {
+        private var ids: [String: String] = [:]
+        func id(for old: String) -> String? { ids[old] }
+        func remember(_ current: String, for old: String) { ids[old] = current }
+    }
+
     private func provider(for source: DataSource?) throws -> any TransitProvider {
         if source == primary.source { return primary }
         if let fallback, source == fallback.source { return fallback }
@@ -220,5 +267,51 @@ public final class CombinedProvider: TransitProvider {
         let prefix = source.rawValue + ":"
         guard cursor.hasPrefix(prefix) else { return nil }
         return String(cursor.dropFirst(prefix.count))
+    }
+}
+
+/// The first of `operation`'s result, the deadline and the caller's cancellation wins
+/// (`CombinedProvider.withDeadline`); the others are cancelled and ignored.
+private final class DeadlineRace<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<T, Error>?
+    private var outcome: Result<T, Error>?
+    private var tasks: [Task<Void, Never>] = []
+
+    func start(_ continuation: CheckedContinuation<T, Error>, deadline: Duration,
+               operation: @escaping @Sendable () async throws -> T) {
+        lock.lock()
+        // Cancelled before it started.
+        if let outcome {
+            lock.unlock()
+            continuation.resume(with: outcome)
+            return
+        }
+        self.continuation = continuation
+        tasks = [
+            Task { [self] in
+                do { finish(.success(try await operation())) } catch { finish(.failure(error)) }
+            },
+            Task { [self] in
+                try? await Task.sleep(for: deadline)
+                finish(.failure(TransitError.timeout))
+            },
+        ]
+        lock.unlock()
+    }
+
+    func finish(_ result: Result<T, Error>) {
+        lock.lock()
+        guard outcome == nil else {
+            lock.unlock()
+            return
+        }
+        outcome = result
+        let continuation = continuation
+        self.continuation = nil
+        let tasks = tasks
+        lock.unlock()
+        tasks.forEach { $0.cancel() }
+        continuation?.resume(with: result)
     }
 }

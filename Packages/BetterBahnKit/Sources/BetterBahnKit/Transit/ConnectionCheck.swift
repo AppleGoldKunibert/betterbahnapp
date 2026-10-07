@@ -69,6 +69,20 @@ public extension Journey {
         }
         return issues
     }
+
+    /// Over 10 minutes after its (realtime) arrival.
+    func isOver(now: Date = .now) -> Bool {
+        (arrival?.best ?? .distantFuture).addingTimeInterval(10 * 60) < now
+    }
+
+    /// `connectionIssues()` to show: a journey that is over only lists its cancellations. How its
+    /// transfers went is history then, and the last live data of its trains is often incomplete (DB
+    /// drops a train's changes a few hours after it ran), so they'd show as missed though they worked.
+    func currentIssues(now: Date = .now) -> [ConnectionIssue] {
+        let issues = connectionIssues()
+        guard isOver(now: now) else { return issues }
+        return issues.filter { if case .legCancelled = $0 { true } else { false } }
+    }
 }
 
 /// Updates the times, platforms and cancellations of a journey from current trip data, optionally
@@ -83,6 +97,9 @@ public struct JourneyRefresher: Sendable {
     }
 
     public func refresh(_ journey: Journey, now: Date = .now) async -> Journey {
+        // Journeys saved before "RJ 177" stopped counting as coupled to its DB twin "ICE 177"
+        // (`Line.isSameTrain(as:)`) drop that entry; a leg left without any is looked up again.
+        let journey = Self.withoutSelfCoupling(journey)
         var updated = journey
         // Coupled trains the search had no time to find (see `CombinedProvider.journeys`).
         async let coupled = provider.coupledTrains(in: [journey], deadline: .seconds(6))
@@ -99,6 +116,14 @@ public struct JourneyRefresher: Sendable {
             updated = named
         }
         return CombinedProvider.applying(await coupled, to: [updated]).first ?? updated
+    }
+
+    static func withoutSelfCoupling(_ journey: Journey) -> Journey {
+        var journey = journey
+        for index in journey.legs.indices {
+            journey.legs[index].line = journey.legs[index].line?.withoutSelfCoupling
+        }
+        return journey
     }
 
     /// Only what `connectionIssues()` looks at: each leg's times, platforms and cancellation at its
@@ -135,26 +160,36 @@ public struct JourneyRefresher: Sendable {
     }
 
     private func refreshEnds(of originalLeg: Leg, now: Date) async -> Leg {
-        var leg = originalLeg
-        if !leg.isWalking, let tripId = leg.tripId, leg.source != .traewelling,
-           let trip = try? await provider.trip(id: tripId, source: leg.source) {
+        guard !Self.isLongOver(originalLeg, now: now) else { return originalLeg }
+        var leg = Self.droppingInferredOnTime(originalLeg, now: now)
+        if !leg.isWalking, leg.tripId != nil, leg.source != .traewelling,
+           let trip = try? await provider.trip(for: leg) {
             leg = Self.apply(trip, to: leg)
         }
         let timetables = TimetablesClient.knowsChanges(until: leg.arrival.planned, now: now) ? self.timetables : nil
         // DB Timetables wins wherever it knows the stop; the trip data above only fills in
         // what DB can't match (regional operators, far-off stops).
-        if let timetables, let override = await timetables.realtime(for: leg) {
+        if let timetables, let override = await timetables.realtime(for: leg, now: now) {
             leg = Self.apply(override, to: leg)
         }
         return leg
     }
 
+    /// A leg that arrived over 30 minutes ago keeps what was last seen live. Later answers only lose
+    /// data: DB drops a train's changes a few hours after it ran and Transitous' realtime runs out, so
+    /// one leg of a finished journey could fall back to the timetable while the other kept its delay,
+    /// and a transfer that worked showed as missed.
+    static func isLongOver(_ leg: Leg, now: Date) -> Bool {
+        leg.arrival.best.addingTimeInterval(30 * 60) < now
+    }
+
     private func refresh(_ originalLeg: Leg, now: Date) async -> Leg {
+        guard !Self.isLongOver(originalLeg, now: now) else { return originalLeg }
         var leg = await refreshEnds(of: originalLeg, now: now)
         let timetables = TimetablesClient.knowsChanges(until: leg.arrival.planned, now: now) ? self.timetables : nil
         if let timetables, timetables.canLookUp(leg) {
             leg = Self.syncingEnds(of: leg, toStopovers: true)
-            let live = await timetables.liveStopovers(for: leg)
+            let live = await timetables.liveStopovers(for: leg, now: now)
             leg.stopovers = live.stopovers
             leg.messages = TrainMessage.merged(leg.messages + live.messages)
             leg = Self.syncingEnds(of: leg, toStopovers: false)
@@ -168,7 +203,11 @@ public struct JourneyRefresher: Sendable {
         let runningSoon = Self.isRunningSoon(leg)
         if let bahnDe = provider.bahnDe, runningSoon || Self.needsPlatforms(leg),
            let stops = try? await bahnDe.journeyStops(for: leg, maxAge: runningSoon ? BahnDeClient.journeyStopsMaxAge : 3600) {
-            if runningSoon, !leg.stopovers.isEmpty { leg.stopovers = BahnDeClient.inserting(stops, into: leg.stopovers) }
+            if runningSoon {
+                if !leg.stopovers.isEmpty { leg.stopovers = BahnDeClient.inserting(stops, into: leg.stopovers) }
+                // DB's own live times beat Transitous' and fill stops DB Timetables missed.
+                leg = BahnDeClient.applyingLiveTimes(from: stops, to: leg)
+            }
             leg = BahnDeClient.fillingMissingPlatforms(in: leg, from: stops)
         }
         return leg
@@ -244,6 +283,26 @@ public struct JourneyRefresher: Sendable {
             if let departure = live.departure { leg.stopovers[index].departure = Self.keepingActual(departure, from: stop.departure) }
             if live.arrivalCancelled { leg.stopovers[index].arrivalCancelled = true }
             if live.departureCancelled { leg.stopovers[index].departureCancelled = true }
+        }
+        return leg
+    }
+
+    /// Journeys saved before `TimetablesClient.infersOnTime` carry DB's made-up "on time" for trains
+    /// hours ahead (actual == planned), which `keepingActual` would keep forever. Dropped while the
+    /// train is still that far off; a real live time comes back from the trip or DB below.
+    static func droppingInferredOnTime(_ leg: Leg, now: Date) -> Leg {
+        guard !TimetablesClient.infersOnTime(departing: leg.departure.planned, now: now) else { return leg }
+        func dropped(_ time: TimeInfo?) -> TimeInfo? {
+            guard var time, time.actual == time.planned else { return time }
+            time.actual = nil
+            return time
+        }
+        var leg = leg
+        if let departure = dropped(leg.departure) { leg.departure = departure }
+        if let arrival = dropped(leg.arrival) { leg.arrival = arrival }
+        for index in leg.stopovers.indices {
+            leg.stopovers[index].arrival = dropped(leg.stopovers[index].arrival)
+            leg.stopovers[index].departure = dropped(leg.stopovers[index].departure)
         }
         return leg
     }
