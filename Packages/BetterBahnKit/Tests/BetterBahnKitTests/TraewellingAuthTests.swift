@@ -178,6 +178,15 @@ import Testing
         let none = try JSONDecoding.decoder.decode(TraewellingStation.self, from: Data(#"{"id":1,"name":"Hamburg Hbf","ibnr":null}"#.utf8))
         #expect(none.ibnr == nil)
     }
+
+    @Test func decodesWhetherThePointsSystemIsEnabled() throws {
+        let off = try JSONDecoding.decoder.decode(TraewellingUser.self, from: Data(#"{"id":1,"displayName":"Gertrud","username":"gertrud","points":0,"pointsEnabled":false}"#.utf8))
+        #expect(off.pointsEnabled == false)
+        let on = try JSONDecoding.decoder.decode(TraewellingUser.self, from: Data(#"{"id":1,"displayName":"Gertrud","username":"gertrud","points":42,"pointsEnabled":true}"#.utf8))
+        #expect(on.pointsEnabled == true)
+        let missing = try JSONDecoding.decoder.decode(TraewellingUser.self, from: Data(#"{"id":1,"displayName":"Gertrud","username":"gertrud"}"#.utf8))
+        #expect(missing.pointsEnabled == nil)
+    }
 }
 
 /// Real-world case: the IC Zürich HB – Stuttgart Hbf is one run in Transitous, but Träwelling splits
