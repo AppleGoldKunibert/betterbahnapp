@@ -13,6 +13,8 @@ struct CheckinDetailSheet: View {
     @Environment(\.openURL) private var openURL
     @State private var status: TraewellingStatus?
     @State private var emojis: [CustomEmoji] = []
+    /// Whether the account collects Träwelling points, so deleting mentions losing them.
+    @State private var showsPoints = false
     @State private var isLoading = true
     @State private var isEditing = false
     @State private var isSaving = false
@@ -275,7 +277,8 @@ struct CheckinDetailSheet: View {
             Button("Löschen", role: .destructive, action: delete)
             Button("Abbrechen", role: .cancel) {}
         } message: {
-            Text("Der Check-in wird bei Träwelling gelöscht, mit seinen Punkten.")
+            Text(showsPoints ? "Der Check-in wird bei Träwelling gelöscht, mit seinen Punkten."
+                             : "Der Check-in wird bei Träwelling gelöscht.")
         }
     }
 
@@ -325,7 +328,7 @@ struct CheckinDetailSheet: View {
     }
 
     private func load() async {
-        async let emojiList = model.checkinEmojis()
+        async let account = loadAccount()
         async let tagList = loadTags()
         do {
             status = try await model.traewelling.status(id: statusId)
@@ -335,11 +338,19 @@ struct CheckinDetailSheet: View {
         } catch {
             self.error = error
         }
-        emojis = await emojiList
+        let loaded = await account
+        showsPoints = loaded.showsPoints
+        emojis = loaded.emojis
         tags = await tagList
         isLoading = false
         // Extra too: the section only shows once someone else is on the train.
         if let status { fellowTravellers = (try? await model.traewelling.fellowTravellers(of: status)) ?? [] }
+    }
+
+    /// The account's points setting and Mastodon emojis: extras the check-in still shows without.
+    private func loadAccount() async -> (showsPoints: Bool, emojis: [CustomEmoji]) {
+        let user = await model.traewellingUser()
+        return (user?.pointsEnabled == true, await model.checkinEmojis(for: user))
     }
 
     /// Tags are extra: the check-in still shows when they can't be loaded.

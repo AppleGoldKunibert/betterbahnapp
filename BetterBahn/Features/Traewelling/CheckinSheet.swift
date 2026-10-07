@@ -21,6 +21,8 @@ struct CheckinSheet: View {
     /// Träwelling knows them as separate trains. Nil until picked.
     @State private var chosenTrain: String?
     @State private var emojis: [CustomEmoji] = []
+    /// Whether the account collects Träwelling points; otherwise the "+0 Punkte" chip stays hidden.
+    @State private var showsPoints = false
     @FocusState private var messageFocused: Bool
     @FocusState private var focusedTag: String?
     /// Where the keyboard was when "Jetzt einchecken" was tapped. It goes away right then, and only
@@ -73,7 +75,7 @@ struct CheckinSheet: View {
             .task {
                 isLoggedIn = await model.traewelling.isLoggedIn
                 visibility = model.settings.traewellingVisibility
-                emojis = await model.checkinEmojis()
+                await loadAccount()
             }
             .alert("Zug nicht gefunden", isPresented: $offerManualTrip) {
                 Button("Manuell eintragen") { send(asManualTrip: true) }
@@ -93,10 +95,21 @@ struct CheckinSheet: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                TraewellingLoginButton { isLoggedIn = true }
+                TraewellingLoginButton {
+                    isLoggedIn = true
+                    Task { await loadAccount() }
+                }
             }
             .frame(maxWidth: .infinity)
         }
+    }
+
+    /// Asked each time a check-in opens, so a newly connected Mastodon account or a changed points
+    /// setting counts at once.
+    private func loadAccount() async {
+        let user = await model.traewellingUser()
+        showsPoints = user?.pointsEnabled == true
+        emojis = await model.checkinEmojis(for: user)
     }
 
     private func successCard(_ result: CheckinResult) -> some View {
@@ -108,7 +121,9 @@ struct CheckinSheet: View {
                     .symbolEffect(.bounce, value: result.points)
                 Text("Eingecheckt").font(.title2.weight(.bold))
                 HStack(spacing: 8) {
-                    InfoChip(text: "+\(result.points) Punkte", systemImage: "sparkles", tint: .brand)
+                    if showsPoints {
+                        InfoChip(text: "+\(result.points) Punkte", systemImage: "sparkles", tint: .brand)
+                    }
                     if result.alsoOnThisConnection > 0 {
                         InfoChip(text: "\(result.alsoOnThisConnection) Mitreisende", systemImage: "person.2.fill", tint: .punctual)
                     }
