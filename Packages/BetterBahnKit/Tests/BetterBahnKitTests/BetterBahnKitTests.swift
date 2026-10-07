@@ -1822,14 +1822,10 @@ private final class CzechTimetableProtocol: URLProtocol, @unchecked Sendable {
     @Test func insertsStopsOnlyTheTwinHas() throws {
         let (oebb, delfi) = try trips()
         let stops = try #require(TransitousProvider.insertingMissingStops(into: oebb.stopovers, from: delfi.stopovers))
-        #expect(stops.map(\.station.name) == [
-            "Hamburg-Altona", "Hamburg Hauptbahnhof", "S Spandau Bhf (Berlin)", "Berlin Hauptbahnhof", "Berlin Südkreuz",
-            "Dresden Bahnhof Neustadt", "Dresden Hauptbahnhof", "Bad Schandau Nationalparkbahnhof", "Děčín hl.n.",
-            "Usti nad Labem hl.n.", "Praha-Holešovice", "Kolin(CZ)", "Pardubice hl.n.", "Ceska Trebova", "Brno hl.n.",
-            "Břeclav", "Wien Hauptbahnhof",
-        ])
+        // All under DB's names, also the stops ÖBB has too ("Děčín hl.n." is DB's "Decin hl.n.").
+        #expect(stops.map(\.station.name) == delfi.stopovers.map(\.station.name))
         // ÖBB's own stops stay, with DB's platform where ÖBB has none (planned 2, live 3).
-        let berlin = try #require(stops.first { $0.station.name == "Berlin Hauptbahnhof" })
+        let berlin = try #require(stops.first { $0.station.name == "S+U Berlin Hauptbahnhof" })
         #expect(berlin.departurePlatform == PlatformInfo(planned: "2", actual: "3"))
         #expect(berlin.station.id == oebb.stopovers[2].station.id)
     }
@@ -1837,10 +1833,13 @@ private final class CzechTimetableProtocol: URLProtocol, @unchecked Sendable {
     @Test func legGetsStopsBetweenItsEnds() throws {
         let leg = try berlinPraha()
         let filled = TransitousProvider.fillingMissingStops(in: leg, from: try trips().delfi.stopovers)
-        #expect(filled.stopovers.map(\.station.name) == [
-            "Berlin Hauptbahnhof", "Berlin Südkreuz", "Dresden Bahnhof Neustadt", "Dresden Hauptbahnhof",
-            "Bad Schandau Nationalparkbahnhof", "Děčín hl.n.", "Usti nad Labem hl.n.", "Praha-Holešovice",
+        #expect(filled.stopovers.map(\.station.displayName) == [
+            "Berlin Hbf", "Berlin Südkreuz", "Dresden Bahnhof Neustadt", "Dresden Hbf",
+            "Bad Schandau Nationalparkbahnhof", "Decin hl.n.", "Usti nad Labem hl.n.", "Praha-Holesovice",
         ])
+        #expect(filled.origin.displayName == "Berlin Hbf")
+        #expect(filled.destination.displayName == "Praha-Holesovice")
+        #expect(filled.origin.id == leg.origin.id)
         #expect(filled.departurePlatform?.best == "3")
         #expect(filled.arrivalPlatform == nil)
     }

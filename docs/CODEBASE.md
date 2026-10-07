@@ -192,7 +192,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   (ÖBB's RJ 177 Berlin → Praha lists only Südkreuz and Děčín in between; not for DELFI's or CZPTT's trains,
   `mayLackStops`): the same train from another feed (DELFI's "ICE 177") is found on the departures at the leg's start
   by number and planned time, and its stops between two of the leg's own are inserted, its platforms filled in where
-  the leg has none (`insertingMissingStops`, cached 12 h). Same places as the Czech platforms, before them, so
+  the leg has none (`insertingMissingStops`, cached 12 h). Stops both have, and the leg's ends, take DB's (DELFI's) names,
+  so one train's stops read alike. Same places as the Czech platforms, before them, so
   inserted Czech stops get theirs too; the journey view does both in its first step (`completingStopsAndPlatforms`),
   before the live refresh, which also waits for bahn.de.
 - `Transit/Timetables/` – official DB Timetables XML client (realtime overrides, messages), through the

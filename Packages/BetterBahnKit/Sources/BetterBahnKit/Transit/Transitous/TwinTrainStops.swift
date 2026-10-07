@@ -96,6 +96,9 @@ extension TransitousProvider {
         guard let stops = insertingMissingStops(into: leg.stopovers, from: twin) else { return leg }
         var leg = leg
         leg.stopovers = stops
+        // The leg's ends take DB's names like its stops.
+        if let first = stops.first, first.station.isSamePlace(as: leg.origin) { leg.origin.name = first.station.name }
+        if let last = stops.last, last.station.isSamePlace(as: leg.destination) { leg.destination.name = last.station.name }
         if leg.departurePlatform?.best == nil, let first = stops.first, first.station.isSamePlace(as: leg.origin),
            first.departurePlatform?.best != nil {
             leg.departurePlatform = first.departurePlatform
@@ -108,8 +111,10 @@ extension TransitousProvider {
     }
 
     /// `own` with `twin`'s stops inserted between two neighbouring stops of `own` that `twin` has
-    /// too, in its order, and with platforms `own` lacks at those taken from `twin`. Nil when `twin`
-    /// adds neither a stop nor a platform, or doesn't have `own`'s stops in the same order (another route).
+    /// too, in its order, and with platforms `own` lacks at those taken from `twin`. Where `twin` is
+    /// DB's own copy (DELFI), the stops both have take DB's names, so the stops read alike whichever
+    /// feed they came from ("Decin hl.n." next to DB's "Dresden Hbf", not ÖBB's "Děčín hl.n.").
+    /// Nil when `twin` changes nothing, or doesn't have `own`'s stops in the same order (another route).
     static func insertingMissingStops(into own: [Stopover], from twin: [Stopover]) -> [Stopover]? {
         // Where each of `own`'s stops is in `twin`, walking forward.
         var positions: [Int?] = []
@@ -126,6 +131,10 @@ extension TransitousProvider {
             var stop = stop
             if let position = positions[index] {
                 let other = twin[position]
+                if isDBStop(other), other.station.name != stop.station.name {
+                    stop.station.name = other.station.name
+                    changed = true
+                }
                 if stop.arrival != nil, stop.arrivalPlatform?.best == nil, other.arrivalPlatform?.best != nil {
                     stop.arrivalPlatform = other.arrivalPlatform
                     changed = true
@@ -142,6 +151,11 @@ extension TransitousProvider {
             changed = changed || !between.isEmpty
         }
         return changed ? result : nil
+    }
+
+    /// A stop from DB's own feed (DELFI).
+    private static func isDBStop(_ stop: Stopover) -> Bool {
+        stop.station.id.hasPrefix("de-DELFI_")
     }
 
     /// The same stop in two feeds: the same place, at about the same planned time.
