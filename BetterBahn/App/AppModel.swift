@@ -12,6 +12,7 @@ final class AppModel {
     private(set) var provider: CombinedProvider
     private(set) var traewelling: TraewellingClient
     let liveActivities = LiveActivityManager()
+    @ObservationIgnored let customEmojis = CustomEmojiClient()
 
     var favoriteStations: [Station] {
         didSet {
@@ -59,6 +60,11 @@ final class AppModel {
     var trackedManualCheckins: [TrackedManualCheckin] {
         didSet { Storage.save(trackedManualCheckins, key: "trackedManualCheckins") }
     }
+    /// Träwelling status of each leg checked in from this app (by `Leg.id`), so the leg's "Mehr"
+    /// offers "Check-in ansehen" instead of checking in again.
+    var checkinStatusIDs: [String: Int] {
+        didSet { Storage.save(checkinStatusIDs, key: "checkinStatusIDs") }
+    }
     /// Explicit choice (from the route view) of which saved journey's Live Activity to show,
     /// overriding the automatic pick until that journey finishes or another one is chosen.
     /// Journeys whose Live Activity was switched off by hand, so the automatic pick skips them.
@@ -103,6 +109,7 @@ final class AppModel {
         recentStations = Storage.load(key: "recentStations") ?? []
         savedJourneys = Storage.load(key: "savedJourneys") ?? []
         trackedManualCheckins = Storage.load(key: "trackedManualCheckins") ?? []
+        checkinStatusIDs = Storage.load(key: "checkinStatusIDs") ?? [:]
         liveJourneys = Storage.load(key: "liveJourneys") ?? LiveDataCache()
         liveTrips = Storage.load(key: "liveTrips") ?? LiveDataCache()
         tickets = TicketStore.load()
@@ -585,7 +592,11 @@ final class AppModel {
     // MARK: Live train positions
 
     /// Latest position of every train on a saved journey that is running right now, keyed by train name.
-    private(set) var trainPositions: [String: LiveTrainPosition] = [:]
+    private(set) var trainPositions: [String: LiveTrainPosition] = [:] {
+        didSet { if trainPositions != oldValue { updateWidgets() } }
+    }
+    /// What the widgets were last given, so they're only reloaded when something changed.
+    @ObservationIgnored var lastWidgetSnapshot: WidgetSnapshot?
 
     /// Fetches the position of each train leg of an unfinished saved journey that is underway
     /// (plus 10 minutes either side, since departures and arrivals shift). All legs share one
@@ -845,6 +856,67 @@ final class AppModel {
         liveActivitySyncLoop = nil
     }
 
+    // MARK: Träwelling check-ins
+
+    func rememberCheckin(statusId: Int, leg: Leg) {
+        // Keep the list small: legs are only looked up while their journey is still around.
+        if checkinStatusIDs.count > 300 { checkinStatusIDs.removeAll() }
+        checkinStatusIDs[leg.id] = statusId
+    }
+
+    func forgetCheckin(statusId: Int) {
+        checkinStatusIDs = checkinStatusIDs.filter { $0.value != statusId }
+        trackedManualCheckins.removeAll { $0.statusId == statusId }
+    }
+
+    /// Deletes a check-in on Träwelling and forgets it here.
+    func deleteCheckin(statusId: Int) async throws {
+        try await traewelling.deleteStatus(id: statusId)
+        forgetCheckin(statusId: statusId)
+    }
+
+    /// The journey's legs checked in from this app, in order.
+    func checkins(in journey: Journey) -> [(leg: Leg, statusId: Int)] {
+        let journey = savedEntry(for: journey)?.journey ?? journey
+        return journey.legs.compactMap { leg in checkinStatusIDs[leg.id].map { (leg: leg, statusId: $0) } }
+    }
+
+    /// The checked-in leg of `journey` that is under way, and where checking out now would end it
+    /// (`TraewellingClient.earlyExit`). Uses the saved journey's live times.
+    func earlyCheckout(in journey: Journey, at now: Date = .now) -> (leg: Leg, statusId: Int, exit: Stopover)? {
+        for checkin in checkins(in: journey) {
+            if let exit = TraewellingClient.earlyExit(on: checkin.leg, at: now) { return (leg: checkin.leg, statusId: checkin.statusId, exit: exit) }
+        }
+        return nil
+    }
+
+    /// Deletes every check-in of `journey` made from this app.
+    func deleteCheckins(in journey: Journey) async throws {
+        for checkin in checkins(in: journey) { try await deleteCheckin(statusId: checkin.statusId) }
+    }
+
+    /// Checks out of `journey` now: the ride under way ends at the last stop reached (see
+    /// `earlyCheckout`), check-ins of legs not yet started are deleted, finished ones stay.
+    func checkOutEarly(of journey: Journey, at now: Date = .now) async throws {
+        guard let running = earlyCheckout(in: journey, at: now) else { return }
+        let status = try await traewelling.status(id: running.statusId)
+        try await traewelling.changeDestination(of: status, to: running.exit.station, arrival: running.exit.arrival?.planned)
+        forgetCheckin(statusId: running.statusId)
+        for checkin in checkins(in: journey) where checkin.leg.departure.best > now {
+            try await deleteCheckin(statusId: checkin.statusId)
+        }
+    }
+
+    /// The custom emojis of the Mastodon instance connected to the Träwelling account, or of
+    /// zug.network without one. Empty if neither can be loaded; emojis are only a nicety.
+    func checkinEmojis() async -> [CustomEmoji] {
+        // Asked each time a check-in opens, so a newly connected Mastodon account counts at once.
+        var user: TraewellingUser?
+        if await traewelling.isLoggedIn { user = try? await traewelling.currentUser() }
+        let instance = CustomEmojiText.instance(fromMastodonURL: user?.mastodonUrl) ?? CustomEmojiText.defaultInstance
+        return (try? await customEmojis.emojis(instance: instance)) ?? []
+    }
+
     // MARK: Manual Träwelling check-ins
 
     func trackManualCheckin(statusId: Int, leg: Leg) {
@@ -969,22 +1041,27 @@ final class AppModel {
     ///   journey never interrupts one that's under way, it waits its turn;
     /// - otherwise, the most recently added journey among the ones that have started.
     func syncLiveActivity() {
-        let eligible = liveActivityEligibleJourneys
         if let manualID = manualLiveActivityJourneyID, !upcomingJourneys.contains(where: { $0.id == manualID }) {
             manualLiveActivityJourneyID = nil
             return // the didSet above already re-runs this
         }
-        let candidate: SavedJourney?
-        if let manualID = manualLiveActivityJourneyID, let manual = eligible.first(where: { $0.id == manualID }) {
-            candidate = manual
-        } else if let activeID = liveActivities.activeJourneyID, let current = eligible.first(where: { $0.journey.id == activeID }) {
-            candidate = current
-        } else {
-            candidate = eligible.max { $0.savedAt < $1.savedAt }
-        }
+        let candidate = liveJourneyCandidate
         // Switched off in the settings: `show(nil)` ends whatever is still running.
         let journey = settings.liveActivitiesEnabled ? candidate?.journey : nil
         Task { await liveActivities.show(journey) }
+        updateWidgets()
+    }
+
+    /// The journey that should be live right now (see `syncLiveActivity`), whether or not Live
+    /// Activities are switched on; the widgets follow it too.
+    var liveJourneyCandidate: SavedJourney? {
+        let eligible = liveActivityEligibleJourneys
+        if let manualID = manualLiveActivityJourneyID, let manual = eligible.first(where: { $0.id == manualID }) {
+            return manual
+        } else if let activeID = liveActivities.activeJourneyID, let current = eligible.first(where: { $0.journey.id == activeID }) {
+            return current
+        }
+        return eligible.max { $0.savedAt < $1.savedAt }
     }
 
     /// Identifier for the background refresh task that keeps the Live Activity's journey up to date
@@ -1231,6 +1308,16 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(trainPositionRefresh.rawValue, forKey: "trainPositionRefresh") }
     }
 
+    /// Reports the regional and long-distance trains the app shows to BetterBahn's statistics server
+    /// (`TrainSightings`, #169). On by default, per device.
+    var shareTrainStatistics: Bool {
+        didSet {
+            UserDefaults.standard.set(shareTrainStatistics, forKey: "shareTrainStatistics")
+            let enabled = shareTrainStatistics
+            Task { await TrainSightings.shared.setEnabled(enabled) }
+        }
+    }
+
     /// Unlocks the features below; each one still has to be switched on by itself.
     var expertMode: Bool {
         didSet {
@@ -1262,6 +1349,12 @@ final class AppSettings {
             uploadToCloud()
         }
     }
+    var expertRil100: Bool {
+        didSet {
+            UserDefaults.standard.set(expertRil100, forKey: "expertRil100")
+            uploadToCloud()
+        }
+    }
 
     /// Träwelling check-ins, login and map import.
     var traewellingEnabled: Bool { expertMode && expertTraewelling }
@@ -1272,6 +1365,9 @@ final class AppSettings {
     /// The connection search also shows direct trains you may not board or leave at that station
     /// ("Nur Ausstieg" / "Nur Einstieg"), which the timetable otherwise hides.
     var ignoreBoardingRulesEnabled: Bool { expertMode && expertIgnoreBoardingRules }
+    /// The station search shows each station's RIL100 code ("FF") next to its name (#165). Searching
+    /// by code works either way.
+    var ril100Enabled: Bool { expertMode && expertRil100 }
 
     init() {
         let defaults = UserDefaults.standard
@@ -1279,11 +1375,15 @@ final class AppSettings {
         ticketType = defaults.string(forKey: "ticketType").flatMap(TicketType.init) ?? .deutschlandticket
         liveActivitiesEnabled = defaults.object(forKey: "liveActivitiesEnabled") as? Bool ?? true
         trainPositionRefresh = defaults.string(forKey: "trainPositionRefresh").flatMap(TrainPositionRefresh.init) ?? .automatic
+        let shareTrainStatistics = defaults.object(forKey: "shareTrainStatistics") as? Bool ?? true
+        self.shareTrainStatistics = shareTrainStatistics
+        Task { await TrainSightings.shared.setEnabled(shareTrainStatistics) }
         expertMode = defaults.bool(forKey: "expertMode")
         expertTraewelling = defaults.bool(forKey: "expertTraewelling")
         expertEditJourney = defaults.bool(forKey: "expertEditJourney")
         expertTrainChoice = defaults.bool(forKey: "expertTrainChoice")
         expertIgnoreBoardingRules = defaults.bool(forKey: "expertIgnoreBoardingRules")
+        expertRil100 = defaults.bool(forKey: "expertRil100")
         traewellingVisibility = TraewellingVisibility(rawValue: defaults.integer(forKey: "traewellingVisibility")) ?? .publicVisible
         bc100Rules = Storage.load(key: "bc100Rules") ?? .default
         syncTraewellingToMap = defaults.object(forKey: "syncTraewellingToMap") as? Bool ?? true
@@ -1313,6 +1413,7 @@ final class AppSettings {
         var expertTrainChoice: Bool
         /// Optional: settings synced by older versions don't have it.
         var expertIgnoreBoardingRules: Bool?
+        var expertRil100: Bool?
     }
 
     /// What iCloud stores: the settings and when they were last changed.
@@ -1326,7 +1427,7 @@ final class AppSettings {
         traewellingVisibility: TraewellingVisibility(rawValue: 0) ?? .publicVisible, bc100Rules: .default,
         syncTraewellingToMap: true, connectionWarnings: true, quickTags: QuickTag.defaults,
         liveActivitiesEnabled: true, expertMode: false, expertTraewelling: false, expertEditJourney: false,
-        expertTrainChoice: false, expertIgnoreBoardingRules: false)
+        expertTrainChoice: false, expertIgnoreBoardingRules: false, expertRil100: false)
 
     @ObservationIgnored private var isApplyingCloudValue = false
 
@@ -1336,7 +1437,8 @@ final class AppSettings {
                    syncTraewellingToMap: syncTraewellingToMap, connectionWarnings: connectionWarnings,
                    quickTags: quickTags, liveActivitiesEnabled: liveActivitiesEnabled, expertMode: expertMode,
                    expertTraewelling: expertTraewelling, expertEditJourney: expertEditJourney,
-                   expertTrainChoice: expertTrainChoice, expertIgnoreBoardingRules: expertIgnoreBoardingRules)
+                   expertTrainChoice: expertTrainChoice, expertIgnoreBoardingRules: expertIgnoreBoardingRules,
+                   expertRil100: expertRil100)
     }
 
     /// When the settings were last changed on this device or taken over from iCloud. Before
@@ -1382,6 +1484,7 @@ final class AppSettings {
         expertEditJourney = value.expertEditJourney
         expertTrainChoice = value.expertTrainChoice
         expertIgnoreBoardingRules = value.expertIgnoreBoardingRules ?? expertIgnoreBoardingRules
+        expertRil100 = value.expertRil100 ?? expertRil100
     }
 }
 

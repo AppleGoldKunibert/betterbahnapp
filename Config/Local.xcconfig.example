@@ -1,5 +1,8 @@
 // Copy this file to Config/Local.xcconfig (gitignored) to build under your own Apple Developer
 // account — e.g. so two people can each have their own build installed on the same test device
 // at the same time, or so you can test without touching the shared signing settings.
+// The App Group "group.de.goldkunibert.BetterBahn" (widgets) is written out in Config/*.entitlements and
+// the Info.plists, since Xcode can't register a group name with a build setting in it; under another
+// team, change it there too (locally, don't commit) or the widgets get no data.
 LOCAL_DEVELOPMENT_TEAM = YOURTEAMID
 LOCAL_BUNDLE_ID_SUFFIX = .yourname

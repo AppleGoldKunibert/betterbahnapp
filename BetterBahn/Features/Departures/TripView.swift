@@ -236,6 +236,10 @@ struct TripContent: View {
     /// Read when the view appears, so the tip doesn't vanish (and move the stops) while picking them.
     @State private var showsStopTip = !UserDefaults.standard.bool(forKey: "pickedTripStop")
     @State private var sequenceRequest: BahnDeClient.FormationRequest?
+    /// Where a train run by several railways changes hands (stopover ID → operators), e.g. DB at the
+    /// start and at Bad Schandau, ČD at Děčín; empty for one railway throughout.
+    @State private var operatorStops: [String: [String]] = [:]
+    @Environment(AppModel.self) private var model
 
     private var color: Color { trip.line?.product.color ?? .gray }
 
@@ -255,8 +259,8 @@ struct TripContent: View {
                                 .foregroundStyle(.secondary)
                                 .fullTextPopup("\(origin.displayName) → \(destination.displayName)", lines: 2)
                         }
-                        if let op = trip.line?.operatorName {
-                            Label(op, systemImage: "building.2.fill").font(.caption).foregroundStyle(.tertiary)
+                        if trip.line?.operatorName != nil {
+                            TrainOperatorsLabel(source: .trip(trip)).font(.caption).foregroundStyle(.tertiary)
                         }
                         TrainFormationLabel(trip: trip, savedLeg: savedLeg)
                     }
@@ -309,6 +313,10 @@ struct TripContent: View {
             if let sequenceRequest {
                 CoachSequenceView(request: sequenceRequest, trainName: trip.line?.name)
             }
+        }
+        .task(id: trip.stopovers.map(\.id)) {
+            guard let bahnDe = model.provider.bahnDe, let found = try? await bahnDe.operatorStops(for: trip) else { return }
+            operatorStops = found
         }
     }
 
@@ -369,6 +377,11 @@ struct TripContent: View {
                             }
                             if stop.isAdditional {
                                 InfoChip(text: "Zusatzhalt", systemImage: "plus.circle.fill", tint: .brand)
+                            }
+                            if let operators = operatorStops[stop.id] {
+                                HStack(spacing: 6) {
+                                    ForEach(operators, id: \.self) { OperatorLogo(name: $0) }
+                                }
                             }
                         }
                         Spacer()
