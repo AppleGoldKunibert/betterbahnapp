@@ -41,6 +41,19 @@ import Testing
         #expect(!status.checkin.isManualTrip)
     }
 
+    @Test func readsTheAuthorsMastodonInstance() throws {
+        func user(_ mastodon: String) throws -> TraewellingStatus.User? {
+            try JSONDecoding.decoder.decode(TraewellingStatus.self, from: Data(#"""
+            {"id":1,"user":{"id":11,"displayName":"A","username":"a","mastodon":\#(mastodon)},
+             "checkin":{"origin":{"name":"A"},"destination":{"name":"B"}}}
+            """#.utf8)).user
+        }
+        #expect(try user(#"{"server":"Chaos.Social","user_id":"1"}"#)?.mastodonServer == "chaos.social")
+        #expect(try user(#"{"server":null,"user_id":null}"#)?.mastodonServer == nil)
+        // Something unexpected there must not lose the user.
+        #expect(try user(#""nope""#)?.username == "a")
+    }
+
     @Test func brokenTagsDontHideTheCheckin() throws {
         let status = try Self.status(id: 1, user: 11, from: 0, to: 90, extra: #""tags":"nope","#)
         #expect(status.tags.isEmpty)

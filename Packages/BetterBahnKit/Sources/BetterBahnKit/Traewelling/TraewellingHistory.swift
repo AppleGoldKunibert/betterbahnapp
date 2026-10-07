@@ -47,10 +47,22 @@ public struct TraewellingStatus: Decodable, Sendable, Hashable {
         public var displayName: String
         public var username: String
         public var profilePicture: URL? { profilePictureString.flatMap(URL.init(string:)) }
+        /// The host of the Mastodon instance connected to their account (e.g. "chaos.social"), whose
+        /// custom emojis their check-in texts use.
+        public var mastodonServer: String? {
+            mastodon?.value?.server.flatMap { CustomEmojiText.instance(fromMastodonURL: $0) }
+        }
         private var profilePictureString: String?
+        private var mastodon: LenientMastodon?
 
         enum CodingKeys: String, CodingKey {
-            case id, displayName, username, profilePictureString = "profilePicture"
+            case id, displayName, username, mastodon, profilePictureString = "profilePicture"
+        }
+
+        struct LenientMastodon: Decodable, Sendable, Hashable {
+            struct Account: Decodable, Sendable, Hashable { var server: String? }
+            var value: Account?
+            init(from decoder: Decoder) throws { value = try? Account(from: decoder) }
         }
     }
 

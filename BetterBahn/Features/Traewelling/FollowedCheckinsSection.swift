@@ -15,6 +15,9 @@ extension AppModel {
                 if due, let fresh = try? await traewelling.followedCheckins() {
                     followedCheckins = fresh
                     followedCheckinsLoadedAt = .now
+                    let current = Set(fresh.statuses.map(\.id))
+                    followedTracks = followedTracks.filter { current.contains($0.key) }
+                    followedTrains = followedTrains.filter { current.contains($0.key) }
                 }
             } else {
                 followedCheckins = nil
@@ -22,6 +25,17 @@ extension AppModel {
             }
             try? await Task.sleep(for: Self.followedCheckinsInterval)
         }
+    }
+
+    /// The custom emojis for someone else's check-in text: their Mastodon instance's first, then the
+    /// user's own (`checkinEmojis`), so shortcodes from either show as pictures.
+    func emojis(forTextOf status: TraewellingStatus) async -> [CustomEmoji] {
+        var theirs: [CustomEmoji] = []
+        if let server = status.user?.mastodonServer {
+            theirs = (try? await customEmojis.emojis(instance: server)) ?? []
+        }
+        var seen = Set(theirs.map(\.shortcode))
+        return theirs + (await checkinEmojis()).filter { seen.insert($0.shortcode).inserted }
     }
 
     /// A Träwelling status tag's name: the quick tag's for a known key, else the key itself.
@@ -110,8 +124,9 @@ private struct FollowedCheckinCard: View {
     @State private var isSearchingTrain = false
     @State private var searchedTrain = false
     @State private var showTrain = false
-    /// The ride's track from Träwelling.
+    /// The ride's track from Träwelling once asked for (empty: it has none, or it couldn't be loaded).
     @State private var geometry: [Coordinate]?
+    @State private var emojis: [CustomEmoji] = []
     /// The like state after tapping, until the next refresh brings Träwelling's.
     @State private var liked: Bool?
     @State private var likes: Int?
@@ -119,7 +134,11 @@ private struct FollowedCheckinCard: View {
     @State private var error: Error?
 
     private var checkin: TraewellingStatus.Checkin { status.checkin }
-    private var ride: Leg? { status.journey(geometry: geometry)?.legs.first }
+    // What an earlier opening looked up counts at once (`AppModel.followedTracks`/`followedTrains`).
+    private var track: [Coordinate]? { geometry ?? model.followedTracks[status.id] }
+    private var train: Leg? { trainLeg ?? model.followedTrains[status.id] ?? nil }
+    private var trainSearched: Bool { searchedTrain || model.followedTrains[status.id] != nil }
+    private var ride: Leg? { status.journey(geometry: track.flatMap { $0.isEmpty ? nil : $0 })?.legs.first }
     private var origin: String { checkin.origin.station?.name ?? checkin.origin.name ?? "?" }
     private var destination: String { checkin.destination.station?.name ?? checkin.destination.name ?? "?" }
 
@@ -130,10 +149,11 @@ private struct FollowedCheckinCard: View {
         return name.split(separator: " ").contains { $0 == number } ? nil : number
     }
 
-    /// The train's route for the map: the timetable's run with its stops if found, else Träwelling's ride.
+    /// The train's route for the map: the timetable's run with its stops if found, else Träwelling's ride,
+    /// along Träwelling's track.
     private var route: LiveTrainRoute? {
-        guard var leg = trainLeg ?? ride else { return nil }
-        if leg.geometry?.isEmpty ?? true { leg.geometry = geometry }
+        guard var leg = train ?? ride else { return nil }
+        if leg.geometry?.isEmpty ?? true, let track, !track.isEmpty { leg.geometry = track }
         return LiveTrainRoute(leg: leg)
     }
 
@@ -148,11 +168,20 @@ private struct FollowedCheckinCard: View {
             }
         }
         .sheet(isPresented: $showTrain) {
-            if let trainLeg { LegTripSheet(leg: trainLeg) }
+            if let train { LegTripSheet(leg: train) }
+        }
+        // Each on its own, so the track shows as soon as Träwelling sends it, however long the train search takes.
+        .task(id: isOpen) {
+            guard isOpen else { return }
+            await loadTrack()
         }
         .task(id: isOpen) {
             guard isOpen else { return }
-            await loadDetails()
+            await findTrain()
+        }
+        .task(id: isOpen) {
+            guard isOpen, emojis.isEmpty, status.body?.contains(":") ?? false else { return }
+            emojis = await model.emojis(forTextOf: status)
         }
         .onChange(of: status.liked) {
             liked = nil
@@ -224,12 +253,13 @@ private struct FollowedCheckinCard: View {
     private var details: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let body = status.body?.trimmingCharacters(in: .whitespacesAndNewlines), !body.isEmpty {
-                Text(body)
+                EmojiText(text: body, emojis: emojis)
                     .font(.subheadline)
                     .textSelection(.enabled)
             }
             if let route {
-                FollowedRideMap(route: route)
+                // No line until the track is known: drawn from start to end first, it would jump.
+                FollowedRideMap(route: route, showsPath: track != nil)
             }
             HStack(spacing: 8) {
                 if !checkin.isManualTrip { trainButton }
@@ -243,7 +273,7 @@ private struct FollowedCheckinCard: View {
             .font(.subheadline.weight(.medium))
             .buttonStyle(.glass)
             .controlSize(.small)
-            if searchedTrain, trainLeg == nil, !checkin.isManualTrip {
+            if trainSearched, train == nil, !checkin.isManualTrip {
                 Text("Den Zug gibt es in den Fahrplandaten nicht.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -265,7 +295,7 @@ private struct FollowedCheckinCard: View {
                 Label("Zug", systemImage: "train.side.front.car")
             }
         }
-        .disabled(trainLeg == nil)
+        .disabled(train == nil)
     }
 
     private var likeButton: some View {
@@ -282,16 +312,30 @@ private struct FollowedCheckinCard: View {
         .accessibilityLabel(isLiked ? "Gefällt mir nicht mehr" : "Gefällt mir")
     }
 
-    private func loadDetails() async {
-        let traewelling = model.traewelling, statusID = status.id
-        async let track = try? traewelling.polylines(statusIDs: [statusID])
-        if !checkin.isManualTrip, !searchedTrain {
-            isSearchingTrain = true
-            trainLeg = try? await model.provider.leg(forCheckin: status)
-            isSearchingTrain = false
-            searchedTrain = true
+    /// Träwelling's track of the ride. Only an answer is remembered; a failed request is asked again next time.
+    private func loadTrack() async {
+        let id = status.id
+        guard model.followedTracks[id] == nil else { return }
+        if let lines = try? await model.traewelling.polylines(statusIDs: [id]) {
+            let line = lines[id].flatMap { $0.count > 1 ? $0 : nil } ?? []
+            model.followedTracks[id] = line
+            geometry = line
+        } else {
+            geometry = []
         }
-        if geometry == nil, let line = await track?[statusID], line.count > 1 { geometry = line }
+    }
+
+    /// The train in the timetable data; like the track, remembered once the search got an answer.
+    private func findTrain() async {
+        guard !checkin.isManualTrip, !trainSearched else { return }
+        isSearchingTrain = true
+        defer { isSearchingTrain = false }
+        do {
+            let found = try await model.provider.leg(forCheckin: status)
+            model.followedTrains[status.id] = .some(found)
+            trainLeg = found
+        } catch {}
+        searchedTrain = true
     }
 
     private func toggleLike() async {
@@ -318,6 +362,7 @@ private struct FollowedCheckinCard: View {
 /// tapping opens the full live map.
 private struct FollowedRideMap: View {
     let route: LiveTrainRoute
+    var showsPath = true
 
     @Environment(AppModel.self) private var model
     @State private var position: TrainPosition?
@@ -331,7 +376,7 @@ private struct FollowedRideMap: View {
             showMap = true
         } label: {
             Map(position: $camera, interactionModes: []) {
-                if route.path.count > 1 {
+                if showsPath, route.path.count > 1 {
                     MapPolyline(coordinates: route.path.map(\.clCoordinate))
                         .stroke(color.opacity(0.8), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
                 }
