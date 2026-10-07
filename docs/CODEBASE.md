@@ -73,7 +73,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 - `Features/Departures/` – `StationBoardView`/`BoardRow`, `TripView` (single train's stops),
   `CoachSequenceView` (Wagenreihung sheet, opened from `CoachSequenceButton` in train headers or a stop's platform in `TripContent`;
   bahn.de's sequence, else vagonweb's planned one).
-- `Features/Map/` – `TravelMapView` heatmap of past trips (`TravelMapHeatmap`, railway tile overlay),
+- `Features/Map/` – `TravelMapView` heatmap of past trips (`TravelMapHeatmap`, `RailwayTileOverlay`: OpenRailwayMap tiles, 512 px, cached on disk 7 days, 10 min pause after 403/429, #171;
+  a ride both saved and checked in on Träwelling is drawn from the check-in, saved journeys only add unchecked legs – `RideMatch.uncovered`),
   `LiveTrainMapView` (one train's live position on its route, opened from `LiveTrainIconTile`, the train icon on
   legs and trips bahn.jetzt has). `JourneyMapView` shows the journey's running trains too.
 - `Features/Tickets/` – `TicketLookupView` (native form; bahn.de's "Auftragssuche" runs in a hidden SwiftUI `WebView`,
