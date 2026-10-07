@@ -60,12 +60,6 @@ extension AppModel {
         return saved + checkins
     }
 
-    /// Saved train rides already travelled that no Träwelling check-in covers, newest first: what
-    /// turning "Gespeichert" on adds to the map. Settings lists them so missing check-ins can be found.
-    func uncheckedRides(in interval: DateInterval?) -> [Leg] {
-        travelledLegs(of: uncheckedJourneys(in: interval)).map(\.leg).sorted { $0.departure.planned > $1.departure.planned }
-    }
-
     private func checkins(in interval: DateInterval?) -> [Journey] {
         traewellingTrips.map(\.journey).filter { Self.departs($0, in: interval) }
     }

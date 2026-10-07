@@ -81,7 +81,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `SeatReservationViews` (`ReservationRow` in `LegCard` above "Mehr", read-only). Reservations come from the journey's
   tickets (`AppModel.reservations(for:)`) and only show on the leg whose train matches.
 - `Features/Trips/TripsView.swift` – upcoming/past saved journeys, `SaveJourneyButton`.
-- `Features/Traewelling/` – `CheckinSheet`, `TraewellingLoginButton`, `UncheckedRidesView` (Settings → Träwelling → "Nicht eingecheckt": travelled saved rides without a check-in, `AppModel.uncheckedRides`; "Alle einchecken" checks them in one by one, as a manual trip when Träwelling can't find the train).
+- `Features/Traewelling/` – `CheckinSheet`, `TraewellingLoginButton`.
 - `Features/Sharing/` – preview of shared journeys and imported DB shares; `JourneyShareButton` (in `JourneyDetailView`)
   uploads for a short link, falls back to the long link, and opens `UIActivityViewController`.
 - `Features/Settings/` – settings (incl. privacy policy link and "not affiliated with DB" note), `DataSourcesView`
