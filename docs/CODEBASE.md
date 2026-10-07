@@ -96,7 +96,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   a small map with the ride and the live position/speed (bahn.jetzt, tap → `LiveTrainMapView`), a Träwelling link and a like
   button (only when the user's `likes_enabled` and the status `isLikable`). Track and train are looked up separately and kept
   per status (`AppModel.followedTracks`/`followedTrains`), so opening it again shows them at once; the text shows the custom
-  emojis of the author's Mastodon instance (`User.mastodonServer`), then the user's own (`AppModel.emojis(forTextOf:)`).
+  emojis of the author's Mastodon instance (`User.mastodonServer`), else zug.network's (`AppModel.emojis(forTextOf:)`).
 - `Features/Sharing/` – preview of shared journeys and imported DB shares; `JourneyShareButton` (in `JourneyDetailView`)
   uploads for a short link, falls back to the long link, and opens `UIActivityViewController`.
 - `Features/Settings/` – settings (incl. privacy policy link and "not affiliated with DB" note), `DataSourcesView`

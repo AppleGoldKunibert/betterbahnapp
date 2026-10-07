@@ -27,15 +27,14 @@ extension AppModel {
         }
     }
 
-    /// The custom emojis for someone else's check-in text: their Mastodon instance's first, then the
-    /// user's own (`checkinEmojis`), so shortcodes from either show as pictures.
+    /// The custom emojis for someone else's check-in text: those of the Mastodon instance connected to
+    /// their account, else (none connected, or it can't be reached) zug.network's, like for the user's own.
     func emojis(forTextOf status: TraewellingStatus) async -> [CustomEmoji] {
-        var theirs: [CustomEmoji] = []
-        if let server = status.user?.mastodonServer {
-            theirs = (try? await customEmojis.emojis(instance: server)) ?? []
+        if let server = status.user?.mastodonServer, server != CustomEmojiText.defaultInstance,
+           let theirs = try? await customEmojis.emojis(instance: server) {
+            return theirs
         }
-        var seen = Set(theirs.map(\.shortcode))
-        return theirs + (await checkinEmojis()).filter { seen.insert($0.shortcode).inserted }
+        return (try? await customEmojis.emojis(instance: CustomEmojiText.defaultInstance)) ?? []
     }
 
     /// A Träwelling status tag's name: the quick tag's for a known key, else the key itself.
