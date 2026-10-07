@@ -329,6 +329,48 @@ extension Array where Element == Journey {
         var seen = Set<String>()
         return filter { seen.insert($0.id).inserted }
     }
+
+    /// Drops journeys taking the very same trains at the same times as another one, only from another
+    /// feed: Transitous routes RJ 385 Berlin → Praha over DB's copy ("ICE 385", named "RJ 385" by bahn.de)
+    /// and over Rejseplanen's, and once their stops are filled in from each other they read alike. The
+    /// copy with more live data, then more stops and platforms, stays, in the place of the first.
+    public func removingSameTrainDuplicates() -> [Journey] {
+        var result: [Journey] = []
+        for journey in self {
+            if let index = result.firstIndex(where: { $0.isSameRide(as: journey) }) {
+                if journey.completeness > result[index].completeness { result[index] = journey }
+            } else {
+                result.append(journey)
+            }
+        }
+        return result
+    }
+}
+
+extension Journey {
+    /// The same trains (by number) between the same places at the same planned times, walks aside.
+    func isSameRide(as other: Journey) -> Bool {
+        let legs = transitLegs, otherLegs = other.transitLegs
+        guard !legs.isEmpty, legs.count == otherLegs.count else { return false }
+        return zip(legs, otherLegs).allSatisfy { a, b in
+            guard let number = a.line?.number, number == b.line?.number, a.line?.product.isTrain == b.line?.product.isTrain
+            else { return false }
+            return a.departure.planned == b.departure.planned && a.arrival.planned == b.arrival.planned
+                && a.origin.isSamePlace(as: b.origin) && a.destination.isSamePlace(as: b.destination)
+        }
+    }
+
+    /// How much a journey knows: live times first, then stops, then platforms.
+    var completeness: (Int, Int, Int) {
+        let legs = transitLegs
+        let live = legs.filter { $0.departure.actual != nil || $0.arrival.actual != nil }.count
+        let stops = legs.reduce(0) { $0 + $1.stopovers.count }
+        let platforms = legs.reduce(0) { count, leg in
+            count + (leg.departurePlatform?.best != nil ? 1 : 0) + (leg.arrivalPlatform?.best != nil ? 1 : 0)
+                + leg.stopovers.filter { ($0.departurePlatform ?? $0.arrivalPlatform)?.best != nil }.count
+        }
+        return (live, stops, platforms)
+    }
 }
 
 public struct Leg: Codable, Sendable, Hashable, Identifiable {

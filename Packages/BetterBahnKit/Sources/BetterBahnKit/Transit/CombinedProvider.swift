@@ -156,6 +156,8 @@ public final class CombinedProvider: TransitProvider {
         page.journeys = Self.applying(await coupled, to: page.journeys)
         page.journeys = Self.applying(twinStops: await twinStops, to: page.journeys)
         page.journeys = Self.applying(czechStops: await czechStops, to: page.journeys)
+        // The same train from two feeds now reads alike: show it once.
+        page.journeys = page.journeys.removingSameTrainDuplicates()
         return page
     }
 

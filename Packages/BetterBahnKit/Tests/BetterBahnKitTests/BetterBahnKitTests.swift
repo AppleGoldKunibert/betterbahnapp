@@ -1867,6 +1867,27 @@ private final class CzechTimetableProtocol: URLProtocol, @unchecked Sendable {
         #expect(TransitousProvider.insertingMissingStops(into: filled, from: sameStops) == nil)
     }
 
+    /// RJ 177 Berlin Hbf → Praha-Holešovice from ÖBB's and from DB's feed is one connection: DB's copy,
+    /// with live times, stays in the place of the first.
+    @Test func sameTrainFromTwoFeedsShowsOnce() throws {
+        let oebb = try berlinPraha()
+        let run = try trips().delfi
+        let stops = Array(run.stopovers[3...10])
+        let delfi = Leg(origin: stops[0].station, destination: stops[7].station,
+                        departure: try #require(stops[0].departure), arrival: try #require(stops[7].arrival),
+                        departurePlatform: stops[0].departurePlatform, arrivalPlatform: nil, tripId: run.tripId, line: run.line,
+                        direction: run.direction, isWalking: false, cancelled: false, stopovers: stops, remarks: [], source: .transitous)
+        let later = Leg(origin: delfi.origin, destination: delfi.destination,
+                        departure: TimeInfo(planned: delfi.departure.planned.addingTimeInterval(7200), actual: nil),
+                        arrival: TimeInfo(planned: delfi.arrival.planned.addingTimeInterval(7200), actual: nil),
+                        departurePlatform: nil, arrivalPlatform: nil, tripId: "later", line: run.line, direction: nil,
+                        isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+        let journeys = [Journey(legs: [oebb], source: .transitous), Journey(legs: [later], source: .transitous),
+                        Journey(legs: [delfi], source: .transitous)]
+        let shown = journeys.removingSameTrainDuplicates()
+        #expect(shown.map { $0.legs[0].tripId } == [delfi.tripId, "later"])
+    }
+
     @Test func onlyTrainsFromFeedsThatLeaveOutStops() throws {
         let (oebb, delfi) = try trips()
         #expect(TransitousProvider.mayLackStops(oebb))

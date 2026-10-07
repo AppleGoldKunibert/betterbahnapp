@@ -638,7 +638,10 @@ struct PlannedPlatformNote: View {
             }
         }
         .padding()
-        .frame(minWidth: 240, maxWidth: 320, alignment: .leading)
+        // A fixed width, so the popover measures the text's height at the width it shows it at
+        // (with a width range the last line was cut off).
+        .frame(width: 280, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
