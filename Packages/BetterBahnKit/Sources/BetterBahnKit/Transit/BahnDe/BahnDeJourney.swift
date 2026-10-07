@@ -106,10 +106,16 @@ extension BahnDeClient {
             var ezAnkunftsZeitpunkt: String?
             var priorisierteMeldungen: [Message]?
             var risMeldungen: [RISMessage]?
+            /// The railway running the train from this stop, by its UIC code: RJ 171 has "80" (DB) from
+            /// Hamburg-Altona to Bad Schandau and "54" (ČD) from Děčín to Praha hl.n.
+            var adminID: String?
+            /// The train's category here, e.g. "RJ".
+            var kategorie: String?
         }
-        /// The train's attributes; its operators are the "BEF" (Beförderer) entries, one per section on
+        /// The train's attributes; operators may come as "BEF" (Beförderer) entries, one per section on
         /// trains run by several, e.g. `{"key": "BEF", "value": "DB Fernverkehr AG",
-        /// "teilstreckenHinweis": "(Berlin Hbf - Bad Schandau)"}` (as parsed by db-vendo-client).
+        /// "teilstreckenHinweis": "(Berlin Hbf - Bad Schandau)"}` (as parsed by db-vendo-client). The
+        /// journey details of RJ 171 Hamburg → Praha (2026-10-07) had none, only each stop's `adminID`.
         struct Attribute: Decodable { var key: String?; var value: String?; var teilstreckenHinweis: String? }
         var halte: [Stop]
         var zugattribute: [Attribute]?
@@ -483,7 +489,61 @@ extension BahnDeClient {
 
     private func fetchJourneyCourse(journeyId: String) async throws -> JourneyCourse {
         let details = try await get(Self.journeyURL(journeyId), as: JourneyDetails.self)
-        return JourneyCourse(stops: details.halte.compactMap(JourneyStop.init), operators: Self.operators(in: details.zugattribute ?? []))
+        let named = Self.operators(in: details.zugattribute ?? [])
+        return JourneyCourse(stops: details.halte.compactMap(JourneyStop.init),
+                             operators: named.isEmpty ? Self.operators(byAdministration: details.halte) : named)
+    }
+
+    /// The operators of a train run by several railways, from its stops' `adminID`s: one per run of
+    /// stops with the same code, its section from the first to the last of them. Empty when the whole
+    /// train has one code (the feed's operator names it better, e.g. "DB Regio AG NRW") or a code isn't
+    /// known, so a railway is never silently left out.
+    static func operators(byAdministration stops: [JourneyDetails.Stop]) -> [TrainOperator] {
+        var runs: [(admin: String, first: JourneyDetails.Stop, last: JourneyDetails.Stop)] = []
+        for stop in stops {
+            guard let admin = stop.adminID?.prefix(2), admin.count == 2 else { continue }
+            if let last = runs.last, last.admin == admin {
+                runs[runs.count - 1].last = stop
+            } else {
+                runs.append((String(admin), stop, stop))
+            }
+        }
+        guard Set(runs.map(\.admin)).count > 1 else { return [] }
+        var operators: [TrainOperator] = []
+        for run in runs {
+            let longDistance = !regionalTrainCategories.contains(run.first.kategorie?.uppercased() ?? "")
+            guard let name = railwayName(uicCode: run.admin, longDistance: longDistance) else { return [] }
+            operators.append(TrainOperator(name: name, section: .init(from: run.first.name, to: run.last.name)))
+        }
+        return operators
+    }
+
+    /// Categories of regional trains, whose DB part is DB Regio rather than DB Fernverkehr.
+    static let regionalTrainCategories: Set<String> = ["RE", "RB", "IRE", "S", "RS", "MEX", "REX", "R", "OS", "SP", "IR"]
+
+    /// The passenger railway behind a UIC country code as bahn.de uses it for `adminID`. Named like
+    /// the feeds name them, so `OperatorBrand` finds their logos.
+    static func railwayName(uicCode: String, longDistance: Bool) -> String? {
+        switch uicCode {
+        case "80": longDistance ? "DB Fernverkehr AG" : "DB Regio AG"
+        case "81": "ÖBB Personenverkehr AG"
+        case "85": "Schweizerische Bundesbahnen SBB"
+        case "54": "České dráhy, a.s."
+        case "51": longDistance ? "PKP Intercity" : "Polregio"
+        case "56": "Železničná spoločnosť Slovensko, a.s."
+        case "55": "MÁV-START"
+        case "43": "GYSEV"
+        case "84": "NS Reizigers"
+        case "88": "SNCB"
+        case "87": "SNCF"
+        case "83": "Trenitalia"
+        case "82": "CFL"
+        case "86": "DSB"
+        case "74": "SJ"
+        case "79": "Slovenske železnice"
+        case "78": "HŽ Putnički prijevoz"
+        default: nil
+        }
     }
 
     // MARK: Operators
@@ -526,7 +586,8 @@ extension BahnDeClient {
                   let from = stops.firstIndex(where: { Station.normalize($0.name) == Station.normalize(section.from) }),
                   let to = stops.indices.last(where: { $0 > from && Station.normalize(stops[$0].name) == Station.normalize(section.to) })
             else { return true }
-            return from < legEnd && to > legStart
+            // Its section runs on to the next stop (Bad Schandau → Děčín is still DB's).
+            return from < legEnd && to >= legStart
         }
         var seen = Set<String>()
         let unique = riding.filter { seen.insert($0.name).inserted }

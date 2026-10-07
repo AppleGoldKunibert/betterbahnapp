@@ -4542,6 +4542,50 @@ private final class RE3318CancelledProtocol: RE3318Protocol, @unchecked Sendable
         #expect(try JSONDecoding.decoder.decode(BahnDeClient.JourneyDetails.self, from: Data(#"{"halte": []}"#.utf8)).zugattribute == nil)
     }
 
+    /// Real RJ 171 Hamburg-Altona → Praha hl.n. (bahn.de journey details, 2026-10-07, shortened): no
+    /// "BEF" attribute at all, but each stop's `adminID` – "80" (DB) up to Bad Schandau, "54" (ČD) after.
+    @Test func operatorsFromTheStopsAdministration() throws {
+        let details = #"""
+        {"zugName": "RJ 171", "zugattribute": [{"kategorie": "BORDBISTRO", "key": "BR", "value": "Bordrestaurant"}], "halte": [
+          {"id": "A=1@O=Berlin Hbf@X=13369549@Y=52525589@U=80@L=8098160@", "extId": "8098160", "name": "Berlin Hbf", "adminID": "80", "kategorie": "RJ", "ankunft": {"sollzeit": "2026-10-07T07:23:00"}, "abfahrt": {"sollzeit": "2026-10-07T07:28:00"}},
+          {"id": "A=1@O=Dresden Hbf@X=13732039@Y=51040562@U=80@L=8010085@", "extId": "8010085", "name": "Dresden Hbf", "adminID": "80", "kategorie": "RJ", "ankunft": {"sollzeit": "2026-10-07T09:07:00"}, "abfahrt": {"sollzeit": "2026-10-07T09:10:00"}},
+          {"id": "A=1@O=Bad Schandau@X=14137542@Y=50919289@U=80@L=8010022@", "extId": "8010022", "name": "Bad Schandau", "adminID": "80", "kategorie": "RJ", "ankunft": {"sollzeit": "2026-10-07T09:35:00"}, "abfahrt": {"sollzeit": "2026-10-07T09:37:00"}},
+          {"id": "A=1@O=Decin hl.n.@X=14201249@Y=50773412@U=80@L=5400003@", "extId": "5400003", "name": "Decin hl.n.", "adminID": "54", "kategorie": "RJ", "ankunft": {"sollzeit": "2026-10-07T09:53:00"}, "abfahrt": {"sollzeit": "2026-10-07T09:57:00"}},
+          {"id": "A=1@O=Praha hl.n.@X=14436038@Y=50083058@U=80@L=5400014@", "extId": "5400014", "name": "Praha hl.n.", "adminID": "54", "kategorie": "RJ", "ankunft": {"sollzeit": "2026-10-07T11:25:00"}}
+        ]}
+        """#
+        let decoded = try JSONDecoding.decoder.decode(BahnDeClient.JourneyDetails.self, from: Data(details.utf8))
+        #expect(BahnDeClient.operators(in: decoded.zugattribute ?? []).isEmpty)
+        let operators = BahnDeClient.operators(byAdministration: decoded.halte)
+        #expect(operators == [
+            TrainOperator(name: "DB Fernverkehr AG", section: .init(from: "Berlin Hbf", to: "Bad Schandau")),
+            TrainOperator(name: "České dráhy, a.s.", section: .init(from: "Decin hl.n.", to: "Praha hl.n.")),
+        ])
+        #expect(operators.map { OperatorBrand(operatorName: $0.name) } == [.db, .cd])
+
+        let stops = decoded.halte.compactMap(JourneyStop.init)
+        func time(_ text: String) throws -> TimeInfo { TimeInfo(planned: try #require(BahnDeClient.parseBerlinTime(text)), actual: nil) }
+        func station(_ name: String, _ lat: Double, _ lon: Double) -> Station {
+            Station(id: "t:\(name)", name: name, coordinate: Coordinate(latitude: lat, longitude: lon), evaNumber: nil, source: .transitous)
+        }
+        let berlin = station("S+U Berlin Hauptbahnhof", 52.5252, 13.3694)
+        func leg(to destination: Station, arriving: String) throws -> Leg {
+            Leg(origin: berlin, destination: destination, departure: try time("2026-10-07T07:28:00"), arrival: try time(arriving),
+                departurePlatform: nil, arrivalPlatform: nil, tripId: "rj", line: Line(name: "RJ 171", number: "171", product: .highSpeed, operatorName: "DB Fernverkehr AG"),
+                direction: nil, isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+        }
+        let toDresden = try leg(to: station("Dresden Hbf", 51.0405, 13.7320), arriving: "2026-10-07T09:07:00")
+        let toPraha = try leg(to: station("Praha hl.n.", 50.0830, 14.4360), arriving: "2026-10-07T11:25:00")
+        #expect(BahnDeClient.operators(operators, riding: toDresden, stops: stops) == [TrainOperator(name: "DB Fernverkehr AG")])
+        #expect(BahnDeClient.operators(operators, riding: toPraha, stops: stops) == operators)
+
+        // A train run by one railway throughout keeps the feed's operator, and an unknown code isn't guessed.
+        #expect(BahnDeClient.operators(byAdministration: Array(decoded.halte.prefix(3))).isEmpty)
+        var unknown = decoded.halte
+        unknown[4].adminID = "99"
+        #expect(BahnDeClient.operators(byAdministration: unknown).isEmpty)
+    }
+
     /// Berlin → Praha is run by DB and ČD; riding only to Dresden shows DB alone, riding to Praha both.
     @Test func narrowsOperatorsToTheLegsSection() throws {
         let start = try #require(JSONDecoding.parseISODate("2026-10-08T07:00:00Z"))
