@@ -191,18 +191,23 @@ private struct TrainDrawingRow: View {
                 }
             }
             .layoutPriority(1)
-            // As wide as its height allows, cut off at the trailing edge.
-            Color.clear
-                .frame(maxWidth: .infinity, minHeight: Self.height, maxHeight: Self.height)
-                .overlay(alignment: .leading) {
-                    Image(drawing.assetName)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(height: Self.height)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
-                .clipped()
-                .accessibilityHidden(true)
+            VStack(alignment: .trailing, spacing: 2) {
+                // As wide as its height allows, cut off at the trailing edge.
+                Color.clear
+                    .frame(maxWidth: .infinity, minHeight: Self.height, maxHeight: Self.height)
+                    .overlay(alignment: .leading) {
+                        Image(drawing.assetName)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(height: Self.height)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                    .clipped()
+                    .accessibilityHidden(true)
+                Text("Quelle: Deutsche Bahn")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
         }
         .accessibilityElement(children: .combine)
     }
