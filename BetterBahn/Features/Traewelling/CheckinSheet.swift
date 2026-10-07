@@ -15,6 +15,10 @@ struct CheckinSheet: View {
     @State private var result: CheckinResult?
     @State private var error: Error?
     @State private var offerManualTrip = false
+    /// Träwelling still has the user on another train at that time (`.collision`), e.g. because the
+    /// previous one arrived early; offers to check in anyway. Remembers whether it was the manual trip.
+    @State private var offerForcedCheckin = false
+    @State private var forcedAsManualTrip = false
     @State private var activeTags: Set<String> = []
     @State private var tagValues: [String: String] = [:]
     /// For coupled trains (`Line.coupledTrains`): which of them the user sits in, picked by hand since
@@ -82,6 +86,13 @@ struct CheckinSheet: View {
                 Button("Abbrechen", role: .cancel) {}
             } message: {
                 Text("Träwelling kennt \(rideLeg.line?.name ?? "diesen Zug") nicht. Du kannst ihn selbst eintragen.")
+            }
+            .alert("Schon eingecheckt", isPresented: $offerForcedCheckin) {
+                Button("Trotzdem einchecken") { send(asManualTrip: forcedAsManualTrip, force: true) }
+                Button("Abbrechen", role: .cancel) {}
+            } message: {
+                Text("Träwelling hat dich zu dieser Zeit noch in einem anderen Zug, z. B. weil dein letzter Zug früher angekommen ist. Trotzdem einchecken?"
+                     + (showsPoints ? " Dafür gibt es keine Punkte." : ""))
             }
         }
     }
@@ -269,39 +280,26 @@ struct CheckinSheet: View {
         .disabled(isSending || message.count > 280 || needsTrainChoice)
     }
 
-    private func send(asManualTrip: Bool = false) {
+    private func send(asManualTrip: Bool = false, force: Bool = false) {
         isSending = true
         Task {
             defer { isSending = false }
             do {
-                let leg = rideLeg
-                // The search for the train already failed before a manual trip is offered; don't run it again.
-                let checkin = asManualTrip ? try await model.traewelling.checkinAsManualTrip(draft(for: leg))
-                                           : try await attemptCheckin(leg: leg)
-                await finishSuccess(checkin, leg: leg)
+                if asManualTrip {
+                    // The search for the train already failed before a manual trip is offered; don't run it again.
+                    let leg = rideLeg
+                    let checkin = try await model.traewelling.checkinAsManualTrip(draft(for: leg, force: force))
+                    await finishSuccess(checkin, leg: leg)
+                } else if let found = try await checkinFindingTrain(force: force) {
+                    await finishSuccess(found.checkin, leg: found.leg)
+                } else {
+                    offerManualTrip = true
+                }
             } catch OAuthError.notLoggedIn {
                 isLoggedIn = false
-            } catch TraewellingError.tripNotFound where !asManualTrip {
-                // Some international trains are listed under two names by separate feeds (e.g. an
-                // ÖBB "RJ 177" that Deutsche Bahn's own live feed calls "ICE 177") — try the other
-                // name Transitous knows about before asking to create a manual entry.
-                if let alternate = await model.provider.alternateLineName(for: rideLeg), alternate != rideLeg.line?.name {
-                    var altLeg = rideLeg
-                    altLeg.line?.name = alternate
-                    if let checkin = try? await attemptCheckin(leg: altLeg) {
-                        await finishSuccess(checkin, leg: altLeg)
-                        return
-                    }
-                }
-                // `leg.origin` may be a Zusatzhalt (an unscheduled stop, e.g. after a diversion) —
-                // Träwelling's own timetable never has those, which is exactly why the checkin above
-                // just failed. Bridge the gap with a short manual trip instead of asking the user to
-                // manually enter the whole rest of the journey.
-                if let checkin = try? await attemptZusatzhaltCheckin() {
-                    await finishSuccess(checkin, leg: rideLeg)
-                    return
-                }
-                offerManualTrip = true
+            } catch TraewellingError.collision where !force {
+                forcedAsManualTrip = asManualTrip
+                offerForcedCheckin = true
             } catch {
                 self.error = error
                 if (error as? TraewellingError)?.isInvalidInput == true {
@@ -312,24 +310,63 @@ struct CheckinSheet: View {
         }
     }
 
-    private func attemptCheckin(leg: Leg) async throws -> CheckinResult {
-        try await model.traewelling.checkin(draft(for: leg))
+    /// Checks in `rideLeg`, falling back to other ways Träwelling may know the train when its own
+    /// timetable doesn't have it. `nil` if none works, so a manual trip is offered. The leg returned
+    /// is the one actually checked in (another train name).
+    private func checkinFindingTrain(force: Bool) async throws -> (checkin: CheckinResult, leg: Leg)? {
+        do {
+            return (try await attemptCheckin(leg: rideLeg, force: force), rideLeg)
+        } catch TraewellingError.tripNotFound {}
+        // Some international trains are listed under two names by separate feeds (e.g. an
+        // ÖBB "RJ 177" that Deutsche Bahn's own live feed calls "ICE 177") — try the other
+        // name Transitous knows about before asking to create a manual entry.
+        if let alternate = await model.provider.alternateLineName(for: rideLeg), alternate != rideLeg.line?.name {
+            var altLeg = rideLeg
+            altLeg.line?.name = alternate
+            if let checkin = try await fallback({ try await attemptCheckin(leg: altLeg, force: force) }) {
+                return (checkin, altLeg)
+            }
+        }
+        // `leg.origin` may be a Zusatzhalt (an unscheduled stop, e.g. after a diversion) —
+        // Träwelling's own timetable never has those, which is exactly why the checkin above
+        // just failed. Bridge the gap with a short manual trip instead of asking the user to
+        // manually enter the whole rest of the journey.
+        if let checkin = try await fallback({ try await attemptZusatzhaltCheckin(force: force) }) ?? nil {
+            return (checkin, rideLeg)
+        }
+        return nil
     }
 
-    private func draft(for leg: Leg) -> CheckinDraft {
-        CheckinDraft(leg: leg, message: message, visibility: visibility, business: business, toot: toot)
+    /// A fallback attempt's result, `nil` if it failed. A collision still reaches the user, who can
+    /// check in anyway; it would happen the same way with a manual trip.
+    private func fallback<T>(_ attempt: () async throws -> T) async throws -> T? {
+        do {
+            return try await attempt()
+        } catch TraewellingError.collision {
+            throw TraewellingError.collision
+        } catch {
+            return nil
+        }
+    }
+
+    private func attemptCheckin(leg: Leg, force: Bool) async throws -> CheckinResult {
+        try await model.traewelling.checkin(draft(for: leg, force: force))
+    }
+
+    private func draft(for leg: Leg, force: Bool) -> CheckinDraft {
+        CheckinDraft(leg: leg, message: message, visibility: visibility, business: business, toot: toot, force: force)
     }
 
     /// If `leg` boards at a Zusatzhalt bahn.de's journey details know about, checks in the hop up
     /// to the next regular stop as a short manual trip and then checks in normally from there. `nil`
     /// if bahn.de doesn't know this train, or `leg.origin` isn't actually a Zusatzhalt (some other
     /// reason Träwelling didn't recognise the departure).
-    private func attemptZusatzhaltCheckin() async throws -> CheckinResult? {
+    private func attemptZusatzhaltCheckin(force: Bool) async throws -> CheckinResult? {
         guard let bahnDe = model.provider.bahnDe,
               let stops = try await bahnDe.journeyStops(for: rideLeg),
               let (zusatzhalt, nextRegular) = BahnDeClient.nextRegularStop(after: rideLeg.origin, in: stops)
         else { return nil }
-        return try await model.traewelling.checkin(draft(for: rideLeg), fromZusatzhalt: zusatzhalt, toNextRegularStop: nextRegular)
+        return try await model.traewelling.checkin(draft(for: rideLeg, force: force), fromZusatzhalt: zusatzhalt, toNextRegularStop: nextRegular)
     }
 
     private func finishSuccess(_ checkin: CheckinResult, leg: Leg) async {
