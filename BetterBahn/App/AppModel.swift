@@ -243,6 +243,11 @@ final class AppModel {
 
     // MARK: Träwelling sync
 
+    /// Check-ins of the people the user follows on Träwelling that are under way (#196), kept fresh by
+    /// `keepFollowedCheckinsFresh()` while the Verbindungen tab is shown.
+    var followedCheckins: FollowedCheckins?
+    @ObservationIgnored var followedCheckinsLoadedAt: Date?
+
     /// Check-ins imported from Träwelling (newest first), shown on the travel map. Empty until
     /// loaded from disk after launch; `loadTraewellingTrips()` waits for that.
     var traewellingTrips: [ImportedTrip] = [] {

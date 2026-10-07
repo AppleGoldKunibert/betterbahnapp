@@ -59,7 +59,7 @@ ${PAGE_STYLE}
 <body>
 <main>
 <h1>Datenschutz</h1>
-<p class="muted">BetterBahn für iPhone · Stand: 6. Oktober 2026</p>
+<p class="muted">BetterBahn für iPhone · Stand: 7. Oktober 2026</p>
 
 <p>BetterBahn ist ein privates Projekt und steht in keiner Verbindung zur Deutschen Bahn AG. Die App hat
 keine Benutzerkonten, keine Werbung, kein Tracking und keine Analyse-Werkzeuge. Was du in der App speicherst,
@@ -140,8 +140,11 @@ Namen mit dem Suchtext.</p>
 
 <h2>Träwelling</h2>
 <p>Wenn du dich bei <a href="https://traewelling.de">Träwelling</a> anmeldest, schickt die App deine Check-ins
-(Zug, Strecke, Zeiten, Nachricht, Sichtbarkeit) und Abfragen an Träwelling. Dafür gilt die Datenschutzerklärung
-von Träwelling. Du kannst dich in den Einstellungen jederzeit abmelden.</p>
+(Zug, Strecke, Zeiten, Nachricht, Sichtbarkeit), deine Likes und Abfragen an Träwelling. Dafür gilt die
+Datenschutzerklärung von Träwelling. Du kannst dich in den Einstellungen jederzeit abmelden.</p>
+<p>Die App zeigt dir, wer von den Leuten, denen du auf Träwelling folgst, gerade eingecheckt ist. Um deren Zug
+anzuzeigen, fragt sie Transitous nach den Abfahrten am Einstiegsbahnhof des Check-ins, mit Bahnhof und Uhrzeit,
+aber ohne Namen; die Live-Position kommt wie bei deinen eigenen Zügen von bahn.jetzt.</p>
 <p>Für die Emojis im Check-in-Text lädt die App die Emoji-Liste und -Bilder der Mastodon-Instanz, die mit
 deinem Träwelling-Konto verbunden ist, sonst von <a href="https://zug.network">zug.network</a>. Dabei wird
 nichts über dich gesendet außer deiner IP-Adresse, die jeder Abruf im Internet mitschickt.</p>

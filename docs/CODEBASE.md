@@ -90,6 +90,11 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   checked in from the app, `AppModel.checkinStatusIDs`; shows and edits text, visibility, trip type and tags, deletes the
   check-in, lists the "Mitreisende" on the same train (#184)), `CheckoutPrompt` (removing a saved journey with such check-ins asks: check out at the last stop reached
   (`TraewellingClient.earlyExit`, later check-ins deleted), delete the check-ins, or keep them).
+  `FollowedCheckinsSection` (#196): small button above "Deine Reisen" (`UpcomingTripsSection`) listing who of the people the
+  user follows is checked in right now (`AppModel.followedCheckins`, refreshed every 2 min while the Verbindungen tab shows,
+  `keepFollowedCheckinsFresh`): tags, train, from → to; opening one shows its train (`LegTripSheet`, hidden for manual trips),
+  a small map with the ride and the live position/speed (bahn.jetzt, tap → `LiveTrainMapView`), a Träwelling link and a like
+  button (only when the user's `likes_enabled` and the status `isLikable`).
 - `Features/Sharing/` – preview of shared journeys and imported DB shares; `JourneyShareButton` (in `JourneyDetailView`)
   uploads for a short link, falls back to the long link, and opens `UIActivityViewController`.
 - `Features/Settings/` – settings (incl. privacy policy link and "not affiliated with DB" note), `DataSourcesView`
@@ -199,6 +204,11 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `TraewellingCheckinEdit`: `status(id:)`, `updateStatus` (text, visibility, trip type), `deleteStatus`, tags
   (`tags`, `applyTagChanges` with `StatusTagChanges`), moving the exit, `earlyExit` (where checking out now ends a ride),
   `fellowTravellers(of:)` (others checked in to the same trip, `trips/{id}/statuses`, whose ride overlaps).
+  `TraewellingFollowed`: `followedCheckins()` (the `dashboard`, paged back up to 12 h, filtered to others' rides under way),
+  `like`/`unlike` (`status/{id}/like`, scope `write-likes`; a 403 → `TraewellingError.likeNotAllowed`, logins from before
+  the scope existed must log in again), `CombinedProvider.leg(forCheckin:)` (the run on Transitous' board at the check-in's
+  origin, by planned time and name or run number; `nil` for manual trips, whose `hafasId` is a UUID). Token refreshes send
+  no `scope`, so adding a scope never invalidates existing logins.
 - `Mastodon/CustomEmoji.swift` – Mastodon custom emojis for check-in texts (#168): `CustomEmojiClient` loads
   `/api/v1/custom_emojis` of the instance from the Träwelling user's `mastodonUrl` (else zug.network) and caches it a day on
   disk; `CustomEmojiText` finds the `:shortcode` being typed, completes it, ranks suggestions and splits text into text/emoji.

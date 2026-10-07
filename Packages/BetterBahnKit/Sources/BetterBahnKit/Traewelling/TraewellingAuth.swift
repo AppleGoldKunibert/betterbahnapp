@@ -40,7 +40,7 @@ public struct TraewellingConfig: Sendable {
 
     public init(baseURL: URL = URL(string: "https://traewelling.de")!, clientID: String = "406",
                 redirectURI: String = "https://betterbahn.betterbahn.workers.dev/oauth/traewelling/callback",
-                scopes: [String] = ["read-statuses", "write-statuses", "read-search"]) {
+                scopes: [String] = ["read-statuses", "write-statuses", "read-search", "write-likes"]) {
         self.baseURL = baseURL
         self.clientID = clientID
         self.redirectURI = redirectURI

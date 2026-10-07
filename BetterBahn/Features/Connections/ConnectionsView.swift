@@ -121,6 +121,7 @@ struct ConnectionsView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .onAppear { onlyValidTicket = model.settings.ticketFilterByDefault }
+            .task { await model.keepFollowedCheckinsFresh() }
             .onChange(of: model.journeyToOpen, initial: true) { _, entry in
                 guard let entry else { return }
                 path = [.journey(entry.route())]
