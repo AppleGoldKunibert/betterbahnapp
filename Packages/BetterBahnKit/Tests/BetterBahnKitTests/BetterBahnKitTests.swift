@@ -4732,11 +4732,11 @@ private final class RE3318CancelledProtocol: RE3318Protocol, @unchecked Sendable
     /// Agency names as Transitous reports them on German, Swiss and Austrian boards (#166).
     @Test func recognisesFeedAgencyNames() {
         let expected: [String: OperatorBrand] = [
-            "DB Fernverkehr AG": .db, "DB Fernverkehr (Codesharing)": .db, "DB Regio AG NRW": .db,
+            "DB Fernverkehr AG": .db, "DB Fernverkehr (Codesharing)": .db, "DB Regio AG NRW": .dbregio, "DB Regio AG": .dbregio,
             "DB Regio AG S-Bahn München": .sbahn, "DB RegioNetz Verkehrs GmbH Kurhessenbahn": .db,
             "Deutsche Bahn AG": .db, "S-Bahn Hamburg": .sbahn, "S-Bahn Berlin GmbH": .sbahn,
             "DB Regio AG S-Bahn Rhein-Main": .sbahn, "DB Regio AG S-Bahn Stuttgart": .sbahn,
-            "DB Regio AG Südost": .db, "DB Regio AG Bayern": .db,
+            "DB Regio AG Südost": .dbregio, "DB Regio AG Bayern": .dbregio,
             "S-Bahn Hannover (Transdev)": .transdev, "S-Bahn Hannover": .transdev,
             "Schweizerische Bundesbahnen SBB": .sbb, "SBB GmbH (Grenzverkehr)": .sbb,
             "Schweizerische Südostbahn (sob)": .sob, "THURBO": .thurbo, "BLS AG (bls)": .bls,

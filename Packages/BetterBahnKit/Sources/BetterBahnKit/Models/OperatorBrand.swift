@@ -6,7 +6,7 @@ import Foundation
 /// (from Wikimedia Commons); an operator not listed here keeps the generic icon. To add one, add its case,
 /// a rule and its logo (the test `everyBrandHasALogo` checks the asset exists).
 public enum OperatorBrand: String, CaseIterable, Sendable {
-    case abellio, agilis, alex, arverio, bls, brb, cantus, cd, db, dsb, enno, erfurterbahn, erixx, eurobahn
+    case abellio, agilis, alex, arverio, bls, brb, cantus, cd, db, dbregio, dsb, enno, erfurterbahn, erixx, eurobahn
     case europeansleeper, eurostar, flixtrain, gysev, hlb, laenderbahn, metronom, mrb, nationalexpress
     case nordbahn, nordwestbahn, ns, odeg, oebb, pkpic, polregio, sbahn, sbb, sob, suedthueringenbahn, sweg
     case thurbo, transdev, transregio, trenitalia, vlexx, westfalenbahn, zssk
@@ -15,7 +15,7 @@ public enum OperatorBrand: String, CaseIterable, Sendable {
     /// digits stripped from word ends: "vlexx1", "DLB1"). Checked in order, so the specific ones come
     /// first: "alex - Die Länderbahn" is alex, "S-Bahn Hannover (Transdev)" Transdev, not DB. DB's S-Bahns
     /// with a name of their own ("S-Bahn Berlin GmbH", "DB Regio AG S-Bahn München") get the S-Bahn's "S";
-    /// those the feed only names "DB Regio AG NRW" keep DB's logo.
+    /// other DB Regio trains ("DB Regio AG NRW") DB Regio's logo, everything else of DB's DB's.
     private static let rules: [(OperatorBrand, [String])] = [
         (.transdev, ["transdev", "s bahn hannover"]),
         (.alex, ["alex"]),
@@ -58,6 +58,7 @@ public enum OperatorBrand: String, CaseIterable, Sendable {
         (.zssk, ["zssk", "zeleznicna spolocnost slovensko"]),
         (.dsb, ["dsb", "danske statsbaner"]),
         (.sbahn, ["s bahn"]),
+        (.dbregio, ["db regio"]),
         (.db, ["db", "deutsche bahn"]),
     ]
 
@@ -88,7 +89,7 @@ public enum OperatorBrand: String, CaseIterable, Sendable {
         case .db, .dsb, .erfurterbahn, .europeansleeper, .eurostar, .flixtrain, .gysev, .nationalexpress, .oebb,
              .polregio, .sbahn, .sob, .thurbo, .transdev, .trenitalia, .westfalenbahn, .zssk:
             false
-        case .abellio, .agilis, .alex, .arverio, .bls, .brb, .cantus, .cd, .enno, .erixx, .eurobahn, .hlb,
+        case .abellio, .agilis, .alex, .arverio, .bls, .brb, .cantus, .cd, .dbregio, .enno, .erixx, .eurobahn, .hlb,
              .laenderbahn, .metronom, .mrb, .nordbahn, .nordwestbahn, .ns, .odeg, .pkpic, .sbb,
              .suedthueringenbahn, .sweg, .transregio, .vlexx:
             true
