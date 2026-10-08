@@ -307,7 +307,8 @@ struct TrainSearchResultView: View {
     @State private var checkedSequence = false
     /// nil while checking.
     @State private var hasLivePosition: Bool?
-    @State private var showSequence = false
+    /// Wagenreihung opened or closed by hand; nil unfolds it around the departure (`CoachSequence.unfoldsByItself`).
+    @State private var sequenceExpanded: Bool?
     @State private var showMap = false
 
     private var color: Color { trip?.line?.product.color ?? result.product.color }
@@ -331,11 +332,6 @@ struct TrainSearchResultView: View {
         .background { AppBackground() }
         .navigationTitle(result.name)
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $showSequence) {
-            if let trip, let request = sequenceRequest(for: trip) {
-                CoachSequenceView(request: request, trainName: trip.line?.name, sequence: sequence)
-            }
-        }
         .sheet(isPresented: $showMap) {
             if let trip {
                 LiveTrainMapView(route: LiveTrainRoute(trip: trip))
@@ -382,15 +378,29 @@ struct TrainSearchResultView: View {
         }
         .buttonStyle(.plain)
 
-        if let sequence, !sequence.coaches.isEmpty {
-            Button {
-                showSequence = true
-            } label: {
-                OptionRow(title: sequence.source == .bahnDe ? "Wagenreihung" : "Plan-Wagenreihung",
-                          subtitle: "Wagen, Klassen und Ausstattung",
-                          systemImage: "train.side.front.car", color: .brand)
+        if let sequence, !sequence.coaches.isEmpty, let request = sequenceRequest(for: trip) {
+            TimelineView(.everyMinute) { context in
+                let departure = CoachSequenceDisclosure.departure(of: trip, for: request)
+                let open = sequenceExpanded ?? CoachSequence.unfoldsByItself(departure: departure, now: context.date)
+                VStack(spacing: 12) {
+                    Button {
+                        withAnimation(.snappy) { sequenceExpanded = !open }
+                    } label: {
+                        OptionRow(title: sequence.source == .bahnDe ? "Wagenreihung" : "Plan-Wagenreihung",
+                                  subtitle: "Wagen, Klassen und Ausstattung",
+                                  systemImage: "train.side.front.car", color: .brand,
+                                  chevron: open ? "chevron.up" : "chevron.down")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityValue(open ? "Ausgeklappt" : "Eingeklappt")
+                    if open {
+                        Card {
+                            CoachSequencePanel(request: request, sequence: sequence)
+                        }
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+                }
             }
-            .buttonStyle(.plain)
         } else if !checkedSequence {
             OptionRow(title: "Wagenreihung", subtitle: "Wird gesucht …", systemImage: "train.side.front.car",
                       color: .secondary, loading: true)
@@ -432,7 +442,7 @@ struct TrainSearchResultView: View {
         BahnDeClient.formationRequest(for: trip) ?? BahnDeClient.formationRequest(for: trip, lookahead: nil)
     }
 
-    /// The same lookup as `CoachSequenceButton`: bahn.de's sequence within its lookahead, else the plan.
+    /// The same lookup as `CoachSequenceDisclosure`: bahn.de's sequence within its lookahead, else the plan.
     private func checkSequence() async {
         guard let trip else { return }
         sequence = nil
@@ -478,6 +488,7 @@ private struct OptionRow: View {
     let color: Color
     var loading = false
     var showsChevron = true
+    var chevron = "chevron.right"
 
     var body: some View {
         Card {
@@ -494,7 +505,7 @@ private struct OptionRow: View {
                 if loading {
                     ProgressView().controlSize(.small)
                 } else if showsChevron {
-                    Image(systemName: "chevron.right")
+                    Image(systemName: chevron)
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(.tertiary)
                 }

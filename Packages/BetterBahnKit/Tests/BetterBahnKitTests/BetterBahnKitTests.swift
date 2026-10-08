@@ -2803,6 +2803,17 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(TrainFormation(units: [.init(model: "FLIRT", number: nil)]).drawing == nil)
     }
 
+    /// The Wagenreihung unfolds by itself from 30 minutes before the departure until 15 minutes after it.
+    @Test func coachSequenceUnfoldsAroundDeparture() {
+        let departure = Date(timeIntervalSince1970: 1_800_000_000)
+        #expect(!CoachSequence.unfoldsByItself(departure: departure, now: departure.addingTimeInterval(-31 * 60)))
+        #expect(CoachSequence.unfoldsByItself(departure: departure, now: departure.addingTimeInterval(-30 * 60)))
+        #expect(CoachSequence.unfoldsByItself(departure: departure, now: departure))
+        #expect(CoachSequence.unfoldsByItself(departure: departure, now: departure.addingTimeInterval(15 * 60)))
+        #expect(!CoachSequence.unfoldsByItself(departure: departure, now: departure.addingTimeInterval(16 * 60)))
+        #expect(!CoachSequence.unfoldsByItself(departure: nil))
+    }
+
     /// Coupled trainsets of one series share a card in the Wagenreihung, other series get their own (#167).
     @Test func formationPartsBySeries() {
         let twin = TrainFormation(units: [.init(model: "ICE 3", number: "302"), .init(model: "ICE 3", number: "330")])

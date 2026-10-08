@@ -484,21 +484,18 @@ struct LegCard: View {
                         TrainFormationLabel(leg: leg)
                     }
                     Spacer()
-                    VStack(alignment: .trailing, spacing: 6) {
-                        HStack(spacing: 10) {
-                            TrainMessagesButton(messages: leg.messages)
-                            if leg.cancelled {
-                                InfoChip(text: "Fällt aus", systemImage: "xmark.octagon.fill", tint: .heavyDelay)
-                            } else {
-                                DelayPill(minutes: leg.departure.delayMinutes)
-                            }
-                            if leg.tripId != nil {
-                                Image(systemName: "chevron.right")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.tertiary)
-                            }
+                    HStack(spacing: 10) {
+                        TrainMessagesButton(messages: leg.messages)
+                        if leg.cancelled {
+                            InfoChip(text: "Fällt aus", systemImage: "xmark.octagon.fill", tint: .heavyDelay)
+                        } else {
+                            DelayPill(minutes: leg.departure.delayMinutes)
                         }
-                        CoachSequenceButton(leg: leg)
+                        if leg.tripId != nil {
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
                     }
                 }
                 .contentShape(.rect)
@@ -567,6 +564,9 @@ struct LegCard: View {
                     TimelineNode(kind: .major, color: color, lineAbove: color) {
                         stationRow(time: leg.arrival, name: leg.destination.displayName, platform: leg.arrivalPlatform)
                     }
+
+                    // Between the stops and "Mehr"; unfolds by itself around the departure.
+                    CoachSequenceDisclosure(leg: leg, spacing: 14)
                 }
 
                 if transferBroken {

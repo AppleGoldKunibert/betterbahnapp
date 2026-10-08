@@ -71,13 +71,18 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `JourneyDetailView` (+ `LegCard`, `TransferRow`, alternatives sheets), `JourneyMapView` (MapKit),
   `JourneyReplanSheet` (replan from mid-journey).
 - `Features/Departures/` – `StationBoardView`/`BoardRow`, `TripView` (single train's stops),
-  `CoachSequenceView` (Wagenreihung sheet, opened from `CoachSequenceButton` in train headers or a stop's platform in `TripContent`;
-  bahn.de's sequence, else vagonweb's planned one). On top one `TrainCard` per series (Kit `TrainFormation.partsBySeries`:
-  coupled trainsets of one series share a card, "2× ICE 4") with type, "BR …", Tz and the series' side view running off the
-  card's edge (#167): `Assets.xcassets/Trains/Train-<BR>` (401, 402, 403, 407, 408, 411, 412; cut from DB's Fahrzeuglexikon
-  PDFs, © DB AG: "Quelle: Deutsche Bahn" next to it, named under bahn.de in Datenquellen), picked by Kit `TrainDrawing`.
-  Below, `CoachSequenceDiagram` lays the platform out horizontally (start left, scrolls sideways, opens at the train's front):
-  sector bar, part labels, `CoachTile`s to scale (number, class, amenity icons, rounded noses at trainset ends), "← Richtung".
+  `CoachSequenceView.swift`: the Wagenreihung unfolds in place, no sheet. `CoachSequenceDisclosure` ("Wagenreihung ⌄" row in
+  `LegCard` between the stops and "Mehr", in `TripContent`'s header; the train search has its own row) shows once bahn.de has a
+  sequence, else vagonweb's planned one, and opens by itself from 30 min before to 15 min after the departure (Kit
+  `CoachSequence.unfoldsByItself`) or by tap. Tapping a stop's platform in `TripContent` unfolds that stop's below it.
+  `CoachSequencePanel` holds the content: notes, one `TrainCard` per series (Kit `TrainFormation.partsBySeries`: coupled
+  trainsets of one series share one, "2× ICE 4") with type, "BR …", each Tz with its Taufname and the series' side view
+  running off the box's edge (#167): `Assets.xcassets/Trains/Train-<BR>` (401, 402, 403, 407, 408, 411, 412; cut from DB's
+  Fahrzeuglexikon PDFs, © DB AG: "Quelle: Deutsche Bahn" next to it, named under bahn.de in Datenquellen), picked by Kit
+  `TrainDrawing`. Then `CoachSequenceDiagram` lays the platform out horizontally (start left, scrolls sideways, opens at the
+  train's front): sector bar, part labels (train for coupled/split trains, Tz, Taufname on up to 2 lines) that stay at the
+  visible edge until the coupling point (`onScrollGeometryChange`), `CoachTile`s to scale (number, class, amenity icons,
+  rounded noses at trainset ends), "← Richtung".
 - `Features/TrainSearch/` – `TrainSearchOverlay` (#183): Spotlight-style bar over every tab (`AppModel.showsTrainSearch`, set
   by the train button on Verbindungen and the search button on the map, shown from `RootView`); searches while typing, the day
   behind a calendar button (graphical picker below the bar), filtered by Settings → Zugschnellsuche (`AppSettings.trainSearchKinds`:

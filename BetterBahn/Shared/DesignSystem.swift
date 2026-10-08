@@ -367,61 +367,6 @@ struct TrainFormationLabel: View {
     }
 }
 
-/// "Wagenreihung" chip for a train's header, shown once bahn.de has a coach sequence for it (the
-/// same request `TrainFormationLabel` makes, so it is only sent once), or else vagonweb.cz has the
-/// planned one ("Plan-Wagenreihung"). Opens the Wagenreihung sheet.
-struct CoachSequenceButton: View {
-    /// bahn.de's request, only for departures within `BahnDeClient.formationLookahead`.
-    let request: BahnDeClient.FormationRequest?
-    /// The same for any later departure, for vagonweb's planned Wagenreihung days ahead.
-    let plannedRequest: BahnDeClient.FormationRequest?
-    let trainName: String?
-
-    init(leg: Leg) {
-        request = BahnDeClient.formationRequest(for: leg)
-        plannedRequest = BahnDeClient.formationRequest(for: leg, lookahead: nil)
-        trainName = leg.line?.name
-    }
-
-    init(trip: Trip) {
-        request = BahnDeClient.formationRequest(for: trip)
-        plannedRequest = BahnDeClient.formationRequest(for: trip, lookahead: nil)
-        trainName = trip.line?.name
-    }
-
-    @Environment(AppModel.self) private var model
-    @State private var sequence: CoachSequence?
-    @State private var showSequence = false
-
-    var body: some View {
-        // A ZStack rather than Group: `.task` never fires on a view that is empty.
-        ZStack {
-            if let sequence, !sequence.coaches.isEmpty {
-                Button {
-                    showSequence = true
-                } label: {
-                    InfoChip(text: sequence.source == .bahnDe ? "Wagenreihung" : "Plan-Wagenreihung",
-                             systemImage: "train.side.front.car", tint: .brand)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .sheet(isPresented: $showSequence) {
-            if let request = request ?? plannedRequest {
-                CoachSequenceView(request: request, trainName: trainName, sequence: sequence)
-            }
-        }
-        .task(id: plannedRequest) {
-            sequence = nil
-            if let request, let live = try? await model.coachSequence(for: request), !live.coaches.isEmpty {
-                sequence = live
-            } else if let plannedRequest {
-                sequence = await model.plannedCoachSequence(for: plannedRequest)
-            }
-        }
-    }
-}
-
 /// "ICE 4" / "ICE 3neo" / "ICE L" … next to a train's name. bahn.de's coach sequence first (the same
 /// request `TrainFormationLabel` makes, so it is only sent once); then the planned formation for days
 /// ahead from vagonweb.cz, or bahn.expert when vagonweb has none (`AppModel.trainType`).
