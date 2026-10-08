@@ -185,6 +185,12 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   has no coach sequence and vagonweb has none either: it has DB's planned formation (`DB-plan`) for days
   ahead; bahn.de is only asked for departures within `BahnDeClient.formationLookahead` (12 h). Needs a
   `Referer` and a non-curl User-Agent (else an empty 206).
+  Also tells whether a connecting train waits (`TransferDisposition`, "Anschluss wartet (nicht)" in `TransferRow`):
+  `disposition(from:to:)` finds the arriving train (`journey/find`, no administration so ODEG etc. match), its
+  arrival ID at the transfer station (`journey/detailsByJourneyId`, by EVA or planned time) and the departing train
+  in `connections/connections` (by run number and planned time) and reads DB's `dispositionStatus`
+  (`WAITING`/`NOT_WAITING`). `dispositions(in:now:)` asks for transfers from 15 min ago up to 3 h ahead, for
+  `JourneyDetailView` and for saved journeys' refresh, which notifies once per decision (`notificationID`).
 - `Transit/TrainNumberSearch.swift` – train search by number (#183): bahn.expert's `journey/find` lists the runs with
   that number on a day (`TrainNumberQuery` reads "ICE 123"/"123"; `ranked` keeps the `TrainSearchFilter`'s kinds, the typed
   category or the same kind of train; countries from the end stops' IFOPT/EVA, `TrainSearchCountry`; trains that may cross
@@ -258,7 +264,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 - Logic: `JourneyReplanner` (`continuations` come `fastestFirst`: by live arrival, without routes another one beats
   leaving no earlier, arriving no later with no more changes), `ConnectionCheck` (`ConnectionIssue`, `JourneyRefresher`), `PlatformChange`
   (platform changes since the last refresh → push, ignores sectors/bus bays), `TrainRoutePlanner`,
-  `ViaRoutePlanner` (vias without minimum stay keep a through train as one leg), `TrainPicker` (also
+  `ViaRoutePlanner` (vias without minimum stay keep a through train as one leg), `TrainPicker` ("Anderer Zug": `replacing` keeps
+  the rest of the plan and reports a `MissedConnection` the user may ignore or pick another train for, #226; `reroutes`
+  offers connections straight to the next via/destination that skip the transfer point, "Andere Routenführung"; also
   `journeysIgnoringBoardingRules`: direct trains with "Nur Ein-/Ausstieg" for the expert option of that name,
   and `journeysContinuingFromRestrictedTrains`: "Nur Ausstieg" trains that end short of the destination plus an onward
   connection, e.g. ICE 204 Harburg → Hamburg Hbf → RJ; both added to search results in `JourneyResultsView`), `StationCalls` (hides routes that change onto a train also calling at
