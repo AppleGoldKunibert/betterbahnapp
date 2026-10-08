@@ -384,6 +384,9 @@ struct TripContent: View {
                             if stop.isAdditional {
                                 InfoChip(text: "Zusatzhalt", systemImage: "plus.circle.fill", tint: .brand)
                             }
+                            if stop.isManual {
+                                InfoChip(text: "Selbst eingetragen", systemImage: "hand.point.up.left.fill", tint: .brand)
+                            }
                             if let operators = operatorStops[stop.id] {
                                 HStack(spacing: 6) {
                                     ForEach(operators, id: \.self) { OperatorLogo(name: $0) }

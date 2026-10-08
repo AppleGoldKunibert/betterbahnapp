@@ -257,10 +257,14 @@ public struct Stopover: Codable, Sendable, Hashable, Identifiable {
     /// An unscheduled stop the train additionally picked up today ("Zusatzhalt"), not part of its
     /// regular timetable — only `BahnDeClient.journeyStops` knows about these, see `inserting(_:into:)`.
     public var isAdditional: Bool
+    /// A stop the user added by hand because the train halted somewhere no source knows of (see
+    /// `Stopover.manual(at:time:)`). Kept apart from `isAdditional`, which bahn.de's lookup replaces
+    /// on every refresh.
+    public var isManual: Bool
 
     public init(station: Station, arrival: TimeInfo?, departure: TimeInfo?,
                 arrivalPlatform: PlatformInfo?, departurePlatform: PlatformInfo?, cancelled: Bool,
-                access: StopAccess = .normal, isAdditional: Bool = false) {
+                access: StopAccess = .normal, isAdditional: Bool = false, isManual: Bool = false) {
         self.station = station
         self.arrival = arrival
         self.departure = departure
@@ -270,6 +274,7 @@ public struct Stopover: Codable, Sendable, Hashable, Identifiable {
         self.departureCancelled = cancelled
         self.access = access
         self.isAdditional = isAdditional
+        self.isManual = isManual
     }
 
     /// The whole stop is out: every side it actually has (arrival and/or departure) is cancelled.
@@ -287,11 +292,11 @@ public struct Stopover: Codable, Sendable, Hashable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case station, arrival, departure, arrivalPlatform, departurePlatform, cancelled, arrivalCancelled,
-             departureCancelled, access, isAdditional
+             departureCancelled, access, isAdditional, isManual
     }
 
-    /// Custom-decoded so journeys cached to disk before `access`/`isAdditional`/the per-side
-    /// cancellation existed still load, defaulting to `.normal`/`false`/the old single `cancelled`.
+    /// Custom-decoded so journeys cached to disk before `access`/`isAdditional`/`isManual`/the per-side
+    /// cancellation existed still load, defaulting to `.normal`/`false`/`false`/the old single `cancelled`.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         station = try c.decode(Station.self, forKey: .station)
@@ -304,6 +309,7 @@ public struct Stopover: Codable, Sendable, Hashable, Identifiable {
         departureCancelled = try c.decodeIfPresent(Bool.self, forKey: .departureCancelled) ?? cancelled
         access = try c.decodeIfPresent(StopAccess.self, forKey: .access) ?? .normal
         isAdditional = try c.decodeIfPresent(Bool.self, forKey: .isAdditional) ?? false
+        isManual = try c.decodeIfPresent(Bool.self, forKey: .isManual) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -319,6 +325,7 @@ public struct Stopover: Codable, Sendable, Hashable, Identifiable {
         try c.encode(departureCancelled, forKey: .departureCancelled)
         try c.encode(access, forKey: .access)
         try c.encode(isAdditional, forKey: .isAdditional)
+        try c.encode(isManual, forKey: .isManual)
     }
 }
 

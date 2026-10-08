@@ -932,6 +932,17 @@ final class AppModel {
 
     // MARK: Manual Träwelling check-ins
 
+    /// Replaces a check-in by one on a manual trip that ends at `leg`'s exit, a stop Träwelling's
+    /// trip doesn't have (see `TraewellingClient.replaceWithManualTrip`), and keeps its delay updated
+    /// like any other manual trip.
+    func replaceCheckinWithManualTrip(_ status: TraewellingStatus, leg: Leg) async throws {
+        let result = try await traewelling.replaceWithManualTrip(status, leg: leg)
+        forgetCheckin(statusId: status.id)
+        guard let statusId = result.statusId else { return }
+        rememberCheckin(statusId: statusId, leg: leg)
+        trackManualCheckin(statusId: statusId, leg: leg)
+    }
+
     func trackManualCheckin(statusId: Int, leg: Leg) {
         trackedManualCheckins.removeAll { $0.leg.id == leg.id }
         trackedManualCheckins.append(TrackedManualCheckin(statusId: statusId, leg: leg, lastUpdate: .distantPast))

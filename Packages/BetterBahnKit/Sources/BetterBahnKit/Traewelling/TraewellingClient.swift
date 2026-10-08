@@ -479,6 +479,24 @@ public actor TraewellingClient {
     /// Creates a Träwelling trip for a train its own timetable data doesn't have, then checks into it.
     private func checkinManualTrip(_ draft: CheckinDraft) async throws -> CheckinResult {
         let leg = draft.leg
+        let trip = try await createManualTrip(for: leg)
+        var result = try await sendCheckin(draft, tripId: trip.tripId, lineName: trip.lineName,
+                                           startID: trip.origin.id, destinationID: trip.destination.id,
+                                           departure: leg.departure.planned, arrival: leg.arrival.planned)
+        result.isManualTrip = true
+        return result
+    }
+
+    private struct ManualTrip: Decodable, Sendable {
+        struct StationRef: Decodable, Sendable { var id: Int }
+        var tripId: String
+        var lineName: String
+        var origin: StationRef
+        var destination: StationRef
+    }
+
+    /// Creates a Träwelling trip for `leg`'s train, running from its origin to its destination.
+    private func createManualTrip(for leg: Leg) async throws -> ManualTrip {
         guard let line = leg.line else { throw TraewellingError.tripNotFound("Fußweg") }
         let origin = try await matchStation(leg.origin)
         let destination = try await matchStation(leg.destination)
@@ -492,21 +510,34 @@ public actor TraewellingClient {
             "destinationArrivalPlanned": JSONDecoding.isoString(leg.arrival.planned),
         ]
         if let number = line.number, let journeyNumber = Int(number) { body["journeyNumber"] = journeyNumber }
-
-        struct ManualTrip: Decodable, Sendable {
-            struct StationRef: Decodable, Sendable { var id: Int }
-            var tripId: String
-            var lineName: String
-            var origin: StationRef
-            var destination: StationRef
-        }
         let data = try JSONSerialization.data(withJSONObject: body)
-        let trip = try await api("trips", method: "POST", body: data, as: DataWrapper<ManualTrip>.self).data
+        return try await api("trips", method: "POST", body: data, as: DataWrapper<ManualTrip>.self).data
+    }
 
+    /// Turns a check-in into one on a manual trip covering `leg`, for an exit Träwelling's trip
+    /// doesn't have (a stop added by hand, see `Stopover.manual(at:time:)`): `changeDestination`
+    /// only accepts the trip's own stops, and a check-in can't be moved to another trip. So the old
+    /// check-in is deleted and checked in again – only once the manual trip exists, so a failure
+    /// before that leaves it untouched. Text, visibility, trip type and tags carry over; likes and
+    /// comments can't. Not tooted again.
+    public func replaceWithManualTrip(_ status: TraewellingStatus, leg: Leg) async throws -> CheckinResult {
+        let draft = CheckinDraft(leg: leg, message: status.body ?? "",
+                                 visibility: status.visibility ?? .publicVisible,
+                                 business: status.business ?? .privateTrip)
+        let trip = try await createManualTrip(for: leg)
+        let tags = (try? await tags(statusId: status.id)) ?? status.tags
+        try await deleteStatus(id: status.id)
         var result = try await sendCheckin(draft, tripId: trip.tripId, lineName: trip.lineName,
                                            startID: trip.origin.id, destinationID: trip.destination.id,
                                            departure: leg.departure.planned, arrival: leg.arrival.planned)
         result.isManualTrip = true
+        if let statusId = result.statusId {
+            // A tag that doesn't come along isn't worth failing the new check-in over.
+            for tag in tags {
+                _ = try? await addTag(statusId: statusId, key: tag.key, value: tag.value,
+                                      visibility: tag.visibility ?? draft.visibility)
+            }
+        }
         return result
     }
 

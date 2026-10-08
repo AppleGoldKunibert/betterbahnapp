@@ -38,6 +38,9 @@ struct JourneyReplanSheet: View {
     @State private var boardingID: String?
     @State private var exitID: String?
     @State private var showStops: Bool
+    /// A stop added by hand where the train halted outside its timetable (#207), offered as exit.
+    @State private var manualStop: Stopover?
+    @State private var showManualStopSheet = false
 
     @State private var destination: Station?
     @State private var viaRows: [ViaRow] = []
@@ -73,6 +76,11 @@ struct JourneyReplanSheet: View {
     @State private var isFixingCheckin = false
     @State private var checkinFixed = false
     @State private var checkinError: Error?
+    /// The check-in can't just end at the new exit, a stop Träwelling's trip doesn't have: it has to be
+    /// replaced by a manual trip, which is asked first since likes and comments are lost.
+    @State private var checkinNeedsManualTrip = false
+    @State private var confirmManualTrip = false
+    @State private var checkinReplaced = false
 
     enum Field: Hashable {
         case destination, via(UUID)
@@ -100,7 +108,11 @@ struct JourneyReplanSheet: View {
 
     // MARK: Derived state
 
-    private var shownTrip: Trip? { trip ?? legTrip }
+    private var shownTrip: Trip? {
+        guard let base = trip ?? legTrip else { return nil }
+        guard let manualStop else { return base }
+        return base.inserting(manualStop: manualStop, boardingAt: leg.origin) ?? base
+    }
 
     /// Stand-in built from the leg's own stops, so the exit can be picked before (or without) the
     /// full trip having loaded.
@@ -173,6 +185,9 @@ struct JourneyReplanSheet: View {
             }
             .task { await setUp() }
             .task(id: selectedLegID) { await loadSelectedLeg() }
+            .sheet(isPresented: $showManualStopSheet) {
+                ManualStopSheet(earliest: leg.departure.best) { station, time in addManualStop(station, time: time) }
+            }
             .sheet(isPresented: $showTrainSheet) {
                 TrainNumberSheet(search: continuationSearch, suggestions: trainSuggestions,
                                  defaultBoarding: requirements.last?.exit ?? exitStation) { requirement in
@@ -504,10 +519,13 @@ struct JourneyReplanSheet: View {
 
             if showStops {
                 if let shownTrip {
-                    TripContent(trip: shownTrip, highlight: leg.origin,
-                                boardingID: $boardingID, exitID: $exitID, exitOnly: true,
-                                onSelectStop: { _ in exitPicked() })
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    VStack(spacing: 12) {
+                        TripContent(trip: shownTrip, highlight: leg.origin,
+                                    boardingID: $boardingID, exitID: $exitID, exitOnly: true,
+                                    onSelectStop: { _ in exitPicked() })
+                        manualStopButton
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 } else if let tripError {
                     ErrorBanner(error: tripError)
                 } else {
@@ -516,6 +534,26 @@ struct JourneyReplanSheet: View {
                         .padding(.vertical, 20)
                 }
             }
+        }
+    }
+
+    /// For a halt that isn't in the timetable, e.g. doors opened at a station during a disruption.
+    private var manualStopButton: some View {
+        VStack(spacing: 6) {
+            Button {
+                showManualStopSheet = true
+            } label: {
+                Label("Halt hinzufügen", systemImage: "plus.circle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.glass)
+            .controlSize(.large)
+            .tint(.brand)
+            Text("Hält der Zug außerplanmäßig, z. B. bei einer Störung? Trag den Halt ein, um dort auszusteigen.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
         }
     }
 
@@ -718,7 +756,9 @@ struct JourneyReplanSheet: View {
                     IconTile(systemImage: "checkmark.seal.fill", color: .punctual, size: 38)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Check-in angepasst").font(.headline)
-                        Text("Dein Check-in endet jetzt in \(exit.destination.displayName).")
+                        Text(checkinReplaced
+                             ? "Neu angelegt als manuelle Fahrt bis \(exit.destination.displayName)."
+                             : "Dein Check-in endet jetzt in \(exit.destination.displayName).")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -731,26 +771,36 @@ struct JourneyReplanSheet: View {
     }
 
     private func checkinSuggestion(_ status: TraewellingStatus, exit: Leg) -> some View {
-        Card {
+        let asManualTrip = needsManualTrip(exit)
+        let exitName = exit.destination.displayName
+        return Card {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 12) {
                     IconTile(systemImage: "checkmark.seal.fill", color: .brand, size: 38)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Träwelling-Check-in anpassen?").font(.headline)
-                        Text("Du bist bis \(checkedInDestinationName(status)) eingecheckt, steigst jetzt aber in \(exit.destination.displayName) aus.")
+                        Text(asManualTrip
+                             ? "Du bist bis \(checkedInDestinationName(status)) eingecheckt. \(exitName) ist auf Träwelling kein Halt dieser Fahrt, darum wird dein Check-in als manuelle Fahrt bis \(exitName) neu angelegt."
+                             : "Du bist bis \(checkedInDestinationName(status)) eingecheckt, steigst jetzt aber in \(exitName) aus.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 0)
                 }
                 Button {
-                    fixCheckin(status, exit: exit)
+                    if asManualTrip {
+                        confirmManualTrip = true
+                    } else {
+                        fixCheckin(status, exit: exit)
+                    }
                 } label: {
                     Group {
                         if isFixingCheckin {
                             ProgressView()
+                        } else if asManualTrip {
+                            Label("Als manuelle Fahrt bis \(exitName) einchecken", systemImage: "arrow.triangle.2.circlepath")
                         } else {
-                            Label("Ausstieg auf \(exit.destination.displayName) ändern", systemImage: "arrow.down.right.circle.fill")
+                            Label("Ausstieg auf \(exitName) ändern", systemImage: "arrow.down.right.circle.fill")
                         }
                     }
                     .font(.subheadline.weight(.semibold))
@@ -760,14 +810,42 @@ struct JourneyReplanSheet: View {
                 .tint(.brand)
                 .controlSize(.large)
                 .disabled(isFixingCheckin)
+                .confirmationDialog("Check-in ersetzen?", isPresented: $confirmManualTrip, titleVisibility: .visible) {
+                    Button("Check-in ersetzen", role: .destructive) { replaceCheckin(status, exit: exit) }
+                } message: {
+                    Text("Dein bisheriger Check-in wird gelöscht und als manuelle Fahrt neu angelegt. Text, Sichtbarkeit und Tags werden übernommen, Likes und Kommentare gehen verloren.")
+                }
             }
         }
+    }
+
+    /// Whether the check-in has to become a manual trip to end at `exit`: a stop added by hand is never
+    /// on Träwelling's trip, and moving the exit may have just found that out for another one.
+    private func needsManualTrip(_ exit: Leg) -> Bool {
+        checkinNeedsManualTrip || exit.stopovers.last?.isManual == true
     }
 
     private func checkedInDestinationName(_ status: TraewellingStatus) -> String {
         if let station = status.journey(geometry: nil)?.legs.first?.destination { return station.displayName }
         let stop = status.checkin.destination
         return stop.station?.name ?? stop.name ?? "?"
+    }
+
+    /// Makes a stop added by hand the exit. One the train stops at anyway after boarding is simply picked.
+    private func addManualStop(_ station: Station, time: Date) {
+        let stop = Stopover.manual(at: station, time: time)
+        guard let base = trip ?? legTrip else { return }
+        if base.inserting(manualStop: stop, boardingAt: leg.origin) != nil {
+            manualStop = stop
+            exitID = stop.id
+        } else if let boarding = base.stopovers.firstIndex(where: { $0.station.isSamePlace(as: leg.origin) }),
+                  let existing = base.stopovers[(boarding + 1)...].first(where: { $0.station.isSamePlace(as: station) }) {
+            manualStop = nil
+            exitID = existing.id
+        } else {
+            return
+        }
+        exitPicked()
     }
 
     /// A hand-picked exit invalidates results found for the previous one.
@@ -801,6 +879,7 @@ struct JourneyReplanSheet: View {
         trip = nil
         tripError = nil
         exitID = nil
+        manualStop = nil
         results = []
         hasSearched = false
         fasterOption = nil
@@ -829,8 +908,9 @@ struct JourneyReplanSheet: View {
             // The full trip has different stop IDs than the leg's own stops – re-seed against it.
             let keptExit = exitStation
             trip = fresh
-            boardingID = fresh.stopovers.first { $0.station.isSamePlace(as: leg.origin) }?.id
-            exitID = fresh.stopovers.last { $0.station.isSamePlace(as: keptExit) }?.id
+            // Through `shownTrip`, so a stop added by hand meanwhile stays the exit.
+            boardingID = shownTrip?.stopovers.first { $0.station.isSamePlace(as: leg.origin) }?.id
+            exitID = shownTrip?.stopovers.last { $0.station.isSamePlace(as: keptExit) }?.id
             tripError = nil
         } catch is CancellationError {
         } catch {
@@ -952,6 +1032,28 @@ struct JourneyReplanSheet: View {
                                                               arrival: exit.arrival.planned)
                 model.updateTrackedCheckin(statusId: status.id, leg: exit)
                 withAnimation(.bouncy) {
+                    checkinFixed = true
+                    checkinToFix = nil
+                }
+                checkinError = nil
+            } catch TraewellingError.stopNotOnTrip {
+                // Träwelling's trip doesn't stop there (e.g. a Zusatzhalt): offer the manual trip instead.
+                withAnimation(.snappy) { checkinNeedsManualTrip = true }
+                checkinError = nil
+            } catch {
+                checkinError = error
+            }
+        }
+    }
+
+    private func replaceCheckin(_ status: TraewellingStatus, exit: Leg) {
+        isFixingCheckin = true
+        Task {
+            defer { isFixingCheckin = false }
+            do {
+                try await model.replaceCheckinWithManualTrip(status, leg: exit)
+                withAnimation(.bouncy) {
+                    checkinReplaced = true
                     checkinFixed = true
                     checkinToFix = nil
                 }
