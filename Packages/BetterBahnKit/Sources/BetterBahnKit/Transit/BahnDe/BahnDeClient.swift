@@ -606,7 +606,7 @@ public actor BahnDeGate {
     /// Why bahn.de is being left alone and until when; nil while it isn't.
     public var blockDescription: String? {
         guard isBlocked, let blockedUntil else { return nil }
-        let until = blockedUntil.formatted(Date.FormatStyle(timeZone: BahnDeClient.berlin).hour(.twoDigits(amPM: .omitted)).minute())
+        let until = blockedUntil.formatted(Date.FormatStyle(timeZone: BahnDeClient.berlin).hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
         return "Pause bis \(until) nach \(blockReason ?? "einer Sperre")"
     }
 
@@ -617,7 +617,7 @@ public actor BahnDeGate {
     func report(_ error: TransitError, url: URL? = nil) {
         guard error.isBlocked else { return }
         blockedUntil = Date.now.addingTimeInterval(Self.cooldown)
-        let time = Date.now.formatted(Date.FormatStyle(timeZone: BahnDeClient.berlin).hour(.twoDigits(amPM: .omitted)).minute())
+        let time = Date.now.formatted(Date.FormatStyle(timeZone: BahnDeClient.berlin).hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
         let answer = switch error {
         case .http(let status, let body): "\(status)\(body.map { " " + Self.excerpt($0) } ?? "")"
         default: "429"
