@@ -20,13 +20,15 @@ public struct TrainTypeLookup: Codable, Sendable, Hashable {
         public var destination: String?
         public var coachCount: Int
 
-        /// Marketing family: "ICE 1", "ICE 2", "ICE 3", "ICE 3neo", "ICE 4", "ICE T", "ICE L", or the
+        /// Marketing family: "ICE 1", "ICE 2", "ICE 3", "ICE 3 Velaro" (as bahn.de names the BR 407), "ICE 3neo",
+        /// "ICE 4", "ICE T", "ICE L", or the
         /// cleaned-up bahn.expert name for anything else (e.g. "IC 2").
         public var family: String? {
             switch baureihe {
             case "401": "ICE 1"
             case "402": "ICE 2"
-            case "403", "406", "407": "ICE 3"
+            case "403", "406": "ICE 3"
+            case "407": "ICE 3 Velaro"
             case "408": "ICE 3neo"
             case "411", "415": "ICE T"
             case "412": "ICE 4"

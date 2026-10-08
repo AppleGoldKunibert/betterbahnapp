@@ -315,26 +315,68 @@ public struct BahnDeClient: Sendable {
     /// - Returns: nil if bahn.de has no coach sequence for it (yet).
     /// - Throws: `TransitError.rateLimited` while bahn.de is blocking requests.
     public func coachSequence(_ request: FormationRequest) async throws -> CoachSequence? {
-        let key = "\(request.category) \(([request.number] + request.coupledNumbers).joined(separator: "+"))|\(request.station.id)|\(request.plannedDeparture.timeIntervalSince1970)"
         guard usesSharedCaches else { return try await fetchCoachSequence(request) }
-        return try await Self.sequenceCache.value(for: key, maxAge: Self.formationMaxAge) {
+        return try await Self.sequenceCache.value(for: Self.sequenceKey(request), maxAge: Self.formationMaxAge) {
             try await self.fetchCoachSequence(request)
         }
     }
 
+    /// Why bahn.de had no coach sequence for `request` the last time it was asked (no EVA number, 404,
+    /// an answer without the train's coaches, an error), with what was asked; nil when it had one or
+    /// wasn't asked. Shown when the Wagenreihung falls back to vagonweb's plan, since bahn.de's answer
+    /// can only be seen from inside the app.
+    public func coachSequenceNote(for request: FormationRequest) async -> String? {
+        await Self.sequenceNotes.note(for: Self.sequenceKey(request))
+    }
+
+    static func sequenceKey(_ request: FormationRequest) -> String {
+        "\(request.category) \(([request.number] + request.coupledNumbers).joined(separator: "+"))|\(request.station.id)|\(request.plannedDeparture.timeIntervalSince1970)"
+    }
+
     private static let sequenceCache = ExpiringCache<CoachSequence?>()
+    private static let sequenceNotes = SequenceNotes()
     /// A formation rarely changes once published; 10 minutes still catches a late swap.
     static let formationMaxAge: TimeInterval = 10 * 60
 
     private func fetchCoachSequence(_ request: FormationRequest) async throws -> CoachSequence? {
-        guard let eva = try await evaNumber(for: request.station) else { return nil }
-        for candidate in [eva, Self.otherLevel(of: eva)].compactMap(\.self) {
-            guard let response = try await sequenceResponse(request, eva: candidate) else { continue }
-            let sequence = Self.coachSequence(from: response, category: request.category, number: Int(request.number),
-                                              coupledNumbers: Set(request.coupledNumbers.compactMap { Int($0) }))
-            return sequence.coaches.isEmpty && sequence.formation.units.isEmpty ? nil : sequence
+        let key = Self.sequenceKey(request)
+        let asked = "\(request.category) \(request.number), \(Self.utcTimestamp(request.plannedDeparture))"
+        do {
+            guard let eva = try await evaNumber(for: request.station) else {
+                await Self.sequenceNotes.set("keine EVA-Nummer für \(request.station.name) · \(asked)", for: key)
+                return nil
+            }
+            let candidates = [eva, Self.otherLevel(of: eva)].compactMap(\.self)
+            for candidate in candidates {
+                guard let response = try await sequenceResponse(request, eva: candidate) else { continue }
+                let sequence = Self.coachSequence(from: response, category: request.category, number: Int(request.number),
+                                                  coupledNumbers: Set(request.coupledNumbers.compactMap { Int($0) }))
+                guard !sequence.coaches.isEmpty || !sequence.formation.units.isEmpty else {
+                    await Self.sequenceNotes.set("Antwort ohne Wagen an EVA \(candidate): \(Self.summary(of: response)) · \(asked)", for: key)
+                    return nil
+                }
+                await Self.sequenceNotes.set(nil, for: key)
+                return sequence
+            }
+            await Self.sequenceNotes.set("keine Wagenreihung an EVA \(candidates.joined(separator: " / ")) (404) · \(asked)", for: key)
+            return nil
+        } catch {
+            var reason = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+            // Usually not this request's fault: an earlier answer paused every bahn.de request.
+            if case TransitError.rateLimited = error, let block = await gate.blockDescription { reason += " (\(block))" }
+            await Self.sequenceNotes.set("\(reason) · \(asked)", for: key)
+            throw error
         }
-        return nil
+    }
+
+    /// "2 Gruppen, Züge IC 1189, RB 5410": what an answer without usable coaches had.
+    static func summary(of response: SequenceResponse) -> String {
+        let groups = response.groups ?? []
+        let trains = Set(groups.compactMap { group in
+            group.transport.map { "\($0.category ?? "?") \($0.number.map(String.init) ?? "?")" }
+        }).sorted()
+        let vehicles = groups.reduce(0) { $0 + ($1.vehicles?.count ?? 0) }
+        return "\(groups.count) Gruppen, \(vehicles) Fahrzeuge, Züge \(trains.isEmpty ? "keine" : trains.joined(separator: ", "))"
     }
 
     /// nil when bahn.de has no coach sequence for the train at `eva` (404).
@@ -540,7 +582,7 @@ public struct BahnDeClient: Sendable {
         do {
             return try await http.get(url, as: type, headers: Self.headers(), auth: auth)
         } catch let error as TransitError {
-            await gate.report(error)
+            await gate.report(error, url: url)
             throw error.isBlocked ? TransitError.rateLimited : error
         }
     }
@@ -553,18 +595,40 @@ public actor BahnDeGate {
     public static let cooldown: TimeInterval = 10 * 60
 
     private var blockedUntil: Date?
+    /// What started the current pause: when, the answer and the path, e.g. "10:41 403 OPS_BLOCKED (…/vehicle-sequence)".
+    private var blockReason: String?
 
     public init() {}
 
     /// Whether bahn.de is currently being left alone after a block.
     public var isBlocked: Bool { blockedUntil.map { $0 > .now } ?? false }
 
+    /// Why bahn.de is being left alone and until when; nil while it isn't.
+    public var blockDescription: String? {
+        guard isBlocked, let blockedUntil else { return nil }
+        let until = blockedUntil.formatted(Date.FormatStyle(timeZone: BahnDeClient.berlin).hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+        return "Pause bis \(until) nach \(blockReason ?? "einer Sperre")"
+    }
+
     func check() throws {
         if isBlocked { throw TransitError.rateLimited }
     }
 
-    func report(_ error: TransitError) {
-        if error.isBlocked { blockedUntil = Date.now.addingTimeInterval(Self.cooldown) }
+    func report(_ error: TransitError, url: URL? = nil) {
+        guard error.isBlocked else { return }
+        blockedUntil = Date.now.addingTimeInterval(Self.cooldown)
+        let time = Date.now.formatted(Date.FormatStyle(timeZone: BahnDeClient.berlin).hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+        let answer = switch error {
+        case .http(let status, let body): "\(status)\(body.map { " " + Self.excerpt($0) } ?? "")"
+        default: "429"
+        }
+        blockReason = "\(answer) um \(time)\(url.map { " (…/\($0.lastPathComponent))" } ?? "")"
+    }
+
+    /// The start of an error body on one line, e.g. bahn.de's `{"code":"OPS_BLOCKED",…}`.
+    static func excerpt(_ body: String) -> String {
+        let line = body.split(whereSeparator: \.isNewline).joined(separator: " ")
+        return line.count > 80 ? String(line.prefix(80)) + "…" : line
     }
 }
 
@@ -577,6 +641,15 @@ extension TransitError {
         default: false
         }
     }
+}
+
+/// Why bahn.de's coach sequence was missing, per request (`BahnDeClient.coachSequenceNote(for:)`).
+actor SequenceNotes {
+    private var notes: [String: String] = [:]
+
+    func note(for key: String) -> String? { notes[key] }
+
+    func set(_ note: String?, for key: String) { notes[key] = note }
 }
 
 /// Values fetched per key, kept for `maxAge`; concurrent requests for the same key share one fetch.
