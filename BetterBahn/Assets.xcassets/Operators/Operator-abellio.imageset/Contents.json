@@ -1,0 +1,23 @@
+{
+  "images": [
+    {
+      "filename": "Operator-abellio.png",
+      "idiom": "universal",
+      "scale": "1x"
+    },
+    {
+      "filename": "Operator-abellio@2x.png",
+      "idiom": "universal",
+      "scale": "2x"
+    },
+    {
+      "filename": "Operator-abellio@3x.png",
+      "idiom": "universal",
+      "scale": "3x"
+    }
+  ],
+  "info": {
+    "author": "xcode",
+    "version": 1
+  }
+}

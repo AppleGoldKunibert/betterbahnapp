@@ -19,11 +19,11 @@ struct TravelMapView: View {
     @State private var showRangeSheet = false
     @State private var includeSaved = true
     @State private var includeTraewelling = true
-    @State private var hasJourneysInRange = true
     @State private var legendExpanded = true
 
     struct Stats {
-        var journeys = 0
+        /// Train rides (legs), not journeys: a check-in is one ride, so a saved journey counts
+        /// once per train too and both sources are counted alike.
         var legs = 0
         var kilometers = 0.0
         var hours = 0.0
@@ -46,11 +46,6 @@ struct TravelMapView: View {
                 .ignoresSafeArea(edges: [.top, .bottom])
                 .overlay(alignment: .top) { header }
                 .overlay(alignment: .bottomTrailing) { legend }
-                .overlay {
-                    if !hasJourneysInRange, !model.isSyncingTraewelling {
-                        emptyHint
-                    }
-                }
                 .toolbar(.hidden, for: .navigationBar)
                 .task(id: selection) { await load() }
                 .task { await model.syncTraewelling() }
@@ -107,7 +102,7 @@ struct TravelMapView: View {
             }
 
             HStack(spacing: 0) {
-                stat(value: "\(stats.journeys)", label: "Reisen", icon: "bookmark.fill")
+                stat(value: "\(stats.legs)", label: "Fahrten", icon: "tram.fill")
                 Divider().frame(height: 28)
                 stat(value: stats.kilometers.formatted(.number.precision(.fractionLength(0))), label: "km", icon: "point.topleft.down.to.point.bottomright.curvepath.fill")
                 Divider().frame(height: 28)
@@ -136,6 +131,16 @@ struct TravelMapView: View {
                     sourceToggle("Träwelling", icon: "checkmark.seal.fill", isOn: $includeTraewelling)
                 }
                 Spacer(minLength: 0)
+                Button {
+                    model.showsTrainSearch = true
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(width: 34, height: 34)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(.regular, in: .circle)
+                .accessibilityLabel("Zug suchen")
                 if !model.settings.traewellingEnabled {
                     EmptyView()
                 } else if model.isSyncingTraewelling {
@@ -179,22 +184,6 @@ struct TravelMapView: View {
         }
         .padding(.horizontal)
         .padding(.top, 8)
-    }
-
-    private var emptyHint: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "map").font(.title).foregroundStyle(.secondary)
-            let hasAny = !model.savedJourneys.isEmpty || !model.traewellingTrips.isEmpty
-            Text(hasAny ? "Keine Fahrten in diesem Zeitraum" : "Noch keine Fahrten")
-                .font(.headline)
-            Text(hasAny ? "Wähle einen längeren Zeitraum." : "Deine gespeicherten Reisen erscheinen hier auf der Karte.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .padding(20)
-        .frame(maxWidth: 300)
-        .glassEffect(.regular, in: .rect(cornerRadius: 24))
     }
 
     private func sourceToggle(_ title: String, icon: String, isOn: Binding<Bool>) -> some View {
@@ -290,7 +279,6 @@ struct TravelMapView: View {
         // The background prewarm builds the same thing; let this one have the CPU and network.
         model.stopTravelMapPrewarm()
         let selection = selection
-        hasJourneysInRange = !model.mapJourneys(for: selection).isEmpty
         guard let heatmap = await model.mapHeatmap(
             for: selection,
             onProgress: { done, total in progress = (done, total) },
@@ -302,8 +290,7 @@ struct TravelMapView: View {
         withAnimation {
             runs = heatmap.runs
             runsVersion += 1
-            stats = Stats(journeys: heatmap.journeysCount, legs: heatmap.legsCount,
-                          kilometers: heatmap.kilometers, hours: heatmap.hours)
+            stats = Stats(legs: heatmap.legsCount, kilometers: heatmap.kilometers, hours: heatmap.hours)
         }
         progress = nil
     }
@@ -364,22 +351,6 @@ private extension Coordinate {
 
 nonisolated final class HeatPolyline: MKPolyline, @unchecked Sendable {
     var count = 1
-}
-
-/// OpenRailwayMap tiles with BetterBahn's identifying User-Agent and linked attribution in the legend.
-nonisolated final class RailwayTileOverlay: MKTileOverlay, @unchecked Sendable {
-    init() {
-        super.init(urlTemplate: "https://tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png")
-        canReplaceMapContent = false
-        maximumZ = 19
-    }
-
-    override func loadTile(at path: MKTileOverlayPath, result: @escaping (Data?, (any Error)?) -> Void) {
-        var request = URLRequest(url: url(forTilePath: path))
-        request.setValue(HTTPClient.identifyingUserAgent, forHTTPHeaderField: "User-Agent")
-        nonisolated(unsafe) let completion = result
-        URLSession.shared.dataTask(with: request) { data, _, error in completion(data, error) }.resume()
-    }
 }
 
 struct TravelMap: UIViewRepresentable {

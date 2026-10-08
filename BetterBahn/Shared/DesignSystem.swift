@@ -203,6 +203,104 @@ struct LineBadge: View {
     }
 }
 
+/// An operator's logo (#166) on a transparent background, exactly as wide as the logo itself so a
+/// narrow one like DB's doesn't sit in a wide empty box. Logos wider than 5:1 (SBB, Länderbahn,
+/// PKP IC, …) are scaled down to that width, keeping their proportions, instead of being squashed.
+/// In dark mode, logos with dark lettering (`OperatorBrand.needsPlateInDarkMode`) get a soft light
+/// plate so they stay readable. Nothing for an operator without a logo.
+struct OperatorLogo: View {
+    let name: String
+    @ScaledMetric(relativeTo: .caption) private var height: CGFloat = 12
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        if let brand = OperatorBrand(operatorName: name), let logo = UIImage(named: brand.assetName), logo.size.height > 0 {
+            let plate = colorScheme == .dark && brand.needsPlateInDarkMode
+            Image(uiImage: logo)
+                .renderingMode(.original)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: min(height * logo.size.width / logo.size.height, height * 5), height: height)
+                .padding(.horizontal, plate ? 4 : 0)
+                .padding(.vertical, plate ? 2 : 0)
+                .background(plate ? Color(white: 0.88) : .clear, in: .rect(cornerRadius: 4, style: .continuous))
+                .accessibilityLabel(name)
+        }
+    }
+}
+
+/// The operator of a train (e.g. "DB Fernverkehr AG") with its logo; operators without a logo
+/// (`OperatorBrand`) keep the building icon. Some names are shortened ("ODEG", `OperatorBrand.displayName`).
+struct OperatorLabel: View {
+    let name: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if OperatorBrand(operatorName: name) != nil {
+                OperatorLogo(name: name).accessibilityHidden(true)
+            } else {
+                Image(systemName: "building.2.fill")
+            }
+            Text(OperatorBrand.displayName(for: name))
+        }
+    }
+}
+
+/// Everyone running the train you ride (#166): bahn.de names the railway per stop, so international
+/// trains have several (Berlin → Praha: DB Fernverkehr, then České dráhy), while the feed only ever
+/// names one. Several show as their logos next to each other (a name only where there's no logo);
+/// shows the feed's operator until bahn.de answered, and keeps it when bahn.de has nothing.
+struct TrainOperatorsLabel: View {
+    enum Source { case leg(Leg), trip(Trip) }
+
+    let source: Source
+    @Environment(AppModel.self) private var model
+    @State private var operators: [TrainOperator]?
+
+    private var feedName: String? {
+        switch source {
+        case .leg(let leg): leg.line?.operatorName
+        case .trip(let trip): trip.line?.operatorName
+        }
+    }
+
+    private var key: String {
+        switch source {
+        case .leg(let leg): leg.id
+        case .trip(let trip): trip.id
+        }
+    }
+
+    var body: some View {
+        Group {
+            if let operators, operators.count > 1 {
+                HStack(spacing: 6) {
+                    ForEach(Array(operators.enumerated()), id: \.offset) { _, entry in
+                        if OperatorBrand(operatorName: entry.name) != nil {
+                            OperatorLogo(name: entry.name)
+                        } else {
+                            Text(OperatorBrand.displayName(for: entry.name))
+                        }
+                    }
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(operators.map(\.name).joined(separator: ", "))
+            } else if let name = operators?.first?.name ?? feedName {
+                OperatorLabel(name: name)
+            }
+        }
+        .task(id: key) {
+            guard let bahnDe = model.provider.bahnDe else { return }
+            let found: [TrainOperator]?
+            switch source {
+            case .leg(let leg): found = try? await bahnDe.trainOperators(for: leg)
+            case .trip(let trip): found = try? await bahnDe.trainOperators(for: trip)
+            }
+            if let found { operators = found }
+        }
+    }
+}
+
 /// Triebzug numbers and names of a train (e.g. "Tz 9457 „Bundesrepublik Deutschland“"). bahn.de's
 /// coach sequence first (it only has one in the coming hours); bahn.expert as fallback, which
 /// has the Tz once its data is live. Says so when bahn.de is refusing requests and nothing else helped.
@@ -262,65 +360,11 @@ struct TrainFormationLabel: View {
                fallback.unitDescription != nil {
                 found = fallback
             }
-            if let found, found.unitDescription != nil {
+            if let found, found.unitDescription != nil || found.isIC1 {
+                // An IC 1 has no Tz: hide (and forget) one remembered by an older version.
                 formation = found
                 blocked = false
                 if let leg { model.rememberFormation(found, for: leg) }
-            }
-        }
-    }
-}
-
-/// "Wagenreihung" chip for a train's header, shown once bahn.de has a coach sequence for it (the
-/// same request `TrainFormationLabel` makes, so it is only sent once), or else vagonweb.cz has the
-/// planned one ("Plan-Wagenreihung"). Opens the Wagenreihung sheet.
-struct CoachSequenceButton: View {
-    /// bahn.de's request, only for departures within `BahnDeClient.formationLookahead`.
-    let request: BahnDeClient.FormationRequest?
-    /// The same for any later departure, for vagonweb's planned Wagenreihung days ahead.
-    let plannedRequest: BahnDeClient.FormationRequest?
-    let trainName: String?
-
-    init(leg: Leg) {
-        request = BahnDeClient.formationRequest(for: leg)
-        plannedRequest = BahnDeClient.formationRequest(for: leg, lookahead: nil)
-        trainName = leg.line?.name
-    }
-
-    init(trip: Trip) {
-        request = BahnDeClient.formationRequest(for: trip)
-        plannedRequest = BahnDeClient.formationRequest(for: trip, lookahead: nil)
-        trainName = trip.line?.name
-    }
-
-    @Environment(AppModel.self) private var model
-    @State private var sequence: CoachSequence?
-    @State private var showSequence = false
-
-    var body: some View {
-        // A ZStack rather than Group: `.task` never fires on a view that is empty.
-        ZStack {
-            if let sequence, !sequence.coaches.isEmpty {
-                Button {
-                    showSequence = true
-                } label: {
-                    InfoChip(text: sequence.source == .bahnDe ? "Wagenreihung" : "Plan-Wagenreihung",
-                             systemImage: "train.side.front.car", tint: .brand)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .sheet(isPresented: $showSequence) {
-            if let request = request ?? plannedRequest {
-                CoachSequenceView(request: request, trainName: trainName, sequence: sequence)
-            }
-        }
-        .task(id: plannedRequest) {
-            sequence = nil
-            if let request, let live = try? await model.coachSequence(for: request), !live.coaches.isEmpty {
-                sequence = live
-            } else if let plannedRequest {
-                sequence = await model.plannedCoachSequence(for: plannedRequest)
             }
         }
     }
@@ -453,8 +497,41 @@ struct DelayPill: View {
 struct PlatformBadge: View {
     let platform: PlatformInfo?
     var prominent = false
+    /// Opens the Wagenreihung at this stop. Only used for a platform from the Czech timetable, whose
+    /// tap shows where it comes from: the note then offers the Wagenreihung instead.
+    var onCoachSequence: (() -> Void)?
+    @State private var showsSource = false
 
     var body: some View {
+        if platform?.source == .czechTimetable, platform?.best != nil {
+            // Planned only (see `PlatformInfo.Source.czechTimetable`); tapping says so.
+            Button {
+                showsSource = true
+            } label: {
+                badge.contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Zeigt, woher das Gleis stammt")
+            .popover(isPresented: $showsSource) {
+                PlannedPlatformNote(onCoachSequence: onCoachSequence.map { open in
+                    {
+                        showsSource = false
+                        // The Wagenreihung sheet only opens once the popover is gone.
+                        Task {
+                            try? await Task.sleep(for: .milliseconds(350))
+                            open()
+                        }
+                    }
+                })
+                .presentationCompactAdaptation(.popover)
+            }
+        } else {
+            badge
+        }
+    }
+
+    @ViewBuilder
+    private var badge: some View {
         if let best = platform?.best {
             let changed = platform?.hasChanged == true
             VStack(spacing: 0) {
@@ -462,13 +539,19 @@ struct PlatformBadge: View {
                     .font(.system(size: 8, weight: .semibold))
                     .textCase(.uppercase)
                     .opacity(0.8)
+                // One line: a range like "2 A - D" widens the badge instead of wrapping,
+                // and only shrinks when the row has no room left.
                 Text(best)
                     .font(prominent ? .headline : .subheadline.weight(.bold))
                     .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
-            .frame(minWidth: prominent ? 46 : 38)
+            // Thin edges inside the usual width: short platforms keep the old size, and a wide one
+            // only grows by what its text needs beyond that.
+            .padding(.horizontal, 2)
+            .frame(minWidth: prominent ? 54 : 46)
             .padding(.vertical, 4)
-            .padding(.horizontal, 4)
             .foregroundStyle(changed ? .white : .primary)
             .background(changed ? AnyShapeStyle(Color.heavyDelay.gradient) : AnyShapeStyle(Color.secondary.opacity(0.13)),
                         in: .rect(cornerRadius: 8, style: .continuous))
@@ -478,9 +561,41 @@ struct PlatformBadge: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.white, Color.heavyDelay)
                         .offset(x: 5, y: -5)
+                } else if platform?.source == .czechTimetable {
+                    Image(systemName: "info.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white, Color.secondary)
+                        .offset(x: 5, y: -5)
                 }
             }
         }
+    }
+}
+
+/// Where a platform from the Czech timetable comes from, shown by tapping its `PlatformBadge`.
+struct PlannedPlatformNote: View {
+    var onCoachSequence: (() -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Gleis laut Fahrplan", systemImage: "calendar")
+                .font(.subheadline.weight(.semibold))
+            Text("Dieses Gleis stammt aus dem tschechischen Fahrplan (Správa železnic). Es sind nur Plandaten: Kurzfristige Gleisänderungen fehlen, bitte vor Ort auf die Anzeigen achten.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let onCoachSequence {
+                Button("Wagenreihung anzeigen", systemImage: "train.side.front.car", action: onCoachSequence)
+                    .font(.caption.weight(.semibold))
+                    .tint(.brand)
+                    .padding(.top, 2)
+            }
+        }
+        .padding()
+        // A fixed width, so the popover measures the text's height at the width it shows it at
+        // (with a width range the last line was cut off).
+        .frame(width: 280, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -604,19 +719,21 @@ struct SourceNotice: View {
     }
 }
 
-/// Proportional bar of all legs, colored by product.
+/// Proportional bar of all legs, colored by product, laid out by `Journey.barSpans` (in order, a leg
+/// a late train runs into pushed back instead of covered).
 struct JourneySegmentBar: View {
     let journey: Journey
 
     var body: some View {
         GeometryReader { proxy in
-            let total = max(journey.duration ?? 1, 1)
-            let start = journey.departure?.best ?? .now
+            let spans = journey.barSpans
+            let start = spans.first?.start ?? .now
+            let total = max(spans.last.map { $0.end.timeIntervalSince(start) } ?? 1, 1)
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.secondary.opacity(0.1)).frame(height: 6)
-                ForEach(journey.legs) { leg in
-                    let offset = max(leg.departure.best.timeIntervalSince(start), 0) / total
-                    let length = max(leg.arrival.best.timeIntervalSince(leg.departure.best), 0) / total
+                ForEach(Array(journey.legs.enumerated()), id: \.element.id) { index, leg in
+                    let offset = spans[index].start.timeIntervalSince(start) / total
+                    let length = spans[index].duration / total
                     Capsule()
                         .fill(leg.isWalking ? AnyShapeStyle(Color.secondary.opacity(0.3))
                                             : AnyShapeStyle((leg.line?.product.color ?? .gray).gradient))

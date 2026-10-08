@@ -97,6 +97,55 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Menu {
+                        ForEach(TrainSearchKind.allCases, id: \.self) { kind in
+                            Toggle(kind.displayName, isOn: Binding {
+                                settings.trainSearchKinds.contains(kind)
+                            } set: { on in
+                                if on { settings.trainSearchKinds.insert(kind) } else { settings.trainSearchKinds.remove(kind) }
+                            })
+                        }
+                    } label: {
+                        HStack {
+                            IconLabel(title: "Zugarten", systemImage: "tram.fill", color: .brand)
+                            Spacer()
+                            Text(trainSearchKindsSummary(settings.trainSearchKinds))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        .contentShape(.rect)
+                    }
+                    .menuActionDismissBehavior(.disabled)
+                    .tint(.primary)
+                    NavigationLink {
+                        TrainSearchCountriesView()
+                    } label: {
+                        HStack {
+                            IconLabel(title: "Länder", systemImage: "globe.europe.africa.fill", color: .teal)
+                            Spacer()
+                            Text(trainSearchCountriesSummary(settings.trainSearchCountries))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                } header: {
+                    Text("Zugschnellsuche")
+                } footer: {
+                    Text("Die Suche nach Zugnummer (Zug-Symbol bei Verbindungen, Lupe auf der Karte) zeigt nur diese Zugarten und nur Züge, die durch eines der Länder fahren.")
+                }
+
+                Section {
+                    Toggle(isOn: $settings.shareTrainStatistics) {
+                        IconLabel(title: "Zugdaten für Statistik teilen", systemImage: "chart.bar.fill", color: .teal)
+                    }
+                    .tint(.brand)
+                } header: {
+                    Text("Statistik")
+                } footer: {
+                    Text("Schickt Zugnummer und Fahrt der Regional- und Fernzüge, die du dir ansiehst, an den BetterBahn-Server. Er merkt sich dann Verspätungen, Gleiswechsel, Ausfälle und Wagenreihung dieser Fahrt für spätere Statistiken. Ohne Bezug zu dir oder deinem Standort.")
+                }
+
+                Section {
                     Button(role: .destructive) {
                         showClearHistoryConfirmation = true
                     } label: {
@@ -182,6 +231,19 @@ struct SettingsView: View {
         }
     }
 
+    private func trainSearchKindsSummary(_ kinds: Set<TrainSearchKind>) -> String {
+        if kinds == Set(TrainSearchKind.allCases) { return "Alle" }
+        if kinds == TrainSearchKind.defaults { return "Alle Züge" }
+        if kinds.isEmpty { return "Keine" }
+        return TrainSearchKind.allCases.filter(kinds.contains).map(\.displayName).joined(separator: ", ")
+    }
+
+    private func trainSearchCountriesSummary(_ codes: Set<String>) -> String {
+        if codes.isEmpty { return "Überall" }
+        let names = TrainSearchCountry.all.filter { codes.contains($0.code) }.map(\.name)
+        return names.count <= 2 ? names.joined(separator: ", ") : "\(names.count) Länder"
+    }
+
     private var traewellingSection: some View {
         @Bindable var settings = model.settings
         return Section {
@@ -195,7 +257,7 @@ struct SettingsView: View {
                         }
                     }
                     Spacer()
-                    if let points = user?.points {
+                    if let points = user?.points, user?.pointsEnabled == true {
                         InfoChip(text: "\(points)", systemImage: "sparkles", tint: .brand)
                     }
                 }
@@ -223,11 +285,12 @@ struct SettingsView: View {
                     HStack {
                         IconLabel(title: "Jetzt synchronisieren", systemImage: "arrow.triangle.2.circlepath", color: .blue)
                         Spacer()
+                        // The count keeps growing while a long history is imported page by page.
+                        Text("\(model.traewellingTrips.count) Fahrten")
+                            .foregroundStyle(.secondary)
+                            .contentTransition(.numericText())
                         if model.isSyncingTraewelling {
                             ProgressView()
-                        } else {
-                            Text("\(model.traewellingTrips.count) Fahrten")
-                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -418,4 +481,56 @@ struct AddQuickTagSheet: View {
 #Preview {
     SettingsView()
         .environment(AppModel())
+}
+
+/// Settings → Zugschnellsuche → Länder: the train search lists only trains running through one of them.
+private struct TrainSearchCountriesView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var settings = model.settings
+        Form {
+            Section {
+                Button {
+                    settings.trainSearchCountries = []
+                } label: {
+                    row(title: "Überall", flag: "🌍", selected: settings.trainSearchCountries.isEmpty)
+                }
+            } footer: {
+                Text("Zeigt Züge aus allen Ländern, die bahn.expert kennt.")
+            }
+            Section {
+                ForEach(TrainSearchCountry.all) { country in
+                    Button {
+                        if settings.trainSearchCountries.contains(country.code) {
+                            settings.trainSearchCountries.remove(country.code)
+                        } else {
+                            settings.trainSearchCountries.insert(country.code)
+                        }
+                    } label: {
+                        row(title: country.name, flag: country.flag,
+                            selected: settings.trainSearchCountries.contains(country.code))
+                    }
+                }
+            } footer: {
+                Text("Ein Zug wird gezeigt, wenn er in einem der gewählten Länder startet, endet oder hält.")
+            }
+        }
+        .navigationTitle("Länder")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func row(title: String, flag: String, selected: Bool) -> some View {
+        HStack(spacing: 12) {
+            Text(flag).font(.title3)
+            Text(title).foregroundStyle(.primary)
+            Spacer()
+            if selected {
+                Image(systemName: "checkmark")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(Color.brand)
+            }
+        }
+        .contentShape(.rect)
+    }
 }

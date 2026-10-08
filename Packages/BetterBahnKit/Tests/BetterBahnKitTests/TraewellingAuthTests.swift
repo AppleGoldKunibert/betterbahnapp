@@ -42,7 +42,7 @@ import Testing
             "client_id": "public-client",
             "redirect_uri": redirectURI,
             "response_type": "code",
-            "scope": "read-statuses write-statuses read-search",
+            "scope": "read-statuses write-statuses read-search write-likes",
             "state": pkce.state,
             "code_challenge": pkce.challenge,
             "code_challenge_method": "S256",
@@ -138,6 +138,63 @@ import Testing
         #expect(result.zusatzhaltHop?.statusId == 9001)
         #expect(result.zusatzhaltHop?.leg.origin.name == "Frankfurt (Main) Süd")
         #expect(result.zusatzhaltHop?.leg.destination.name == "Hanau Hbf")
+    }
+}
+
+@Suite struct TraewellingErrorTests {
+    @Test func onlyAValidationErrorAsksToFixTheInput() {
+        #expect(TraewellingError.api(status: 422, message: "The body field must not be greater than 280 characters.").isInvalidInput)
+        #expect(!TraewellingError.api(status: 500, message: nil).isInvalidInput)
+        #expect(!TraewellingError.collision.isInvalidInput)
+        #expect(!TraewellingError.tripNotFound("ICE 594").isInvalidInput)
+    }
+}
+
+/// Real-world case: a manual trip from Hamburg Hbf started at the U-Bahn stop "Hauptbahnhof Süd",
+/// because that stop lay closer to Transitous' coordinate than Träwelling's Hbf.
+@Suite struct TraewellingStationMatchTests {
+    static let hbf = TraewellingStation(id: 1, name: "Hamburg Hbf", latitude: 53.5530, longitude: 10.0060)
+    static let uSued = TraewellingStation(id: 2, name: "Hauptbahnhof Süd, Hamburg", latitude: 53.5526, longitude: 10.0077)
+    static let dammtor = TraewellingStation(id: 3, name: "Hamburg Dammtor", latitude: 53.5605, longitude: 9.9896)
+
+    @Test func prefersTheSameNameOverACloserStop() {
+        let ours = station("hh", "Hamburg Hbf", 53.5527, 10.0075, source: .transitous)
+        let ranked = TraewellingClient.ranked([Self.dammtor, Self.uSued, Self.hbf], for: ours)
+        #expect(ranked.map(\.0.id) == [1, 2, 3])
+    }
+
+    @Test func prefersTheSameEvaNumber() {
+        var hbf = Self.hbf
+        hbf.name = "Hamburg Hauptbahnhof (tief)"
+        hbf.ibnr = "8002549"
+        let ranked = TraewellingClient.ranked([Self.uSued, hbf], for: station("8002549", "Hamburg Hbf", 53.5527, 10.0075))
+        #expect(ranked.first?.0.id == 1)
+    }
+
+    @Test func fallsBackToTheNearestStop() {
+        // A same-named station far away doesn't count; without a name match the nearest wins.
+        let elsewhere = TraewellingStation(id: 4, name: "Neustadt", latitude: 49.35, longitude: 8.14)
+        let near = TraewellingStation(id: 5, name: "Neustadt (Holst)", latitude: 54.10, longitude: 10.81)
+        let ranked = TraewellingClient.ranked([elsewhere, near], for: station("x", "Neustadt", 54.101, 10.812, source: .transitous))
+        #expect(ranked.map(\.0.id) == [5, 4])
+    }
+
+    @Test func decodesTheIbnrAsNumberOrString() throws {
+        let number = try JSONDecoding.decoder.decode(TraewellingStation.self, from: Data(#"{"id":1,"name":"Hamburg Hbf","ibnr":8002549}"#.utf8))
+        #expect(number.ibnr == "8002549")
+        let text = try JSONDecoding.decoder.decode(TraewellingStation.self, from: Data(#"{"id":1,"name":"Hamburg Hbf","ibnr":"8002549"}"#.utf8))
+        #expect(text.ibnr == "8002549")
+        let none = try JSONDecoding.decoder.decode(TraewellingStation.self, from: Data(#"{"id":1,"name":"Hamburg Hbf","ibnr":null}"#.utf8))
+        #expect(none.ibnr == nil)
+    }
+
+    @Test func decodesWhetherThePointsSystemIsEnabled() throws {
+        let off = try JSONDecoding.decoder.decode(TraewellingUser.self, from: Data(#"{"id":1,"displayName":"Gertrud","username":"gertrud","points":0,"pointsEnabled":false}"#.utf8))
+        #expect(off.pointsEnabled == false)
+        let on = try JSONDecoding.decoder.decode(TraewellingUser.self, from: Data(#"{"id":1,"displayName":"Gertrud","username":"gertrud","points":42,"pointsEnabled":true}"#.utf8))
+        #expect(on.pointsEnabled == true)
+        let missing = try JSONDecoding.decoder.decode(TraewellingUser.self, from: Data(#"{"id":1,"displayName":"Gertrud","username":"gertrud"}"#.utf8))
+        #expect(missing.pointsEnabled == nil)
     }
 }
 
@@ -590,4 +647,95 @@ private final class UnknownTrainCheckinProtocol: URLProtocol, @unchecked Sendabl
     }
 
     override func stopLoading() {}
+}
+
+/// Träwelling still has the user on the previous train when it arrived early (it only knows the
+/// scheduled arrival), so the next check-in collides. `CheckinDraft.force` sends it anyway.
+@Suite(.serialized) struct TraewellingForcedCheckinTests {
+    @Test func collisionThenForcedCheckinSendsForce() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [CollidingCheckinProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        CollidingCheckinProtocol.forceFlags.withLock { $0 = [] }
+        let store = TokenStore(service: "BetterBahnKitTests.\(UUID().uuidString)")
+        store.save(OAuthToken(accessToken: "test-token", refreshToken: nil, expiresAt: .distantFuture))
+        let client = TraewellingClient(config: TraewellingConfig(clientID: "public-client"), http: HTTPClient(session: session), store: store)
+
+        let departure = Date(timeIntervalSince1970: 1_790_000_000)
+        let leg = Leg(origin: Station(id: "8000105", name: "Frankfurt (Main) Hbf", coordinate: Coordinate(latitude: 50.1071, longitude: 8.6632),
+                                      evaNumber: "8000105", source: .transitous),
+                      destination: Station(id: "8000068", name: "Darmstadt Hbf", coordinate: Coordinate(latitude: 49.8725, longitude: 8.6294),
+                                           evaNumber: "8000068", source: .transitous),
+                      departure: TimeInfo(planned: departure, actual: nil),
+                      arrival: TimeInfo(planned: departure.addingTimeInterval(20 * 60), actual: nil),
+                      departurePlatform: nil, arrivalPlatform: nil, tripId: "transitous-trip",
+                      line: Line(name: "RE 60", number: "4560", product: .regional, operatorName: "DB Regio AG"),
+                      direction: "Darmstadt Hbf", isWalking: false, cancelled: false,
+                      stopovers: [], remarks: [], source: .transitous)
+        var draft = CheckinDraft(leg: leg)
+
+        await #expect(throws: TraewellingError.collision) { try await client.checkinAsManualTrip(draft) }
+        draft.force = true
+        let result = try await client.checkinAsManualTrip(draft)
+        #expect(result.statusId == 7002)
+        #expect(result.points == 0)
+        #expect(CollidingCheckinProtocol.forceFlags.withLock { $0 } == [false, true])
+    }
+}
+
+private final class CollidingCheckinProtocol: URLProtocol, @unchecked Sendable {
+    /// Whether each `trains/checkin` request carried `force: true`.
+    static let forceFlags = Mutex<[Bool]>([])
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let path = request.url!.path
+        var status = 200
+        let json: String
+        switch true {
+        case path.contains("autocomplete") && path.contains("Darmstadt"):
+            json = #"{"data":[{"id":2,"name":"Darmstadt Hbf","latitude":49.8725,"longitude":8.6294}]}"#
+        case path.contains("autocomplete"):
+            json = #"{"data":[{"id":1,"name":"Frankfurt (Main) Hbf","latitude":50.1071,"longitude":8.6632}]}"#
+        case path == "/api/v1/trips":
+            json = #"{"data":{"tripId":"manual-trip","lineName":"RE 60","origin":{"id":1},"destination":{"id":2}}}"#
+        case path == "/api/v1/trains/checkin":
+            let body = (try? JSONSerialization.jsonObject(with: Self.body(of: request))) as? [String: Any]
+            let force = body?["force"] as? Bool ?? false
+            Self.forceFlags.withLock { $0.append(force) }
+            if force {
+                json = #"{"data":{"status":{"id":7002},"points":{"points":0},"alsoOnThisConnection":[]}}"#
+            } else {
+                status = 409
+                json = #"{"message":{"status_id":7001,"lineName":"ICE 1"},"data":{"conflicts":[]}}"#
+            }
+        default:
+            client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
+            return
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(json.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+
+    private static func body(of request: URLRequest) -> Data {
+        var body = request.httpBody ?? Data()
+        if let stream = request.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            var buffer = [UInt8](repeating: 0, count: 1024)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                guard count > 0 else { break }
+                body.append(contentsOf: buffer.prefix(count))
+            }
+        }
+        return body
+    }
 }

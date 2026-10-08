@@ -110,7 +110,7 @@ struct MLineInfo {
     var agencyName: String?
 
     func toLine() -> Line {
-        let name = displayName ?? tripShortName ?? routeShortName ?? mode
+        let name = trainNameInsteadOfLine ?? displayName ?? tripShortName ?? routeShortName ?? mode
         let prefix = name.split(separator: " ").first.map { String($0).uppercased() } ?? ""
         let product = MLineInfo.product(mode: mode, prefix: prefix)
         let digitsInName = name.split(separator: " ").last.map(String.init)?.filter(\.isNumber)
@@ -133,6 +133,22 @@ struct MLineInfo {
                     nightRail: mode == "NIGHT_RAIL" ? true : nil)
     }
 
+    /// Long-distance train categories a Czech feed puts behind its line name.
+    private static let bracketedTrainCategories: Set<String> = ["ICE", "ECE", "RJ", "RJX", "EC", "IC", "EN", "NJ"]
+
+    /// Czech feeds (CZPTT) name a long-distance train after its line, with the train in brackets:
+    /// "Ex5 (rj 383)" for the Railjet København → Praha, "Ex2 (EC 223)". It's the train passengers and
+    /// bahn.de know ("RJ 383"; Czech writes ČD's railjet "rj"), and only under that name does it match
+    /// the same train from DB's or DSB's feed.
+    var trainNameInsteadOfLine: String? {
+        guard let displayName, let tripShortName else { return nil }
+        let parts = tripShortName.split(separator: " ")
+        guard parts.count == 2, parts[1].allSatisfy(\.isNumber), displayName.hasSuffix("(\(tripShortName))") else { return nil }
+        let category = parts[0].uppercased()
+        guard Self.bracketedTrainCategories.contains(category) else { return nil }
+        return "\(category) \(parts[1])"
+    }
+
     /// Whether this is a train (as opposed to bus, tram, subway, ferry, …).
     var isRail: Bool {
         ["HIGHSPEED_RAIL", "LONG_DISTANCE", "NIGHT_RAIL", "REGIONAL_FAST_RAIL", "REGIONAL_RAIL", "SUBURBAN", "RAIL"]
@@ -140,6 +156,11 @@ struct MLineInfo {
     }
 
     static func product(mode: String, prefix: String) -> Product {
+        // A high-speed train is never regional, whatever its feed says: DSB's feed (Rejseplanen) has the
+        // Railjet København → Praha as a regional "RJ".
+        if ["REGIONAL_FAST_RAIL", "REGIONAL_RAIL"].contains(mode), ProductGuess.fromLinePrefix(prefix) == .highSpeed {
+            return .highSpeed
+        }
         switch mode {
         case "HIGHSPEED_RAIL": return .highSpeed
         case "LONG_DISTANCE", "NIGHT_RAIL": return .longDistance

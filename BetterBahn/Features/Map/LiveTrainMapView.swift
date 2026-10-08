@@ -9,8 +9,11 @@ struct LiveTrainRoute: Hashable {
     var plannedDeparture: Date
     /// Stops in order, including the first and last.
     var stops: [Stopover]
-    /// Track geometry if known, else the stops joined by straight lines.
+    /// Track geometry if known, else the stops joined by straight lines. Only good enough to tell
+    /// whether a position lies on the route; the map draws `track` instead.
     var path: [Coordinate]
+    /// The run as a leg, to look up its track geometry when it came without.
+    var geometryLeg: Leg?
     /// The train's final destination, to tell it from a foreign train with the same run number.
     var destination: String?
     /// When the train can be running at all: nothing is asked for outside of it.
@@ -28,6 +31,7 @@ struct LiveTrainRoute: Hashable {
             : leg.stopovers
         path = leg.geometry.flatMap { $0.isEmpty ? nil : $0 } ?? stops.compactMap(\.station.coordinate)
         destination = leg.direction
+        geometryLeg = leg
         // The train is usually already underway before the leg starts, which is when it's most
         // interesting where it is.
         start = leg.departure.best.addingTimeInterval(-2 * 3600)
@@ -40,6 +44,14 @@ struct LiveTrainRoute: Hashable {
         plannedDeparture = trip.stopovers.lazy.compactMap(\.departure).first?.planned ?? .now
         path = trip.geometry.flatMap { $0.isEmpty ? nil : $0 } ?? trip.stopovers.compactMap(\.station.coordinate)
         destination = trip.stopovers.last?.station.name
+        if let first = trip.stopovers.first, let last = trip.stopovers.last, trip.stopovers.count > 1,
+           let departure = first.departure, let arrival = last.arrival {
+            geometryLeg = Leg(origin: first.station, destination: last.station, departure: departure, arrival: arrival,
+                              departurePlatform: first.departurePlatform, arrivalPlatform: last.arrivalPlatform,
+                              tripId: trip.id, line: trip.line, direction: trip.direction, isWalking: false,
+                              cancelled: trip.cancelled, stopovers: trip.stopovers, remarks: [], source: trip.source,
+                              geometry: trip.geometry)
+        }
         start = (trip.stopovers.lazy.compactMap(\.departure).first?.best ?? .distantPast).addingTimeInterval(-10 * 60)
         end = (trip.stopovers.last?.arrival?.best ?? .distantFuture).addingTimeInterval(10 * 60)
     }
@@ -126,14 +138,17 @@ struct LiveTrainMapView: View {
     @State private var position: TrainPosition?
     @State private var camera: MapCameraPosition = .automatic
     @State private var following = true
+    /// The route along the tracks; nil until known, and then the map shows only the stops rather
+    /// than straight lines across country.
+    @State private var track: [Coordinate]?
 
     private var color: Color { route.line?.product.color ?? .brand }
 
     var body: some View {
         NavigationStack {
             Map(position: $camera) {
-                if route.path.count > 1 {
-                    MapPolyline(coordinates: route.path.map(\.clCoordinate))
+                if let track {
+                    MapPolyline(coordinates: track.map(\.clCoordinate))
                         .stroke(color.opacity(0.8), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
                 }
                 ForEach(route.stops) { stop in
@@ -182,6 +197,13 @@ struct LiveTrainMapView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Fertig", systemImage: "xmark", role: .cancel) { dismiss() }
                 }
+            }
+        }
+        .task(id: route) {
+            if RouteGeometryService.followsTracks(route.path) {
+                track = route.path
+            } else if let leg = route.geometryLeg {
+                track = await model.geometry(for: leg)
             }
         }
         .task(id: route) {

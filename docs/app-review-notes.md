@@ -5,7 +5,8 @@ features or data flows change (and update the privacy policy in `Cloudflare/work
 
 ## Before submitting
 
-- **Workers deployed** with `TOKEN_SECRET` (same value in `betterbahn2` and `betterbahn-pass`),
+- **Workers deployed** with `TOKEN_SECRET` (same value in `betterbahn2`, `betterbahn-pass` and
+  `betterbahn-stats`, whose D1 database is set up as in `Cloudflare/stats/README.md`),
   `DB_CLIENT_ID`/`DB_API_KEY` in `betterbahn2`, and `ALLOW_UNATTESTED` removed once no old builds
   are left. The privacy policy Worker (`betterbahn`) has the controller's name filled in, its KV
   namespace `SHARES` and `TOKEN_SECRET` set (share links), and the App ID has Associated Domains.
@@ -15,7 +16,11 @@ features or data flows change (and update the privacy policy in `Cloudflare/work
   user's iCloud, or is only passed through BetterBahn's Workers to answer the request right away
   (timetable lookups, Wallet pass signing) and not kept. Exception: a journey the user shares is
   stored for 30 days (connection only, no identity) so the short link works – decide whether to
-  declare it (e.g. "Other User Content", not linked, not tracking). Check this against the current code before
+  declare it (e.g. "Other User Content", not linked, not tracking). Second exception: the train
+  statistics (`Cloudflare/stats`, Settings → "Zugdaten für Statistik teilen", on by default) report the
+  bahn.de IDs of trains the app showed and keep those trains' data for a year, without any device or
+  install ID – likely "Usage Data → Product Interaction", not linked to the user, not tracking (or
+  "Other Data"). Check this against the current code before
   answering "Data Not Collected"; Träwelling check-ins go to the user's own Träwelling account at
   their request.
 - **Demo access:** create a Träwelling test account and put its login in the review notes, and keep
@@ -28,7 +33,8 @@ features or data flows change (and update the privacy policy in `Cloudflare/work
 > affiliated with Deutsche Bahn AG (stated in Settings).
 >
 > Timetable data comes from Transitous (open data, transitous.org). Some details (coach sequences,
-> extra stops, platforms) come from bahn.de's public web API through our own server.
+> extra stops, platforms) come from bahn.de's public web API through our own server; when bahn.de
+> refuses our server, the app asks bahn.de directly from the device in a hidden web view.
 >
 > Träwelling (traewelling.de) is an optional, independent check-in service. Turn it on under
 > Settings → Für Profis → Expertenmodus → Träwelling, then sign in with the demo account below.
