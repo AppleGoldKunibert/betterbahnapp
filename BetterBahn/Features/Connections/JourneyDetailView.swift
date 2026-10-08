@@ -74,9 +74,11 @@ struct JourneyDetailView: View {
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $legToReplace) { selection in
-            AlternativeTrainsSheet(leg: selection.leg, notBefore: selection.notBefore,
-                                   nextLeg: journey.nextTransitLegIndex(after: selection.index).map { journey.legs[$0] }) { newLegs in
-                try await model.trainPicker.replacing(legAt: selection.index, in: journey, with: newLegs, finalDestination: goal)
+            AlternativeTrainsSheet(leg: selection.leg, notBefore: selection.notBefore, nextLeg: nextTransitLeg(after: selection.index),
+                                   rerouteTarget: rerouteTargetIndex(for: selection).map { journey.legs[$0].destination },
+                                   rerouteNextLeg: nextTransitLeg(after: rerouteTargetIndex(for: selection))) { newLegs in
+                try await model.trainPicker.replacing(legsIn: replacedRange(for: selection, by: newLegs), in: journey,
+                                                      with: newLegs, finalDestination: goal)
             } onApply: { replacement, showAlternatives in
                 let updated = replacement.journey
                 withAnimation {
@@ -160,6 +162,23 @@ struct JourneyDetailView: View {
 
     /// The options to start a re-plan from: this view's own, else whatever was saved with the journey.
     private var replanSearch: ConnectionSearch? { search ?? model.savedEntry(for: journey)?.search }
+
+    private func nextTransitLeg(after index: Int?) -> Leg? {
+        index.flatMap { journey.nextTransitLegIndex(after: $0) }.map { journey.legs[$0] }
+    }
+
+    /// The leg ending at the next via or the destination, for "Andere Routenführung" from `selection`.
+    private func rerouteTargetIndex(for selection: LegSelection) -> Int? {
+        journey.rerouteTargetIndex(from: selection.index, vias: replanSearch?.via.map(\.station) ?? [], finalDestination: goal)
+    }
+
+    /// The legs `newLegs` replace: just the picked one, or up to the next via for an "Andere Routenführung".
+    private func replacedRange(for selection: LegSelection, by newLegs: [Leg]) -> ClosedRange<Int> {
+        guard let end = newLegs.last?.destination, !end.isSamePlace(as: selection.leg.destination),
+              let target = rerouteTargetIndex(for: selection), end.isSamePlace(as: journey.legs[target].destination)
+        else { return selection.index...selection.index }
+        return selection.index...target
+    }
 
     /// Pull-to-refresh: re-fetches realtime data (delays, platforms, cancellations) for every leg.
     private func refreshRealtime() async {
@@ -646,6 +665,11 @@ struct AlternativeTrainsSheet: View {
     var notBefore: Date?
     /// The planned train after `leg`, to mark alternatives that arrive too late for it.
     var nextLeg: Leg?
+    /// The next via or the destination when `leg` ends at a mere transfer point: connections straight
+    /// there are offered too, as "Andere Routenführung".
+    var rerouteTarget: Station?
+    /// The planned train after `rerouteTarget`, like `nextLeg`.
+    var rerouteNextLeg: Leg?
     /// Builds the new plan from the legs replacing `leg`: one for a direct train, several for a connection with transfers.
     let onSelect: ([Leg]) async throws -> LegReplacement
     /// Applies the new plan; `true` when the user wants other trains for the connection it misses
@@ -656,6 +680,7 @@ struct AlternativeTrainsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var alternatives: [Leg] = []
     @State private var connections: [Journey] = []
+    @State private var reroutes: [Journey] = []
     @State private var isLoading = true
     @State private var applyingID: String?
     @State private var onlyValidTicket = false
@@ -736,6 +761,33 @@ struct AlternativeTrainsSheet: View {
                         .buttonStyle(.plain)
                         .disabled(applyingID != nil)
                     }
+
+                    if !reroutes.isEmpty, let rerouteTarget {
+                        SectionHeader(title: "Weiter bis \(rerouteTarget.displayName)", systemImage: "arrow.triangle.branch")
+                            .padding(.top, 6)
+                    }
+
+                    ForEach(reroutes) { route in
+                        Button {
+                            apply(route.legs, id: route.id)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                JourneyCard(journey: route)
+                                    .overlay(alignment: .topTrailing) {
+                                        if applyingID == route.id { ProgressView().padding(14) }
+                                    }
+                                Label("Andere Routenführung", systemImage: "arrow.triangle.branch")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 14)
+                                if let rerouteNextLeg, let last = route.legs.last, !last.catches(rerouteNextLeg) {
+                                    MissedConnectionHint(next: rerouteNextLeg).padding(.horizontal, 14)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(applyingID != nil)
+                    }
                 }
                 .padding()
             }
@@ -743,7 +795,7 @@ struct AlternativeTrainsSheet: View {
             .overlay {
                 if isLoading {
                     ProgressView("Suche Züge …")
-                } else if alternatives.isEmpty, connections.isEmpty, error == nil {
+                } else if alternatives.isEmpty, connections.isEmpty, reroutes.isEmpty, error == nil {
                     ContentUnavailableView("Keine anderen Züge", systemImage: "tram.fill",
                                            description: Text("Gerade fährt kein anderer Zug von \(leg.origin.displayName) nach \(leg.destination.displayName)."))
                 }
@@ -781,18 +833,27 @@ struct AlternativeTrainsSheet: View {
         isLoading = true
         defer { isLoading = false }
         let filter = onlyValidTicket ? model.ticketFilter : nil
-        let picker = model.trainPicker, leg = leg, notBefore = notBefore
-        // Both lists load together; one failing still shows the other.
+        let picker = model.trainPicker, leg = leg, notBefore = notBefore, target = rerouteTarget
+        // The lists load together; one failing still shows the others.
         async let direct = picker.alternatives(for: leg, notBefore: notBefore, ticketFilter: filter)
         async let withTransfers = picker.connections(for: leg, notBefore: notBefore, ticketFilter: filter)
+        async let rerouted = Self.reroutes(picker, for: leg, to: target, notBefore: notBefore, ticketFilter: filter)
         var failure: Error?
-        var foundDirect: [Leg] = [], foundWithTransfers: [Journey] = []
+        var foundDirect: [Leg] = [], foundWithTransfers: [Journey] = [], foundReroutes: [Journey] = []
         do { foundDirect = try await direct } catch { failure = error }
         do { foundWithTransfers = try await withTransfers } catch { failure = failure ?? error }
+        do { foundReroutes = try await rerouted } catch { failure = failure ?? error }
         guard !Task.isCancelled, !(failure is CancellationError) else { return }
         alternatives = foundDirect
         connections = foundWithTransfers
-        error = foundDirect.isEmpty && foundWithTransfers.isEmpty ? failure : nil
+        reroutes = foundReroutes
+        error = foundDirect.isEmpty && foundWithTransfers.isEmpty && foundReroutes.isEmpty ? failure : nil
+    }
+
+    private static func reroutes(_ picker: TrainPicker, for leg: Leg, to target: Station?, notBefore: Date?,
+                                 ticketFilter: TicketFilter?) async throws -> [Journey] {
+        guard let target else { return [] }
+        return try await picker.reroutes(for: leg, to: target, notBefore: notBefore, ticketFilter: ticketFilter)
     }
 
     private func apply(_ legs: [Leg], id: String) {

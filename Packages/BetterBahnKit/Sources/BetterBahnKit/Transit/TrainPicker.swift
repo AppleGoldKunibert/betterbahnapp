@@ -111,6 +111,20 @@ public extension Journey {
         legs.indices.dropFirst(index + 1).first { !legs[$0].isWalking }
     }
 
+    /// Where the leg at `index` could be rerouted to instead (see `TrainPicker.reroutes`): the index of
+    /// the first later leg ending at a via or at `finalDestination`. Nil when the leg itself ends at one,
+    /// since then there's no transfer point to skip.
+    func rerouteTargetIndex(from index: Int, vias: [Station], finalDestination: Station) -> Int? {
+        guard legs.indices.contains(index) else { return nil }
+        func isGoal(_ station: Station) -> Bool {
+            station.isSamePlace(as: finalDestination) || vias.contains { station.isSamePlace(as: $0) }
+        }
+        guard !isGoal(legs[index].destination) else { return nil }
+        let later = legs.indices.dropFirst(index + 1).filter { !legs[$0].isWalking }
+        // Without a goal among them (a walk to an address at the end), the last train's stop counts.
+        return later.first { isGoal(legs[$0].destination) } ?? later.last
+    }
+
     /// The next transit leg after the one at `index`, if it leaves too soon after that one arrives.
     func missedConnection(after index: Int) -> MissedConnection? {
         guard legs.indices.contains(index), !legs[index].isWalking,
@@ -166,8 +180,27 @@ public struct TrainPicker: Sendable {
     /// `alternatives(for:)` already lists them.
     public func connections(for leg: Leg, minutesBefore: Int = 30, minutesAfter: Int = 180,
                             notBefore: Date? = nil, ticketFilter: TicketFilter? = nil) async throws -> [Journey] {
+        try await journeys(around: leg, to: leg.destination, minutesBefore: minutesBefore, minutesAfter: minutesAfter,
+                           notBefore: notBefore, ticketFilter: ticketFilter)
+            .filter { $0.transitLegs.count > 1 }
+    }
+
+    /// Connections from `leg.origin` straight on to `target` (the next via or the final destination,
+    /// see `Journey.rerouteTargetIndex`) in the same time window that don't change trains where `leg`
+    /// ends, e.g. a direct train skipping that transfer. Shown as "Andere Routenführung".
+    public func reroutes(for leg: Leg, to target: Station, minutesBefore: Int = 30, minutesAfter: Int = 180,
+                         notBefore: Date? = nil, ticketFilter: TicketFilter? = nil) async throws -> [Journey] {
+        try await journeys(around: leg, to: target, minutesBefore: minutesBefore, minutesAfter: minutesAfter,
+                           notBefore: notBefore, ticketFilter: ticketFilter)
+            .filter { journey in !journey.transitLegs.dropLast().contains { $0.destination.isSamePlace(as: leg.destination) } }
+            .sorted { ($0.arrival?.best ?? .distantFuture) < ($1.arrival?.best ?? .distantFuture) }
+    }
+
+    /// Journeys from `leg.origin` to `destination` leaving in `leg`'s window, by departure.
+    private func journeys(around leg: Leg, to destination: Station, minutesBefore: Int, minutesAfter: Int,
+                          notBefore: Date?, ticketFilter: TicketFilter?) async throws -> [Journey] {
         let (start, end) = Self.window(for: leg, minutesBefore: minutesBefore, minutesAfter: minutesAfter, notBefore: notBefore)
-        var query = JourneyQuery(from: leg.origin, to: leg.destination, date: start)
+        var query = JourneyQuery(from: leg.origin, to: destination, date: start)
         var found: [Journey] = []
         // A page often covers only an hour or two; one more page fills the rest of the window.
         for _ in 0..<2 {
@@ -180,7 +213,7 @@ public struct TrainPicker: Sendable {
         var seen = Set<String>()
         return found
             .filter { journey in
-                guard journey.transitLegs.count > 1, !journey.isCancelled,
+                guard !journey.transitLegs.isEmpty, !journey.isCancelled,
                       let departure = journey.departure?.planned, departure >= start, departure <= end else { return false }
                 if let notBefore, let best = journey.departure?.best, best < notBefore { return false }
                 return ticketFilter?.isValid(journey) ?? true
@@ -257,19 +290,26 @@ public struct TrainPicker: Sendable {
     }
 
     /// Replaces the leg at `index` with one leg (a direct train) or several (a connection with transfers).
-    /// When they end where the old leg did, the rest of the plan stays as it was (#226); if its next
-    /// train can't be caught any more, the result says so (`missedConnection`) and the user decides.
-    /// Otherwise everything after it is planned anew.
     public func replacing(legAt index: Int, in journey: Journey, with newLegs: [Leg], finalDestination: Station) async throws -> LegReplacement {
-        guard let firstLeg = newLegs.first, let newLeg = newLegs.last, journey.legs.indices.contains(index) else {
+        try await replacing(legsIn: index...index, in: journey, with: newLegs, finalDestination: finalDestination)
+    }
+
+    /// Replaces the legs in `range` (one, or several for an "Andere Routenführung" up to the next via).
+    /// When the new legs end where the last replaced one did, the rest of the plan stays as it was (#226);
+    /// if its next train can't be caught any more, the result says so (`missedConnection`) and the user
+    /// decides. Otherwise everything after it is planned anew.
+    public func replacing(legsIn range: ClosedRange<Int>, in journey: Journey, with newLegs: [Leg],
+                          finalDestination: Station) async throws -> LegReplacement {
+        guard let firstLeg = newLegs.first, let newLeg = newLegs.last,
+              journey.legs.indices.contains(range.lowerBound), journey.legs.indices.contains(range.upperBound) else {
             throw TransitError.invalidInput("Keine Verbindung ausgewählt.")
         }
-        var legs = Array(journey.legs.prefix(index))
+        var legs = Array(journey.legs.prefix(range.lowerBound))
         // Drop a walking leg right before the replaced leg if it no longer fits.
         if let last = legs.last, last.isWalking, !last.destination.isSamePlace(as: firstLeg.origin) { legs.removeLast() }
         legs += newLegs
-        let following = Array(journey.legs.dropFirst(index + 1))
-        if !following.isEmpty, newLeg.destination.isSamePlace(as: journey.legs[index].destination) {
+        let following = Array(journey.legs.dropFirst(range.upperBound + 1))
+        if !following.isEmpty, newLeg.destination.isSamePlace(as: journey.legs[range.upperBound].destination) {
             let kept = Journey(legs: legs + following, source: journey.source)
             return LegReplacement(journey: kept, missedConnection: kept.missedConnection(after: legs.count - 1))
         }

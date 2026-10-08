@@ -1997,6 +1997,28 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(withWalk.missedConnection(after: 2) == nil)
     }
 
+    @Test func reroutesSkipTheTransferPoint() async throws {
+        let (picker, _, withTransfer) = try transferPicker()
+        // Köln → Düsseldorf → Berlin: the direct ICE 1 to Berlin counts, the change in Düsseldorf doesn't.
+        let reroutes = try await picker.reroutes(for: withTransfer.legs[0], to: berlin)
+        #expect(reroutes.map { $0.legs.map(\.tripId) } == [["ice1"]])
+    }
+
+    @Test func rerouteTargetIsNextViaOrDestination() throws {
+        let (_, _, withTransfer) = try transferPicker()
+        #expect(withTransfer.rerouteTargetIndex(from: 0, vias: [], finalDestination: berlin) == 1)
+        // Düsseldorf is a via: the leg already ends at a point the route has to pass.
+        #expect(withTransfer.rerouteTargetIndex(from: 0, vias: [duesseldorf], finalDestination: berlin) == nil)
+        #expect(withTransfer.rerouteTargetIndex(from: 1, vias: [], finalDestination: berlin) == nil)
+    }
+
+    @Test func rerouteReplacesLegsUpToTarget() async throws {
+        let (picker, direct, withTransfer) = try transferPicker()
+        let replaced = try await picker.replacing(legsIn: 0...1, in: withTransfer, with: [direct], finalDestination: berlin)
+        #expect(replaced.journey.legs.map(\.tripId) == ["ice1"])
+        #expect(replaced.missedConnection == nil)
+    }
+
     @Test func alternativesForMissedConnectionLeaveAfterArrival() async throws {
         let (picker, _, _) = makePicker()
         let other = trip("ice999", "ICE 999", [stop(koeln, arr: nil, dep: 20), stop(duesseldorf, arr: 40, dep: nil)])
