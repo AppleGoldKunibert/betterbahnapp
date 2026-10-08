@@ -57,6 +57,19 @@ import Testing
         #expect(state.legIndex == 0)
     }
 
+    @Test func marksNightTrains() {
+        let nightjet = Line(name: "NJ 40490", number: "40490", product: .longDistance, operatorName: nil, nightRail: true)
+        let night = Journey(legs: [
+            leg(re, from: "Bonn Hbf", to: "Köln Hbf", depart: 0, arrive: 30),
+            leg(nightjet, from: "Köln Hbf", to: "Wien Hbf", depart: 40, arrive: 600),
+        ], source: .bahnDe)
+        #expect(JourneyWidgetState.from(night, now: time(-20))?.isNightTrain == false)
+        let transfer = JourneyWidgetState.from(night, now: time(25))
+        #expect(transfer?.isNightTrain == false)
+        #expect(transfer?.transfer?.toNightTrain == true)
+        #expect(JourneyWidgetState.from(night, now: time(100))?.isNightTrain == true)
+    }
+
     @Test func showsTheNextStopWhileRiding() {
         let state = state(at: 5)
         #expect(state.phase == .riding)

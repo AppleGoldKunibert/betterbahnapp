@@ -30,6 +30,19 @@ public struct JourneyStop: Sendable, Hashable {
     }
 }
 
+/// bahn.de's journey details for one run: its stops and what it says about the train itself.
+public struct JourneyCourse: Sendable, Hashable {
+    public var stops: [JourneyStop]
+    /// bahn.de lists sleeping ("Schlafwagen", SW) or couchette cars ("Liegewagen", LW) among the
+    /// train's attributes: a night train, also one the timetable feeds don't mark (#241).
+    public var hasSleepingCars: Bool
+
+    public init(stops: [JourneyStop], hasSleepingCars: Bool = false) {
+        self.stops = stops
+        self.hasSleepingCars = hasSleepingCars
+    }
+}
+
 extension Stopover {
     /// A `Stopover` for a Zusatzhalt bahn.de reported (see `BahnDeClient.inserting(_:into:)`). Only
     /// ever used for display; a Zusatzhalt's Träwelling checkin goes through
@@ -85,7 +98,14 @@ extension BahnDeClient {
             var priorisierteMeldungen: [Message]?
             var risMeldungen: [RISMessage]?
         }
+        struct Attribute: Decodable { var kategorie: String?; var key: String? }
         var halte: [Stop]
+        var zugattribute: [Attribute]?
+
+        var course: JourneyCourse {
+            JourneyCourse(stops: halte.compactMap(JourneyStop.init),
+                          hasSleepingCars: zugattribute?.contains { $0.kategorie == "SCHLAFWAGEN" || ["SW", "LW"].contains($0.key) } == true)
+        }
     }
 
     // MARK: Journey stops
@@ -97,23 +117,33 @@ extension BahnDeClient {
     /// throws `TransitError.notFound` if bahn.de doesn't list it.
     /// `maxAge` is how old a cached answer may be; legs days ahead can do with an hourly look.
     public func journeyStops(for leg: Leg, maxAge: TimeInterval = BahnDeClient.journeyStopsMaxAge) async throws -> [JourneyStop]? {
-        try await journeyStops(line: leg.line, station: leg.origin, plannedDeparture: leg.departure.planned, maxAge: maxAge)
+        try await journeyCourse(for: leg, maxAge: maxAge)?.stops
+    }
+
+    /// `journeyStops(for:)` with what bahn.de says about the train (`JourneyCourse`), same request.
+    public func journeyCourse(for leg: Leg, maxAge: TimeInterval = BahnDeClient.journeyStopsMaxAge) async throws -> JourneyCourse? {
+        try await journeyCourse(line: leg.line, station: leg.origin, plannedDeparture: leg.departure.planned, maxAge: maxAge)
     }
 
     /// The realtime stop sequence for `trip`'s train (see `journeyStops(for:)` above); `nil` under the
     /// same conditions, plus when `trip` has no departing stop to look the train up at.
     public func journeyStops(for trip: Trip) async throws -> [JourneyStop]? {
-        guard let first = trip.stopovers.first(where: { $0.departure != nil }), let departure = first.departure else { return nil }
-        return try await journeyStops(line: trip.line, station: first.station, plannedDeparture: departure.planned)
+        try await journeyCourse(for: trip)?.stops
     }
 
-    private func journeyStops(line: Line?, station: Station, plannedDeparture: Date,
-                              maxAge: TimeInterval = BahnDeClient.journeyStopsMaxAge) async throws -> [JourneyStop]? {
+    /// `journeyStops(for:)` with what bahn.de says about the train (`JourneyCourse`), same request.
+    public func journeyCourse(for trip: Trip) async throws -> JourneyCourse? {
+        guard let first = trip.stopovers.first(where: { $0.departure != nil }), let departure = first.departure else { return nil }
+        return try await journeyCourse(line: trip.line, station: first.station, plannedDeparture: departure.planned)
+    }
+
+    private func journeyCourse(line: Line?, station: Station, plannedDeparture: Date,
+                               maxAge: TimeInterval = BahnDeClient.journeyStopsMaxAge) async throws -> JourneyCourse? {
         guard let ref = Self.journeyReference(for: line), let line else { return nil }
         let journeyKey = "\(ref.category) \(ref.number)|\(station.id)|\(plannedDeparture.timeIntervalSince1970)"
         guard usesSharedCaches else {
             let id = try await findJourneyId(line: line, station: station, plannedDeparture: plannedDeparture)
-            return try await fetchJourneyStops(journeyId: id)
+            return try await fetchJourneyCourse(journeyId: id)
         }
         // The journey ID of a run never changes, so resolving it (a departure board request) only
         // happens once; the stops themselves are refreshed every few minutes.
@@ -121,12 +151,12 @@ extension BahnDeClient {
             try await self.findJourneyId(line: line, station: station, plannedDeparture: plannedDeparture)
         }
         return try await Self.journeyStopsCache.value(for: id, maxAge: maxAge) {
-            try await self.fetchJourneyStops(journeyId: id)
+            try await self.fetchJourneyCourse(journeyId: id)
         }
     }
 
     private static let journeyIdCache = ExpiringCache<String>()
-    private static let journeyStopsCache = ExpiringCache<[JourneyStop]>()
+    private static let journeyStopsCache = ExpiringCache<JourneyCourse>()
     /// Matches `TimetablesClient.changesMaxAge`: short enough that a realtime refresh still sees
     /// changes soon, long enough that reopening the same view right after doesn't wait again.
     public static let journeyStopsMaxAge: TimeInterval = 4 * 60
@@ -422,8 +452,16 @@ extension BahnDeClient {
 
     private static let trainNameCache = ExpiringCache<String?>()
 
-    private func fetchJourneyStops(journeyId: String) async throws -> [JourneyStop] {
-        try await get(Self.journeyURL(journeyId), as: JourneyDetails.self).halte.compactMap(JourneyStop.init)
+    private func fetchJourneyCourse(journeyId: String) async throws -> JourneyCourse {
+        try await get(Self.journeyURL(journeyId), as: JourneyDetails.self).course
+    }
+
+    /// `leg` marked as a night train when bahn.de's journey details list sleeping or couchette cars.
+    public static func markingNightTrain(_ leg: Leg, from course: JourneyCourse) -> Leg {
+        guard course.hasSleepingCars, leg.line?.isNightTrain == false else { return leg }
+        var leg = leg
+        leg.line?.nightRail = true
+        return leg
     }
 
     static func journeyURL(_ journeyId: String) -> URL {

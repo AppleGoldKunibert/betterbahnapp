@@ -150,7 +150,7 @@ struct LiveTrainMapView: View {
                 }
                 if let position {
                     Annotation(route.line?.name ?? "Zug", coordinate: position.coordinate.clCoordinate, anchor: .center) {
-                        Image(systemName: route.line?.product.symbolName ?? "tram.fill")
+                        Image(systemName: route.line?.symbolName ?? "tram.fill")
                             .font(.system(size: 15, weight: .bold))
                             .foregroundStyle(.white)
                             .frame(width: 32, height: 32)

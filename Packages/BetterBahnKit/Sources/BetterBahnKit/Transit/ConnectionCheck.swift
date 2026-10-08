@@ -202,9 +202,10 @@ public struct JourneyRefresher: Sendable {
         // for legs up to a week ahead that miss a platform, so many saved journeys don't flood bahn.de.
         let runningSoon = Self.isRunningSoon(leg)
         if let bahnDe = provider.bahnDe, runningSoon || Self.needsPlatforms(leg),
-           let stops = try? await bahnDe.journeyStops(for: leg, maxAge: runningSoon ? BahnDeClient.journeyStopsMaxAge : 3600) {
-            if runningSoon, !leg.stopovers.isEmpty { leg.stopovers = BahnDeClient.inserting(stops, into: leg.stopovers) }
-            leg = BahnDeClient.fillingMissingPlatforms(in: leg, from: stops)
+           let course = try? await bahnDe.journeyCourse(for: leg, maxAge: runningSoon ? BahnDeClient.journeyStopsMaxAge : 3600) {
+            if runningSoon, !leg.stopovers.isEmpty { leg.stopovers = BahnDeClient.inserting(course.stops, into: leg.stopovers) }
+            leg = BahnDeClient.fillingMissingPlatforms(in: leg, from: course.stops)
+            leg = BahnDeClient.markingNightTrain(leg, from: course)
         }
         return leg
     }

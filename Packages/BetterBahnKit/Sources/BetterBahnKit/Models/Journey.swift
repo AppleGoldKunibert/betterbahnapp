@@ -52,6 +52,25 @@ public struct Line: Codable, Sendable, Hashable {
     /// The run's own train number where it differs from `number` (a regional "RE3" is line 3 but run
     /// 3307) – what DB's dispatching feed knows the train by.
     public var tripNumber: String?
+    /// Set when the feed classes the train as a night train (Transitous' `NIGHT_RAIL` mode). Not every
+    /// feed does (SNCB's "NJ", Snälltåget's "300"), so `isNightTrain` also goes by name and operator.
+    public var nightRail: Bool?
+
+    /// A night train (Nightjet, EuroNight, European Sleeper, Snälltåget, Alpen-Sylt Nachtexpress, …),
+    /// shown with a bed instead of the product's train symbol (#241).
+    public var isNightTrain: Bool {
+        if nightRail == true { return true }
+        // Only trains: city bus or tram lines can carry letters like "EN" too.
+        guard product.isTrain else { return false }
+        if Self.nightTrainPrefixes.contains(String(name.uppercased().prefix { $0.isLetter })) { return true }
+        guard let op = operatorName?.lowercased() else { return false }
+        return Self.nightTrainOperators.contains { op.contains($0) }
+    }
+
+    /// Train categories that only run at night: Nightjet, EuroNight, DB's Urlaubs-Express.
+    static let nightTrainPrefixes: Set<String> = ["NJ", "EN", "UEX"]
+    /// Operators that (in and around Germany) only run night trains, as case-insensitive substrings.
+    static let nightTrainOperators = ["snälltåget", "snalltaget", "european sleeper", "nachtexpress", "urlaubs-express"]
 
     /// A line the feed didn't name ("?", e.g. an extra train DB added at short notice); a board names
     /// it after the other trains to its destination or bahn.de (`TransitousProvider.namingUnknownLines`).
@@ -168,7 +187,8 @@ public struct Line: Codable, Sendable, Hashable {
     }
 
     public init(name: String, number: String?, product: Product, operatorName: String?, alternateName: String? = nil,
-                tripNumber: String? = nil, coupledTrains: [CoupledTrain]? = nil) {
+                tripNumber: String? = nil, coupledTrains: [CoupledTrain]? = nil, nightRail: Bool? = nil) {
+        self.nightRail = nightRail
         self.coupledTrains = coupledTrains
         self.tripNumber = tripNumber
         self.name = name

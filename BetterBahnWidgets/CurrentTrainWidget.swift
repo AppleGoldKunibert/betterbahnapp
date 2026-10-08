@@ -62,7 +62,7 @@ struct CurrentTrainWidgetView: View {
 
     private func header(_ state: JourneyWidgetState) -> some View {
         HStack(spacing: 6) {
-            TrainBadge(name: state.trainName, product: state.product)
+            TrainBadge(name: state.trainName, product: state.product, nightTrain: state.isNightTrain)
             if family == .systemMedium, let direction = state.direction {
                 Text("→ \(direction)").font(.caption.weight(.semibold)).foregroundStyle(.secondary).lineLimit(1)
             }

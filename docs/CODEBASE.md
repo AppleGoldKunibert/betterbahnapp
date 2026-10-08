@@ -215,7 +215,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   journey widget shows at a moment: phase, next stop and its delay, transfer "RE 5 → ICE 645, Gl. 4 → Gl. 7", final
   delay, countdown target; `changeDates` for the widget's timeline entries), `TrainMapLink` (`betterbahn://map`).
 - `Geometry/` – polyline decode, `RouteGeometryService`, `SegmentHeatmap`.
-- `Support/HTTPClient.swift` – shared HTTP + `TransitError`, `JSONDecoding`. Every request sends `identifyingUserAgent` (app version + `/support` contact, as Transitous/OpenRailwayMap/Träwelling ask); only `BahnDeClient` sends browser agents. `ProductStyle` colors.
+- `Support/HTTPClient.swift` – shared HTTP + `TransitError`, `JSONDecoding`. Every request sends `identifyingUserAgent` (app version + `/support` contact, as Transitous/OpenRailwayMap/Träwelling ask); only `BahnDeClient` sends browser agents. `ProductStyle` colors and symbols: night trains (`Line.isNightTrain`: Transitous' `NIGHT_RAIL` mode as `Line.nightRail`, NJ/EN/UEx, night-only operators like Snälltåget or European Sleeper; bahn.de's "Liegewagen"/"Schlafwagen" train attributes wherever its `fahrt` is loaded anyway, `JourneyCourse.hasSleepingCars`; #241) get a bed via `Line.symbolName`, carried into the widgets and the Live Activity as `isNightTrain`.
 - `Support/LoadingDeadline.swift` – waits up to 4 s for live data before a screen shows a journey or train
   run never loaded live before (journey detail, `TripView`, `LegTripSheet`), so it doesn't show the timetable
   first and jump to the delays. `Support/LiveDataCache.swift` – what was seen live (`AppModel.liveJourneys`,

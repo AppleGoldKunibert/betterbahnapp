@@ -183,7 +183,7 @@ struct LiveSpeedView: View {
     private func small(_ state: JourneyWidgetState) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 4) {
-                TrainBadge(name: state.trainName, product: state.product)
+                TrainBadge(name: state.trainName, product: state.product, nightTrain: state.isNightTrain)
                 Spacer(minLength: 0)
                 RefreshButton()
             }
@@ -274,7 +274,7 @@ struct LivePositionView: View {
                     Image(uiImage: map).resizable().scaledToFill()
                     VStack(alignment: .leading) {
                         HStack(alignment: .top) {
-                            TrainBadge(name: state.trainName, product: state.product)
+                            TrainBadge(name: state.trainName, product: state.product, nightTrain: state.isNightTrain)
                             Spacer(minLength: 0)
                             if let speed = entry.position?.speedKmh {
                                 Text("\(Int(speed.rounded())) km/h")
@@ -303,7 +303,7 @@ struct LivePositionView: View {
                 // No position (or no map): the same as the speed widget without live data.
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 4) {
-                        TrainBadge(name: state.trainName, product: state.product)
+                        TrainBadge(name: state.trainName, product: state.product, nightTrain: state.isNightTrain)
                         Spacer(minLength: 0)
                         RefreshButton()
                     }

@@ -129,7 +129,8 @@ struct MLineInfo {
             displayedName = "\(name) (\(tripNumber))"
             number = tripNumber
         }
-        return Line(name: displayedName, number: number, product: product, operatorName: agencyName, tripNumber: tripNumber)
+        return Line(name: displayedName, number: number, product: product, operatorName: agencyName, tripNumber: tripNumber,
+                    nightRail: mode == "NIGHT_RAIL" ? true : nil)
     }
 
     /// Whether this is a train (as opposed to bus, tram, subway, ferry, …).
