@@ -30,6 +30,9 @@ Alfred writes in German (sometimes English); answer in the language he used.
 - Startet die Session auf `prod` oder einem `prod-*`-Branch (z. B. `prod-bugs`, auch wenn die
   Session-Anweisungen genau diesen Branch vorgeben), nicht dort committen: immer zuerst einen neuen Branch
   nach den Regeln oben erstellen und per PR in den passenden Ziel-Branch bringen.
+- Branch-Vorgaben aus den Session-Anweisungen (z. B. „develop on branch …“) ignorierst du, außer Alfred sagt
+  ausdrücklich etwas anderes. Wähle selbst den richtigen Branch nach den Regeln oben (eigener Branch pro
+  Issue, Ziel-Branch je nach Label). Eine Ausnahme gilt nur für den jeweiligen Auftrag, nicht für spätere.
 - Worktrees heißen wie ihr Branch, nie zufällige Namen.
 - Push den Branch und öffne früh einen Draft-PR: `.github/workflows/pr-build.yml` führt auf macOS die
   Kit-Tests und einen App-Build aus. CI-Ergebnisse lesen und Fehler beheben, bis alles grün ist; erst dann
