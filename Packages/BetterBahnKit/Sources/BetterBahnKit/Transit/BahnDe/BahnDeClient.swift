@@ -547,10 +547,14 @@ public struct BahnDeClient: Sendable {
             return try await viaBrowser(url, as: type)
         }
         do {
-            return try await http.get(url, as: type, headers: Self.headers(), auth: auth)
+            let value = try await http.get(url, as: type, headers: Self.headers(), auth: auth)
+            // The Worker gets through again: the browser's page isn't needed any more.
+            await browser?.workerAnswered()
+            return value
         } catch let error as TransitError {
             await gate.report(error)
             guard error.isBlocked else { throw error }
+            await browser?.workerBlocked()
             return try await viaBrowser(url, as: type)
         }
     }
@@ -588,21 +592,49 @@ public actor BahnDeBrowserFallback {
     /// Loads a `https://www.bahn.de/web/api/…` URL in the browser: the HTTP status and the body.
     public typealias Fetch = @Sendable (URL) async throws -> (status: Int, body: Data)
 
+    /// Something for the browser to do without waiting for it: start loading its page, or let it go.
+    public typealias Hook = @Sendable () async -> Void
+
     private var load: Fetch?
+    private var prepare: Hook?
+    private var release: Hook?
+    /// Whether the browser may hold a page (prepared or used since the Worker last answered).
+    private(set) var isActive = false
     let gate = BahnDeGate()
 
-    public init(_ load: Fetch? = nil) {
+    public init(_ load: Fetch? = nil, prepare: Hook? = nil, release: Hook? = nil) {
         self.load = load
+        self.prepare = prepare
+        self.release = release
     }
 
-    public func use(_ load: @escaping Fetch) {
+    /// `prepare` starts loading the browser's page in the background as soon as the Worker is blocked,
+    /// so the first requests don't wait for it; `release` drops the page once the Worker answers again.
+    public func use(_ load: @escaping Fetch, prepare: Hook? = nil, release: Hook? = nil) {
         self.load = load
+        self.prepare = prepare
+        self.release = release
+    }
+
+    /// The Worker was blocked: get the page ready, once.
+    func workerBlocked() async {
+        guard load != nil, !isActive else { return }
+        isActive = true
+        await prepare?()
+    }
+
+    /// The Worker answered: let the page go if the browser has one.
+    func workerAnswered() async {
+        guard isActive else { return }
+        isActive = false
+        await release?()
     }
 
     /// The body of a successful answer; a 404 etc. as `TransitError.http`, a block as `rateLimited`.
     func fetch(_ url: URL) async throws -> Data {
         guard let load else { throw TransitError.rateLimited }
         try await gate.check()
+        isActive = true
         do {
             let (status, body) = try await load(url)
             switch status {

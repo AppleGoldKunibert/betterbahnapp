@@ -5,8 +5,10 @@ import WebKit
 
 /// Asks bahn.de's web API from a hidden web view on bahn.de, for when bahn.de's bot protection blocks
 /// our shared Worker (`BahnDeBrowserFallback`): a real browser engine on the phone's own connection gets
-/// through, like bahn.de in Safari. The page is loaded once and reused for half an hour; each request is
-/// a `fetch` inside it, so bahn.de sees the cookies its page set.
+/// through, like bahn.de in Safari. The page starts loading as soon as the Worker is blocked (`prepare`)
+/// and is reused for at most half an hour; each request is a `fetch` inside it, so bahn.de sees the
+/// cookies its page set. It is let go once the Worker answers again (`release`) or after 5 minutes
+/// without a request, so it doesn't sit in memory and wake up for nothing.
 @MainActor
 final class BahnDeBrowser {
     static let shared = BahnDeBrowser()
@@ -14,11 +16,31 @@ final class BahnDeBrowser {
     /// Where the hidden page starts: bahn.de's timetable search, the page whose API the app uses.
     private static let startURL = URL(string: "https://www.bahn.de/buchung/fahrplan/suche")!
     private static let pageLifetime: TimeInterval = 30 * 60
+    private static let idleTime: Duration = .seconds(5 * 60)
 
     private var page: Task<WebPage, Error>?
     private var pageLoaded: Date?
+    /// Lets the page go once nothing asked for `idleTime`.
+    private var idleRelease: Task<Void, Never>?
+
+    /// Starts loading the page in the background (bahn.de just blocked the Worker).
+    func prepare() {
+        _ = pageTask()
+        releaseWhenIdle()
+    }
+
+    /// The Worker answers again: no page needed.
+    func release() {
+        guard page != nil else { return }
+        Self.log.info("Releasing the bahn.de web view")
+        page = nil
+        pageLoaded = nil
+        idleRelease?.cancel()
+        idleRelease = nil
+    }
 
     func fetch(_ url: URL) async throws -> (status: Int, body: Data) {
+        releaseWhenIdle()
         let page = try await readyPage()
         let answer = try await page.callJavaScript(Self.fetchScript, arguments: ["url": url.absoluteString])
         guard let parts = answer as? [Any], parts.count == 2, let text = parts[1] as? String,
@@ -34,17 +56,30 @@ final class BahnDeBrowser {
 
     /// The loaded bahn.de page, loading a new one first when there is none or it is old.
     private func readyPage() async throws -> WebPage {
-        if let page, let pageLoaded, Date.now.timeIntervalSince(pageLoaded) < Self.pageLifetime {
-            return try await page.value
-        }
-        let load = Task { try await Self.load() }
-        page = load
-        pageLoaded = .now
+        let load = pageTask()
         do {
             return try await load.value
         } catch {
-            page = nil
+            if page == load { page = nil }
             throw error
+        }
+    }
+
+    /// The page being loaded or loaded, a new load when there is none or it is old.
+    private func pageTask() -> Task<WebPage, Error> {
+        if let page, let pageLoaded, Date.now.timeIntervalSince(pageLoaded) < Self.pageLifetime { return page }
+        let load = Task { try await Self.load() }
+        page = load
+        pageLoaded = .now
+        return load
+    }
+
+    private func releaseWhenIdle() {
+        idleRelease?.cancel()
+        idleRelease = Task { [weak self] in
+            try? await Task.sleep(for: Self.idleTime)
+            guard !Task.isCancelled else { return }
+            self?.release()
         }
     }
 

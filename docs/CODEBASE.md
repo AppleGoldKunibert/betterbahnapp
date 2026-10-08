@@ -147,7 +147,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   cached; a 403/429 pauses all bahn.de requests through the Worker for 10 min (`BahnDeGate`). Then (and on that first
   blocked answer) the app asks bahn.de from the phone instead: `BahnDeBrowserFallback` (set at launch in `AppModel.init`,
   none in widgets/tests) loads the same `/web/api/…` path at www.bahn.de through `BahnDeBrowser` (hidden `WebPage` on
-  bahn.de's timetable search, reused 30 min, requests are `fetch` calls inside it), with a 10-min cooldown of its own.
+  bahn.de's timetable search, requests are `fetch` calls inside it), with a 10-min cooldown of its own. The page starts
+  loading on the Worker's first blocked answer (`prepare`) and is dropped once the Worker answers again (`release`), after
+  5 min without a request, or reloaded after 30 min.
   The privacy policy (`Cloudflare/worker.mjs`) says so: the user's IP and bahn.de's cookies then reach DB.
 - `Transit/Vagonweb/` – vagonweb.cz (used with their permission, #95): scheduled train compositions for the
   whole timetable year, read from the train's HTML page (`VagonwebComposition.scheduled`, fixtures
