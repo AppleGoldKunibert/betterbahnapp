@@ -1,0 +1,8 @@
+# Left out of the graphify graph (see docs/CODEBASE.md, `.claude/`):
+# - docs that change with nearly every commit (their cached extraction would always be stale)
+#   and that Claude reads in full anyway
+docs/CODEBASE.md
+.claude/
+# - files that would cost tokens without adding anything: logo/icon PNGs and HTML test fixtures
+*.xcassets/
+Packages/BetterBahnKit/Tests/BetterBahnKitTests/Fixtures/
