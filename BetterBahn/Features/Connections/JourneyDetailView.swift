@@ -390,7 +390,8 @@ struct TransferRow: View {
     private var color: Color { isPast && minutes < 0 ? .secondary : transferColor(minutes) }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        // Centered, so a taller platform badge doesn't push the transfer text off the middle.
+        HStack(spacing: 10) {
             Image(systemName: walk != nil ? "figure.walk" : "arrow.triangle.2.circlepath")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(color)
@@ -416,6 +417,8 @@ struct TransferRow: View {
                     Image(systemName: "arrow.right").font(.caption2.weight(.bold)).foregroundStyle(.tertiary)
                     endpoint(platform: to.departurePlatform, of: to)
                 }
+                // The badges get their full width first; the transfer text wraps instead.
+                .layoutPriority(1)
             }
         }
         .padding(.horizontal, 20)

@@ -560,13 +560,19 @@ struct PlatformBadge: View {
                     .font(.system(size: 8, weight: .semibold))
                     .textCase(.uppercase)
                     .opacity(0.8)
+                // One line: a range like "2 A - D" widens the badge instead of wrapping,
+                // and only shrinks when the row has no room left.
                 Text(best)
                     .font(prominent ? .headline : .subheadline.weight(.bold))
                     .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
-            .frame(minWidth: prominent ? 46 : 38)
+            // Thin edges inside the usual width: short platforms keep the old size, and a wide one
+            // only grows by what its text needs beyond that.
+            .padding(.horizontal, 2)
+            .frame(minWidth: prominent ? 54 : 46)
             .padding(.vertical, 4)
-            .padding(.horizontal, 4)
             .foregroundStyle(changed ? .white : .primary)
             .background(changed ? AnyShapeStyle(Color.heavyDelay.gradient) : AnyShapeStyle(Color.secondary.opacity(0.13)),
                         in: .rect(cornerRadius: 8, style: .continuous))
