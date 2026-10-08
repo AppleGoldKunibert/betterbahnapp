@@ -2228,6 +2228,18 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(TrainModel.detect(cars, category: "IC")?.name == "IC 2 Twindexx")
     }
 
+    @Test func classicICCoachesAreNotICEL() {
+        // "61 80 20-91 …" coaches of an IC 1 have the same "091" digits as the ICE L's Talgo coaches.
+        let ic = ["618020911234", "618080910123"].map { Carriage(vehicleID: $0, constructionType: "B2091") }
+        #expect(TrainModel.detect(ic, category: "IC") == nil)
+        #expect(BahnDeClient.model(constructionTypes: ["B2091", "A1091"], groupName: "IC450007", category: "IC") == "IC 1")
+        let talgo = ["618020911234", "618080910123"].map { Carriage(vehicleID: $0, constructionType: "R8911") }
+        #expect(TrainModel.detect(talgo, category: "IC")?.name == "ICE L")
+        let unknown = ["618020911234", "618080910123"].map { Carriage(vehicleID: $0, constructionType: nil) }
+        #expect(TrainModel.detect(unknown, category: "ICE")?.name == "ICE L")
+        #expect(TrainModel.detect(unknown, category: "IC") == nil)
+    }
+
     @Test func constructionTypeFallback() {
         #expect(BahnDeClient.model(constructionTypes: ["I4080", "I4081"], groupName: "ICE8033", category: "ICE") == "ICE 3neo")
         #expect(BahnDeClient.model(constructionTypes: ["I0812", "I1412", "I1812"], groupName: "ICE9465", category: "ICE") == "ICE 4")
