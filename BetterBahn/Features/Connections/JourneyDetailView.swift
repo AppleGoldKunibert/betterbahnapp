@@ -832,6 +832,16 @@ struct AlternativeRow: View {
     }
 }
 
+/// Both dispatching decisions, without having to find a train that is actually waited for.
+#Preview("Anschluss wartet / wartet nicht") {
+    VStack(spacing: 16) {
+        TransferRow(from: PreviewData.firstLeg, to: PreviewData.secondLeg, disposition: .waiting)
+        TransferRow(from: PreviewData.firstLeg, to: PreviewData.secondLeg, walk: PreviewData.walk, disposition: .notWaiting)
+    }
+    .padding()
+    .background { AppBackground() }
+}
+
 #Preview("Reiseplan-Teilstrecke") {
     ScrollView {
         VStack(spacing: 16) {
