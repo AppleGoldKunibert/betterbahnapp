@@ -8,12 +8,13 @@ struct CurrentTrainProvider: TimelineProvider {
     }
 
     func getSnapshot(in context: Context, completion: @escaping (JourneyWidgetEntry) -> Void) {
-        let entries = JourneyWidgetProvider.entries(countdown: .nextConnection, now: .now)
+        let entries = JourneyWidgetProvider.entries(countdown: .nextConnection, now: .now, showsTimer: false)
         completion(context.isPreview && entries.first?.state == nil ? placeholder(in: context) : entries[0])
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<JourneyWidgetEntry>) -> Void) {
-        completion(Timeline(entries: JourneyWidgetProvider.entries(countdown: .nextConnection, now: .now), policy: .atEnd))
+        let entries = JourneyWidgetProvider.entries(countdown: .nextConnection, now: .now, showsTimer: false)
+        completion(Timeline(entries: entries, policy: .atEnd))
     }
 }
 

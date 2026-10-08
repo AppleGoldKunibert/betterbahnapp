@@ -141,6 +141,45 @@ import Testing
     }
 }
 
+/// Real-world case: a manual trip from Hamburg Hbf started at the U-Bahn stop "Hauptbahnhof Süd",
+/// because that stop lay closer to Transitous' coordinate than Träwelling's Hbf.
+@Suite struct TraewellingStationMatchTests {
+    static let hbf = TraewellingStation(id: 1, name: "Hamburg Hbf", latitude: 53.5530, longitude: 10.0060)
+    static let uSued = TraewellingStation(id: 2, name: "Hauptbahnhof Süd, Hamburg", latitude: 53.5526, longitude: 10.0077)
+    static let dammtor = TraewellingStation(id: 3, name: "Hamburg Dammtor", latitude: 53.5605, longitude: 9.9896)
+
+    @Test func prefersTheSameNameOverACloserStop() {
+        let ours = station("hh", "Hamburg Hbf", 53.5527, 10.0075, source: .transitous)
+        let ranked = TraewellingClient.ranked([Self.dammtor, Self.uSued, Self.hbf], for: ours)
+        #expect(ranked.map(\.0.id) == [1, 2, 3])
+    }
+
+    @Test func prefersTheSameEvaNumber() {
+        var hbf = Self.hbf
+        hbf.name = "Hamburg Hauptbahnhof (tief)"
+        hbf.ibnr = "8002549"
+        let ranked = TraewellingClient.ranked([Self.uSued, hbf], for: station("8002549", "Hamburg Hbf", 53.5527, 10.0075))
+        #expect(ranked.first?.0.id == 1)
+    }
+
+    @Test func fallsBackToTheNearestStop() {
+        // A same-named station far away doesn't count; without a name match the nearest wins.
+        let elsewhere = TraewellingStation(id: 4, name: "Neustadt", latitude: 49.35, longitude: 8.14)
+        let near = TraewellingStation(id: 5, name: "Neustadt (Holst)", latitude: 54.10, longitude: 10.81)
+        let ranked = TraewellingClient.ranked([elsewhere, near], for: station("x", "Neustadt", 54.101, 10.812, source: .transitous))
+        #expect(ranked.map(\.0.id) == [5, 4])
+    }
+
+    @Test func decodesTheIbnrAsNumberOrString() throws {
+        let number = try JSONDecoding.decoder.decode(TraewellingStation.self, from: Data(#"{"id":1,"name":"Hamburg Hbf","ibnr":8002549}"#.utf8))
+        #expect(number.ibnr == "8002549")
+        let text = try JSONDecoding.decoder.decode(TraewellingStation.self, from: Data(#"{"id":1,"name":"Hamburg Hbf","ibnr":"8002549"}"#.utf8))
+        #expect(text.ibnr == "8002549")
+        let none = try JSONDecoding.decoder.decode(TraewellingStation.self, from: Data(#"{"id":1,"name":"Hamburg Hbf","ibnr":null}"#.utf8))
+        #expect(none.ibnr == nil)
+    }
+}
+
 /// Real-world case: the IC Zürich HB – Stuttgart Hbf is one run in Transitous, but Träwelling splits
 /// it at the border into a Swiss trip ending in Singen (Hohentwiel) and a German one from there, so
 /// Stuttgart was never on the trip found at Zürich and the checkin failed with `.stopNotOnTrip`.

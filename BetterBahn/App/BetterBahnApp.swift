@@ -94,6 +94,7 @@ struct RootView: View {
                 model.stopRefreshing()
                 model.scheduleLiveActivityBackgroundCheck()
                 model.updateWidgets(force: true)
+                Task { await TrainSightings.shared.flush() }
             }
         }
         #if DEBUG
