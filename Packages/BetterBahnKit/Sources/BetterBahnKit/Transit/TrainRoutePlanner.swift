@@ -292,7 +292,7 @@ public struct TrainRoutePlanner: Sendable {
         var windowStart = notBefore.addingTimeInterval(slack)
         // Two windows: a train named for a search in the evening may only run again next morning.
         for _ in 0..<2 {
-            let entries = try await provider.departures(at: station, date: windowStart, duration: windowMinutes)
+            let entries = try await provider.departuresForTrainLookup(at: station, date: windowStart, duration: windowMinutes)
             var matches: [BoardEntry] = []
             for entry in entries.filter({ $0.time.best >= notBefore.addingTimeInterval(slack) && wanted.matches($0.line) })
                 .sorted(by: { $0.time.best < $1.time.best }) {

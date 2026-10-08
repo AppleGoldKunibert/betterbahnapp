@@ -926,12 +926,15 @@ final class AppModel {
         }
     }
 
-    /// The custom emojis of the Mastodon instance connected to the Träwelling account, or of
+    /// The logged-in Träwelling account, nil when logged out or it can't be loaded.
+    func traewellingUser() async -> TraewellingUser? {
+        guard await traewelling.isLoggedIn else { return nil }
+        return try? await traewelling.currentUser()
+    }
+
+    /// The custom emojis of the Mastodon instance connected to the Träwelling account `user`, or of
     /// zug.network without one. Empty if neither can be loaded; emojis are only a nicety.
-    func checkinEmojis() async -> [CustomEmoji] {
-        // Asked each time a check-in opens, so a newly connected Mastodon account counts at once.
-        var user: TraewellingUser?
-        if await traewelling.isLoggedIn { user = try? await traewelling.currentUser() }
+    func checkinEmojis(for user: TraewellingUser?) async -> [CustomEmoji] {
         let instance = CustomEmojiText.instance(fromMastodonURL: user?.mastodonUrl) ?? CustomEmojiText.defaultInstance
         return (try? await customEmojis.emojis(instance: instance)) ?? []
     }

@@ -15,6 +15,11 @@ struct StationBoardView: View {
     @State private var isLoading = false
     @State private var error: Error?
     @State private var lastUpdate: Date?
+    /// `reloadKey` the current `entries` belong to; the board is only cleared when it changes, not when the tab reappears.
+    @State private var loadedKey: String?
+    /// When the board was last on screen (tab left or app in the background); see `resumeAfterAbsence`.
+    @State private var leftAt: Date?
+    @Environment(\.scenePhase) private var scenePhase
     @FocusState private var stationFocused: Bool?
 
     private var filter: BoardFilter {
@@ -102,16 +107,31 @@ struct StationBoardView: View {
             }
             .refreshable { await load() }
             .task(id: reloadKey) {
-                entries = []
-                lastUpdate = nil
-                // Auto-refresh every 60 seconds while visible.
+                if loadedKey != reloadKey {
+                    entries = []
+                    lastUpdate = nil
+                    loadedKey = reloadKey
+                }
+                // Auto-refresh every 60 seconds while visible; coming back to the tab keeps the
+                // rows on screen and just updates them.
                 while !Task.isCancelled {
                     await load()
                     try? await Task.sleep(for: .seconds(60))
                 }
             }
             .scrollDismissesKeyboard(.interactively)
-            .onAppear { onlyValidTicket = model.settings.ticketFilterByDefault }
+            .onAppear {
+                onlyValidTicket = model.settings.ticketFilterByDefault
+                resumeAfterAbsence()
+            }
+            .onDisappear { if path.isEmpty { leftAt = .now } }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .background {
+                    if path.isEmpty { leftAt = .now }
+                } else if phase == .active {
+                    resumeAfterAbsence()
+                }
+            }
             .navigationDestination(for: BoardEntry.self) { TripView(entry: $0) }
         }
         .toolbar(path.isEmpty ? .automatic : .hidden, for: .tabBar)
@@ -229,6 +249,20 @@ struct StationBoardView: View {
                     Label(product.displayName, systemImage: product.symbolName)
                 }
             }
+        }
+    }
+
+    /// After 5 minutes away the board jumps back to "jetzt"; after 7.5 minutes the station is closed.
+    private func resumeAfterAbsence() {
+        guard let leftAt else { return }
+        self.leftAt = nil
+        let away = Date.now.timeIntervalSince(leftAt)
+        guard away >= 5 * 60 else { return }
+        useNow = true
+        date = .now
+        if away >= 7.5 * 60 {
+            station = nil
+            error = nil
         }
     }
 

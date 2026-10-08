@@ -204,9 +204,10 @@ struct LineBadge: View {
 }
 
 /// An operator's logo (#166) on a transparent background, exactly as wide as the logo itself so a
-/// narrow one like DB's doesn't sit in a wide empty box. In dark mode, logos with dark lettering
-/// (`OperatorBrand.needsPlateInDarkMode`) get a soft light plate so they stay readable. Nothing for
-/// an operator without a logo.
+/// narrow one like DB's doesn't sit in a wide empty box. Logos wider than 5:1 (SBB, Länderbahn,
+/// PKP IC, …) are scaled down to that width, keeping their proportions, instead of being squashed.
+/// In dark mode, logos with dark lettering (`OperatorBrand.needsPlateInDarkMode`) get a soft light
+/// plate so they stay readable. Nothing for an operator without a logo.
 struct OperatorLogo: View {
     let name: String
     @ScaledMetric(relativeTo: .caption) private var height: CGFloat = 12
@@ -218,6 +219,7 @@ struct OperatorLogo: View {
             Image(uiImage: logo)
                 .renderingMode(.original)
                 .resizable()
+                .aspectRatio(contentMode: .fit)
                 .frame(width: min(height * logo.size.width / logo.size.height, height * 5), height: height)
                 .padding(.horizontal, plate ? 4 : 0)
                 .padding(.vertical, plate ? 2 : 0)
@@ -358,7 +360,8 @@ struct TrainFormationLabel: View {
                fallback.unitDescription != nil {
                 found = fallback
             }
-            if let found, found.unitDescription != nil {
+            if let found, found.unitDescription != nil || found.isIC1 {
+                // An IC 1 has no Tz: hide (and forget) one remembered by an older version.
                 formation = found
                 blocked = false
                 if let leg { model.rememberFormation(found, for: leg) }
@@ -536,13 +539,19 @@ struct PlatformBadge: View {
                     .font(.system(size: 8, weight: .semibold))
                     .textCase(.uppercase)
                     .opacity(0.8)
+                // One line: a range like "2 A - D" widens the badge instead of wrapping,
+                // and only shrinks when the row has no room left.
                 Text(best)
                     .font(prominent ? .headline : .subheadline.weight(.bold))
                     .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
-            .frame(minWidth: prominent ? 46 : 38)
+            // Thin edges inside the usual width: short platforms keep the old size, and a wide one
+            // only grows by what its text needs beyond that.
+            .padding(.horizontal, 2)
+            .frame(minWidth: prominent ? 54 : 46)
             .padding(.vertical, 4)
-            .padding(.horizontal, 4)
             .foregroundStyle(changed ? .white : .primary)
             .background(changed ? AnyShapeStyle(Color.heavyDelay.gradient) : AnyShapeStyle(Color.secondary.opacity(0.13)),
                         in: .rect(cornerRadius: 8, style: .continuous))

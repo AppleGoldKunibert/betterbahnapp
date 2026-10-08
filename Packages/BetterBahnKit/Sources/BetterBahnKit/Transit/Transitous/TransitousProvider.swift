@@ -1333,6 +1333,14 @@ public struct TransitousProvider: TransitProvider {
     }
 
     public func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int, products: Set<Product>) async throws -> [BoardEntry] {
+        try await board(kind, at: station, date: date, duration: duration, products: products, correctingEnds: true)
+    }
+
+    /// `correctingEnds: false` skips `withCorrectedLongDistanceEnds`, which loads the full trip of every
+    /// long-distance train on the board: fine for an hour's board, but a long window at a hub (8 h at
+    /// Frankfurt Hbf has 150+ of them) can't finish in time. For looking up one train by name (`TrainRoutePlanner`).
+    func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int, products: Set<Product>,
+               correctingEnds: Bool) async throws -> [BoardEntry] {
         let stop = try await resolve(station)
         // MOTIS picks stop times by their live time, so a train leaving early drops out while its
         // planned-only twin from another feed (ICE 146: DB's row live at 9:08, NS's row planned 9:09)
@@ -1357,6 +1365,7 @@ public struct TransitousProvider: TransitProvider {
             .filter { ($0.time.actual ?? $0.time.planned) >= date && $0.time.planned <= end }
         let deduplicated = Self.namingUnknownLines(Self.combiningCoupledTrains(Self.deduplicated(entries)))
             .sorted { $0.time.planned < $1.time.planned }
+        guard correctingEnds else { return deduplicated }
         return await withCorrectedLongDistanceEnds(deduplicated, kind: kind)
     }
 
