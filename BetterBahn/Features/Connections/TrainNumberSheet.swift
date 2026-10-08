@@ -22,6 +22,8 @@ struct TrainNumberSheet: View {
     @State private var finder: TrainCandidateFinder?
     @State private var candidates: [TrainCandidate] = []
     @State private var isSearching = false
+    /// The train search (by number) is still adding runs to the list.
+    @State private var isSearchingMore = false
     @State private var searchedText = ""
     @State private var picked: TrainCandidate?
     @State private var boardingID: String?
@@ -70,7 +72,13 @@ struct TrainNumberSheet: View {
                 }
             }
             .onAppear {
-                if finder == nil { finder = TrainCandidateFinder(provider: model.provider) }
+                if finder == nil {
+                    let finder = TrainCandidateFinder(provider: model.provider)
+                    self.finder = finder
+                    // The boards load while the train is typed, so the list shows right away.
+                    let stations = stations, date = date
+                    Task { await finder.prefetch(stations: stations, date: date) }
+                }
                 focused = .train
             }
             // Searches while typing, a moment after the last key.
@@ -130,11 +138,18 @@ struct TrainNumberSheet: View {
                 Button { pick(candidate) } label: { candidateRow(candidate) }
                     .buttonStyle(.plain)
             }
-            if !isSearching, searchedText == trimmed, candidates.isEmpty {
+            if isSearchingMore, !isSearching {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Suche weitere Züge mit dieser Nummer …").font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 4)
+            }
+            if !isSearching, !isSearchingMore, searchedText == trimmed, candidates.isEmpty {
                 ContentUnavailableView("Kein passender Zug", systemImage: "tram.fill",
                                        description: Text("Auf deiner Strecke fährt um diese Zeit kein Zug „\(trimmed)“. Du kannst Ein- und Ausstieg auch selbst angeben."))
             }
-            if !isSearching, searchedText == trimmed { manualEntry }
+            if !isSearching, !isSearchingMore, searchedText == trimmed { manualEntry }
         }
     }
 
@@ -217,17 +232,28 @@ struct TrainNumberSheet: View {
             candidates = []
             searchedText = ""
             isSearching = false
+            isSearchingMore = false
             return
         }
         try? await Task.sleep(for: .milliseconds(350))
         guard !Task.isCancelled else { return }
         isSearching = true
-        let found = await finder.candidates(for: text, stations: stations, target: search.to, date: date)
+        isSearchingMore = true
+        let stations = stations, target = search.to, date = date
+        // Trains on the route's boards show first; runs found by number join once the slower train search is done.
+        async let byNumber = finder.numberCandidates(for: text, stations: stations, target: target, date: date)
+        let route = await finder.routeCandidates(for: text, stations: stations, target: target, date: date)
         guard !Task.isCancelled else { return }
         withAnimation(.snappy) {
-            candidates = found
+            candidates = route
             searchedText = text
             isSearching = false
+        }
+        let more = await byNumber
+        guard !Task.isCancelled else { return }
+        withAnimation(.snappy) {
+            candidates = TrainCandidateFinder.merged(route, more, target: target, date: date)
+            isSearchingMore = false
         }
     }
 

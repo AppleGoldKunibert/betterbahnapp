@@ -4408,6 +4408,8 @@ final class RoutingMockProvider: TransitProvider, @unchecked Sendable {
     var trips: [String: Trip] = [:]
     /// Journeys keyed by "<from> -> <to>"; the planner filters them by time itself.
     var routes: [String: [Journey]] = [:]
+    /// Stations whose next board request fails (once each).
+    var failingBoards: Set<String> = []
     private(set) var journeyQueries: [String] = []
     private let lock = NSLock()
 
@@ -4420,7 +4422,9 @@ final class RoutingMockProvider: TransitProvider, @unchecked Sendable {
     }
 
     func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int, products: Set<Product>) async throws -> [BoardEntry] {
-        (boards[station.name] ?? []).filter {
+        let fails = lock.withLock { failingBoards.remove(station.name) != nil }
+        if fails { throw TransitError.notFound(station.name) }
+        return (boards[station.name] ?? []).filter {
             $0.time.best >= date && $0.time.best <= date.addingTimeInterval(TimeInterval(duration * 60))
         }
     }
@@ -4774,6 +4778,21 @@ final class RoutingMockProvider: TransitProvider, @unchecked Sendable {
 
         let byRun = await finder.candidates(for: "3300", stations: [koeln], target: berlin, date: base)
         #expect(byRun.map(\.trip.id) == ["re3300"])
+    }
+
+    /// A board that failed to load isn't kept as empty: the next letter typed asks again and finds the train.
+    @Test func retriesBoardThatFailed() async throws {
+        let mock = makeProvider()
+        let ice = trip("ice91", "ICE 91", [stop(koeln, arr: nil, dep: 10), stop(berlin, arr: 250, dep: nil)])
+        mock.trips[ice.id] = ice
+        mock.boards[koeln.name] = [entry(ice, at: koeln, minutes: 10)]
+        mock.failingBoards = [koeln.name]
+        let finder = TrainCandidateFinder(provider: CombinedProvider(primary: mock, fallback: nil, bahnDe: nil, bahnExpert: nil))
+
+        let first = await finder.routeCandidates(for: "9", stations: [koeln], target: berlin, date: base)
+        #expect(first.isEmpty)
+        let second = await finder.routeCandidates(for: "91", stations: [koeln], target: berlin, date: base)
+        #expect(second.map(\.trip.id) == ["ice91"])
     }
 
     /// #225: continuations come fastest first, without routes a later one beats outright.

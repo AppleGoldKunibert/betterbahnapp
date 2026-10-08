@@ -107,15 +107,21 @@ public struct TrainCandidate: Sendable, Hashable, Identifiable {
 /// Finds the trains that fit a typed name or number for a route (#225): first on the departure boards
 /// of the route's stations (where you'd board), then – for a number – with the train search, which
 /// knows every run by number. The ones going to the destination come first.
+///
+/// The boards are slow (a few seconds each), so they are loaded in parallel, can be loaded before the
+/// first letter is typed (`prefetch`), and are shared by every search while the sheet is open. The
+/// train search is slower still, so its runs come separately (`numberCandidates`) and never hold up
+/// the trains already found on the boards (`routeCandidates`).
 public actor TrainCandidateFinder {
     public let provider: CombinedProvider
     let numberSearch: TrainNumberSearch?
     /// How far before the given time the boards start, and how many minutes they cover.
     let minutesBefore: Int
     let windowMinutes: Int
-    /// Boards and runs already loaded, so each typed letter doesn't ask again.
-    private var boards: [String: [BoardEntry]] = [:]
-    private var trips: [String: Trip] = [:]
+    /// Boards and runs loading or loaded, so each typed letter doesn't ask again. A request isn't
+    /// cancelled when the search that started it is (typing on), and a failed one isn't kept.
+    private var boards: [String: Task<[BoardEntry]?, Never>] = [:]
+    private var trips: [String: Task<Trip?, Never>] = [:]
 
     public init(provider: CombinedProvider, minutesBefore: Int = 30, windowMinutes: Int = 360) {
         self.provider = provider
@@ -124,21 +130,42 @@ public actor TrainCandidateFinder {
         self.windowMinutes = windowMinutes
     }
 
-    /// Up to `limit` trains matching `text` that can be boarded at one of `stations` (in order of
-    /// preference) from about `date`, best fit for reaching `target` first.
+    /// Starts loading the boards of `stations`, so the first search finds them ready.
+    public func prefetch(stations: [Station], date: Date) async {
+        await withTaskGroup(of: Void.self) { group in
+            for station in Self.places(stations) {
+                group.addTask { _ = await self.board(at: station, date: date) }
+            }
+        }
+    }
+
+    /// Both kinds of trains together (see `routeCandidates` and `numberCandidates`), best fit first.
     public func candidates(for text: String, stations: [Station], target: Station, date: Date,
                            limit: Int = 8) async -> [TrainCandidate] {
+        async let byNumber = numberCandidates(for: text, stations: stations, target: target, date: date)
+        let route = await routeCandidates(for: text, stations: stations, target: target, date: date, limit: limit)
+        return Self.merged(route, await byNumber, target: target, date: date, limit: limit)
+    }
+
+    /// Up to `limit` trains matching `text` that leave one of `stations` (in order of preference)
+    /// from about `date`, best fit for reaching `target` first.
+    public func routeCandidates(for text: String, stations: [Station], target: Station, date: Date,
+                                limit: Int = 8) async -> [TrainCandidate] {
         let query = TrainNameQuery(text)
         guard !query.isEmpty else { return [] }
-        var places: [Station] = []
-        for station in stations where !places.contains(where: { $0.isSamePlace(as: station) }) { places.append(station) }
-        places = Array(places.prefix(Self.maxStations))
-
-        async let found = numberSearchCandidates(query, stations: places, target: target, date: date)
+        let places = Self.places(stations)
+        let loaded = await withTaskGroup(of: (Int, [BoardEntry]).self) { group in
+            for (rank, station) in places.enumerated() {
+                group.addTask { (rank, await self.board(at: station, date: date)) }
+            }
+            var boards: [(Int, [BoardEntry])] = []
+            for await board in group { boards.append(board) }
+            return boards.sorted { $0.0 < $1.0 }
+        }
         var entries: [(entry: BoardEntry, score: Int, stationRank: Int)] = []
         var seen = Set<String>()
-        for (rank, station) in places.enumerated() {
-            for entry in await board(at: station, date: date) {
+        for (rank, board) in loaded {
+            for entry in board {
                 guard entry.line.product.isTrain, !entry.cancelled, entry.access != .exitOnly,
                       let score = query.score(entry.line), seen.insert(entry.tripId).inserted else { continue }
                 entries.append((entry, score, rank))
@@ -150,18 +177,54 @@ public actor TrainCandidateFinder {
             if a.stationRank != b.stationRank { return a.stationRank < b.stationRank }
             return abs(a.entry.time.planned.timeIntervalSince(date)) < abs(b.entry.time.planned.timeIntervalSince(date))
         }
-        var results: [TrainCandidate] = []
-        for chunk in Array(entries.prefix(Self.maxTripLoads)).chunked(into: 4) {
-            await withTaskGroup(of: TrainCandidate?.self) { group in
-                for item in chunk {
-                    group.addTask { await self.loadCandidate(item.entry, exact: item.score == 2, target: target) }
-                }
-                for await candidate in group { if let candidate { results.append(candidate) } }
+        let picked = Array(entries.prefix(Self.maxTripLoads))
+        let results = await withTaskGroup(of: TrainCandidate?.self) { group in
+            var iterator = picked.makeIterator()
+            var running = 0
+            var results: [TrainCandidate] = []
+            func addNext() -> Bool {
+                guard let item = iterator.next() else { return false }
+                group.addTask { await self.loadCandidate(item.entry, exact: item.score == 2, target: target) }
+                return true
             }
+            // At most 4 parallel requests, like the other planners; the next starts as soon as one is done.
+            while running < 4, addNext() { running += 1 }
+            while let candidate = await group.next() {
+                if let candidate { results.append(candidate) }
+                _ = addNext()
+            }
+            return results
         }
-        let fromBoards = Set(results.map(\.trip.id))
-        results += await found.filter { !fromBoards.contains($0.trip.id) }
         return Array(Self.ranked(results, target: target, date: date).prefix(limit))
+    }
+
+    /// Runs found by number (the train search), for trains the route's boards don't have – e.g. one
+    /// boarded at a station the route only passes later. Boarded at the first route station it calls at.
+    /// Slow (a station search and a board per run), so asked alongside `routeCandidates`, not before.
+    public func numberCandidates(for text: String, stations: [Station], target: Station,
+                                 date: Date) async -> [TrainCandidate] {
+        guard let numberSearch, let numberQuery = TrainNameQuery(text).numberQuery,
+              let found = try? await numberSearch.trains(numberQuery, on: date) else { return [] }
+        let places = Self.places(stations)
+        return await withTaskGroup(of: TrainCandidate?.self) { group in
+            for result in found.prefix(Self.maxNumberRuns) {
+                group.addTask {
+                    guard let (_, trip) = try? await numberSearch.run(of: result) else { return nil }
+                    let station = places.first { station in trip.stopovers.contains { $0.station.isSamePlace(as: station) } }
+                    return Self.candidate(trip, boardingAt: station, near: date, target: target, exact: true)
+                }
+            }
+            var results: [TrainCandidate] = []
+            for await candidate in group { if let candidate { results.append(candidate) } }
+            return results
+        }
+    }
+
+    /// The trains from the boards with those found by number added (each run once), best fit first.
+    public static func merged(_ route: [TrainCandidate], _ byNumber: [TrainCandidate], target: Station, date: Date,
+                              limit: Int = 8) -> [TrainCandidate] {
+        let known = Set(route.map(\.trip.id))
+        return Array(ranked(route + byNumber.filter { !known.contains($0.trip.id) }, target: target, date: date).prefix(limit))
     }
 
     /// Best first: full matches, boardable on the route, going to the target (earliest arrival), else
@@ -199,6 +262,13 @@ public actor TrainCandidateFinder {
         return TrainCandidate(trip: trip, boardingIndex: boarding, exitIndex: exit, isExact: exact)
     }
 
+    /// The first `maxStations` of `stations`, each place once.
+    static func places(_ stations: [Station]) -> [Station] {
+        var places: [Station] = []
+        for station in stations where !places.contains(where: { $0.isSamePlace(as: station) }) { places.append(station) }
+        return Array(places.prefix(maxStations))
+    }
+
     // MARK: - Loading
 
     private func loadCandidate(_ entry: BoardEntry, exact: Bool, target: Station) async -> TrainCandidate? {
@@ -206,47 +276,46 @@ public actor TrainCandidateFinder {
         return Self.candidate(trip, boardingAt: entry.station, near: entry.time.planned, target: target, exact: exact)
     }
 
-    /// Runs found by number (the train search), for trains the route's boards don't have – e.g. one
-    /// boarded at a station the route only passes later. Boarded at the first route station it calls at.
-    private func numberSearchCandidates(_ query: TrainNameQuery, stations: [Station], target: Station,
-                                        date: Date) async -> [TrainCandidate] {
-        guard let numberSearch, let numberQuery = query.numberQuery,
-              let found = try? await numberSearch.trains(numberQuery, on: date) else { return [] }
-        var results: [TrainCandidate] = []
-        for result in found.prefix(Self.maxNumberRuns) {
-            guard let (_, trip) = try? await numberSearch.run(of: result) else { continue }
-            let station = stations.first { station in trip.stopovers.contains { $0.station.isSamePlace(as: station) } }
-            results.append(Self.candidate(trip, boardingAt: station, near: date, target: target, exact: true))
-        }
-        return results
-    }
-
+    /// The station's trains (only trains: a smaller board) for the window around `date`.
     private func board(at station: Station, date: Date) async -> [BoardEntry] {
         let start = date.addingTimeInterval(TimeInterval(-minutesBefore * 60))
         let key = station.id + "|\(Int(start.timeIntervalSince1970 / 300))"
-        if let cached = boards[key] { return cached }
-        let entries = (try? await provider.departures(at: station, date: start, duration: windowMinutes)) ?? []
-        boards[key] = entries
+        let task: Task<[BoardEntry]?, Never>
+        if let loading = boards[key] {
+            task = loading
+        } else {
+            let provider = provider, duration = windowMinutes
+            task = Task { try? await provider.departures(at: station, date: start, duration: duration, products: Self.trainProducts) }
+            boards[key] = task
+        }
+        guard let entries = await task.value else {
+            boards[key] = nil
+            return []
+        }
         return entries
     }
 
     private func trip(id: String, source: DataSource) async -> Trip? {
-        if let cached = trips[id] { return cached }
-        guard let trip = try? await provider.trip(id: id, source: source) else { return nil }
-        trips[id] = trip
+        let task: Task<Trip?, Never>
+        if let loading = trips[id] {
+            task = loading
+        } else {
+            let provider = provider
+            task = Task { try? await provider.trip(id: id, source: source) }
+            trips[id] = task
+        }
+        guard let trip = await task.value else {
+            trips[id] = nil
+            return nil
+        }
         return trip
     }
 
+    static let trainProducts = Set(Product.allCases.filter(\.isTrain))
     /// How many of the route's stations have their board asked.
     static let maxStations = 4
     /// How many matching departures get their run loaded to see where they go.
-    static let maxTripLoads = 12
+    static let maxTripLoads = 10
     /// How many runs found by number are looked up (each costs a station search and a board).
     static let maxNumberRuns = 3
-}
-
-extension Array {
-    func chunked(into size: Int) -> [[Element]] {
-        stride(from: 0, to: count, by: size).map { Array(self[$0..<Swift.min($0 + size, count)]) }
-    }
 }
