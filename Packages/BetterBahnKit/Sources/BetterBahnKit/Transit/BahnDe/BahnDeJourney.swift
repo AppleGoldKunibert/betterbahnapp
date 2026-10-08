@@ -85,7 +85,13 @@ extension BahnDeClient {
             var priorisierteMeldungen: [Message]?
             var risMeldungen: [RISMessage]?
         }
+        /// A train attribute such as `{"key": "RP", "value": "Reservierungspflicht"}`.
+        struct Attribute: Decodable { var key: String?; var value: String? }
         var halte: [Stop]
+        var zugattribute: [Attribute]?
+
+        /// DB marks trains where a seat reservation is mandatory (e.g. Snälltåget, Nightjet) with the attribute `RP`.
+        var requiresReservation: Bool { zugattribute?.contains { $0.key == "RP" } ?? false }
     }
 
     // MARK: Journey stops
@@ -109,21 +115,43 @@ extension BahnDeClient {
 
     private func journeyStops(line: Line?, station: Station, plannedDeparture: Date,
                               maxAge: TimeInterval = BahnDeClient.journeyStopsMaxAge) async throws -> [JourneyStop]? {
-        guard let ref = Self.journeyReference(for: line), let line else { return nil }
-        let journeyKey = "\(ref.category) \(ref.number)|\(station.id)|\(plannedDeparture.timeIntervalSince1970)"
-        guard usesSharedCaches else {
-            let id = try await findJourneyId(line: line, station: station, plannedDeparture: plannedDeparture)
-            return try await fetchJourneyStops(journeyId: id)
-        }
-        // The journey ID of a run never changes, so resolving it (a departure board request) only
-        // happens once; the stops themselves are refreshed every few minutes.
-        let id = try await Self.journeyIdCache.value(for: journeyKey, maxAge: 12 * 3600) {
-            try await self.findJourneyId(line: line, station: station, plannedDeparture: plannedDeparture)
-        }
+        guard Self.journeyReference(for: line) != nil, let line else { return nil }
+        let id = try await cachedJourneyId(line: line, station: station, plannedDeparture: plannedDeparture)
+        guard usesSharedCaches else { return try await fetchJourneyStops(journeyId: id) }
         return try await Self.journeyStopsCache.value(for: id, maxAge: maxAge) {
             try await self.fetchJourneyStops(journeyId: id)
         }
     }
+
+    /// The journey ID of a run never changes, so resolving it (a departure board request) only
+    /// happens once; the stops themselves are refreshed every few minutes.
+    private func cachedJourneyId(line: Line, station: Station, plannedDeparture: Date) async throws -> String {
+        guard usesSharedCaches, let ref = Self.lookupReference(for: line) else {
+            return try await findJourneyId(line: line, station: station, plannedDeparture: plannedDeparture)
+        }
+        let journeyKey = "\(ref.category) \(ref.number)|\(station.id)|\(plannedDeparture.timeIntervalSince1970)"
+        return try await Self.journeyIdCache.value(for: journeyKey, maxAge: 12 * 3600) {
+            try await self.findJourneyId(line: line, station: station, plannedDeparture: plannedDeparture)
+        }
+    }
+
+    // MARK: Reservation requirement
+
+    /// Whether bahn.de lists `leg`'s train as reservation-only ("Reservierungspflicht" among the journey
+    /// details' train attributes, e.g. Snälltåget D 301 Malmö–Berlin). `nil` if the train isn't one bahn.de
+    /// can be asked about (`lookupReference`); throws `TransitError.notFound` if bahn.de doesn't list it.
+    public func requiresReservation(for leg: Leg) async throws -> Bool? {
+        guard let line = leg.line, !leg.isWalking, Self.lookupReference(for: line) != nil else { return nil }
+        let id = try await cachedJourneyId(line: line, station: leg.origin, plannedDeparture: leg.departure.planned)
+        let fetch: @Sendable () async throws -> Bool = {
+            try await self.get(Self.journeyURL(id), as: JourneyDetails.self).requiresReservation
+        }
+        // The obligation doesn't change from one refresh to the next.
+        guard usesSharedCaches else { return try await fetch() }
+        return try await Self.reservationCache.value(for: id, maxAge: 12 * 3600, fetch: fetch)
+    }
+
+    private static let reservationCache = ExpiringCache<Bool>()
 
     private static let journeyIdCache = ExpiringCache<String>()
     private static let journeyStopsCache = ExpiringCache<[JourneyStop]>()
@@ -140,10 +168,19 @@ extension BahnDeClient {
         return (ref.category, ref.number, true)
     }
 
+    /// `journeyReference`, plus long-distance trains of other railways (SJ's "D 301", Nightjet, TGV …) by their
+    /// number, which bahn.de lists on its board too but whose Zusatzhalte and platforms we never ask for.
+    static func lookupReference(for line: Line?) -> (category: String, number: String, isRegional: Bool)? {
+        if let ref = journeyReference(for: line) { return ref }
+        guard let line, [.highSpeed, .longDistance].contains(line.product), let number = line.number,
+              let category = line.name.split(separator: " ").first.map({ String($0).uppercased() }) else { return nil }
+        return (category, number, false)
+    }
+
     /// bahn.de's journey ID for `line`, found on the departure board of `station` at its scheduled time.
     func findJourneyId(line: Line, station: Station, plannedDeparture: Date) async throws -> String {
         guard let eva = try await evaNumber(for: station) else { throw TransitError.notFound(line.name) }
-        let regional = Self.journeyReference(for: line)?.isRegional == true
+        let regional = Self.lookupReference(for: line)?.isRegional == true
         let board = try await get(Self.boardURL(eva: eva, at: plannedDeparture, products: regional ? Self.regionalProducts : Self.longDistanceProducts),
                                   as: Board.self)
         guard let id = Self.journeyId(in: board, for: line, plannedDeparture: plannedDeparture) else {
@@ -179,7 +216,7 @@ extension BahnDeClient {
     /// directions.
     static func journeyId(in board: Board, for line: Line, plannedDeparture: Date) -> String? {
         let targets = Set([line.name, line.alternateName].compactMap { $0 }.map(normalizedTrainName))
-        let number = journeyReference(for: line)?.number
+        let number = lookupReference(for: line)?.number
         return board.entries
             .filter { entry in
                 if let number, let run = journeyNumber(in: entry.journeyId) { return run == number }

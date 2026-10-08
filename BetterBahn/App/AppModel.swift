@@ -457,6 +457,33 @@ final class AppModel {
         savedJourneys = updated
     }
 
+    /// The trains of `journey` that bahn.de lists as reservation-only (a seat reservation is mandatory).
+    /// Answers within `limit`: a train bahn.de doesn't know, or doesn't answer for in time, counts as free,
+    /// so saving never waits long. The answers stay cached, so a second try is instant.
+    func reservationRequiredLegs(in journey: Journey, within limit: Duration = .seconds(3)) async -> [Leg] {
+        guard let bahnDe = provider.bahnDe else { return [] }
+        let legs = journey.transitLegs
+        return await withTaskGroup(of: [Leg]?.self) { group in
+            group.addTask {
+                await withTaskGroup(of: Leg?.self) { lookups in
+                    for leg in legs {
+                        lookups.addTask { (try? await bahnDe.requiresReservation(for: leg)) == true ? leg : nil }
+                    }
+                    var required: [Leg] = []
+                    for await leg in lookups { if let leg { required.append(leg) } }
+                    return legs.filter { leg in required.contains { $0.id == leg.id } }
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(for: limit)
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first ?? []
+        }
+    }
+
     func unsave(_ journey: Journey) {
         let removed = Set(savedJourneys.filter { $0.journey.id == journey.id }.map(\.id))
         savedJourneys.removeAll { $0.journey.id == journey.id }

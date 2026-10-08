@@ -2643,6 +2643,40 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         #expect(abs(coordinate.latitude - 50.099365) < 0.000001 && abs(coordinate.longitude - 8.686303) < 0.000001)
     }
 
+    /// Real Snälltåget D 301 Malmö Central – Berlin Gesundbrunnen (2026-10-08): bahn.de marks the train with
+    /// the attribute RP ("Reservierungspflicht"); the other attributes don't make it reservation-only.
+    @Test func readsTheReservationObligationFromTrainAttributes() throws {
+        let json = #"""
+        {"zugName": "D 301", "halte": [{"extId": "7400004", "name": "Malmö Central", "abfahrt": {"sollzeit": "2026-10-08T21:55:00"}}],
+         "zugattribute": [{"kategorie": "BORDBISTRO", "key": "BR", "value": "Bordrestaurant"},
+                          {"kategorie": "INFORMATION", "key": "RP", "value": "Reservierungspflicht"},
+                          {"kategorie": "INFORMATION", "key": "GP", "value": "Globalpreis"}]}
+        """#
+        let details = try JSONDecoding.decoder.decode(BahnDeClient.JourneyDetails.self, from: Data(json.utf8))
+        #expect(details.requiresReservation)
+        #expect(!(try JSONDecoding.decoder.decode(BahnDeClient.JourneyDetails.self,
+                                                  from: Data(#"{"halte": [], "zugattribute": [{"key": "BR", "value": "Bordrestaurant"}]}"#.utf8))).requiresReservation)
+        // Details without any attributes (the older format) simply have no obligation.
+        #expect(!(try Self.decodedDetails()).requiresReservation)
+    }
+
+    static func decodedDetails() throws -> BahnDeClient.JourneyDetails {
+        try JSONDecoding.decoder.decode(BahnDeClient.JourneyDetails.self, from: Data(details.utf8))
+    }
+
+    /// The reservation check also asks about trains of other railways (D 301), which `journeyStops` leaves alone.
+    @Test func looksUpForeignLongDistanceTrainsForTheReservationCheck() {
+        let night = Line(name: "D 301", number: "301", product: .longDistance, operatorName: "Snälltåget")
+        #expect(BahnDeClient.journeyReference(for: night) == nil)
+        #expect(BahnDeClient.lookupReference(for: night)?.number == "301")
+        #expect(BahnDeClient.lookupReference(for: night)?.isRegional == false)
+        #expect(BahnDeClient.lookupReference(for: Line(name: "ICE 693", number: "693", product: .highSpeed, operatorName: nil))?.category == "ICE")
+        // Regional and local trains without a run number, and buses, stay out.
+        #expect(BahnDeClient.lookupReference(for: Line(name: "RE3", number: "3", product: .regionalExpress, operatorName: nil)) == nil)
+        #expect(BahnDeClient.lookupReference(for: Line(name: "S1", number: "1", product: .suburban, operatorName: nil)) == nil)
+        #expect(BahnDeClient.lookupReference(for: nil) == nil)
+    }
+
     @Test func findsTheZusatzhaltHop() throws {
         let stops = try Self.stops()
         let zusatzhalt = station("8002041", "Frankfurt (Main) Süd")

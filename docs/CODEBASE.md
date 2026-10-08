@@ -82,7 +82,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `TicketButton` (next to "Gespeichert" in `JourneyDetailView`, only once the journey has tickets), `AddTicketButton` ("Via Ticket hinzufügen" icon next to "Verbindungen suchen", opens `TicketLookupView`), `TicketsListView` (Settings → Gespeicherte Tickets, list + delete; also "Zeitkarten": passes like the Deutschland-Ticket added from a screenshot via `PhotosPicker`, shown in `TravelPassView` with `AddToWalletButton`),
   `SeatReservationViews` (`ReservationRow` in `LegCard` above "Mehr", read-only). Reservations come from the journey's
   tickets (`AppModel.reservations(for:)`) and only show on the leg whose train matches.
-- `Features/Trips/TripsView.swift` – upcoming/past saved journeys, `SaveJourneyButton`.
+- `Features/Trips/TripsView.swift` – upcoming/past saved journeys, `SaveJourneyButton` (before saving it asks bahn.de via
+  `AppModel.reservationRequiredLegs` and warns "Zug ist reservierungspflichtig" with Abbrechen / Verstanden, weiter; journeys added by
+  a ticket/reservation import are saved without the button and never warn).
 - `Features/Traewelling/` – `CheckinSheet`, `TraewellingLoginButton`, `CustomEmojiViews` (`EmojiMessageField`: text field
   with emoji suggestions + preview, `EmojiText`), `CheckinDetailSheet` ("Check-in ansehen" in a leg's "Mehr" once the leg was
   checked in from the app, `AppModel.checkinStatusIDs`; shows and edits text, visibility, trip type and tags, deletes the
@@ -128,7 +130,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   own train names for boards (departures and arrivals) and journey legs (`correctingTrainNames`, e.g. "RJ 171" that Transitous calls "ICE 171"),
   and DB's live times (`ezZeit`) for every train on boards (not subway, tram, bus; RE/RB, S-Bahn and other brands by run number or name) (`correctingFromBoard`, `applyingLiveTimes`), which
   beat DELFI's forecasts in Transitous. Responses are
-  cached; a 403/429 pauses all bahn.de requests for 10 min (`BahnDeGate`).
+  cached; a 403/429 pauses all bahn.de requests for 10 min (`BahnDeGate`). The journey details' train attribute `RP`
+  ("Reservierungspflicht") says a reservation is mandatory (`requiresReservation(for:)`, also for other railways' trains like
+  SJ's D 301 via `lookupReference`; cached 12 h).
 - `Transit/Vagonweb/` – vagonweb.cz (used with their permission, #95): scheduled train compositions for the
   whole timetable year, read from the train's HTML page (`VagonwebComposition.scheduled`, fixtures
   `vagonweb-ice*.html`). Used when bahn.de has no coach sequence: the train type (`AppModel.trainType`) and the
