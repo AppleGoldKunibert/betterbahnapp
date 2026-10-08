@@ -107,7 +107,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `TicketButton` (next to "Gespeichert" in `JourneyDetailView`, only once the journey has tickets), `AddTicketButton` ("Via Ticket hinzufügen" icon next to "Verbindungen suchen", opens `TicketLookupView`), `TicketsListView` (Settings → Gespeicherte Tickets, list + delete; also "Zeitkarten": passes like the Deutschland-Ticket added from a screenshot via `PhotosPicker`, shown in `TravelPassView` with `AddToWalletButton`),
   `SeatReservationViews` (`ReservationRow` in `LegCard` above "Mehr", read-only). Reservations come from the journey's
   tickets (`AppModel.reservations(for:)`) and only show on the leg whose train matches.
-- `Features/Trips/TripsView.swift` – upcoming/past saved journeys, `SaveJourneyButton`.
+- `Features/Trips/TripsView.swift` – upcoming/past saved journeys, `SaveJourneyButton` (before saving it asks bahn.de via
+  `AppModel.reservationRequiredLegs` and warns "Zug ist reservierungspflichtig" with Abbrechen / Verstanden, weiter; journeys added by
+  a ticket/reservation import are saved without the button and never warn).
 - `Features/Traewelling/` – `CheckinSheet` (`MenuPickerRow`: the Sichtbarkeit/Reiseart menus of both check-in sheets, constant width so the closing menu doesn't jump; the keyboard goes away as soon as the check-in/save is tapped and only comes back when Träwelling rejects the input, `TraewellingError.isInvalidInput`; when Träwelling already has the user on another train at that time (`.collision`, e.g. the previous train arrived early) it offers "Trotzdem einchecken", `CheckinDraft.force`, no points), `TraewellingLoginButton`, `CustomEmojiViews` (`EmojiMessageField`: text field
   with emoji suggestions + preview, `EmojiText`), `CheckinDetailSheet` ("Check-in ansehen" in a leg's "Mehr" once the leg was
   checked in from the app, `AppModel.checkinStatusIDs`; shows and edits text, visibility, trip type and tags, deletes the
@@ -168,6 +170,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   loading on the Worker's first blocked answer (`prepare`) and is dropped once the Worker answers again (`release`), after
   5 min without a request, or reloaded after 30 min.
   The privacy policy (`Cloudflare/worker.mjs`) says so: the user's IP and bahn.de's cookies then reach DB.
+  The journey details' train attribute `RP` ("Reservierungspflicht") says a reservation is mandatory (`requiresReservation(for:)`, also for other
+  railways' trains like SJ's D 301 or a Nightjet via `lookupReference`; shares the `journeyCourse` cache).
 - `Transit/Vagonweb/` – vagonweb.cz (used with their permission, #95): scheduled train compositions for the
   whole timetable year, read from the train's HTML page (`VagonwebComposition.scheduled`, fixtures
   `vagonweb-ice*.html`). Used when bahn.de has no coach sequence: the train type (`AppModel.trainType`) and the
