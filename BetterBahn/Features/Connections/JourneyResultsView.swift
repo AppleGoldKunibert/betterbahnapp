@@ -743,6 +743,8 @@ struct TrainNumberSheet: View {
             .onAppear { focused = .train }
         }
         .presentationDetents([.medium, .large])
+        // Same background as the content, so the sheet doesn't first show the system's default gray.
+        .presentationBackground { AppBackground() }
     }
 
     private func add() {
