@@ -8,6 +8,7 @@ struct UpcomingTripsSection: View {
     var body: some View {
         let upcoming = model.upcomingJourneys
         VStack(alignment: .leading, spacing: 10) {
+            FollowedCheckinsSection()
             SectionHeader(title: "Deine Reisen", systemImage: "bookmark.fill",
                           trailing: upcoming.isEmpty ? nil : "\(upcoming.count)")
             if upcoming.isEmpty {

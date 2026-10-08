@@ -204,19 +204,29 @@ public struct TimeInfo: Codable, Sendable, Hashable {
 public struct PlatformInfo: Codable, Sendable, Hashable {
     public var planned: String?
     public var actual: String?
+    /// Where the platform came from, when not from the train's own data (which may be live).
+    public var source: Source?
+
+    public enum Source: String, Codable, Sendable, Hashable {
+        /// The Czech national timetable (CZPTT, from Správa železnic), taken over for a train another
+        /// feed has no platforms for in Czechia: planned only, a change at short notice won't show.
+        case czechTimetable
+    }
 
     /// Blank values count as none: bahn.de reports `"gleis": ""` at stations it has no platform for
     /// (e.g. in Czechia), which showed as a "Gleis" badge without a number.
-    public init(planned: String?, actual: String?) {
+    public init(planned: String?, actual: String?, source: Source? = nil) {
         self.planned = Self.nonBlank(planned)
         self.actual = Self.nonBlank(actual)
+        self.source = source
     }
 
     /// Also drops the blank platforms journeys saved before kept.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.init(planned: try c.decodeIfPresent(String.self, forKey: .planned),
-                  actual: try c.decodeIfPresent(String.self, forKey: .actual))
+                  actual: try c.decodeIfPresent(String.self, forKey: .actual),
+                  source: try? c.decodeIfPresent(Source.self, forKey: .source))
     }
 
     private static func nonBlank(_ value: String?) -> String? {
@@ -247,10 +257,14 @@ public struct Stopover: Codable, Sendable, Hashable, Identifiable {
     /// An unscheduled stop the train additionally picked up today ("Zusatzhalt"), not part of its
     /// regular timetable — only `BahnDeClient.journeyStops` knows about these, see `inserting(_:into:)`.
     public var isAdditional: Bool
+    /// A stop the user added by hand because the train halted somewhere no source knows of (see
+    /// `Stopover.manual(at:time:)`). Kept apart from `isAdditional`, which bahn.de's lookup replaces
+    /// on every refresh.
+    public var isManual: Bool
 
     public init(station: Station, arrival: TimeInfo?, departure: TimeInfo?,
                 arrivalPlatform: PlatformInfo?, departurePlatform: PlatformInfo?, cancelled: Bool,
-                access: StopAccess = .normal, isAdditional: Bool = false) {
+                access: StopAccess = .normal, isAdditional: Bool = false, isManual: Bool = false) {
         self.station = station
         self.arrival = arrival
         self.departure = departure
@@ -260,6 +274,7 @@ public struct Stopover: Codable, Sendable, Hashable, Identifiable {
         self.departureCancelled = cancelled
         self.access = access
         self.isAdditional = isAdditional
+        self.isManual = isManual
     }
 
     /// The whole stop is out: every side it actually has (arrival and/or departure) is cancelled.
@@ -277,11 +292,11 @@ public struct Stopover: Codable, Sendable, Hashable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case station, arrival, departure, arrivalPlatform, departurePlatform, cancelled, arrivalCancelled,
-             departureCancelled, access, isAdditional
+             departureCancelled, access, isAdditional, isManual
     }
 
-    /// Custom-decoded so journeys cached to disk before `access`/`isAdditional`/the per-side
-    /// cancellation existed still load, defaulting to `.normal`/`false`/the old single `cancelled`.
+    /// Custom-decoded so journeys cached to disk before `access`/`isAdditional`/`isManual`/the per-side
+    /// cancellation existed still load, defaulting to `.normal`/`false`/`false`/the old single `cancelled`.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         station = try c.decode(Station.self, forKey: .station)
@@ -294,6 +309,7 @@ public struct Stopover: Codable, Sendable, Hashable, Identifiable {
         departureCancelled = try c.decodeIfPresent(Bool.self, forKey: .departureCancelled) ?? cancelled
         access = try c.decodeIfPresent(StopAccess.self, forKey: .access) ?? .normal
         isAdditional = try c.decodeIfPresent(Bool.self, forKey: .isAdditional) ?? false
+        isManual = try c.decodeIfPresent(Bool.self, forKey: .isManual) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -309,6 +325,7 @@ public struct Stopover: Codable, Sendable, Hashable, Identifiable {
         try c.encode(departureCancelled, forKey: .departureCancelled)
         try c.encode(access, forKey: .access)
         try c.encode(isAdditional, forKey: .isAdditional)
+        try c.encode(isManual, forKey: .isManual)
     }
 }
 
@@ -318,6 +335,48 @@ extension Array where Element == Journey {
     public func removingDuplicateIDs() -> [Journey] {
         var seen = Set<String>()
         return filter { seen.insert($0.id).inserted }
+    }
+
+    /// Drops journeys taking the very same trains at the same times as another one, only from another
+    /// feed: Transitous routes RJ 385 Berlin → Praha over DB's copy ("ICE 385", named "RJ 385" by bahn.de)
+    /// and over Rejseplanen's, and once their stops are filled in from each other they read alike. The
+    /// copy with more live data, then more stops and platforms, stays, in the place of the first.
+    public func removingSameTrainDuplicates() -> [Journey] {
+        var result: [Journey] = []
+        for journey in self {
+            if let index = result.firstIndex(where: { $0.isSameRide(as: journey) }) {
+                if journey.completeness > result[index].completeness { result[index] = journey }
+            } else {
+                result.append(journey)
+            }
+        }
+        return result
+    }
+}
+
+extension Journey {
+    /// The same trains (by number) between the same places at the same planned times, walks aside.
+    func isSameRide(as other: Journey) -> Bool {
+        let legs = transitLegs, otherLegs = other.transitLegs
+        guard !legs.isEmpty, legs.count == otherLegs.count else { return false }
+        return zip(legs, otherLegs).allSatisfy { a, b in
+            guard let number = a.line?.number, number == b.line?.number, a.line?.product.isTrain == b.line?.product.isTrain
+            else { return false }
+            return a.departure.planned == b.departure.planned && a.arrival.planned == b.arrival.planned
+                && a.origin.isSamePlace(as: b.origin) && a.destination.isSamePlace(as: b.destination)
+        }
+    }
+
+    /// How much a journey knows: live times first, then stops, then platforms.
+    var completeness: (Int, Int, Int) {
+        let legs = transitLegs
+        let live = legs.filter { $0.departure.actual != nil || $0.arrival.actual != nil }.count
+        let stops = legs.reduce(0) { $0 + $1.stopovers.count }
+        let platforms = legs.reduce(0) { count, leg in
+            count + (leg.departurePlatform?.best != nil ? 1 : 0) + (leg.arrivalPlatform?.best != nil ? 1 : 0)
+                + leg.stopovers.filter { ($0.departurePlatform ?? $0.arrivalPlatform)?.best != nil }.count
+        }
+        return (live, stops, platforms)
     }
 }
 

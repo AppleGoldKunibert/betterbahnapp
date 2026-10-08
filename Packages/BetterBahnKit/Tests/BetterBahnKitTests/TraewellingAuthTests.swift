@@ -42,7 +42,7 @@ import Testing
             "client_id": "public-client",
             "redirect_uri": redirectURI,
             "response_type": "code",
-            "scope": "read-statuses write-statuses read-search",
+            "scope": "read-statuses write-statuses read-search write-likes",
             "state": pkce.state,
             "code_challenge": pkce.challenge,
             "code_challenge_method": "S256",

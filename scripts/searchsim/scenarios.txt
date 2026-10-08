@@ -20,7 +20,7 @@ Berlin | suedkreuz | Südkreuz | 1
 Berlin | zoo | Zoologischer Garten | 2
 Berlin | friedrichstr | Friedrichstr | 1
 Berlin | warschau | Warszawa | 3
-Berlin | prag | Praha | 3
+Berlin | prag | =Prag | 1
 Berlin | wien | Wien Hbf | 2
 Berlin | kopenhagen | København | 3
 Berlin | erkner | Erkner | 1
@@ -64,7 +64,7 @@ München | augsburg | Augsburg Hbf | 1
 München | bozen | Bolzano | 3
 München | verona | Verona | 3
 München | zürich | Zürich HB | 2
-München | prag | Praha | 3
+München | prag | =Prag | 1
 München | nürnberg | Nürnberg Hbf | 1
 München | mü | München Hbf | 2
 München | bern | =Bern | 1
@@ -120,7 +120,7 @@ Konstanz | zürich | Zürich HB | 1
 Konstanz | st gallen | St. Gallen | 1
 Flensburg | kopenhagen | København | 3
 Flensburg | padborg | Padborg | 1
-Dresden | prag | Praha | 3
+Dresden | prag | =Prag | 1
 Dresden | neustadt | Dresden-Neustadt | 1
 Dresden | tetschen | Děčín | 3
 Dresden | pirna | Pirna | 1
@@ -160,7 +160,7 @@ Lindau | lindau | Lindau-Reutin | 2
 - | köln | Köln Hbf | 1
 - | wien | Wien Hbf | 1
 - | basel | Basel SBB | 2
-- | prag | Praha | 3
+- | prag | =Prag | 1
 Berlin | zoo | Zoologischer Garten | 1
 Berlin | ham | Hamburg Hbf | 3
 Hamburg | mü | München | 3
@@ -539,7 +539,7 @@ Szczecin | stettin | Szczecin G | 2
 Strasbourg | straßburg | Strasbourg | 1
 Basel | mülhausen | Mulhouse | 1
 Berlin | stettin hbf | Szczecin G | 1
-Berlin | prag hbf | Praha | 1
+Berlin | prag hbf | =Prag | 1
 Berlin | breslau hbf | Wrocław | 1
 # Partial German names (typing letter by letter)
 Berlin | kopenh | København | 3
@@ -606,7 +606,7 @@ Köln | flughafen | Zürich; Wien | 0
 Salzburg | flughafen | Zürich; Wien | 0
 Hamburg | hbf | Wien; Zürich | 0
 # Second round
-- | prag hbf | Praha | 1
+- | prag hbf | =Prag | 1
 Flensburg | sonderburg | Sønderborg | 3
 Flensburg | sønderborg | Sønderborg | 1
 Flensburg | tønder | Tønder | 1

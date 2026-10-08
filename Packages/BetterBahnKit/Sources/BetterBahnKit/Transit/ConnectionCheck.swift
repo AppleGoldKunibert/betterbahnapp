@@ -186,6 +186,11 @@ public struct JourneyRefresher: Sendable {
     private func refresh(_ originalLeg: Leg, now: Date) async -> Leg {
         guard !Self.isLongOver(originalLeg, now: now) else { return originalLeg }
         var leg = await refreshEnds(of: originalLeg, now: now)
+        // Stops the leg's own feed leaves out (ÖBB's RJ 177 has none between Südkreuz and Děčín), before
+        // DB's live data and bahn.de's Zusatzhalte are laid over them.
+        if let transitous = provider.primary as? TransitousProvider {
+            leg = await transitous.fillingMissingStops(in: leg)
+        }
         let timetables = TimetablesClient.knowsChanges(until: leg.arrival.planned, now: now) ? self.timetables : nil
         if let timetables, timetables.canLookUp(leg) {
             leg = Self.syncingEnds(of: leg, toStopovers: true)
@@ -209,6 +214,10 @@ public struct JourneyRefresher: Sendable {
                 leg = BahnDeClient.applyingLiveTimes(from: stops, to: leg)
             }
             leg = BahnDeClient.fillingMissingPlatforms(in: leg, from: stops)
+        }
+        // International trains from DB's feed have no platforms in Czechia; the Czech timetable has them.
+        if let transitous = provider.primary as? TransitousProvider {
+            leg = await transitous.fillingCzechPlatforms(in: leg)
         }
         return leg
     }

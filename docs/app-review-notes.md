@@ -33,7 +33,8 @@ features or data flows change (and update the privacy policy in `Cloudflare/work
 > affiliated with Deutsche Bahn AG (stated in Settings).
 >
 > Timetable data comes from Transitous (open data, transitous.org). Some details (coach sequences,
-> extra stops, platforms) come from bahn.de's public web API through our own server.
+> extra stops, platforms) come from bahn.de's public web API through our own server; when bahn.de
+> refuses our server, the app asks bahn.de directly from the device in a hidden web view.
 >
 > Träwelling (traewelling.de) is an optional, independent check-in service. Turn it on under
 > Settings → Für Profis → Expertenmodus → Träwelling, then sign in with the demo account below.

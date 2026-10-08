@@ -109,6 +109,13 @@ public struct CoachSequence: Sendable, Hashable {
     public var hasSeveralTrains: Bool { Set(travellingGroups.compactMap(\.trainName)).count > 1 }
     /// Its parts go on to different places, so it matters which coach you board.
     public var partsGoToDifferentPlaces: Bool { Set(travellingGroups.compactMap(\.destination)).count > 1 }
+
+    /// Whether the Wagenreihung unfolds by itself next to the train: from 30 minutes before its
+    /// departure until 15 minutes after it, while you look for your coach and board.
+    public static func unfoldsByItself(departure: Date?, now: Date = .now) -> Bool {
+        guard let departure else { return false }
+        return now >= departure.addingTimeInterval(-30 * 60) && now <= departure.addingTimeInterval(15 * 60)
+    }
 }
 
 // MARK: - Compared with the plan

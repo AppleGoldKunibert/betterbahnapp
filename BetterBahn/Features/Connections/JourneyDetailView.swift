@@ -26,6 +26,8 @@ struct JourneyDetailView: View {
     /// The destination picked when the journey was edited, so later edits and "Anderer Zug" route there
     /// instead of back to the one the journey was opened with.
     @State private var editedDestination: Station?
+    /// Whether DB's dispatchers let a connecting train wait, keyed by the departing leg's id.
+    @State private var dispositions: [String: TransferDisposition] = [:]
 
     /// Where the journey is going now.
     private var goal: Station { editedDestination ?? finalDestination }
@@ -50,6 +52,7 @@ struct JourneyDetailView: View {
         .refreshable {
             await TimetablesClient.invalidateDelays()
             await refreshRealtime()
+            await loadDispositions()
         }
         .task {
             if !readOnly, model.savedEntry(for: journey) == nil, let seen = model.liveJourneys.value(for: journey.id) {
@@ -62,11 +65,13 @@ struct JourneyDetailView: View {
                 await refreshRealtime()
             }, showingAfter: LoadingDeadline.liveData) { liveDataLoaded = true }
             liveDataLoaded = true
+            await loadDispositions()
             // Keep a saved journey's delays current while it's open.
             while !Task.isCancelled {
                 try? await Task.sleep(for: AppModel.realtimeRefreshInterval)
                 guard !Task.isCancelled else { return }
                 if model.savedEntry(for: journey) != nil { await refreshRealtime() }
+                await loadDispositions()
             }
         }
         .tabBarSafePadding()
@@ -147,7 +152,8 @@ struct JourneyDetailView: View {
                         reservation: model.reservation(for: leg, in: journey)
                     )
                     if let info = transferInfo(after: leg) {
-                        TransferRow(from: leg, to: info.next, walk: info.walk, isPast: journey.isOver())
+                        TransferRow(from: leg, to: info.next, walk: info.walk, isPast: journey.isOver(),
+                                    disposition: dispositions[info.next.id])
                     }
                 }
             }
@@ -192,6 +198,17 @@ struct JourneyDetailView: View {
         withAnimation { journey = refreshed }
     }
 
+    /// Asks bahn.expert whether the connecting trains wait (see `BahnExpertClient.dispositions(in:now:)`).
+    /// A failed lookup keeps what was known.
+    private func loadDispositions() async {
+        guard !readOnly, let bahnExpert = model.provider.bahnExpert else { return }
+        let updates = await bahnExpert.dispositions(in: journey)
+        guard !updates.isEmpty else { return }
+        withAnimation {
+            for update in updates { dispositions[update.departing.id] = update.disposition }
+        }
+    }
+
     /// A saved journey is only refreshed until 10 minutes after it arrives, so its end keeps whatever
     /// delay DB reported last, often before the train got there. Opened within 24 hours of arriving,
     /// it's refreshed once more and stored, so it shows the real arrival like the trip view does.
@@ -210,10 +227,16 @@ struct JourneyDetailView: View {
         return entry
     }
 
-    /// Saved or imported journeys may still lack a Gleis Transitous didn't have; DB's schedule fills it.
+    /// Saved or imported journeys may still lack a Gleis Transitous didn't have; DB's schedule fills it,
+    /// the Czech timetable those in Czechia, and stops a train's feed left out come from another feed.
+    /// Before the live refresh, which also waits for bahn.de and can take a while: both lookups are
+    /// usually cached from the search already.
     private func fillMissingPlatforms() async {
-        guard !readOnly, let timetables = model.timetablesClient else { return }
-        let filled = await timetables.fillMissingPlatforms(in: journey)
+        guard !readOnly else { return }
+        var filled = await model.provider.completingStopsAndPlatforms(of: journey, deadline: .seconds(3))
+        if let timetables = model.timetablesClient {
+            filled = await timetables.fillMissingPlatforms(in: filled)
+        }
         guard filled != journey else { return }
         if let entry = model.savedEntry(for: journey) {
             model.updateSavedJourneyData(id: entry.id, journey: filled)
@@ -409,6 +432,8 @@ struct TransferRow: View {
     /// The journey is over: a transfer that looks missed only lacks a train's last delay (see
     /// `Journey.currentIssues`), so it isn't flagged.
     var isPast = false
+    /// Whether DB's dispatchers let the connecting train wait (from bahn.expert), if decided.
+    var disposition: TransferDisposition?
 
     private var minutes: Int {
         Int((to.departure.best.timeIntervalSince(from.arrival.best) / 60).rounded())
@@ -428,6 +453,11 @@ struct TransferRow: View {
                 Text(broken ? "Umstieg nicht erreichbar" : minutes < 0 ? "Umstieg" : "Umstieg · \(minutes) min")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(color)
+                if let disposition, !isPast {
+                    Label(disposition.title, systemImage: disposition == .waiting ? "hourglass" : "xmark.circle.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(disposition == .waiting ? Color.punctual : Color.heavyDelay)
+                }
                 if let walk {
                     Text("\(Int((walk.arrival.best.timeIntervalSince(walk.departure.best) / 60).rounded())) min Fußweg")
                         .font(.caption)
@@ -505,21 +535,18 @@ struct LegCard: View {
                         TrainFormationLabel(leg: leg)
                     }
                     Spacer()
-                    VStack(alignment: .trailing, spacing: 6) {
-                        HStack(spacing: 10) {
-                            TrainMessagesButton(messages: leg.messages)
-                            if leg.cancelled {
-                                InfoChip(text: "Fällt aus", systemImage: "xmark.octagon.fill", tint: .heavyDelay)
-                            } else {
-                                DelayPill(minutes: leg.departure.delayMinutes)
-                            }
-                            if leg.tripId != nil {
-                                Image(systemName: "chevron.right")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.tertiary)
-                            }
+                    HStack(spacing: 10) {
+                        TrainMessagesButton(messages: leg.messages)
+                        if leg.cancelled {
+                            InfoChip(text: "Fällt aus", systemImage: "xmark.octagon.fill", tint: .heavyDelay)
+                        } else {
+                            DelayPill(minutes: leg.departure.delayMinutes)
                         }
-                        CoachSequenceButton(leg: leg)
+                        if leg.tripId != nil {
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
                     }
                 }
                 .contentShape(.rect)
@@ -588,6 +615,9 @@ struct LegCard: View {
                     TimelineNode(kind: .major, color: color, lineAbove: color) {
                         stationRow(time: leg.arrival, name: leg.destination.displayName, platform: leg.arrivalPlatform)
                     }
+
+                    // Between the stops and "Mehr"; unfolds by itself around the departure.
+                    CoachSequenceDisclosure(leg: leg, spacing: 14)
                 }
 
                 if transferBroken {
@@ -723,65 +753,32 @@ struct AlternativeTrainsSheet: View {
                         ErrorBanner(error: error)
                     }
 
-                    if !alternatives.isEmpty {
-                        SectionHeader(title: "Züge auf dieser Strecke", systemImage: "tram.fill",
+                    if !options.isEmpty {
+                        SectionHeader(title: "Andere Züge", systemImage: "tram.fill",
                                       trailing: notBefore == nil ? "30 Min. vorher bis 3 Std. nachher" : "3 Std. ab Ankunft")
                             .padding(.top, 6)
                     }
 
-                    ForEach(alternatives) { alternative in
+                    // One list by departure; a note on each says how it gets there.
+                    ForEach(options) { option in
                         Button {
-                            apply([alternative], id: alternative.id)
+                            apply(option.legs, id: option.id)
                         } label: {
-                            AlternativeRow(leg: alternative, current: leg, nextLeg: nextLeg, isApplying: applyingID == alternative.id)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(applyingID != nil)
-                    }
-
-                    if !connections.isEmpty {
-                        SectionHeader(title: "Mit Umstieg", systemImage: "arrow.triangle.swap")
-                            .padding(.top, 6)
-                    }
-
-                    ForEach(connections) { connection in
-                        Button {
-                            apply(connection.legs, id: connection.id)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 6) {
-                                JourneyCard(journey: connection)
-                                    .overlay(alignment: .topTrailing) {
-                                        if applyingID == connection.id { ProgressView().padding(14) }
+                            switch option {
+                            case .direct(let alternative):
+                                AlternativeRow(leg: alternative, current: leg, nextLeg: nextLeg, note: option.note,
+                                               isApplying: applyingID == option.id)
+                            case .withTransfer(let route), .reroute(let route):
+                                let next = option.isReroute ? rerouteNextLeg : nextLeg
+                                VStack(alignment: .leading, spacing: 6) {
+                                    JourneyCard(journey: route)
+                                        .overlay(alignment: .topTrailing) {
+                                            if applyingID == option.id { ProgressView().padding(14) }
+                                        }
+                                    RouteNote(text: option.note, systemImage: option.symbolName).padding(.horizontal, 14)
+                                    if let next, let last = route.legs.last, !last.catches(next) {
+                                        MissedConnectionHint(next: next).padding(.horizontal, 14)
                                     }
-                                if let nextLeg, let last = connection.legs.last, !last.catches(nextLeg) {
-                                    MissedConnectionHint(next: nextLeg).padding(.horizontal, 14)
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(applyingID != nil)
-                    }
-
-                    if !reroutes.isEmpty, let rerouteTarget {
-                        SectionHeader(title: "Weiter bis \(rerouteTarget.displayName)", systemImage: "arrow.triangle.branch")
-                            .padding(.top, 6)
-                    }
-
-                    ForEach(reroutes) { route in
-                        Button {
-                            apply(route.legs, id: route.id)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 6) {
-                                JourneyCard(journey: route)
-                                    .overlay(alignment: .topTrailing) {
-                                        if applyingID == route.id { ProgressView().padding(14) }
-                                    }
-                                Label("Andere Routenführung", systemImage: "arrow.triangle.branch")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                    .padding(.horizontal, 14)
-                                if let rerouteNextLeg, let last = route.legs.last, !last.catches(rerouteNextLeg) {
-                                    MissedConnectionHint(next: rerouteNextLeg).padding(.horizontal, 14)
                                 }
                             }
                         }
@@ -850,6 +847,46 @@ struct AlternativeTrainsSheet: View {
         error = foundDirect.isEmpty && foundWithTransfers.isEmpty && foundReroutes.isEmpty ? failure : nil
     }
 
+    /// An entry of the list: a direct train, a connection with transfers, or one straight on to the
+    /// next via or destination ("Andere Routenführung").
+    private enum Option: Identifiable {
+        case direct(Leg), withTransfer(Journey), reroute(Journey)
+
+        var id: String {
+            switch self {
+            case .direct(let leg): "direct|" + leg.id
+            case .withTransfer(let route): "transfer|" + route.id
+            case .reroute(let route): "reroute|" + route.id
+            }
+        }
+        var legs: [Leg] {
+            switch self {
+            case .direct(let leg): [leg]
+            case .withTransfer(let route), .reroute(let route): route.legs
+            }
+        }
+        var isReroute: Bool { if case .reroute = self { true } else { false } }
+        var note: String {
+            switch self {
+            case .direct: "Direkt"
+            case .withTransfer: "Mit Umstieg"
+            case .reroute: "Andere Routenführung"
+            }
+        }
+        var symbolName: String {
+            switch self {
+            case .direct: "arrow.right"
+            case .withTransfer: "arrow.triangle.swap"
+            case .reroute: "arrow.triangle.branch"
+            }
+        }
+    }
+
+    private var options: [Option] {
+        (alternatives.map(Option.direct) + connections.map(Option.withTransfer) + reroutes.map(Option.reroute))
+            .sorted { ($0.legs.first?.departure.planned ?? .distantFuture) < ($1.legs.first?.departure.planned ?? .distantFuture) }
+    }
+
     private static func reroutes(_ picker: TrainPicker, for leg: Leg, to target: Station?, notBefore: Date?,
                                  ticketFilter: TicketFilter?) async throws -> [Journey] {
         guard let target else { return [] }
@@ -880,6 +917,8 @@ struct AlternativeRow: View {
     let current: Leg
     /// The planned train after `current`, flagged when `leg` arrives too late for it.
     var nextLeg: Leg?
+    /// How it gets there ("Direkt"), next to the train's name.
+    var note: String?
     var isApplying = false
 
     var body: some View {
@@ -888,7 +927,10 @@ struct AlternativeRow: View {
         Card(padding: 14) {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 8) {
-                    LineBadge(line: leg.line)
+                    HStack(spacing: 8) {
+                        LineBadge(line: leg.line)
+                        if let note { RouteNote(text: note, systemImage: "arrow.right") }
+                    }
                     HStack(spacing: 8) {
                         TimeStack(time: leg.departure, font: .headline)
                         Image(systemName: "arrow.right").font(.caption.weight(.bold)).foregroundStyle(.tertiary)
@@ -917,6 +959,18 @@ struct AlternativeRow: View {
     }
 }
 
+/// Says how an alternative gets there: "Direkt", "Mit Umstieg" or "Andere Routenführung".
+struct RouteNote: View {
+    let text: String
+    let systemImage: String
+
+    var body: some View {
+        Label(text, systemImage: systemImage)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+    }
+}
+
 /// Marks an alternative that arrives too late for the planned train after it.
 struct MissedConnectionHint: View {
     let next: Leg
@@ -927,6 +981,16 @@ struct MissedConnectionHint: View {
             .font(.caption.weight(.semibold))
             .foregroundStyle(Color.heavyDelay)
     }
+}
+
+/// Both dispatching decisions, without having to find a train that is actually waited for.
+#Preview("Anschluss wartet / wartet nicht") {
+    VStack(spacing: 16) {
+        TransferRow(from: PreviewData.firstLeg, to: PreviewData.secondLeg, disposition: .waiting)
+        TransferRow(from: PreviewData.firstLeg, to: PreviewData.secondLeg, walk: PreviewData.walk, disposition: .notWaiting)
+    }
+    .padding()
+    .background { AppBackground() }
 }
 
 #Preview("Reiseplan-Teilstrecke") {

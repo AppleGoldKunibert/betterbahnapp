@@ -367,61 +367,6 @@ struct TrainFormationLabel: View {
     }
 }
 
-/// "Wagenreihung" chip for a train's header, shown once bahn.de has a coach sequence for it (the
-/// same request `TrainFormationLabel` makes, so it is only sent once), or else vagonweb.cz has the
-/// planned one ("Plan-Wagenreihung"). Opens the Wagenreihung sheet.
-struct CoachSequenceButton: View {
-    /// bahn.de's request, only for departures within `BahnDeClient.formationLookahead`.
-    let request: BahnDeClient.FormationRequest?
-    /// The same for any later departure, for vagonweb's planned Wagenreihung days ahead.
-    let plannedRequest: BahnDeClient.FormationRequest?
-    let trainName: String?
-
-    init(leg: Leg) {
-        request = BahnDeClient.formationRequest(for: leg)
-        plannedRequest = BahnDeClient.formationRequest(for: leg, lookahead: nil)
-        trainName = leg.line?.name
-    }
-
-    init(trip: Trip) {
-        request = BahnDeClient.formationRequest(for: trip)
-        plannedRequest = BahnDeClient.formationRequest(for: trip, lookahead: nil)
-        trainName = trip.line?.name
-    }
-
-    @Environment(AppModel.self) private var model
-    @State private var sequence: CoachSequence?
-    @State private var showSequence = false
-
-    var body: some View {
-        // A ZStack rather than Group: `.task` never fires on a view that is empty.
-        ZStack {
-            if let sequence, !sequence.coaches.isEmpty {
-                Button {
-                    showSequence = true
-                } label: {
-                    InfoChip(text: sequence.source == .bahnDe ? "Wagenreihung" : "Plan-Wagenreihung",
-                             systemImage: "train.side.front.car", tint: .brand)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .sheet(isPresented: $showSequence) {
-            if let request = request ?? plannedRequest {
-                CoachSequenceView(request: request, trainName: trainName, sequence: sequence)
-            }
-        }
-        .task(id: plannedRequest) {
-            sequence = nil
-            if let request, let live = try? await model.coachSequence(for: request), !live.coaches.isEmpty {
-                sequence = live
-            } else if let plannedRequest {
-                sequence = await model.plannedCoachSequence(for: plannedRequest)
-            }
-        }
-    }
-}
-
 /// "ICE 4" / "ICE 3neo" / "ICE L" … next to a train's name. bahn.de's coach sequence first (the same
 /// request `TrainFormationLabel` makes, so it is only sent once); then the planned formation for days
 /// ahead from vagonweb.cz, or bahn.expert when vagonweb has none (`AppModel.trainType`).
@@ -549,8 +494,41 @@ struct DelayPill: View {
 struct PlatformBadge: View {
     let platform: PlatformInfo?
     var prominent = false
+    /// Opens the Wagenreihung at this stop. Only used for a platform from the Czech timetable, whose
+    /// tap shows where it comes from: the note then offers the Wagenreihung instead.
+    var onCoachSequence: (() -> Void)?
+    @State private var showsSource = false
 
     var body: some View {
+        if platform?.source == .czechTimetable, platform?.best != nil {
+            // Planned only (see `PlatformInfo.Source.czechTimetable`); tapping says so.
+            Button {
+                showsSource = true
+            } label: {
+                badge.contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Zeigt, woher das Gleis stammt")
+            .popover(isPresented: $showsSource) {
+                PlannedPlatformNote(onCoachSequence: onCoachSequence.map { open in
+                    {
+                        showsSource = false
+                        // The Wagenreihung sheet only opens once the popover is gone.
+                        Task {
+                            try? await Task.sleep(for: .milliseconds(350))
+                            open()
+                        }
+                    }
+                })
+                .presentationCompactAdaptation(.popover)
+            }
+        } else {
+            badge
+        }
+    }
+
+    @ViewBuilder
+    private var badge: some View {
         if let best = platform?.best {
             let changed = platform?.hasChanged == true
             VStack(spacing: 0) {
@@ -574,9 +552,41 @@ struct PlatformBadge: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.white, Color.heavyDelay)
                         .offset(x: 5, y: -5)
+                } else if platform?.source == .czechTimetable {
+                    Image(systemName: "info.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white, Color.secondary)
+                        .offset(x: 5, y: -5)
                 }
             }
         }
+    }
+}
+
+/// Where a platform from the Czech timetable comes from, shown by tapping its `PlatformBadge`.
+struct PlannedPlatformNote: View {
+    var onCoachSequence: (() -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Gleis laut Fahrplan", systemImage: "calendar")
+                .font(.subheadline.weight(.semibold))
+            Text("Dieses Gleis stammt aus dem tschechischen Fahrplan (Správa železnic). Es sind nur Plandaten: Kurzfristige Gleisänderungen fehlen, bitte vor Ort auf die Anzeigen achten.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let onCoachSequence {
+                Button("Wagenreihung anzeigen", systemImage: "train.side.front.car", action: onCoachSequence)
+                    .font(.caption.weight(.semibold))
+                    .tint(.brand)
+                    .padding(.top, 2)
+            }
+        }
+        .padding()
+        // A fixed width, so the popover measures the text's height at the width it shows it at
+        // (with a width range the last line was cut off).
+        .frame(width: 280, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
