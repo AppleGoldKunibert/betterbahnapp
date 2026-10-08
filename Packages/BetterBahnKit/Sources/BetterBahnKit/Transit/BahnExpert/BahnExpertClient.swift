@@ -241,7 +241,7 @@ public struct BahnExpertClient: Sendable {
         return request
     }
 
-    func call<T: Decodable>(_ procedure: String, input: [String: Any]) async throws -> T {
+    private func call<T: Decodable>(_ procedure: String, input: [String: Any]) async throws -> T {
         let request = try Self.request(procedure: procedure, input: input)
         do {
             return try await http.send(request, as: Envelope<T>.self).json

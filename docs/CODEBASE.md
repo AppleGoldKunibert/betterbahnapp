@@ -148,11 +148,6 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 - `Transit/BahnExpert/` – bahn.expert, only as fallback for the train type (`TrainTypeLookup`) when bahn.de
   has no coach sequence and vagonweb has none either: it has DB's planned formation (`DB-plan`) for days
   ahead; bahn.de is only asked for departures within `BahnDeClient.formationLookahead` (12 h).
-  Also tells whether a connecting train waits (`TransferDisposition`, "Anschluss wartet (nicht)" in `TransferRow`):
-  `disposition(from:to:)` finds the arriving train (`journey/find`, no administration so ODEG etc. match), its
-  arrival ID at the transfer station (`journey/detailsByJourneyId`, by EVA or planned time) and the departing train
-  in `connections/connections` (by run number and planned time) and reads DB's `dispositionStatus`
-  (`WAITING`/`NOT_WAITING`). `JourneyDetailView` asks for transfers from 15 min ago up to 3 h ahead.
 - `Transit/BahnJetzt/` – live train positions from bahn.jetzt's `/api/journeys` (one shared list,
   refreshed by `AppModel.followTrainPositions()` while the map is on screen). Long-distance trains by
   number, regional/S-Bahn by run number (`Line.tripNumber`).
