@@ -4988,7 +4988,23 @@ final class RoutingMockProvider: TransitProvider, @unchecked Sendable {
         // While typing, the beginning counts too, but less than a full match.
         #expect(TrainNameQuery("ICE 9").score(ice) == 1)
         #expect(TrainNameQuery("ICE 91").score(ice) == 2)
-        #expect(TrainNameQuery("33").score(re3) == 1)
+        // A bare number lists a regional train only by its whole run number, not its line or a part.
+        #expect(TrainNameQuery("33").score(re3) == nil)
+        #expect(TrainNameQuery("3").score(re3) == nil)
+        #expect(TrainNameQuery("3300").score(re3) == 2)
+        #expect(TrainNameQuery("RE3").score(re3) == 2)
+        #expect(TrainNameQuery("RE 33").score(re3) == 1)
+        #expect(TrainNameQuery("RE").score(re3) == 1)
+        let s9 = Line(name: "S9", number: "9", product: .suburban, operatorName: nil, tripNumber: "91234")
+        #expect(TrainNameQuery("91").score(s9) == nil)
+        #expect(TrainNameQuery("9").score(s9) == nil)
+        #expect(TrainNameQuery("S9").score(s9) == 2)
+        #expect(TrainNameQuery("S").score(s9) == 1)
+        #expect(TrainNameQuery("91234").score(s9) == 2)
+        // Without a run number the line's number is no run number.
+        let s9WithoutRun = Line(name: "S 9", number: "9", product: .suburban, operatorName: nil)
+        #expect(TrainNameQuery("9").score(s9WithoutRun) == nil)
+        #expect(TrainNameQuery("S 9").score(s9WithoutRun) == 2)
         #expect(TrainNameQuery("IC 9").score(ice) == 1)
         #expect(TrainNameQuery("RB 9").score(ice) == nil)
     }

@@ -51,7 +51,14 @@ public struct TrainNameQuery: Sendable, Hashable {
 
     /// How well `line` fits while the name is still being typed: 2 for a full match, 1 when one of its
     /// names or numbers starts with what was typed ("ICE 5" → ICE 597), nil when it doesn't fit.
+    /// A regional train or S-Bahn only fits a bare number that is its whole run number ("3300" for the
+    /// RE 3 running as 3300): "3" or "91" would list every RE 3 or S 9 on the route. With its category
+    /// typed ("S9", "RE 3", "S") it fits like any other train.
     public func score(_ line: Line) -> Int? {
+        if Self.isLocal(line), category == nil, !isRunNumber {
+            guard let number, let run = Self.runNumber(of: line) else { return nil }
+            return run == number ? 2 : nil
+        }
         if matches(line) { return 2 }
         guard !isEmpty else { return nil }
         if isRunNumber, let number {
@@ -60,6 +67,21 @@ public struct TrainNameQuery: Sendable, Hashable {
         if !name.isEmpty, line.allNames.contains(where: { Line.normalize($0).hasPrefix(name) }) { return 1 }
         if let number, Self.numbers(of: line).contains(where: { $0.hasPrefix(number) }), fitsCategory(line) { return 1 }
         return nil
+    }
+
+    /// Not a long-distance train: regional trains, S-Bahn and the like, which run many times a day under one line.
+    static func isLocal(_ line: Line) -> Bool {
+        line.product != .highSpeed && line.product != .longDistance
+    }
+
+    /// A regional train's or S-Bahn's own run number, never its line's ("3300" for the RE 3 running as
+    /// 3300; nothing for an S 9 whose feed only gives the line).
+    static func runNumber(of line: Line) -> String? {
+        if let trip = line.tripNumber { return trimmingZeros(trip) }
+        guard let number = line.number else { return nil }
+        // Feeds without a run number put the line's there; it's the number in the line's name, and short.
+        if number.count < 4, line.allNames.contains(where: { $0.filter(\.isNumber) == number }) { return nil }
+        return trimmingZeros(number)
     }
 
     /// No category typed, or the line's name starts with it ("re" for "RE 3", "ice" for an ICE also called "RJ 177").

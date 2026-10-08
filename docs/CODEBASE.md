@@ -257,7 +257,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   such made-up "pünktlich" from journeys saved earlier.
 - `Transit/TrainChoice.swift` – picking a train for a route (#225): `TrainNameQuery` reads "ICE 423", "423", "RE 3300",
   "RE 3 (3300)" and matches a line by name, train or run number (`Line.tripNumber`), with `score` for prefixes while
-  typing (used by `TrainRoutePlanner`, `TrainPicker`); `TrainCandidateFinder` (actor): a number is listed like the train search (`numberTrains`:
+  typing (regional trains and S-Bahn only by their category, "S9"/"RE 3", or their whole run number, never by "3" or "91") (used by `TrainRoutePlanner`, `TrainPicker`); `TrainCandidateFinder` (actor): a number is listed like the train search (`numberTrains`:
   one bahn.expert request, kinds from Settings → Zugschnellsuche), each run's stops (`routeFit`) then mark where it
   boards on the route, whether it reaches the target and whether it passes one of the settings' countries (`ranked`);
   only the picked run's trip is loaded (`candidate(for:)`, from the boarding station's board, else `TrainNumberSearch.run`).
