@@ -968,6 +968,9 @@ struct RouteNote: View {
         Label(text, systemImage: systemImage)
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
+            .lineLimit(1)
+            // Next to a long train name the row would otherwise squeeze it into one letter per line.
+            .fixedSize()
     }
 }
 
