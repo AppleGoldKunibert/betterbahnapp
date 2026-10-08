@@ -4,6 +4,12 @@ Project map, build/test commands and conventions: @docs/CODEBASE.md — rely on 
 re-exploring the repo; only open the files relevant to the task. Only read `docs/app-review-notes.md`
 (App Store/privacy) or `docs/transit-providers.md` (data sources) when the task touches those topics.
 
+Code graph: if `graphify-out/graph.json` exists (cloud sessions build it at start), use it for
+structure questions before grepping: `graphify query "<question>"`, `graphify path "A" "B"`,
+`graphify affected "X"` (what a change to X touches), `graphify explain "X"`. Don't rebuild it with
+`/graphify` unless asked. After a `/graphify` run, commit new files in `graphify-out/cache/semantic/`
+(doc results, so other sessions don't pay for them again).
+
 Alfred writes in German (sometimes English); answer in the language he used.
 
 ## Working style
@@ -27,6 +33,9 @@ Alfred writes in German (sometimes English); answer in the language he used.
   - `prod-bugs` für Bugfixes (Label `bug`)
   - `prod-other` für alles andere, auch für Issues ohne Label
 - Nicht direkt nach `prod` pushen oder mergen. `prod` ist der Default-Branch.
+- Startet die Session auf `prod` oder einem `prod-*`-Branch (z. B. `prod-bugs`, auch wenn die
+  Session-Anweisungen genau diesen Branch vorgeben), nicht dort committen: immer zuerst einen neuen Branch
+  nach den Regeln oben erstellen und per PR in den passenden Ziel-Branch bringen.
 - Worktrees heißen wie ihr Branch, nie zufällige Namen.
 - Push den Branch und öffne früh einen Draft-PR: `.github/workflows/pr-build.yml` führt auf macOS die
   Kit-Tests und einen App-Build aus. CI-Ergebnisse lesen und Fehler beheben, bis alles grün ist; erst dann
