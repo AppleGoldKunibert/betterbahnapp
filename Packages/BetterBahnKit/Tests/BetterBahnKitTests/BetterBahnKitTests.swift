@@ -2296,6 +2296,23 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(formation.unitDescription == "Tz 9457 „Bundesrepublik Deutschland“ + 9018 „Freistaat Bayern“")
     }
 
+    /// IC 1189 (IC 1 farewell run) showed "Tz 450007": loco-hauled IC 1 coaches have no Tz.
+    @Test func ic1HasNoTrainsetNumber() throws {
+        let json = #"""
+        {"groups": [
+            {"name": "IC450007", "transport": {"category": "IC", "number": 1189},
+             "vehicles": [
+                {"vehicleID": "618020911234", "type": {"category": "PASSENGERCARRIAGE_ECONOMY_CLASS", "constructionType": "B2091"}},
+                {"vehicleID": "618010910123", "type": {"category": "PASSENGERCARRIAGE_FIRST_CLASS", "constructionType": "A1091"}}]}
+        ]}
+        """#
+        let response = try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data(json.utf8))
+        let formation = BahnDeClient.formation(from: response, category: "IC", number: 1189)
+        #expect(formation.units == [.init(model: "IC 1", number: nil, name: nil)])
+        let sequence = BahnDeClient.coachSequence(from: response, category: "IC", number: 1189)
+        #expect(sequence.groups.map(\.unit) == [nil])
+    }
+
     /// A group without vehicles (or other missing fields) must not lose the whole formation.
     @Test func toleratesMissingFields() throws {
         let json = #"""

@@ -383,17 +383,29 @@ public struct BahnDeClient: Sendable {
             let name = group.name ?? ""
             // Locomotive-only groups (e.g. the Vectron of an ICE L) have a vehicle ID as name.
             if !vehicles.isEmpty, vehicles.allSatisfy({ $0.type?.category == "LOCOMOTIVE" }) { continue }
-            let carriages = vehicles.map { Carriage(vehicleID: $0.vehicleID, constructionType: $0.type?.constructionType) }
-            let types = vehicles.compactMap { $0.type?.constructionType }
-            let model = TrainModel.detect(carriages, category: category).map(\.name)
-                ?? Self.model(constructionTypes: types, groupName: name, category: category)
-            let trainset = hasTrainsets(category)
+            let model = Self.model(of: group, category: category)
+            let trainset = hasTrainsets(category) && !isIC1(group, model: model)
             let number = trainset ? unitNumber(from: name) : nil
             let unit = TrainFormation.Unit(model: TrainModel.name(model, unit: number), number: number,
                                            name: trainset ? trainsetName(from: name) : nil)
             if unit.model != nil || unit.number != nil { units.append(unit) }
         }
         return TrainFormation(units: units)
+    }
+
+    /// Series of one group: from the vehicles' UIC numbers, else from their construction types.
+    static func model(of group: SequenceResponse.Group, category: String) -> String? {
+        let vehicles = group.vehicles ?? []
+        let carriages = vehicles.map { Carriage(vehicleID: $0.vehicleID, constructionType: $0.type?.constructionType) }
+        let types = vehicles.compactMap { $0.type?.constructionType }
+        return TrainModel.detect(carriages, category: category).map(\.name)
+            ?? model(constructionTypes: types, groupName: group.name ?? "", category: category)
+    }
+
+    /// Loco-hauled IC 1 coaches aren't a trainset: their group name ("IC450007") carries a coach-set
+    /// number, not a Tz. Groups without vehicles fall back to "IC 1" for any IC, so they keep theirs.
+    static func isIC1(_ group: SequenceResponse.Group, model: String?) -> Bool {
+        model == "IC 1" && !(group.vehicles ?? []).isEmpty
     }
 
     /// `groups`, or none when they all name a train number and none of them is `wanted`: then bahn.de
