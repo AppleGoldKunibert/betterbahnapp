@@ -257,11 +257,13 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   such made-up "pünktlich" from journeys saved earlier.
 - `Transit/TrainChoice.swift` – picking a train for a route (#225): `TrainNameQuery` reads "ICE 423", "423", "RE 3300",
   "RE 3 (3300)" and matches a line by name, train or run number (`Line.tripNumber`), with `score` for prefixes while
-  typing (used by `TrainRoutePlanner`, `TrainPicker`); `TrainCandidateFinder` (actor) searches the boards of up to 4 route
-  stations (`departuresForTrainLookup`, trains only, loaded in parallel, `prefetch`ed when the sheet opens, shared and never cached when failed)
-  as `routeCandidates`, and for numbers `TrainNumberSearch` as `numberCandidates`, which the sheet adds to the list
-  once it answers (`merged`); runs are ranked: full match, boardable on the route, reaching the target (earliest),
-  closest to it, time. A picked run is pinned in
+  typing (used by `TrainRoutePlanner`, `TrainPicker`); `TrainCandidateFinder` (actor): a number is listed like the train search (`numberTrains`:
+  one bahn.expert request, kinds from Settings → Zugschnellsuche), each run's stops (`routeFit`) then mark where it
+  boards on the route, whether it reaches the target and whether it passes one of the settings' countries (`ranked`);
+  only the picked run's trip is loaded (`candidate(for:)`, from the boarding station's board, else `TrainNumberSearch.run`).
+  Lines ("RE 3") and other trains come from the boards of up to 4 route stations (`routeCandidates`:
+  `departuresForTrainLookup`, trains only, loaded in parallel, `prefetch`ed when the sheet opens, never cached when
+  failed; `boardExtras` leaves out runs already listed by number). A picked run is pinned in
   `TrainRequirement.tripId`, so the planner loads it instead of searching boards.
 - Logic: `JourneyReplanner` (`continuations` come `fastestFirst`: by live arrival, without routes another one beats
   leaving no earlier, arriving no later with no more changes), `ConnectionCheck` (`ConnectionIssue`, `JourneyRefresher`), `PlatformChange`

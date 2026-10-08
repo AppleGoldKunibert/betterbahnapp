@@ -104,14 +104,47 @@ public struct TrainCandidate: Sendable, Hashable, Identifiable {
     }
 }
 
+/// A run found by number for the train list, with where it meets the route once its stops are in.
+public struct NumberedTrain: Sendable, Hashable, Identifiable {
+    public var result: TrainSearchResult
+    /// Nil until its stops are loaded (`TrainCandidateFinder.routeFit`).
+    public var fit: RouteFit?
+
+    public var id: String { result.id }
+
+    public init(result: TrainSearchResult, fit: RouteFit? = nil) {
+        self.result = result
+        self.fit = fit
+    }
+}
+
+/// Where a run found by number meets the route.
+public struct RouteFit: Sendable, Hashable {
+    /// The route station it is boarded at, nil when it calls at none of them.
+    public var boarding: Station?
+    /// When it leaves there, planned.
+    public var departure: Date?
+    /// It calls at the destination after boarding.
+    public var reachesTarget: Bool
+    /// It runs through one of the countries wanted (Settings → Zugschnellsuche).
+    public var inCountries: Bool
+
+    public init(boarding: Station?, departure: Date?, reachesTarget: Bool, inCountries: Bool) {
+        self.boarding = boarding
+        self.departure = departure
+        self.reachesTarget = reachesTarget
+        self.inCountries = inCountries
+    }
+}
+
 /// Finds the trains that fit a typed name or number for a route (#225): first on the departure boards
-/// of the route's stations (where you'd board), then – for a number – with the train search, which
-/// knows every run by number. The ones going to the destination come first.
+/// of the route's stations (where you'd board, `routeCandidates`), and for a number the way the train
+/// search does it: bahn.expert lists the runs with that number at once (`numberTrains`), each run's
+/// stops then tell whether it calls on the route and at the destination (`routeFit`), and only the
+/// picked one has its trip loaded (`candidate(for:)`). The ones going to the destination come first.
 ///
 /// The boards are slow (a few seconds each), so they are loaded in parallel, can be loaded before the
-/// first letter is typed (`prefetch`), and are shared by every search while the sheet is open. The
-/// train search is slower still, so its runs come separately (`numberCandidates`) and never hold up
-/// the trains already found on the boards (`routeCandidates`).
+/// first letter is typed (`prefetch`), and are shared by every search while the sheet is open.
 public actor TrainCandidateFinder {
     public let provider: CombinedProvider
     let numberSearch: TrainNumberSearch?
@@ -137,14 +170,6 @@ public actor TrainCandidateFinder {
                 group.addTask { _ = await self.board(at: station, date: date) }
             }
         }
-    }
-
-    /// Both kinds of trains together (see `routeCandidates` and `numberCandidates`), best fit first.
-    public func candidates(for text: String, stations: [Station], target: Station, date: Date,
-                           limit: Int = 8) async -> [TrainCandidate] {
-        async let byNumber = numberCandidates(for: text, stations: stations, target: target, date: date)
-        let route = await routeCandidates(for: text, stations: stations, target: target, date: date, limit: limit)
-        return Self.merged(route, await byNumber, target: target, date: date, limit: limit)
     }
 
     /// Up to `limit` trains matching `text` that leave one of `stations` (in order of preference)
@@ -198,33 +223,87 @@ public actor TrainCandidateFinder {
         return Array(Self.ranked(results, target: target, date: date).prefix(limit))
     }
 
-    /// Runs found by number (the train search), for trains the route's boards don't have – e.g. one
-    /// boarded at a station the route only passes later. Boarded at the first route station it calls at.
-    /// Slow (a station search and a board per run), so asked alongside `routeCandidates`, not before.
-    public func numberCandidates(for text: String, stations: [Station], target: Station,
-                                 date: Date) async -> [TrainCandidate] {
-        guard let numberSearch, let numberQuery = TrainNameQuery(text).numberQuery,
-              let found = try? await numberSearch.trains(numberQuery, on: date) else { return [] }
-        let places = Self.places(stations)
-        return await withTaskGroup(of: TrainCandidate?.self) { group in
-            for result in found.prefix(Self.maxNumberRuns) {
-                group.addTask {
-                    guard let (_, trip) = try? await numberSearch.run(of: result) else { return nil }
-                    let station = places.first { station in trip.stopovers.contains { $0.station.isSamePlace(as: station) } }
-                    return Self.candidate(trip, boardingAt: station, near: date, target: target, exact: true)
-                }
+    // MARK: - By number, like the train search
+
+    /// The runs with the typed number on `date`'s day, as the train search lists them (one request to
+    /// bahn.expert, the kinds of trains from Settings → Zugschnellsuche, fastest kind first); nil
+    /// without a number or when bahn.expert doesn't answer, so the boards' trains are all there is.
+    /// Countries aren't checked here: that needs a run's stops, which `routeFit` loads anyway.
+    public func numberTrains(for text: String, date: Date, filter: TrainSearchFilter) async -> [TrainSearchResult]? {
+        guard let numberSearch, let query = TrainNameQuery(text).numberQuery else { return nil }
+        return try? await numberSearch.trains(query, on: date, filter: TrainSearchFilter(kinds: filter.kinds, countries: []))
+    }
+
+    /// Whether `result` is in one of `countries` from its ends alone: true when it starts or ends there,
+    /// false when it can't pass through one in between, nil when only its stops can tell.
+    public static func countryStatus(_ result: TrainSearchResult, countries: Set<String>) -> Bool? {
+        if countries.isEmpty || TrainNumberSearch.endsIn(countries, result) { return true }
+        return TrainNumberSearch.mayPassThrough(result) ? nil : false
+    }
+
+    /// Where the run meets the route, from its stops (one small request to bahn.expert).
+    public func routeFit(of result: TrainSearchResult, stations: [Station], target: Station,
+                         countries: Set<String>) async -> RouteFit? {
+        guard let numberSearch, let stops = try? await numberSearch.bahnExpert.stops(ofJourney: result.journeyId) else { return nil }
+        return Self.fit(stops: stops, stations: Self.places(stations), target: target, countries: countries)
+    }
+
+    /// The first of `stations` (in their order) the run leaves from, whether it calls at `target` after
+    /// that, and whether it runs through one of `countries`.
+    static func fit(stops: [TrainSearchStop], stations: [Station], target: Station, countries: Set<String>) -> RouteFit {
+        func matches(_ stop: TrainSearchStop, _ station: Station) -> Bool {
+            if let eva = station.evaNumber, eva == stop.evaNumber { return true }
+            return Station.normalize(Station.displayName(for: stop.name)) == Station.normalize(station.displayName)
+        }
+        var boarding: (index: Int, station: Station)?
+        for station in stations {
+            if let index = stops.firstIndex(where: { $0.plannedDeparture != nil && matches($0, station) }) {
+                boarding = (index, station)
+                break
             }
-            var results: [TrainCandidate] = []
-            for await candidate in group { if let candidate { results.append(candidate) } }
-            return results
+        }
+        let reaches = boarding.map { b in stops[(b.index + 1)...].contains { matches($0, target) } } ?? false
+        let inCountries = countries.isEmpty || stops.contains { $0.country.map(countries.contains) == true }
+        return RouteFit(boarding: boarding?.station, departure: boarding.flatMap { stops[$0.index].plannedDeparture },
+                        reachesTarget: reaches, inCountries: inCountries)
+    }
+
+    /// Going to the target first, then boardable on the route, then leaving closest to `date`; else
+    /// the train search's own order. Runs whose stops aren't known yet keep their place behind those.
+    public static func ranked(_ trains: [NumberedTrain], date: Date) -> [NumberedTrain] {
+        trains.enumerated().sorted { a, b in
+            func key(_ t: NumberedTrain, _ offset: Int) -> (Int, Int, Double, Int) {
+                let fit = t.fit
+                return (fit?.reachesTarget == true ? 0 : 1, fit?.boarding != nil ? 0 : 1,
+                        fit?.departure.map { abs($0.timeIntervalSince(date)) } ?? .greatestFiniteMagnitude, offset)
+            }
+            return key(a.element, a.offset) < key(b.element, b.offset)
+        }.map(\.element)
+    }
+
+    /// The boards' trains that aren't runs of `number` – those come from the train search already.
+    /// Only the run's own number counts: an RE 3 running as 3300 is no run of "3".
+    public static func boardExtras(_ route: [TrainCandidate], besides number: Int) -> [TrainCandidate] {
+        let wanted = String(number)
+        return route.filter { candidate in
+            guard let run = candidate.trip.line?.dispatchNumber else { return true }
+            return TrainNameQuery.trimmingZeros(run) != wanted
         }
     }
 
-    /// The trains from the boards with those found by number added (each run once), best fit first.
-    public static func merged(_ route: [TrainCandidate], _ byNumber: [TrainCandidate], target: Station, date: Date,
-                              limit: Int = 8) -> [TrainCandidate] {
-        let known = Set(route.map(\.trip.id))
-        return Array(ranked(route + byNumber.filter { !known.contains($0.trip.id) }, target: target, date: date).prefix(limit))
+    /// The picked run's trip, to show its stops: from the boarding station's board when the route
+    /// meets it (one small board), else wherever the train search finds it (`TrainNumberSearch.run`).
+    public func candidate(for train: NumberedTrain, target: Station) async throws -> TrainCandidate {
+        guard let numberSearch else { throw TransitError.notFound("\(train.result.name) im Fahrplan") }
+        if let station = train.fit?.boarding, let departure = train.fit?.departure,
+           let entries = try? await provider.departuresForTrainLookup(at: station, date: departure.addingTimeInterval(-2 * 60),
+                                                                     duration: 5, products: Self.trainProducts),
+           let entry = TrainNumberSearch.entry(for: train.result, departing: departure, in: entries),
+           let trip = await trip(id: entry.tripId, source: entry.source) {
+            return Self.candidate(trip, boardingAt: station, near: departure, target: target, exact: true)
+        }
+        let (_, trip) = try await numberSearch.run(of: train.result)
+        return Self.candidate(trip, boardingAt: train.fit?.boarding, near: train.fit?.departure, target: target, exact: true)
     }
 
     /// Best first: full matches, boardable on the route, going to the target (earliest arrival), else

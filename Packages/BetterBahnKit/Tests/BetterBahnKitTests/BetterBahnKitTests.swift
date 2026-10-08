@@ -5049,17 +5049,84 @@ final class RoutingMockProvider: TransitProvider, @unchecked Sendable {
         // No bahn.expert: only the boards are asked, never the network.
         let finder = TrainCandidateFinder(provider: CombinedProvider(primary: mock, fallback: nil, bahnDe: nil, bahnExpert: nil))
 
-        let found = await finder.candidates(for: "ICE 50", stations: [koeln], target: berlin, date: base)
+        let found = await finder.routeCandidates(for: "ICE 50", stations: [koeln], target: berlin, date: base)
         #expect(found.map(\.trip.id) == ["ice500", "ice501", "ice502"])
         #expect(found.first?.exit?.station.isSamePlace(as: berlin) == true)
         #expect(found.first?.boarding?.station.isSamePlace(as: koeln) == true)
 
         // A full match beats the ones only starting with what was typed.
-        let exact = await finder.candidates(for: "ICE 502", stations: [koeln], target: berlin, date: base)
+        let exact = await finder.routeCandidates(for: "ICE 502", stations: [koeln], target: berlin, date: base)
         #expect(exact.map(\.trip.id) == ["ice502"])
 
-        let byRun = await finder.candidates(for: "3300", stations: [koeln], target: berlin, date: base)
+        let byRun = await finder.routeCandidates(for: "3300", stations: [koeln], target: berlin, date: base)
         #expect(byRun.map(\.trip.id) == ["re3300"])
+    }
+
+    func numbered(_ number: Int, _ category: String, from origin: String, to destination: String,
+                  originEVA: String = "8000001", destinationEVA: String = "8000002") -> TrainSearchResult {
+        TrainSearchResult(journeyId: "j\(number)\(origin)", category: category, number: number, line: nil,
+                          product: .highSpeed, origin: origin, destination: destination,
+                          originEVA: originEVA, destinationEVA: destinationEVA)
+    }
+
+    /// A run found by number is matched to the route by its stops: boarded at the first route station
+    /// it leaves from, and whether it goes on to the destination.
+    @Test func fitsNumberedRunToTheRoute() {
+        let stops = [
+            TrainSearchStop(evaNumber: "8002549", name: "Hamburg Hbf", plannedDeparture: base),
+            TrainSearchStop(evaNumber: koeln.evaNumber!, name: "Köln Hbf", plannedDeparture: base.addingTimeInterval(4 * 3600)),
+            TrainSearchStop(evaNumber: "8000096", name: "Bonn Hbf", plannedDeparture: base.addingTimeInterval(5 * 3600)),
+            TrainSearchStop(evaNumber: "8100002", name: "Wien Hbf", plannedDeparture: nil),
+        ]
+        let bonn = station("8000096", "Bonn Hbf", 50.732, 7.097)
+        let fit = TrainCandidateFinder.fit(stops: stops, stations: [hamm, koeln], target: bonn, countries: ["DE"])
+        #expect(fit.boarding?.isSamePlace(as: koeln) == true)
+        #expect(fit.departure == base.addingTimeInterval(4 * 3600))
+        #expect(fit.reachesTarget)
+        #expect(fit.inCountries)
+
+        let away = TrainCandidateFinder.fit(stops: stops, stations: [hamm], target: berlin, countries: ["CH"])
+        #expect(away.boarding == nil)
+        #expect(!away.reachesTarget)
+        #expect(!away.inCountries)
+    }
+
+    /// The countries from Settings → Zugschnellsuche: a run ending there shows at once, a regional
+    /// train elsewhere never, a long-distance train elsewhere once its stops show it passes through.
+    @Test func filtersNumberedRunsByCountry() {
+        let german = numbered(91, "ICE", from: "Hamburg-Altona", to: "Wien Hbf", originEVA: "8002553", destinationEVA: "8103000")
+        var swiss = numbered(91, "IR", from: "Basel SBB", to: "Zürich HB", originEVA: "8500010", destinationEVA: "8503000")
+        swiss.product = .regional
+        let through = numbered(91, "EC", from: "Salzburg Hbf", to: "Innsbruck Hbf", originEVA: "8100002", destinationEVA: "8100108")
+        #expect(TrainCandidateFinder.countryStatus(german, countries: ["DE"]) == true)
+        #expect(TrainCandidateFinder.countryStatus(swiss, countries: ["DE"]) == false)
+        #expect(TrainCandidateFinder.countryStatus(through, countries: ["DE"]) == nil)
+        #expect(TrainCandidateFinder.countryStatus(swiss, countries: []) == true)
+    }
+
+    @Test func ranksNumberedRunsByRoute() {
+        let a = NumberedTrain(result: numbered(91, "ICE", from: "A", to: "B"),
+                              fit: RouteFit(boarding: nil, departure: nil, reachesTarget: false, inCountries: true))
+        let b = NumberedTrain(result: numbered(91, "RE", from: "C", to: "D"),
+                              fit: RouteFit(boarding: koeln, departure: base, reachesTarget: false, inCountries: true))
+        let c = NumberedTrain(result: numbered(91, "IC", from: "E", to: "F"),
+                              fit: RouteFit(boarding: koeln, departure: base.addingTimeInterval(3600), reachesTarget: true, inCountries: true))
+        let unknown = NumberedTrain(result: numbered(91, "S", from: "G", to: "H"))
+        let ranked = TrainCandidateFinder.ranked([unknown, a, b, c], date: base)
+        #expect(ranked.map(\.result.category) == ["IC", "RE", "S", "ICE"])
+    }
+
+    /// With a number typed, the boards only add trains that aren't runs of it (those come from the list).
+    @Test func boardExtrasLeaveOutTheNumberedRuns() {
+        let ice = trip("ice91", "ICE 91", [stop(koeln, arr: nil, dep: 10), stop(berlin, arr: 250, dep: nil)])
+        let other = trip("ice910", "ICE 910", [stop(koeln, arr: nil, dep: 20), stop(berlin, arr: 260, dep: nil)])
+        let candidates = [ice, other].map { TrainCandidate(trip: $0, boardingIndex: 0, exitIndex: 1, isExact: false) }
+        #expect(TrainCandidateFinder.boardExtras(candidates, besides: 91).map(\.trip.id) == ["ice910"])
+        // A line's number isn't a run number: RE 3 (3300) stays when "3" was searched by number.
+        let re = regional("re3300", line: "RE 3", run: "3300", [stop(koeln, arr: nil, dep: 15), stop(hamm, arr: 90, dep: nil)])
+        let regionalCandidate = TrainCandidate(trip: re, boardingIndex: 0, exitIndex: nil, isExact: true)
+        #expect(TrainCandidateFinder.boardExtras([regionalCandidate], besides: 3).count == 1)
+        #expect(TrainCandidateFinder.boardExtras([regionalCandidate], besides: 3300).isEmpty)
     }
 
     /// A board that failed to load isn't kept as empty: the next letter typed asks again and finds the train.
