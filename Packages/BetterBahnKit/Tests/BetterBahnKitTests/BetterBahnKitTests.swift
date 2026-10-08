@@ -2660,6 +2660,19 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         #expect(!(try Self.decodedDetails()).requiresReservation)
     }
 
+    /// Real Nightjet NJ 471 (2026-10-08) carries RP too, but also "FR" ("Fahrradmitnahme reservierungspflichtig"), which only
+    /// concerns bikes: the key decides, never the wording. A train with just the bike attribute is not reservation-only.
+    @Test func bikeReservationIsNotATrainReservationObligation() throws {
+        func details(_ attributes: String) throws -> BahnDeClient.JourneyDetails {
+            try JSONDecoding.decoder.decode(BahnDeClient.JourneyDetails.self, from: Data(#"{"halte": [], "zugattribute": [\#(attributes)]}"#.utf8))
+        }
+        let bike = #"{"kategorie": "FAHRRADMITNAHME", "key": "FR", "value": "Fahrradmitnahme reservierungspflichtig", "teilstreckenHinweis": "(Basel SBB - Zürich HB)"}"#
+        let sleeper = #"{"kategorie": "SCHLAFWAGEN", "key": "SW", "value": "Schlafwagen"}"#
+        let reservation = #"{"kategorie": "INFORMATION", "key": "RP", "value": "Reservierungspflicht"}"#
+        #expect(try details([bike, sleeper, reservation].joined(separator: ",")).requiresReservation)
+        #expect(try !details([bike, sleeper].joined(separator: ",")).requiresReservation)
+    }
+
     static func decodedDetails() throws -> BahnDeClient.JourneyDetails {
         try JSONDecoding.decoder.decode(BahnDeClient.JourneyDetails.self, from: Data(details.utf8))
     }
@@ -2670,6 +2683,8 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         #expect(BahnDeClient.journeyReference(for: night) == nil)
         #expect(BahnDeClient.lookupReference(for: night)?.number == "301")
         #expect(BahnDeClient.lookupReference(for: night)?.isRegional == false)
+        // Nightjet (NJ 471) may come in as a train of no particular class.
+        #expect(BahnDeClient.lookupReference(for: Line(name: "NJ 471", number: "471", product: .other, operatorName: "ÖBB"))?.category == "NJ")
         #expect(BahnDeClient.lookupReference(for: Line(name: "ICE 693", number: "693", product: .highSpeed, operatorName: nil))?.category == "ICE")
         // Regional and local trains without a run number, and buses, stay out.
         #expect(BahnDeClient.lookupReference(for: Line(name: "RE3", number: "3", product: .regionalExpress, operatorName: nil)) == nil)

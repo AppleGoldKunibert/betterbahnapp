@@ -169,10 +169,10 @@ extension BahnDeClient {
     }
 
     /// `journeyReference`, plus long-distance trains of other railways (SJ's "D 301", Nightjet, TGV …) by their
-    /// number, which bahn.de lists on its board too but whose Zusatzhalte and platforms we never ask for.
+    /// number (also with an unclassified product, which is how Nightjet may arrive), which bahn.de lists on its board too but whose Zusatzhalte and platforms we never ask for.
     static func lookupReference(for line: Line?) -> (category: String, number: String, isRegional: Bool)? {
         if let ref = journeyReference(for: line) { return ref }
-        guard let line, [.highSpeed, .longDistance].contains(line.product), let number = line.number,
+        guard let line, [.highSpeed, .longDistance, .other].contains(line.product), let number = line.number,
               let category = line.name.split(separator: " ").first.map({ String($0).uppercased() }) else { return nil }
         return (category, number, false)
     }
