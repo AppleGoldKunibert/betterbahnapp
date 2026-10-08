@@ -102,6 +102,8 @@ final class AppModel {
 
     init() {
         provider = CombinedProvider(vagonweb: VagonwebClient(browserLoader: { url in try await VagonwebBrowser.shared.html(at: url) }))
+        // When bahn.de blocks our Worker, the phone asks bahn.de itself in a hidden web view.
+        Task { await BahnDeBrowserFallback.shared.use { url in try await BahnDeBrowser.shared.fetch(url) } }
         traewelling = TraewellingClient(config: TraewellingConfig())
         // Older versions stored everything in UserDefaults; move the raw bytes into files once
         // (re-encoding everything on every launch is what used to slow the start down).

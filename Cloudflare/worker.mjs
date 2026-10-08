@@ -59,7 +59,7 @@ ${PAGE_STYLE}
 <body>
 <main>
 <h1>Datenschutz</h1>
-<p class="muted">BetterBahn für iPhone · Stand: 7. Oktober 2026</p>
+<p class="muted">BetterBahn für iPhone · Stand: 8. Oktober 2026</p>
 
 <p>BetterBahn ist ein privates Projekt und steht in keiner Verbindung zur Deutschen Bahn AG. Die App hat
 keine Benutzerkonten, keine Werbung, kein Tracking und keine Analyse-Werkzeuge. Was du in der App speicherst,
@@ -89,7 +89,11 @@ aber nicht mit Daten über dich:</p>
 <li><a href="https://www.vagonweb.cz">vagonweb.cz</a> (geplante Wagenreihungen und Zugtypen), <a href="https://bahn.expert">bahn.expert</a> (Zugtypen) und <a href="https://bahn.jetzt">bahn.jetzt</a> (Zugpositionen auf der Karte)</li>
 <li><a href="https://www.openrailwaymap.org">OpenRailwayMap</a> (Kartenkacheln mit Daten von <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>) und Apple Karten</li>
 <li>bahn.de und die Timetables-Schnittstelle der Deutschen Bahn – diese Anfragen laufen über den Server von
-BetterBahn (siehe unten), daher sieht die Deutsche Bahn nicht deine IP-Adresse, sondern die des Servers.</li>
+BetterBahn (siehe unten), daher sieht die Deutsche Bahn nicht deine IP-Adresse, sondern die des Servers.
+Weist bahn.de den Server gerade ab, fragt die App bahn.de für eine Weile direkt von deinem Gerät aus, in einer
+unsichtbaren Webansicht: Dann sieht die Deutsche Bahn deine IP-Adresse, und bahn.de kann Cookies auf deinem Gerät
+speichern, wie beim Besuch von bahn.de im Browser. Es gelten die
+<a href="https://www.bahn.de/datenschutz">Datenschutzhinweise der Deutschen Bahn</a>.</li>
 </ul>
 
 <h2>Server von BetterBahn</h2>
