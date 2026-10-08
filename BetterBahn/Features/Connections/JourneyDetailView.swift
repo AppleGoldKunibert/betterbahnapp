@@ -917,7 +917,7 @@ struct AlternativeRow: View {
     let current: Leg
     /// The planned train after `current`, flagged when `leg` arrives too late for it.
     var nextLeg: Leg?
-    /// How it gets there ("Direkt"), next to the train's name.
+    /// How it gets there ("Direkt"), under the times.
     var note: String?
     var isApplying = false
 
@@ -927,15 +927,13 @@ struct AlternativeRow: View {
         Card(padding: 14) {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        LineBadge(line: leg.line)
-                        if let note { RouteNote(text: note, systemImage: "arrow.right") }
-                    }
+                    LineBadge(line: leg.line)
                     HStack(spacing: 8) {
                         TimeStack(time: leg.departure, font: .headline)
                         Image(systemName: "arrow.right").font(.caption.weight(.bold)).foregroundStyle(.tertiary)
                         TimeStack(time: leg.arrival, font: .headline)
                     }
+                    if let note { RouteNote(text: note, systemImage: "arrow.right") }
                     if let nextLeg, !leg.catches(nextLeg) {
                         MissedConnectionHint(next: nextLeg)
                     }
@@ -969,8 +967,6 @@ struct RouteNote: View {
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
             .lineLimit(1)
-            // Next to a long train name the row would otherwise squeeze it into one letter per line.
-            .fixedSize()
     }
 }
 
