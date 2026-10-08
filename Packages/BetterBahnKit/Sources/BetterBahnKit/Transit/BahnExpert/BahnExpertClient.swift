@@ -184,9 +184,10 @@ public struct BahnExpertClient: Sendable {
         // run as the requested train so the other half's series doesn't leak in.
         let own = sequence.groups.filter { $0.journeyNumber == journeyNumber }
         let groups = (own.isEmpty ? sequence.groups : own).map { group in
-            TrainTypeLookup.Group(
-                seriesName: Self.seriesName(of: group, category: category), baureihe: group.baureihe?.baureihe,
-                unitNumber: sequenceResponse.isRealtime ? group.name.flatMap(BahnDeClient.unitNumber(from:)) : nil,
+            let seriesName = Self.seriesName(of: group, category: category)
+            return TrainTypeLookup.Group(
+                seriesName: seriesName, baureihe: group.baureihe?.baureihe,
+                unitNumber: sequenceResponse.isRealtime ? Self.unitNumber(of: group, seriesName: seriesName, category: category) : nil,
                 origin: group.originName, destination: group.destinationName, coachCount: group.coaches?.count ?? 0)
         }
         return TrainTypeLookup(category: category, number: number, date: date, administration: administration,
@@ -208,6 +209,16 @@ public struct BahnExpertClient: Sendable {
         if let name = group.baureihe?.name { return name }
         if category == "IC" || category == "EC", group.name?.hasPrefix("ICD") == true { return "IC 2 Twindexx" }
         return nil
+    }
+
+    /// The Tz from the group name ("ICE9465"). A loco-hauled IC 1 has a coach-set number there instead
+    /// ("IC450007", as in bahn.de's `isIC1`). bahn.expert has no vehicle numbers to tell it apart, and no
+    /// Baureihe for IC 2 sets either, so only an IC without any series and a number longer than any Tz counts.
+    static func unitNumber(of group: SequenceResponse.Sequence.Group, seriesName: String?, category: String) -> String? {
+        guard let number = group.name.flatMap(BahnDeClient.unitNumber(from:)) else { return nil }
+        let isIC1 = (category == "IC" || category == "EC") && group.baureihe?.baureihe == nil
+            && (seriesName.map(TrainTypeLookup.family(of:)).map { $0 == "IC 1" } ?? true) && number.count > 4
+        return isIC1 ? nil : number
     }
 
     /// Rejects malformed dates and impossible ones like 2026-02-31.

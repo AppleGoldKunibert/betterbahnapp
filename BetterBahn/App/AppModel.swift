@@ -926,12 +926,15 @@ final class AppModel {
         }
     }
 
-    /// The custom emojis of the Mastodon instance connected to the Träwelling account, or of
+    /// The logged-in Träwelling account, nil when logged out or it can't be loaded.
+    func traewellingUser() async -> TraewellingUser? {
+        guard await traewelling.isLoggedIn else { return nil }
+        return try? await traewelling.currentUser()
+    }
+
+    /// The custom emojis of the Mastodon instance connected to the Träwelling account `user`, or of
     /// zug.network without one. Empty if neither can be loaded; emojis are only a nicety.
-    func checkinEmojis() async -> [CustomEmoji] {
-        // Asked each time a check-in opens, so a newly connected Mastodon account counts at once.
-        var user: TraewellingUser?
-        if await traewelling.isLoggedIn { user = try? await traewelling.currentUser() }
+    func checkinEmojis(for user: TraewellingUser?) async -> [CustomEmoji] {
         let instance = CustomEmojiText.instance(fromMastodonURL: user?.mastodonUrl) ?? CustomEmojiText.defaultInstance
         return (try? await customEmojis.emojis(instance: instance)) ?? []
     }
@@ -1031,8 +1034,14 @@ final class AppModel {
             for change in newPlatforms {
                 await ConnectionNotifier.notify(change, journey: refreshed)
             }
+            // DB's dispatchers decided whether a connecting train waits (from bahn.expert).
+            let newDispositions = await (provider.bahnExpert?.dispositions(in: refreshed) ?? [])
+                .filter { $0.notificationID.map { !known.contains($0) } ?? false }
+            for update in newDispositions {
+                await ConnectionNotifier.notify(update, journey: refreshed)
+            }
             updated.notifiedIssues = Array(known.union(newIssues.map(\.id)).union(newReasons.map(\.id))
-                .union(newPlatforms.map(\.id)))
+                .union(newPlatforms.map(\.id)).union(newDispositions.compactMap(\.notificationID)))
         }
         if updated != savedJourneys[index] { savedJourneys[index] = updated }
     }
@@ -1569,6 +1578,17 @@ enum ConnectionNotifier {
         content.sound = .default
         content.interruptionLevel = change.isTight ? .timeSensitive : .active
         let request = UNNotificationRequest(identifier: change.id + journey.id, content: content, trigger: nil)
+        try? await UNUserNotificationCenter.current().add(request)
+    }
+
+    static func notify(_ update: TransferDispositionUpdate, journey: Journey) async {
+        guard let disposition = update.disposition, let id = update.notificationID else { return }
+        let content = UNMutableNotificationContent()
+        content.title = disposition.title
+        content.body = disposition.message(arriving: update.arriving, departing: update.departing)
+        content.sound = disposition == .notWaiting ? .defaultCritical : .default
+        content.interruptionLevel = .timeSensitive
+        let request = UNNotificationRequest(identifier: id + journey.id, content: content, trigger: nil)
         try? await UNUserNotificationCenter.current().add(request)
     }
 

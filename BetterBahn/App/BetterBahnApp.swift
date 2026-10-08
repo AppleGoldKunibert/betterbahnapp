@@ -86,7 +86,9 @@ struct RootView: View {
             if model.showsTrainSearch {
                 TrainSearchOverlay()
                     .tint(.brand)
-                    .transition(.opacity)
+                    // Appears at once, so the dimming doesn't fade from light to dark gray (#229); the bar
+                    // fades in itself. Closing still fades out.
+                    .transition(.asymmetric(insertion: .identity, removal: .opacity))
             }
         }
         .animation(.snappy, value: model.showsTrainSearch)

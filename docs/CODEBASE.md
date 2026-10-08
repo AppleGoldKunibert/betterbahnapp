@@ -99,7 +99,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 - `Features/Map/` – `TravelMapView` heatmap of past trips (no banner when empty) (`TravelMapHeatmap`, `RailwayTileOverlay`: OpenRailwayMap tiles, 512 px, cached on disk 7 days, 10 min pause after 403/429, #171;
   a ride both saved and checked in on Träwelling is drawn from the check-in, saved journeys only add unchecked legs – `RideMatch.uncovered`),
   `LiveTrainMapView` (one train's live position on its route, opened from `LiveTrainIconTile`, the train icon on
-  legs and trips bahn.jetzt has). `JourneyMapView` shows the journey's running trains too.
+  legs and trips bahn.jetzt has; draws the track from `AppModel.geometry(for:)`, never straight lines between stops). `JourneyMapView` shows the journey's running trains too.
 - `Features/Tickets/` – `TicketLookupView` (native form; bahn.de's "Auftragssuche" runs in a hidden SwiftUI `WebView`,
   `DBOrderPage.fillScript` types the input into bahn.de's form, `fetchScript` then fetches order + ticket PDFs
   inside the page; the page is only shown if bahn.de asks for more, e.g. a captcha),
@@ -108,7 +108,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `SeatReservationViews` (`ReservationRow` in `LegCard` above "Mehr", read-only). Reservations come from the journey's
   tickets (`AppModel.reservations(for:)`) and only show on the leg whose train matches.
 - `Features/Trips/TripsView.swift` – upcoming/past saved journeys, `SaveJourneyButton`.
-- `Features/Traewelling/` – `CheckinSheet`, `TraewellingLoginButton`, `CustomEmojiViews` (`EmojiMessageField`: text field
+- `Features/Traewelling/` – `CheckinSheet` (`MenuPickerRow`: the Sichtbarkeit/Reiseart menus of both check-in sheets, constant width so the closing menu doesn't jump; the keyboard goes away as soon as the check-in/save is tapped and only comes back when Träwelling rejects the input, `TraewellingError.isInvalidInput`; when Träwelling already has the user on another train at that time (`.collision`, e.g. the previous train arrived early) it offers "Trotzdem einchecken", `CheckinDraft.force`, no points), `TraewellingLoginButton`, `CustomEmojiViews` (`EmojiMessageField`: text field
   with emoji suggestions + preview, `EmojiText`), `CheckinDetailSheet` ("Check-in ansehen" in a leg's "Mehr" once the leg was
   checked in from the app, `AppModel.checkinStatusIDs`; shows and edits text, visibility, trip type and tags, deletes the
   check-in, lists the "Mitreisende" on the same train (#184)), `CheckoutPrompt` (removing a saved journey with such check-ins asks: check out at the last stop reached
@@ -185,6 +185,12 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   has no coach sequence and vagonweb has none either: it has DB's planned formation (`DB-plan`) for days
   ahead; bahn.de is only asked for departures within `BahnDeClient.formationLookahead` (12 h). Needs a
   `Referer` and a non-curl User-Agent (else an empty 206).
+  Also tells whether a connecting train waits (`TransferDisposition`, "Anschluss wartet (nicht)" in `TransferRow`):
+  `disposition(from:to:)` finds the arriving train (`journey/find`, no administration so ODEG etc. match), its
+  arrival ID at the transfer station (`journey/detailsByJourneyId`, by EVA or planned time) and the departing train
+  in `connections/connections` (by run number and planned time) and reads DB's `dispositionStatus`
+  (`WAITING`/`NOT_WAITING`). `dispositions(in:now:)` asks for transfers from 15 min ago up to 3 h ahead, for
+  `JourneyDetailView` and for saved journeys' refresh, which notifies once per decision (`notificationID`).
 - `Transit/TrainNumberSearch.swift` – train search by number (#183): bahn.expert's `journey/find` lists the runs with
   that number on a day (`TrainNumberQuery` reads "ICE 123"/"123"; `ranked` keeps the `TrainSearchFilter`'s kinds, the typed
   category or the same kind of train; countries from the end stops' IFOPT/EVA, `TrainSearchCountry`; trains that may cross
@@ -260,7 +266,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 - Logic: `JourneyReplanner` (`continuations` come `fastestFirst`: by live arrival, without routes another one beats
   leaving no earlier, arriving no later with no more changes), `ConnectionCheck` (`ConnectionIssue`, `JourneyRefresher`), `PlatformChange`
   (platform changes since the last refresh → push, ignores sectors/bus bays), `TrainRoutePlanner`,
-  `ViaRoutePlanner` (vias without minimum stay keep a through train as one leg), `TrainPicker` (also
+  `ViaRoutePlanner` (vias without minimum stay keep a through train as one leg), `TrainPicker` ("Anderer Zug": `replacing` keeps
+  the rest of the plan and reports a `MissedConnection` the user may ignore or pick another train for, #226; `reroutes`
+  offers connections straight to the next via/destination that skip the transfer point, "Andere Routenführung"; also
   `journeysIgnoringBoardingRules`: direct trains with "Nur Ein-/Ausstieg" for the expert option of that name,
   and `journeysContinuingFromRestrictedTrains`: "Nur Ausstieg" trains that end short of the destination plus an onward
   connection, e.g. ICE 204 Harburg → Hamburg Hbf → RJ; both added to search results in `JourneyResultsView`), `StationCalls` (hides routes that change onto a train also calling at

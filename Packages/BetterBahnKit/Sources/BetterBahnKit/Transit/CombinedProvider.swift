@@ -246,6 +246,25 @@ public final class CombinedProvider: TransitProvider {
         let entries = try await withFallback(deadline: .seconds(8),
                                { try await $0.board(kind, at: station, date: date, duration: duration, products: products) },
                                { try await $0.board(kind, at: station, date: date, duration: duration, products: products) })
+        return await correctingBoard(entries, at: station)
+    }
+
+    /// Departures over a long window to find one train in (`TrainRoutePlanner`): Transitous' board without
+    /// loading every long-distance train's full run for its destination (see `TransitousProvider.board`'s
+    /// `correctingEnds`), which made such a lookup at a hub run past the deadline ("Keine Antwort").
+    public func departuresForTrainLookup(at station: Station, date: Date, duration: Int) async throws -> [BoardEntry] {
+        let all = Set(Product.allCases)
+        let entries = try await withFallback(deadline: .seconds(15), { provider in
+            if let transitous = provider as? TransitousProvider {
+                return try await transitous.board(.departures, at: station, date: date, duration: duration,
+                                                  products: all, correctingEnds: false)
+            }
+            return try await provider.board(.departures, at: station, date: date, duration: duration, products: all)
+        }, { try await $0.board(.departures, at: station, date: date, duration: duration, products: all) })
+        return await correctingBoard(entries, at: station)
+    }
+
+    private func correctingBoard(_ entries: [BoardEntry], at station: Station) async -> [BoardEntry] {
         let filtered = entries.filter { !Self.isFlixBus($0.line) }
         // bahn.de's own names beat Transitous' generic ones for cross-border trains, and DB's live
         // times beat DELFI's forecasts (see `BahnDeClient.correctingFromBoard`); a slow bahn.de
