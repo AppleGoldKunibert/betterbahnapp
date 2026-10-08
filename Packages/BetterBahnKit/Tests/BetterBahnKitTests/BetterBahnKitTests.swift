@@ -2803,6 +2803,14 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(TrainFormation(units: [.init(model: "FLIRT", number: nil)]).drawing == nil)
     }
 
+    /// When bahn.de answers without the train's coaches, the Wagenreihung's note says what the answer had.
+    @Test func sequenceResponseSummary() throws {
+        let json = #"{"groups":[{"name":"IC1","transport":{"category":"RB","number":5410},"vehicles":[{},{}]}]}"#
+        let response = try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data(json.utf8))
+        #expect(BahnDeClient.summary(of: response) == "1 Gruppen, 2 Fahrzeuge, Züge RB 5410")
+        #expect(BahnDeClient.summary(of: BahnDeClient.SequenceResponse()) == "0 Gruppen, 0 Fahrzeuge, Züge keine")
+    }
+
     /// The Wagenreihung unfolds by itself from 30 minutes before the departure until 15 minutes after it.
     @Test func coachSequenceUnfoldsAroundDeparture() {
         let departure = Date(timeIntervalSince1970: 1_800_000_000)

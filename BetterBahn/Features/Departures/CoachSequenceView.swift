@@ -116,6 +116,8 @@ struct CoachSequencePanel: View {
     @State private var blocked = false
     /// What bahn.de's sequence has differently from vagonweb's plan (`CoachSequence.deviations(fromPlan:)`).
     @State private var deviations: [String] = []
+    /// Why bahn.de had no Wagenreihung when vagonweb's plan is shown instead (`BahnDeClient.coachSequenceNote(for:)`).
+    @State private var bahnDeNote: String?
 
     private var station: Station { request.station }
 
@@ -156,6 +158,9 @@ struct CoachSequencePanel: View {
                 }
                 loading = false
             }
+            if sequence?.source != .bahnDe {
+                bahnDeNote = await model.provider.bahnDe?.coachSequenceNote(for: request)
+            }
             // bahn.de flags nearly every train as differing, so compare with the plan here.
             if let sequence, sequence.source == .bahnDe, !sequence.coaches.isEmpty,
                let plan = await model.plannedCoachSequence(for: request, direction: false) {
@@ -171,6 +176,12 @@ struct CoachSequencePanel: View {
                 .foregroundStyle(.secondary)
             if case .vagonweb(let from, let until) = sequence.source {
                 plannedNote(sequence, from: from, until: until)
+            }
+            if let bahnDeNote {
+                Text("bahn.de: \(bahnDeNote)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .textSelection(.enabled)
             }
             if !deviations.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {

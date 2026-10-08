@@ -315,26 +315,66 @@ public struct BahnDeClient: Sendable {
     /// - Returns: nil if bahn.de has no coach sequence for it (yet).
     /// - Throws: `TransitError.rateLimited` while bahn.de is blocking requests.
     public func coachSequence(_ request: FormationRequest) async throws -> CoachSequence? {
-        let key = "\(request.category) \(([request.number] + request.coupledNumbers).joined(separator: "+"))|\(request.station.id)|\(request.plannedDeparture.timeIntervalSince1970)"
         guard usesSharedCaches else { return try await fetchCoachSequence(request) }
-        return try await Self.sequenceCache.value(for: key, maxAge: Self.formationMaxAge) {
+        return try await Self.sequenceCache.value(for: Self.sequenceKey(request), maxAge: Self.formationMaxAge) {
             try await self.fetchCoachSequence(request)
         }
     }
 
+    /// Why bahn.de had no coach sequence for `request` the last time it was asked (no EVA number, 404,
+    /// an answer without the train's coaches, an error), with what was asked; nil when it had one or
+    /// wasn't asked. Shown when the Wagenreihung falls back to vagonweb's plan, since bahn.de's answer
+    /// can only be seen from inside the app.
+    public func coachSequenceNote(for request: FormationRequest) async -> String? {
+        await Self.sequenceNotes.note(for: Self.sequenceKey(request))
+    }
+
+    static func sequenceKey(_ request: FormationRequest) -> String {
+        "\(request.category) \(([request.number] + request.coupledNumbers).joined(separator: "+"))|\(request.station.id)|\(request.plannedDeparture.timeIntervalSince1970)"
+    }
+
     private static let sequenceCache = ExpiringCache<CoachSequence?>()
+    private static let sequenceNotes = SequenceNotes()
     /// A formation rarely changes once published; 10 minutes still catches a late swap.
     static let formationMaxAge: TimeInterval = 10 * 60
 
     private func fetchCoachSequence(_ request: FormationRequest) async throws -> CoachSequence? {
-        guard let eva = try await evaNumber(for: request.station) else { return nil }
-        for candidate in [eva, Self.otherLevel(of: eva)].compactMap(\.self) {
-            guard let response = try await sequenceResponse(request, eva: candidate) else { continue }
-            let sequence = Self.coachSequence(from: response, category: request.category, number: Int(request.number),
-                                              coupledNumbers: Set(request.coupledNumbers.compactMap { Int($0) }))
-            return sequence.coaches.isEmpty && sequence.formation.units.isEmpty ? nil : sequence
+        let key = Self.sequenceKey(request)
+        let asked = "\(request.category) \(request.number), \(Self.utcTimestamp(request.plannedDeparture))"
+        do {
+            guard let eva = try await evaNumber(for: request.station) else {
+                await Self.sequenceNotes.set("keine EVA-Nummer für \(request.station.name) · \(asked)", for: key)
+                return nil
+            }
+            let candidates = [eva, Self.otherLevel(of: eva)].compactMap(\.self)
+            for candidate in candidates {
+                guard let response = try await sequenceResponse(request, eva: candidate) else { continue }
+                let sequence = Self.coachSequence(from: response, category: request.category, number: Int(request.number),
+                                                  coupledNumbers: Set(request.coupledNumbers.compactMap { Int($0) }))
+                guard !sequence.coaches.isEmpty || !sequence.formation.units.isEmpty else {
+                    await Self.sequenceNotes.set("Antwort ohne Wagen an EVA \(candidate): \(Self.summary(of: response)) · \(asked)", for: key)
+                    return nil
+                }
+                await Self.sequenceNotes.set(nil, for: key)
+                return sequence
+            }
+            await Self.sequenceNotes.set("keine Wagenreihung an EVA \(candidates.joined(separator: " / ")) (404) · \(asked)", for: key)
+            return nil
+        } catch {
+            let reason = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+            await Self.sequenceNotes.set("\(reason) · \(asked)", for: key)
+            throw error
         }
-        return nil
+    }
+
+    /// "2 Gruppen, Züge IC 1189, RB 5410": what an answer without usable coaches had.
+    static func summary(of response: SequenceResponse) -> String {
+        let groups = response.groups ?? []
+        let trains = Set(groups.compactMap { group in
+            group.transport.map { "\($0.category ?? "?") \($0.number.map(String.init) ?? "?")" }
+        }).sorted()
+        let vehicles = groups.reduce(0) { $0 + ($1.vehicles?.count ?? 0) }
+        return "\(groups.count) Gruppen, \(vehicles) Fahrzeuge, Züge \(trains.isEmpty ? "keine" : trains.joined(separator: ", "))"
     }
 
     /// nil when bahn.de has no coach sequence for the train at `eva` (404).
@@ -581,6 +621,15 @@ extension TransitError {
 
 /// Values fetched per key, kept for `maxAge`; concurrent requests for the same key share one fetch.
 /// Errors are not cached, so a failed lookup is tried again next time.
+/// Why bahn.de's coach sequence was missing, per request (`BahnDeClient.coachSequenceNote(for:)`).
+actor SequenceNotes {
+    private var notes: [String: String] = [:]
+
+    func note(for key: String) -> String? { notes[key] }
+
+    func set(_ note: String?, for key: String) { notes[key] = note }
+}
+
 actor ExpiringCache<Value: Sendable> {
     struct Entry { let date: Date; let value: Value }
     private var entries: [String: Entry] = [:]
