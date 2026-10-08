@@ -56,7 +56,7 @@ struct CoachSequenceDisclosure: View {
                         }
                         if open {
                             CoachSequencePanel(request: shown, sequence: sequence)
-                                .transition(.opacity.combined(with: .move(edge: .top)))
+                                .transition(.coachSequenceFold)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -73,6 +73,13 @@ struct CoachSequenceDisclosure: View {
             }
         }
     }
+}
+
+extension AnyTransition {
+    /// Folding the Wagenreihung in or out. It only fades: sliding the panel up by its own height (`.move`)
+    /// took the train out of its frame while the rest of the screen moved up under it, so it was drawn
+    /// over the text above (#227).
+    static var coachSequenceFold: AnyTransition { .opacity }
 }
 
 /// "Wagenreihung ⌄", styled like a card's "Mehr".

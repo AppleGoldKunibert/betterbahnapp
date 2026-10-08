@@ -397,7 +397,7 @@ struct TrainSearchResultView: View {
                         Card {
                             CoachSequencePanel(request: request, sequence: sequence)
                         }
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                        .transition(.coachSequenceFold)
                     }
                 }
             }
