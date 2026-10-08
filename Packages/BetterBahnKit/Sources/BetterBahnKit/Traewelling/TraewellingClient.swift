@@ -32,6 +32,12 @@ public struct TraewellingUser: Decodable, Sendable {
     public var displayName: String
     public var username: String
     public var points: Int?
+    /// Whether the user has Träwelling's points system switched on (off by default); without it
+    /// check-ins earn 0 points, which the app then doesn't show.
+    public var pointsEnabled: Bool?
+    /// The connected Mastodon profile (e.g. "https://zug.network/@name"), whose instance's
+    /// custom emojis the check-in text offers.
+    public var mastodonUrl: String?
 }
 
 public struct TraewellingStation: Decodable, Sendable, Hashable {
@@ -39,6 +45,31 @@ public struct TraewellingStation: Decodable, Sendable, Hashable {
     public var name: String
     public var latitude: Double?
     public var longitude: Double?
+    /// DB EVA number, if Träwelling has one (sent as a number, tolerated as a string).
+    public var ibnr: String?
+
+    public init(id: Int, name: String, latitude: Double? = nil, longitude: Double? = nil, ibnr: String? = nil) {
+        self.id = id
+        self.name = name
+        self.latitude = latitude
+        self.longitude = longitude
+        self.ibnr = ibnr
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, name, latitude, longitude, ibnr }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(Int.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        latitude = try container.decodeIfPresent(Double.self, forKey: .latitude)
+        longitude = try container.decodeIfPresent(Double.self, forKey: .longitude)
+        if let number = try? container.decodeIfPresent(Int.self, forKey: .ibnr) {
+            ibnr = String(number)
+        } else {
+            ibnr = try? container.decodeIfPresent(String.self, forKey: .ibnr)
+        }
+    }
 }
 
 public struct TraewellingDeparture: Decodable, Sendable {
@@ -73,14 +104,19 @@ public struct CheckinDraft: Sendable, Hashable {
     public var visibility: TraewellingVisibility
     public var business: TraewellingBusiness
     public var toot: Bool
+    /// Checks in even though Träwelling has the user on another train at that time (`.collision`),
+    /// e.g. when the previous train arrived early and Träwelling still has its scheduled arrival.
+    /// Träwelling gives no points for such a check-in.
+    public var force: Bool
 
     public init(leg: Leg, message: String = "", visibility: TraewellingVisibility = .publicVisible,
-                business: TraewellingBusiness = .privateTrip, toot: Bool = false) {
+                business: TraewellingBusiness = .privateTrip, toot: Bool = false, force: Bool = false) {
         self.leg = leg
         self.message = message
         self.visibility = visibility
         self.business = business
         self.toot = toot
+        self.force = force
     }
 }
 
@@ -88,6 +124,20 @@ public struct StatusTag: Codable, Sendable, Hashable {
     public var key: String
     public var value: String
     public var visibility: TraewellingVisibility?
+
+    public init(key: String, value: String, visibility: TraewellingVisibility?) {
+        self.key = key
+        self.value = value
+        self.visibility = visibility
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        key = try container.decode(String.self, forKey: .key)
+        value = try container.decode(String.self, forKey: .value)
+        // A visibility this app doesn't know must not hide the tag.
+        visibility = try? container.decodeIfPresent(TraewellingVisibility.self, forKey: .visibility)
+    }
 }
 
 public struct CheckinResult: Sendable {
@@ -123,6 +173,12 @@ public enum TraewellingError: Error, LocalizedError, Equatable {
         case .collision: "Du bist zu dieser Zeit schon eingecheckt."
         case .api(let status, let message): message ?? "Träwelling-Fehler (\(status))"
         }
+    }
+
+    /// Träwelling rejected what was typed in (its validation answers 422, e.g. a text that's too long),
+    /// so the form brings the keyboard back to fix it. Other errors leave it hidden.
+    public var isInvalidInput: Bool {
+        if case .api(422, _) = self { true } else { false }
     }
 }
 
@@ -338,7 +394,7 @@ public actor TraewellingClient {
             // The user's message/toot belong on the first part only, so a split train doesn't post
             // the same note twice.
             let segmentDraft = result == nil ? draft
-                : CheckinDraft(leg: draft.leg, visibility: draft.visibility, business: draft.business)
+                : CheckinDraft(leg: draft.leg, visibility: draft.visibility, business: draft.business, force: draft.force)
             let part = try await sendCheckin(segmentDraft, tripId: segment.tripId, lineName: segment.lineName,
                                              startID: segment.startID, destinationID: segment.destinationID,
                                              departure: segment.departure, arrival: segment.arrival)
@@ -490,13 +546,15 @@ public actor TraewellingClient {
         hopLeg.stopovers = []
         // The user's message/toot belong on the main checkin below, not this short bridging hop, so
         // boarding at a Zusatzhalt doesn't post the same note to Träwelling twice.
-        let hopResult = try await checkinManualTrip(CheckinDraft(leg: hopLeg, visibility: draft.visibility, business: draft.business))
+        let hopResult = try await checkinManualTrip(CheckinDraft(leg: hopLeg, visibility: draft.visibility,
+                                                                 business: draft.business, force: draft.force))
 
         var mainLeg = leg
         mainLeg.origin = nextStation
         mainLeg.departure = nextRegular.departure ?? arrival
         mainLeg.departurePlatform = nextRegular.departurePlatform
-        let mainDraft = CheckinDraft(leg: mainLeg, message: draft.message, visibility: draft.visibility, business: draft.business, toot: draft.toot)
+        var mainDraft = draft
+        mainDraft.leg = mainLeg
 
         var result = try await checkin(mainDraft, allowManualTrip: false)
         result.points += hopResult.points
@@ -551,6 +609,7 @@ public actor TraewellingClient {
             "toot": draft.toot,
         ]
         if !draft.message.isEmpty { body["body"] = String(draft.message.prefix(280)) }
+        if draft.force { body["force"] = true }
 
         struct Response: Decodable, Sendable {
             struct Status: Decodable, Sendable { var id: Int? }
@@ -581,28 +640,42 @@ public actor TraewellingClient {
         }
     }
 
-    /// Candidate Träwelling stations for `station`, nearest first (or API order if we have no coordinate).
+    /// Candidate Träwelling stations for `station`, best first (see `ranked(_:for:)`).
     private func candidateStations(for station: Station) async throws -> [(TraewellingStation, Double)] {
         // Keep querying until something plausible turns up: a query can return only far-away or
         // unrelated stations, in which case the simpler variants may still find the right one.
         var results: [TraewellingStation] = []
         var seen = Set<Int>()
-        var ranked: [(TraewellingStation, Double)] = []
         for query in Self.stationQueries(for: station.name) {
             for s in try await stations(matching: query) where seen.insert(s.id).inserted {
                 results.append(s)
+            }
+            let ranked = Self.ranked(results, for: station)
+            if station.coordinate == nil ? !results.isEmpty : ranked.contains(where: { $0.1 < 1_500 }) { break }
+        }
+        return Self.ranked(results, for: station)
+    }
+
+    /// Orders autocomplete results for `station` with their distance to it: the same EVA number first,
+    /// then the same name close by (or anywhere without coordinates), then nearest first; stations
+    /// without a coordinate keep API order at the end. Nearest alone isn't enough: at Hamburg Hbf the
+    /// U-Bahn stop "Hauptbahnhof Süd" can be closer to our coordinate than Träwelling's Hbf, so a
+    /// manual trip started at the subway stop.
+    static func ranked(_ stations: [TraewellingStation], for station: Station) -> [(TraewellingStation, Double)] {
+        let wanted = Set(stationQueries(for: station.name).map(Station.normalize))
+        return stations.enumerated()
+            .map { offset, s -> (tier: Int, offset: Int, station: TraewellingStation, distance: Double) in
                 var distance = Double.infinity
                 if let coordinate = station.coordinate, let lat = s.latitude, let lon = s.longitude {
                     distance = Coordinate(latitude: lat, longitude: lon).distance(to: coordinate)
                 }
-                ranked.append((s, distance))
+                let sameEva = station.evaNumber != nil && s.ibnr == station.evaNumber
+                let sameName = wanted.contains(Station.normalize(s.name))
+                    && (distance < 1_500 || station.coordinate == nil)
+                return (sameEva ? 0 : sameName ? 1 : 2, offset, s, distance)
             }
-            if station.coordinate == nil ? !results.isEmpty : ranked.contains(where: { $0.1 < 1_500 }) { break }
-        }
-        // Nearest first; stations without a coordinate keep API order at the end.
-        return ranked.enumerated()
-            .sorted { ($0.element.1, $0.offset) < ($1.element.1, $1.offset) }
-            .map(\.element)
+            .sorted { ($0.tier, $0.distance, $0.offset) < ($1.tier, $1.distance, $1.offset) }
+            .map { ($0.station, $0.distance) }
     }
 
     /// Autocomplete queries to try for a station name, most specific first. Some sources append a
@@ -627,10 +700,10 @@ public actor TraewellingClient {
     }
 
     private func matchStation(_ station: Station) async throws -> TraewellingStation {
-        let candidates = try await candidateStations(for: station)
-        if let nearest = candidates.first, nearest.1 < 1_500 { return nearest.0 }
-        guard let first = candidates.first else { throw TraewellingError.stationNotFound(station.name) }
-        return first.0
+        guard let best = try await candidateStations(for: station).first else {
+            throw TraewellingError.stationNotFound(station.name)
+        }
+        return best.0
     }
 
     /// Matches a departure to a HAFAS trip Träwelling knows about. Beyond the nearest station and a
@@ -658,7 +731,7 @@ public actor TraewellingClient {
                 for await (index, board) in group { boards[index] = board }
                 return boards
             }
-            // Nearest station first, as before; a station whose board failed is skipped.
+            // Best station first (see `ranked(_:for:)`); a station whose board failed is skipped.
             for (station, board) in zip(stations, boards) {
                 switch board {
                 case .success(let departures):

@@ -205,9 +205,23 @@ public struct PlatformInfo: Codable, Sendable, Hashable {
     public var planned: String?
     public var actual: String?
 
+    /// Blank values count as none: bahn.de reports `"gleis": ""` at stations it has no platform for
+    /// (e.g. in Czechia), which showed as a "Gleis" badge without a number.
     public init(planned: String?, actual: String?) {
-        self.planned = planned
-        self.actual = actual
+        self.planned = Self.nonBlank(planned)
+        self.actual = Self.nonBlank(actual)
+    }
+
+    /// Also drops the blank platforms journeys saved before kept.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(planned: try c.decodeIfPresent(String.self, forKey: .planned),
+                  actual: try c.decodeIfPresent(String.self, forKey: .actual))
+    }
+
+    private static func nonBlank(_ value: String?) -> String? {
+        guard let value, !value.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        return value
     }
 
     public var best: String? { actual ?? planned }
@@ -380,7 +394,10 @@ public struct Leg: Codable, Sendable, Hashable, Identifiable {
 }
 
 public struct Journey: Codable, Sendable, Hashable, Identifiable {
-    public var id: String { legs.map(\.id).joined(separator: "|") }
+    /// The legs, plus where the journey ends: a leg's ID doesn't include where you get off, so Berlin →
+    /// Dresden and Berlin → Praha on the same train would otherwise be one journey (and opening one
+    /// showed the other one remembered from before).
+    public var id: String { legs.map(\.id).joined(separator: "|") + ">" + (legs.last?.destination.id ?? "") }
     public var legs: [Leg]
     public var source: DataSource
 
@@ -416,6 +433,20 @@ public struct Journey: Codable, Sendable, Hashable, Identifiable {
         return a.best.timeIntervalSince(d.best)
     }
     public var isCancelled: Bool { legs.contains(where: \.cancelled) }
+
+    /// Where each leg sits on the journey's bar, in order and never overlapping: a late train arriving
+    /// after the next leg's departure pushes that leg (and the ones after) back, as the next metro would
+    /// be taken. RJ 175 +31 into Praha-Holešovice, then walk and metro C on their planned times, drew the
+    /// train across the whole bar with the metro as a dot on top. Empty for a journey without legs.
+    public var barSpans: [DateInterval] {
+        var spans: [DateInterval] = []
+        for leg in legs {
+            let start = max(leg.departure.best, spans.last?.end ?? leg.departure.best)
+            let length = max(leg.arrival.best.timeIntervalSince(leg.departure.best), 0)
+            spans.append(DateInterval(start: start, duration: length))
+        }
+        return spans
+    }
 
     /// Transfers where the next departure is before the previous arrival.
     public var brokenTransferIndices: [Int] {

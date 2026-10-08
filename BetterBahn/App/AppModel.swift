@@ -12,6 +12,7 @@ final class AppModel {
     private(set) var provider: CombinedProvider
     private(set) var traewelling: TraewellingClient
     let liveActivities = LiveActivityManager()
+    @ObservationIgnored let customEmojis = CustomEmojiClient()
 
     var favoriteStations: [Station] {
         didSet {
@@ -59,6 +60,11 @@ final class AppModel {
     var trackedManualCheckins: [TrackedManualCheckin] {
         didSet { Storage.save(trackedManualCheckins, key: "trackedManualCheckins") }
     }
+    /// Träwelling status of each leg checked in from this app (by `Leg.id`), so the leg's "Mehr"
+    /// offers "Check-in ansehen" instead of checking in again.
+    var checkinStatusIDs: [String: Int] {
+        didSet { Storage.save(checkinStatusIDs, key: "checkinStatusIDs") }
+    }
     /// Explicit choice (from the route view) of which saved journey's Live Activity to show,
     /// overriding the automatic pick until that journey finishes or another one is chosen.
     /// Journeys whose Live Activity was switched off by hand, so the automatic pick skips them.
@@ -103,20 +109,25 @@ final class AppModel {
         recentStations = Storage.load(key: "recentStations") ?? []
         savedJourneys = Storage.load(key: "savedJourneys") ?? []
         trackedManualCheckins = Storage.load(key: "trackedManualCheckins") ?? []
+        checkinStatusIDs = Storage.load(key: "checkinStatusIDs") ?? [:]
         liveJourneys = Storage.load(key: "liveJourneys") ?? LiveDataCache()
         liveTrips = Storage.load(key: "liveTrips") ?? LiveDataCache()
         tickets = TicketStore.load()
         travelPasses = TicketStore.loadPasses()
         manualLiveActivityJourneyID = UserDefaults.standard.string(forKey: "manualLiveActivityJourneyID").flatMap(UUID.init)
-        // The check-in history holds every trip's full track geometry and can run to many
-        // megabytes, so it's decoded off the main thread instead of blocking the launch.
+        // The check-in history can run to thousands of trips, so it's decoded off the main thread
+        // instead of blocking the launch.
         traewellingTripsLoadTask = Task { [weak self] in
-            let trips = await Task.detached(priority: .userInitiated) { () -> [ImportedTrip] in
-                Storage.load(key: "traewellingTrips") ?? []
+            // Earlier versions kept every trip's track geometry in this file; it moves to the
+            // geometry cache, which stores it far more compactly (#170).
+            let (trips, geometries) = await Task.detached(priority: .userInitiated) { () -> ([ImportedTrip], [String: [Coordinate]]) in
+                ImportedTrip.movingGeometryOut(of: Storage.load(key: "traewellingTrips") ?? [])
             }.value
             guard let self else { return }
+            await rememberGeometries(geometries)
             traewellingTrips = trips
             traewellingTripsLoaded = true
+            if !geometries.isEmpty { traewellingTrips = trips } // saves the slimmed-down list
         }
         // After init, since taking over synced journeys also updates the Live Activity.
         Task { [weak self] in self?.startCloudSync() }
@@ -256,42 +267,98 @@ final class AppModel {
     private(set) var isSyncingTraewelling = false
     private(set) var traewellingSyncError: String?
 
-    /// Fetches new check-ins and their track geometry. Stops at the first already known status.
+    /// Fetches new check-ins and their track geometry, page by page (#170): the trips show up bit by bit,
+    /// and an import that stopped half way continues where it was (`traewellingImportNextPage`)
+    /// instead of starting over. Runs on even when the screen that started it goes away.
     func syncTraewelling(force: Bool = false) async {
+        await Task { await self.runTraewellingSync(force: force) }.value
+    }
+
+    private func runTraewellingSync(force: Bool) async {
         // Without the stored history every check-in would look new and be imported again.
         await loadTraewellingTrips()
         guard settings.traewellingEnabled, settings.syncTraewellingToMap, !isSyncingTraewelling, await traewelling.isLoggedIn else { return }
         if !force, let last = settings.lastTraewellingSync, Date.now.timeIntervalSince(last) < 15 * 60 { return }
         isSyncingTraewelling = true
         defer { isSyncingTraewelling = false }
+        var knownIDs = Set(traewellingTrips.map(\.statusID))
+        // A first import has nothing to stop at: it walks the whole history, remembering how far it got.
+        var resumePage = knownIDs.isEmpty ? (settings.traewellingImportNextPage ?? 1) : settings.traewellingImportNextPage
+        // A full resync walks every page and compares each check-in with the ride imported for it: an
+        // edit on Träwelling (e.g. checking out at another stop) keeps the status ID.
+        let walkingAll = force && !knownIDs.isEmpty
+        var refreshing: [Int: Journey] = walkingAll
+            ? Dictionary(traewellingTrips.map { ($0.statusID, $0.journey) }, uniquingKeysWith: { first, _ in first })
+            : [:]
+        var seen: Set<Int> = []
+        var pending: [ImportedTrip] = []
+        // Hands the loaded trips to the map now and then (saving the whole list after every page would
+        // rewrite a large file hundreds of times), and only then moves the resume point past them.
+        func commit() {
+            if !pending.isEmpty {
+                let replaced = Set(pending.map(\.statusID))
+                traewellingTrips = (pending + traewellingTrips.filter { !replaced.contains($0.statusID) })
+                    .sorted { $0.statusID > $1.statusID }
+                pending = []
+            }
+            settings.traewellingImportNextPage = resumePage
+        }
+        defer { commit() }
         do {
             let username = try await traewelling.currentUser().username
-            let knownIDs = Set(traewellingTrips.map(\.statusID))
-            var newStatuses: [TraewellingStatus] = []
-            var page = 1
-            pages: while page <= 200 {
-                let result = try await traewelling.statuses(username: username, page: page)
-                for status in result.statuses {
-                    // Everything after a known status was imported before (unless a full resync is forced).
-                    if knownIDs.contains(status.id), !force { break pages }
-                    if !knownIDs.contains(status.id) { newStatuses.append(status) }
+            // New check-ins first, down to the newest one imported before; then, if an earlier import
+            // stopped half way, the older pages it didn't get to.
+            var backfilling = knownIDs.isEmpty
+            var page = backfilling ? resumePage ?? 1 : 1
+            while true {
+                let result = try await traewelling.historyPage(username: username, page: page, knownIDs: knownIDs,
+                                                               refreshing: refreshing)
+                seen.formUnion(result.statusIDs)
+                let trips = result.trips.map { ImportedTrip(statusID: $0.statusID, journey: $0.journey) }
+                let edited = Set(trips.map(\.statusID)).intersection(refreshing.keys)
+                if !edited.isEmpty {
+                    // An edited check-in keeps its leg ID, so its old track would be drawn from the cache.
+                    await forgetGeometries(of: traewellingTrips.filter { edited.contains($0.statusID) }.flatMap(\.journey.legs))
+                    // Paging by offset can repeat a status when a check-in lands mid-sync.
+                    for id in edited { refreshing[id] = nil }
                 }
-                guard result.hasMore else { break }
-                page += 1
-                try await Task.sleep(for: .milliseconds(300)) // be gentle with the API
-            }
-
-            var imported: [ImportedTrip] = []
-            for batch in stride(from: 0, to: newStatuses.count, by: 20).map({ Array(newStatuses[$0..<min($0 + 20, newStatuses.count)]) }) {
-                let geometries = (try? await traewelling.polylines(statusIDs: batch.map(\.id))) ?? [:]
-                for status in batch {
-                    if let journey = status.journey(geometry: geometries[status.id]) {
-                        imported.append(ImportedTrip(statusID: status.id, journey: journey))
+                let (stripped, geometries) = ImportedTrip.movingGeometryOut(of: trips)
+                await rememberGeometries(geometries)
+                pending += stripped
+                knownIDs.formUnion(result.trips.map(\.statusID))
+                if !result.hasMore {
+                    resumePage = nil
+                    commit()
+                    // A full resync that got through every page has seen every status there is. A check-in
+                    // deleted on Träwelling (e.g. a cancelled ride) would otherwise stay in the local copy
+                    // forever and keep counting on the map.
+                    if walkingAll, !seen.isEmpty {
+                        let deleted = traewellingTrips.filter { !seen.contains($0.statusID) }
+                        if !deleted.isEmpty {
+                            await forgetGeometries(of: deleted.flatMap(\.journey.legs))
+                            traewellingTrips.removeAll { !seen.contains($0.statusID) }
+                        }
                     }
+                    break
                 }
-            }
-            if !imported.isEmpty {
-                traewellingTrips = (imported + traewellingTrips).sorted { $0.statusID > $1.statusID }
+                if backfilling {
+                    resumePage = page + 1
+                    page += 1
+                } else if walkingAll {
+                    // Pages an earlier import didn't get to are imported on the way.
+                    if let next = resumePage { resumePage = max(next, page + 1) }
+                    page += 1
+                } else if result.reachedKnown {
+                    guard let next = resumePage else { break }
+                    backfilling = true
+                    // One page back, since check-ins deleted meanwhile move the rest forward.
+                    page = max(next - 1, page + 1)
+                } else {
+                    page += 1
+                }
+                if pending.count >= 100 { commit() }
+                // Two requests per page; Träwelling allows about 60 a minute (`historyPage` waits out a 429).
+                try await Task.sleep(for: .seconds(1))
             }
             settings.lastTraewellingSync = .now
             traewellingSyncError = nil
@@ -303,21 +370,38 @@ final class AppModel {
     // MARK: Track geometry
 
     @ObservationIgnored private let geometryService = RouteGeometryService()
-    /// Leg ID → encoded polyline, persisted so the map doesn't reload everything.
-    /// Loaded off the main thread on first use, since the file can grow large over time.
-    @ObservationIgnored private var geometryCacheTask: Task<[String: String], Never>?
+    /// Leg ID → encoded polyline, persisted so the map doesn't reload everything. Träwelling's track
+    /// geometry lives here too rather than in `traewellingTrips` (#170): as encoded polylines it takes
+    /// a fraction of the space. Loaded off the main thread on first use, since the file can grow large.
+    @ObservationIgnored private var geometryCache: [String: String]?
+    @ObservationIgnored private var geometryCacheLoad: Task<[String: String], Never>?
+    @ObservationIgnored private var geometryCacheSaveDelay: Task<Void, Never>?
 
     private func loadedGeometryCache() async -> [String: String] {
-        if let geometryCacheTask { return await geometryCacheTask.value }
-        let task = Task.detached(priority: .utility) { () -> [String: String] in
+        if let geometryCache { return geometryCache }
+        let task = geometryCacheLoad ?? Task.detached(priority: .utility) { () -> [String: String] in
             Storage.load(key: "legGeometries") ?? [:]
         }
-        geometryCacheTask = task
-        return await task.value
+        geometryCacheLoad = task
+        let loaded = await task.value
+        if geometryCache == nil { geometryCache = loaded }
+        return geometryCache ?? loaded
+    }
+
+    /// Writes the cache a moment after the last change. Filling in thousands of legs used to rewrite
+    /// the whole file, with its own copy of the cache in memory, once per leg, which with a long
+    /// Träwelling history ran the app out of memory (#170).
+    private func saveGeometryCache() {
+        geometryCacheSaveDelay?.cancel()
+        geometryCacheSaveDelay = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled, let cache = self?.geometryCache else { return }
+            Storage.saveInBackground(cache, key: "legGeometries")
+        }
     }
 
     func geometry(for leg: Leg) async -> [Coordinate]? {
-        var cache = await loadedGeometryCache()
+        let cache = await loadedGeometryCache()
         if let encoded = cache[leg.id] {
             let cached = Polyline.decode(encoded)
             // Earlier versions cached straight lines between the two stations; look those up again
@@ -325,10 +409,27 @@ final class AppModel {
             if RouteGeometryService.followsTracks(cached) { return cached }
         }
         guard let geometry = await geometryService.geometry(for: leg) else { return nil }
-        cache[leg.id] = Polyline.encode(geometry)
-        geometryCacheTask = Task { cache }
-        Task.detached(priority: .utility) { Storage.save(cache, key: "legGeometries") }
+        geometryCache?[leg.id] = Polyline.encode(geometry)
+        saveGeometryCache()
         return geometry
+    }
+
+    /// Adds track geometry that came with the data (Träwelling sends it with each check-in).
+    func rememberGeometries(_ geometries: [String: [Coordinate]]) async {
+        guard !geometries.isEmpty else { return }
+        let encoded = await Task.detached(priority: .utility) {
+            geometries.mapValues { Polyline.encode($0) }
+        }.value
+        _ = await loadedGeometryCache()
+        geometryCache?.merge(encoded) { _, new in new }
+        saveGeometryCache()
+    }
+
+    private func forgetGeometries(of legs: [Leg]) async {
+        guard !legs.isEmpty else { return }
+        _ = await loadedGeometryCache()
+        for leg in legs { geometryCache?[leg.id] = nil }
+        saveGeometryCache()
     }
 
     /// The already-cached geometry of many legs at once, decoded off the main thread.
@@ -491,7 +592,11 @@ final class AppModel {
     // MARK: Live train positions
 
     /// Latest position of every train on a saved journey that is running right now, keyed by train name.
-    private(set) var trainPositions: [String: LiveTrainPosition] = [:]
+    private(set) var trainPositions: [String: LiveTrainPosition] = [:] {
+        didSet { if trainPositions != oldValue { updateWidgets() } }
+    }
+    /// What the widgets were last given, so they're only reloaded when something changed.
+    @ObservationIgnored var lastWidgetSnapshot: WidgetSnapshot?
 
     /// Fetches the position of each train leg of an unfinished saved journey that is underway
     /// (plus 10 minutes either side, since departures and arrivals shift). All legs share one
@@ -751,6 +856,70 @@ final class AppModel {
         liveActivitySyncLoop = nil
     }
 
+    // MARK: Träwelling check-ins
+
+    func rememberCheckin(statusId: Int, leg: Leg) {
+        // Keep the list small: legs are only looked up while their journey is still around.
+        if checkinStatusIDs.count > 300 { checkinStatusIDs.removeAll() }
+        checkinStatusIDs[leg.id] = statusId
+    }
+
+    func forgetCheckin(statusId: Int) {
+        checkinStatusIDs = checkinStatusIDs.filter { $0.value != statusId }
+        trackedManualCheckins.removeAll { $0.statusId == statusId }
+    }
+
+    /// Deletes a check-in on Träwelling and forgets it here.
+    func deleteCheckin(statusId: Int) async throws {
+        try await traewelling.deleteStatus(id: statusId)
+        forgetCheckin(statusId: statusId)
+    }
+
+    /// The journey's legs checked in from this app, in order.
+    func checkins(in journey: Journey) -> [(leg: Leg, statusId: Int)] {
+        let journey = savedEntry(for: journey)?.journey ?? journey
+        return journey.legs.compactMap { leg in checkinStatusIDs[leg.id].map { (leg: leg, statusId: $0) } }
+    }
+
+    /// The checked-in leg of `journey` that is under way, and where checking out now would end it
+    /// (`TraewellingClient.earlyExit`). Uses the saved journey's live times.
+    func earlyCheckout(in journey: Journey, at now: Date = .now) -> (leg: Leg, statusId: Int, exit: Stopover)? {
+        for checkin in checkins(in: journey) {
+            if let exit = TraewellingClient.earlyExit(on: checkin.leg, at: now) { return (leg: checkin.leg, statusId: checkin.statusId, exit: exit) }
+        }
+        return nil
+    }
+
+    /// Deletes every check-in of `journey` made from this app.
+    func deleteCheckins(in journey: Journey) async throws {
+        for checkin in checkins(in: journey) { try await deleteCheckin(statusId: checkin.statusId) }
+    }
+
+    /// Checks out of `journey` now: the ride under way ends at the last stop reached (see
+    /// `earlyCheckout`), check-ins of legs not yet started are deleted, finished ones stay.
+    func checkOutEarly(of journey: Journey, at now: Date = .now) async throws {
+        guard let running = earlyCheckout(in: journey, at: now) else { return }
+        let status = try await traewelling.status(id: running.statusId)
+        try await traewelling.changeDestination(of: status, to: running.exit.station, arrival: running.exit.arrival?.planned)
+        forgetCheckin(statusId: running.statusId)
+        for checkin in checkins(in: journey) where checkin.leg.departure.best > now {
+            try await deleteCheckin(statusId: checkin.statusId)
+        }
+    }
+
+    /// The logged-in Träwelling account, nil when logged out or it can't be loaded.
+    func traewellingUser() async -> TraewellingUser? {
+        guard await traewelling.isLoggedIn else { return nil }
+        return try? await traewelling.currentUser()
+    }
+
+    /// The custom emojis of the Mastodon instance connected to the Träwelling account `user`, or of
+    /// zug.network without one. Empty if neither can be loaded; emojis are only a nicety.
+    func checkinEmojis(for user: TraewellingUser?) async -> [CustomEmoji] {
+        let instance = CustomEmojiText.instance(fromMastodonURL: user?.mastodonUrl) ?? CustomEmojiText.defaultInstance
+        return (try? await customEmojis.emojis(instance: instance)) ?? []
+    }
+
     // MARK: Manual Träwelling check-ins
 
     func trackManualCheckin(statusId: Int, leg: Leg) {
@@ -875,22 +1044,27 @@ final class AppModel {
     ///   journey never interrupts one that's under way, it waits its turn;
     /// - otherwise, the most recently added journey among the ones that have started.
     func syncLiveActivity() {
-        let eligible = liveActivityEligibleJourneys
         if let manualID = manualLiveActivityJourneyID, !upcomingJourneys.contains(where: { $0.id == manualID }) {
             manualLiveActivityJourneyID = nil
             return // the didSet above already re-runs this
         }
-        let candidate: SavedJourney?
-        if let manualID = manualLiveActivityJourneyID, let manual = eligible.first(where: { $0.id == manualID }) {
-            candidate = manual
-        } else if let activeID = liveActivities.activeJourneyID, let current = eligible.first(where: { $0.journey.id == activeID }) {
-            candidate = current
-        } else {
-            candidate = eligible.max { $0.savedAt < $1.savedAt }
-        }
+        let candidate = liveJourneyCandidate
         // Switched off in the settings: `show(nil)` ends whatever is still running.
         let journey = settings.liveActivitiesEnabled ? candidate?.journey : nil
         Task { await liveActivities.show(journey) }
+        updateWidgets()
+    }
+
+    /// The journey that should be live right now (see `syncLiveActivity`), whether or not Live
+    /// Activities are switched on; the widgets follow it too.
+    var liveJourneyCandidate: SavedJourney? {
+        let eligible = liveActivityEligibleJourneys
+        if let manualID = manualLiveActivityJourneyID, let manual = eligible.first(where: { $0.id == manualID }) {
+            return manual
+        } else if let activeID = liveActivities.activeJourneyID, let current = eligible.first(where: { $0.journey.id == activeID }) {
+            return current
+        }
+        return eligible.max { $0.savedAt < $1.savedAt }
     }
 
     /// Identifier for the background refresh task that keeps the Live Activity's journey up to date
@@ -948,10 +1122,25 @@ final class AppModel {
     }
 }
 
-struct ImportedTrip: Codable, Hashable, Identifiable {
+nonisolated struct ImportedTrip: Codable, Hashable, Identifiable {
     var id: Int { statusID }
     var statusID: Int
     var journey: Journey
+
+    /// The trips without their track geometry, plus that geometry by leg ID for the geometry cache.
+    static func movingGeometryOut(of trips: [ImportedTrip]) -> ([ImportedTrip], [String: [Coordinate]]) {
+        var geometries: [String: [Coordinate]] = [:]
+        let stripped = trips.map { trip in
+            var trip = trip
+            for index in trip.journey.legs.indices {
+                guard let geometry = trip.journey.legs[index].geometry else { continue }
+                geometries[trip.journey.legs[index].id] = geometry
+                trip.journey.legs[index].geometry = nil
+            }
+            return trip
+        }
+        return (stripped, geometries)
+    }
 }
 
 /// A manual Träwelling check-in whose delay we keep pushing until it arrives.
@@ -1096,6 +1285,10 @@ final class AppSettings {
     var lastTraewellingSync: Date? {
         didSet { UserDefaults.standard.set(lastTraewellingSync, forKey: "lastTraewellingSync") }
     }
+    /// The history page an unfinished Träwelling import continues with; nil once it reached the oldest check-in.
+    var traewellingImportNextPage: Int? {
+        didSet { UserDefaults.standard.set(traewellingImportNextPage, forKey: "traewellingImportNextPage") }
+    }
     /// Suggested tags offered as quick-add chips in the Träwelling check-in sheet.
     var quickTags: [QuickTag] {
         didSet {
@@ -1116,6 +1309,16 @@ final class AppSettings {
     /// data it costs depends on the device's connection.
     var trainPositionRefresh: TrainPositionRefresh {
         didSet { UserDefaults.standard.set(trainPositionRefresh.rawValue, forKey: "trainPositionRefresh") }
+    }
+
+    /// Reports the regional and long-distance trains the app shows to BetterBahn's statistics server
+    /// (`TrainSightings`, #169). On by default, per device.
+    var shareTrainStatistics: Bool {
+        didSet {
+            UserDefaults.standard.set(shareTrainStatistics, forKey: "shareTrainStatistics")
+            let enabled = shareTrainStatistics
+            Task { await TrainSightings.shared.setEnabled(enabled) }
+        }
     }
 
     /// Unlocks the features below; each one still has to be switched on by itself.
@@ -1149,6 +1352,12 @@ final class AppSettings {
             uploadToCloud()
         }
     }
+    var expertRil100: Bool {
+        didSet {
+            UserDefaults.standard.set(expertRil100, forKey: "expertRil100")
+            uploadToCloud()
+        }
+    }
 
     /// Träwelling check-ins, login and map import.
     var traewellingEnabled: Bool { expertMode && expertTraewelling }
@@ -1159,6 +1368,9 @@ final class AppSettings {
     /// The connection search also shows direct trains you may not board or leave at that station
     /// ("Nur Ausstieg" / "Nur Einstieg"), which the timetable otherwise hides.
     var ignoreBoardingRulesEnabled: Bool { expertMode && expertIgnoreBoardingRules }
+    /// The station search shows each station's RIL100 code ("FF") next to its name (#165). Searching
+    /// by code works either way.
+    var ril100Enabled: Bool { expertMode && expertRil100 }
 
     init() {
         let defaults = UserDefaults.standard
@@ -1166,15 +1378,20 @@ final class AppSettings {
         ticketType = defaults.string(forKey: "ticketType").flatMap(TicketType.init) ?? .deutschlandticket
         liveActivitiesEnabled = defaults.object(forKey: "liveActivitiesEnabled") as? Bool ?? true
         trainPositionRefresh = defaults.string(forKey: "trainPositionRefresh").flatMap(TrainPositionRefresh.init) ?? .automatic
+        let shareTrainStatistics = defaults.object(forKey: "shareTrainStatistics") as? Bool ?? true
+        self.shareTrainStatistics = shareTrainStatistics
+        Task { await TrainSightings.shared.setEnabled(shareTrainStatistics) }
         expertMode = defaults.bool(forKey: "expertMode")
         expertTraewelling = defaults.bool(forKey: "expertTraewelling")
         expertEditJourney = defaults.bool(forKey: "expertEditJourney")
         expertTrainChoice = defaults.bool(forKey: "expertTrainChoice")
         expertIgnoreBoardingRules = defaults.bool(forKey: "expertIgnoreBoardingRules")
+        expertRil100 = defaults.bool(forKey: "expertRil100")
         traewellingVisibility = TraewellingVisibility(rawValue: defaults.integer(forKey: "traewellingVisibility")) ?? .publicVisible
         bc100Rules = Storage.load(key: "bc100Rules") ?? .default
         syncTraewellingToMap = defaults.object(forKey: "syncTraewellingToMap") as? Bool ?? true
         lastTraewellingSync = defaults.object(forKey: "lastTraewellingSync") as? Date
+        traewellingImportNextPage = defaults.object(forKey: "traewellingImportNextPage") as? Int
         connectionWarnings = defaults.object(forKey: "connectionWarnings") as? Bool ?? true
         quickTags = Storage.load(key: "quickTags") ?? QuickTag.defaults
     }
@@ -1199,6 +1416,7 @@ final class AppSettings {
         var expertTrainChoice: Bool
         /// Optional: settings synced by older versions don't have it.
         var expertIgnoreBoardingRules: Bool?
+        var expertRil100: Bool?
     }
 
     /// What iCloud stores: the settings and when they were last changed.
@@ -1212,7 +1430,7 @@ final class AppSettings {
         traewellingVisibility: TraewellingVisibility(rawValue: 0) ?? .publicVisible, bc100Rules: .default,
         syncTraewellingToMap: true, connectionWarnings: true, quickTags: QuickTag.defaults,
         liveActivitiesEnabled: true, expertMode: false, expertTraewelling: false, expertEditJourney: false,
-        expertTrainChoice: false, expertIgnoreBoardingRules: false)
+        expertTrainChoice: false, expertIgnoreBoardingRules: false, expertRil100: false)
 
     @ObservationIgnored private var isApplyingCloudValue = false
 
@@ -1222,7 +1440,8 @@ final class AppSettings {
                    syncTraewellingToMap: syncTraewellingToMap, connectionWarnings: connectionWarnings,
                    quickTags: quickTags, liveActivitiesEnabled: liveActivitiesEnabled, expertMode: expertMode,
                    expertTraewelling: expertTraewelling, expertEditJourney: expertEditJourney,
-                   expertTrainChoice: expertTrainChoice, expertIgnoreBoardingRules: expertIgnoreBoardingRules)
+                   expertTrainChoice: expertTrainChoice, expertIgnoreBoardingRules: expertIgnoreBoardingRules,
+                   expertRil100: expertRil100)
     }
 
     /// When the settings were last changed on this device or taken over from iCloud. Before
@@ -1268,6 +1487,7 @@ final class AppSettings {
         expertEditJourney = value.expertEditJourney
         expertTrainChoice = value.expertTrainChoice
         expertIgnoreBoardingRules = value.expertIgnoreBoardingRules ?? expertIgnoreBoardingRules
+        expertRil100 = value.expertRil100 ?? expertRil100
     }
 }
 

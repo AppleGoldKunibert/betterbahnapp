@@ -1,0 +1,23 @@
+{
+  "images": [
+    {
+      "filename": "Operator-nordbahn.png",
+      "idiom": "universal",
+      "scale": "1x"
+    },
+    {
+      "filename": "Operator-nordbahn@2x.png",
+      "idiom": "universal",
+      "scale": "2x"
+    },
+    {
+      "filename": "Operator-nordbahn@3x.png",
+      "idiom": "universal",
+      "scale": "3x"
+    }
+  ],
+  "info": {
+    "author": "xcode",
+    "version": 1
+  }
+}

@@ -30,6 +30,25 @@ public struct JourneyStop: Sendable, Hashable {
     }
 }
 
+/// A railway undertaking running (part of) a train, as bahn.de lists it. International trains are run by
+/// several, one per section, e.g. Berlin → Praha by DB Fernverkehr in Germany and České dráhy in Czechia.
+public struct TrainOperator: Sendable, Hashable {
+    public struct Section: Sendable, Hashable {
+        public var from: String
+        public var to: String
+        public init(from: String, to: String) { self.from = from; self.to = to }
+    }
+
+    public var name: String
+    /// First and last station of its section, as bahn.de names them; `nil` when it runs the whole train.
+    public var section: Section?
+
+    public init(name: String, section: Section? = nil) {
+        self.name = name
+        self.section = section
+    }
+}
+
 extension Stopover {
     /// A `Stopover` for a Zusatzhalt bahn.de reported (see `BahnDeClient.inserting(_:into:)`). Only
     /// ever used for display; a Zusatzhalt's Träwelling checkin goes through
@@ -84,8 +103,27 @@ extension BahnDeClient {
             var ezAnkunftsZeitpunkt: String?
             var priorisierteMeldungen: [Message]?
             var risMeldungen: [RISMessage]?
+            /// The railway running the train from this stop, by its UIC code: RJ 171 has "80" (DB) from
+            /// Hamburg-Altona to Bad Schandau and "54" (ČD) from Děčín to Praha hl.n.
+            var adminID: String?
+            /// The train's category here, e.g. "RJ".
+            var kategorie: String?
         }
+        /// The train's attributes; operators may come as "BEF" (Beförderer) entries, one per section on
+        /// trains run by several, e.g. `{"key": "BEF", "value": "DB Fernverkehr AG",
+        /// "teilstreckenHinweis": "(Berlin Hbf - Bad Schandau)"}` (as parsed by db-vendo-client). The
+        /// journey details of RJ 171 Hamburg → Praha (2026-10-07) had none, only each stop's `adminID`.
+        struct Attribute: Decodable { var key: String?; var value: String?; var teilstreckenHinweis: String? }
         var halte: [Stop]
+        var zugattribute: [Attribute]?
+        /// The train's name, e.g. "RJ 383".
+        var zugName: String?
+    }
+
+    /// A train's journey details: its realtime stops and the operators running it.
+    struct JourneyCourse: Sendable {
+        var stops: [JourneyStop]
+        var operators: [TrainOperator]
     }
 
     // MARK: Journey stops
@@ -109,24 +147,87 @@ extension BahnDeClient {
 
     private func journeyStops(line: Line?, station: Station, plannedDeparture: Date,
                               maxAge: TimeInterval = BahnDeClient.journeyStopsMaxAge) async throws -> [JourneyStop]? {
+        try await journeyCourse(line: line, station: station, plannedDeparture: plannedDeparture, maxAge: maxAge)?.stops
+    }
+
+    /// The operators bahn.de lists for the part of `leg`'s train you ride: on an international train run
+    /// by several (one per section), only those whose section overlaps the leg. `nil` under the same
+    /// conditions as `journeyStops(for:)` or when bahn.de names none; shares its request and cache.
+    public func trainOperators(for leg: Leg) async throws -> [TrainOperator]? {
+        guard let course = try await journeyCourse(line: leg.line, station: leg.origin, plannedDeparture: leg.departure.planned) else { return nil }
+        let operators = Self.operators(course.operators, riding: leg, stops: course.stops)
+        return operators.isEmpty ? nil : operators
+    }
+
+    /// Every operator bahn.de lists for `trip`'s train, each with its section when there are several.
+    public func trainOperators(for trip: Trip) async throws -> [TrainOperator]? {
+        guard let first = trip.stopovers.first(where: { $0.departure != nil }), let departure = first.departure,
+              let course = try await journeyCourse(line: trip.line, station: first.station, plannedDeparture: departure.planned)
+        else { return nil }
+        switch course.operators.count {
+        case 0: return nil
+        case 1: return [TrainOperator(name: course.operators[0].name)]
+        default: return course.operators
+        }
+    }
+
+    /// Where a train run by several railways changes hands, for marking those stops in its route:
+    /// stopover ID → the operators to show there. RJ 171: DB at its first stop and at Bad Schandau,
+    /// ČD at Děčín. Empty for a train run by one railway; shares the request and cache of `journeyStops`.
+    public func operatorStops(for trip: Trip) async throws -> [String: [String]] {
+        guard let first = trip.stopovers.first(where: { $0.departure != nil }), let departure = first.departure,
+              let course = try await journeyCourse(line: trip.line, station: first.station, plannedDeparture: departure.planned)
+        else { return [:] }
+        return Self.operatorStops(course.operators, stops: course.stops, stopovers: trip.stopovers)
+    }
+
+    /// Each operator at the first stop of its section, and at the last one too unless it runs to the end,
+    /// placed on `stopovers` (the app's own stop list) by planned time and place.
+    static func operatorStops(_ operators: [TrainOperator], stops: [JourneyStop], stopovers: [Stopover]) -> [String: [String]] {
+        guard operators.count > 1 else { return [:] }
+        var marks: [String: [String]] = [:]
+        func mark(_ name: String, at stop: JourneyStop) {
+            guard let stopover = stopovers.first(where: { stopover in
+                guard isNear(stop, stopover.station) else { return false }
+                let times = [(stop.departure, stopover.departure), (stop.arrival, stopover.arrival)]
+                return times.contains { pair in
+                    guard let a = pair.0?.planned, let b = pair.1?.planned else { return false }
+                    return abs(a.timeIntervalSince(b)) < 60
+                }
+            }) else { return }
+            if marks[stopover.id, default: []].last != name { marks[stopover.id, default: []].append(name) }
+        }
+        for (index, entry) in operators.enumerated() {
+            guard let section = entry.section,
+                  let from = stops.firstIndex(where: { Station.normalize($0.name) == Station.normalize(section.from) }),
+                  let to = stops.indices.last(where: { $0 >= from && Station.normalize(stops[$0].name) == Station.normalize(section.to) })
+            else { continue }
+            mark(entry.name, at: stops[from])
+            if index < operators.count - 1 { mark(entry.name, at: stops[to]) }
+        }
+        return marks
+    }
+
+    private func journeyCourse(line: Line?, station: Station, plannedDeparture: Date,
+                               maxAge: TimeInterval = BahnDeClient.journeyStopsMaxAge) async throws -> JourneyCourse? {
         guard let ref = Self.journeyReference(for: line), let line else { return nil }
         let journeyKey = "\(ref.category) \(ref.number)|\(station.id)|\(plannedDeparture.timeIntervalSince1970)"
         guard usesSharedCaches else {
             let id = try await findJourneyId(line: line, station: station, plannedDeparture: plannedDeparture)
-            return try await fetchJourneyStops(journeyId: id)
+            return try await fetchJourneyCourse(journeyId: id, feedOperator: line.operatorName)
         }
         // The journey ID of a run never changes, so resolving it (a departure board request) only
         // happens once; the stops themselves are refreshed every few minutes.
         let id = try await Self.journeyIdCache.value(for: journeyKey, maxAge: 12 * 3600) {
             try await self.findJourneyId(line: line, station: station, plannedDeparture: plannedDeparture)
         }
-        return try await Self.journeyStopsCache.value(for: id, maxAge: maxAge) {
-            try await self.fetchJourneyStops(journeyId: id)
+        return try await Self.journeyCourseCache.value(for: id, maxAge: maxAge) {
+            try await self.fetchJourneyCourse(journeyId: id, feedOperator: line.operatorName)
         }
     }
 
     private static let journeyIdCache = ExpiringCache<String>()
-    private static let journeyStopsCache = ExpiringCache<[JourneyStop]>()
+    private static let journeyCourseCache = ExpiringCache<JourneyCourse>()
     /// Matches `TimetablesClient.changesMaxAge`: short enough that a realtime refresh still sees
     /// changes soon, long enough that reopening the same view right after doesn't wait again.
     public static let journeyStopsMaxAge: TimeInterval = 4 * 60
@@ -149,6 +250,7 @@ extension BahnDeClient {
         guard let id = Self.journeyId(in: board, for: line, plannedDeparture: plannedDeparture) else {
             throw TransitError.notFound(line.name)
         }
+        reportSightings(board.entries.filter { $0.journeyId == id })
         return id
     }
 
@@ -236,6 +338,7 @@ extension BahnDeClient {
             guard let latest = page.entries.compactMap({ $0.zeit.flatMap(Self.parseBerlinTime) }).max(), latest < last else { break }
             start = latest.addingTimeInterval(60)
         }
+        reportSightings(trains.compactMap { Self.boardMatch(for: $0, in: board) })
         return Self.applyingLiveTimes(Self.correctingTrainNames(entries, using: board, kind: kind), using: board, kind: kind)
     }
 
@@ -305,16 +408,20 @@ extension BahnDeClient {
     /// planned time, while DB had it on time. Entries bahn.de has no live time for keep Transitous'.
     static func applyingLiveTimes(_ entries: [BoardEntry], using board: [Board.Entry], kind: BoardKind = .departures) -> [BoardEntry] {
         entries.map { entry in
-            guard entry.kind == kind else { return entry }
-            let match = trainReference(for: entry.line) != nil
-                ? boardEntry(for: entry.line, plannedDeparture: entry.time.planned, in: board)
-                : isLookedUp(entry.line)
-                    ? otherBoardEntry(for: entry.line, plannedDeparture: entry.time.planned, in: board) : nil
-            guard let live = match?.ezZeit.flatMap(parseBerlinTime) else { return entry }
+            guard entry.kind == kind, let live = boardMatch(for: entry, in: board)?.ezZeit.flatMap(parseBerlinTime) else { return entry }
             var corrected = entry
             corrected.time.actual = live
             return corrected
         }
+    }
+
+    /// bahn.de's board entry for `entry`'s train: long-distance trains by number, other trains by run
+    /// number or name (`otherBoardEntry`); nil for subway, tram and bus.
+    static func boardMatch(for entry: BoardEntry, in board: [Board.Entry]) -> Board.Entry? {
+        trainReference(for: entry.line) != nil
+            ? boardEntry(for: entry.line, plannedDeparture: entry.time.planned, in: board)
+            : isLookedUp(entry.line)
+                ? otherBoardEntry(for: entry.line, plannedDeparture: entry.time.planned, in: board) : nil
     }
 
     /// `entries` whose line is still unknown ("?", see `TransitousProvider.namingUnknownLines`) named
@@ -409,6 +516,7 @@ extension BahnDeClient {
         let fetch: @Sendable () async throws -> String? = {
             guard let eva = try await self.evaNumber(for: station) else { return nil }
             let board = try await self.get(Self.boardURL(eva: eva, at: plannedDeparture), as: Board.self)
+            self.reportSightings([Self.boardEntry(for: line, plannedDeparture: plannedDeparture, in: board.entries)].compactMap { $0 })
             // "" for "same name" so that answer is cached too.
             return Self.bahnDeName(for: line, plannedDeparture: plannedDeparture, in: board.entries) ?? ""
         }
@@ -422,8 +530,180 @@ extension BahnDeClient {
 
     private static let trainNameCache = ExpiringCache<String?>()
 
-    private func fetchJourneyStops(journeyId: String) async throws -> [JourneyStop] {
-        try await get(Self.journeyURL(journeyId), as: JourneyDetails.self).halte.compactMap(JourneyStop.init)
+    private func fetchJourneyCourse(journeyId: String, feedOperator: String?) async throws -> JourneyCourse {
+        let details = try await get(Self.journeyURL(journeyId), as: JourneyDetails.self)
+        return JourneyCourse(stops: details.halte.compactMap(JourneyStop.init),
+                             operators: Self.operators(of: details, feedOperator: feedOperator))
+    }
+
+    /// The operators bahn.de names in the train's attributes, unless its stops' railways (`adminID`, else
+    /// their country) name more: then the attributes only list some of them, and the Railjet København →
+    /// Praha, run by DSB, DB and ČD, showed as DSB's alone. The stops' version also wins when it names as
+    /// many and the attributes have no sections, since it knows where each railway takes over.
+    ///
+    /// The stations' countries only stand for national railways, so they are only asked when the feed
+    /// names one (`feedOperator`, or none at all): Die Länderbahn's trilex to Liberec or RegioJet to
+    /// Bratislava would otherwise show DB Regio and ČD, ČD and ZSSK. Then the feed's operator stays.
+    static func operators(of details: JourneyDetails, feedOperator: String? = nil) -> [TrainOperator] {
+        let named = operators(in: details.zugattribute ?? [])
+        let byCountry = !details.halte.contains { $0.adminID != nil }
+        let countriesFit = feedOperator.map { OperatorBrand(operatorName: $0)?.isNationalRailway == true } ?? true
+        let byAdministration = byCountry && !countriesFit ? [] : operators(byAdministration: details.halte, trainName: details.zugName)
+        let namedCount = Set(named.map(\.name)).count, stopsCount = Set(byAdministration.map(\.name)).count
+        // As many but without sections (one comma-separated attribute): the stops' version knows where each runs.
+        if stopsCount > namedCount || (stopsCount > 0 && stopsCount == namedCount && !named.contains { $0.section != nil }) {
+            return byAdministration
+        }
+        return named
+    }
+
+    /// The operators of a train run by several railways, from its stops' `adminID`s: one per run of
+    /// stops with the same code, its section from the first to the last of them. Empty when the whole
+    /// train has one code (the feed's operator names it better, e.g. "DB Regio AG NRW") or a code isn't
+    /// known, so a railway is never silently left out.
+    ///
+    /// Without any `adminID` (RJ 383 København → Praha, 2026-10-07) each stop's country stands in for
+    /// it: the UIC code its station number starts with ("8601309" København H: 86, DSB). A single stop
+    /// abroad doesn't count (an ICE ending at Basel SBB is still DB's), only a run of two or more.
+    /// `trainName` ("RJ 383") gives the category for stops without their own.
+    static func operators(byAdministration stops: [JourneyDetails.Stop], trainName: String? = nil) -> [TrainOperator] {
+        let byCountry = !stops.contains { $0.adminID != nil }
+        var runs: [(admin: String, first: JourneyDetails.Stop, last: JourneyDetails.Stop, count: Int)] = []
+        func add(_ admin: String, _ first: JourneyDetails.Stop, _ last: JourneyDetails.Stop, _ count: Int) {
+            if let previous = runs.last, previous.admin == admin {
+                runs[runs.count - 1].last = last
+                runs[runs.count - 1].count += count
+            } else {
+                runs.append((admin, first, last, count))
+            }
+        }
+        for stop in stops {
+            guard let admin = byCountry ? countryCode(of: stop) : stop.adminID.map({ String($0.prefix(2)) }), admin.count == 2
+            else { continue }
+            add(admin, stop, stop, 1)
+        }
+        if byCountry {
+            let all = runs
+            runs = []
+            for run in all where run.count > 1 { add(run.admin, run.first, run.last, run.count) }
+        }
+        guard Set(runs.map(\.admin)).count > 1 else { return [] }
+        let trainCategory = trainName?.split(separator: " ").first.map(String.init)
+        var operators: [TrainOperator] = []
+        for run in runs {
+            let category = (run.first.kategorie ?? trainCategory)?.uppercased() ?? ""
+            guard let name = railwayName(uicCode: run.admin, longDistance: !regionalTrainCategories.contains(category)) else { return [] }
+            operators.append(TrainOperator(name: name, section: .init(from: run.first.name, to: run.last.name)))
+        }
+        return operators
+    }
+
+    /// The UIC country code a stop's station number starts with: "8601309" (København H) → "86".
+    static func countryCode(of stop: JourneyDetails.Stop) -> String? {
+        guard let number = stop.extId ?? stop.evaNumber, number.count == 7, number.allSatisfy(\.isNumber) else { return nil }
+        return String(number.prefix(2))
+    }
+
+    /// Categories of regional trains, whose DB part is DB Regio rather than DB Fernverkehr.
+    static let regionalTrainCategories: Set<String> = ["RE", "RB", "IRE", "S", "RS", "MEX", "REX", "R", "OS", "SP", "IR"]
+
+    /// The passenger railway behind a UIC country code as bahn.de uses it for `adminID`. Named like
+    /// the feeds name them, so `OperatorBrand` finds their logos.
+    static func railwayName(uicCode: String, longDistance: Bool) -> String? {
+        switch uicCode {
+        case "80": longDistance ? "DB Fernverkehr AG" : "DB Regio AG"
+        case "81": "ÖBB Personenverkehr AG"
+        case "85": "Schweizerische Bundesbahnen SBB"
+        case "54": "České dráhy, a.s."
+        case "51": longDistance ? "PKP Intercity" : "Polregio"
+        case "56": "Železničná spoločnosť Slovensko, a.s."
+        case "55": "MÁV-START"
+        case "43": "GYSEV"
+        case "84": "NS Reizigers"
+        case "88": "SNCB"
+        case "87": "SNCF"
+        case "83": "Trenitalia"
+        case "82": "CFL"
+        case "86": "DSB"
+        case "74": "SJ"
+        case "79": "Slovenske železnice"
+        case "78": "HŽ Putnički prijevoz"
+        default: nil
+        }
+    }
+
+    // MARK: Operators
+
+    /// The "BEF" (or "OP") attributes as operators, in bahn.de's order and without repeats. A section
+    /// hint like "(Berlin Hbf - Bad Schandau)" becomes the operator's section. One attribute can name
+    /// several, comma-separated, as bahn.de's connections do: "Dänische Staatsbahnen, DB Fernverkehr AG,
+    /// Ceske Drahy" (RJ 385, 2026-10-07).
+    static func operators(in attributes: [JourneyDetails.Attribute]) -> [TrainOperator] {
+        var operators: [TrainOperator] = []
+        for attribute in attributes where attribute.key == "BEF" || attribute.key == "OP" {
+            let section = attribute.teilstreckenHinweis.flatMap(section)
+            for name in operatorNames(in: attribute.value ?? "") {
+                let entry = TrainOperator(name: name, section: section)
+                if !operators.contains(entry) { operators.append(entry) }
+            }
+        }
+        return operators
+    }
+
+    /// "Dänische Staatsbahnen, DB Fernverkehr AG, Ceske Drahy" → its three names. A company's legal form
+    /// after a comma stays with it: "České dráhy, a.s." is one name.
+    static func operatorNames(in value: String) -> [String] {
+        var names: [String] = []
+        for part in value.components(separatedBy: ",").map({ $0.trimmingCharacters(in: .whitespaces) }) where !part.isEmpty {
+            let isLegalForm = part.contains(".") && !part.contains(" ") && part.count <= 7
+            if isLegalForm, let last = names.popLast() {
+                names.append("\(last), \(part)")
+            } else {
+                names.append(part)
+            }
+        }
+        return names
+    }
+
+    /// "(Berlin Hbf - Bad Schandau)" → Berlin Hbf … Bad Schandau. Only " - " with spaces separates,
+    /// so hyphenated names like "Berlin-Spandau" stay whole.
+    static func section(_ hint: String) -> TrainOperator.Section? {
+        let trimmed = hint.trimmingCharacters(in: CharacterSet(charactersIn: "() ").union(.whitespaces))
+        let parts = trimmed.components(separatedBy: " - ").map { $0.trimmingCharacters(in: .whitespaces) }
+        guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else { return nil }
+        return TrainOperator.Section(from: parts[0], to: parts[1])
+    }
+
+    /// `operators` narrowed to those running some part of `leg`, located by bahn.de's own stop order:
+    /// an operator whose section ends before the leg starts or starts after it ends is left out.
+    /// Anything that can't be placed (no section, a station not found) is kept. Once only one operator
+    /// is left, its section is dropped: it runs everything you ride.
+    static func operators(_ operators: [TrainOperator], riding leg: Leg, stops: [JourneyStop]) -> [TrainOperator] {
+        guard operators.count > 1,
+              let legStart = stops.firstIndex(where: { stop in
+                  stop.departure.map { abs($0.planned.timeIntervalSince(leg.departure.planned)) < 60 } == true && isNear(stop, leg.origin) }),
+              let legEnd = stops.indices.last(where: { index in
+                  index > legStart && stops[index].arrival.map { abs($0.planned.timeIntervalSince(leg.arrival.planned)) < 60 } == true
+                      && isNear(stops[index], leg.destination) })
+        else { return operators.count == 1 ? [TrainOperator(name: operators[0].name)] : operators }
+        let riding = operators.filter { entry in
+            guard let section = entry.section,
+                  let from = stops.firstIndex(where: { Station.normalize($0.name) == Station.normalize(section.from) }),
+                  let to = stops.indices.last(where: { $0 > from && Station.normalize(stops[$0].name) == Station.normalize(section.to) })
+            else { return true }
+            // Its section runs on to the next stop (Bad Schandau → Děčín is still DB's).
+            return from < legEnd && to >= legStart
+        }
+        var seen = Set<String>()
+        let unique = riding.filter { seen.insert($0.name).inserted }
+        return unique.count == 1 ? [TrainOperator(name: unique[0].name)] : riding
+    }
+
+    /// Same place test as `stop(in:at:planned:side:)`, without the time.
+    private static func isNear(_ stop: JourneyStop, _ station: Station) -> Bool {
+        if matches(stop, station) || Station.normalize(stop.name) == Station.normalize(station.displayName) { return true }
+        guard let a = stop.coordinate, let b = station.coordinate else { return false }
+        return a.distance(to: b) < 1_000
     }
 
     static func journeyURL(_ journeyId: String) -> URL {
@@ -464,6 +744,39 @@ extension BahnDeClient {
             }
         }
         return leg
+    }
+
+    /// `leg` with DB's live times from bahn.de's journey details wherever bahn.de has one (`echtzeit`),
+    /// at its start, its end and its stops. Transitous' realtime for cross-border trains often carries
+    /// no delay at all and DB Timetables can miss a stop, so RJ 383 showed +59 at Dresden Hbf but none
+    /// at Bad Schandau, where bahn.de had +57. Matched like the platforms, by planned time and place.
+    public static func applyingLiveTimes(from stops: [JourneyStop], to leg: Leg) -> Leg {
+        var leg = leg
+        if let actual = stop(in: stops, at: leg.origin, planned: leg.departure.planned, side: \.departure)?.departure?.actual {
+            leg.departure.actual = actual
+        }
+        if let actual = stop(in: stops, at: leg.destination, planned: leg.arrival.planned, side: \.arrival)?.arrival?.actual {
+            leg.arrival.actual = actual
+        }
+        leg.stopovers = applyingLiveTimes(from: stops, to: leg.stopovers)
+        return leg
+    }
+
+    /// `stopovers` with bahn.de's live times where it has one (see `applyingLiveTimes(from:to:)` for a leg).
+    public static func applyingLiveTimes(from stops: [JourneyStop], to stopovers: [Stopover]) -> [Stopover] {
+        var stopovers = stopovers
+        for index in stopovers.indices {
+            let stopover = stopovers[index]
+            if let planned = stopover.arrival?.planned,
+               let actual = stop(in: stops, at: stopover.station, planned: planned, side: \.arrival)?.arrival?.actual {
+                stopovers[index].arrival?.actual = actual
+            }
+            if let planned = stopover.departure?.planned,
+               let actual = stop(in: stops, at: stopover.station, planned: planned, side: \.departure)?.departure?.actual {
+                stopovers[index].departure?.actual = actual
+            }
+        }
+        return stopovers
     }
 
     /// Whether `leg` lacks a platform at its start, its end or any of its stops.

@@ -34,9 +34,45 @@ public struct TransitousProvider: TransitProvider {
     /// aren't used up by others. "l" only sorts on the device: the location never leaves it.
     public func searchStations(_ search: StationSearch, near location: Coordinate?) async throws -> [Station] {
         let modes = search.modes.reduce(into: Set<String>()) { $0.formUnion($1.motisModes) }
+        let ril = search.modes.isEmpty ? Ril100.entry(forCode: search.text) : nil
+        async let rilHit = station(for: ril)
         let matches = try await geocode(search.text, addingMainStation: true, near: location, modes: modes)
         let merged = Self.rankedAndMerged(matches, query: search.text, near: location)
-        return Self.applying(search, to: merged, near: location).map { $0.toStation() }
+        let stations = Self.applying(search, to: merged, near: location).map { $0.toStation() }
+        guard let ril else { return stations }
+        let placed = Ril100.placing(await rilHit, for: ril, typed: search.text, in: stations)
+        return search.byDistance ? search.ordered(placed, near: location) : placed
+    }
+
+    /// The stop of the station with a typed RIL100 code ("ff"), looked up by DB's name for it, its
+    /// first part and its town (`Ril100.searchTexts`), as the geocoder finds "Hof" but not "Hof Hbf";
+    /// nil if none finds it near DB's position (or nothing was typed as a code).
+    func station(for ril: Ril100.Entry?) async -> Station? {
+        guard let ril else { return nil }
+        let matches = await withTaskGroup(of: [MGeocodeMatch].self) { group in
+            for text in Ril100.searchTexts(for: ril.name) {
+                group.addTask {
+                    (try? await CombinedProvider.withDeadline(Self.extraQueryDeadline) { try await geocodeRequest(text) }) ?? []
+                }
+            }
+            return await group.reduce(into: []) { $0 += $1 }
+        }
+        // The geocoder names a stop after whichever of its names matched: for "Berlin Hauptbahnhof -
+        // Lehrter Bahnhof" Berlin Hbf comes back as "Berlin Hbf-Lehrter Bahnhof Nord", for "Ulm" Ulm Hbf
+        // as "Ulm ZOB". The shortest name that is DB's goes.
+        func preference(_ match: MGeocodeMatch) -> (Int, Int) {
+            (Ril100.isNamed(match.fullName, like: ril) ? 0 : 1, match.name.count)
+        }
+        var byId: [String: MGeocodeMatch] = [:]
+        for match in matches where byId[match.id].map({ preference(match) < preference($0) }) ?? true {
+            byId[match.id] = match
+        }
+        let named = matches.compactMap { byId.removeValue(forKey: $0.id) }
+        // The busiest stop that is the station: its main hall, not a bus stop in front of it.
+        return Self.rankedAndMerged(named, query: ril.name, near: ril.points.first)
+            .filter { Ril100.matches($0.toStation(), ril) }
+            .max { ($0.relevance, $0.importance ?? 0) < ($1.relevance, $1.importance ?? 0) }?
+            .toStation()
     }
 
     static func rankedAndMerged(_ matches: [MGeocodeMatch], query: String, near location: Coordinate?) -> [MGeocodeMatch] {
@@ -1208,7 +1244,7 @@ public struct TransitousProvider: TransitProvider {
     /// Index of the most recent leg in `result` that `leg` is really a direct continuation of –
     /// either truly back-to-back, or separated only by a single short walk leg bridging two stops
     /// that are really the same platform (see `mergeThroughTrainLegs` above). Recognized by the same
-    /// train number and product continuing with no real dwell time between the two train legs' own
+    /// train number and kind of train continuing with no real dwell time between the two train legs' own
     /// planned times — the walk leg's own bounds don't factor in, only that it doesn't hide an actual
     /// transfer.
     static func continuationAnchorIndex(in result: [Leg], for leg: Leg) -> Int? {
@@ -1221,11 +1257,19 @@ public struct TransitousProvider: TransitProvider {
             ? anchor.destination.isSamePlace(as: last.origin) && last.destination.isSamePlace(as: leg.origin)
             : anchor.destination.isSamePlace(as: leg.origin)
         guard bridged,
-              anchor.line?.product == leg.line?.product,
-              let anchorNumber = anchor.line?.number, anchorNumber == leg.line?.number,
+              let anchorLine = anchor.line, let line = leg.line, Self.isSameKind(anchorLine.product, line.product),
+              let anchorNumber = anchorLine.number, anchorNumber == line.number,
               leg.departure.planned.timeIntervalSince(anchor.arrival.planned) <= 5 * 60
         else { return nil }
         return anchorIndex
+    }
+
+    /// Whether two products can be the same train in two feeds. Long-distance and high-speed count as one:
+    /// the Railjet København → Praha is high-speed in DB's feed but long-distance in the Czech one
+    /// ("Ex5 (rj 383)"), which showed it as two trains with a change at Děčín.
+    private static func isSameKind(_ a: Product, _ b: Product) -> Bool {
+        let longDistance: Set<Product> = [.highSpeed, .longDistance]
+        return a == b || (longDistance.contains(a) && longDistance.contains(b))
     }
 
     /// A domestic feed sometimes genericizes an international EuroCity as a plain "IC"; when the

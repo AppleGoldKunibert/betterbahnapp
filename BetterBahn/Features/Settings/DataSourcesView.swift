@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Settings → Datenquellen: every service the app gets data from, with the attribution their terms ask for
-/// (Transitous sources, OSM + OpenRailwayMap with links, DB Timetables under CC BY 4.0).
+/// (Transitous sources, OSM + OpenRailwayMap with links, DB Timetables under CC BY 4.0, operator logos).
 struct DataSourcesView: View {
     struct Source: Identifiable {
         let name: String
@@ -18,6 +18,9 @@ struct DataSourcesView: View {
         Source(name: "Deutsche Bahn – DB Timetables", usage: "Echtzeitdaten und Meldungen",
                url: URL(string: "https://developers.deutschebahn.com/db-api-marketplace/apis/product/timetables")!,
                license: ("Lizenz: CC BY 4.0", URL(string: "https://creativecommons.org/licenses/by/4.0/deed.de")!)),
+        Source(name: "Deutsche Bahn – Infrastrukturdaten der DB InfraGO", usage: "RIL100-Codes der Bahnhöfe",
+               url: URL(string: "https://mobilithek.info/offers/922109165921083392")!,
+               license: ("Lizenz: CC BY 4.0", URL(string: "https://creativecommons.org/licenses/by/4.0/deed.de")!)),
         Source(name: "bahn.de", usage: "Wagenreihung, Zusatzhalte, Gleise und Zugnamen",
                url: URL(string: "https://www.bahn.de")!),
         Source(name: "vagonweb.cz", usage: "Geplante Wagenreihungen und Zugtypen, mit Erlaubnis von vagonweb",
@@ -25,10 +28,14 @@ struct DataSourcesView: View {
         Source(name: "bahn.expert", usage: "Zugtypen", url: URL(string: "https://bahn.expert")!),
         Source(name: "bahn.jetzt", usage: "Zugpositionen auf der Karte", url: URL(string: "https://bahn.jetzt")!),
         Source(name: "Träwelling", usage: "Check-ins", url: URL(string: "https://traewelling.de")!),
+        Source(name: "zug.network", usage: "Emojis im Check-in-Text (oder die deiner mit Träwelling verbundenen Mastodon-Instanz)",
+               url: URL(string: "https://zug.network")!),
         Source(name: "OpenStreetMap", usage: "Kartendaten des Schienennetzes, © OpenStreetMap-Mitwirkende",
                url: URL(string: "https://www.openstreetmap.org/copyright")!),
         Source(name: "OpenRailwayMap", usage: "Kartenkacheln des Schienennetzes",
                url: URL(string: "https://www.openrailwaymap.org")!),
+        Source(name: "Wikimedia Commons", usage: "Logos der Bahnunternehmen, Marken der jeweiligen Unternehmen",
+               url: URL(string: "https://commons.wikimedia.org/wiki/Category:Logos_of_railway_companies")!),
     ]
 
     var body: some View {

@@ -59,7 +59,7 @@ ${PAGE_STYLE}
 <body>
 <main>
 <h1>Datenschutz</h1>
-<p class="muted">BetterBahn für iPhone · Stand: 4. Oktober 2026</p>
+<p class="muted">BetterBahn für iPhone · Stand: 6. Oktober 2026</p>
 
 <p>BetterBahn ist ein privates Projekt und steht in keiner Verbindung zur Deutschen Bahn AG. Die App hat
 keine Benutzerkonten, keine Werbung, kein Tracking und keine Analyse-Werkzeuge. Was du in der App speicherst,
@@ -101,9 +101,10 @@ kurz zwischen (Sekunden bis höchstens einen Tag), damit nicht jede Anfrage erne
 (Barcode des Tickets, Namen der Reisenden, Verbindung, Sitzplätze, Auftragsnummer; bei Zeitkarten auch das
 Geburtsdatum aus dem Barcode) an den Server geschickt, dort signiert und sofort zurückgegeben,</li>
 <li>leiten die Anmeldung bei Träwelling an die App weiter,</li>
-<li>speichern Reisen, die du teilst (siehe „Reisen teilen“).</li>
+<li>speichern Reisen, die du teilst (siehe „Reisen teilen“),</li>
+<li>sammeln Zugdaten für Statistiken (siehe „Zugstatistik“).</li>
 </ul>
-<p>Abgesehen von geteilten Reisen wird dabei nichts gespeichert oder protokolliert. Cloudflare verarbeitet zur Absicherung des Dienstes
+<p>Abgesehen von geteilten Reisen und den Zugdaten für die Statistik wird dabei nichts gespeichert oder protokolliert. Cloudflare verarbeitet zur Absicherung des Dienstes
 IP-Adressen; Details stehen in der <a href="https://www.cloudflare.com/privacypolicy/">Datenschutzerklärung von Cloudflare</a>.</p>
 <p>Damit nur die echte App diese Funktionen nutzen kann, prüft die App ihre Echtheit mit Apples App Attest.
 Der Server erhält dabei eine zufällige Schlüsselkennung dieser App-Installation, aber keine Angaben über dich.</p>
@@ -114,6 +115,16 @@ von BetterBahn. Dort wird sie unter einer zufälligen Kennung 30 Tage lang gespe
 gelöscht. Geteilt wird nur ein kurzer Link; wer ihn hat, kann die Reise in dieser Zeit abrufen. Namen, Tickets
 oder andere Angaben über dich sind nicht dabei. Ist der Server nicht erreichbar, teilt die App stattdessen einen
 längeren Link, der die Reise selbst enthält; dann wird nichts gespeichert.</p>
+
+<h2>Zugstatistik</h2>
+<p>Solange „Zugdaten für Statistik teilen“ in den Einstellungen eingeschaltet ist (Standard), schickt die App
+für Regional- und Fernzüge, die sie dir anzeigt (Abfahrtstafeln, Suchergebnisse, Zugverläufe), die Kennung
+dieser Fahrt bei bahn.de an den Server von BetterBahn. Der Server fragt bei bahn.de den Verlauf dieser Fahrt
+ab und speichert Fahrplan, Verspätungen, Gleise, Ausfälle, Störungsmeldungen und die Wagenreihung, um
+Statistiken über Pünktlichkeit, Gleiswechsel und Fahrzeuge zu erstellen. Gespeichert wird nur, welcher Zug
+wann wo gefahren ist, nicht wer ihn angesehen hat: keine Kennung deines Geräts oder deiner App-Installation,
+kein Standort, nichts über dich. Die Zugdaten bleiben ein Jahr auf dem Server und werden danach gelöscht oder
+offline archiviert.</p>
 
 <h2>Tickets abrufen</h2>
 <p>Zum Abrufen eines Tickets öffnet die App die Auftragssuche von bahn.de. Auftragsnummer und Nachname gehen nur
@@ -131,6 +142,9 @@ Namen mit dem Suchtext.</p>
 <p>Wenn du dich bei <a href="https://traewelling.de">Träwelling</a> anmeldest, schickt die App deine Check-ins
 (Zug, Strecke, Zeiten, Nachricht, Sichtbarkeit) und Abfragen an Träwelling. Dafür gilt die Datenschutzerklärung
 von Träwelling. Du kannst dich in den Einstellungen jederzeit abmelden.</p>
+<p>Für die Emojis im Check-in-Text lädt die App die Emoji-Liste und -Bilder der Mastodon-Instanz, die mit
+deinem Träwelling-Konto verbunden ist, sonst von <a href="https://zug.network">zug.network</a>. Dabei wird
+nichts über dich gesendet außer deiner IP-Adresse, die jeder Abruf im Internet mitschickt.</p>
 
 <h2>Mitteilungen</h2>
 <p>Hinweise zu Verspätungen und Gleiswechseln erzeugt die App selbst auf deinem Gerät. Es gibt keine
@@ -138,7 +152,8 @@ Push-Mitteilungen über einen Server.</p>
 
 <h2>Rechtsgrundlage und deine Rechte</h2>
 <p>Die Verarbeitung dient dazu, die Funktionen bereitzustellen, die du in der App nutzt (Art. 6 Abs. 1 lit. b
-DSGVO), und den Dienst vor Missbrauch zu schützen (Art. 6 Abs. 1 lit. f DSGVO). Du hast das Recht auf Auskunft,
+DSGVO), den Dienst vor Missbrauch zu schützen und Statistiken über Züge zu erstellen (Art. 6 Abs. 1 lit. f
+DSGVO). Die Zugstatistik kannst du in den Einstellungen jederzeit abschalten. Du hast das Recht auf Auskunft,
 Berichtigung, Löschung, Einschränkung der Verarbeitung, Datenübertragbarkeit und Widerspruch sowie das Recht,
 dich bei einer Datenschutz-Aufsichtsbehörde zu beschweren. Schreib mir dazu einfach eine E-Mail.</p>
 </main>

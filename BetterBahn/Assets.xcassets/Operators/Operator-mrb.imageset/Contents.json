@@ -1,0 +1,23 @@
+{
+  "images": [
+    {
+      "filename": "Operator-mrb.png",
+      "idiom": "universal",
+      "scale": "1x"
+    },
+    {
+      "filename": "Operator-mrb@2x.png",
+      "idiom": "universal",
+      "scale": "2x"
+    },
+    {
+      "filename": "Operator-mrb@3x.png",
+      "idiom": "universal",
+      "scale": "3x"
+    }
+  ],
+  "info": {
+    "author": "xcode",
+    "version": 1
+  }
+}

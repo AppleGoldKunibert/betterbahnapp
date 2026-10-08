@@ -1,0 +1,27 @@
+name = "betterbahn-stats"
+main = "worker.mjs"
+compatibility_date = "2026-09-01"
+workers_dev = true
+
+# Train statistics (#169). Create the database once with
+# `npx wrangler d1 create betterbahn-stats`, put its id here and load schema.sql (see README.md).
+[[d1_databases]]
+binding = "DB"
+database_name = "betterbahn-stats"
+database_id = "8e54043e-cfd7-48fd-be13-d26497af6b43"
+
+# Every minute: look at the runs that are due (schedule, Wagenreihung, final state).
+[triggers]
+crons = ["* * * * *"]
+
+# Per app install (App Attest key): 30 reports per minute. namespace_id is any number unique within the account.
+[[ratelimits]]
+name = "SIGHTINGS_LIMITER"
+namespace_id = "1301"
+simple = { limit = 30, period = 60 }
+
+[vars]
+# Runs per cron invocation (one bahn.de request each). 8 fits the free plan's 10 ms CPU; raise it on Workers Paid.
+BATCH = "8"
+# Secrets (`npx wrangler secret put …`): TOKEN_SECRET (same value as in betterbahn2, betterbahn and betterbahn-pass).
+# ALLOW_UNATTESTED = "true" lets apps without App Attest (Simulator) report trains.

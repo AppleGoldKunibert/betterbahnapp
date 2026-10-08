@@ -149,6 +149,14 @@ struct TrainModel: Sendable, Hashable {
         }
     }
 
+    /// ICE L coaches (Talgo, construction type "R89…") share the "…-91" UIC numbers with classic IC coaches
+    /// ("61 80 20-91 …"), so an IC 1 farewell run came out as "ICE L". Without a construction type only ICE
+    /// trains count.
+    private static func isTalgo(_ carriage: Carriage, category: String) -> Bool {
+        guard let type = carriage.constructionType else { return category == "ICE" }
+        return type.hasPrefix("R89")
+    }
+
     private static func germanSubtype(model: Int, carriage: Carriage, category: String) -> String? {
         let serial = Int(carriage.digits(9, 2)) ?? 0
         let block = carriage.digits(5, 4)
@@ -156,7 +164,7 @@ struct TrainModel: Sendable, Hashable {
         // (one digit further on), which never matches, so a FLIRT of BR 1430 came out as the S-Bahn BR 430.
         let type = carriage.digits(4, 4)
         switch model {
-        case 91, 491, 791, 891: return "091"
+        case 91, 491, 791, 891: return isTalgo(carriage, category: category) ? "091" : nil
         case 401, 801...804: return "401"
         case 402, 805...808: return "402"
         case 403: return serial <= 37 ? "403.S1" : "403.S2"

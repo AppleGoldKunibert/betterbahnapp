@@ -5,5 +5,9 @@ import WidgetKit
 struct BetterBahnWidgetsBundle: WidgetBundle {
     var body: some Widget {
         TripLiveActivity()
+        JourneyOverviewWidget()
+        CurrentTrainWidget()
+        LiveSpeedWidget()
+        LivePositionWidget()
     }
 }
