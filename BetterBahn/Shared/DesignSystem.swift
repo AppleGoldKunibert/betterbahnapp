@@ -360,7 +360,8 @@ struct TrainFormationLabel: View {
                fallback.unitDescription != nil {
                 found = fallback
             }
-            if let found, found.unitDescription != nil {
+            if let found, found.unitDescription != nil || found.isIC1 {
+                // An IC 1 has no Tz: hide (and forget) one remembered by an older version.
                 formation = found
                 blocked = false
                 if let leg { model.rememberFormation(found, for: leg) }
