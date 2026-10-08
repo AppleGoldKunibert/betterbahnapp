@@ -35,6 +35,8 @@ struct JourneyDetailView: View {
     struct LegSelection: Identifiable {
         let index: Int
         let leg: Leg
+        /// Set when picking a train for a missed connection: only trains leaving then or later.
+        var notBefore: Date?
         var id: String { leg.id }
     }
 
@@ -77,14 +79,22 @@ struct JourneyDetailView: View {
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $legToReplace) { selection in
-            AlternativeTrainsSheet(leg: selection.leg) { newLegs in
-                let updated = try await model.trainPicker.replacing(
-                    legAt: selection.index, in: journey, with: newLegs, finalDestination: goal)
+            AlternativeTrainsSheet(leg: selection.leg, notBefore: selection.notBefore, nextLeg: nextTransitLeg(after: selection.index),
+                                   rerouteTarget: rerouteTargetIndex(for: selection).map { journey.legs[$0].destination },
+                                   rerouteNextLeg: nextTransitLeg(after: rerouteTargetIndex(for: selection))) { newLegs in
+                try await model.trainPicker.replacing(legsIn: replacedRange(for: selection, by: newLegs), in: journey,
+                                                      with: newLegs, finalDestination: goal)
+            } onApply: { replacement, showAlternatives in
+                let updated = replacement.journey
                 withAnimation {
                     if let entry = model.savedEntry(for: journey) {
                         model.replaceSaved(id: entry.id, with: updated, reason: "Anderer Zug gewählt")
                     }
                     journey = updated
+                }
+                // A new item swaps the open sheet for the missed train's alternatives.
+                if showAlternatives, let missed = replacement.missedConnection {
+                    legToReplace = LegSelection(index: missed.legIndex, leg: missed.leg, notBefore: missed.earliestDeparture)
                 }
             }
         }
@@ -158,6 +168,23 @@ struct JourneyDetailView: View {
 
     /// The options to start a re-plan from: this view's own, else whatever was saved with the journey.
     private var replanSearch: ConnectionSearch? { search ?? model.savedEntry(for: journey)?.search }
+
+    private func nextTransitLeg(after index: Int?) -> Leg? {
+        index.flatMap { journey.nextTransitLegIndex(after: $0) }.map { journey.legs[$0] }
+    }
+
+    /// The leg ending at the next via or the destination, for "Andere Routenführung" from `selection`.
+    private func rerouteTargetIndex(for selection: LegSelection) -> Int? {
+        journey.rerouteTargetIndex(from: selection.index, vias: replanSearch?.via.map(\.station) ?? [], finalDestination: goal)
+    }
+
+    /// The legs `newLegs` replace: just the picked one, or up to the next via for an "Andere Routenführung".
+    private func replacedRange(for selection: LegSelection, by newLegs: [Leg]) -> ClosedRange<Int> {
+        guard let end = newLegs.last?.destination, !end.isSamePlace(as: selection.leg.destination),
+              let target = rerouteTargetIndex(for: selection), end.isSamePlace(as: journey.legs[target].destination)
+        else { return selection.index...selection.index }
+        return selection.index...target
+    }
 
     /// Pull-to-refresh: re-fetches realtime data (delays, platforms, cancellations) for every leg.
     private func refreshRealtime() async {
@@ -664,17 +691,32 @@ struct LegCard: View {
 
 struct AlternativeTrainsSheet: View {
     let leg: Leg
-    /// The legs replacing `leg`: one for a direct train, several for a connection with transfers.
-    let onSelect: ([Leg]) async throws -> Void
+    /// Only trains leaving then or later (picking one for a missed connection).
+    var notBefore: Date?
+    /// The planned train after `leg`, to mark alternatives that arrive too late for it.
+    var nextLeg: Leg?
+    /// The next via or the destination when `leg` ends at a mere transfer point: connections straight
+    /// there are offered too, as "Andere Routenführung".
+    var rerouteTarget: Station?
+    /// The planned train after `rerouteTarget`, like `nextLeg`.
+    var rerouteNextLeg: Leg?
+    /// Builds the new plan from the legs replacing `leg`: one for a direct train, several for a connection with transfers.
+    let onSelect: ([Leg]) async throws -> LegReplacement
+    /// Applies the new plan; `true` when the user wants other trains for the connection it misses
+    /// (the caller then shows those instead of this sheet).
+    let onApply: (LegReplacement, _ showAlternatives: Bool) -> Void
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var alternatives: [Leg] = []
     @State private var connections: [Journey] = []
+    @State private var reroutes: [Journey] = []
     @State private var isLoading = true
     @State private var applyingID: String?
     @State private var onlyValidTicket = false
     @State private var error: Error?
+    /// A picked train that misses the next planned one, waiting for the user's choice.
+    @State private var pending: LegReplacement?
 
     var body: some View {
         NavigationStack {
@@ -691,6 +733,11 @@ struct AlternativeTrainsSheet: View {
                                     Text("Aktuell: \(leg.line?.name ?? "Zug") um \(leg.departure.planned.timeString)")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
+                                    if let notBefore {
+                                        Text("Anschluss verpasst · Züge ab \(notBefore.timeString)")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(Color.heavyDelay)
+                                    }
                                 }
                             }
                             Divider()
@@ -706,35 +753,34 @@ struct AlternativeTrainsSheet: View {
                         ErrorBanner(error: error)
                     }
 
-                    if !alternatives.isEmpty {
-                        SectionHeader(title: "Züge auf dieser Strecke", systemImage: "tram.fill",
-                                      trailing: "30 Min. vorher bis 3 Std. nachher")
+                    if !options.isEmpty {
+                        SectionHeader(title: "Andere Züge", systemImage: "tram.fill",
+                                      trailing: notBefore == nil ? "30 Min. vorher bis 3 Std. nachher" : "3 Std. ab Ankunft")
                             .padding(.top, 6)
                     }
 
-                    ForEach(alternatives) { alternative in
+                    // One list by departure; a note on each says how it gets there.
+                    ForEach(options) { option in
                         Button {
-                            apply([alternative], id: alternative.id)
+                            apply(option.legs, id: option.id)
                         } label: {
-                            AlternativeRow(leg: alternative, current: leg, isApplying: applyingID == alternative.id)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(applyingID != nil)
-                    }
-
-                    if !connections.isEmpty {
-                        SectionHeader(title: "Mit Umstieg", systemImage: "arrow.triangle.swap")
-                            .padding(.top, 6)
-                    }
-
-                    ForEach(connections) { connection in
-                        Button {
-                            apply(connection.legs, id: connection.id)
-                        } label: {
-                            JourneyCard(journey: connection)
-                                .overlay(alignment: .topTrailing) {
-                                    if applyingID == connection.id { ProgressView().padding(14) }
+                            switch option {
+                            case .direct(let alternative):
+                                AlternativeRow(leg: alternative, current: leg, nextLeg: nextLeg, note: option.note,
+                                               isApplying: applyingID == option.id)
+                            case .withTransfer(let route), .reroute(let route):
+                                let next = option.isReroute ? rerouteNextLeg : nextLeg
+                                VStack(alignment: .leading, spacing: 6) {
+                                    JourneyCard(journey: route)
+                                        .overlay(alignment: .topTrailing) {
+                                            if applyingID == option.id { ProgressView().padding(14) }
+                                        }
+                                    RouteNote(text: option.note, systemImage: option.symbolName).padding(.horizontal, 14)
+                                    if let next, let last = route.legs.last, !last.catches(next) {
+                                        MissedConnectionHint(next: next).padding(.horizontal, 14)
+                                    }
                                 }
+                            }
                         }
                         .buttonStyle(.plain)
                         .disabled(applyingID != nil)
@@ -746,7 +792,7 @@ struct AlternativeTrainsSheet: View {
             .overlay {
                 if isLoading {
                     ProgressView("Suche Züge …")
-                } else if alternatives.isEmpty, connections.isEmpty, error == nil {
+                } else if alternatives.isEmpty, connections.isEmpty, reroutes.isEmpty, error == nil {
                     ContentUnavailableView("Keine anderen Züge", systemImage: "tram.fill",
                                            description: Text("Gerade fährt kein anderer Zug von \(leg.origin.displayName) nach \(leg.destination.displayName)."))
                 }
@@ -760,6 +806,23 @@ struct AlternativeTrainsSheet: View {
             }
             .task(id: onlyValidTicket) { await load() }
             .onAppear { onlyValidTicket = model.settings.ticketFilterByDefault }
+            .alert("Anschluss nicht erreichbar", isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }),
+                   presenting: pending) { replacement in
+                Button("Alternativen zeigen") { onApply(replacement, true) }
+                Button("Ignorieren") {
+                    onApply(replacement, false)
+                    dismiss()
+                }
+                Button("Abbrechen", role: .cancel) {}
+            } message: { replacement in
+                if let missed = replacement.missedConnection {
+                    Text("""
+                        \(missed.arriving.line?.name ?? "Der Zug") kommt um \(missed.arriving.arrival.best.timeString) in \
+                        \(missed.leg.origin.displayName) an, \(missed.leg.line?.name ?? "dein Anschluss") fährt dort \
+                        schon um \(missed.leg.departure.best.timeString). Andere Züge dafür anzeigen oder den Plan so lassen?
+                        """)
+                }
+            }
         }
     }
 
@@ -767,18 +830,67 @@ struct AlternativeTrainsSheet: View {
         isLoading = true
         defer { isLoading = false }
         let filter = onlyValidTicket ? model.ticketFilter : nil
-        let picker = model.trainPicker, leg = leg
-        // Both lists load together; one failing still shows the other.
-        async let direct = picker.alternatives(for: leg, ticketFilter: filter)
-        async let withTransfers = picker.connections(for: leg, ticketFilter: filter)
+        let picker = model.trainPicker, leg = leg, notBefore = notBefore, target = rerouteTarget
+        // The lists load together; one failing still shows the others.
+        async let direct = picker.alternatives(for: leg, notBefore: notBefore, ticketFilter: filter)
+        async let withTransfers = picker.connections(for: leg, notBefore: notBefore, ticketFilter: filter)
+        async let rerouted = Self.reroutes(picker, for: leg, to: target, notBefore: notBefore, ticketFilter: filter)
         var failure: Error?
-        var foundDirect: [Leg] = [], foundWithTransfers: [Journey] = []
+        var foundDirect: [Leg] = [], foundWithTransfers: [Journey] = [], foundReroutes: [Journey] = []
         do { foundDirect = try await direct } catch { failure = error }
         do { foundWithTransfers = try await withTransfers } catch { failure = failure ?? error }
+        do { foundReroutes = try await rerouted } catch { failure = failure ?? error }
         guard !Task.isCancelled, !(failure is CancellationError) else { return }
         alternatives = foundDirect
         connections = foundWithTransfers
-        error = foundDirect.isEmpty && foundWithTransfers.isEmpty ? failure : nil
+        reroutes = foundReroutes
+        error = foundDirect.isEmpty && foundWithTransfers.isEmpty && foundReroutes.isEmpty ? failure : nil
+    }
+
+    /// An entry of the list: a direct train, a connection with transfers, or one straight on to the
+    /// next via or destination ("Andere Routenführung").
+    private enum Option: Identifiable {
+        case direct(Leg), withTransfer(Journey), reroute(Journey)
+
+        var id: String {
+            switch self {
+            case .direct(let leg): "direct|" + leg.id
+            case .withTransfer(let route): "transfer|" + route.id
+            case .reroute(let route): "reroute|" + route.id
+            }
+        }
+        var legs: [Leg] {
+            switch self {
+            case .direct(let leg): [leg]
+            case .withTransfer(let route), .reroute(let route): route.legs
+            }
+        }
+        var isReroute: Bool { if case .reroute = self { true } else { false } }
+        var note: String {
+            switch self {
+            case .direct: "Direkt"
+            case .withTransfer: "Mit Umstieg"
+            case .reroute: "Andere Routenführung"
+            }
+        }
+        var symbolName: String {
+            switch self {
+            case .direct: "arrow.right"
+            case .withTransfer: "arrow.triangle.swap"
+            case .reroute: "arrow.triangle.branch"
+            }
+        }
+    }
+
+    private var options: [Option] {
+        (alternatives.map(Option.direct) + connections.map(Option.withTransfer) + reroutes.map(Option.reroute))
+            .sorted { ($0.legs.first?.departure.planned ?? .distantFuture) < ($1.legs.first?.departure.planned ?? .distantFuture) }
+    }
+
+    private static func reroutes(_ picker: TrainPicker, for leg: Leg, to target: Station?, notBefore: Date?,
+                                 ticketFilter: TicketFilter?) async throws -> [Journey] {
+        guard let target else { return [] }
+        return try await picker.reroutes(for: leg, to: target, notBefore: notBefore, ticketFilter: ticketFilter)
     }
 
     private func apply(_ legs: [Leg], id: String) {
@@ -786,8 +898,13 @@ struct AlternativeTrainsSheet: View {
         Task {
             defer { applyingID = nil }
             do {
-                try await onSelect(legs)
-                dismiss()
+                let replacement = try await onSelect(legs)
+                if replacement.missedConnection != nil {
+                    pending = replacement
+                } else {
+                    onApply(replacement, false)
+                    dismiss()
+                }
             } catch {
                 self.error = error
             }
@@ -798,6 +915,10 @@ struct AlternativeTrainsSheet: View {
 struct AlternativeRow: View {
     let leg: Leg
     let current: Leg
+    /// The planned train after `current`, flagged when `leg` arrives too late for it.
+    var nextLeg: Leg?
+    /// How it gets there ("Direkt"), under the times.
+    var note: String?
     var isApplying = false
 
     var body: some View {
@@ -811,6 +932,10 @@ struct AlternativeRow: View {
                         TimeStack(time: leg.departure, font: .headline)
                         Image(systemName: "arrow.right").font(.caption.weight(.bold)).foregroundStyle(.tertiary)
                         TimeStack(time: leg.arrival, font: .headline)
+                    }
+                    if let note { RouteNote(text: note, systemImage: "arrow.right") }
+                    if let nextLeg, !leg.catches(nextLeg) {
+                        MissedConnectionHint(next: nextLeg)
                     }
                 }
                 Spacer()
@@ -829,6 +954,31 @@ struct AlternativeRow: View {
                 }
             }
         }
+    }
+}
+
+/// Says how an alternative gets there: "Direkt", "Mit Umstieg" or "Andere Routenführung".
+struct RouteNote: View {
+    let text: String
+    let systemImage: String
+
+    var body: some View {
+        Label(text, systemImage: systemImage)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+    }
+}
+
+/// Marks an alternative that arrives too late for the planned train after it.
+struct MissedConnectionHint: View {
+    let next: Leg
+
+    var body: some View {
+        Label("Anschluss \(next.line?.name ?? "Zug") um \(next.departure.best.timeString) nicht erreichbar",
+              systemImage: "exclamationmark.triangle.fill")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(Color.heavyDelay)
     }
 }
 
