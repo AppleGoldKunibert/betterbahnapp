@@ -70,6 +70,26 @@ public extension Journey {
         return issues
     }
 
+    /// The transit leg an issue is about: the arriving train of a (missed or tight) transfer, or the
+    /// cancelled train. Matches the way `connectionIssues()` names stations and lines, so a raw name
+    /// like "S+U Gesundbrunnen Bhf (Berlin)" still finds the issue's "Berlin Gesundbrunnen".
+    func leg(for issue: ConnectionIssue) -> Leg? {
+        let transit = transitLegs
+        func lineName(_ leg: Leg) -> String { leg.line?.name ?? "Zug" }
+        switch issue {
+        case .transferMissed(let at, let arriving, let departing, _), .transferAtRisk(let at, let arriving, let departing, _):
+            guard transit.count > 1 else { return nil }
+            return (1..<transit.count).first {
+                lineName(transit[$0 - 1]) == arriving && lineName(transit[$0]) == departing
+                    && transit[$0].origin.displayName == at
+            }.map { transit[$0 - 1] }
+        case .legCancelled(let line, let from, let to):
+            return transit.first {
+                $0.cancelled && lineName($0) == line && $0.origin.displayName == from && $0.destination.displayName == to
+            }
+        }
+    }
+
     /// Over 10 minutes after its (realtime) arrival.
     func isOver(now: Date = .now) -> Bool {
         (arrival?.best ?? .distantFuture).addingTimeInterval(10 * 60) < now

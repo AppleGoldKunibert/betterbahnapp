@@ -3635,6 +3635,22 @@ private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
         #expect(journey.connectionIssues().first?.title == "Umstieg in Berlin Hbf klappt nicht mehr")
     }
 
+    /// The Alternative sheet showed "Problemstelle nicht gefunden" when the S-Bahn's raw station name
+    /// ("S+U Gesundbrunnen Bhf (Berlin)") differed from the issue's display name "Berlin Gesundbrunnen".
+    @Test func issueFindsItsLegDespiteRawStationNames() {
+        let ice = leg("ICE 1002", "München Hbf", "Berlin Gesundbrunnen", dep: 0, arr: 270, arrDelay: 18)
+        let s2 = leg("S 2", "S+U Gesundbrunnen Bhf (Berlin)", "Bernau", dep: 284, arr: 320)
+        let journey = Journey(legs: [ice, leg("", "Berlin Gesundbrunnen", "S+U Gesundbrunnen Bhf (Berlin)", dep: 270, arr: 272, walking: true), s2],
+                              source: .bahnDe)
+        let issue = journey.connectionIssues().first
+        #expect(issue?.title == "Umstieg in Berlin Gesundbrunnen klappt nicht mehr")
+        #expect(issue.flatMap(journey.leg(for:)) == ice)
+
+        let cancelled = leg("RE 3", "S+U Berlin Hauptbahnhof", "Stralsund", dep: 0, arr: 60, cancelled: true)
+        let withCancellation = Journey(legs: [cancelled], source: .bahnDe)
+        #expect(withCancellation.connectionIssues().first.flatMap(withCancellation.leg(for:)) == cancelled)
+    }
+
     @Test func tightButPossible() {
         let journey = Journey(legs: [leg("ICE 1", "A", "B", dep: 0, arr: 60, arrDelay: 6), leg("ICE 2", "B", "C", dep: 70, arr: 120)], source: .bahnDe)
         #expect(journey.connectionIssues().first?.isBlocking == false)
