@@ -31,27 +31,80 @@ public struct TraewellingStatus: Decodable, Sendable, Hashable {
         public var manualArrival: Date?
         public var origin: Stop
         public var destination: Stop
+
+        /// A trip the user typed in on Träwelling ("Manuell eintragen") rather than one from a
+        /// timetable: Träwelling gives those a UUID instead of a feed's trip ID.
+        public var isManualTrip: Bool { hafasId.map { UUID(uuidString: $0) != nil } ?? false }
+
+        /// When the ride starts and ends: times typed in on Träwelling, else live, else planned.
+        public var start: Date? { manualDeparture ?? origin.departureReal ?? origin.departure ?? origin.departurePlanned }
+        public var end: Date? { manualArrival ?? destination.arrivalReal ?? destination.arrival ?? destination.arrivalPlanned }
+    }
+
+    /// Who checked in (Träwelling's `LightUser`).
+    public struct User: Decodable, Sendable, Hashable {
+        public var id: Int
+        public var displayName: String
+        public var username: String
+        public var profilePicture: URL? { profilePictureString.flatMap(URL.init(string:)) }
+        /// The host of the Mastodon instance connected to their account (e.g. "chaos.social"), whose
+        /// custom emojis their check-in texts use.
+        public var mastodonServer: String? {
+            mastodon?.value?.server.flatMap { CustomEmojiText.instance(fromMastodonURL: $0) }
+        }
+        private var profilePictureString: String?
+        private var mastodon: LenientMastodon?
+
+        enum CodingKeys: String, CodingKey {
+            case id, displayName, username, mastodon, profilePictureString = "profilePicture"
+        }
+
+        struct LenientMastodon: Decodable, Sendable, Hashable {
+            struct Account: Decodable, Sendable, Hashable { var server: String? }
+            var value: Account?
+            init(from decoder: Decoder) throws { value = try? Account(from: decoder) }
+        }
     }
 
     public var id: Int
     public var checkin: Checkin
+    public var user: User? { userValue?.value }
     public var createdAt: Date?
     /// The check-in's text, which may hold Mastodon `:shortcode:` emojis (`CustomEmojiText`).
     public var body: String?
     public var visibility: TraewellingVisibility? { visibilityValue?.value.flatMap(TraewellingVisibility.init(rawValue:)) }
     public var business: TraewellingBusiness? { businessValue?.value.flatMap(TraewellingBusiness.init(rawValue:)) }
+    /// How many liked the check-in, whether the user did, and whether they may (Träwelling's
+    /// `isLikable`: false e.g. when its author has likes off).
+    public var likes: Int?
+    public var liked: Bool?
+    public var isLikable: Bool?
+    /// The check-in's tags (seat, wagon, …) the user may see; only sent with lists like the dashboard.
+    public var tags: [StatusTag] { tagsValue?.value ?? [] }
     // Read leniently: a value this app doesn't know must not break loading the whole history.
     private var visibilityValue: LenientInt?
     private var businessValue: LenientInt?
+    private var userValue: LenientUser?
+    private var tagsValue: LenientTags?
 
     enum CodingKeys: String, CodingKey {
-        case id, checkin, createdAt, body
-        case visibilityValue = "visibility", businessValue = "business"
+        case id, checkin, createdAt, body, likes, liked, isLikable
+        case visibilityValue = "visibility", businessValue = "business", userValue = "user", tagsValue = "tags"
     }
 
     struct LenientInt: Decodable, Sendable, Hashable {
         var value: Int?
         init(from decoder: Decoder) throws { value = try? decoder.singleValueContainer().decode(Int.self) }
+    }
+
+    struct LenientUser: Decodable, Sendable, Hashable {
+        var value: User?
+        init(from decoder: Decoder) throws { value = try? User(from: decoder) }
+    }
+
+    struct LenientTags: Decodable, Sendable, Hashable {
+        var value: [StatusTag]?
+        init(from decoder: Decoder) throws { value = try? [StatusTag](from: decoder) }
     }
 
     public var product: Product {
@@ -69,9 +122,7 @@ public struct TraewellingStatus: Decodable, Sendable, Hashable {
         }
     }
 
-    public var departure: Date? {
-        checkin.manualDeparture ?? checkin.origin.departureReal ?? checkin.origin.departure ?? checkin.origin.departurePlanned
-    }
+    public var departure: Date? { checkin.start }
 
     /// Converts the check-in into a one-leg journey with its track geometry.
     public func journey(geometry: [Coordinate]?) -> Journey? {
@@ -104,11 +155,79 @@ public extension TraewellingClient {
         var links: Links?
     }
 
-    /// One page (newest first) of the user's statuses and whether more pages exist.
+    /// One page (newest first, 15 per page) of the user's statuses and whether more pages exist.
     func statuses(username: String, page: Int) async throws -> (statuses: [TraewellingStatus], hasMore: Bool) {
         let result = try await authorized("user/\(username)/statuses", query: [.init(name: "page", value: String(page))],
                                           as: StatusPage.self)
         return (result.data, result.links?.next != nil)
+    }
+
+    /// A check-in imported for the travel map.
+    struct HistoryTrip: Sendable {
+        public var statusID: Int
+        public var journey: Journey
+    }
+
+    /// One page of the check-in history, converted for the map.
+    struct HistoryPage: Sendable {
+        /// The page's check-ins not in `knownIDs` (or whose ride changed, see `refreshing`), with their track geometry.
+        public var trips: [HistoryTrip]
+        /// Every check-in on the page, so a full resync can tell which were deleted on Träwelling.
+        public var statusIDs: [Int]
+        /// The page had a check-in from `knownIDs`, so everything older was imported before
+        /// (unless an earlier import stopped half way).
+        public var reachedKnown: Bool
+        public var hasMore: Bool
+    }
+
+    /// Waits before retrying a request Träwelling rejected with 429. Its API allows about 60 requests
+    /// a minute, which a long history (one request per 15 check-ins plus their geometry) exceeds.
+    static let rateLimitDelays: [Duration] = [.seconds(15), .seconds(30), .seconds(60)]
+
+    /// Loads one page of the user's statuses and the geometry of the new ones, waiting and retrying
+    /// when Träwelling rate-limits instead of giving up (#170). A known check-in in `refreshing` comes
+    /// back too when its ride no longer matches the one imported: an edit on Träwelling (e.g. checking
+    /// out at another stop) keeps the status ID.
+    func historyPage(username: String, page: Int, knownIDs: Set<Int>, refreshing: [Int: Journey] = [:],
+                     rateLimitDelays: [Duration] = TraewellingClient.rateLimitDelays) async throws -> HistoryPage {
+        let result = try await retryingWhenRateLimited(delays: rateLimitDelays) {
+            try await self.statuses(username: username, page: page)
+        }
+        let new = result.statuses.filter { status in
+            guard knownIDs.contains(status.id) else { return true }
+            return refreshing[status.id].map { Self.rideChanged($0, status) } ?? false
+        }
+        var geometries: [Int: [Coordinate]] = [:]
+        if !new.isEmpty {
+            // Without geometry the trip still shows (as a straight line until the map looks the track up).
+            geometries = (try? await retryingWhenRateLimited(delays: rateLimitDelays) {
+                try await self.polylines(statusIDs: new.map(\.id))
+            }) ?? [:]
+        }
+        let trips = new.compactMap { status in
+            status.journey(geometry: geometries[status.id]).map { HistoryTrip(statusID: status.id, journey: $0) }
+        }
+        return HistoryPage(trips: trips, statusIDs: result.statuses.map(\.id),
+                           reachedKnown: result.statuses.contains { knownIDs.contains($0.id) }, hasMore: result.hasMore)
+    }
+
+    /// Whether a status no longer describes the ride imported for it: stops or planned times changed.
+    static func rideChanged(_ imported: Journey, _ status: TraewellingStatus) -> Bool {
+        guard let fresh = status.journey(geometry: nil)?.legs.first, let old = imported.legs.first else { return false }
+        return fresh.origin.id != old.origin.id || fresh.destination.id != old.destination.id
+            || fresh.departure != old.departure || fresh.arrival != old.arrival
+    }
+
+    private func retryingWhenRateLimited<T: Sendable>(delays: [Duration], _ operation: () async throws -> T) async throws -> T {
+        var remaining = delays[...]
+        while true {
+            do {
+                return try await operation()
+            } catch TransitError.rateLimited {
+                guard let delay = remaining.popFirst() else { throw TransitError.rateLimited }
+                try await Task.sleep(for: delay)
+            }
+        }
     }
 
     /// Track geometries for status IDs (Träwelling returns GeoJSON LineStrings, lon/lat order).

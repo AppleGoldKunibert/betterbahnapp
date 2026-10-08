@@ -70,6 +70,26 @@ public extension Journey {
         return issues
     }
 
+    /// The transit leg an issue is about: the arriving train of a (missed or tight) transfer, or the
+    /// cancelled train. Matches the way `connectionIssues()` names stations and lines, so a raw name
+    /// like "S+U Gesundbrunnen Bhf (Berlin)" still finds the issue's "Berlin Gesundbrunnen".
+    func leg(for issue: ConnectionIssue) -> Leg? {
+        let transit = transitLegs
+        func lineName(_ leg: Leg) -> String { leg.line?.name ?? "Zug" }
+        switch issue {
+        case .transferMissed(let at, let arriving, let departing, _), .transferAtRisk(let at, let arriving, let departing, _):
+            guard transit.count > 1 else { return nil }
+            return (1..<transit.count).first {
+                lineName(transit[$0 - 1]) == arriving && lineName(transit[$0]) == departing
+                    && transit[$0].origin.displayName == at
+            }.map { transit[$0 - 1] }
+        case .legCancelled(let line, let from, let to):
+            return transit.first {
+                $0.cancelled && lineName($0) == line && $0.origin.displayName == from && $0.destination.displayName == to
+            }
+        }
+    }
+
     /// Over 10 minutes after its (realtime) arrival.
     func isOver(now: Date = .now) -> Bool {
         (arrival?.best ?? .distantFuture).addingTimeInterval(10 * 60) < now
@@ -186,6 +206,11 @@ public struct JourneyRefresher: Sendable {
     private func refresh(_ originalLeg: Leg, now: Date) async -> Leg {
         guard !Self.isLongOver(originalLeg, now: now) else { return originalLeg }
         var leg = await refreshEnds(of: originalLeg, now: now)
+        // Stops the leg's own feed leaves out (ÖBB's RJ 177 has none between Südkreuz and Děčín), before
+        // DB's live data and bahn.de's Zusatzhalte are laid over them.
+        if let transitous = provider.primary as? TransitousProvider {
+            leg = await transitous.fillingMissingStops(in: leg)
+        }
         let timetables = TimetablesClient.knowsChanges(until: leg.arrival.planned, now: now) ? self.timetables : nil
         if let timetables, timetables.canLookUp(leg) {
             leg = Self.syncingEnds(of: leg, toStopovers: true)
@@ -203,8 +228,16 @@ public struct JourneyRefresher: Sendable {
         let runningSoon = Self.isRunningSoon(leg)
         if let bahnDe = provider.bahnDe, runningSoon || Self.needsPlatforms(leg),
            let stops = try? await bahnDe.journeyStops(for: leg, maxAge: runningSoon ? BahnDeClient.journeyStopsMaxAge : 3600) {
-            if runningSoon, !leg.stopovers.isEmpty { leg.stopovers = BahnDeClient.inserting(stops, into: leg.stopovers) }
+            if runningSoon {
+                if !leg.stopovers.isEmpty { leg.stopovers = BahnDeClient.inserting(stops, into: leg.stopovers) }
+                // DB's own live times beat Transitous' and fill stops DB Timetables missed.
+                leg = BahnDeClient.applyingLiveTimes(from: stops, to: leg)
+            }
             leg = BahnDeClient.fillingMissingPlatforms(in: leg, from: stops)
+        }
+        // International trains from DB's feed have no platforms in Czechia; the Czech timetable has them.
+        if let transitous = provider.primary as? TransitousProvider {
+            leg = await transitous.fillingCzechPlatforms(in: leg)
         }
         return leg
     }

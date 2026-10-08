@@ -452,7 +452,7 @@ struct JourneyResultsView: View {
             let early = await lookup?.value(within: .milliseconds(1500))
             if let early { result = applying(early, to: result) }
             if cursor == nil {
-                journeys = result.removingDuplicateIDs()
+                journeys = result.removingDuplicateIDs().removingSameTrainDuplicates()
                 // The first connection is the one most likely opened next: have its live data ready.
                 if let first = result.first(where: { ($0.departure?.best ?? .distantFuture) > .now }) {
                     model.prepareLiveData(for: first)
@@ -460,10 +460,10 @@ struct JourneyResultsView: View {
                 earlierCursor = page?.earlierCursor
                 laterCursor = page?.laterCursor
             } else if prepend {
-                journeys = (result + journeys).removingDuplicateIDs()
+                journeys = (result + journeys).removingDuplicateIDs().removingSameTrainDuplicates()
                 earlierCursor = page?.earlierCursor
             } else {
-                journeys = (journeys + result).removingDuplicateIDs()
+                journeys = (journeys + result).removingDuplicateIDs().removingSameTrainDuplicates()
                 laterCursor = page?.laterCursor
             }
             error = nil

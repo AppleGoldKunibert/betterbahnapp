@@ -3,7 +3,7 @@ import SwiftUI
 
 /// A leg's Träwelling check-in, opened from "Check-in ansehen" in the leg's "Mehr": shows its text
 /// (with the Mastodon instance's emojis) and tags, lets text, visibility, trip type and tags be changed
-/// and the check-in be deleted.
+/// and the check-in be deleted. Below it, the others checked in to the same train ("Mitreisende").
 struct CheckinDetailSheet: View {
     let leg: Leg
     let statusId: Int
@@ -13,6 +13,8 @@ struct CheckinDetailSheet: View {
     @Environment(\.openURL) private var openURL
     @State private var status: TraewellingStatus?
     @State private var emojis: [CustomEmoji] = []
+    /// Whether the account collects Träwelling points, so deleting mentions losing them.
+    @State private var showsPoints = false
     @State private var isLoading = true
     @State private var isEditing = false
     @State private var isSaving = false
@@ -25,6 +27,12 @@ struct CheckinDetailSheet: View {
     @State private var editedTags: [StatusTag] = []
     @State private var confirmDelete = false
     @State private var isDeleting = false
+    @State private var fellowTravellers: [TraewellingStatus] = []
+    @FocusState private var messageFocused: Bool
+    @FocusState private var focusedTag: String?
+    /// Where the keyboard was when "Speichern" was tapped: it goes away right then and only comes
+    /// back there if Träwelling rejects the input (`isInvalidInput`).
+    @State private var focusBeforeSave: (message: Bool, tag: String?) = (false, nil)
 
     private var statusURL: URL {
         model.traewelling.config.baseURL.appending(path: "status/\(statusId)")
@@ -45,6 +53,7 @@ struct CheckinDetailSheet: View {
                         saveButton
                     } else if let status {
                         statusCard(status)
+                        if !fellowTravellers.isEmpty { fellowTravellersSection }
                         if let error { ErrorBanner(error: error) }
                         deleteButton
                     } else if let error {
@@ -118,16 +127,75 @@ struct CheckinDetailSheet: View {
         }
     }
 
+    private var fellowTravellersSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionHeader(title: "Mitreisende", systemImage: "person.2.fill", trailing: "\(fellowTravellers.count)")
+            Card {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(Array(fellowTravellers.enumerated()), id: \.element.id) { index, fellow in
+                        if index > 0 { Divider() }
+                        fellowTravellerRow(fellow)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Someone else on this train: who, and from where to where; opens their profile on Träwelling.
+    private func fellowTravellerRow(_ fellow: TraewellingStatus) -> some View {
+        let baseURL = model.traewelling.config.baseURL
+        let url = fellow.user.map { baseURL.appending(path: "@\($0.username)") } ?? baseURL.appending(path: "status/\(fellow.id)")
+        let origin = fellow.checkin.origin.station?.name ?? fellow.checkin.origin.name ?? "?"
+        let destination = fellow.checkin.destination.station?.name ?? fellow.checkin.destination.name ?? "?"
+        return Button {
+            openURL(url)
+        } label: {
+            HStack(spacing: 12) {
+                AsyncImage(url: fellow.user?.profilePicture) { image in
+                    image.resizable().scaledToFill()
+                } placeholder: {
+                    Image(systemName: "person.crop.circle.fill")
+                        .resizable()
+                        .foregroundStyle(.secondary)
+                }
+                .frame(width: 36, height: 36)
+                .clipShape(.circle)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 4) {
+                        Text(fellow.user?.displayName ?? "Träwelling-Nutzer")
+                            .font(.subheadline.weight(.semibold))
+                        if let username = fellow.user?.username {
+                            Text("@\(username)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .lineLimit(1)
+                    Text("\(origin) → \(destination)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+    }
+
     private var editCard: some View {
         Card {
             VStack(alignment: .leading, spacing: 14) {
-                EmojiMessageField(message: $message, emojis: emojis, placeholder: "Text (optional)")
+                EmojiMessageField(message: $message, emojis: emojis, placeholder: "Text (optional)", isFocused: $messageFocused)
                 Divider()
-                menuRow("Sichtbarkeit", icon: "eye.fill", color: .purple, selection: $visibility,
-                        options: TraewellingVisibility.allCases) { $0.label }
+                MenuPickerRow(title: "Sichtbarkeit", icon: "eye.fill", color: .purple, selection: $visibility,
+                              options: TraewellingVisibility.allCases) { $0.label }
                 Divider()
-                menuRow("Reiseart", icon: "briefcase.fill", color: .orange, selection: $business,
-                        options: TraewellingBusiness.allCases) { $0.label }
+                MenuPickerRow(title: "Reiseart", icon: "briefcase.fill", color: .orange, selection: $business,
+                              options: TraewellingBusiness.allCases) { $0.label }
                 Divider()
                 tagsEditor
             }
@@ -152,6 +220,7 @@ struct CheckinDetailSheet: View {
                     TextField(tagLabel(tag.key), text: $tag.value)
                         .textFieldStyle(.roundedBorder)
                         .font(.subheadline)
+                        .focused($focusedTag, equals: tag.key)
                     Button("Tag entfernen", systemImage: "minus.circle.fill") {
                         let key = tag.key
                         withAnimation(.snappy) { editedTags.removeAll { $0.key == key } }
@@ -208,22 +277,15 @@ struct CheckinDetailSheet: View {
             Button("Löschen", role: .destructive, action: delete)
             Button("Abbrechen", role: .cancel) {}
         } message: {
-            Text("Der Check-in wird bei Träwelling gelöscht, mit seinen Punkten.")
+            Text(showsPoints ? "Der Check-in wird bei Träwelling gelöscht, mit seinen Punkten."
+                             : "Der Check-in wird bei Träwelling gelöscht.")
         }
     }
 
     /// A tag's name: the quick tag's label for its key, else the key without Träwelling's prefix.
-    private func tagLabel(_ key: String) -> String {
-        quickTag(for: key)?.label ?? (key.hasPrefix("trwl:") ? String(key.dropFirst(5)) : key)
-    }
+    private func tagLabel(_ key: String) -> String { model.statusTagLabel(key) }
 
-    private func tagIcon(_ key: String) -> String {
-        quickTag(for: key)?.systemImage ?? "tag.fill"
-    }
-
-    private func quickTag(for key: String) -> QuickTag? {
-        (model.settings.quickTags + QuickTag.defaults).first { $0.key == key }
-    }
+    private func tagIcon(_ key: String) -> String { model.statusTagIcon(key) }
 
     private var goneCard: some View {
         Card {
@@ -257,41 +319,8 @@ struct CheckinDetailSheet: View {
         .disabled(isSaving || message.count > 280)
     }
 
-    /// Same row as the check-in form's pickers: a `Menu` so long values truncate instead of wrapping.
-    private func menuRow<T: Hashable>(_ title: String, icon: String, color: Color,
-                                      selection: Binding<T>, options: [T], label: @escaping (T) -> String) -> some View {
-        HStack(spacing: 12) {
-            IconTile(systemImage: icon, color: color, size: 32)
-            Text(title)
-                .font(.subheadline.weight(.medium))
-                .lineLimit(1)
-                .layoutPriority(1)
-            Spacer(minLength: 8)
-            Menu {
-                ForEach(options, id: \.self) { option in
-                    Button {
-                        selection.wrappedValue = option
-                    } label: {
-                        if option == selection.wrappedValue {
-                            Label(label(option), systemImage: "checkmark")
-                        } else {
-                            Text(label(option))
-                        }
-                    }
-                }
-            } label: {
-                Text(label(selection.wrappedValue))
-                    .font(.subheadline)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: 150, alignment: .trailing)
-        }
-    }
-
     private func load() async {
-        async let emojiList = model.checkinEmojis()
+        async let account = loadAccount()
         async let tagList = loadTags()
         do {
             status = try await model.traewelling.status(id: statusId)
@@ -301,9 +330,19 @@ struct CheckinDetailSheet: View {
         } catch {
             self.error = error
         }
-        emojis = await emojiList
+        let loaded = await account
+        showsPoints = loaded.showsPoints
+        emojis = loaded.emojis
         tags = await tagList
         isLoading = false
+        // Extra too: the section only shows once someone else is on the train.
+        if let status { fellowTravellers = (try? await model.traewelling.fellowTravellers(of: status)) ?? [] }
+    }
+
+    /// The account's points setting and Mastodon emojis: extras the check-in still shows without.
+    private func loadAccount() async -> (showsPoints: Bool, emojis: [CustomEmoji]) {
+        let user = await model.traewellingUser()
+        return (user?.pointsEnabled == true, await model.checkinEmojis(for: user))
     }
 
     /// Tags are extra: the check-in still shows when they can't be loaded.
@@ -322,6 +361,9 @@ struct CheckinDetailSheet: View {
     }
 
     private func save() {
+        focusBeforeSave = (messageFocused, focusedTag)
+        messageFocused = false
+        focusedTag = nil
         isSaving = true
         Task {
             defer { isSaving = false }
@@ -334,6 +376,10 @@ struct CheckinDetailSheet: View {
                 withAnimation(.snappy) { isEditing = false }
             } catch {
                 self.error = error
+                if (error as? TraewellingError)?.isInvalidInput == true {
+                    messageFocused = focusBeforeSave.message
+                    focusedTag = focusBeforeSave.tag
+                }
                 // Some tag changes may have gone through; the next try starts from what Träwelling has.
                 if let current = try? await model.traewelling.tags(statusId: statusId) { tags = current }
             }

@@ -52,17 +52,30 @@ struct TravelMapSelection: Hashable {
 
 extension AppModel {
     /// Saved journeys and Träwelling check-ins in the selected range. A ride that's both saved in
-    /// the app and checked in on Träwelling counts once (see `RideMatch`).
+    /// the app and checked in on Träwelling, or checked in twice, counts once (see `RideMatch`):
+    /// the check-in wins, so saved journeys only add the legs nobody checked in.
     func mapJourneys(for selection: TravelMapSelection) -> [Journey] {
-        let saved = selection.includeSaved ? savedJourneys.map(\.journey) : []
-        let imported = selection.includeTraewelling
-            ? RideMatch.deduplicated(traewellingTrips.map(\.journey), against: saved)
-            : []
-        return (saved + imported).filter { journey in
-            guard let interval = selection.interval else { return true }
-            guard let departure = journey.departure?.planned else { return false }
-            return interval.contains(departure)
-        }
+        let checkins = selection.includeTraewelling ? RideMatch.deduplicated(checkins(in: selection.interval)) : []
+        let saved = selection.includeSaved ? uncheckedJourneys(in: selection.interval) : []
+        return saved + checkins
+    }
+
+    private func checkins(in interval: DateInterval?) -> [Journey] {
+        traewellingTrips.map(\.journey).filter { Self.departs($0, in: interval) }
+    }
+
+    /// Matched against every check-in, duplicates included: even one that isn't drawn proves that
+    /// train was ridden then (e.g. the first version of a check-in redone or edited since).
+    private func uncheckedJourneys(in interval: DateInterval?) -> [Journey] {
+        // Filtered before matching: `uncovered` drops legs, which can move a journey's departure.
+        RideMatch.uncovered(savedJourneys.map(\.journey).filter { Self.departs($0, in: interval) },
+                            by: checkins(in: interval))
+    }
+
+    private static func departs(_ journey: Journey, in interval: DateInterval?) -> Bool {
+        guard let interval else { return true }
+        guard let departure = journey.departure?.planned else { return false }
+        return interval.contains(departure)
     }
 
     /// The train legs of these journeys that have actually been ridden: a leg counts once it has
@@ -83,8 +96,11 @@ extension AppModel {
             : ""
         // Bumped whenever the heatmap is built differently, so results cached by an older build
         // (with grid-snapped lines or the old duplicate matching) aren't shown again.
-        let version = "v5"
-        return "\(version)|\(selection.range.rawValue)|\(custom)|\(savedJourneys.count)|\(traewellingTrips.count)|\(travelledLegs(of: mapJourneys(for: selection)).count)|\(selection.includeSaved)|\(selection.includeTraewelling)"
+        let version = "v7"
+        let legs = travelledLegs(of: mapJourneys(for: selection)).map(\.leg)
+        // A check-in edited on Träwelling (another exit) changes no count, but its arrival.
+        let arrivals = legs.reduce(0) { $0 &+ Int($1.arrival.planned.timeIntervalSince1970) }
+        return "\(version)|\(selection.range.rawValue)|\(custom)|\(savedJourneys.count)|\(traewellingTrips.count)|\(legs.count)|\(arrivals)|\(selection.includeSaved)|\(selection.includeTraewelling)"
     }
 
     /// The finished heatmap for a selection, from the cache when possible.

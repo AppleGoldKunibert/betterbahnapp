@@ -15,12 +15,23 @@ struct CheckinSheet: View {
     @State private var result: CheckinResult?
     @State private var error: Error?
     @State private var offerManualTrip = false
+    /// Träwelling still has the user on another train at that time (`.collision`), e.g. because the
+    /// previous one arrived early; offers to check in anyway. Remembers whether it was the manual trip.
+    @State private var offerForcedCheckin = false
+    @State private var forcedAsManualTrip = false
     @State private var activeTags: Set<String> = []
     @State private var tagValues: [String: String] = [:]
     /// For coupled trains (`Line.coupledTrains`): which of them the user sits in, picked by hand since
     /// Träwelling knows them as separate trains. Nil until picked.
     @State private var chosenTrain: String?
     @State private var emojis: [CustomEmoji] = []
+    /// Whether the account collects Träwelling points; otherwise the "+0 Punkte" chip stays hidden.
+    @State private var showsPoints = false
+    @FocusState private var messageFocused: Bool
+    @FocusState private var focusedTag: String?
+    /// Where the keyboard was when "Jetzt einchecken" was tapped. It goes away right then, and only
+    /// comes back there if Träwelling rejects the input (`isInvalidInput`), so it can be fixed.
+    @State private var focusBeforeSend: (message: Bool, tag: String?) = (false, nil)
 
     private var coupledTrains: [Line.CoupledTrain] { leg.line?.coupledTrains ?? [] }
 
@@ -68,13 +79,20 @@ struct CheckinSheet: View {
             .task {
                 isLoggedIn = await model.traewelling.isLoggedIn
                 visibility = model.settings.traewellingVisibility
-                emojis = await model.checkinEmojis()
+                await loadAccount()
             }
             .alert("Zug nicht gefunden", isPresented: $offerManualTrip) {
                 Button("Manuell eintragen") { send(asManualTrip: true) }
                 Button("Abbrechen", role: .cancel) {}
             } message: {
                 Text("Träwelling kennt \(rideLeg.line?.name ?? "diesen Zug") nicht. Du kannst ihn selbst eintragen.")
+            }
+            .alert("Schon eingecheckt", isPresented: $offerForcedCheckin) {
+                Button("Trotzdem einchecken") { send(asManualTrip: forcedAsManualTrip, force: true) }
+                Button("Abbrechen", role: .cancel) {}
+            } message: {
+                Text("Träwelling hat dich zu dieser Zeit noch in einem anderen Zug, z. B. weil dein letzter Zug früher angekommen ist. Trotzdem einchecken?"
+                     + (showsPoints ? " Dafür gibt es keine Punkte." : ""))
             }
         }
     }
@@ -88,10 +106,21 @@ struct CheckinSheet: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                TraewellingLoginButton { isLoggedIn = true }
+                TraewellingLoginButton {
+                    isLoggedIn = true
+                    Task { await loadAccount() }
+                }
             }
             .frame(maxWidth: .infinity)
         }
+    }
+
+    /// Asked each time a check-in opens, so a newly connected Mastodon account or a changed points
+    /// setting counts at once.
+    private func loadAccount() async {
+        let user = await model.traewellingUser()
+        showsPoints = user?.pointsEnabled == true
+        emojis = await model.checkinEmojis(for: user)
     }
 
     private func successCard(_ result: CheckinResult) -> some View {
@@ -103,7 +132,9 @@ struct CheckinSheet: View {
                     .symbolEffect(.bounce, value: result.points)
                 Text("Eingecheckt").font(.title2.weight(.bold))
                 HStack(spacing: 8) {
-                    InfoChip(text: "+\(result.points) Punkte", systemImage: "sparkles", tint: .brand)
+                    if showsPoints {
+                        InfoChip(text: "+\(result.points) Punkte", systemImage: "sparkles", tint: .brand)
+                    }
                     if result.alsoOnThisConnection > 0 {
                         InfoChip(text: "\(result.alsoOnThisConnection) Mitreisende", systemImage: "person.2.fill", tint: .punctual)
                     }
@@ -159,11 +190,13 @@ struct CheckinSheet: View {
     private var formCard: some View {
         Card {
             VStack(alignment: .leading, spacing: 14) {
-                EmojiMessageField(message: $message, emojis: emojis)
+                EmojiMessageField(message: $message, emojis: emojis, isFocused: $messageFocused)
                 Divider()
-                pickerRow("Sichtbarkeit", icon: "eye.fill", color: .purple, selection: $visibility, options: TraewellingVisibility.allCases) { $0.label }
+                MenuPickerRow(title: "Sichtbarkeit", icon: "eye.fill", color: .purple, selection: $visibility,
+                              options: TraewellingVisibility.allCases) { $0.label }
                 Divider()
-                pickerRow("Reiseart", icon: "briefcase.fill", color: .orange, selection: $business, options: TraewellingBusiness.allCases) { $0.label }
+                MenuPickerRow(title: "Reiseart", icon: "briefcase.fill", color: .orange, selection: $business,
+                              options: TraewellingBusiness.allCases) { $0.label }
                 if !model.settings.quickTags.isEmpty {
                     Divider()
                     tagsRow
@@ -177,43 +210,6 @@ struct CheckinSheet: View {
                 }
                 .tint(.brand)
             }
-        }
-    }
-
-    /// A settings row with a leading icon/title and a trailing value that opens a `Menu` to pick
-    /// from `options`. Built on `Menu` rather than a system `Picker` because a menu-style
-    /// `Picker`'s auto-generated label ignores an outer `.lineLimit(1)` and can still wrap a long
-    /// selected value onto a second line; here the label is our own `Text`, so the line limit
-    /// actually takes effect and long values truncate with "…" instead.
-    private func pickerRow<T: Hashable>(_ title: String, icon: String, color: Color,
-                                        selection: Binding<T>, options: [T], label: @escaping (T) -> String) -> some View {
-        HStack(spacing: 12) {
-            IconTile(systemImage: icon, color: color, size: 32)
-            Text(title)
-                .font(.subheadline.weight(.medium))
-                .lineLimit(1)
-                .layoutPriority(1)
-            Spacer(minLength: 8)
-            Menu {
-                ForEach(options, id: \.self) { option in
-                    Button {
-                        selection.wrappedValue = option
-                    } label: {
-                        if option == selection.wrappedValue {
-                            Label(label(option), systemImage: "checkmark")
-                        } else {
-                            Text(label(option))
-                        }
-                    }
-                }
-            } label: {
-                Text(label(selection.wrappedValue))
-                    .font(.subheadline)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: 150, alignment: .trailing)
         }
     }
 
@@ -235,6 +231,7 @@ struct CheckinSheet: View {
                 TextField(tag.label, text: valueBinding(for: tag))
                     .textFieldStyle(.roundedBorder)
                     .font(.subheadline)
+                    .focused($focusedTag, equals: tag.id)
             }
         }
     }
@@ -261,7 +258,12 @@ struct CheckinSheet: View {
     }
 
     private var sendButton: some View {
-        Button(action: { send() }) {
+        Button {
+            focusBeforeSend = (messageFocused, focusedTag)
+            messageFocused = false
+            focusedTag = nil
+            send()
+        } label: {
             Group {
                 if isSending {
                     ProgressView()
@@ -278,63 +280,93 @@ struct CheckinSheet: View {
         .disabled(isSending || message.count > 280 || needsTrainChoice)
     }
 
-    private func send(asManualTrip: Bool = false) {
+    private func send(asManualTrip: Bool = false, force: Bool = false) {
         isSending = true
         Task {
             defer { isSending = false }
             do {
-                let leg = rideLeg
-                // The search for the train already failed before a manual trip is offered; don't run it again.
-                let checkin = asManualTrip ? try await model.traewelling.checkinAsManualTrip(draft(for: leg))
-                                           : try await attemptCheckin(leg: leg)
-                await finishSuccess(checkin, leg: leg)
+                if asManualTrip {
+                    // The search for the train already failed before a manual trip is offered; don't run it again.
+                    let leg = rideLeg
+                    let checkin = try await model.traewelling.checkinAsManualTrip(draft(for: leg, force: force))
+                    await finishSuccess(checkin, leg: leg)
+                } else if let found = try await checkinFindingTrain(force: force) {
+                    await finishSuccess(found.checkin, leg: found.leg)
+                } else {
+                    offerManualTrip = true
+                }
             } catch OAuthError.notLoggedIn {
                 isLoggedIn = false
-            } catch TraewellingError.tripNotFound where !asManualTrip {
-                // Some international trains are listed under two names by separate feeds (e.g. an
-                // ÖBB "RJ 177" that Deutsche Bahn's own live feed calls "ICE 177") — try the other
-                // name Transitous knows about before asking to create a manual entry.
-                if let alternate = await model.provider.alternateLineName(for: rideLeg), alternate != rideLeg.line?.name {
-                    var altLeg = rideLeg
-                    altLeg.line?.name = alternate
-                    if let checkin = try? await attemptCheckin(leg: altLeg) {
-                        await finishSuccess(checkin, leg: altLeg)
-                        return
-                    }
-                }
-                // `leg.origin` may be a Zusatzhalt (an unscheduled stop, e.g. after a diversion) —
-                // Träwelling's own timetable never has those, which is exactly why the checkin above
-                // just failed. Bridge the gap with a short manual trip instead of asking the user to
-                // manually enter the whole rest of the journey.
-                if let checkin = try? await attemptZusatzhaltCheckin() {
-                    await finishSuccess(checkin, leg: rideLeg)
-                    return
-                }
-                offerManualTrip = true
+            } catch TraewellingError.collision where !force {
+                forcedAsManualTrip = asManualTrip
+                offerForcedCheckin = true
             } catch {
                 self.error = error
+                if (error as? TraewellingError)?.isInvalidInput == true {
+                    messageFocused = focusBeforeSend.message
+                    focusedTag = focusBeforeSend.tag
+                }
             }
         }
     }
 
-    private func attemptCheckin(leg: Leg) async throws -> CheckinResult {
-        try await model.traewelling.checkin(draft(for: leg))
+    /// Checks in `rideLeg`, falling back to other ways Träwelling may know the train when its own
+    /// timetable doesn't have it. `nil` if none works, so a manual trip is offered. The leg returned
+    /// is the one actually checked in (another train name).
+    private func checkinFindingTrain(force: Bool) async throws -> (checkin: CheckinResult, leg: Leg)? {
+        do {
+            return (try await attemptCheckin(leg: rideLeg, force: force), rideLeg)
+        } catch TraewellingError.tripNotFound {}
+        // Some international trains are listed under two names by separate feeds (e.g. an
+        // ÖBB "RJ 177" that Deutsche Bahn's own live feed calls "ICE 177") — try the other
+        // name Transitous knows about before asking to create a manual entry.
+        if let alternate = await model.provider.alternateLineName(for: rideLeg), alternate != rideLeg.line?.name {
+            var altLeg = rideLeg
+            altLeg.line?.name = alternate
+            if let checkin = try await fallback({ try await attemptCheckin(leg: altLeg, force: force) }) {
+                return (checkin, altLeg)
+            }
+        }
+        // `leg.origin` may be a Zusatzhalt (an unscheduled stop, e.g. after a diversion) —
+        // Träwelling's own timetable never has those, which is exactly why the checkin above
+        // just failed. Bridge the gap with a short manual trip instead of asking the user to
+        // manually enter the whole rest of the journey.
+        if let checkin = try await fallback({ try await attemptZusatzhaltCheckin(force: force) }) ?? nil {
+            return (checkin, rideLeg)
+        }
+        return nil
     }
 
-    private func draft(for leg: Leg) -> CheckinDraft {
-        CheckinDraft(leg: leg, message: message, visibility: visibility, business: business, toot: toot)
+    /// A fallback attempt's result, `nil` if it failed. A collision still reaches the user, who can
+    /// check in anyway; it would happen the same way with a manual trip.
+    private func fallback<T>(_ attempt: () async throws -> T) async throws -> T? {
+        do {
+            return try await attempt()
+        } catch TraewellingError.collision {
+            throw TraewellingError.collision
+        } catch {
+            return nil
+        }
+    }
+
+    private func attemptCheckin(leg: Leg, force: Bool) async throws -> CheckinResult {
+        try await model.traewelling.checkin(draft(for: leg, force: force))
+    }
+
+    private func draft(for leg: Leg, force: Bool) -> CheckinDraft {
+        CheckinDraft(leg: leg, message: message, visibility: visibility, business: business, toot: toot, force: force)
     }
 
     /// If `leg` boards at a Zusatzhalt bahn.de's journey details know about, checks in the hop up
     /// to the next regular stop as a short manual trip and then checks in normally from there. `nil`
     /// if bahn.de doesn't know this train, or `leg.origin` isn't actually a Zusatzhalt (some other
     /// reason Träwelling didn't recognise the departure).
-    private func attemptZusatzhaltCheckin() async throws -> CheckinResult? {
+    private func attemptZusatzhaltCheckin(force: Bool) async throws -> CheckinResult? {
         guard let bahnDe = model.provider.bahnDe,
               let stops = try await bahnDe.journeyStops(for: rideLeg),
               let (zusatzhalt, nextRegular) = BahnDeClient.nextRegularStop(after: rideLeg.origin, in: stops)
         else { return nil }
-        return try await model.traewelling.checkin(draft(for: rideLeg), fromZusatzhalt: zusatzhalt, toNextRegularStop: nextRegular)
+        return try await model.traewelling.checkin(draft(for: rideLeg, force: force), fromZusatzhalt: zusatzhalt, toNextRegularStop: nextRegular)
     }
 
     private func finishSuccess(_ checkin: CheckinResult, leg: Leg) async {
@@ -362,6 +394,57 @@ struct CheckinSheet: View {
             let value = tag.value ?? tagValues[tag.id]?.trimmingCharacters(in: .whitespaces) ?? ""
             guard !value.isEmpty else { continue }
             _ = try? await model.traewelling.addTag(statusId: statusId, key: tag.key, value: value, visibility: visibility)
+        }
+    }
+}
+
+/// A form row with a leading icon/title and a trailing value that opens a `Menu` to pick from
+/// `options` (check-in form and `CheckinDetailSheet`). Built on `Menu` rather than a system `Picker`
+/// because a menu-style `Picker`'s auto-generated label ignores an outer `.lineLimit(1)` and can
+/// still wrap a long selected value onto a second line; here the label is our own `Text`, so the
+/// line limit actually takes effect and long values truncate with "…" instead.
+///
+/// The menu keeps the same width whatever is picked: if it shrank with its label ("Vertraute Nutzer"
+/// → "Öffentlich"), iOS animates the closing menu back to the old frame and the new value sits in the
+/// wrong place for about a second before snapping into place.
+struct MenuPickerRow<T: Hashable>: View {
+    let title: String
+    let icon: String
+    let color: Color
+    @Binding var selection: T
+    let options: [T]
+    let label: (T) -> String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            IconTile(systemImage: icon, color: color, size: 32)
+            Text(title)
+                .font(.subheadline.weight(.medium))
+                .lineLimit(1)
+                .layoutPriority(1)
+            Spacer(minLength: 8)
+            Menu {
+                ForEach(options, id: \.self) { option in
+                    Button {
+                        selection = option
+                    } label: {
+                        if option == selection {
+                            Label(label(option), systemImage: "checkmark")
+                        } else {
+                            Text(label(option))
+                        }
+                    }
+                }
+            } label: {
+                Text(label(selection))
+                    .font(.subheadline)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .contentShape(.rect)
+            }
+            .frame(maxWidth: 150)
         }
     }
 }

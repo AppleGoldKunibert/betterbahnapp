@@ -63,12 +63,19 @@ struct JourneyWidgetProvider: AppIntentTimelineProvider {
     /// One entry now and one at every moment the journey's state changes (departures, arrivals,
     /// stops, transfers), so the widget moves on by itself.
     /// Also used by the current-train widget.
-    static func entries(countdown: JourneyWidgetState.CountdownTarget, now: Date) -> [JourneyWidgetEntry] {
+    /// With `showsTimer`, more than 12 hours ahead there's also one every minute for the next hour,
+    /// as the timer then reads "2d 3h 49m" (`WidgetTimer`); the widget reloads when they run out.
+    static func entries(countdown: JourneyWidgetState.CountdownTarget, now: Date, showsTimer: Bool = true) -> [JourneyWidgetEntry] {
         let snapshot = WidgetStore.load()
         guard let journey = snapshot?.journey else {
             return [JourneyWidgetEntry(date: now, state: nil, journeyID: nil, updatedAt: snapshot?.updatedAt, countdown: countdown)]
         }
-        let dates = [now] + JourneyWidgetState.changeDates(of: journey, after: now).prefix(Self.maxEntries - 1)
+        var changes = Set(JourneyWidgetState.changeDates(of: journey, after: now))
+        if showsTimer, let state = JourneyWidgetState.from(journey, now: now) {
+            changes.formUnion(WidgetTimer.tickDates(to: state.countdownEnd(countdown), after: now,
+                                                    until: now.addingTimeInterval(3600)))
+        }
+        let dates = [now] + changes.sorted().prefix(Self.maxEntries - 1)
         return dates.map { date in
             JourneyWidgetEntry(date: date, state: JourneyWidgetState.from(journey, now: date), journeyID: journey.id,
                                updatedAt: snapshot?.updatedAt, countdown: countdown)
@@ -205,8 +212,7 @@ struct JourneyWidgetView: View {
         } else {
             HStack(spacing: 4) {
                 Image(systemName: state.countsToDeparture(entry.countdown) ? "arrow.up.right.circle.fill" : "flag.checkered")
-                // The range starts at the entry's fixed date, not `.now` (see `countdownRange` in TripLiveActivity).
-                Text(timerInterval: entry.date...end, countsDown: true)
+                CountdownText(date: entry.date, end: end)
                     .monospacedDigit()
             }
             .font(.caption.weight(.bold))
@@ -215,22 +221,49 @@ struct JourneyWidgetView: View {
     }
 }
 
+/// Counts down from the entry's `date` to `end`: a running timer up to 12 hours ahead, further out
+/// "2d 3h 49m", which the timeline moves on with an entry every minute (`WidgetTimer`).
+struct CountdownText: View {
+    let date: Date
+    let end: Date
+
+    var body: some View {
+        if let text = WidgetTimer.longText(from: date, to: end) {
+            Text(text)
+        } else {
+            // The range starts at the entry's fixed date, not `.now` (see `countdownRange` in TripLiveActivity).
+            Text(timerInterval: date...max(date, end), countsDown: true)
+        }
+    }
+}
+
 /// The train's product color with its short name ("RE 5", "ICE 645").
 struct TrainBadge: View {
     let name: String
     let product: Product
+    @Environment(\.widgetRenderingMode) private var renderingMode
 
     var body: some View {
-        HStack(spacing: 3) {
+        let label = HStack(spacing: 3) {
             Image(systemName: product.symbolName)
             Text(name).lineLimit(1)
         }
         .font(.caption.weight(.bold))
         .padding(.horizontal, 7)
         .padding(.vertical, 3)
-        .foregroundStyle(.white)
-        .background(product.color.gradient, in: .capsule)
-        .fixedSize()
+        if renderingMode == .fullColor {
+            label
+                .foregroundStyle(.white)
+                .background(product.color.gradient, in: .capsule)
+                .fixedSize()
+        } else {
+            // Tinted and clear Home Screens (and the Lock Screen) draw everything in one color, so the
+            // filled capsule would swallow the white name: a faint capsule behind the name instead.
+            label
+                .widgetAccentable()
+                .background(.quaternary, in: .capsule)
+                .fixedSize()
+        }
     }
 }
 
