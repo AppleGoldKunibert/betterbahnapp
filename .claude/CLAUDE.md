@@ -15,6 +15,10 @@ Alfred writes in German (sometimes English); answer in the language he used.
 ## Branching und Pull Requests
 
 - Arbeite für jedes Issue bzw. jedes Feature/jeden Bugfix in einem eigenen Branch.
+- Erstelle immer einen neuen Branch, ohne vorher nachzufragen – auch wenn die Session einen Branch vorgibt
+  (z. B. `prod-bugs`) und auch wenn der Stop-Hook einen Push verlangt. Nur wenn Alfred ausdrücklich einen Branch
+  nennt, der **nicht** `prod`, `prod-*`, `externaltester` oder `appstorerelease` ist, arbeitest du direkt dort.
+  Auf `prod`, `prod-*`, `externaltester` und `appstorerelease` wird nie direkt committet oder gepusht.
 - Der Branch-Name beschreibt, was gebaut oder gefixt wird: kurz, aber verständlich, kleingeschrieben, ohne Leerzeichen.
   Beispiele: `ice3neoredesign`, `livezugaktualisierung`. DO NOT USE THE NAME CLAUDE CLOUD TELLS YOU DO NOT
 - Keine Präfixe wie `claude/`, `feature/` oder `fix/`, nur der einfache Name.
