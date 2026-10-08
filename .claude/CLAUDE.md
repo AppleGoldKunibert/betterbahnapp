@@ -4,6 +4,12 @@ Project map, build/test commands and conventions: @docs/CODEBASE.md — rely on 
 re-exploring the repo; only open the files relevant to the task. Only read `docs/app-review-notes.md`
 (App Store/privacy) or `docs/transit-providers.md` (data sources) when the task touches those topics.
 
+Code graph: if `graphify-out/graph.json` exists (cloud sessions build it at start), use it for
+structure questions before grepping: `graphify query "<question>"`, `graphify path "A" "B"`,
+`graphify affected "X"` (what a change to X touches), `graphify explain "X"`. Don't rebuild it with
+`/graphify` unless asked. After a `/graphify` run, commit new files in `graphify-out/cache/semantic/`
+(doc results, so other sessions don't pay for them again).
+
 Alfred writes in German (sometimes English); answer in the language he used.
 
 ## Working style
