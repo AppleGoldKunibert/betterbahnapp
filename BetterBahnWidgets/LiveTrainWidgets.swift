@@ -107,7 +107,8 @@ struct LiveTrainProvider: TimelineProvider {
         options.region = MKCoordinateRegion(center: center, latitudinalMeters: 15_000,
                                             longitudinalMeters: 15_000 * size.width / size.height)
         options.pointOfInterestFilter = .excludingAll
-        let route = leg.geometry ?? leg.stopovers.compactMap(\.station.coordinate)
+        // Without track geometry no line at all: the stops joined up would cut straight across country.
+        let route = leg.geometry.flatMap { RouteGeometryService.followsTracks($0) ? $0 : nil } ?? []
         return await withCheckedContinuation { continuation in
             MKMapSnapshotter(options: options).start(with: .main) { snapshot, _ in
                 continuation.resume(returning: snapshot.map { draw($0, center: center, route: route, color: color, size: size) })
