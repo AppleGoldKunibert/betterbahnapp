@@ -285,7 +285,10 @@ public actor TrainCandidateFinder {
             task = loading
         } else {
             let provider = provider, duration = windowMinutes
-            task = Task { try? await provider.departures(at: station, date: start, duration: duration, products: Self.trainProducts) }
+            // The lookup board: without loading every long-distance train's run for its destination, which
+            // at a hub took longer than the board's deadline and came back empty.
+            task = Task { try? await provider.departuresForTrainLookup(at: station, date: start, duration: duration,
+                                                                       products: Self.trainProducts) }
             boards[key] = task
         }
         guard let entries = await task.value else {

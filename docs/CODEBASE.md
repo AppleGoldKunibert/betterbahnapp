@@ -258,7 +258,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 - `Transit/TrainChoice.swift` – picking a train for a route (#225): `TrainNameQuery` reads "ICE 423", "423", "RE 3300",
   "RE 3 (3300)" and matches a line by name, train or run number (`Line.tripNumber`), with `score` for prefixes while
   typing (used by `TrainRoutePlanner`, `TrainPicker`); `TrainCandidateFinder` (actor) searches the boards of up to 4 route
-  stations (trains only, loaded in parallel, `prefetch`ed when the sheet opens, shared and never cached when failed)
+  stations (`departuresForTrainLookup`, trains only, loaded in parallel, `prefetch`ed when the sheet opens, shared and never cached when failed)
   as `routeCandidates`, and for numbers `TrainNumberSearch` as `numberCandidates`, which the sheet adds to the list
   once it answers (`merged`); runs are ranked: full match, boardable on the route, reaching the target (earliest),
   closest to it, time. A picked run is pinned in
