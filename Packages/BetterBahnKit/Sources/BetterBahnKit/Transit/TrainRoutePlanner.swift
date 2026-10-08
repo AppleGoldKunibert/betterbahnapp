@@ -4,19 +4,26 @@ import Foundation
 /// Several of these can be active at once; the planner honours all of them in one route.
 public struct TrainRequirement: Sendable, Hashable, Identifiable, Codable {
     public var id: UUID
-    /// As typed, e.g. "ICE 423" or just "423".
+    /// As typed, e.g. "ICE 423", "423" or "RE 3 (3300)".
     public var trainName: String
     /// Where to board this train. Required.
     public var boarding: Station
     /// Where to leave it again. When `nil` the planner tries every stop after `boarding` and keeps
     /// whichever one gets to the destination fastest.
     public var exit: Station?
+    /// The run picked from the list of trains (#225): the planner rides exactly this one instead of
+    /// looking the name up on the boarding station's board. Nil when only a name was typed.
+    public var tripId: String?
+    public var tripSource: DataSource?
 
-    public init(id: UUID = UUID(), trainName: String, boarding: Station, exit: Station? = nil) {
+    public init(id: UUID = UUID(), trainName: String, boarding: Station, exit: Station? = nil,
+                tripId: String? = nil, tripSource: DataSource? = nil) {
         self.id = id
         self.trainName = trainName
         self.boarding = boarding
         self.exit = exit
+        self.tripId = tripId
+        self.tripSource = tripSource
     }
 }
 
@@ -134,10 +141,13 @@ public struct TrainRoutePlanner: Sendable {
             earliest = soonest
         }
 
-        // 2. The next run of the wanted train that can still be caught.
-        let (entry, trip) = try await train(requirement.trainName, at: requirement.boarding,
-                                            notBefore: earliest.addingTimeInterval(needsFeeder ? minTransfer : 0))
-        guard let boardIndex = trip.stopovers.firstIndex(where: { $0.station.isSamePlace(as: requirement.boarding) }),
+        // 2. The run picked from the list, else the next run of the wanted train that can still be caught.
+        let notBefore = earliest.addingTimeInterval(needsFeeder ? minTransfer : 0)
+        let pinned = try await pinnedTrip(of: requirement, notBefore: notBefore)
+        let (trainName, trip) = if let pinned { pinned } else {
+            try await train(requirement.trainName, at: requirement.boarding, notBefore: notBefore)
+        }
+        guard let boardIndex = boardingIndex(in: trip, at: requirement.boarding, notBefore: notBefore),
               let departure = trip.stopovers[boardIndex].departure
         else { throw TransitError.notFound("\(requirement.trainName) ab \(requirement.boarding.displayName)") }
 
@@ -158,9 +168,9 @@ public struct TrainRoutePlanner: Sendable {
                                    after: feederLegs, base: partial)
         guard !extended.isEmpty else {
             let where_ = requirement.exit?.displayName ?? target.displayName
-            throw TransitError.notFound("\(entry.line.name) nach \(where_) (hält dort nicht)")
+            throw TransitError.notFound("\(trainName) nach \(where_) (hält dort nicht)")
         }
-        return (prune(extended), entry.line.name)
+        return (prune(extended), trainName)
     }
 
     /// Builds one partial route per alighting stop (and, when continuing, per onward connection).
@@ -250,9 +260,31 @@ public struct TrainRoutePlanner: Sendable {
         return usable.max { ($0.departure?.best ?? .distantPast) < ($1.departure?.best ?? .distantPast) }
     }
 
+    /// The run picked from the list, when it can still be caught at the boarding station.
+    /// - Throws: `TransitError.notFound` when it has left before the traveller can be there.
+    private func pinnedTrip(of requirement: TrainRequirement, notBefore: Date) async throws -> (String, Trip)? {
+        guard let tripId = requirement.tripId,
+              let trip = try? await provider.trip(id: tripId, source: requirement.tripSource ?? provider.source) else { return nil }
+        let name = trip.line?.name ?? requirement.trainName
+        guard boardingIndex(in: trip, at: requirement.boarding, notBefore: notBefore) != nil else {
+            throw TransitError.notFound("\(name) ab \(requirement.boarding.displayName) – bis zur Abfahrt nicht erreichbar")
+        }
+        return (name, trip)
+    }
+
+    /// Where `trip` is boarded at `station`: the first visit leaving at or after `notBefore` (ring lines
+    /// call at a station twice).
+    private func boardingIndex(in trip: Trip, at station: Station, notBefore: Date) -> Int? {
+        let slack: TimeInterval = -2 * 60
+        return trip.stopovers.firstIndex { stop in
+            guard stop.station.isSamePlace(as: station), let departure = stop.departure else { return false }
+            return departure.best >= notBefore.addingTimeInterval(slack)
+        }
+    }
+
     /// Finds the next run of `name` leaving `station` at or after `notBefore`.
-    private func train(_ name: String, at station: Station, notBefore: Date) async throws -> (BoardEntry, Trip) {
-        let wanted = Line.normalize(name)
+    private func train(_ name: String, at station: Station, notBefore: Date) async throws -> (String, Trip) {
+        let wanted = TrainNameQuery(name)
         guard !wanted.isEmpty else {
             throw TransitError.invalidInput("Bitte einen Zug angeben, z. B. „ICE 423“.")
         }
@@ -262,7 +294,7 @@ public struct TrainRoutePlanner: Sendable {
         for _ in 0..<2 {
             let entries = try await provider.departures(at: station, date: windowStart, duration: windowMinutes)
             var matches: [BoardEntry] = []
-            for entry in entries.filter({ $0.time.best >= notBefore.addingTimeInterval(slack) && Self.matches(wanted, $0.line) })
+            for entry in entries.filter({ $0.time.best >= notBefore.addingTimeInterval(slack) && wanted.matches($0.line) })
                 .sorted(by: { $0.time.best < $1.time.best }) {
                 if entry.cancelled, !(await cancellationDisputed(entry, at: station)) { continue }
                 matches.append(entry)
@@ -272,7 +304,7 @@ public struct TrainRoutePlanner: Sendable {
             }
             for match in matches {
                 if let trip = try? await provider.trip(id: match.tripId, source: match.source) {
-                    return (match, trip)
+                    return (match.line.name, trip)
                 }
             }
             windowStart = windowStart.addingTimeInterval(TimeInterval(windowMinutes * 60))
@@ -312,14 +344,19 @@ public struct TrainRoutePlanner: Sendable {
         return rescued
     }
 
-    /// "ICE 423" matches the line name (or a coupled train's), "423" the train number alone.
+    /// "ICE 423" matches the line name (or a coupled train's), "423" the train or run number alone,
+    /// "RE 3 (3300)" that run (see `TrainNameQuery`).
     static func matches(_ wanted: String, _ line: Line) -> Bool {
-        if line.allNames.contains(where: { Line.normalize($0) == wanted }) { return true }
-        return wanted.allSatisfy(\.isNumber) && line.number == wanted
+        TrainNameQuery(wanted).matches(line)
     }
 
-    /// "ICE 423" -> ("ICE", "423"); "423" -> (nil, "423"); "ICE" alone -> nil (no number to look up).
+    /// "ICE 423" -> ("ICE", "423"); "423" -> (nil, "423"); "RE 3 (3300)" -> ("RE", "3300");
+    /// "ICE" alone -> nil (no number to look up).
     static func parseCategoryAndNumber(_ name: String) -> (category: String?, number: String)? {
+        if name.contains("("), let number = TrainNameQuery(name).number {
+            let category = name.prefix { $0 != "(" }.prefix { !$0.isNumber }.trimmingCharacters(in: .whitespaces)
+            return (category.isEmpty ? nil : category, number)
+        }
         let tokens = name.trimmingCharacters(in: .whitespaces).split(separator: " ").map(String.init)
         guard let last = tokens.last, !last.isEmpty, last.allSatisfy(\.isNumber) else { return nil }
         let category = tokens.count > 1 ? tokens.dropLast().joined(separator: " ") : nil

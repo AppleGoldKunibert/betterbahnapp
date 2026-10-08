@@ -310,7 +310,8 @@ struct TripContent: View {
             Card {
                 VStack(spacing: 0) {
                     ForEach(Array(trip.stopovers.enumerated()), id: \.element.id) { index, stop in
-                        stopNode(stop, index: index)
+                        // Scroll target, so a sheet can open the list at the exit (#225).
+                        stopNode(stop, index: index).id(stop.id)
                     }
                 }
             }

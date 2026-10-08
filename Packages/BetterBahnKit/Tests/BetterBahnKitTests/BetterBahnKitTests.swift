@@ -4676,6 +4676,115 @@ final class RoutingMockProvider: TransitProvider, @unchecked Sendable {
         #expect(numberOnly?.category == nil)
         #expect(numberOnly?.number == "423")
         #expect(TrainRoutePlanner.parseCategoryAndNumber("ICE") == nil)
+        let bracketed = TrainRoutePlanner.parseCategoryAndNumber("RE3 (3346)")
+        #expect(bracketed?.category == "RE")
+        #expect(bracketed?.number == "3346")
+    }
+
+    func regional(_ id: String, line: String, run: String, _ stops: [Stopover]) -> Trip {
+        Trip(id: id, line: Line(name: line, number: String(line.split(separator: " ").last!), product: .regionalExpress,
+                                operatorName: nil, tripNumber: run),
+             direction: stops.last?.station.name, stopovers: stops, cancelled: false, remarks: [], source: .bahnDe)
+    }
+
+    /// #225: a regional train goes by its run number ("3300") as well as its line ("RE 3").
+    @Test func matchesRunNumbersOfRegionalTrains() {
+        let re3 = Line(name: "RE 3", number: "3", product: .regionalExpress, operatorName: nil, tripNumber: "3300")
+        for typed in ["3300", "RE 3300", "re3300", "RE 3 (3300)", "RE3 (3300)", "RE 3", "RE3", "3"] {
+            #expect(TrainNameQuery(typed).matches(re3), "\(typed)")
+        }
+        for typed in ["3346", "RE3 (3346)", "ICE 3300", "RE 33", "RB 3300"] {
+            #expect(!TrainNameQuery(typed).matches(re3), "\(typed)")
+        }
+        let ice = Line(name: "ICE 91", number: "91", product: .highSpeed, operatorName: nil)
+        #expect(TrainNameQuery("ICE 91").matches(ice))
+        #expect(TrainNameQuery("091").matches(ice))
+        // While typing, the beginning counts too, but less than a full match.
+        #expect(TrainNameQuery("ICE 9").score(ice) == 1)
+        #expect(TrainNameQuery("ICE 91").score(ice) == 2)
+        #expect(TrainNameQuery("33").score(re3) == 1)
+        #expect(TrainNameQuery("IC 9").score(ice) == 1)
+        #expect(TrainNameQuery("RB 9").score(ice) == nil)
+    }
+
+    @Test func ridesRegionalTrainTypedByRunNumber() async throws {
+        let mock = makeProvider()
+        let re = regional("re3300", line: "RE 3", run: "3300", [stop(koeln, arr: nil, dep: 10), stop(hamm, arr: 90, dep: nil)])
+        let other = regional("re3302", line: "RE 3", run: "3302", [stop(koeln, arr: nil, dep: 5), stop(hamm, arr: 85, dep: nil)])
+        mock.trips[re.id] = re
+        mock.trips[other.id] = other
+        mock.boards[koeln.name] = [entry(other, at: koeln, minutes: 5), entry(re, at: koeln, minutes: 10)]
+
+        for typed in ["3300", "RE 3 (3300)"] {
+            let plan = try await planner(mock).plan([TrainRequirement(trainName: typed, boarding: koeln, exit: hamm)],
+                                                    from: koeln, to: hamm, date: base)
+            #expect(plan.best?.transitLegs.map(\.tripId) == ["re3300"], "\(typed)")
+        }
+    }
+
+    /// A run picked from the list is ridden as it is, without asking the boarding station's board.
+    @Test func ridesPickedRunWithoutBoard() async throws {
+        let mock = makeProvider()
+        let re = regional("re3346", line: "RE 3", run: "3346", [stop(hamm, arr: nil, dep: 100), stop(berlin, arr: 300, dep: nil)])
+        let ice = trip("ice91", "ICE 91", [stop(koeln, arr: nil, dep: 10), stop(hamm, arr: 70, dep: 72), stop(hannover, arr: 130, dep: nil)])
+        mock.trips[re.id] = re
+        mock.trips[ice.id] = ice
+        let plan = try await planner(mock).plan([
+            TrainRequirement(trainName: "ICE 91", boarding: koeln, tripId: ice.id, tripSource: .bahnDe),
+            TrainRequirement(trainName: "RE3 (3346)", boarding: hamm, exit: berlin, tripId: re.id, tripSource: .bahnDe),
+        ], from: koeln, to: berlin, date: base)
+        let best = try #require(plan.best)
+        #expect(best.transitLegs.map(\.tripId) == ["ice91", "re3346"])
+        #expect(best.transitLegs.first?.destination.isSamePlace(as: hamm) == true)
+    }
+
+    @Test func reportsPickedRunThatLeftAlready() async throws {
+        let mock = makeProvider()
+        let ice = trip("ice91", "ICE 91", [stop(hamm, arr: nil, dep: 30), stop(berlin, arr: 200, dep: nil)])
+        mock.trips[ice.id] = ice
+        mock.routes["Köln Hbf -> Hamm (Westf)"] = [journey("RE 1", koeln, hamm, dep: 5, arr: 60)]
+        await #expect(throws: TransitError.self) {
+            try await planner(mock).plan([TrainRequirement(trainName: "ICE 91", boarding: hamm, tripId: ice.id)],
+                                         from: koeln, to: berlin, date: base)
+        }
+    }
+
+    /// The list of trains while typing: the one going to the destination first, then the one getting
+    /// closest, and a train only found by its run number too.
+    @Test func ranksCandidatesByRoute() async throws {
+        let mock = makeProvider()
+        let toBerlin = trip("ice500", "ICE 500", [stop(koeln, arr: nil, dep: 40), stop(hannover, arr: 160, dep: 162), stop(berlin, arr: 260, dep: nil)])
+        let toHannover = trip("ice501", "ICE 501", [stop(koeln, arr: nil, dep: 20), stop(hannover, arr: 140, dep: nil)])
+        let toDuesseldorf = trip("ice502", "ICE 502", [stop(koeln, arr: nil, dep: 10), stop(duesseldorf, arr: 30, dep: nil)])
+        let re = regional("re3300", line: "RE 3", run: "3300", [stop(koeln, arr: nil, dep: 15), stop(hamm, arr: 90, dep: nil)])
+        for t in [toBerlin, toHannover, toDuesseldorf, re] { mock.trips[t.id] = t }
+        mock.boards[koeln.name] = [entry(toDuesseldorf, at: koeln, minutes: 10), entry(re, at: koeln, minutes: 15),
+                                   entry(toHannover, at: koeln, minutes: 20), entry(toBerlin, at: koeln, minutes: 40)]
+        // No bahn.expert: only the boards are asked, never the network.
+        let finder = TrainCandidateFinder(provider: CombinedProvider(primary: mock, fallback: nil, bahnDe: nil, bahnExpert: nil))
+
+        let found = await finder.candidates(for: "ICE 50", stations: [koeln], target: berlin, date: base)
+        #expect(found.map(\.trip.id) == ["ice500", "ice501", "ice502"])
+        #expect(found.first?.exit?.station.isSamePlace(as: berlin) == true)
+        #expect(found.first?.boarding?.station.isSamePlace(as: koeln) == true)
+
+        // A full match beats the ones only starting with what was typed.
+        let exact = await finder.candidates(for: "ICE 502", stations: [koeln], target: berlin, date: base)
+        #expect(exact.map(\.trip.id) == ["ice502"])
+
+        let byRun = await finder.candidates(for: "3300", stations: [koeln], target: berlin, date: base)
+        #expect(byRun.map(\.trip.id) == ["re3300"])
+    }
+
+    /// #225: continuations come fastest first, without routes a later one beats outright.
+    @Test func ordersContinuationsByArrival() {
+        let slowEarly = journey("RE 1", hamm, berlin, dep: 80, arr: 320)
+        let fast = journey("ICE 500", hamm, berlin, dep: 95, arr: 260)
+        let earlierSlower = journey("IC 140", hamm, berlin, dep: 75, arr: 280)
+        let later = journey("ICE 600", hamm, berlin, dep: 150, arr: 300)
+        let result = JourneyReplanner.fastestFirst([slowEarly, earlierSlower, fast, later])
+        // RE 1 leaves before ICE 500 and arrives after it; ICE 600 leaves later, so it stays.
+        #expect(result.map { $0.transitLegs.first?.line?.name } == ["ICE 500", "ICE 600"])
     }
 }
 
