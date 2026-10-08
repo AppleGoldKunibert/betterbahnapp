@@ -390,7 +390,8 @@ struct TransferRow: View {
     private var color: Color { isPast && minutes < 0 ? .secondary : transferColor(minutes) }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        // Centered, so a taller platform badge doesn't push the transfer text off the middle.
+        HStack(spacing: 10) {
             Image(systemName: walk != nil ? "figure.walk" : "arrow.triangle.2.circlepath")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(color)
@@ -416,6 +417,8 @@ struct TransferRow: View {
                     Image(systemName: "arrow.right").font(.caption2.weight(.bold)).foregroundStyle(.tertiary)
                     endpoint(platform: to.departurePlatform, of: to)
                 }
+                // The badges get their full width first; the transfer text wraps instead.
+                .layoutPriority(1)
             }
         }
         .padding(.horizontal, 20)
@@ -830,19 +833,13 @@ struct AlternativeJourneySheet: View {
     /// Legs that still work, and where/when to continue from.
     private var restart: (keep: [Leg], from: Station, date: Date, reason: String)? {
         let legs = entry.journey.legs
-        let transit = entry.journey.transitLegs
-        guard let destination = legs.last?.destination else { return nil }
-        _ = destination
         for issue in entry.journey.connectionIssues() where issue.isBlocking {
+            guard let leg = entry.journey.leg(for: issue), let index = legs.firstIndex(of: leg) else { continue }
             switch issue {
-            case .transferMissed(let at, let arrivingLine, _, _):
-                guard let arriving = transit.first(where: { $0.line?.name == arrivingLine && $0.destination.name == at }),
-                      let index = legs.firstIndex(of: arriving) else { continue }
-                return (Array(legs[...index]), arriving.destination, arriving.arrival.best, issue.title)
-            case .legCancelled(let line, let from, _):
-                guard let cancelled = transit.first(where: { $0.line?.name == line && $0.origin.name == from }),
-                      let index = legs.firstIndex(of: cancelled) else { continue }
-                return (Array(legs[..<index]), cancelled.origin, cancelled.departure.planned, issue.title)
+            case .transferMissed:
+                return (Array(legs[...index]), leg.destination, leg.arrival.best, issue.title)
+            case .legCancelled:
+                return (Array(legs[..<index]), leg.origin, leg.departure.planned, issue.title)
             case .transferAtRisk:
                 continue
             }

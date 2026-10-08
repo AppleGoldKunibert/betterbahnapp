@@ -2097,6 +2097,10 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(!calls.isDetour(normal))
         #expect(!calls.isDetour(Journey(legs: [leg("594", hbf, gesundbrunnen, 150, 158)], source: .transitous)))
 
+        // Bad feed data: the last leg arrives before the first one leaves. Must not trap (`start...end`).
+        let backwards = Journey(legs: [leg("10", hbf, halle, 100, 170), leg("12", halle, leipzig, 180, 60)], source: .transitous)
+        #expect(!calls.isDetour(backwards))
+
         // Transitous' routing offers ICE 594 from Hbf as a normal ride; the stop times mark it "Nur Ausstieg".
         var direct = leg("594", hbf, gesundbrunnen, 150, 158)
         direct.stopovers = [Stopover(station: hbf, arrival: nil, departure: direct.departure, arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
@@ -2177,6 +2181,17 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(TrainFormation.remembering(swapped, for: "b", in: stored) == ["a": tz, "b": swapped])
     }
 
+    /// IC 1189 kept showing "Tz 450007" remembered by an older version once bahn.de named it an IC 1.
+    @Test func ic1DropsRememberedTz() {
+        let bogus = TrainFormation(units: [TrainFormation.Unit(model: "ICE L", number: "450007")])
+        let ic1 = TrainFormation(units: [TrainFormation.Unit(model: "IC 1", number: nil)])
+        #expect(ic1.isIC1)
+        #expect(!bogus.isIC1)
+        #expect(TrainFormation.remembering(ic1, for: "a", in: ["a": bogus, "b": bogus]) == ["b": bogus])
+        #expect(TrainFormation.remembering(ic1, for: "a", in: ["b": bogus]) == nil)
+        #expect(TrainFormation.remembering(ic1, for: "a", in: nil) == nil)
+    }
+
     /// The key survives a refresh renaming the train or changing its trip.
     @Test func formationKeyIgnoresTrainNameAndTrip() {
         let at = { (minutes: Double) in TimeInfo(planned: Date(timeIntervalSince1970: 1_800_000_000 + minutes * 60), actual: nil) }
@@ -2222,6 +2237,18 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
     @Test func detectsIntercity2FromDoubleDeckCoaches() {
         let cars = ["508026810011", "508026810029"].map { Carriage(vehicleID: $0, constructionType: "DApza") }
         #expect(TrainModel.detect(cars, category: "IC")?.name == "IC 2 Twindexx")
+    }
+
+    @Test func classicICCoachesAreNotICEL() {
+        // "61 80 20-91 …" coaches of an IC 1 have the same "091" digits as the ICE L's Talgo coaches.
+        let ic = ["618020911234", "618080910123"].map { Carriage(vehicleID: $0, constructionType: "B2091") }
+        #expect(TrainModel.detect(ic, category: "IC") == nil)
+        #expect(BahnDeClient.model(constructionTypes: ["B2091", "A1091"], groupName: "IC450007", category: "IC") == "IC 1")
+        let talgo = ["618020911234", "618080910123"].map { Carriage(vehicleID: $0, constructionType: "R8911") }
+        #expect(TrainModel.detect(talgo, category: "IC")?.name == "ICE L")
+        let unknown = ["618020911234", "618080910123"].map { Carriage(vehicleID: $0, constructionType: nil) }
+        #expect(TrainModel.detect(unknown, category: "ICE")?.name == "ICE L")
+        #expect(TrainModel.detect(unknown, category: "IC") == nil)
     }
 
     @Test func constructionTypeFallback() {
@@ -2278,6 +2305,23 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         ])
         #expect(formation.modelSummary == "2× ICE 4")
         #expect(formation.unitDescription == "Tz 9457 „Bundesrepublik Deutschland“ + 9018 „Freistaat Bayern“")
+    }
+
+    /// IC 1189 (IC 1 farewell run) showed "Tz 450007": loco-hauled IC 1 coaches have no Tz.
+    @Test func ic1HasNoTrainsetNumber() throws {
+        let json = #"""
+        {"groups": [
+            {"name": "IC450007", "transport": {"category": "IC", "number": 1189},
+             "vehicles": [
+                {"vehicleID": "618020911234", "type": {"category": "PASSENGERCARRIAGE_ECONOMY_CLASS", "constructionType": "B2091"}},
+                {"vehicleID": "618010910123", "type": {"category": "PASSENGERCARRIAGE_FIRST_CLASS", "constructionType": "A1091"}}]}
+        ]}
+        """#
+        let response = try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data(json.utf8))
+        let formation = BahnDeClient.formation(from: response, category: "IC", number: 1189)
+        #expect(formation.units == [.init(model: "IC 1", number: nil, name: nil)])
+        let sequence = BahnDeClient.coachSequence(from: response, category: "IC", number: 1189)
+        #expect(sequence.groups.map(\.unit) == [nil])
     }
 
     /// A group without vehicles (or other missing fields) must not lose the whole formation.
@@ -2644,6 +2688,20 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         #expect(formation.modelSummary == "ICE 3neo Redesign + ICE 3neo")
         #expect(TrainFormation(units: [.init(model: "ICE 3neo Redesign", number: "8039")]).modelSummary == "ICE 3neo Redesign")
         #expect(TrainFormation(units: [.init(model: "ICE 3neo", number: nil)]).modelSummary == "ICE 3neo")
+    }
+
+    /// bahn.expert's fallback for an IC 1 (IC 1189): its coach-set number is no Tz, an IC 2's Tz stays.
+    @Test func bahnExpertIC1HasNoTrainsetNumber() throws {
+        let json = """
+        {"isRealtime": true, "source": "DB-risTransports", "sequence": {"groups": [
+            {"name": "IC450007", "journeyNumber": 1189, "baureihe": null, "coaches": []},
+            {"name": "ICD2868", "journeyNumber": 2271, "baureihe": null, "coaches": []}]}}
+        """
+        let response = try JSONDecoding.decoder.decode(BahnExpertClient.SequenceResponse.self, from: Data(json.utf8))
+        let groups = try #require(response.sequence?.groups)
+        #expect(BahnExpertClient.unitNumber(of: groups[0], seriesName: nil, category: "IC") == nil)
+        #expect(BahnExpertClient.unitNumber(of: groups[1], seriesName: "IC 2 Twindexx", category: "IC") == "2868")
+        #expect(BahnExpertClient.unitNumber(of: groups[1], seriesName: nil, category: "IC") == "2868")
     }
 
     /// Real response for IC 2271 (2026-10-01): bahn.expert has no Baureihe for IC 2 Twindexx sets.
@@ -3575,6 +3633,22 @@ private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
         let journey = Journey(legs: [leg("RE 3", "A", hbf, dep: 0, arr: 60, arrDelay: 15), leg("ICE 2", hbf, "C", dep: 70, arr: 120)],
                               source: .bahnDe)
         #expect(journey.connectionIssues().first?.title == "Umstieg in Berlin Hbf klappt nicht mehr")
+    }
+
+    /// The Alternative sheet showed "Problemstelle nicht gefunden" when the S-Bahn's raw station name
+    /// ("S+U Gesundbrunnen Bhf (Berlin)") differed from the issue's display name "Berlin Gesundbrunnen".
+    @Test func issueFindsItsLegDespiteRawStationNames() {
+        let ice = leg("ICE 1002", "München Hbf", "Berlin Gesundbrunnen", dep: 0, arr: 270, arrDelay: 18)
+        let s2 = leg("S 2", "S+U Gesundbrunnen Bhf (Berlin)", "Bernau", dep: 284, arr: 320)
+        let journey = Journey(legs: [ice, leg("", "Berlin Gesundbrunnen", "S+U Gesundbrunnen Bhf (Berlin)", dep: 270, arr: 272, walking: true), s2],
+                              source: .bahnDe)
+        let issue = journey.connectionIssues().first
+        #expect(issue?.title == "Umstieg in Berlin Gesundbrunnen klappt nicht mehr")
+        #expect(issue.flatMap(journey.leg(for:)) == ice)
+
+        let cancelled = leg("RE 3", "S+U Berlin Hauptbahnhof", "Stralsund", dep: 0, arr: 60, cancelled: true)
+        let withCancellation = Journey(legs: [cancelled], source: .bahnDe)
+        #expect(withCancellation.connectionIssues().first.flatMap(withCancellation.leg(for:)) == cancelled)
     }
 
     @Test func tightButPossible() {

@@ -206,7 +206,7 @@ struct SettingsView: View {
                         }
                     }
                     Spacer()
-                    if let points = user?.points {
+                    if let points = user?.points, user?.pointsEnabled == true {
                         InfoChip(text: "\(points)", systemImage: "sparkles", tint: .brand)
                     }
                 }

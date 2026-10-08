@@ -241,7 +241,8 @@ extension BahnDeClient {
         var coaches: [CoachSequence.Coach] = []
         for group in groups {
             let groupName = group.name ?? ""
-            let unitNumber = hasTrainsets(category) ? unitNumber(from: groupName) : nil
+            let isTrainset = hasTrainsets(category) && !isIC1(group, model: model(of: group, category: category))
+            let unitNumber = isTrainset ? unitNumber(from: groupName) : nil
             let trainName = group.transport.flatMap { transport in
                 transport.number.map { "\(transport.category ?? category) \($0)" }
             }
