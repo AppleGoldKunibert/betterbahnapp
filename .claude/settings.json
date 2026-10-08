@@ -11,4 +11,13 @@
       }
     ]
   }
+  "permissions": {
+    "allow": [
+      "Bash(git config --local gpg.*)",
+      "Bash(git config --local user.signingkey*)",
+      "Bash(git config --local commit.gpgsign*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
+    ]
+  }
 }
