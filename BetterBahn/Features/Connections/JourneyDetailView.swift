@@ -26,6 +26,8 @@ struct JourneyDetailView: View {
     /// The destination picked when the journey was edited, so later edits and "Anderer Zug" route there
     /// instead of back to the one the journey was opened with.
     @State private var editedDestination: Station?
+    /// Whether DB's dispatchers let a connecting train wait, keyed by the departing leg's id.
+    @State private var dispositions: [String: TransferDisposition] = [:]
 
     /// Where the journey is going now.
     private var goal: Station { editedDestination ?? finalDestination }
@@ -48,6 +50,7 @@ struct JourneyDetailView: View {
         .refreshable {
             await TimetablesClient.invalidateDelays()
             await refreshRealtime()
+            await loadDispositions()
         }
         .task {
             if !readOnly, model.savedEntry(for: journey) == nil, let seen = model.liveJourneys.value(for: journey.id) {
@@ -60,11 +63,13 @@ struct JourneyDetailView: View {
                 await refreshRealtime()
             }, showingAfter: LoadingDeadline.liveData) { liveDataLoaded = true }
             liveDataLoaded = true
+            await loadDispositions()
             // Keep a saved journey's delays current while it's open.
             while !Task.isCancelled {
                 try? await Task.sleep(for: AppModel.realtimeRefreshInterval)
                 guard !Task.isCancelled else { return }
                 if model.savedEntry(for: journey) != nil { await refreshRealtime() }
+                await loadDispositions()
             }
         }
         .tabBarSafePadding()
@@ -137,7 +142,8 @@ struct JourneyDetailView: View {
                         reservation: model.reservation(for: leg, in: journey)
                     )
                     if let info = transferInfo(after: leg) {
-                        TransferRow(from: leg, to: info.next, walk: info.walk, isPast: journey.isOver())
+                        TransferRow(from: leg, to: info.next, walk: info.walk, isPast: journey.isOver(),
+                                    disposition: dispositions[info.next.id])
                     }
                 }
             }
@@ -163,6 +169,17 @@ struct JourneyDetailView: View {
             model.updateSavedJourneyData(id: entry.id, journey: refreshed)
         }
         withAnimation { journey = refreshed }
+    }
+
+    /// Asks bahn.expert whether the connecting trains wait (see `BahnExpertClient.dispositions(in:now:)`).
+    /// A failed lookup keeps what was known.
+    private func loadDispositions() async {
+        guard !readOnly, let bahnExpert = model.provider.bahnExpert else { return }
+        let updates = await bahnExpert.dispositions(in: journey)
+        guard !updates.isEmpty else { return }
+        withAnimation {
+            for update in updates { dispositions[update.departing.id] = update.disposition }
+        }
     }
 
     /// A saved journey is only refreshed until 10 minutes after it arrives, so its end keeps whatever
@@ -388,6 +405,8 @@ struct TransferRow: View {
     /// The journey is over: a transfer that looks missed only lacks a train's last delay (see
     /// `Journey.currentIssues`), so it isn't flagged.
     var isPast = false
+    /// Whether DB's dispatchers let the connecting train wait (from bahn.expert), if decided.
+    var disposition: TransferDisposition?
 
     private var minutes: Int {
         Int((to.departure.best.timeIntervalSince(from.arrival.best) / 60).rounded())
@@ -407,6 +426,11 @@ struct TransferRow: View {
                 Text(broken ? "Umstieg nicht erreichbar" : minutes < 0 ? "Umstieg" : "Umstieg · \(minutes) min")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(color)
+                if let disposition, !isPast {
+                    Label(disposition.title, systemImage: disposition == .waiting ? "hourglass" : "xmark.circle.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(disposition == .waiting ? Color.punctual : Color.heavyDelay)
+                }
                 if let walk {
                     Text("\(Int((walk.arrival.best.timeIntervalSince(walk.departure.best) / 60).rounded())) min Fußweg")
                         .font(.caption)

@@ -162,6 +162,12 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   has no coach sequence and vagonweb has none either: it has DB's planned formation (`DB-plan`) for days
   ahead; bahn.de is only asked for departures within `BahnDeClient.formationLookahead` (12 h). Needs a
   `Referer` and a non-curl User-Agent (else an empty 206).
+  Also tells whether a connecting train waits (`TransferDisposition`, "Anschluss wartet (nicht)" in `TransferRow`):
+  `disposition(from:to:)` finds the arriving train (`journey/find`, no administration so ODEG etc. match), its
+  arrival ID at the transfer station (`journey/detailsByJourneyId`, by EVA or planned time) and the departing train
+  in `connections/connections` (by run number and planned time) and reads DB's `dispositionStatus`
+  (`WAITING`/`NOT_WAITING`). `dispositions(in:now:)` asks for transfers from 15 min ago up to 3 h ahead, for
+  `JourneyDetailView` and for saved journeys' refresh, which notifies once per decision (`notificationID`).
 - `Transit/TrainNumberSearch.swift` – train search by number (#183): bahn.expert's `journey/find` lists the runs with
   that number on a day (`TrainNumberQuery` reads "ICE 123"/"123"; `ranked` keeps the `TrainSearchFilter`'s kinds, the typed
   category or the same kind of train; countries from the end stops' IFOPT/EVA, `TrainSearchCountry`; trains that may cross
