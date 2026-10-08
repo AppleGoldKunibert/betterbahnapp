@@ -245,14 +245,11 @@ public struct TrainPicker: Sendable {
     /// alternative looked up alongside it for anyone who'd rather not rely on it.
     public func journey(withTrain trainName: String, from origin: Station, to destination: Station,
                         date: Date, windowMinutes: Int = 240) async throws -> TrainMatch {
-        let wanted = Line.normalize(trainName)
+        let wanted = TrainNameQuery(trainName)
         guard !wanted.isEmpty else { throw TransitError.invalidInput("Bitte einen Zug angeben, z. B. „ICE 423“.") }
         let entries = try await provider.departures(at: origin, date: date, duration: windowMinutes)
-        let matches = entries.filter { entry in
-            // "ICE 423" matches the line name, "423" matches the train number alone.
-            if Line.normalize(entry.line.name) == wanted { return true }
-            return wanted.allSatisfy(\.isNumber) && entry.line.number == wanted
-        }
+        // "ICE 423" matches the line name, "423" the train or run number, "RE 3 (3300)" that run.
+        let matches = entries.filter { wanted.matches($0.line) }
         guard !matches.isEmpty else {
             throw TransitError.notFound("\(trainName) ab \(origin.name)")
         }

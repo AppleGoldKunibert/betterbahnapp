@@ -4690,6 +4690,8 @@ final class RoutingMockProvider: TransitProvider, @unchecked Sendable {
     var trips: [String: Trip] = [:]
     /// Journeys keyed by "<from> -> <to>"; the planner filters them by time itself.
     var routes: [String: [Journey]] = [:]
+    /// Stations whose next board request fails (once each).
+    var failingBoards: Set<String> = []
     private(set) var journeyQueries: [String] = []
     private let lock = NSLock()
 
@@ -4702,7 +4704,9 @@ final class RoutingMockProvider: TransitProvider, @unchecked Sendable {
     }
 
     func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int, products: Set<Product>) async throws -> [BoardEntry] {
-        (boards[station.name] ?? []).filter {
+        let fails = lock.withLock { failingBoards.remove(station.name) != nil }
+        if fails { throw TransitError.notFound(station.name) }
+        return (boards[station.name] ?? []).filter {
             $0.time.best >= date && $0.time.best <= date.addingTimeInterval(TimeInterval(duration * 60))
         }
     }
@@ -4958,6 +4962,213 @@ final class RoutingMockProvider: TransitProvider, @unchecked Sendable {
         #expect(numberOnly?.category == nil)
         #expect(numberOnly?.number == "423")
         #expect(TrainRoutePlanner.parseCategoryAndNumber("ICE") == nil)
+        let bracketed = TrainRoutePlanner.parseCategoryAndNumber("RE3 (3346)")
+        #expect(bracketed?.category == "RE")
+        #expect(bracketed?.number == "3346")
+    }
+
+    func regional(_ id: String, line: String, run: String, _ stops: [Stopover]) -> Trip {
+        Trip(id: id, line: Line(name: line, number: String(line.split(separator: " ").last!), product: .regionalExpress,
+                                operatorName: nil, tripNumber: run),
+             direction: stops.last?.station.name, stopovers: stops, cancelled: false, remarks: [], source: .bahnDe)
+    }
+
+    /// #225: a regional train goes by its run number ("3300") as well as its line ("RE 3").
+    @Test func matchesRunNumbersOfRegionalTrains() {
+        let re3 = Line(name: "RE 3", number: "3", product: .regionalExpress, operatorName: nil, tripNumber: "3300")
+        for typed in ["3300", "RE 3300", "re3300", "RE 3 (3300)", "RE3 (3300)", "RE 3", "RE3", "3"] {
+            #expect(TrainNameQuery(typed).matches(re3), "\(typed)")
+        }
+        for typed in ["3346", "RE3 (3346)", "ICE 3300", "RE 33", "RB 3300"] {
+            #expect(!TrainNameQuery(typed).matches(re3), "\(typed)")
+        }
+        let ice = Line(name: "ICE 91", number: "91", product: .highSpeed, operatorName: nil)
+        #expect(TrainNameQuery("ICE 91").matches(ice))
+        #expect(TrainNameQuery("091").matches(ice))
+        // While typing, the beginning counts too, but less than a full match.
+        #expect(TrainNameQuery("ICE 9").score(ice) == 1)
+        #expect(TrainNameQuery("ICE 91").score(ice) == 2)
+        // A bare number lists a regional train only by its whole run number, not its line or a part.
+        #expect(TrainNameQuery("33").score(re3) == nil)
+        #expect(TrainNameQuery("3").score(re3) == nil)
+        #expect(TrainNameQuery("3300").score(re3) == 2)
+        #expect(TrainNameQuery("RE3").score(re3) == 2)
+        #expect(TrainNameQuery("RE 33").score(re3) == 1)
+        #expect(TrainNameQuery("RE").score(re3) == 1)
+        let s9 = Line(name: "S9", number: "9", product: .suburban, operatorName: nil, tripNumber: "91234")
+        #expect(TrainNameQuery("91").score(s9) == nil)
+        #expect(TrainNameQuery("9").score(s9) == nil)
+        #expect(TrainNameQuery("S9").score(s9) == 2)
+        #expect(TrainNameQuery("S").score(s9) == 1)
+        #expect(TrainNameQuery("91234").score(s9) == 2)
+        // Without a run number the line's number is no run number.
+        let s9WithoutRun = Line(name: "S 9", number: "9", product: .suburban, operatorName: nil)
+        #expect(TrainNameQuery("9").score(s9WithoutRun) == nil)
+        #expect(TrainNameQuery("S 9").score(s9WithoutRun) == 2)
+        #expect(TrainNameQuery("IC 9").score(ice) == 1)
+        #expect(TrainNameQuery("RB 9").score(ice) == nil)
+    }
+
+    @Test func ridesRegionalTrainTypedByRunNumber() async throws {
+        let mock = makeProvider()
+        let re = regional("re3300", line: "RE 3", run: "3300", [stop(koeln, arr: nil, dep: 10), stop(hamm, arr: 90, dep: nil)])
+        let other = regional("re3302", line: "RE 3", run: "3302", [stop(koeln, arr: nil, dep: 5), stop(hamm, arr: 85, dep: nil)])
+        mock.trips[re.id] = re
+        mock.trips[other.id] = other
+        mock.boards[koeln.name] = [entry(other, at: koeln, minutes: 5), entry(re, at: koeln, minutes: 10)]
+
+        for typed in ["3300", "RE 3 (3300)"] {
+            let plan = try await planner(mock).plan([TrainRequirement(trainName: typed, boarding: koeln, exit: hamm)],
+                                                    from: koeln, to: hamm, date: base)
+            #expect(plan.best?.transitLegs.map(\.tripId) == ["re3300"], "\(typed)")
+        }
+    }
+
+    /// A run picked from the list is ridden as it is, without asking the boarding station's board.
+    @Test func ridesPickedRunWithoutBoard() async throws {
+        let mock = makeProvider()
+        let re = regional("re3346", line: "RE 3", run: "3346", [stop(hamm, arr: nil, dep: 100), stop(berlin, arr: 300, dep: nil)])
+        let ice = trip("ice91", "ICE 91", [stop(koeln, arr: nil, dep: 10), stop(hamm, arr: 70, dep: 72), stop(hannover, arr: 130, dep: nil)])
+        mock.trips[re.id] = re
+        mock.trips[ice.id] = ice
+        let plan = try await planner(mock).plan([
+            TrainRequirement(trainName: "ICE 91", boarding: koeln, tripId: ice.id, tripSource: .bahnDe),
+            TrainRequirement(trainName: "RE3 (3346)", boarding: hamm, exit: berlin, tripId: re.id, tripSource: .bahnDe),
+        ], from: koeln, to: berlin, date: base)
+        let best = try #require(plan.best)
+        #expect(best.transitLegs.map(\.tripId) == ["ice91", "re3346"])
+        #expect(best.transitLegs.first?.destination.isSamePlace(as: hamm) == true)
+    }
+
+    @Test func reportsPickedRunThatLeftAlready() async throws {
+        let mock = makeProvider()
+        let ice = trip("ice91", "ICE 91", [stop(hamm, arr: nil, dep: 30), stop(berlin, arr: 200, dep: nil)])
+        mock.trips[ice.id] = ice
+        mock.routes["Köln Hbf -> Hamm (Westf)"] = [journey("RE 1", koeln, hamm, dep: 5, arr: 60)]
+        await #expect(throws: TransitError.self) {
+            try await planner(mock).plan([TrainRequirement(trainName: "ICE 91", boarding: hamm, tripId: ice.id)],
+                                         from: koeln, to: berlin, date: base)
+        }
+    }
+
+    /// The list of trains while typing: the one going to the destination first, then the one getting
+    /// closest, and a train only found by its run number too.
+    @Test func ranksCandidatesByRoute() async throws {
+        let mock = makeProvider()
+        let toBerlin = trip("ice500", "ICE 500", [stop(koeln, arr: nil, dep: 40), stop(hannover, arr: 160, dep: 162), stop(berlin, arr: 260, dep: nil)])
+        let toHannover = trip("ice501", "ICE 501", [stop(koeln, arr: nil, dep: 20), stop(hannover, arr: 140, dep: nil)])
+        let toDuesseldorf = trip("ice502", "ICE 502", [stop(koeln, arr: nil, dep: 10), stop(duesseldorf, arr: 30, dep: nil)])
+        let re = regional("re3300", line: "RE 3", run: "3300", [stop(koeln, arr: nil, dep: 15), stop(hamm, arr: 90, dep: nil)])
+        for t in [toBerlin, toHannover, toDuesseldorf, re] { mock.trips[t.id] = t }
+        mock.boards[koeln.name] = [entry(toDuesseldorf, at: koeln, minutes: 10), entry(re, at: koeln, minutes: 15),
+                                   entry(toHannover, at: koeln, minutes: 20), entry(toBerlin, at: koeln, minutes: 40)]
+        // No bahn.expert: only the boards are asked, never the network.
+        let finder = TrainCandidateFinder(provider: CombinedProvider(primary: mock, fallback: nil, bahnDe: nil, bahnExpert: nil))
+
+        let found = await finder.routeCandidates(for: "ICE 50", stations: [koeln], target: berlin, date: base)
+        #expect(found.map(\.trip.id) == ["ice500", "ice501", "ice502"])
+        #expect(found.first?.exit?.station.isSamePlace(as: berlin) == true)
+        #expect(found.first?.boarding?.station.isSamePlace(as: koeln) == true)
+
+        // A full match beats the ones only starting with what was typed.
+        let exact = await finder.routeCandidates(for: "ICE 502", stations: [koeln], target: berlin, date: base)
+        #expect(exact.map(\.trip.id) == ["ice502"])
+
+        let byRun = await finder.routeCandidates(for: "3300", stations: [koeln], target: berlin, date: base)
+        #expect(byRun.map(\.trip.id) == ["re3300"])
+    }
+
+    func numbered(_ number: Int, _ category: String, from origin: String, to destination: String,
+                  originEVA: String = "8000001", destinationEVA: String = "8000002") -> TrainSearchResult {
+        TrainSearchResult(journeyId: "j\(number)\(origin)", category: category, number: number, line: nil,
+                          product: .highSpeed, origin: origin, destination: destination,
+                          originEVA: originEVA, destinationEVA: destinationEVA)
+    }
+
+    /// A run found by number is matched to the route by its stops: boarded at the first route station
+    /// it leaves from, and whether it goes on to the destination.
+    @Test func fitsNumberedRunToTheRoute() {
+        let stops = [
+            TrainSearchStop(evaNumber: "8002549", name: "Hamburg Hbf", plannedDeparture: base),
+            TrainSearchStop(evaNumber: koeln.evaNumber!, name: "Köln Hbf", plannedDeparture: base.addingTimeInterval(4 * 3600)),
+            TrainSearchStop(evaNumber: "8000096", name: "Bonn Hbf", plannedDeparture: base.addingTimeInterval(5 * 3600)),
+            TrainSearchStop(evaNumber: "8100002", name: "Wien Hbf", plannedDeparture: nil),
+        ]
+        let bonn = station("8000096", "Bonn Hbf", 50.732, 7.097)
+        let fit = TrainCandidateFinder.fit(stops: stops, stations: [hamm, koeln], target: bonn, countries: ["DE"])
+        #expect(fit.boarding?.isSamePlace(as: koeln) == true)
+        #expect(fit.departure == base.addingTimeInterval(4 * 3600))
+        #expect(fit.reachesTarget)
+        #expect(fit.inCountries)
+
+        let away = TrainCandidateFinder.fit(stops: stops, stations: [hamm], target: berlin, countries: ["CH"])
+        #expect(away.boarding == nil)
+        #expect(!away.reachesTarget)
+        #expect(!away.inCountries)
+    }
+
+    /// The countries from Settings → Zugschnellsuche: a run ending there shows at once, a regional
+    /// train elsewhere never, a long-distance train elsewhere once its stops show it passes through.
+    @Test func filtersNumberedRunsByCountry() {
+        let german = numbered(91, "ICE", from: "Hamburg-Altona", to: "Wien Hbf", originEVA: "8002553", destinationEVA: "8103000")
+        var swiss = numbered(91, "IR", from: "Basel SBB", to: "Zürich HB", originEVA: "8500010", destinationEVA: "8503000")
+        swiss.product = .regional
+        let through = numbered(91, "EC", from: "Salzburg Hbf", to: "Innsbruck Hbf", originEVA: "8100002", destinationEVA: "8100108")
+        #expect(TrainCandidateFinder.countryStatus(german, countries: ["DE"]) == true)
+        #expect(TrainCandidateFinder.countryStatus(swiss, countries: ["DE"]) == false)
+        #expect(TrainCandidateFinder.countryStatus(through, countries: ["DE"]) == nil)
+        #expect(TrainCandidateFinder.countryStatus(swiss, countries: []) == true)
+    }
+
+    @Test func ranksNumberedRunsByRoute() {
+        let a = NumberedTrain(result: numbered(91, "ICE", from: "A", to: "B"),
+                              fit: RouteFit(boarding: nil, departure: nil, reachesTarget: false, inCountries: true))
+        let b = NumberedTrain(result: numbered(91, "RE", from: "C", to: "D"),
+                              fit: RouteFit(boarding: koeln, departure: base, reachesTarget: false, inCountries: true))
+        let c = NumberedTrain(result: numbered(91, "IC", from: "E", to: "F"),
+                              fit: RouteFit(boarding: koeln, departure: base.addingTimeInterval(3600), reachesTarget: true, inCountries: true))
+        let unknown = NumberedTrain(result: numbered(91, "S", from: "G", to: "H"))
+        let ranked = TrainCandidateFinder.ranked([unknown, a, b, c], date: base)
+        #expect(ranked.map(\.result.category) == ["IC", "RE", "S", "ICE"])
+    }
+
+    /// With a number typed, the boards only add trains that aren't runs of it (those come from the list).
+    @Test func boardExtrasLeaveOutTheNumberedRuns() {
+        let ice = trip("ice91", "ICE 91", [stop(koeln, arr: nil, dep: 10), stop(berlin, arr: 250, dep: nil)])
+        let other = trip("ice910", "ICE 910", [stop(koeln, arr: nil, dep: 20), stop(berlin, arr: 260, dep: nil)])
+        let candidates = [ice, other].map { TrainCandidate(trip: $0, boardingIndex: 0, exitIndex: 1, isExact: false) }
+        #expect(TrainCandidateFinder.boardExtras(candidates, besides: 91).map(\.trip.id) == ["ice910"])
+        // A line's number isn't a run number: RE 3 (3300) stays when "3" was searched by number.
+        let re = regional("re3300", line: "RE 3", run: "3300", [stop(koeln, arr: nil, dep: 15), stop(hamm, arr: 90, dep: nil)])
+        let regionalCandidate = TrainCandidate(trip: re, boardingIndex: 0, exitIndex: nil, isExact: true)
+        #expect(TrainCandidateFinder.boardExtras([regionalCandidate], besides: 3).count == 1)
+        #expect(TrainCandidateFinder.boardExtras([regionalCandidate], besides: 3300).isEmpty)
+    }
+
+    /// A board that failed to load isn't kept as empty: the next letter typed asks again and finds the train.
+    @Test func retriesBoardThatFailed() async throws {
+        let mock = makeProvider()
+        let ice = trip("ice91", "ICE 91", [stop(koeln, arr: nil, dep: 10), stop(berlin, arr: 250, dep: nil)])
+        mock.trips[ice.id] = ice
+        mock.boards[koeln.name] = [entry(ice, at: koeln, minutes: 10)]
+        mock.failingBoards = [koeln.name]
+        let finder = TrainCandidateFinder(provider: CombinedProvider(primary: mock, fallback: nil, bahnDe: nil, bahnExpert: nil))
+
+        let first = await finder.routeCandidates(for: "9", stations: [koeln], target: berlin, date: base)
+        #expect(first.isEmpty)
+        let second = await finder.routeCandidates(for: "91", stations: [koeln], target: berlin, date: base)
+        #expect(second.map(\.trip.id) == ["ice91"])
+    }
+
+    /// #225: continuations come fastest first, without routes a later one beats outright.
+    @Test func ordersContinuationsByArrival() {
+        let slowEarly = journey("RE 1", hamm, berlin, dep: 80, arr: 320)
+        let fast = journey("ICE 500", hamm, berlin, dep: 95, arr: 260)
+        let earlierSlower = journey("IC 140", hamm, berlin, dep: 75, arr: 280)
+        let later = journey("ICE 600", hamm, berlin, dep: 150, arr: 300)
+        let result = JourneyReplanner.fastestFirst([slowEarly, earlierSlower, fast, later])
+        // RE 1 leaves before ICE 500 and arrives after it; ICE 600 leaves later, so it stays.
+        #expect(result.map { $0.transitLegs.first?.line?.name } == ["ICE 500", "ICE 600"])
     }
 }
 

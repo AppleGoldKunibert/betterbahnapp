@@ -67,10 +67,14 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   the app goes to the background) writes the `WidgetSnapshot` for `widgetJourney` (the Live Activity's pick
   `liveJourneyCandidate`, else the next saved journey not switched off) and reloads the widgets only if it changed.
 - `Features/Connections/` – search form (`ConnectionsView`, `ConnectionSearch`, `RouteOptionsEditor`
-  for via stops/products/max transfers), `JourneyResultsView` (+ `JourneyCard`, `TrainNumberSheet`),
+  for via stops/products/max transfers), `JourneyResultsView` (+ `JourneyCard`), `TrainNumberSheet` ("Bestimmten Zug
+  wählen", #225: lists the trains fitting what is typed via Kit `TrainCandidateFinder`, picking one shows its stops in
+  `TripContent` with boarding/exit preselected and pins that run; "Ein- und Ausstieg selbst angeben" for the typed name),
   `JourneyDetailView` (+ `LegCard`, `TransferRow`, alternatives sheets), `JourneyMapView` (MapKit),
   `JourneyReplanSheet` (replan from mid-journey; "Halt hinzufügen" via `ManualStopSheet` adds a stop outside the
-  timetable as exit, and a Träwelling check-in then becomes a manual trip via `AppModel.replaceCheckinWithManualTrip`, #207).
+  timetable as exit, and a Träwelling check-in then becomes a manual trip via `AppModel.replaceCheckinWithManualTrip`, #207;
+  the stop list opens scrolled to the exit, a new exit on the last train asks "Reise … beenden" / "Weiter nach …",
+  on other trains it searches right away, #225).
 - `Features/Departures/` – `StationBoardView`/`BoardRow`, `TripView` (single train's stops),
   `CoachSequenceView.swift`: the Wagenreihung unfolds in place, no sheet. `CoachSequenceDisclosure` ("Wagenreihung ⌄" row in
   `LegCard` between the stops and "Mehr", in `TripContent`'s header; the train search has its own row) shows once bahn.de has a
@@ -251,7 +255,18 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   A stop DB schedules without a change only counts as on time when the train runs within 2 h
   (`infersOnTime`); a journey tomorrow shows plain times, and `JourneyRefresher.droppingInferredOnTime` clears
   such made-up "pünktlich" from journeys saved earlier.
-- Logic: `JourneyReplanner`, `ConnectionCheck` (`ConnectionIssue`, `JourneyRefresher`), `PlatformChange`
+- `Transit/TrainChoice.swift` – picking a train for a route (#225): `TrainNameQuery` reads "ICE 423", "423", "RE 3300",
+  "RE 3 (3300)" and matches a line by name, train or run number (`Line.tripNumber`), with `score` for prefixes while
+  typing (regional trains and S-Bahn only by their category, "S9"/"RE 3", or their whole run number, never by "3" or "91") (used by `TrainRoutePlanner`, `TrainPicker`); `TrainCandidateFinder` (actor): a number is listed like the train search (`numberTrains`:
+  one bahn.expert request, kinds from Settings → Zugschnellsuche), each run's stops (`routeFit`) then mark where it
+  boards on the route, whether it reaches the target and whether it passes one of the settings' countries (`ranked`);
+  only the picked run's trip is loaded (`candidate(for:)`, from the boarding station's board, else `TrainNumberSearch.run`).
+  Lines ("RE 3") and other trains come from the boards of up to 4 route stations (`routeCandidates`:
+  `departuresForTrainLookup`, trains only, loaded in parallel, `prefetch`ed when the sheet opens, never cached when
+  failed; `boardExtras` leaves out runs already listed by number). A picked run is pinned in
+  `TrainRequirement.tripId`, so the planner loads it instead of searching boards.
+- Logic: `JourneyReplanner` (`continuations` come `fastestFirst`: by live arrival, without routes another one beats
+  leaving no earlier, arriving no later with no more changes), `ConnectionCheck` (`ConnectionIssue`, `JourneyRefresher`), `PlatformChange`
   (platform changes since the last refresh → push, ignores sectors/bus bays), `TrainRoutePlanner`,
   `ViaRoutePlanner` (vias without minimum stay keep a through train as one leg), `TrainPicker` ("Anderer Zug": `replacing` keeps
   the rest of the plan and reports a `MissedConnection` the user may ignore or pick another train for, #226; `reroutes`
