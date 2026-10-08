@@ -124,13 +124,18 @@ extension BahnDeClient {
         var hasSleepingCars: Bool {
             zugattribute?.contains { $0.kategorie == "SCHLAFWAGEN" || ["SW", "LW"].contains($0.key) } == true
         }
+        /// DB marks trains where a seat reservation is mandatory (e.g. Snälltåget, Nightjet) with the attribute `RP`.
+        /// Only the key counts: "FR" is "Fahrradmitnahme reservierungspflichtig", which concerns bikes alone.
+        var requiresReservation: Bool { zugattribute?.contains { $0.key == "RP" } ?? false }
     }
 
-    /// A train's journey details: its realtime stops, the operators running it and whether it has sleepers.
+    /// A train's journey details: its realtime stops, the operators running it and what its attributes say.
     struct JourneyCourse: Sendable {
         var stops: [JourneyStop]
         var operators: [TrainOperator]
         var hasSleepingCars = false
+        /// Whether a seat reservation is mandatory on the train (attribute `RP`).
+        var requiresReservation = false
     }
 
     // MARK: Journey stops
@@ -237,9 +242,11 @@ extension BahnDeClient {
         return marks
     }
 
+    /// `includingOtherRailways` also looks up long-distance trains of other railways (`lookupReference`).
     private func journeyCourse(line: Line?, station: Station, plannedDeparture: Date,
-                               maxAge: TimeInterval = BahnDeClient.journeyStopsMaxAge) async throws -> JourneyCourse? {
-        guard let ref = Self.journeyReference(for: line), let line else { return nil }
+                               maxAge: TimeInterval = BahnDeClient.journeyStopsMaxAge,
+                               includingOtherRailways: Bool = false) async throws -> JourneyCourse? {
+        guard let ref = includingOtherRailways ? Self.lookupReference(for: line) : Self.journeyReference(for: line), let line else { return nil }
         let journeyKey = "\(ref.category) \(ref.number)|\(station.id)|\(plannedDeparture.timeIntervalSince1970)"
         guard usesSharedCaches else {
             let id = try await findJourneyId(line: line, station: station, plannedDeparture: plannedDeparture)
@@ -253,6 +260,16 @@ extension BahnDeClient {
         return try await Self.journeyCourseCache.value(for: id, maxAge: maxAge) {
             try await self.fetchJourneyCourse(journeyId: id, feedOperator: line.operatorName)
         }
+    }
+
+    /// Whether bahn.de lists `leg`'s train as reservation-only ("Reservierungspflicht" among the journey
+    /// details' train attributes, e.g. Snälltåget D 301 Malmö–Berlin or a Nightjet). `nil` if the train isn't
+    /// one bahn.de can be asked about (`lookupReference`); throws `TransitError.notFound` if bahn.de doesn't
+    /// list it. Shares the request and cache of `journeyStops`.
+    public func requiresReservation(for leg: Leg) async throws -> Bool? {
+        guard let line = leg.line, !leg.isWalking else { return nil }
+        return try await journeyCourse(line: line, station: leg.origin, plannedDeparture: leg.departure.planned,
+                                       includingOtherRailways: true)?.requiresReservation
     }
 
     private static let journeyIdCache = ExpiringCache<String>()
@@ -270,10 +287,20 @@ extension BahnDeClient {
         return (ref.category, ref.number, true)
     }
 
+    /// `journeyReference`, plus long-distance trains of other railways (SJ's "D 301", Nightjet, TGV …) by their
+    /// number (also with an unclassified product, which is how Nightjet may arrive), which bahn.de lists on its
+    /// board too but whose Zusatzhalte and platforms we never ask for.
+    static func lookupReference(for line: Line?) -> (category: String, number: String, isRegional: Bool)? {
+        if let ref = journeyReference(for: line) { return ref }
+        guard let line, [.highSpeed, .longDistance, .other].contains(line.product), let number = line.number,
+              let category = line.name.split(separator: " ").first.map({ String($0).uppercased() }) else { return nil }
+        return (category, number, false)
+    }
+
     /// bahn.de's journey ID for `line`, found on the departure board of `station` at its scheduled time.
     func findJourneyId(line: Line, station: Station, plannedDeparture: Date) async throws -> String {
         guard let eva = try await evaNumber(for: station) else { throw TransitError.notFound(line.name) }
-        let regional = Self.journeyReference(for: line)?.isRegional == true
+        let regional = Self.lookupReference(for: line)?.isRegional == true
         let board = try await get(Self.boardURL(eva: eva, at: plannedDeparture, products: regional ? Self.regionalProducts : Self.longDistanceProducts),
                                   as: Board.self)
         guard let id = Self.journeyId(in: board, for: line, plannedDeparture: plannedDeparture) else {
@@ -310,7 +337,7 @@ extension BahnDeClient {
     /// directions.
     static func journeyId(in board: Board, for line: Line, plannedDeparture: Date) -> String? {
         let targets = Set([line.name, line.alternateName].compactMap { $0 }.map(normalizedTrainName))
-        let number = journeyReference(for: line)?.number
+        let number = lookupReference(for: line)?.number
         return board.entries
             .filter { entry in
                 if let number, let run = journeyNumber(in: entry.journeyId) { return run == number }
@@ -563,7 +590,8 @@ extension BahnDeClient {
         let details = try await get(Self.journeyURL(journeyId), as: JourneyDetails.self)
         return JourneyCourse(stops: details.halte.compactMap(JourneyStop.init),
                              operators: Self.operators(of: details, feedOperator: feedOperator),
-                             hasSleepingCars: details.hasSleepingCars)
+                             hasSleepingCars: details.hasSleepingCars,
+                             requiresReservation: details.requiresReservation)
     }
 
     /// The operators bahn.de names in the train's attributes, unless its stops' railways (`adminID`, else
