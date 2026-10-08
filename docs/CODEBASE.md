@@ -76,7 +76,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   sequence, else vagonweb's planned one, and opens by itself from 30 min before to 15 min after the departure (Kit
   `CoachSequence.unfoldsByItself`) or by tap. Tapping a stop's platform in `TripContent` unfolds that stop's below it.
   `CoachSequencePanel` holds the content: notes (when it falls back to vagonweb's plan, a grey "bahn.de: …" line says why, from
-  Kit `BahnDeClient.coachSequenceNote(for:)`: no EVA, 404, an answer without the train's coaches, or the error), one `TrainCard` per series (Kit `TrainFormation.partsBySeries`: coupled
+  Kit `BahnDeClient.coachSequenceNote(for:)`: no EVA, 404, an answer without the train's coaches, or the error; for the
+  10-min `BahnDeGate` pause also what started it, `blockDescription`), one `TrainCard` per series (Kit `TrainFormation.partsBySeries`: coupled
   trainsets of one series share one, "2× ICE 4") with type, "BR …", each Tz with its Taufname and the series' side view
   running off the box's edge (#167): `Assets.xcassets/Trains/Train-<BR>` (401, 402, 403, 407, 408, 411, 412; cut from DB's
   Fahrzeuglexikon PDFs, © DB AG: "Quelle: Deutsche Bahn" next to it, named under bahn.de in Datenquellen), picked by Kit

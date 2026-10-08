@@ -2811,6 +2811,21 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(BahnDeClient.summary(of: BahnDeClient.SequenceResponse()) == "0 Gruppen, 0 Fahrzeuge, Züge keine")
     }
 
+    /// A pause after bahn.de blocked the app says what started it, so the Wagenreihung's note can show it.
+    @Test func bahnDeBlockIsDescribed() async {
+        let gate = BahnDeGate()
+        #expect(await gate.blockDescription == nil)
+        await gate.report(.http(status: 404, body: nil))
+        #expect(await gate.blockDescription == nil)
+        await gate.report(.http(status: 403, body: #"{"status":"ERROR","code":"OPS_BLOCKED"}"#),
+                          url: URL(string: "https://example.com/web/api/reisebegleitung/wagenreihung/vehicle-sequence")!)
+        let description = await gate.blockDescription
+        #expect(description?.hasPrefix("Pause bis ") == true)
+        #expect(description?.contains(#"403 {"status":"ERROR","code":"OPS_BLOCKED"}"#) == true)
+        #expect(description?.hasSuffix("(…/vehicle-sequence)") == true)
+        #expect(BahnDeGate.excerpt(String(repeating: "x", count: 100)).count == 81)
+    }
+
     /// The Wagenreihung unfolds by itself from 30 minutes before the departure until 15 minutes after it.
     @Test func coachSequenceUnfoldsAroundDeparture() {
         let departure = Date(timeIntervalSince1970: 1_800_000_000)

@@ -361,7 +361,9 @@ public struct BahnDeClient: Sendable {
             await Self.sequenceNotes.set("keine Wagenreihung an EVA \(candidates.joined(separator: " / ")) (404) · \(asked)", for: key)
             return nil
         } catch {
-            let reason = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+            var reason = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+            // Usually not this request's fault: an earlier answer paused every bahn.de request.
+            if case TransitError.rateLimited = error, let block = await gate.blockDescription { reason += " (\(block))" }
             await Self.sequenceNotes.set("\(reason) · \(asked)", for: key)
             throw error
         }
@@ -580,7 +582,7 @@ public struct BahnDeClient: Sendable {
         do {
             return try await http.get(url, as: type, headers: Self.headers(), auth: auth)
         } catch let error as TransitError {
-            await gate.report(error)
+            await gate.report(error, url: url)
             throw error.isBlocked ? TransitError.rateLimited : error
         }
     }
@@ -593,18 +595,40 @@ public actor BahnDeGate {
     public static let cooldown: TimeInterval = 10 * 60
 
     private var blockedUntil: Date?
+    /// What started the current pause: when, the answer and the path, e.g. "10:41 403 OPS_BLOCKED (…/vehicle-sequence)".
+    private var blockReason: String?
 
     public init() {}
 
     /// Whether bahn.de is currently being left alone after a block.
     public var isBlocked: Bool { blockedUntil.map { $0 > .now } ?? false }
 
+    /// Why bahn.de is being left alone and until when; nil while it isn't.
+    public var blockDescription: String? {
+        guard isBlocked, let blockedUntil else { return nil }
+        let until = blockedUntil.formatted(Date.FormatStyle(timeZone: BahnDeClient.berlin).hour(.twoDigits(amPM: .omitted)).minute())
+        return "Pause bis \(until) nach \(blockReason ?? "einer Sperre")"
+    }
+
     func check() throws {
         if isBlocked { throw TransitError.rateLimited }
     }
 
-    func report(_ error: TransitError) {
-        if error.isBlocked { blockedUntil = Date.now.addingTimeInterval(Self.cooldown) }
+    func report(_ error: TransitError, url: URL? = nil) {
+        guard error.isBlocked else { return }
+        blockedUntil = Date.now.addingTimeInterval(Self.cooldown)
+        let time = Date.now.formatted(Date.FormatStyle(timeZone: BahnDeClient.berlin).hour(.twoDigits(amPM: .omitted)).minute())
+        let answer = switch error {
+        case .http(let status, let body): "\(status)\(body.map { " " + Self.excerpt($0) } ?? "")"
+        default: "429"
+        }
+        blockReason = "\(answer) um \(time)\(url.map { " (…/\($0.lastPathComponent))" } ?? "")"
+    }
+
+    /// The start of an error body on one line, e.g. bahn.de's `{"code":"OPS_BLOCKED",…}`.
+    static func excerpt(_ body: String) -> String {
+        let line = body.split(whereSeparator: \.isNewline).joined(separator: " ")
+        return line.count > 80 ? String(line.prefix(80)) + "…" : line
     }
 }
 
@@ -619,8 +643,6 @@ extension TransitError {
     }
 }
 
-/// Values fetched per key, kept for `maxAge`; concurrent requests for the same key share one fetch.
-/// Errors are not cached, so a failed lookup is tried again next time.
 /// Why bahn.de's coach sequence was missing, per request (`BahnDeClient.coachSequenceNote(for:)`).
 actor SequenceNotes {
     private var notes: [String: String] = [:]
@@ -630,6 +652,8 @@ actor SequenceNotes {
     func set(_ note: String?, for key: String) { notes[key] = note }
 }
 
+/// Values fetched per key, kept for `maxAge`; concurrent requests for the same key share one fetch.
+/// Errors are not cached, so a failed lookup is tried again next time.
 actor ExpiringCache<Value: Sendable> {
     struct Entry { let date: Date; let value: Value }
     private var entries: [String: Entry] = [:]
