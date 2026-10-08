@@ -2938,6 +2938,130 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         await #expect(throws: TransitError.rateLimited) { try await bahnDe.formation(request) }
         #expect(BlockedProtocol.requests.withLock { $0 } == 1)
     }
+
+    /// Requests to the Worker map onto bahn.de's own `/web/api/…` addresses for the phone's browser.
+    @Test func directURLMirrorsWorkerPath() {
+        let url = BahnDeClient.baseURL.appending(path: "reiseloesung/orte").appending(queryItems: [.init(name: "suchbegriff", value: "Köln Hbf")])
+        #expect(BahnDeClient.directURL(for: url)?.absoluteString == "https://www.bahn.de/web/api/reiseloesung/orte?suchbegriff=K%C3%B6ln%20Hbf")
+        #expect(BahnDeClient.directURL(for: URL(string: "https://example.com/web/api/reiseloesung/orte")!) == nil)
+        #expect(BahnDeClient.directURL(for: URL(string: "https://betterbahn2.betterbahn.workers.dev/timetables/v1/station/8000105")!) == nil)
+    }
+
+    /// When the Worker is blocked, the phone's browser asks bahn.de instead, also while the Worker pauses.
+    @Test func blockedWorkerFallsBackToBrowser() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [ForbiddenProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let loaded = Recorded<[String]>([])
+        let browser = BahnDeBrowserFallback { url in
+            loaded.value.withLock { $0.append(url.absoluteString) }
+            return (200, Data(#"[{"extId":"8000105","name":"Frankfurt(Main)Hbf","type":"ST","products":["ICE"]}]"#.utf8))
+        }
+        let gate = BahnDeGate()
+        let bahnDe = BahnDeClient(http: HTTPClient(session: session), gate: gate, browser: browser)
+
+        #expect(try await bahnDe.searchStations("Frankfurt").map(\.id) == ["8000105"])
+        #expect(await gate.isBlocked)
+        #expect(try await bahnDe.searchStations("Frankfurt").map(\.id) == ["8000105"])
+        // The Worker was asked once; then only the browser, at bahn.de's own address.
+        #expect(ForbiddenProtocol.requests.withLock { $0 } == 1)
+        #expect(loaded.value.withLock { $0.count } == 2)
+        #expect(loaded.value.withLock { $0.allSatisfy { $0.hasPrefix("https://www.bahn.de/web/api/reiseloesung/orte?") } })
+    }
+
+    /// A blocked Worker gets the browser's page loading right away; once the Worker answers again, the page goes.
+    @Test func browserPageFollowsWorkerState() async throws {
+        let prepared = Recorded(0)
+        let released = Recorded(0)
+        let browser = BahnDeBrowserFallback({ _ in
+            (200, Data(#"[{"extId":"8000105","name":"Frankfurt(Main)Hbf","type":"ST"}]"#.utf8))
+        }, prepare: { prepared.value.withLock { $0 += 1 } }, release: { released.value.withLock { $0 += 1 } })
+
+        let blockedConfig = URLSessionConfiguration.ephemeral
+        blockedConfig.protocolClasses = [RefusingProtocol.self]
+        let blockedSession = URLSession(configuration: blockedConfig)
+        defer { blockedSession.invalidateAndCancel() }
+        let blocked = BahnDeClient(http: HTTPClient(session: blockedSession), gate: BahnDeGate(), browser: browser)
+        _ = try await blocked.searchStations("Frankfurt")
+        _ = try await blocked.searchStations("Frankfurt")
+        #expect(prepared.value.withLock { $0 } == 1)
+        #expect(await browser.isActive)
+
+        let workingConfig = URLSessionConfiguration.ephemeral
+        workingConfig.protocolClasses = [StationsProtocol.self]
+        let workingSession = URLSession(configuration: workingConfig)
+        defer { workingSession.invalidateAndCancel() }
+        let working = BahnDeClient(http: HTTPClient(session: workingSession), gate: BahnDeGate(), browser: browser)
+        _ = try await working.searchStations("Frankfurt")
+        _ = try await working.searchStations("Frankfurt")
+        #expect(released.value.withLock { $0 } == 1)
+        #expect(await !browser.isActive)
+    }
+
+    /// When bahn.de blocks the phone too, its browser pauses as well instead of asking again.
+    @Test func blockedBrowserPausesToo() async throws {
+        let calls = Recorded(0)
+        let browser = BahnDeBrowserFallback { _ in
+            calls.value.withLock { $0 += 1 }
+            return (403, Data(#"{"code":"OPS_BLOCKED"}"#.utf8))
+        }
+        let gate = BahnDeGate()
+        await gate.report(.rateLimited)
+        let bahnDe = BahnDeClient(http: HTTPClient(session: .shared), gate: gate, browser: browser)
+
+        await #expect(throws: TransitError.rateLimited) { try await bahnDe.searchStations("Frankfurt") }
+        await #expect(throws: TransitError.rateLimited) { try await bahnDe.searchStations("Frankfurt") }
+        #expect(calls.value.withLock { $0 } == 1)
+        #expect(await browser.gate.isBlocked)
+    }
+}
+
+/// A value a test's closures record into (a `Mutex` itself can't be captured).
+private final class Recorded<Value: Sendable>: Sendable {
+    let value: Mutex<Value>
+    init(_ value: Value) { self.value = Mutex(value) }
+}
+
+/// The Worker answering bahn.de's block, counted apart from `BlockedProtocol` (tests run in parallel).
+private final class ForbiddenProtocol: URLProtocol, @unchecked Sendable {
+    static let requests = Mutex(0)
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.requests.withLock { $0 += 1 }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 403, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(#"{"status":"ERROR","code":"OPS_BLOCKED"}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+/// The Worker blocked, uncounted (`ForbiddenProtocol` counts for another test).
+private final class RefusingProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let response = HTTPURLResponse(url: request.url!, statusCode: 403, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(#"{"status":"ERROR","code":"OPS_BLOCKED"}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+/// The Worker answering a station search.
+private final class StationsProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(#"[{"extId":"8000105","name":"Frankfurt(Main)Hbf","type":"ST"}]"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }
 
 private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
