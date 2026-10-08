@@ -2161,6 +2161,8 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
     let source: DataSource
     var failing = false
     var boards: [BoardEntry] = []
+    /// Arrival boards, when they should differ from `boards`.
+    var arrivalBoards: [BoardEntry]?
     var trips: [String: Trip] = [:]
     var journeyPages: [JourneyPage] = []
     var calls: [String] = []
@@ -2187,7 +2189,7 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
 
     func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int, products: Set<Product>) async throws -> [BoardEntry] {
         try record("board")
-        return boards
+        return kind == .arrivals ? arrivalBoards ?? boards : boards
     }
 
     func trip(id: String) async throws -> Trip {
@@ -2496,6 +2498,22 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(second.journey.legs.map(\.tripId) == ["re1", "ice4", "ice5"])
         #expect(second.missedConnection == nil)
         #expect(second.journey.connectionIssues().isEmpty)
+    }
+
+    @Test func alternativesAtBusyStationPreferTrainsReachingDestination() async throws {
+        // Like S2 Gesundbrunnen → Bernau: plenty of trains of the same kind leave around the same time
+        // for elsewhere; the next one to C comes later and only made the list via C's arrivals.
+        let elsewhere = (1...30).map { trip("s\($0)", "ICE \($0 + 100)", [(b, nil, 30 + Double($0) * 0.5), (a, 60, nil)]) }
+        let toC = trip("ice9", "ICE 9", [(b, nil, 70), (c, 100, nil)])
+        let primary = MockProvider(source: .bahnDe)
+        primary.boards = elsewhere.map { entry($0, at: b, planned: $0.stopovers[0].departure!.planned.timeIntervalSince(base) / 60) }
+            + [entry(toC, at: b, planned: 70)]
+        primary.arrivalBoards = [entry(toC, at: c, planned: 100)]
+        primary.trips = Dictionary(uniqueKeysWithValues: (elsewhere + [toC, ice2]).map { ($0.id, $0) })
+        let picker = TrainPicker(provider: CombinedProvider(primary: primary, fallback: MockProvider(source: .transitous), bahnDe: nil),
+                                 maxCandidates: 5)
+        let others = try await picker.alternatives(for: try #require(ice2.leg(from: b, to: c)))
+        #expect(others.map(\.tripId) == ["ice9"])
     }
 
     @Test func earlierTrainKeepsConnection() async throws {

@@ -164,13 +164,20 @@ public struct TrainPicker: Sendable {
     public func alternatives(for leg: Leg, minutesBefore: Int = 30, minutesAfter: Int = 180,
                              notBefore: Date? = nil, ticketFilter: TicketFilter? = nil) async throws -> [Leg] {
         let (start, end) = Self.window(for: leg, minutesBefore: minutesBefore, minutesAfter: minutesAfter, notBefore: notBefore)
-        let entries = try await provider.departures(at: leg.origin, date: start,
-                                                    duration: Int(end.timeIntervalSince(start) / 60))
+        let window = Int(end.timeIntervalSince(start) / 60)
+        // At a busy station the nearest trains of the same kind can all go elsewhere (S-Bahn hubs like
+        // Gesundbrunnen: two dozen S-Bahns in half an hour, few to Bernau), so trains the destination's
+        // arrivals list too come first. Without that board, it's the nearest ones as before.
+        let ride = Int(leg.arrival.planned.timeIntervalSince(leg.departure.planned) / 60)
+        async let departures = provider.departures(at: leg.origin, date: start, duration: window)
+        async let arrivals = provider.arrivals(at: leg.destination, date: start, duration: min(window + 2 * ride + 30, 720))
+        let entries = try await departures
+        let reaching = Set(((try? await arrivals) ?? []).map(\.tripId))
         let candidates = entries
             .filter { $0.line.product.isTrain && $0.tripId != leg.tripId && !$0.cancelled }
             .filter { entry in notBefore.map { entry.time.best >= $0 } ?? true }
             .filter { ticketFilter?.isValid($0) ?? true }
-            .sorted { Self.rank($0, like: leg) < Self.rank($1, like: leg) }
+            .sorted { Self.rank($0, like: leg, reaching: reaching) < Self.rank($1, like: leg, reaching: reaching) }
             .prefix(maxCandidates)
         let legs = await legs(for: Array(candidates), from: leg.origin, to: leg.destination)
         return legs.sorted { $0.departure.planned < $1.departure.planned }
@@ -373,9 +380,11 @@ public struct TrainPicker: Sendable {
         }
     }
 
-    /// Lower is better: same product first, then closest departure time.
-    static func rank(_ entry: BoardEntry, like leg: Leg) -> Double {
+    /// Lower is better: trains also arriving at the destination (`reaching`) first, then the same
+    /// product, then closest departure time.
+    static func rank(_ entry: BoardEntry, like leg: Leg, reaching: Set<String> = []) -> Double {
+        let arrives = reaching.contains(entry.tripId) ? 0.0 : 1_000_000.0
         let sameProduct = entry.line.product == leg.line?.product ? 0.0 : 100_000.0
-        return sameProduct + abs(entry.time.planned.timeIntervalSince(leg.departure.planned))
+        return arrives + sameProduct + abs(entry.time.planned.timeIntervalSince(leg.departure.planned))
     }
 }
