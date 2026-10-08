@@ -2679,6 +2679,20 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         #expect(TrainFormation(units: [.init(model: "ICE 3neo", number: nil)]).modelSummary == "ICE 3neo")
     }
 
+    /// bahn.expert's fallback for an IC 1 (IC 1189): its coach-set number is no Tz, an IC 2's Tz stays.
+    @Test func bahnExpertIC1HasNoTrainsetNumber() throws {
+        let json = """
+        {"isRealtime": true, "source": "DB-risTransports", "sequence": {"groups": [
+            {"name": "IC450007", "journeyNumber": 1189, "baureihe": null, "coaches": []},
+            {"name": "ICD2868", "journeyNumber": 2271, "baureihe": null, "coaches": []}]}}
+        """
+        let response = try JSONDecoding.decoder.decode(BahnExpertClient.SequenceResponse.self, from: Data(json.utf8))
+        let groups = try #require(response.sequence?.groups)
+        #expect(BahnExpertClient.unitNumber(of: groups[0], seriesName: nil, category: "IC") == nil)
+        #expect(BahnExpertClient.unitNumber(of: groups[1], seriesName: "IC 2 Twindexx", category: "IC") == "2868")
+        #expect(BahnExpertClient.unitNumber(of: groups[1], seriesName: nil, category: "IC") == "2868")
+    }
+
     /// Real response for IC 2271 (2026-10-01): bahn.expert has no Baureihe for IC 2 Twindexx sets.
     @Test func twindexxSeriesFromGroupName() throws {
         let json = """
