@@ -1915,7 +1915,8 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         let journey = Journey(legs: [try #require(fast.leg(from: koeln, to: berlin))], source: .bahnDe)
         let newLeg = try #require(slow.leg(from: koeln, to: berlin))
         let replaced = try await picker.replacing(legAt: 0, in: journey, with: newLeg, finalDestination: berlin)
-        #expect(replaced.legs.map(\.tripId) == ["ice423"])
+        #expect(replaced.journey.legs.map(\.tripId) == ["ice423"])
+        #expect(replaced.missedConnection == nil)
     }
 
     func transferPicker() throws -> (TrainPicker, Leg, Journey) {
@@ -1945,7 +1946,64 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         let (picker, leg, withTransfer) = try transferPicker()
         let journey = Journey(legs: [leg], source: .bahnDe)
         let replaced = try await picker.replacing(legAt: 0, in: journey, with: withTransfer.legs, finalDestination: berlin)
-        #expect(replaced.legs.map(\.tripId) == ["re5", "ice10"])
+        #expect(replaced.journey.legs.map(\.tripId) == ["re5", "ice10"])
+    }
+
+    /// Köln → Düsseldorf in ICE 999 (arrives :40), then on to Berlin in ICE 10 (leaves :50).
+    func journeyWithOnwardTrain() throws -> (TrainPicker, Journey) {
+        let (picker, _, _) = makePicker()
+        let feeder = trip("ice999", "ICE 999", [stop(koeln, arr: nil, dep: 20), stop(duesseldorf, arr: 40, dep: nil)])
+        let onwards = trip("ice10", "ICE 10", [stop(duesseldorf, arr: nil, dep: 50), stop(berlin, arr: 300, dep: nil)])
+        let journey = Journey(legs: [try #require(feeder.leg(from: koeln, to: duesseldorf)),
+                                     try #require(onwards.leg(from: duesseldorf, to: berlin))], source: .bahnDe)
+        return (picker, journey)
+    }
+
+    @Test func otherTrainKeepsConnectionThatStillWorks() async throws {
+        let (picker, journey) = try journeyWithOnwardTrain()
+        let earlier = trip("ice423", "ICE 423", [stop(koeln, arr: nil, dep: 10), stop(duesseldorf, arr: 30, dep: nil)])
+        let replaced = try await picker.replacing(legAt: 0, in: journey, with: try #require(earlier.leg(from: koeln, to: duesseldorf)),
+                                                  finalDestination: berlin)
+        #expect(replaced.journey.legs.map(\.tripId) == ["ice423", "ice10"])
+        #expect(replaced.missedConnection == nil)
+    }
+
+    @Test func otherTrainReportsMissedConnection() async throws {
+        let (picker, journey) = try journeyWithOnwardTrain()
+        let later = trip("re7", "RE 7", [stop(koeln, arr: nil, dep: 30), stop(duesseldorf, arr: 55, dep: nil)])
+        let replaced = try await picker.replacing(legAt: 0, in: journey, with: try #require(later.leg(from: koeln, to: duesseldorf)),
+                                                  finalDestination: berlin)
+        // The old onward train stays (the user may ignore it); the result names it as missed.
+        #expect(replaced.journey.legs.map(\.tripId) == ["re7", "ice10"])
+        let missed = try #require(replaced.missedConnection)
+        #expect(missed.legIndex == 1)
+        #expect(missed.leg.tripId == "ice10")
+        #expect(missed.arriving.tripId == "re7")
+        #expect(missed.earliestDeparture == base.addingTimeInterval(56 * 60))
+    }
+
+    @Test func missedConnectionLooksPastWalkAndNeedsAMinute() throws {
+        let (_, journey) = try journeyWithOnwardTrain()
+        let walk = Leg(origin: duesseldorf, destination: duesseldorf,
+                       departure: TimeInfo(planned: base.addingTimeInterval(40 * 60), actual: nil),
+                       arrival: TimeInfo(planned: base.addingTimeInterval(45 * 60), actual: nil),
+                       departurePlatform: nil, arrivalPlatform: nil, tripId: nil, line: nil, direction: nil,
+                       isWalking: true, cancelled: false, stopovers: [], remarks: [], source: .bahnDe)
+        var withWalk = Journey(legs: [journey.legs[0], walk, journey.legs[1]], source: .bahnDe)
+        #expect(withWalk.missedConnection(after: 0) == nil)
+        // Arriving :49:30 leaves only half a minute: missed, as `connectionIssues` counts it.
+        withWalk.legs[0].arrival.actual = base.addingTimeInterval(49.5 * 60)
+        #expect(withWalk.missedConnection(after: 0)?.legIndex == 2)
+        #expect(withWalk.missedConnection(after: 2) == nil)
+    }
+
+    @Test func alternativesForMissedConnectionLeaveAfterArrival() async throws {
+        let (picker, _, _) = makePicker()
+        let other = trip("ice999", "ICE 999", [stop(koeln, arr: nil, dep: 20), stop(duesseldorf, arr: 40, dep: nil)])
+        let leg = try #require(other.leg(from: koeln, to: duesseldorf))
+        #expect(try await picker.alternatives(for: leg).map(\.tripId) == ["ice423"])
+        // ICE 423 leaves at :10, before the train before it gets in.
+        #expect(try await picker.alternatives(for: leg, notBefore: base.addingTimeInterval(15 * 60)).isEmpty)
     }
 }
 

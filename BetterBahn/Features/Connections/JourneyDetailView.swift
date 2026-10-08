@@ -33,6 +33,8 @@ struct JourneyDetailView: View {
     struct LegSelection: Identifiable {
         let index: Int
         let leg: Leg
+        /// Set when picking a train for a missed connection: only trains leaving then or later.
+        var notBefore: Date?
         var id: String { leg.id }
     }
 
@@ -72,14 +74,20 @@ struct JourneyDetailView: View {
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $legToReplace) { selection in
-            AlternativeTrainsSheet(leg: selection.leg) { newLegs in
-                let updated = try await model.trainPicker.replacing(
-                    legAt: selection.index, in: journey, with: newLegs, finalDestination: goal)
+            AlternativeTrainsSheet(leg: selection.leg, notBefore: selection.notBefore,
+                                   nextLeg: journey.nextTransitLegIndex(after: selection.index).map { journey.legs[$0] }) { newLegs in
+                try await model.trainPicker.replacing(legAt: selection.index, in: journey, with: newLegs, finalDestination: goal)
+            } onApply: { replacement, showAlternatives in
+                let updated = replacement.journey
                 withAnimation {
                     if let entry = model.savedEntry(for: journey) {
                         model.replaceSaved(id: entry.id, with: updated, reason: "Anderer Zug gewählt")
                     }
                     journey = updated
+                }
+                // A new item swaps the open sheet for the missed train's alternatives.
+                if showAlternatives, let missed = replacement.missedConnection {
+                    legToReplace = LegSelection(index: missed.legIndex, leg: missed.leg, notBefore: missed.earliestDeparture)
                 }
             }
         }
@@ -634,8 +642,15 @@ struct LegCard: View {
 
 struct AlternativeTrainsSheet: View {
     let leg: Leg
-    /// The legs replacing `leg`: one for a direct train, several for a connection with transfers.
-    let onSelect: ([Leg]) async throws -> Void
+    /// Only trains leaving then or later (picking one for a missed connection).
+    var notBefore: Date?
+    /// The planned train after `leg`, to mark alternatives that arrive too late for it.
+    var nextLeg: Leg?
+    /// Builds the new plan from the legs replacing `leg`: one for a direct train, several for a connection with transfers.
+    let onSelect: ([Leg]) async throws -> LegReplacement
+    /// Applies the new plan; `true` when the user wants other trains for the connection it misses
+    /// (the caller then shows those instead of this sheet).
+    let onApply: (LegReplacement, _ showAlternatives: Bool) -> Void
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -645,6 +660,8 @@ struct AlternativeTrainsSheet: View {
     @State private var applyingID: String?
     @State private var onlyValidTicket = false
     @State private var error: Error?
+    /// A picked train that misses the next planned one, waiting for the user's choice.
+    @State private var pending: LegReplacement?
 
     var body: some View {
         NavigationStack {
@@ -661,6 +678,11 @@ struct AlternativeTrainsSheet: View {
                                     Text("Aktuell: \(leg.line?.name ?? "Zug") um \(leg.departure.planned.timeString)")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
+                                    if let notBefore {
+                                        Text("Anschluss verpasst · Züge ab \(notBefore.timeString)")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(Color.heavyDelay)
+                                    }
                                 }
                             }
                             Divider()
@@ -678,7 +700,7 @@ struct AlternativeTrainsSheet: View {
 
                     if !alternatives.isEmpty {
                         SectionHeader(title: "Züge auf dieser Strecke", systemImage: "tram.fill",
-                                      trailing: "30 Min. vorher bis 3 Std. nachher")
+                                      trailing: notBefore == nil ? "30 Min. vorher bis 3 Std. nachher" : "3 Std. ab Ankunft")
                             .padding(.top, 6)
                     }
 
@@ -686,7 +708,7 @@ struct AlternativeTrainsSheet: View {
                         Button {
                             apply([alternative], id: alternative.id)
                         } label: {
-                            AlternativeRow(leg: alternative, current: leg, isApplying: applyingID == alternative.id)
+                            AlternativeRow(leg: alternative, current: leg, nextLeg: nextLeg, isApplying: applyingID == alternative.id)
                         }
                         .buttonStyle(.plain)
                         .disabled(applyingID != nil)
@@ -701,10 +723,15 @@ struct AlternativeTrainsSheet: View {
                         Button {
                             apply(connection.legs, id: connection.id)
                         } label: {
-                            JourneyCard(journey: connection)
-                                .overlay(alignment: .topTrailing) {
-                                    if applyingID == connection.id { ProgressView().padding(14) }
+                            VStack(alignment: .leading, spacing: 6) {
+                                JourneyCard(journey: connection)
+                                    .overlay(alignment: .topTrailing) {
+                                        if applyingID == connection.id { ProgressView().padding(14) }
+                                    }
+                                if let nextLeg, let last = connection.legs.last, !last.catches(nextLeg) {
+                                    MissedConnectionHint(next: nextLeg).padding(.horizontal, 14)
                                 }
+                            }
                         }
                         .buttonStyle(.plain)
                         .disabled(applyingID != nil)
@@ -730,6 +757,23 @@ struct AlternativeTrainsSheet: View {
             }
             .task(id: onlyValidTicket) { await load() }
             .onAppear { onlyValidTicket = model.settings.ticketFilterByDefault }
+            .alert("Anschluss nicht erreichbar", isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }),
+                   presenting: pending) { replacement in
+                Button("Alternativen zeigen") { onApply(replacement, true) }
+                Button("Ignorieren") {
+                    onApply(replacement, false)
+                    dismiss()
+                }
+                Button("Abbrechen", role: .cancel) {}
+            } message: { replacement in
+                if let missed = replacement.missedConnection {
+                    Text("""
+                        \(missed.arriving.line?.name ?? "Der Zug") kommt um \(missed.arriving.arrival.best.timeString) in \
+                        \(missed.leg.origin.displayName) an, \(missed.leg.line?.name ?? "dein Anschluss") fährt dort \
+                        schon um \(missed.leg.departure.best.timeString). Andere Züge dafür anzeigen oder den Plan so lassen?
+                        """)
+                }
+            }
         }
     }
 
@@ -737,10 +781,10 @@ struct AlternativeTrainsSheet: View {
         isLoading = true
         defer { isLoading = false }
         let filter = onlyValidTicket ? model.ticketFilter : nil
-        let picker = model.trainPicker, leg = leg
+        let picker = model.trainPicker, leg = leg, notBefore = notBefore
         // Both lists load together; one failing still shows the other.
-        async let direct = picker.alternatives(for: leg, ticketFilter: filter)
-        async let withTransfers = picker.connections(for: leg, ticketFilter: filter)
+        async let direct = picker.alternatives(for: leg, notBefore: notBefore, ticketFilter: filter)
+        async let withTransfers = picker.connections(for: leg, notBefore: notBefore, ticketFilter: filter)
         var failure: Error?
         var foundDirect: [Leg] = [], foundWithTransfers: [Journey] = []
         do { foundDirect = try await direct } catch { failure = error }
@@ -756,8 +800,13 @@ struct AlternativeTrainsSheet: View {
         Task {
             defer { applyingID = nil }
             do {
-                try await onSelect(legs)
-                dismiss()
+                let replacement = try await onSelect(legs)
+                if replacement.missedConnection != nil {
+                    pending = replacement
+                } else {
+                    onApply(replacement, false)
+                    dismiss()
+                }
             } catch {
                 self.error = error
             }
@@ -768,6 +817,8 @@ struct AlternativeTrainsSheet: View {
 struct AlternativeRow: View {
     let leg: Leg
     let current: Leg
+    /// The planned train after `current`, flagged when `leg` arrives too late for it.
+    var nextLeg: Leg?
     var isApplying = false
 
     var body: some View {
@@ -781,6 +832,9 @@ struct AlternativeRow: View {
                         TimeStack(time: leg.departure, font: .headline)
                         Image(systemName: "arrow.right").font(.caption.weight(.bold)).foregroundStyle(.tertiary)
                         TimeStack(time: leg.arrival, font: .headline)
+                    }
+                    if let nextLeg, !leg.catches(nextLeg) {
+                        MissedConnectionHint(next: nextLeg)
                     }
                 }
                 Spacer()
@@ -799,6 +853,18 @@ struct AlternativeRow: View {
                 }
             }
         }
+    }
+}
+
+/// Marks an alternative that arrives too late for the planned train after it.
+struct MissedConnectionHint: View {
+    let next: Leg
+
+    var body: some View {
+        Label("Anschluss \(next.line?.name ?? "Zug") um \(next.departure.best.timeString) nicht erreichbar",
+              systemImage: "exclamationmark.triangle.fill")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(Color.heavyDelay)
     }
 }
 
