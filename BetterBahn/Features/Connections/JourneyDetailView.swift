@@ -614,8 +614,8 @@ struct LegCard: View {
                     .buttonStyle(.plain)
 
                     if showDetails {
-                        if let operatorName = leg.line?.operatorName {
-                            Label(operatorName, systemImage: "building.2.fill")
+                        if leg.line?.operatorName != nil {
+                            TrainOperatorsLabel(source: .leg(leg))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }

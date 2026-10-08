@@ -32,6 +32,35 @@ public extension TraewellingClient {
         try await authorized("status/\(id)", as: DataWrapper<TraewellingStatus>.self).data
     }
 
+    /// Others checked in to the same train as `status` whose ride overlaps it (Träwelling's
+    /// "Mitreisende"), in boarding order. Only the check-ins Träwelling lets the user see.
+    func fellowTravellers(of status: TraewellingStatus) async throws -> [TraewellingStatus] {
+        guard let trip = status.checkin.trip else { return [] }
+        let onTrip = try await authorized("trips/\(trip)/statuses", as: DataWrapper<[TraewellingStatus]>.self).data
+        return Self.fellowTravellers(in: onTrip, of: status)
+    }
+
+    /// The check-ins in `onTrip` that share part of `status`'s ride: not `status` itself or another
+    /// of its user's, and boarding before `status` gets off and getting off after it boards (planned
+    /// times; one without times counts as sharing the ride).
+    static func fellowTravellers(in onTrip: [TraewellingStatus], of status: TraewellingStatus) -> [TraewellingStatus] {
+        let mine = status.checkin
+        let myDeparture = mine.origin.departurePlanned ?? mine.origin.departure
+        let myArrival = mine.destination.arrivalPlanned ?? mine.destination.arrival
+        let others = onTrip.filter { other in
+            guard other.id != status.id else { return false }
+            if let me = status.user?.id, other.user?.id == me { return false }
+            let departure = other.checkin.origin.departurePlanned ?? other.checkin.origin.departure
+            let arrival = other.checkin.destination.arrivalPlanned ?? other.checkin.destination.arrival
+            if let departure, let myArrival, departure >= myArrival { return false }
+            if let arrival, let myDeparture, arrival <= myDeparture { return false }
+            return true
+        }
+        return others.sorted {
+            ($0.checkin.origin.departurePlanned ?? .distantPast) < ($1.checkin.origin.departurePlanned ?? .distantPast)
+        }
+    }
+
     /// Changes a check-in's text, visibility and trip type. An empty text removes it.
     @discardableResult
     func updateStatus(id: Int, body: String, visibility: TraewellingVisibility,

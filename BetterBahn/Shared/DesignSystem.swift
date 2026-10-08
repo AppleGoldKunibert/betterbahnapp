@@ -203,6 +203,102 @@ struct LineBadge: View {
     }
 }
 
+/// An operator's logo (#166) on a transparent background, exactly as wide as the logo itself so a
+/// narrow one like DB's doesn't sit in a wide empty box. In dark mode, logos with dark lettering
+/// (`OperatorBrand.needsPlateInDarkMode`) get a soft light plate so they stay readable. Nothing for
+/// an operator without a logo.
+struct OperatorLogo: View {
+    let name: String
+    @ScaledMetric(relativeTo: .caption) private var height: CGFloat = 12
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        if let brand = OperatorBrand(operatorName: name), let logo = UIImage(named: brand.assetName), logo.size.height > 0 {
+            let plate = colorScheme == .dark && brand.needsPlateInDarkMode
+            Image(uiImage: logo)
+                .renderingMode(.original)
+                .resizable()
+                .frame(width: min(height * logo.size.width / logo.size.height, height * 5), height: height)
+                .padding(.horizontal, plate ? 4 : 0)
+                .padding(.vertical, plate ? 2 : 0)
+                .background(plate ? Color(white: 0.88) : .clear, in: .rect(cornerRadius: 4, style: .continuous))
+                .accessibilityLabel(name)
+        }
+    }
+}
+
+/// The operator of a train (e.g. "DB Fernverkehr AG") with its logo; operators without a logo
+/// (`OperatorBrand`) keep the building icon. Some names are shortened ("ODEG", `OperatorBrand.displayName`).
+struct OperatorLabel: View {
+    let name: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if OperatorBrand(operatorName: name) != nil {
+                OperatorLogo(name: name).accessibilityHidden(true)
+            } else {
+                Image(systemName: "building.2.fill")
+            }
+            Text(OperatorBrand.displayName(for: name))
+        }
+    }
+}
+
+/// Everyone running the train you ride (#166): bahn.de names the railway per stop, so international
+/// trains have several (Berlin → Praha: DB Fernverkehr, then České dráhy), while the feed only ever
+/// names one. Several show as their logos next to each other (a name only where there's no logo);
+/// shows the feed's operator until bahn.de answered, and keeps it when bahn.de has nothing.
+struct TrainOperatorsLabel: View {
+    enum Source { case leg(Leg), trip(Trip) }
+
+    let source: Source
+    @Environment(AppModel.self) private var model
+    @State private var operators: [TrainOperator]?
+
+    private var feedName: String? {
+        switch source {
+        case .leg(let leg): leg.line?.operatorName
+        case .trip(let trip): trip.line?.operatorName
+        }
+    }
+
+    private var key: String {
+        switch source {
+        case .leg(let leg): leg.id
+        case .trip(let trip): trip.id
+        }
+    }
+
+    var body: some View {
+        Group {
+            if let operators, operators.count > 1 {
+                HStack(spacing: 6) {
+                    ForEach(Array(operators.enumerated()), id: \.offset) { _, entry in
+                        if OperatorBrand(operatorName: entry.name) != nil {
+                            OperatorLogo(name: entry.name)
+                        } else {
+                            Text(OperatorBrand.displayName(for: entry.name))
+                        }
+                    }
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(operators.map(\.name).joined(separator: ", "))
+            } else if let name = operators?.first?.name ?? feedName {
+                OperatorLabel(name: name)
+            }
+        }
+        .task(id: key) {
+            guard let bahnDe = model.provider.bahnDe else { return }
+            let found: [TrainOperator]?
+            switch source {
+            case .leg(let leg): found = try? await bahnDe.trainOperators(for: leg)
+            case .trip(let trip): found = try? await bahnDe.trainOperators(for: trip)
+            }
+            if let found { operators = found }
+        }
+    }
+}
+
 /// Triebzug numbers and names of a train (e.g. "Tz 9457 „Bundesrepublik Deutschland“"). bahn.de's
 /// coach sequence first (it only has one in the coming hours); bahn.expert as fallback, which
 /// has the Tz once its data is live. Says so when bahn.de is refusing requests and nothing else helped.
@@ -604,19 +700,21 @@ struct SourceNotice: View {
     }
 }
 
-/// Proportional bar of all legs, colored by product.
+/// Proportional bar of all legs, colored by product, laid out by `Journey.barSpans` (in order, a leg
+/// a late train runs into pushed back instead of covered).
 struct JourneySegmentBar: View {
     let journey: Journey
 
     var body: some View {
         GeometryReader { proxy in
-            let total = max(journey.duration ?? 1, 1)
-            let start = journey.departure?.best ?? .now
+            let spans = journey.barSpans
+            let start = spans.first?.start ?? .now
+            let total = max(spans.last.map { $0.end.timeIntervalSince(start) } ?? 1, 1)
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.secondary.opacity(0.1)).frame(height: 6)
-                ForEach(journey.legs) { leg in
-                    let offset = max(leg.departure.best.timeIntervalSince(start), 0) / total
-                    let length = max(leg.arrival.best.timeIntervalSince(leg.departure.best), 0) / total
+                ForEach(Array(journey.legs.enumerated()), id: \.element.id) { index, leg in
+                    let offset = spans[index].start.timeIntervalSince(start) / total
+                    let length = spans[index].duration / total
                     Capsule()
                         .fill(leg.isWalking ? AnyShapeStyle(Color.secondary.opacity(0.3))
                                             : AnyShapeStyle((leg.line?.product.color ?? .gray).gradient))
