@@ -83,7 +83,9 @@ extension Leg {
 /// go through our Cloudflare Worker (`Cloudflare/bahnde-proxy`), which mirrors bahn.de's `/web/api/…`
 /// paths and sends the DBRIS browser headers itself. Requests carry the app's App Attest token
 /// (`WorkerAuth`). Responses are cached, and a 403/429 (passed through by the Worker) pauses every
-/// bahn.de request for `BahnDeGate.cooldown` instead of retrying.
+/// bahn.de request through the Worker for `BahnDeGate.cooldown` instead of retrying. Meanwhile the app
+/// asks bahn.de from the phone itself, in a hidden browser (`BahnDeBrowserFallback`), so one block of
+/// the shared Worker doesn't take bahn.de's data away from every user.
 public struct BahnDeClient: Sendable {
     public static let baseURL = URL(string: "https://betterbahn2.betterbahn.workers.dev/web/api")!
     /// Deutsche Bahn's administration ID.
@@ -98,12 +100,16 @@ public struct BahnDeClient: Sendable {
     let http: HTTPClient
     let gate: BahnDeGate
     let auth: WorkerAuth?
+    /// Asks bahn.de from the phone when the Worker is blocked; none in widgets and tests.
+    let browser: BahnDeBrowserFallback?
 
-    /// `auth` defaults to `WorkerAuth.shared` on the app's real session and none on others (tests).
-    public init(http: HTTPClient = HTTPClient(timeout: 8), gate: BahnDeGate = .shared, auth: WorkerAuth? = nil) {
+    /// `auth` and `browser` default to the shared ones on the app's real session and none on others (tests).
+    public init(http: HTTPClient = HTTPClient(timeout: 8), gate: BahnDeGate = .shared, auth: WorkerAuth? = nil,
+                browser: BahnDeBrowserFallback? = nil) {
         self.http = http
         self.gate = gate
         self.auth = http.workerAuth(auth)
+        self.browser = browser ?? (http.session === URLSession.shared ? .shared : nil)
     }
 
     /// Caches are only shared on the app's real session; a client on a custom session (tests,
@@ -324,26 +330,68 @@ public struct BahnDeClient: Sendable {
     /// - Returns: nil if bahn.de has no coach sequence for it (yet).
     /// - Throws: `TransitError.rateLimited` while bahn.de is blocking requests.
     public func coachSequence(_ request: FormationRequest) async throws -> CoachSequence? {
-        let key = "\(request.category) \(([request.number] + request.coupledNumbers).joined(separator: "+"))|\(request.station.id)|\(request.plannedDeparture.timeIntervalSince1970)"
         guard usesSharedCaches else { return try await fetchCoachSequence(request) }
-        return try await Self.sequenceCache.value(for: key, maxAge: Self.formationMaxAge) {
+        return try await Self.sequenceCache.value(for: Self.sequenceKey(request), maxAge: Self.formationMaxAge) {
             try await self.fetchCoachSequence(request)
         }
     }
 
+    /// Why bahn.de had no coach sequence for `request` the last time it was asked (no EVA number, 404,
+    /// an answer without the train's coaches, an error), with what was asked; nil when it had one or
+    /// wasn't asked. Shown when the Wagenreihung falls back to vagonweb's plan, since bahn.de's answer
+    /// can only be seen from inside the app.
+    public func coachSequenceNote(for request: FormationRequest) async -> String? {
+        await Self.sequenceNotes.note(for: Self.sequenceKey(request))
+    }
+
+    static func sequenceKey(_ request: FormationRequest) -> String {
+        "\(request.category) \(([request.number] + request.coupledNumbers).joined(separator: "+"))|\(request.station.id)|\(request.plannedDeparture.timeIntervalSince1970)"
+    }
+
     private static let sequenceCache = ExpiringCache<CoachSequence?>()
+    private static let sequenceNotes = SequenceNotes()
     /// A formation rarely changes once published; 10 minutes still catches a late swap.
     static let formationMaxAge: TimeInterval = 10 * 60
 
     private func fetchCoachSequence(_ request: FormationRequest) async throws -> CoachSequence? {
-        guard let eva = try await evaNumber(for: request.station) else { return nil }
-        for candidate in [eva, Self.otherLevel(of: eva)].compactMap(\.self) {
-            guard let response = try await sequenceResponse(request, eva: candidate) else { continue }
-            let sequence = Self.coachSequence(from: response, category: request.category, number: Int(request.number),
-                                              coupledNumbers: Set(request.coupledNumbers.compactMap { Int($0) }))
-            return sequence.coaches.isEmpty && sequence.formation.units.isEmpty ? nil : sequence
+        let key = Self.sequenceKey(request)
+        let asked = "\(request.category) \(request.number), \(Self.utcTimestamp(request.plannedDeparture))"
+        do {
+            guard let eva = try await evaNumber(for: request.station) else {
+                await Self.sequenceNotes.set("keine EVA-Nummer für \(request.station.name) · \(asked)", for: key)
+                return nil
+            }
+            let candidates = [eva, Self.otherLevel(of: eva)].compactMap(\.self)
+            for candidate in candidates {
+                guard let response = try await sequenceResponse(request, eva: candidate) else { continue }
+                let sequence = Self.coachSequence(from: response, category: request.category, number: Int(request.number),
+                                                  coupledNumbers: Set(request.coupledNumbers.compactMap { Int($0) }))
+                guard !sequence.coaches.isEmpty || !sequence.formation.units.isEmpty else {
+                    await Self.sequenceNotes.set("Antwort ohne Wagen an EVA \(candidate): \(Self.summary(of: response)) · \(asked)", for: key)
+                    return nil
+                }
+                await Self.sequenceNotes.set(nil, for: key)
+                return sequence
+            }
+            await Self.sequenceNotes.set("keine Wagenreihung an EVA \(candidates.joined(separator: " / ")) (404) · \(asked)", for: key)
+            return nil
+        } catch {
+            var reason = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+            // Usually not this request's fault: an earlier answer paused every bahn.de request.
+            if case TransitError.rateLimited = error, let block = await gate.blockDescription { reason += " (\(block))" }
+            await Self.sequenceNotes.set("\(reason) · \(asked)", for: key)
+            throw error
         }
-        return nil
+    }
+
+    /// "2 Gruppen, Züge IC 1189, RB 5410": what an answer without usable coaches had.
+    static func summary(of response: SequenceResponse) -> String {
+        let groups = response.groups ?? []
+        let trains = Set(groups.compactMap { group in
+            group.transport.map { "\($0.category ?? "?") \($0.number.map(String.init) ?? "?")" }
+        }).sorted()
+        let vehicles = groups.reduce(0) { $0 + ($1.vehicles?.count ?? 0) }
+        return "\(groups.count) Gruppen, \(vehicles) Fahrzeuge, Züge \(trains.isEmpty ? "keine" : trains.joined(separator: ", "))"
     }
 
     /// nil when bahn.de has no coach sequence for the train at `eva` (404).
@@ -555,13 +603,110 @@ public struct BahnDeClient: Sendable {
         ]
     }
 
-    /// GET through the shared cooldown: while bahn.de is blocking, nothing is sent at all.
+    /// GET through the Worker and its shared cooldown: while bahn.de is blocking the Worker, nothing is
+    /// sent there at all and the phone's browser asks instead, if the app has one.
     func get<T: Decodable>(_ url: URL, as type: T.Type) async throws -> T {
-        try await gate.check()
+        if await gate.isBlocked {
+            return try await viaBrowser(url, as: type)
+        }
         do {
-            return try await http.get(url, as: type, headers: Self.headers(), auth: auth)
+            let value = try await http.get(url, as: type, headers: Self.headers(), auth: auth)
+            // The Worker gets through again: the browser's page isn't needed any more.
+            await browser?.workerAnswered()
+            return value
         } catch let error as TransitError {
             await gate.report(error)
+            guard error.isBlocked else { throw error }
+            await browser?.workerBlocked()
+            return try await viaBrowser(url, as: type)
+        }
+    }
+
+    /// The same request from the phone's hidden browser on bahn.de (`BahnDeBrowserFallback`), which has
+    /// a cooldown of its own. Throws `rateLimited` without one (widgets, tests) or while it is blocked too.
+    private func viaBrowser<T: Decodable>(_ url: URL, as type: T.Type) async throws -> T {
+        guard let browser, let direct = Self.directURL(for: url) else { throw TransitError.rateLimited }
+        let data = try await browser.fetch(direct)
+        do {
+            return try JSONDecoding.decoder.decode(T.self, from: data)
+        } catch {
+            throw TransitError.decoding(String(describing: error))
+        }
+    }
+
+    /// bahn.de's own address for a request to the Worker, which mirrors its `/web/api/…` paths.
+    static func directURL(for url: URL) -> URL? {
+        guard url.host() == baseURL.host(), url.path().hasPrefix("/web/api/"),
+              var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        components.scheme = "https"
+        components.host = "www.bahn.de"
+        components.port = nil
+        return components.url
+    }
+}
+
+/// The app's hidden browser on bahn.de (set once at launch, `use(_:)`): bahn.de's bot protection lets a
+/// real browser engine through where it blocks Apple's URL loading stack, so when the shared Worker is
+/// blocked, each phone can still ask for itself, with its own IP address. Has a cooldown of its own for
+/// when bahn.de blocks the phone too. Widgets set none.
+public actor BahnDeBrowserFallback {
+    public static let shared = BahnDeBrowserFallback()
+
+    /// Loads a `https://www.bahn.de/web/api/…` URL in the browser: the HTTP status and the body.
+    public typealias Fetch = @Sendable (URL) async throws -> (status: Int, body: Data)
+
+    /// Something for the browser to do without waiting for it: start loading its page, or let it go.
+    public typealias Hook = @Sendable () async -> Void
+
+    private var load: Fetch?
+    private var prepare: Hook?
+    private var release: Hook?
+    /// Whether the browser may hold a page (prepared or used since the Worker last answered).
+    private(set) var isActive = false
+    let gate = BahnDeGate()
+
+    public init(_ load: Fetch? = nil, prepare: Hook? = nil, release: Hook? = nil) {
+        self.load = load
+        self.prepare = prepare
+        self.release = release
+    }
+
+    /// `prepare` starts loading the browser's page in the background as soon as the Worker is blocked,
+    /// so the first requests don't wait for it; `release` drops the page once the Worker answers again.
+    public func use(_ load: @escaping Fetch, prepare: Hook? = nil, release: Hook? = nil) {
+        self.load = load
+        self.prepare = prepare
+        self.release = release
+    }
+
+    /// The Worker was blocked: get the page ready, once.
+    func workerBlocked() async {
+        guard load != nil, !isActive else { return }
+        isActive = true
+        await prepare?()
+    }
+
+    /// The Worker answered: let the page go if the browser has one.
+    func workerAnswered() async {
+        guard isActive else { return }
+        isActive = false
+        await release?()
+    }
+
+    /// The body of a successful answer; a 404 etc. as `TransitError.http`, a block as `rateLimited`.
+    func fetch(_ url: URL) async throws -> Data {
+        guard let load else { throw TransitError.rateLimited }
+        try await gate.check()
+        isActive = true
+        do {
+            let (status, body) = try await load(url)
+            switch status {
+            case 200..<300: return body
+            case 429: throw TransitError.rateLimited
+            default: throw TransitError.http(status: status, body: String(data: body, encoding: .utf8))
+            }
+        } catch let error as TransitError {
+            await gate.report(error, url: url)
             throw error.isBlocked ? TransitError.rateLimited : error
         }
     }
@@ -574,18 +719,40 @@ public actor BahnDeGate {
     public static let cooldown: TimeInterval = 10 * 60
 
     private var blockedUntil: Date?
+    /// What started the current pause: when, the answer and the path, e.g. "10:41 403 OPS_BLOCKED (…/vehicle-sequence)".
+    private var blockReason: String?
 
     public init() {}
 
     /// Whether bahn.de is currently being left alone after a block.
     public var isBlocked: Bool { blockedUntil.map { $0 > .now } ?? false }
 
+    /// Why bahn.de is being left alone and until when; nil while it isn't.
+    public var blockDescription: String? {
+        guard isBlocked, let blockedUntil else { return nil }
+        let until = blockedUntil.formatted(Date.FormatStyle(timeZone: BahnDeClient.berlin).hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+        return "Pause bis \(until) nach \(blockReason ?? "einer Sperre")"
+    }
+
     func check() throws {
         if isBlocked { throw TransitError.rateLimited }
     }
 
-    func report(_ error: TransitError) {
-        if error.isBlocked { blockedUntil = Date.now.addingTimeInterval(Self.cooldown) }
+    func report(_ error: TransitError, url: URL? = nil) {
+        guard error.isBlocked else { return }
+        blockedUntil = Date.now.addingTimeInterval(Self.cooldown)
+        let time = Date.now.formatted(Date.FormatStyle(timeZone: BahnDeClient.berlin).hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+        let answer = switch error {
+        case .http(let status, let body): "\(status)\(body.map { " " + Self.excerpt($0) } ?? "")"
+        default: "429"
+        }
+        blockReason = "\(answer) um \(time)\(url.map { " (…/\($0.lastPathComponent))" } ?? "")"
+    }
+
+    /// The start of an error body on one line, e.g. bahn.de's `{"code":"OPS_BLOCKED",…}`.
+    static func excerpt(_ body: String) -> String {
+        let line = body.split(whereSeparator: \.isNewline).joined(separator: " ")
+        return line.count > 80 ? String(line.prefix(80)) + "…" : line
     }
 }
 
@@ -598,6 +765,15 @@ extension TransitError {
         default: false
         }
     }
+}
+
+/// Why bahn.de's coach sequence was missing, per request (`BahnDeClient.coachSequenceNote(for:)`).
+actor SequenceNotes {
+    private var notes: [String: String] = [:]
+
+    func note(for key: String) -> String? { notes[key] }
+
+    func set(_ note: String?, for key: String) { notes[key] = note }
 }
 
 /// Values fetched per key, kept for `maxAge`; concurrent requests for the same key share one fetch.

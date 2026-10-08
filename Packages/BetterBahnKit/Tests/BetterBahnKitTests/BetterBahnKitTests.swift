@@ -1662,6 +1662,306 @@ private final class CrowdedHubStopTimesProtocol: URLProtocol, @unchecked Sendabl
     override func stopLoading() {}
 }
 
+// MARK: - Platforms in Czechia
+
+/// Serialized: `lookupIsCachedPerTrain` counts the requests `CzechTimetableProtocol` sees.
+@Suite(.serialized) struct CzechPlatformTests {
+    /// Real-world ICE 171 Hamburg-Altona → Praha hl.n. on 8 Oct 2026 from DB's feed (DELFI), which has
+    /// no platform past the border, and the same train as CZPTT's "rj 171" from Bad Schandau on.
+    func ice171() throws -> Leg {
+        let itinerary = try fixture("transitous-trip-ice171-delfi", as: MItinerary.self)
+        return try #require(itinerary.legs.first { !$0.isWalking }).toLeg()
+    }
+
+    func provider() -> (TransitousProvider, URLSession) {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [CzechTimetableProtocol.self]
+        let session = URLSession(configuration: config)
+        return (TransitousProvider(http: HTTPClient(session: session)), session)
+    }
+
+    @Test func czechStopsByStationNumber() {
+        func isCzech(_ id: String) -> Bool { TransitousProvider.isCzechStop(station(id, "x", source: .transitous)) }
+        #expect(isCzech("de-DELFI_000005400003"))
+        #expect(isCzech("sk-zsr_5455659"))
+        #expect(isCzech("eu-european-sleeper_5455659"))
+        #expect(isCzech("at-Railway-Current-Reference-Data-2026_cz:0:5455659:1:1"))
+        #expect(isCzech("cz-CZPTT_czptt:stop:CZ:57076"))
+        #expect(!isCzech("cz-CZPTT_czptt:stop:DE:10533"))
+        #expect(!isCzech("de-DELFI_de:14612:28"))
+        #expect(!isCzech("de-DELFI_de:11000:900003201"))
+        #expect(!isCzech("sk-zsr_8010085"))
+    }
+
+    @Test func dbTrainGetsCzechTimetablePlatforms() async throws {
+        let (provider, session) = provider()
+        defer { session.invalidateAndCancel() }
+        let leg = try ice171()
+        #expect(TransitousProvider.lacksCzechPlatforms(leg))
+
+        let filled = await provider.fillingCzechPlatforms(in: leg)
+
+        let czech = PlatformInfo.Source.czechTimetable
+        #expect(filled.arrivalPlatform == PlatformInfo(planned: "24b", actual: nil, source: czech))
+        let decin = try #require(filled.stopovers.first { $0.station.name == "Decin hl.n." })
+        #expect(decin.arrivalPlatform == PlatformInfo(planned: "1", actual: nil, source: czech))
+        #expect(decin.departurePlatform == PlatformInfo(planned: "1", actual: nil, source: czech))
+        // CZPTT leaves Praha-Holešovice two minutes later than DELFI says; still the same stop.
+        let holesovice = try #require(filled.stopovers.first { $0.station.name == "Praha-Holesovice" })
+        #expect(holesovice.departurePlatform?.best == "1")
+        // DB's own platforms stay as they are.
+        let dresden = try #require(filled.stopovers.first { $0.station.name == "Dresden Hauptbahnhof" })
+        #expect(dresden.departurePlatform?.best == "Gl. 1")
+        #expect(dresden.departurePlatform?.source == nil)
+        #expect(!TransitousProvider.lacksCzechPlatforms(filled))
+    }
+
+    @Test func lookupIsCachedPerTrain() async throws {
+        let (provider, session) = provider()
+        defer { session.invalidateAndCancel() }
+        let leg = try ice171()
+        CzechTimetableProtocol.requests.withLock { $0 = [] }
+        _ = await provider.fillingCzechPlatforms(in: leg)
+        let first = CzechTimetableProtocol.requests.withLock { $0 }
+        #expect(first == ["map/stops", "stoptimes", "trip"])
+        _ = await provider.czechTimetableStops(for: [leg])
+        #expect(CzechTimetableProtocol.requests.withLock { $0 } == first)
+    }
+
+    /// Only CZPTT's run with the same number, within a few minutes: rj 178 leaves Děčín five minutes after rj 171.
+    @Test func sameTrainByNumberAndTime() throws {
+        let stopTimes = try fixture("transitous-czech-stoptimes-decin", as: MStopTimesResponse.self).stopTimes
+        let planned = try #require(ISO8601DateFormatter().date(from: "2026-10-08T07:57:00Z"))
+        let match = TransitousProvider.sameTrain(number: "171", kind: .departures, planned: planned, in: stopTimes)
+        #expect(match?.tripShortName == "rj 171")
+        #expect(TransitousProvider.sameTrain(number: "171", kind: .departures, planned: planned.addingTimeInterval(-20 * 60), in: stopTimes) == nil)
+        #expect(TransitousProvider.sameTrain(number: "999", kind: .departures, planned: planned, in: stopTimes) == nil)
+    }
+
+    @Test func czechTimetableStationFromMapStops() throws {
+        let stops = try fixture("transitous-czech-mapstops-decin", as: [MPlace].self)
+        let decin = Coordinate(latitude: 50.773415, longitude: 14.201247)
+        #expect(TransitousProvider.czechTimetableStation(near: decin, among: stops) == "cz-CZPTT_czptt:stop:CZ:55659")
+    }
+
+    @Test func czechTimetableTrainIsLeftAlone() throws {
+        let itinerary = try fixture("transitous-trip-rj171-czptt", as: MItinerary.self)
+        let leg = try #require(itinerary.legs.first { !$0.isWalking }).toLeg()
+        #expect(!TransitousProvider.lacksCzechPlatforms(leg))
+    }
+
+    @Test func tripGetsCzechTimetablePlatforms() async throws {
+        let (provider, session) = provider()
+        defer { session.invalidateAndCancel() }
+        let leg = try ice171()
+        let trip = Trip(id: try #require(leg.tripId), line: leg.line, direction: leg.direction, stopovers: leg.stopovers,
+                        cancelled: false, remarks: [], source: .transitous)
+        let filled = await provider.fillingCzechPlatforms(in: trip)
+        #expect(filled.stopovers.last?.arrivalPlatform == PlatformInfo(planned: "24b", actual: nil, source: .czechTimetable))
+    }
+
+    /// Journeys saved before the source existed still load, and the source survives saving.
+    @Test func platformSourceIsSaved() throws {
+        let old = try JSONDecoder().decode(PlatformInfo.self, from: Data(#"{"planned": "5"}"#.utf8))
+        #expect(old == PlatformInfo(planned: "5", actual: nil))
+        let czech = PlatformInfo(planned: "24b", actual: nil, source: .czechTimetable)
+        #expect(try JSONDecoder().decode(PlatformInfo.self, from: JSONEncoder().encode(czech)) == czech)
+    }
+}
+
+/// Transitous around Děčín hl.n.: the stops there, CZPTT's departures and both runs of ICE/rj 171.
+private final class CzechTimetableProtocol: URLProtocol, @unchecked Sendable {
+    static let requests = Mutex<[String]>([])
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let url = request.url!
+        let name: String
+        if url.path.hasSuffix("map/stops") {
+            name = "transitous-czech-mapstops-decin"
+            Self.requests.withLock { $0.append("map/stops") }
+        } else if url.path.hasSuffix("stoptimes") {
+            name = "transitous-czech-stoptimes-decin"
+            Self.requests.withLock { $0.append("stoptimes") }
+        } else {
+            let tripId = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "tripId" }?.value ?? ""
+            name = tripId.contains("cz-CZPTT") ? "transitous-trip-rj171-czptt" : "transitous-trip-ice171-delfi"
+            Self.requests.withLock { $0.append("trip") }
+        }
+        let data = Bundle.module.url(forResource: name, withExtension: "json", subdirectory: "Fixtures").flatMap { try? Data(contentsOf: $0) } ?? Data()
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+// MARK: - Stops from another feed
+
+/// Serialized: `TwinTrainProtocol` counts requests.
+@Suite(.serialized) struct TwinTrainStopTests {
+    /// Real-world RJ 177 Hamburg-Altona → Wien Hbf on 7 Oct 2026 from ÖBB's feed, with only nine stops,
+    /// and the same train from DB's feed (DELFI's "ICE 177") with all seventeen.
+    func trips() throws -> (oebb: Leg, delfi: Leg) {
+        let oebb = try fixture("transitous-trip-rj177-oebb", as: MItinerary.self)
+        let delfi = try fixture("transitous-trip-ice177-delfi", as: MItinerary.self)
+        return (try #require(oebb.legs.first { !$0.isWalking }).toLeg(), try #require(delfi.legs.first { !$0.isWalking }).toLeg())
+    }
+
+    /// The part Berlin Hbf → Praha-Holešovice of ÖBB's RJ 177, as a journey has it.
+    func berlinPraha() throws -> Leg {
+        let run = try trips().oebb
+        let stops = Array(run.stopovers[2...5])
+        return Leg(origin: stops[0].station, destination: stops[3].station,
+                   departure: try #require(stops[0].departure), arrival: try #require(stops[3].arrival),
+                   departurePlatform: nil, arrivalPlatform: nil, tripId: run.tripId, line: run.line, direction: run.direction,
+                   isWalking: false, cancelled: false, stopovers: stops, remarks: [], source: .transitous)
+    }
+
+    @Test func insertsStopsOnlyTheTwinHas() throws {
+        let (oebb, delfi) = try trips()
+        let stops = try #require(TransitousProvider.insertingMissingStops(into: oebb.stopovers, from: delfi.stopovers))
+        // All under DB's names, also the stops ÖBB has too ("Děčín hl.n." is DB's "Decin hl.n.").
+        #expect(stops.map(\.station.name) == delfi.stopovers.map(\.station.name))
+        // ÖBB's own stops stay, with DB's platform where ÖBB has none (planned 2, live 3).
+        let berlin = try #require(stops.first { $0.station.name == "S+U Berlin Hauptbahnhof" })
+        #expect(berlin.departurePlatform == PlatformInfo(planned: "2", actual: "3"))
+        #expect(berlin.station.id == oebb.stopovers[2].station.id)
+    }
+
+    @Test func legGetsStopsBetweenItsEnds() throws {
+        let leg = try berlinPraha()
+        let filled = TransitousProvider.fillingMissingStops(in: leg, from: try trips().delfi.stopovers)
+        #expect(filled.stopovers.map(\.station.displayName) == [
+            "Berlin Hbf", "Berlin Südkreuz", "Dresden Bahnhof Neustadt", "Dresden Hbf",
+            "Bad Schandau Nationalparkbahnhof", "Decin hl.n.", "Usti nad Labem hl.n.", "Praha-Holesovice",
+        ])
+        #expect(filled.origin.displayName == "Berlin Hbf")
+        #expect(filled.destination.displayName == "Praha-Holesovice")
+        #expect(filled.origin.id == leg.origin.id)
+        #expect(filled.departurePlatform?.best == "3")
+        #expect(filled.arrivalPlatform == nil)
+    }
+
+    /// The same stations two hours later aren't this train's stops.
+    @Test func otherRunAddsNothing() throws {
+        let leg = try berlinPraha()
+        func later(_ time: TimeInfo?) -> TimeInfo? { time.map { TimeInfo(planned: $0.planned.addingTimeInterval(7200), actual: nil) } }
+        let elsewhere = try trips().delfi.stopovers.map { stop in
+            Stopover(station: stop.station, arrival: later(stop.arrival), departure: later(stop.departure),
+                     arrivalPlatform: stop.arrivalPlatform, departurePlatform: stop.departurePlatform, cancelled: false)
+        }
+        #expect(TransitousProvider.insertingMissingStops(into: leg.stopovers, from: elsewhere) == nil)
+        #expect(TransitousProvider.fillingMissingStops(in: leg, from: elsewhere) == leg)
+    }
+
+    /// A copy with the same stops still brings the platforms its own feed lacks.
+    @Test func sameStopsGetTwinsPlatforms() throws {
+        let (_, delfi) = try trips()
+        let leg = try berlinPraha()
+        let sameStops = delfi.stopovers.filter { stop in leg.stopovers.contains { $0.station.isSamePlace(as: stop.station) } }
+        let filled = try #require(TransitousProvider.insertingMissingStops(into: leg.stopovers, from: sameStops))
+        #expect(filled.count == leg.stopovers.count)
+        #expect(filled.map { $0.departurePlatform?.best } == ["3", "3", nil, nil])
+        #expect(TransitousProvider.insertingMissingStops(into: filled, from: sameStops) == nil)
+    }
+
+    /// RJ 177 Berlin Hbf → Praha-Holešovice from ÖBB's and from DB's feed is one connection: DB's copy,
+    /// with live times, stays in the place of the first.
+    @Test func sameTrainFromTwoFeedsShowsOnce() throws {
+        let oebb = try berlinPraha()
+        let run = try trips().delfi
+        let stops = Array(run.stopovers[3...10])
+        let delfi = Leg(origin: stops[0].station, destination: stops[7].station,
+                        departure: try #require(stops[0].departure), arrival: try #require(stops[7].arrival),
+                        departurePlatform: stops[0].departurePlatform, arrivalPlatform: nil, tripId: run.tripId, line: run.line,
+                        direction: run.direction, isWalking: false, cancelled: false, stopovers: stops, remarks: [], source: .transitous)
+        let later = Leg(origin: delfi.origin, destination: delfi.destination,
+                        departure: TimeInfo(planned: delfi.departure.planned.addingTimeInterval(7200), actual: nil),
+                        arrival: TimeInfo(planned: delfi.arrival.planned.addingTimeInterval(7200), actual: nil),
+                        departurePlatform: nil, arrivalPlatform: nil, tripId: "later", line: run.line, direction: nil,
+                        isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+        let journeys = [Journey(legs: [oebb], source: .transitous), Journey(legs: [later], source: .transitous),
+                        Journey(legs: [delfi], source: .transitous)]
+        let shown = journeys.removingSameTrainDuplicates()
+        #expect(shown.map { $0.legs[0].tripId } == [delfi.tripId, "later"])
+    }
+
+    @Test func onlyTrainsFromFeedsThatLeaveOutStops() throws {
+        let (oebb, delfi) = try trips()
+        #expect(TransitousProvider.mayLackStops(oebb))
+        #expect(!TransitousProvider.mayLackStops(delfi))
+        let czech = try #require(try fixture("transitous-trip-rj171-czptt", as: MItinerary.self).legs.first { !$0.isWalking }).toLeg()
+        #expect(!TransitousProvider.mayLackStops(czech))
+    }
+
+    @Test func findsTwinOnTheDeparturesAndCachesIt() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [TwinTrainProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let provider = TransitousProvider(http: HTTPClient(session: session))
+        TwinTrainProtocol.requests.withLock { $0 = [] }
+        let leg = try berlinPraha()
+
+        let filled = await provider.fillingMissingStops(in: leg)
+        #expect(filled.stopovers.count == 8)
+        #expect(TwinTrainProtocol.requests.withLock { $0 } == ["stoptimes", "trip"])
+
+        let run = try trips().oebb
+        let fullerTrip = await provider.fillingMissingStops(
+            in: Trip(id: try #require(run.tripId), line: run.line, direction: run.direction, stopovers: run.stopovers,
+                     cancelled: false, remarks: [], source: .transitous), of: leg)
+        #expect(fullerTrip.stopovers.count == 17)
+        #expect(TwinTrainProtocol.requests.withLock { $0 } == ["stoptimes", "trip"])
+    }
+}
+
+/// Transitous at Berlin Hbf: the departures with ÖBB's RJ 177 and DB's ICE 177, and both runs.
+private final class TwinTrainProtocol: URLProtocol, @unchecked Sendable {
+    static let requests = Mutex<[String]>([])
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let url = request.url!
+        let name: String
+        if url.path.hasSuffix("stoptimes") {
+            name = "transitous-stoptimes-berlin-rj177"
+            Self.requests.withLock { $0.append("stoptimes") }
+        } else {
+            let tripId = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "tripId" }?.value ?? ""
+            name = tripId.contains("de-DELFI") ? "transitous-trip-ice177-delfi" : "transitous-trip-rj177-oebb"
+            Self.requests.withLock { $0.append("trip") }
+        }
+        let data = Bundle.module.url(forResource: name, withExtension: "json", subdirectory: "Fixtures").flatMap { try? Data(contentsOf: $0) } ?? Data()
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+// MARK: - Named stations
+
+@Suite struct NamedStationTests {
+    /// "prag" lists "Prag" (Praha hlavní nádraží) first, instead of the other hits at the same station.
+    @Test func pragIsPrahaMainStation() {
+        let hits = [
+            station("cz-JDF-merged_JDFS-638", "Praha,Hlavní nádraží", 50.0825, 14.4341, source: .transitous),
+            station("cz-CZPTT_czptt:stop:CZ:57066", "Praha-Libeň", 50.1012, 14.4922, source: .transitous),
+        ]
+        for text in ["prag", "Prag", "prag hbf", "Prag Hauptbahnhof"] {
+            let placed = TransitousProvider.placingNamedStation(for: StationSearch(text: text), in: hits)
+            #expect(placed.map(\.name) == ["Prag", "Praha-Libeň"], "\(text)")
+            #expect(placed.first?.id == "cz-CZPTT_czptt:stop:CZ:57076")
+        }
+        #expect(TransitousProvider.placingNamedStation(for: StationSearch(text: "praha"), in: hits) == hits)
+        #expect(TransitousProvider.placingNamedStation(for: StationSearch(text: "prag", modes: [.bus]), in: hits) == hits)
+    }
+}
+
 // MARK: - Station display names
 
 @Suite struct StationDisplayNameTests {
@@ -1861,6 +2161,8 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
     let source: DataSource
     var failing = false
     var boards: [BoardEntry] = []
+    /// Arrival boards, when they should differ from `boards`.
+    var arrivalBoards: [BoardEntry]?
     var trips: [String: Trip] = [:]
     var journeyPages: [JourneyPage] = []
     var calls: [String] = []
@@ -1887,7 +2189,7 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
 
     func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int, products: Set<Product>) async throws -> [BoardEntry] {
         try record("board")
-        return boards
+        return kind == .arrivals ? arrivalBoards ?? boards : boards
     }
 
     func trip(id: String) async throws -> Trip {
@@ -2012,7 +2314,8 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         let journey = Journey(legs: [try #require(fast.leg(from: koeln, to: berlin))], source: .bahnDe)
         let newLeg = try #require(slow.leg(from: koeln, to: berlin))
         let replaced = try await picker.replacing(legAt: 0, in: journey, with: newLeg, finalDestination: berlin)
-        #expect(replaced.legs.map(\.tripId) == ["ice423"])
+        #expect(replaced.journey.legs.map(\.tripId) == ["ice423"])
+        #expect(replaced.missedConnection == nil)
     }
 
     func transferPicker() throws -> (TrainPicker, Leg, Journey) {
@@ -2042,7 +2345,212 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         let (picker, leg, withTransfer) = try transferPicker()
         let journey = Journey(legs: [leg], source: .bahnDe)
         let replaced = try await picker.replacing(legAt: 0, in: journey, with: withTransfer.legs, finalDestination: berlin)
-        #expect(replaced.legs.map(\.tripId) == ["re5", "ice10"])
+        #expect(replaced.journey.legs.map(\.tripId) == ["re5", "ice10"])
+    }
+
+    /// Köln → Düsseldorf in ICE 999 (arrives :40), then on to Berlin in ICE 10 (leaves :50).
+    func journeyWithOnwardTrain() throws -> (TrainPicker, Journey) {
+        let (picker, _, _) = makePicker()
+        let feeder = trip("ice999", "ICE 999", [stop(koeln, arr: nil, dep: 20), stop(duesseldorf, arr: 40, dep: nil)])
+        let onwards = trip("ice10", "ICE 10", [stop(duesseldorf, arr: nil, dep: 50), stop(berlin, arr: 300, dep: nil)])
+        let journey = Journey(legs: [try #require(feeder.leg(from: koeln, to: duesseldorf)),
+                                     try #require(onwards.leg(from: duesseldorf, to: berlin))], source: .bahnDe)
+        return (picker, journey)
+    }
+
+    @Test func otherTrainKeepsConnectionThatStillWorks() async throws {
+        let (picker, journey) = try journeyWithOnwardTrain()
+        let earlier = trip("ice423", "ICE 423", [stop(koeln, arr: nil, dep: 10), stop(duesseldorf, arr: 30, dep: nil)])
+        let replaced = try await picker.replacing(legAt: 0, in: journey, with: try #require(earlier.leg(from: koeln, to: duesseldorf)),
+                                                  finalDestination: berlin)
+        #expect(replaced.journey.legs.map(\.tripId) == ["ice423", "ice10"])
+        #expect(replaced.missedConnection == nil)
+    }
+
+    @Test func otherTrainReportsMissedConnection() async throws {
+        let (picker, journey) = try journeyWithOnwardTrain()
+        let later = trip("re7", "RE 7", [stop(koeln, arr: nil, dep: 30), stop(duesseldorf, arr: 55, dep: nil)])
+        let replaced = try await picker.replacing(legAt: 0, in: journey, with: try #require(later.leg(from: koeln, to: duesseldorf)),
+                                                  finalDestination: berlin)
+        // The old onward train stays (the user may ignore it); the result names it as missed.
+        #expect(replaced.journey.legs.map(\.tripId) == ["re7", "ice10"])
+        let missed = try #require(replaced.missedConnection)
+        #expect(missed.legIndex == 1)
+        #expect(missed.leg.tripId == "ice10")
+        #expect(missed.arriving.tripId == "re7")
+        #expect(missed.earliestDeparture == base.addingTimeInterval(56 * 60))
+    }
+
+    @Test func missedConnectionLooksPastWalkAndNeedsAMinute() throws {
+        let (_, journey) = try journeyWithOnwardTrain()
+        let walk = Leg(origin: duesseldorf, destination: duesseldorf,
+                       departure: TimeInfo(planned: base.addingTimeInterval(40 * 60), actual: nil),
+                       arrival: TimeInfo(planned: base.addingTimeInterval(45 * 60), actual: nil),
+                       departurePlatform: nil, arrivalPlatform: nil, tripId: nil, line: nil, direction: nil,
+                       isWalking: true, cancelled: false, stopovers: [], remarks: [], source: .bahnDe)
+        var withWalk = Journey(legs: [journey.legs[0], walk, journey.legs[1]], source: .bahnDe)
+        #expect(withWalk.missedConnection(after: 0) == nil)
+        // Arriving :49:30 leaves only half a minute: missed, as `connectionIssues` counts it.
+        withWalk.legs[0].arrival.actual = base.addingTimeInterval(49.5 * 60)
+        #expect(withWalk.missedConnection(after: 0)?.legIndex == 2)
+        #expect(withWalk.missedConnection(after: 2) == nil)
+    }
+
+    @Test func reroutesSkipTheTransferPoint() async throws {
+        let (picker, _, withTransfer) = try transferPicker()
+        // Köln → Düsseldorf → Berlin: the direct ICE 1 to Berlin counts, the change in Düsseldorf doesn't.
+        let reroutes = try await picker.reroutes(for: withTransfer.legs[0], to: berlin)
+        #expect(reroutes.map { $0.legs.map(\.tripId) } == [["ice1"]])
+    }
+
+    @Test func rerouteTargetIsNextViaOrDestination() throws {
+        let (_, _, withTransfer) = try transferPicker()
+        #expect(withTransfer.rerouteTargetIndex(from: 0, vias: [], finalDestination: berlin) == 1)
+        // Düsseldorf is a via: the leg already ends at a point the route has to pass.
+        #expect(withTransfer.rerouteTargetIndex(from: 0, vias: [duesseldorf], finalDestination: berlin) == nil)
+        #expect(withTransfer.rerouteTargetIndex(from: 1, vias: [], finalDestination: berlin) == nil)
+    }
+
+    @Test func rerouteReplacesLegsUpToTarget() async throws {
+        let (picker, direct, withTransfer) = try transferPicker()
+        let replaced = try await picker.replacing(legsIn: 0...1, in: withTransfer, with: [direct], finalDestination: berlin)
+        #expect(replaced.journey.legs.map(\.tripId) == ["ice1"])
+        #expect(replaced.missedConnection == nil)
+    }
+
+    @Test func alternativesForMissedConnectionLeaveAfterArrival() async throws {
+        let (picker, _, _) = makePicker()
+        let other = trip("ice999", "ICE 999", [stop(koeln, arr: nil, dep: 20), stop(duesseldorf, arr: 40, dep: nil)])
+        let leg = try #require(other.leg(from: koeln, to: duesseldorf))
+        #expect(try await picker.alternatives(for: leg).map(\.tripId) == ["ice423"])
+        // ICE 423 leaves at :10, before the train before it gets in.
+        #expect(try await picker.alternatives(for: leg, notBefore: base.addingTimeInterval(15 * 60)).isEmpty)
+    }
+}
+
+/// "Anderer Zug" in the middle of a journey A → B → C → D (#226): Köln → Düsseldorf → Hamm → Berlin.
+@Suite struct MidJourneyReplaceTests {
+    let a = station("8000207", "Köln Hbf", 50.943, 6.958)
+    let b = station("8000085", "Düsseldorf Hbf", 51.219, 6.794)
+    let c = station("8000149", "Hamm (Westf)", 51.678, 7.808)
+    let d = station("8011160", "Berlin Hbf", 52.525, 13.369)
+    let base = Date(timeIntervalSince1970: 1_800_000_000)
+
+    func time(_ minutes: Double?) -> TimeInfo? { minutes.map { TimeInfo(planned: base.addingTimeInterval($0 * 60), actual: nil) } }
+
+    func trip(_ id: String, _ name: String, _ stops: [(Station, Double?, Double?)]) -> Trip {
+        Trip(id: id, line: Line(name: name, number: String(name.split(separator: " ").last!), product: .highSpeed, operatorName: nil),
+             direction: "Berlin Hbf",
+             stopovers: stops.map { Stopover(station: $0.0, arrival: time($0.1), departure: time($0.2),
+                                             arrivalPlatform: nil, departurePlatform: nil, cancelled: false) },
+             cancelled: false, remarks: [], source: .bahnDe)
+    }
+
+    func entry(_ trip: Trip, at station: Station, planned: Double, actual: Double? = nil) -> BoardEntry {
+        BoardEntry(kind: .departures, tripId: trip.id, station: station, line: trip.line!, otherEnd: "Berlin Hbf",
+                   time: TimeInfo(planned: base.addingTimeInterval(planned * 60), actual: actual.map { base.addingTimeInterval($0 * 60) }),
+                   platform: PlatformInfo(planned: nil, actual: nil), cancelled: false,
+                   terminatesOrOriginatesHere: false, remarks: [], source: .bahnDe)
+    }
+
+    var re1: Trip { trip("re1", "RE 1", [(a, nil, 0), (b, 20, nil)]) }
+    var ice2: Trip { trip("ice2", "ICE 2", [(b, nil, 30), (c, 60, nil)]) }
+    var ice3: Trip { trip("ice3", "ICE 3", [(c, nil, 70), (d, 200, nil)]) }
+    /// Later train B → C: gets in at :75, after ICE 3 has left.
+    var ice4: Trip { trip("ice4", "ICE 4", [(b, nil, 50), (c, 75, nil)]) }
+    var ice5: Trip { trip("ice5", "ICE 5", [(c, nil, 90), (d, 210, nil)]) }
+    /// Through train B → C → D: an "Andere Routenführung" without the change in C.
+    var ice6: Trip { trip("ice6", "ICE 6", [(b, nil, 55), (c, 79, 80), (d, 190, nil)]) }
+    /// Planned before ICE 4 gets in, but running 10 min late.
+    var ice7: Trip { trip("ice7", "ICE 7", [(c, nil, 72), (d, 205, nil)]) }
+
+    func plan() throws -> Journey {
+        Journey(legs: [try #require(re1.leg(from: a, to: b)), try #require(ice2.leg(from: b, to: c)),
+                       try #require(ice3.leg(from: c, to: d))], source: .bahnDe)
+    }
+
+    func picker(boards: [BoardEntry] = [], journeys: [Journey] = []) -> TrainPicker {
+        let primary = MockProvider(source: .bahnDe)
+        primary.boards = boards
+        primary.trips = Dictionary(uniqueKeysWithValues: [re1, ice2, ice3, ice4, ice5, ice6, ice7].map { ($0.id, $0) })
+        primary.journeyPages = [JourneyPage(journeys: journeys, earlierCursor: nil, laterCursor: nil, source: .bahnDe)]
+        return TrainPicker(provider: CombinedProvider(primary: primary, fallback: MockProvider(source: .transitous), bahnDe: nil))
+    }
+
+    @Test func laterTrainMissesConnectionThenPickTrainForIt() async throws {
+        let picker = picker(boards: [entry(ice3, at: c, planned: 70), entry(ice5, at: c, planned: 90),
+                                     entry(ice6, at: c, planned: 80), entry(ice7, at: c, planned: 72, actual: 82)])
+        let journey = try plan()
+        // Step 1: ICE 4 instead of ICE 2. RE 1 and ICE 3 stay, ICE 3 is reported as missed.
+        let first = try await picker.replacing(legAt: 1, in: journey, with: try #require(ice4.leg(from: b, to: c)), finalDestination: d)
+        #expect(first.journey.legs.map(\.tripId) == ["re1", "ice4", "ice3"])
+        let missed = try #require(first.missedConnection)
+        #expect(missed.legIndex == 2)
+        #expect(missed.earliestDeparture == base.addingTimeInterval(76 * 60))
+        // "Ignorieren" keeps that plan: the existing warning shows the transfer as missed.
+        #expect(first.journey.connectionIssues().contains { if case .transferMissed = $0 { true } else { false } })
+        // Step 2: "Alternativen zeigen" lists trains C → D leaving from :76 on, the late ICE 7 included.
+        let others = try await picker.alternatives(for: missed.leg, notBefore: missed.earliestDeparture)
+        #expect(others.map(\.tripId) == ["ice7", "ice6", "ice5"])
+        // Step 3: picking ICE 5 fixes the plan.
+        let second = try await picker.replacing(legAt: missed.legIndex, in: first.journey,
+                                                with: try #require(ice5.leg(from: c, to: d)), finalDestination: d)
+        #expect(second.journey.legs.map(\.tripId) == ["re1", "ice4", "ice5"])
+        #expect(second.missedConnection == nil)
+        #expect(second.journey.connectionIssues().isEmpty)
+    }
+
+    @Test func alternativesAtBusyStationPreferTrainsReachingDestination() async throws {
+        // Like S2 Gesundbrunnen → Bernau: plenty of trains of the same kind leave around the same time
+        // for elsewhere; the next one to C comes later and only made the list via C's arrivals.
+        let elsewhere = (1...30).map { trip("s\($0)", "ICE \($0 + 100)", [(b, nil, 30 + Double($0) * 0.5), (a, 60, nil)]) }
+        let toC = trip("ice9", "ICE 9", [(b, nil, 70), (c, 100, nil)])
+        let primary = MockProvider(source: .bahnDe)
+        primary.boards = elsewhere.map { entry($0, at: b, planned: $0.stopovers[0].departure!.planned.timeIntervalSince(base) / 60) }
+            + [entry(toC, at: b, planned: 70)]
+        primary.arrivalBoards = [entry(toC, at: c, planned: 100)]
+        primary.trips = Dictionary(uniqueKeysWithValues: (elsewhere + [toC, ice2]).map { ($0.id, $0) })
+        let picker = TrainPicker(provider: CombinedProvider(primary: primary, fallback: MockProvider(source: .transitous), bahnDe: nil),
+                                 maxCandidates: 5)
+        let others = try await picker.alternatives(for: try #require(ice2.leg(from: b, to: c)))
+        #expect(others.map(\.tripId) == ["ice9"])
+    }
+
+    @Test func earlierTrainKeepsConnection() async throws {
+        let earlier = trip("ice8", "ICE 8", [(b, nil, 25), (c, 55, nil)])
+        let replaced = try await picker().replacing(legAt: 1, in: try plan(), with: try #require(earlier.leg(from: b, to: c)), finalDestination: d)
+        #expect(replaced.journey.legs.map(\.tripId) == ["re1", "ice8", "ice3"])
+        #expect(replaced.missedConnection == nil)
+    }
+
+    @Test func rerouteStraightToDestination() async throws {
+        let journey = try plan()
+        let sameRouting = Journey(legs: [try #require(ice2.leg(from: b, to: c)), try #require(ice3.leg(from: c, to: d))], source: .bahnDe)
+        let through = Journey(legs: [try #require(ice6.leg(from: b, to: d))], source: .bahnDe)
+        let picker = picker(journeys: [sameRouting, through])
+        // ICE 2 ends in Hamm, a mere transfer point: Berlin is the next goal.
+        let target = try #require(journey.rerouteTargetIndex(from: 1, vias: [], finalDestination: d))
+        #expect(target == 2)
+        let reroutes = try await picker.reroutes(for: journey.legs[1], to: journey.legs[target].destination)
+        #expect(reroutes.map(\.id) == [through.id])
+        let replaced = try await picker.replacing(legsIn: 1...target, in: journey, with: through.legs, finalDestination: d)
+        #expect(replaced.journey.legs.map(\.tripId) == ["re1", "ice6"])
+        #expect(replaced.missedConnection == nil)
+        // RE 1 isn't touched; ICE 6 leaves Düsseldorf after it gets in.
+        #expect(replaced.journey.connectionIssues().isEmpty)
+    }
+
+    @Test func noRerouteWhenLegEndsAtVia() throws {
+        #expect(try plan().rerouteTargetIndex(from: 1, vias: [c], finalDestination: d) == nil)
+        // From Köln, the via Hamm is the next goal: a reroute may skip Düsseldorf, not Hamm.
+        #expect(try plan().rerouteTargetIndex(from: 0, vias: [c], finalDestination: d) == 1)
+    }
+
+    @Test func rerouteDoesNotSkipViaInsideThroughTrain() throws {
+        // Köln → Düsseldorf, then ICE 6 through Hamm (a via without stay) to Berlin.
+        let journey = Journey(legs: [try #require(re1.leg(from: a, to: b)), try #require(ice6.leg(from: b, to: d))], source: .bahnDe)
+        #expect(journey.rerouteTargetIndex(from: 0, vias: [c], finalDestination: d) == nil)
+        #expect(journey.rerouteTargetIndex(from: 0, vias: [], finalDestination: d) == 1)
     }
 }
 
@@ -2534,6 +3042,68 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(formation.unitDescription == "Tz 8030 + 8005")
     }
 
+    /// The Wagenreihung shows the front trainset's drawing; series without one show none (#167).
+    @Test func formationDrawing() {
+        #expect(TrainFormation(units: [.init(model: "ICE 1", number: "190")]).drawing
+            == TrainDrawing(assetName: "Train-401", series: "BR 401"))
+        #expect(TrainFormation(units: [.init(model: "ICE 3neo", number: "8030")]).drawing?.assetName == "Train-408")
+        #expect(TrainFormation(units: [.init(model: "ICE T", number: "1190")]).drawing?.series == nil)
+        #expect(TrainFormation(units: [.init(model: "ICE 3 Velaro", number: "4710")]).drawing?.series == "BR 407")
+        #expect(TrainFormation(units: [.init(model: "ICE 3", number: "302")]).drawing == TrainDrawing(assetName: "Train-403", series: "BR 403"))
+        let coupled = TrainFormation(units: [.init(model: "IC 2 KISS", number: "4110"), .init(model: "ICE 4", number: "9018")])
+        #expect(coupled.drawing?.assetName == "Train-412")
+        #expect(TrainFormation(units: [.init(model: "FLIRT", number: nil)]).drawing == nil)
+    }
+
+    /// When bahn.de answers without the train's coaches, the Wagenreihung's note says what the answer had.
+    @Test func sequenceResponseSummary() throws {
+        let json = #"{"groups":[{"name":"IC1","transport":{"category":"RB","number":5410},"vehicles":[{},{}]}]}"#
+        let response = try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data(json.utf8))
+        #expect(BahnDeClient.summary(of: response) == "1 Gruppen, 2 Fahrzeuge, Züge RB 5410")
+        #expect(BahnDeClient.summary(of: BahnDeClient.SequenceResponse()) == "0 Gruppen, 0 Fahrzeuge, Züge keine")
+    }
+
+    /// A pause after bahn.de blocked the app says what started it, so the Wagenreihung's note can show it.
+    @Test func bahnDeBlockIsDescribed() async {
+        let gate = BahnDeGate()
+        #expect(await gate.blockDescription == nil)
+        await gate.report(.http(status: 404, body: nil))
+        #expect(await gate.blockDescription == nil)
+        await gate.report(.http(status: 403, body: #"{"status":"ERROR","code":"OPS_BLOCKED"}"#),
+                          url: URL(string: "https://example.com/web/api/reisebegleitung/wagenreihung/vehicle-sequence")!)
+        let description = await gate.blockDescription
+        #expect(description?.hasPrefix("Pause bis ") == true)
+        #expect(description?.contains(#"403 {"status":"ERROR","code":"OPS_BLOCKED"}"#) == true)
+        #expect(description?.hasSuffix("(…/vehicle-sequence)") == true)
+        #expect(BahnDeGate.excerpt(String(repeating: "x", count: 100)).count == 81)
+    }
+
+    /// The Wagenreihung unfolds by itself from 30 minutes before the departure until 15 minutes after it.
+    @Test func coachSequenceUnfoldsAroundDeparture() {
+        let departure = Date(timeIntervalSince1970: 1_800_000_000)
+        #expect(!CoachSequence.unfoldsByItself(departure: departure, now: departure.addingTimeInterval(-31 * 60)))
+        #expect(CoachSequence.unfoldsByItself(departure: departure, now: departure.addingTimeInterval(-30 * 60)))
+        #expect(CoachSequence.unfoldsByItself(departure: departure, now: departure))
+        #expect(CoachSequence.unfoldsByItself(departure: departure, now: departure.addingTimeInterval(15 * 60)))
+        #expect(!CoachSequence.unfoldsByItself(departure: departure, now: departure.addingTimeInterval(16 * 60)))
+        #expect(!CoachSequence.unfoldsByItself(departure: nil))
+    }
+
+    /// Coupled trainsets of one series share a card in the Wagenreihung, other series get their own (#167).
+    @Test func formationPartsBySeries() {
+        let twin = TrainFormation(units: [.init(model: "ICE 3", number: "302"), .init(model: "ICE 3", number: "330")])
+        #expect(twin.partsBySeries == [twin])
+        #expect(twin.partsBySeries.first?.modelSummary == "2× ICE 3")
+        // ICE 3neo with and without Redesign are both BR 408.
+        let neo = TrainFormation(units: [.init(model: "ICE 3neo", number: "8030"), .init(model: "ICE 3neo", number: "8005")])
+        #expect(neo.partsBySeries.count == 1)
+        let mixed = TrainFormation(units: [.init(model: "ICE 4", number: "9018"), .init(model: nil, number: "9020"),
+                                           .init(model: "ICE 3 Velaro", number: "4710")])
+        #expect(mixed.partsBySeries.map { $0.units.compactMap(\.number) } == [["9018", "9020"], ["4710"]])
+        #expect(TrainFormation(units: [.init(model: nil, number: "190")]).partsBySeries.count == 1)
+        #expect(TrainFormation(units: []).partsBySeries.isEmpty)
+    }
+
     @Test func formationURLUsesGermanDayAndUTCMilliseconds() throws {
         // 00:30 in Berlin on the 30th is still the 29th in UTC; bahn.de wants the German day (it
         // answers 404 for the 29th, e.g. ICE 1540 leaving Brandenburg Hbf at 00:41).
@@ -2620,6 +3190,130 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         await #expect(throws: TransitError.rateLimited) { try await bahnDe.formation(request) }
         #expect(BlockedProtocol.requests.withLock { $0 } == 1)
     }
+
+    /// Requests to the Worker map onto bahn.de's own `/web/api/…` addresses for the phone's browser.
+    @Test func directURLMirrorsWorkerPath() {
+        let url = BahnDeClient.baseURL.appending(path: "reiseloesung/orte").appending(queryItems: [.init(name: "suchbegriff", value: "Köln Hbf")])
+        #expect(BahnDeClient.directURL(for: url)?.absoluteString == "https://www.bahn.de/web/api/reiseloesung/orte?suchbegriff=K%C3%B6ln%20Hbf")
+        #expect(BahnDeClient.directURL(for: URL(string: "https://example.com/web/api/reiseloesung/orte")!) == nil)
+        #expect(BahnDeClient.directURL(for: URL(string: "https://betterbahn2.betterbahn.workers.dev/timetables/v1/station/8000105")!) == nil)
+    }
+
+    /// When the Worker is blocked, the phone's browser asks bahn.de instead, also while the Worker pauses.
+    @Test func blockedWorkerFallsBackToBrowser() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [ForbiddenProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let loaded = Recorded<[String]>([])
+        let browser = BahnDeBrowserFallback { url in
+            loaded.value.withLock { $0.append(url.absoluteString) }
+            return (200, Data(#"[{"extId":"8000105","name":"Frankfurt(Main)Hbf","type":"ST","products":["ICE"]}]"#.utf8))
+        }
+        let gate = BahnDeGate()
+        let bahnDe = BahnDeClient(http: HTTPClient(session: session), gate: gate, browser: browser)
+
+        #expect(try await bahnDe.searchStations("Frankfurt").map(\.id) == ["8000105"])
+        #expect(await gate.isBlocked)
+        #expect(try await bahnDe.searchStations("Frankfurt").map(\.id) == ["8000105"])
+        // The Worker was asked once; then only the browser, at bahn.de's own address.
+        #expect(ForbiddenProtocol.requests.withLock { $0 } == 1)
+        #expect(loaded.value.withLock { $0.count } == 2)
+        #expect(loaded.value.withLock { $0.allSatisfy { $0.hasPrefix("https://www.bahn.de/web/api/reiseloesung/orte?") } })
+    }
+
+    /// A blocked Worker gets the browser's page loading right away; once the Worker answers again, the page goes.
+    @Test func browserPageFollowsWorkerState() async throws {
+        let prepared = Recorded(0)
+        let released = Recorded(0)
+        let browser = BahnDeBrowserFallback({ _ in
+            (200, Data(#"[{"extId":"8000105","name":"Frankfurt(Main)Hbf","type":"ST"}]"#.utf8))
+        }, prepare: { prepared.value.withLock { $0 += 1 } }, release: { released.value.withLock { $0 += 1 } })
+
+        let blockedConfig = URLSessionConfiguration.ephemeral
+        blockedConfig.protocolClasses = [RefusingProtocol.self]
+        let blockedSession = URLSession(configuration: blockedConfig)
+        defer { blockedSession.invalidateAndCancel() }
+        let blocked = BahnDeClient(http: HTTPClient(session: blockedSession), gate: BahnDeGate(), browser: browser)
+        _ = try await blocked.searchStations("Frankfurt")
+        _ = try await blocked.searchStations("Frankfurt")
+        #expect(prepared.value.withLock { $0 } == 1)
+        #expect(await browser.isActive)
+
+        let workingConfig = URLSessionConfiguration.ephemeral
+        workingConfig.protocolClasses = [StationsProtocol.self]
+        let workingSession = URLSession(configuration: workingConfig)
+        defer { workingSession.invalidateAndCancel() }
+        let working = BahnDeClient(http: HTTPClient(session: workingSession), gate: BahnDeGate(), browser: browser)
+        _ = try await working.searchStations("Frankfurt")
+        _ = try await working.searchStations("Frankfurt")
+        #expect(released.value.withLock { $0 } == 1)
+        #expect(await !browser.isActive)
+    }
+
+    /// When bahn.de blocks the phone too, its browser pauses as well instead of asking again.
+    @Test func blockedBrowserPausesToo() async throws {
+        let calls = Recorded(0)
+        let browser = BahnDeBrowserFallback { _ in
+            calls.value.withLock { $0 += 1 }
+            return (403, Data(#"{"code":"OPS_BLOCKED"}"#.utf8))
+        }
+        let gate = BahnDeGate()
+        await gate.report(.rateLimited)
+        let bahnDe = BahnDeClient(http: HTTPClient(session: .shared), gate: gate, browser: browser)
+
+        await #expect(throws: TransitError.rateLimited) { try await bahnDe.searchStations("Frankfurt") }
+        await #expect(throws: TransitError.rateLimited) { try await bahnDe.searchStations("Frankfurt") }
+        #expect(calls.value.withLock { $0 } == 1)
+        #expect(await browser.gate.isBlocked)
+    }
+}
+
+/// A value a test's closures record into (a `Mutex` itself can't be captured).
+private final class Recorded<Value: Sendable>: Sendable {
+    let value: Mutex<Value>
+    init(_ value: Value) { self.value = Mutex(value) }
+}
+
+/// The Worker answering bahn.de's block, counted apart from `BlockedProtocol` (tests run in parallel).
+private final class ForbiddenProtocol: URLProtocol, @unchecked Sendable {
+    static let requests = Mutex(0)
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.requests.withLock { $0 += 1 }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 403, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(#"{"status":"ERROR","code":"OPS_BLOCKED"}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+/// The Worker blocked, uncounted (`ForbiddenProtocol` counts for another test).
+private final class RefusingProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let response = HTTPURLResponse(url: request.url!, statusCode: 403, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(#"{"status":"ERROR","code":"OPS_BLOCKED"}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+/// The Worker answering a station search.
+private final class StationsProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(#"[{"extId":"8000105","name":"Frankfurt(Main)Hbf","type":"ST"}]"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }
 
 private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
@@ -2649,7 +3343,7 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
             TrainTypeLookup.Group(seriesName: name, baureihe: number, unitNumber: nil, origin: nil, destination: nil, coachCount: 0)
         }
         #expect(group("412", "ICE 4 Lang (BR412)").family == "ICE 4")
-        #expect(group("407", "ICE 3 Velaro (BR407)").family == "ICE 3")
+        #expect(group("407", "ICE 3 Velaro (BR407)").family == "ICE 3 Velaro")
         #expect(group("408", "ICE 3neo (BR408)").family == "ICE 3neo")
         #expect(group(nil, "ICE L").family == "ICE L")
         #expect(group(nil, nil).family == nil)
@@ -2754,6 +3448,226 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         #expect(BahnExpertClient.isValidDay("2026-09-20"))
         #expect(!BahnExpertClient.isValidDay("2026-02-31"))
         #expect(!BahnExpertClient.isValidDay("20.09.2026"))
+    }
+}
+
+@Suite struct TrainNumberSearchTests {
+    @Test func readsTypedTrainNumbers() {
+        #expect(TrainNumberQuery("ICE 123") == TrainNumberQuery(category: "ICE", number: 123))
+        #expect(TrainNumberQuery(" ice123 ") == TrainNumberQuery(category: "ICE", number: 123))
+        #expect(TrainNumberQuery("123") == TrainNumberQuery(category: nil, number: 123))
+        #expect(TrainNumberQuery("S 37856") == TrainNumberQuery(category: "S", number: 37856))
+        #expect(TrainNumberQuery("ICE") == nil)
+        #expect(TrainNumberQuery("") == nil)
+        #expect(TrainNumberQuery("0") == nil)
+    }
+
+    /// bahn.expert's `journey/find` for 123 on 2026-10-07 (shortened): the ICE, Swiss and Austrian
+    /// regional trains, a replacement bus filed as regional train and a tram.
+    static let found = """
+    [
+      {"journeyId":"a","train":{"line":"ZB1","category":"R","journeyNumber":123,"transportType":"REGIONAL_TRAIN"},
+       "firstStop":{"stopPlace":{"evaNumber":"8100102","name":"Jenbach"}},"lastStop":{"stopPlace":{"evaNumber":"8100541","name":"Mayrhofen im Zillertal"}}},
+      {"journeyId":"b","train":{"category":"ICE","journeyNumber":123,"transportType":"HIGH_SPEED_TRAIN"},
+       "firstStop":{"stopPlace":{"evaNumber":"8400058","name":"Amsterdam Centraal"}},"lastStop":{"stopPlace":{"evaNumber":"8000105","name":"Frankfurt(Main)Hbf"}}},
+      {"journeyId":"c","train":{"line":"S2","category":"Bus","journeyNumber":123,"transportType":"REGIONAL_TRAIN"},
+       "firstStop":{"stopPlace":{"evaNumber":"131825","name":"Bahnhof, Erding"}},"lastStop":{"stopPlace":{"evaNumber":"131826","name":"Bahnhof, Markt Schwaben"}}},
+      {"journeyId":"d","train":{"line":"S8","category":"S","journeyNumber":123,"transportType":"CITY_TRAIN"},
+       "firstStop":{"stopPlace":{"evaNumber":"8010159","name":"Halle(Saale)Hbf"}},"lastStop":{"stopPlace":{"evaNumber":"8010077","name":"Dessau Hbf"}}},
+      {"journeyId":"e","train":{"line":"63","category":"STR","journeyNumber":123,"transportType":"TRAM"},
+       "firstStop":{"stopPlace":{"evaNumber":"733388","name":"Krankenhaus Köpenick"}},"lastStop":{"stopPlace":{"evaNumber":"733587","name":"Schöneweide"}}}
+    ]
+    """
+
+    func results() throws -> [TrainSearchResult] {
+        let runs = try JSONDecoding.decoder.decode([BahnExpertClient.FoundRun].self, from: Data(Self.found.utf8))
+        return runs.compactMap(BahnExpertClient.result)
+    }
+
+    @Test func listsFasterTrainsFirstAndDropsBusesAndTrams() throws {
+        let ranked = TrainNumberSearch.ranked(try results(), for: TrainNumberQuery(category: nil, number: 123))
+        #expect(ranked.map(\.journeyId) == ["b", "a", "d"])
+        #expect(ranked.map(\.name) == ["ICE 123", "R 123", "S 123"])
+        #expect(ranked[2].lineName == "S8")
+        #expect(ranked[0].lineName == nil)
+    }
+
+    @Test func kindsFilterTheTrains() throws {
+        let all = try results()
+        #expect(all.map(\.kind) == [.rb, .ice, .other, .sBahn, .other])
+        let query = TrainNumberQuery(category: nil, number: 123)
+        #expect(TrainNumberSearch.ranked(all, for: query, kinds: [.sBahn, .ice]).map(\.journeyId) == ["b", "d"])
+        // "Sonstiges" brings the replacement bus and the tram back.
+        #expect(TrainNumberSearch.ranked(all, for: query, kinds: Set(TrainSearchKind.allCases)).count == 5)
+        let flx = TrainSearchResult(journeyId: "f", category: "FLX", number: 1246, line: nil, product: .longDistance,
+                                    origin: "", destination: "", originEVA: nil, destinationEVA: nil)
+        #expect(flx.kind == .flx)
+    }
+
+    @Test func readsCountriesFromIfoptAndEVANumbers() throws {
+        let all = try results()
+        #expect(all.map(\.originCountry) == ["AT", "NL", nil, "DE", nil])
+        #expect(TrainSearchCountry.code(eva: "131825", ifopt: "de:09177:3011") == "DE")
+        #expect(TrainSearchCountry.code(eva: "8500174", ifopt: "ch:1:sloid:174") == "CH")
+        #expect(TrainSearchCountry.code(eva: "8100102") == "AT")
+        #expect(TrainSearchCountry.code(eva: "733388") == nil)
+        #expect(TrainSearchCountry.all.first?.flag == "🇩🇪")
+    }
+
+    @Test func onlyTrainsThatMayCrossABorderAreLookedUp() throws {
+        let all = try results()
+        #expect(TrainNumberSearch.endsIn(["DE"], all[1]))
+        #expect(!TrainNumberSearch.endsIn(["DE"], all[0]))
+        // An ICE may run through Germany between two foreign stations, a regional train within Austria doesn't.
+        #expect(TrainNumberSearch.mayPassThrough(all[1]))
+        #expect(!TrainNumberSearch.mayPassThrough(all[0]))
+    }
+
+    /// Railjet 63 runs Salzburg – Innsbruck through Germany ("Deutsches Eck"); the Austrian regional
+    /// train and the Swiss IR don't come near it.
+    @Test func countriesFilterLooksUpStopsOfTrainsCrossingBorders() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [TrainSearchProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let expert = BahnExpertClient(http: HTTPClient(session: session))
+        let provider = CombinedProvider(primary: TransitousProvider(), bahnDe: nil, bahnExpert: expert, vagonweb: nil, bahnJetzt: nil)
+        let search = try #require(TrainNumberSearch(provider: provider))
+        let query = TrainNumberQuery(category: nil, number: 63)
+        let german = try await search.trains(query, on: .now)
+        #expect(german.map(\.journeyId) == ["rj", "s"])
+        let swiss = try await search.trains(query, on: .now, filter: TrainSearchFilter(countries: ["CH"]))
+        #expect(swiss.map(\.journeyId) == ["ir"])
+        let anywhere = try await search.trains(query, on: .now, filter: TrainSearchFilter(countries: []))
+        #expect(anywhere.count == 4)
+        // Only the Railjet and the IR had their stops looked up: the regional train stays within Austria.
+        #expect(TrainSearchProtocol.detailRequests.withLock { $0 }.isSuperset(of: ["rj", "ir"]))
+        #expect(!TrainSearchProtocol.detailRequests.withLock { $0 }.contains("r"))
+    }
+
+    @Test func typedCategoryNarrowsTheResultsWhenItMatches() throws {
+        let all = try results()
+        #expect(TrainNumberSearch.ranked(all, for: TrainNumberQuery(category: "ICE", number: 123)).map(\.journeyId) == ["b"])
+        // The line counts as well ("S8").
+        #expect(TrainNumberSearch.ranked(all, for: TrainNumberQuery(category: "S8", number: 123)).map(\.journeyId) == ["d"])
+        // Without an exact match the same kind of train: feeds disagree on RE vs. RB, ICE vs. ECE.
+        #expect(TrainNumberSearch.ranked(all, for: TrainNumberQuery(category: "RE", number: 123)).map(\.journeyId) == ["a", "d"])
+        #expect(TrainNumberSearch.ranked(all, for: TrainNumberQuery(category: "ECE", number: 123)).map(\.journeyId) == ["b"])
+    }
+
+    @Test func trainWithoutCategoryGoesByItsLine() {
+        let result = TrainSearchResult(journeyId: "x", category: "-", number: 37856, line: "RS5", product: .regional,
+                                       origin: "Delfzijl", destination: "Veendam", originEVA: "8400171", destinationEVA: nil)
+        #expect(result.name == "RS5 37856")
+        #expect(result.lineName == nil)
+    }
+
+    @Test func looksTheTrainUpAtGermanStopsFirst() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let stops = [
+            TrainSearchStop(evaNumber: "8400058", name: "Amsterdam Centraal", plannedDeparture: start),
+            TrainSearchStop(evaNumber: "8400530", name: "Utrecht Centraal", plannedDeparture: start + 1800),
+            TrainSearchStop(evaNumber: "8000086", name: "Duisburg Hbf", plannedDeparture: start + 7200),
+            TrainSearchStop(evaNumber: "8000085", name: "Düsseldorf Hbf", plannedDeparture: start + 8400),
+            TrainSearchStop(evaNumber: "8000105", name: "Frankfurt(Main)Hbf", plannedDeparture: nil),
+        ]
+        #expect(TrainNumberSearch.lookupStops(stops).map(\.name) == ["Duisburg Hbf", "Düsseldorf Hbf", "Amsterdam Centraal"])
+    }
+
+    @Test func findsTheBoardEntryByNumberAndPlannedTime() {
+        let planned = Date(timeIntervalSince1970: 1_800_000_000)
+        let station = Station(id: "8000086", name: "Duisburg Hbf", coordinate: nil, evaNumber: "8000086", source: .transitous)
+        func entry(_ line: Line, _ time: Date) -> BoardEntry {
+            BoardEntry(kind: .departures, tripId: line.name, station: station, line: line, otherEnd: nil,
+                       time: TimeInfo(planned: time, actual: nil), platform: PlatformInfo(planned: "1", actual: nil),
+                       cancelled: false, terminatesOrOriginatesHere: false, remarks: [], source: .transitous)
+        }
+        let ice = TrainSearchResult(journeyId: "b", category: "ICE", number: 123, line: nil, product: .highSpeed,
+                                    origin: "Amsterdam Centraal", destination: "Frankfurt(Main)Hbf", originEVA: "8400058", destinationEVA: "8000105")
+        let entries = [
+            entry(Line(name: "RE 1", number: "1", product: .regionalExpress, operatorName: nil), planned),
+            entry(Line(name: "ICE 123", number: "123", product: .highSpeed, operatorName: nil), planned + 3600),
+            entry(Line(name: "ICE 123", number: "123", product: .highSpeed, operatorName: nil), planned + 30),
+        ]
+        #expect(TrainNumberSearch.entry(for: ice, departing: planned, in: entries)?.time.planned == planned + 30)
+        // A regional train by its run number.
+        let re = TrainSearchResult(journeyId: "r", category: "RE", number: 4711, line: "RE1", product: .regionalExpress,
+                                   origin: "", destination: "", originEVA: nil, destinationEVA: nil)
+        let run = entry(Line(name: "RE 1", number: "1", product: .regionalExpress, operatorName: nil, tripNumber: "4711"), planned)
+        #expect(TrainNumberSearch.entry(for: re, departing: planned, in: [run]) == run)
+        let otherLine = entry(Line(name: "RE 2", number: "2", product: .regionalExpress, operatorName: nil), planned)
+        #expect(TrainNumberSearch.entry(for: re, departing: planned, in: [otherLine]) == nil)
+        // An S-Bahn whose run number Transitous doesn't know, by its line.
+        let s2 = TrainSearchResult(journeyId: "s", category: "S", number: 2023, line: "S2", product: .suburban,
+                                   origin: "", destination: "", originEVA: nil, destinationEVA: nil)
+        let sBahn = entry(Line(name: "S 2", number: "2", product: .suburban, operatorName: nil), planned)
+        #expect(TrainNumberSearch.entry(for: s2, departing: planned, in: [entries[0], sBahn]) == sBahn)
+    }
+
+    static let found63 = """
+    [
+      {"journeyId":"r","train":{"category":"R","journeyNumber":63,"transportType":"REGIONAL_TRAIN"},
+       "firstStop":{"stopPlace":{"evaNumber":"8100102","name":"Jenbach"}},"lastStop":{"stopPlace":{"evaNumber":"8100541","name":"Mayrhofen"}}},
+      {"journeyId":"rj","train":{"category":"RJ","journeyNumber":63,"transportType":"HIGH_SPEED_TRAIN"},
+       "firstStop":{"stopPlace":{"evaNumber":"8100002","name":"Salzburg Hbf"}},"lastStop":{"stopPlace":{"evaNumber":"8100108","name":"Innsbruck Hbf"}}},
+      {"journeyId":"ir","train":{"category":"IR","journeyNumber":63,"transportType":"INTER_REGIONAL_TRAIN"},
+       "firstStop":{"stopPlace":{"evaNumber":"8505000","name":"Luzern"}},"lastStop":{"stopPlace":{"evaNumber":"8506302","name":"St. Gallen"}}},
+      {"journeyId":"s","train":{"line":"S1","category":"S","journeyNumber":63,"transportType":"CITY_TRAIN"},
+       "firstStop":{"stopPlace":{"evaNumber":"8000105","name":"Frankfurt(Main)Hbf"}},"lastStop":{"stopPlace":{"evaNumber":"8000250","name":"Wiesbaden Hbf"}}}
+    ]
+    """
+
+    static func details(_ journeyId: String) -> String {
+        let evas = journeyId == "rj" ? ["8100002", "8000320", "8000325", "8100108"] : ["8505000", "8506302"]
+        return #"{"stops":["# + evas.map { #"{"stopPlace":{"evaNumber":"\#($0)","name":"\#($0)"}}"# }.joined(separator: ",") + "]}"
+    }
+
+    @Test func mapsBahnExpertTransportTypes() {
+        #expect(BahnExpertClient.product(transportType: "HIGH_SPEED_TRAIN", category: "ICE") == .highSpeed)
+        #expect(BahnExpertClient.product(transportType: "INTERCITY_TRAIN", category: "IC") == .longDistance)
+        #expect(BahnExpertClient.product(transportType: "REGIONAL_TRAIN", category: "RE") == .regionalExpress)
+        #expect(BahnExpertClient.product(transportType: "REGIONAL_TRAIN", category: "RB") == .regional)
+        #expect(BahnExpertClient.product(transportType: "REGIONAL_TRAIN", category: "Bus") == .bus)
+        #expect(BahnExpertClient.product(transportType: "CITY_TRAIN", category: "S") == .suburban)
+        #expect(BahnExpertClient.product(transportType: "FERRY", category: "Fähre") == .ferry)
+    }
+}
+
+private final class TrainSearchProtocol: URLProtocol, @unchecked Sendable {
+    static let detailRequests = Mutex<Set<String>>([])
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let body: String
+        if request.url?.path.hasSuffix("journey/detailsByJourneyId") == true {
+            let input = Self.bodyData(of: request).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            let id = input?["json"] as? String ?? ""
+            Self.detailRequests.withLock { _ = $0.insert(id) }
+            body = #"{"json":"# + TrainNumberSearchTests.details(id) + "}"
+        } else {
+            body = #"{"json":"# + TrainNumberSearchTests.found63 + "}"
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+
+    /// URLSession hands a POST body to protocols as a stream.
+    static func bodyData(of request: URLRequest) -> Data? {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return nil }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while stream.hasBytesAvailable {
+            let read = stream.read(&buffer, maxLength: buffer.count)
+            guard read > 0 else { break }
+            data.append(buffer, count: read)
+        }
+        return data
     }
 }
 
