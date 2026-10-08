@@ -69,7 +69,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 - `Features/Connections/` – search form (`ConnectionsView`, `ConnectionSearch`, `RouteOptionsEditor`
   for via stops/products/max transfers), `JourneyResultsView` (+ `JourneyCard`, `TrainNumberSheet`),
   `JourneyDetailView` (+ `LegCard`, `TransferRow`, alternatives sheets), `JourneyMapView` (MapKit),
-  `JourneyReplanSheet` (replan from mid-journey).
+  `JourneyReplanSheet` (replan from mid-journey; "Halt hinzufügen" via `ManualStopSheet` adds a stop outside the
+  timetable as exit, and a Träwelling check-in then becomes a manual trip via `AppModel.replaceCheckinWithManualTrip`, #207).
 - `Features/Departures/` – `StationBoardView`/`BoardRow`, `TripView` (single train's stops),
   `CoachSequenceView.swift`: the Wagenreihung unfolds in place, no sheet. `CoachSequenceDisclosure` ("Wagenreihung ⌄" row in
   `LegCard` between the stops and "Mehr", in `TripContent`'s header; the train search has its own row) shows once bahn.de has a
@@ -250,10 +251,12 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `journeysIgnoringBoardingRules`: direct trains with "Nur Ein-/Ausstieg" for the expert option of that name,
   and `journeysContinuingFromRestrictedTrains`: "Nur Ausstieg" trains that end short of the destination plus an onward
   connection, e.g. ICE 204 Harburg → Hamburg Hbf → RJ; both added to search results in `JourneyResultsView`), `StationCalls` (hides routes that change onto a train also calling at
-  the origin, or leave one also calling at the destination – e.g. Berlin Hbf → Halle → back via Hbf; not for via searches), `TicketFilter`/`BC100Rules`, `BoardFilter`.
+  the origin, or leave one also calling at the destination – e.g. Berlin Hbf → Halle → back via Hbf; not for via searches), `TicketFilter`/`BC100Rules`, `BoardFilter`,
+  `ManualStop` (`Stopover.manual` with `isManual`, which refreshes keep unlike `isAdditional`; `Trip.inserting(manualStop:boardingAt:)` sorts it in by time).
 - `Traewelling/` – OAuth PKCE (`TraewellingAuth`, `TokenStore`), `TraewellingClient`
   (check-ins, history), `QuickTag`. Finding the train asks only the nearest few stations' departures, in parallel
   (12 s timeout), and caches autocomplete/departures, so retries and "Manuell eintragen" (`checkinAsManualTrip`) don't search again (#106).
+  `replaceWithManualTrip` turns a check-in into one on a manual trip (creates the trip first, then deletes and re-checks in, keeping text/visibility/tags).
   `TraewellingCheckinEdit`: `status(id:)`, `updateStatus` (text, visibility, trip type), `deleteStatus`, tags
   (`tags`, `applyTagChanges` with `StatusTagChanges`), moving the exit, `earlyExit` (where checking out now ends a ride),
   `fellowTravellers(of:)` (others checked in to the same trip, `trips/{id}/statuses`, whose ride overlaps).
