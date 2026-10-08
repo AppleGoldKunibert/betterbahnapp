@@ -3,10 +3,10 @@ import BetterBahnKit
 import SwiftUI
 import WidgetKit
 
-private let brand = Color(red: 0.86, green: 0.09, blue: 0.19)
-private let heavyDelayColor = Color(red: 1.0, green: 0.35, blue: 0.35)
+let brand = Color(red: 0.86, green: 0.09, blue: 0.19)
+let heavyDelayColor = Color(red: 1.0, green: 0.35, blue: 0.35)
 
-private func delayColor(_ minutes: Int) -> Color {
+func delayColor(_ minutes: Int) -> Color {
     minutes >= 6 ? heavyDelayColor : minutes >= 1 ? .yellow : .green
 }
 

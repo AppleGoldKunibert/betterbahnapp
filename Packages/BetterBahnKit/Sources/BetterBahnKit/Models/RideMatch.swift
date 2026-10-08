@@ -14,24 +14,89 @@ public enum RideMatch {
         return isSameLine(a.line, b.line) || coversSameStretch(a, b)
     }
 
-    /// Träwelling check-ins that don't already appear in `saved`.
+    /// Träwelling check-ins that don't already appear in `saved` or earlier in `imported`.
+    ///
+    /// The same ride can be in the check-in history more than once (a check-in deleted and redone
+    /// on Träwelling stays in the local copy until a full resync), so check-ins are matched against
+    /// each other too.
+    /// Otherwise those rides only collapsed while saved journeys were shown, and hiding them made
+    /// the stretches look travelled more often.
+    ///
+    /// Two check-ins only count as one when they're on the rails at the same moment, without the
+    /// tolerance `isSameRide` allows: checking out and in again on the same train (one stop apart, or
+    /// right after a stop) are two rides, and merging them lost one of them.
     ///
     /// Bucketed by day so this stays cheap with long histories; a ride is compared against the legs
     /// of its own and the previous day, which covers rides running over midnight.
-    public static func deduplicated(_ imported: [Journey], against saved: [Journey],
+    public static func deduplicated(_ imported: [Journey], against saved: [Journey] = [],
                                     calendar: Calendar = .current) -> [Journey] {
-        var savedByDay: [Date: [Leg]] = [:]
-        for leg in saved.flatMap(\.transitLegs) {
-            savedByDay[calendar.startOfDay(for: leg.departure.planned), default: []].append(leg)
+        func byDay(_ legs: [Leg]) -> [Date: [Leg]] {
+            Dictionary(grouping: legs) { calendar.startOfDay(for: $0.departure.planned) }
         }
+        let savedByDay = byDay(saved.flatMap(\.transitLegs))
+        var keptByDay: [Date: [Leg]] = [:]
         return imported.filter { trip in
-            !trip.transitLegs.contains { leg in
+            let isKnown = trip.transitLegs.contains { leg in
                 let day = calendar.startOfDay(for: leg.departure.planned)
-                let previous = calendar.date(byAdding: .day, value: -1, to: day) ?? day
-                let candidates = (savedByDay[day] ?? []) + (savedByDay[previous] ?? [])
-                return candidates.contains { isSameRide(leg, $0) }
+                let days = [day, calendar.date(byAdding: .day, value: -1, to: day) ?? day]
+                return days.contains { day in
+                    savedByDay[day, default: []].contains { isSameRide(leg, $0) }
+                        || keptByDay[day, default: []].contains { isRepeatedCheckin(leg, $0) }
+                }
             }
+            if !isKnown {
+                for leg in trip.transitLegs {
+                    keptByDay[calendar.startOfDay(for: leg.departure.planned), default: []].append(leg)
+                }
+            }
+            return !isKnown
         }
+    }
+
+    static func isRepeatedCheckin(_ a: Leg, _ b: Leg) -> Bool {
+        runSimultaneously(a, b) && (isSameLine(a.line, b.line) || coversSameStretch(a, b))
+    }
+
+    /// `saved` reduced to the legs no Träwelling check-in in `checkins` covers; journeys left without
+    /// a ride are dropped.
+    ///
+    /// A check-in is what was actually ridden, so it wins over the plan: a saved leg running at the
+    /// same time as a check-in goes, whatever train it names — you can't sit on two trains at once,
+    /// so it's either that same ride or a plan that wasn't taken. Dropping whole check-ins in favour
+    /// of saved journeys instead made turning saved journeys on swap rides for differently drawn
+    /// copies (and add plans next to the train really taken), so stretches showed up twice and a
+    /// saved journey with three legs replaced three trips with one. This way it only ever adds
+    /// rides nobody checked in. The same ride saved twice counts once, too.
+    public static func uncovered(_ saved: [Journey], by checkins: [Journey],
+                                 calendar: Calendar = .current) -> [Journey] {
+        func day(of leg: Leg) -> Date { calendar.startOfDay(for: leg.departure.planned) }
+        func around(_ day: Date) -> [Date] {
+            [-1, 0, 1].map { calendar.date(byAdding: .day, value: $0, to: day) ?? day }
+        }
+        let checkedIn = Dictionary(grouping: checkins.flatMap(\.transitLegs), by: day(of:))
+        var keptByDay: [Date: [Leg]] = [:]
+        return saved.compactMap { journey in
+            let legs = journey.legs.filter { leg in
+                guard !leg.isWalking else { return false }
+                // Neighbouring days too, for rides running over midnight.
+                let days = around(day(of: leg))
+                if days.contains(where: { checkedIn[$0, default: []].contains { runSimultaneously(leg, $0) } }) {
+                    return false
+                }
+                if days.contains(where: { keptByDay[$0, default: []].contains { isSameRide(leg, $0) } }) {
+                    return false
+                }
+                keptByDay[day(of: leg), default: []].append(leg)
+                return true
+            }
+            return legs.isEmpty ? nil : Journey(legs: legs, source: journey.source)
+        }
+    }
+
+    /// Both rides are under way at the same moment, by plan. No tolerance: a connection leaving
+    /// the minute the check-in arrives is a ride of its own.
+    static func runSimultaneously(_ a: Leg, _ b: Leg) -> Bool {
+        a.departure.planned < b.arrival.planned && b.departure.planned < a.arrival.planned
     }
 
     /// The two rides share time on the rails — you can't sit on two trains at once.

@@ -20,6 +20,7 @@ struct CheckinSheet: View {
     /// For coupled trains (`Line.coupledTrains`): which of them the user sits in, picked by hand since
     /// Träwelling knows them as separate trains. Nil until picked.
     @State private var chosenTrain: String?
+    @State private var emojis: [CustomEmoji] = []
 
     private var coupledTrains: [Line.CoupledTrain] { leg.line?.coupledTrains ?? [] }
 
@@ -67,6 +68,7 @@ struct CheckinSheet: View {
             .task {
                 isLoggedIn = await model.traewelling.isLoggedIn
                 visibility = model.settings.traewellingVisibility
+                emojis = await model.checkinEmojis()
             }
             .alert("Zug nicht gefunden", isPresented: $offerManualTrip) {
                 Button("Manuell eintragen") { send(asManualTrip: true) }
@@ -157,18 +159,7 @@ struct CheckinSheet: View {
     private var formCard: some View {
         Card {
             VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .top, spacing: 12) {
-                    IconTile(systemImage: "text.bubble.fill", color: .blue, size: 32)
-                    TextField("Was geht ab? (optional)", text: $message, axis: .vertical)
-                        .lineLimit(3...6)
-                        .padding(.top, 5)
-                }
-                if !message.isEmpty {
-                    Text("\(message.count)/280")
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(message.count > 280 ? Color.heavyDelay : .secondary)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                }
+                EmojiMessageField(message: $message, emojis: emojis)
                 Divider()
                 pickerRow("Sichtbarkeit", icon: "eye.fill", color: .purple, selection: $visibility, options: TraewellingVisibility.allCases) { $0.label }
                 Divider()
@@ -349,6 +340,8 @@ struct CheckinSheet: View {
     private func finishSuccess(_ checkin: CheckinResult, leg: Leg) async {
         withAnimation(.bouncy) { result = checkin }
         error = nil
+        // Remembered for the leg as shown in the journey (not a picked coupled train), so its "Mehr" finds it.
+        if let statusId = checkin.statusId { model.rememberCheckin(statusId: statusId, leg: self.leg) }
         if checkin.isManualTrip, let statusId = checkin.statusId {
             model.trackManualCheckin(statusId: statusId, leg: leg)
         }

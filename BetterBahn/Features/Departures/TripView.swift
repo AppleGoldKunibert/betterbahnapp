@@ -173,10 +173,11 @@ struct TripView: View {
 
     /// Only bahn.de's journey details report a Zusatzhalt (an unscheduled stop the train additionally
     /// picked up today) at all — Transitous and DB Timetables above only ever overlay onto stops already there.
+    /// Their live times also beat both where bahn.de has one (`BahnDeClient.applyingLiveTimes`).
     private func insertZusatzhalte() async {
         guard let trip, let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: trip),
               self.trip?.id == trip.id else { return }
-        self.trip?.stopovers = BahnDeClient.inserting(stops, into: trip.stopovers)
+        self.trip?.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: BahnDeClient.inserting(stops, into: trip.stopovers))
     }
 }
 
@@ -236,6 +237,10 @@ struct TripContent: View {
     /// Read when the view appears, so the tip doesn't vanish (and move the stops) while picking them.
     @State private var showsStopTip = !UserDefaults.standard.bool(forKey: "pickedTripStop")
     @State private var sequenceRequest: BahnDeClient.FormationRequest?
+    /// Where a train run by several railways changes hands (stopover ID → operators), e.g. DB at the
+    /// start and at Bad Schandau, ČD at Děčín; empty for one railway throughout.
+    @State private var operatorStops: [String: [String]] = [:]
+    @Environment(AppModel.self) private var model
 
     private var color: Color { trip.line?.product.color ?? .gray }
 
@@ -255,8 +260,8 @@ struct TripContent: View {
                                 .foregroundStyle(.secondary)
                                 .fullTextPopup("\(origin.displayName) → \(destination.displayName)", lines: 2)
                         }
-                        if let op = trip.line?.operatorName {
-                            Label(op, systemImage: "building.2.fill").font(.caption).foregroundStyle(.tertiary)
+                        if trip.line?.operatorName != nil {
+                            TrainOperatorsLabel(source: .trip(trip)).font(.caption).foregroundStyle(.tertiary)
                         }
                         TrainFormationLabel(trip: trip, savedLeg: savedLeg)
                     }
@@ -309,6 +314,10 @@ struct TripContent: View {
             if let sequenceRequest {
                 CoachSequenceView(request: sequenceRequest, trainName: trip.line?.name)
             }
+        }
+        .task(id: trip.stopovers.map(\.id)) {
+            guard let bahnDe = model.provider.bahnDe, let found = try? await bahnDe.operatorStops(for: trip) else { return }
+            operatorStops = found
         }
     }
 
@@ -369,6 +378,11 @@ struct TripContent: View {
                             }
                             if stop.isAdditional {
                                 InfoChip(text: "Zusatzhalt", systemImage: "plus.circle.fill", tint: .brand)
+                            }
+                            if let operators = operatorStops[stop.id] {
+                                HStack(spacing: 6) {
+                                    ForEach(operators, id: \.self) { OperatorLogo(name: $0) }
+                                }
                             }
                         }
                         Spacer()
@@ -614,12 +628,13 @@ struct LegTripSheet: View {
     /// Only bahn.de's journey details report a Zusatzhalt (an unscheduled stop the train additionally
     /// picked up today) at all — Transitous and DB Timetables above only ever overlay onto stops already there.
     /// bahn.de only reports them while the train runs, so the leg's own train also keeps the ones the
-    /// saved journey remembered (where you may have got on, off or changed).
+    /// saved journey remembered (where you may have got on, off or changed). bahn.de's live times also
+    /// beat Transitous' and DB Timetables' where it has one (`BahnDeClient.applyingLiveTimes`).
     private func insertZusatzhalte() async {
         guard var updated = trip else { return }
         let ownTrain = shownTripId == nil
         if let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: updated) {
-            updated.stopovers = BahnDeClient.inserting(stops, into: updated.stopovers)
+            updated.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: BahnDeClient.inserting(stops, into: updated.stopovers))
         }
         if ownTrain { updated = updated.keepingAdditionalStops(of: leg) }
         guard self.trip?.id == updated.id, ownTrain == (shownTripId == nil) else { return }

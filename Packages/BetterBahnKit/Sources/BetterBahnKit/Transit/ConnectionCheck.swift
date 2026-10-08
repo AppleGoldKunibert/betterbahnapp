@@ -203,7 +203,11 @@ public struct JourneyRefresher: Sendable {
         let runningSoon = Self.isRunningSoon(leg)
         if let bahnDe = provider.bahnDe, runningSoon || Self.needsPlatforms(leg),
            let stops = try? await bahnDe.journeyStops(for: leg, maxAge: runningSoon ? BahnDeClient.journeyStopsMaxAge : 3600) {
-            if runningSoon, !leg.stopovers.isEmpty { leg.stopovers = BahnDeClient.inserting(stops, into: leg.stopovers) }
+            if runningSoon {
+                if !leg.stopovers.isEmpty { leg.stopovers = BahnDeClient.inserting(stops, into: leg.stopovers) }
+                // DB's own live times beat Transitous' and fill stops DB Timetables missed.
+                leg = BahnDeClient.applyingLiveTimes(from: stops, to: leg)
+            }
             leg = BahnDeClient.fillingMissingPlatforms(in: leg, from: stops)
         }
         return leg

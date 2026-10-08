@@ -2,3 +2,6 @@
 
 DEVELOPMENT_TEAM = $(LOCAL_DEVELOPMENT_TEAM)
 PRODUCT_BUNDLE_IDENTIFIER = de.goldkunibert.BetterBahn$(LOCAL_BUNDLE_ID_SUFFIX).Widgets
+
+// App Group shared with the app: the widgets read the journey the app saves there (WidgetStore).
+CODE_SIGN_ENTITLEMENTS = Config/BetterBahnWidgets.entitlements

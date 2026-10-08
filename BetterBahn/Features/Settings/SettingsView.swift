@@ -97,6 +97,17 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Toggle(isOn: $settings.shareTrainStatistics) {
+                        IconLabel(title: "Zugdaten für Statistik teilen", systemImage: "chart.bar.fill", color: .teal)
+                    }
+                    .tint(.brand)
+                } header: {
+                    Text("Statistik")
+                } footer: {
+                    Text("Schickt Zugnummer und Fahrt der Regional- und Fernzüge, die du dir ansiehst, an den BetterBahn-Server. Er merkt sich dann Verspätungen, Gleiswechsel, Ausfälle und Wagenreihung dieser Fahrt für spätere Statistiken. Ohne Bezug zu dir oder deinem Standort.")
+                }
+
+                Section {
                     Button(role: .destructive) {
                         showClearHistoryConfirmation = true
                     } label: {
@@ -128,12 +139,16 @@ struct SettingsView: View {
                             IconLabel(title: "„Nur Ein-/Ausstieg“ ignorieren", systemImage: "arrow.up.arrow.down.circle.fill", color: .teal)
                         }
                         .tint(.brand)
+                        Toggle(isOn: $settings.expertRil100) {
+                            IconLabel(title: "RIL100-Codes in der Suche", systemImage: "character.textbox", color: .gray)
+                        }
+                        .tint(.brand)
                     }
                 } header: {
                     Text("Für Profis")
                 } footer: {
                     Text(settings.expertMode
-                         ? "Zusätzliche Funktionen für Vielfahrer. „Nur Ein-/Ausstieg“ ignorieren zeigt in der Suche auch direkte Züge, die laut Fahrplan dort keinen Einstieg oder Ausstieg erlauben."
+                         ? "Zusätzliche Funktionen für Vielfahrer. „Nur Ein-/Ausstieg“ ignorieren zeigt in der Suche auch direkte Züge, die laut Fahrplan dort keinen Einstieg oder Ausstieg erlauben. RIL100-Codes zeigt in der Bahnhofssuche die DB-Abkürzung rechts neben dem Bahnhof (z. B. FF); suchen kann man mit „ff“ auch so."
                          : "Zusätzliche Funktionen für Vielfahrer.")
                 }
 
@@ -219,11 +234,12 @@ struct SettingsView: View {
                     HStack {
                         IconLabel(title: "Jetzt synchronisieren", systemImage: "arrow.triangle.2.circlepath", color: .blue)
                         Spacer()
+                        // The count keeps growing while a long history is imported page by page.
+                        Text("\(model.traewellingTrips.count) Fahrten")
+                            .foregroundStyle(.secondary)
+                            .contentTransition(.numericText())
                         if model.isSyncingTraewelling {
                             ProgressView()
-                        } else {
-                            Text("\(model.traewellingTrips.count) Fahrten")
-                                .foregroundStyle(.secondary)
                         }
                     }
                 }
