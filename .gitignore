@@ -94,5 +94,9 @@ AppStoreScreenshots/6.5-Zoll/04-abfahrten.png
 AppStoreScreenshots/6.5-Zoll/05-zugansicht.png
 AppStoreScreenshots/6.5-Zoll/06-live-aktivitaet.png
 
-# graphify output (rebuilt per session with /graphify)
-graphify-out/
+# graphify output: rebuilt per session (code needs no LLM). Only the doc extraction results are
+# kept, so a fresh clone doesn't pay tokens for docs that didn't change.
+graphify-out/*
+!graphify-out/cache/
+graphify-out/cache/*
+!graphify-out/cache/semantic/
