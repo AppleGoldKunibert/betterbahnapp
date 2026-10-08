@@ -2126,6 +2126,116 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
     }
 }
 
+/// "Anderer Zug" in the middle of a journey A → B → C → D (#226): Köln → Düsseldorf → Hamm → Berlin.
+@Suite struct MidJourneyReplaceTests {
+    let a = station("8000207", "Köln Hbf", 50.943, 6.958)
+    let b = station("8000085", "Düsseldorf Hbf", 51.219, 6.794)
+    let c = station("8000149", "Hamm (Westf)", 51.678, 7.808)
+    let d = station("8011160", "Berlin Hbf", 52.525, 13.369)
+    let base = Date(timeIntervalSince1970: 1_800_000_000)
+
+    func time(_ minutes: Double?) -> TimeInfo? { minutes.map { TimeInfo(planned: base.addingTimeInterval($0 * 60), actual: nil) } }
+
+    func trip(_ id: String, _ name: String, _ stops: [(Station, Double?, Double?)]) -> Trip {
+        Trip(id: id, line: Line(name: name, number: String(name.split(separator: " ").last!), product: .highSpeed, operatorName: nil),
+             direction: "Berlin Hbf",
+             stopovers: stops.map { Stopover(station: $0.0, arrival: time($0.1), departure: time($0.2),
+                                             arrivalPlatform: nil, departurePlatform: nil, cancelled: false) },
+             cancelled: false, remarks: [], source: .bahnDe)
+    }
+
+    func entry(_ trip: Trip, at station: Station, planned: Double, actual: Double? = nil) -> BoardEntry {
+        BoardEntry(kind: .departures, tripId: trip.id, station: station, line: trip.line!, otherEnd: "Berlin Hbf",
+                   time: TimeInfo(planned: base.addingTimeInterval(planned * 60), actual: actual.map { base.addingTimeInterval($0 * 60) }),
+                   platform: PlatformInfo(planned: nil, actual: nil), cancelled: false,
+                   terminatesOrOriginatesHere: false, remarks: [], source: .bahnDe)
+    }
+
+    var re1: Trip { trip("re1", "RE 1", [(a, nil, 0), (b, 20, nil)]) }
+    var ice2: Trip { trip("ice2", "ICE 2", [(b, nil, 30), (c, 60, nil)]) }
+    var ice3: Trip { trip("ice3", "ICE 3", [(c, nil, 70), (d, 200, nil)]) }
+    /// Later train B → C: gets in at :75, after ICE 3 has left.
+    var ice4: Trip { trip("ice4", "ICE 4", [(b, nil, 50), (c, 75, nil)]) }
+    var ice5: Trip { trip("ice5", "ICE 5", [(c, nil, 90), (d, 210, nil)]) }
+    /// Through train B → C → D: an "Andere Routenführung" without the change in C.
+    var ice6: Trip { trip("ice6", "ICE 6", [(b, nil, 55), (c, 79, 80), (d, 190, nil)]) }
+    /// Planned before ICE 4 gets in, but running 10 min late.
+    var ice7: Trip { trip("ice7", "ICE 7", [(c, nil, 72), (d, 205, nil)]) }
+
+    func plan() throws -> Journey {
+        Journey(legs: [try #require(re1.leg(from: a, to: b)), try #require(ice2.leg(from: b, to: c)),
+                       try #require(ice3.leg(from: c, to: d))], source: .bahnDe)
+    }
+
+    func picker(boards: [BoardEntry] = [], journeys: [Journey] = []) -> TrainPicker {
+        let primary = MockProvider(source: .bahnDe)
+        primary.boards = boards
+        primary.trips = Dictionary(uniqueKeysWithValues: [re1, ice2, ice3, ice4, ice5, ice6, ice7].map { ($0.id, $0) })
+        primary.journeyPages = [JourneyPage(journeys: journeys, earlierCursor: nil, laterCursor: nil, source: .bahnDe)]
+        return TrainPicker(provider: CombinedProvider(primary: primary, fallback: MockProvider(source: .transitous), bahnDe: nil))
+    }
+
+    @Test func laterTrainMissesConnectionThenPickTrainForIt() async throws {
+        let picker = picker(boards: [entry(ice3, at: c, planned: 70), entry(ice5, at: c, planned: 90),
+                                     entry(ice6, at: c, planned: 80), entry(ice7, at: c, planned: 72, actual: 82)])
+        let journey = try plan()
+        // Step 1: ICE 4 instead of ICE 2. RE 1 and ICE 3 stay, ICE 3 is reported as missed.
+        let first = try await picker.replacing(legAt: 1, in: journey, with: try #require(ice4.leg(from: b, to: c)), finalDestination: d)
+        #expect(first.journey.legs.map(\.tripId) == ["re1", "ice4", "ice3"])
+        let missed = try #require(first.missedConnection)
+        #expect(missed.legIndex == 2)
+        #expect(missed.earliestDeparture == base.addingTimeInterval(76 * 60))
+        // "Ignorieren" keeps that plan: the existing warning shows the transfer as missed.
+        #expect(first.journey.connectionIssues().contains { if case .transferMissed = $0 { true } else { false } })
+        // Step 2: "Alternativen zeigen" lists trains C → D leaving from :76 on, the late ICE 7 included.
+        let others = try await picker.alternatives(for: missed.leg, notBefore: missed.earliestDeparture)
+        #expect(others.map(\.tripId) == ["ice7", "ice6", "ice5"])
+        // Step 3: picking ICE 5 fixes the plan.
+        let second = try await picker.replacing(legAt: missed.legIndex, in: first.journey,
+                                                with: try #require(ice5.leg(from: c, to: d)), finalDestination: d)
+        #expect(second.journey.legs.map(\.tripId) == ["re1", "ice4", "ice5"])
+        #expect(second.missedConnection == nil)
+        #expect(second.journey.connectionIssues().isEmpty)
+    }
+
+    @Test func earlierTrainKeepsConnection() async throws {
+        let earlier = trip("ice8", "ICE 8", [(b, nil, 25), (c, 55, nil)])
+        let replaced = try await picker().replacing(legAt: 1, in: try plan(), with: try #require(earlier.leg(from: b, to: c)), finalDestination: d)
+        #expect(replaced.journey.legs.map(\.tripId) == ["re1", "ice8", "ice3"])
+        #expect(replaced.missedConnection == nil)
+    }
+
+    @Test func rerouteStraightToDestination() async throws {
+        let journey = try plan()
+        let sameRouting = Journey(legs: [try #require(ice2.leg(from: b, to: c)), try #require(ice3.leg(from: c, to: d))], source: .bahnDe)
+        let through = Journey(legs: [try #require(ice6.leg(from: b, to: d))], source: .bahnDe)
+        let picker = picker(journeys: [sameRouting, through])
+        // ICE 2 ends in Hamm, a mere transfer point: Berlin is the next goal.
+        let target = try #require(journey.rerouteTargetIndex(from: 1, vias: [], finalDestination: d))
+        #expect(target == 2)
+        let reroutes = try await picker.reroutes(for: journey.legs[1], to: journey.legs[target].destination)
+        #expect(reroutes.map(\.id) == [through.id])
+        let replaced = try await picker.replacing(legsIn: 1...target, in: journey, with: through.legs, finalDestination: d)
+        #expect(replaced.journey.legs.map(\.tripId) == ["re1", "ice6"])
+        #expect(replaced.missedConnection == nil)
+        // RE 1 isn't touched; ICE 6 leaves Düsseldorf after it gets in.
+        #expect(replaced.journey.connectionIssues().isEmpty)
+    }
+
+    @Test func noRerouteWhenLegEndsAtVia() throws {
+        #expect(try plan().rerouteTargetIndex(from: 1, vias: [c], finalDestination: d) == nil)
+        // From Köln, the via Hamm is the next goal: a reroute may skip Düsseldorf, not Hamm.
+        #expect(try plan().rerouteTargetIndex(from: 0, vias: [c], finalDestination: d) == 1)
+    }
+
+    @Test func rerouteDoesNotSkipViaInsideThroughTrain() throws {
+        // Köln → Düsseldorf, then ICE 6 through Hamm (a via without stay) to Berlin.
+        let journey = Journey(legs: [try #require(re1.leg(from: a, to: b)), try #require(ice6.leg(from: b, to: d))], source: .bahnDe)
+        #expect(journey.rerouteTargetIndex(from: 0, vias: [c], finalDestination: d) == nil)
+        #expect(journey.rerouteTargetIndex(from: 0, vias: [], finalDestination: d) == 1)
+    }
+}
+
 @Suite struct AccessAndDeadlineTests {
     @Test func stopAccessFilter() {
         func entry(_ access: StopAccess) -> BoardEntry {

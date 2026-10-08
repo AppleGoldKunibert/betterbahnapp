@@ -114,15 +114,26 @@ public extension Journey {
     /// Where the leg at `index` could be rerouted to instead (see `TrainPicker.reroutes`): the index of
     /// the first later leg ending at a via or at `finalDestination`. Nil when the leg itself ends at one,
     /// since then there's no transfer point to skip.
+    /// A via without a minimum stay can lie inside a through train's leg (`ViaRoutePlanner`); a reroute
+    /// mustn't skip it, so it ends where that train is boarded, or isn't offered if that's `index` itself.
     func rerouteTargetIndex(from index: Int, vias: [Station], finalDestination: Station) -> Int? {
         guard legs.indices.contains(index) else { return nil }
         func isGoal(_ station: Station) -> Bool {
             station.isSamePlace(as: finalDestination) || vias.contains { station.isSamePlace(as: $0) }
         }
-        guard !isGoal(legs[index].destination) else { return nil }
+        func passesVia(_ leg: Leg) -> Bool {
+            leg.stopovers.dropFirst().dropLast().contains { stop in vias.contains { stop.station.isSamePlace(as: $0) } }
+        }
+        guard !isGoal(legs[index].destination), !passesVia(legs[index]) else { return nil }
         let later = legs.indices.dropFirst(index + 1).filter { !legs[$0].isWalking }
+        var previous = index
+        for candidate in later {
+            if passesVia(legs[candidate]) { return previous == index ? nil : previous }
+            if isGoal(legs[candidate].destination) { return candidate }
+            previous = candidate
+        }
         // Without a goal among them (a walk to an address at the end), the last train's stop counts.
-        return later.first { isGoal(legs[$0].destination) } ?? later.last
+        return later.last
     }
 
     /// The next transit leg after the one at `index`, if it leaves too soon after that one arrives.
@@ -165,14 +176,13 @@ public struct TrainPicker: Sendable {
         return legs.sorted { $0.departure.planned < $1.departure.planned }
     }
 
-    /// The departure window to look for other trains in: around the leg's own departure, or from
-    /// `notBefore` on when it's later than that window's start.
+    /// The departure window to look for other trains in (planned times): around the leg's own departure,
+    /// or around `notBefore` when that's later, so trains planned a bit earlier but running late enough
+    /// still come up (the callers drop those actually leaving before `notBefore`).
     static func window(for leg: Leg, minutesBefore: Int, minutesAfter: Int, notBefore: Date?) -> (start: Date, end: Date) {
-        let start = leg.departure.planned.addingTimeInterval(TimeInterval(-minutesBefore * 60))
-        guard let notBefore, notBefore > start else {
-            return (start, leg.departure.planned.addingTimeInterval(TimeInterval(minutesAfter * 60)))
-        }
-        return (notBefore, notBefore.addingTimeInterval(TimeInterval(minutesAfter * 60)))
+        let reference = max(leg.departure.planned, notBefore ?? .distantPast)
+        return (reference.addingTimeInterval(TimeInterval(-minutesBefore * 60)),
+                reference.addingTimeInterval(TimeInterval(minutesAfter * 60)))
     }
 
     /// Connections with transfers from `leg.origin` to `leg.destination` in the same time window, for
