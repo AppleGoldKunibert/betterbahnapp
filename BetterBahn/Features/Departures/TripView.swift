@@ -241,7 +241,8 @@ struct TripContent: View {
     @AppStorage("pickedTripStop") private var pickedTripStop = false
     /// Read when the view appears, so the tip doesn't vanish (and move the stops) while picking them.
     @State private var showsStopTip = !UserDefaults.standard.bool(forKey: "pickedTripStop")
-    @State private var sequenceRequest: BahnDeClient.FormationRequest?
+    /// The stop whose platform was tapped: its Wagenreihung is unfolded below it.
+    @State private var sequenceStopID: String?
     /// Where a train run by several railways changes hands (stopover ID → operators), e.g. DB at the
     /// start and at Bad Schandau, ČD at Děčín; empty for one railway throughout.
     @State private var operatorStops: [String: [String]] = [:]
@@ -252,29 +253,30 @@ struct TripContent: View {
     var body: some View {
         VStack(spacing: 16) {
             Card {
-                HStack(spacing: 12) {
-                    LiveTrainIconTile(route: LiveTrainRoute(trip: trip), systemImage: trip.line?.product.symbolName ?? "tram.fill",
-                                      color: color, size: 46)
-                    VStack(alignment: .leading, spacing: 3) {
-                        TrainNameRow(name: trip.line?.nameWithTripNumber ?? "Zug", font: .title3.weight(.bold), spacing: 8) {
-                            TrainSeriesTag(trip: trip, savedLeg: savedLeg)
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 12) {
+                        LiveTrainIconTile(route: LiveTrainRoute(trip: trip), systemImage: trip.line?.product.symbolName ?? "tram.fill",
+                                          color: color, size: 46)
+                        VStack(alignment: .leading, spacing: 3) {
+                            TrainNameRow(name: trip.line?.nameWithTripNumber ?? "Zug", font: .title3.weight(.bold), spacing: 8) {
+                                TrainSeriesTag(trip: trip, savedLeg: savedLeg)
+                            }
+                            if let origin = trip.origin, let destination = trip.destination {
+                                Text("\(origin.displayName) → \(destination.displayName)")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .fullTextPopup("\(origin.displayName) → \(destination.displayName)", lines: 2)
+                            }
+                            if trip.line?.operatorName != nil {
+                                TrainOperatorsLabel(source: .trip(trip)).font(.caption).foregroundStyle(.tertiary)
+                            }
+                            TrainFormationLabel(trip: trip, savedLeg: savedLeg)
                         }
-                        if let origin = trip.origin, let destination = trip.destination {
-                            Text("\(origin.displayName) → \(destination.displayName)")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .fullTextPopup("\(origin.displayName) → \(destination.displayName)", lines: 2)
-                        }
-                        if trip.line?.operatorName != nil {
-                            TrainOperatorsLabel(source: .trip(trip)).font(.caption).foregroundStyle(.tertiary)
-                        }
-                        TrainFormationLabel(trip: trip, savedLeg: savedLeg)
-                    }
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 6) {
+                        Spacer()
                         TrainMessagesButton(messages: trip.messages)
-                        CoachSequenceButton(trip: trip)
                     }
+                    // At the next stop; any other stop's unfolds below it with a tap on its platform.
+                    CoachSequenceDisclosure(trip: trip, spacing: 14)
                 }
             }
 
@@ -315,11 +317,6 @@ struct TripContent: View {
 
             ForEach(trip.remarks, id: \.self) { RemarkRow(text: $0) }
         }
-        .sheet(isPresented: Binding(get: { sequenceRequest != nil }, set: { if !$0 { sequenceRequest = nil } })) {
-            if let sequenceRequest {
-                CoachSequenceView(request: sequenceRequest, trainName: trip.line?.name)
-            }
-        }
         .task(id: trip.stopovers.map(\.id)) {
             guard let bahnDe = model.provider.bahnDe, let found = try? await bahnDe.operatorStops(for: trip) else { return }
             operatorStops = found
@@ -346,63 +343,69 @@ struct TripContent: View {
 
         return TimelineNode(kind: isMajor ? .major : .minor, color: isRidden(index) ? color : color.opacity(0.45),
                              lineAbove: segmentAbove, lineBelow: segmentBelow, dimmed: dimmed) {
-            HStack(alignment: .top, spacing: 10) {
-                Button {
-                    withAnimation(.snappy) { showPlannedTimes.toggle() }
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        if let arrival = stop.arrival {
-                            DelayTimeText(time: arrival, cancelled: stop.arrivalCancelled, showPlanned: showPlannedTimes,
-                                          font: isMajor ? .subheadline.weight(.semibold) : .caption.weight(.semibold))
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 10) {
+                    Button {
+                        withAnimation(.snappy) { showPlannedTimes.toggle() }
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            if let arrival = stop.arrival {
+                                DelayTimeText(time: arrival, cancelled: stop.arrivalCancelled, showPlanned: showPlannedTimes,
+                                              font: isMajor ? .subheadline.weight(.semibold) : .caption.weight(.semibold))
+                            }
+                            if let departure = stop.departure {
+                                DelayTimeText(time: departure, cancelled: stop.departureCancelled, showPlanned: showPlannedTimes,
+                                              font: isMajor ? .headline : .subheadline)
+                            }
                         }
-                        if let departure = stop.departure {
-                            DelayTimeText(time: departure, cancelled: stop.departureCancelled, showPlanned: showPlannedTimes,
-                                          font: isMajor ? .headline : .subheadline)
-                        }
+                        .fixedSize()
+                        .frame(minWidth: 68, alignment: .leading)
+                        .contentShape(.rect)
                     }
-                    .fixedSize()
-                    .frame(minWidth: 68, alignment: .leading)
-                    .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
+                    .buttonStyle(.plain)
 
-                Button {
-                    guard interactive else { return }
-                    select(index)
-                } label: {
-                    HStack(alignment: .top, spacing: 10) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(stop.station.displayName)
-                                .font(isMajor ? .headline : .subheadline)
-                                .fontWeight(highlight.map { stop.station.isSamePlace(as: $0) } == true ? .bold : nil)
-                                .lineLimit(2)
-                            if isBoarding {
-                                InfoChip(text: "Einstieg", systemImage: "arrow.up.right.circle.fill", tint: .punctual)
-                            } else if isExit {
-                                InfoChip(text: "Ausstieg", systemImage: "arrow.down.right.circle.fill", tint: .brand)
-                            }
-                            if stop.isAdditional {
-                                InfoChip(text: "Zusatzhalt", systemImage: "plus.circle.fill", tint: .brand)
-                            }
-                            if let operators = operatorStops[stop.id] {
-                                HStack(spacing: 6) {
-                                    ForEach(operators, id: \.self) { OperatorLogo(name: $0) }
+                    Button {
+                        guard interactive else { return }
+                        select(index)
+                    } label: {
+                        HStack(alignment: .top, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(stop.station.displayName)
+                                    .font(isMajor ? .headline : .subheadline)
+                                    .fontWeight(highlight.map { stop.station.isSamePlace(as: $0) } == true ? .bold : nil)
+                                    .lineLimit(2)
+                                if isBoarding {
+                                    InfoChip(text: "Einstieg", systemImage: "arrow.up.right.circle.fill", tint: .punctual)
+                                } else if isExit {
+                                    InfoChip(text: "Ausstieg", systemImage: "arrow.down.right.circle.fill", tint: .brand)
+                                }
+                                if stop.isAdditional {
+                                    InfoChip(text: "Zusatzhalt", systemImage: "plus.circle.fill", tint: .brand)
+                                }
+                                if let operators = operatorStops[stop.id] {
+                                    HStack(spacing: 6) {
+                                        ForEach(operators, id: \.self) { OperatorLogo(name: $0) }
+                                    }
                                 }
                             }
+                            Spacer()
                         }
-                        Spacer()
+                        .contentShape(.rect)
                     }
-                    .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .disabled(!interactive)
+                    .buttonStyle(.plain)
+                    .disabled(!interactive)
 
-                platformButton(stop)
+                    platformButton(stop)
+                }
+                if sequenceStopID == stop.id, let request = coachSequenceRequest(at: stop) {
+                    CoachSequencePanel(request: request)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             }
         }
     }
 
-    /// The stop's platform; tapping it opens the Wagenreihung at that stop when bahn.de can have one.
+    /// The stop's platform; tapping it unfolds the Wagenreihung at that stop below it when bahn.de can have one.
     @ViewBuilder
     private func platformButton(_ stop: Stopover) -> some View {
         let platform = stop.departurePlatform?.best != nil ? stop.departurePlatform : stop.arrivalPlatform
@@ -410,18 +413,22 @@ struct TripContent: View {
         if platform?.source == .czechTimetable {
             // Its tap tells where the platform comes from; that note offers the Wagenreihung.
             let request = coachSequenceRequest(at: stop)
-            PlatformBadge(platform: platform, onCoachSequence: request.map { request in { sequenceRequest = request } })
-        } else if let request = coachSequenceRequest(at: stop) {
+            PlatformBadge(platform: platform, onCoachSequence: request.map { _ in { toggleSequence(at: stop) } })
+        } else if coachSequenceRequest(at: stop) != nil {
             Button {
-                sequenceRequest = request
+                toggleSequence(at: stop)
             } label: {
                 badge.contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .accessibilityHint("Zeigt die Wagenreihung an diesem Halt")
+            .accessibilityHint(sequenceStopID == stop.id ? "Blendet die Wagenreihung an diesem Halt aus" : "Zeigt die Wagenreihung an diesem Halt")
         } else {
             badge
         }
+    }
+
+    private func toggleSequence(at stop: Stopover) {
+        withAnimation(.snappy) { sequenceStopID = sequenceStopID == stop.id ? nil : stop.id }
     }
 
     private func coachSequenceRequest(at stop: Stopover) -> BahnDeClient.FormationRequest? {

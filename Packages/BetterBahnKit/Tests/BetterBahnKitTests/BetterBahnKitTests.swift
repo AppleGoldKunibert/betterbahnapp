@@ -2790,6 +2790,68 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(formation.unitDescription == "Tz 8030 + 8005")
     }
 
+    /// The Wagenreihung shows the front trainset's drawing; series without one show none (#167).
+    @Test func formationDrawing() {
+        #expect(TrainFormation(units: [.init(model: "ICE 1", number: "190")]).drawing
+            == TrainDrawing(assetName: "Train-401", series: "BR 401"))
+        #expect(TrainFormation(units: [.init(model: "ICE 3neo", number: "8030")]).drawing?.assetName == "Train-408")
+        #expect(TrainFormation(units: [.init(model: "ICE T", number: "1190")]).drawing?.series == nil)
+        #expect(TrainFormation(units: [.init(model: "ICE 3 Velaro", number: "4710")]).drawing?.series == "BR 407")
+        #expect(TrainFormation(units: [.init(model: "ICE 3", number: "302")]).drawing == TrainDrawing(assetName: "Train-403", series: "BR 403"))
+        let coupled = TrainFormation(units: [.init(model: "IC 2 KISS", number: "4110"), .init(model: "ICE 4", number: "9018")])
+        #expect(coupled.drawing?.assetName == "Train-412")
+        #expect(TrainFormation(units: [.init(model: "FLIRT", number: nil)]).drawing == nil)
+    }
+
+    /// When bahn.de answers without the train's coaches, the Wagenreihung's note says what the answer had.
+    @Test func sequenceResponseSummary() throws {
+        let json = #"{"groups":[{"name":"IC1","transport":{"category":"RB","number":5410},"vehicles":[{},{}]}]}"#
+        let response = try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data(json.utf8))
+        #expect(BahnDeClient.summary(of: response) == "1 Gruppen, 2 Fahrzeuge, Züge RB 5410")
+        #expect(BahnDeClient.summary(of: BahnDeClient.SequenceResponse()) == "0 Gruppen, 0 Fahrzeuge, Züge keine")
+    }
+
+    /// A pause after bahn.de blocked the app says what started it, so the Wagenreihung's note can show it.
+    @Test func bahnDeBlockIsDescribed() async {
+        let gate = BahnDeGate()
+        #expect(await gate.blockDescription == nil)
+        await gate.report(.http(status: 404, body: nil))
+        #expect(await gate.blockDescription == nil)
+        await gate.report(.http(status: 403, body: #"{"status":"ERROR","code":"OPS_BLOCKED"}"#),
+                          url: URL(string: "https://example.com/web/api/reisebegleitung/wagenreihung/vehicle-sequence")!)
+        let description = await gate.blockDescription
+        #expect(description?.hasPrefix("Pause bis ") == true)
+        #expect(description?.contains(#"403 {"status":"ERROR","code":"OPS_BLOCKED"}"#) == true)
+        #expect(description?.hasSuffix("(…/vehicle-sequence)") == true)
+        #expect(BahnDeGate.excerpt(String(repeating: "x", count: 100)).count == 81)
+    }
+
+    /// The Wagenreihung unfolds by itself from 30 minutes before the departure until 15 minutes after it.
+    @Test func coachSequenceUnfoldsAroundDeparture() {
+        let departure = Date(timeIntervalSince1970: 1_800_000_000)
+        #expect(!CoachSequence.unfoldsByItself(departure: departure, now: departure.addingTimeInterval(-31 * 60)))
+        #expect(CoachSequence.unfoldsByItself(departure: departure, now: departure.addingTimeInterval(-30 * 60)))
+        #expect(CoachSequence.unfoldsByItself(departure: departure, now: departure))
+        #expect(CoachSequence.unfoldsByItself(departure: departure, now: departure.addingTimeInterval(15 * 60)))
+        #expect(!CoachSequence.unfoldsByItself(departure: departure, now: departure.addingTimeInterval(16 * 60)))
+        #expect(!CoachSequence.unfoldsByItself(departure: nil))
+    }
+
+    /// Coupled trainsets of one series share a card in the Wagenreihung, other series get their own (#167).
+    @Test func formationPartsBySeries() {
+        let twin = TrainFormation(units: [.init(model: "ICE 3", number: "302"), .init(model: "ICE 3", number: "330")])
+        #expect(twin.partsBySeries == [twin])
+        #expect(twin.partsBySeries.first?.modelSummary == "2× ICE 3")
+        // ICE 3neo with and without Redesign are both BR 408.
+        let neo = TrainFormation(units: [.init(model: "ICE 3neo", number: "8030"), .init(model: "ICE 3neo", number: "8005")])
+        #expect(neo.partsBySeries.count == 1)
+        let mixed = TrainFormation(units: [.init(model: "ICE 4", number: "9018"), .init(model: nil, number: "9020"),
+                                           .init(model: "ICE 3 Velaro", number: "4710")])
+        #expect(mixed.partsBySeries.map { $0.units.compactMap(\.number) } == [["9018", "9020"], ["4710"]])
+        #expect(TrainFormation(units: [.init(model: nil, number: "190")]).partsBySeries.count == 1)
+        #expect(TrainFormation(units: []).partsBySeries.isEmpty)
+    }
+
     @Test func formationURLUsesGermanDayAndUTCMilliseconds() throws {
         // 00:30 in Berlin on the 30th is still the 29th in UTC; bahn.de wants the German day (it
         // answers 404 for the 29th, e.g. ICE 1540 leaving Brandenburg Hbf at 00:41).
@@ -2905,7 +2967,7 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
             TrainTypeLookup.Group(seriesName: name, baureihe: number, unitNumber: nil, origin: nil, destination: nil, coachCount: 0)
         }
         #expect(group("412", "ICE 4 Lang (BR412)").family == "ICE 4")
-        #expect(group("407", "ICE 3 Velaro (BR407)").family == "ICE 3")
+        #expect(group("407", "ICE 3 Velaro (BR407)").family == "ICE 3 Velaro")
         #expect(group("408", "ICE 3neo (BR408)").family == "ICE 3neo")
         #expect(group(nil, "ICE L").family == "ICE L")
         #expect(group(nil, nil).family == nil)
