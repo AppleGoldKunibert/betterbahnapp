@@ -47,11 +47,20 @@ public struct TrainFormation: Codable, Sendable, Hashable {
         return "Tz " + parts.joined(separator: " + ")
     }
 
+    /// A loco-hauled IC 1: only "IC 1" units, none with a Tz. Older versions read its coach-set number
+    /// ("IC450007") as a Tz and remembered it.
+    public var isIC1: Bool { !units.isEmpty && units.allSatisfy { $0.model == "IC 1" && $0.number == nil } }
+
     /// `stored` with `formation` kept for `key` (see `Leg.formationKey`), so a saved journey still
     /// shows which trainsets ran once bahn.de and bahn.expert no longer answer for the train. Only a
-    /// formation naming a Tz is kept; nil when there is nothing to change.
+    /// formation naming a Tz is kept, and an IC 1 drops the bogus Tz remembered for it; nil when there
+    /// is nothing to change.
     public static func remembering(_ formation: TrainFormation, for key: String,
                                    in stored: [String: TrainFormation]?) -> [String: TrainFormation]? {
+        if formation.isIC1, var updated = stored, updated[key] != nil {
+            updated[key] = nil
+            return updated
+        }
         guard formation.unitDescription != nil, stored?[key] != formation else { return nil }
         var updated = stored ?? [:]
         updated[key] = formation

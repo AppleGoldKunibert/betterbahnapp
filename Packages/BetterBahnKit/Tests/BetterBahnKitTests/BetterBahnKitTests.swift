@@ -2181,6 +2181,17 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(TrainFormation.remembering(swapped, for: "b", in: stored) == ["a": tz, "b": swapped])
     }
 
+    /// IC 1189 kept showing "Tz 450007" remembered by an older version once bahn.de named it an IC 1.
+    @Test func ic1DropsRememberedTz() {
+        let bogus = TrainFormation(units: [TrainFormation.Unit(model: "ICE L", number: "450007")])
+        let ic1 = TrainFormation(units: [TrainFormation.Unit(model: "IC 1", number: nil)])
+        #expect(ic1.isIC1)
+        #expect(!bogus.isIC1)
+        #expect(TrainFormation.remembering(ic1, for: "a", in: ["a": bogus, "b": bogus]) == ["b": bogus])
+        #expect(TrainFormation.remembering(ic1, for: "a", in: ["b": bogus]) == nil)
+        #expect(TrainFormation.remembering(ic1, for: "a", in: nil) == nil)
+    }
+
     /// The key survives a refresh renaming the train or changing its trip.
     @Test func formationKeyIgnoresTrainNameAndTrip() {
         let at = { (minutes: Double) in TimeInfo(planned: Date(timeIntervalSince1970: 1_800_000_000 + minutes * 60), actual: nil) }
