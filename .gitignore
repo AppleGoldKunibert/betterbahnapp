@@ -93,3 +93,6 @@ AppStoreScreenshots/6.5-Zoll/03-reiseplan.png
 AppStoreScreenshots/6.5-Zoll/04-abfahrten.png
 AppStoreScreenshots/6.5-Zoll/05-zugansicht.png
 AppStoreScreenshots/6.5-Zoll/06-live-aktivitaet.png
+
+# graphify output (rebuilt per session with /graphify)
+graphify-out/
