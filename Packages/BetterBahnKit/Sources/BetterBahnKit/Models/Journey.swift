@@ -20,6 +20,11 @@ public enum Product: String, Codable, Sendable, CaseIterable, Hashable {
         }
     }
 
+    /// Products of the departure board's "Nur Fernverkehr" filter: ICE and IC/EC.
+    public static let longDistanceProducts: Set<Product> = [.highSpeed, .longDistance]
+    /// Products of the departure board's "Nur Regionalverkehr" filter: RE and RB only, no S-Bahn.
+    public static let regionalProducts: Set<Product> = [.regionalExpress, .regional]
+
     public var displayName: String {
         switch self {
         case .highSpeed: "ICE / Hochgeschwindigkeit"
