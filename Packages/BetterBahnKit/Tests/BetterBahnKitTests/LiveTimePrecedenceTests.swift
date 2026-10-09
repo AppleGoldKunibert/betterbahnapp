@@ -4,7 +4,7 @@ import Testing
 
 /// bahn.de's journey details overlay the times DB Timetables gave, but not a delay DB Timetables already
 /// put on a stop: for RE 3 3354 (9 Oct 2026) bahn.de had +7 at Gesundbrunnen and ±0 at the end, where
-/// DB Timetables (and bahn.expert) had +19 and +7.
+/// DB Timetables (and DB Navigator) had +19 and +7.
 struct LiveTimePrecedenceTests {
     let now = Date(timeIntervalSince1970: 1_790_000_000)
 

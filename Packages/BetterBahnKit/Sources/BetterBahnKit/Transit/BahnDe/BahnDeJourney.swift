@@ -811,7 +811,7 @@ extension BahnDeClient {
     ///
     /// `keepingDelays` is for when DB Timetables has been asked already: a time it put a delay on stays, and
     /// bahn.de only fills what is missing or on time. bahn.de's forecast can be far off for some trains
-    /// (RE 3 3354 on 9 Oct 2026: +7 at Gesundbrunnen and ±0 at the end, where DB Timetables and bahn.expert had
+    /// (RE 3 3354 on 9 Oct 2026: +7 at Gesundbrunnen and ±0 at the end, where DB Timetables and DB Navigator had
     /// +19 and +7), and it used to overwrite DB Timetables' times.
     public static func applyingLiveTimes(from stops: [JourneyStop], to leg: Leg, keepingDelays: Bool = false) -> Leg {
         var leg = leg
