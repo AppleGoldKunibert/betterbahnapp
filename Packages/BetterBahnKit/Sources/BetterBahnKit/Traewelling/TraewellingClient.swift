@@ -273,7 +273,12 @@ public actor TraewellingClient {
         return access
     }
 
+    /// The refresh token Träwelling last rejected, so it isn't sent again on every request until the
+    /// Keychain holds another one.
+    private var rejectedRefreshToken: String?
+
     private func refreshToken(_ refresh: String) async throws {
+        if refresh == rejectedRefreshToken { throw OAuthError.sessionExpired }
         if let refreshing { return try await refreshing.value }
         let task = Task { try await self.exchangeRefreshToken(refresh) }
         refreshing = task
@@ -281,11 +286,14 @@ public actor TraewellingClient {
         try await task.value
     }
 
-    /// Träwelling answers a refresh token it no longer accepts with 400 `invalid_grant`. That happens when
-    /// another device already used it (the token syncs through iCloud Keychain), or when the answer to
-    /// an earlier refresh never arrived (a train in a tunnel). Without handling it every request failed
-    /// with "Serverfehler (400)" until the user logged out and in again; now a newer token in the
-    /// Keychain is used, and otherwise the login ends so the app asks to log in.
+    /// Träwelling answers a refresh token it no longer accepts with 400 `invalid_grant`. Access tokens last
+    /// only an hour, so this is common: another device already used the refresh token (it syncs through
+    /// iCloud Keychain, which may not have delivered the new one yet), or the answer to an earlier refresh
+    /// never arrived (a train in a tunnel). Without handling it every request failed with
+    /// "Serverfehler (400)" until the user logged out and in again; now a newer token in the Keychain is
+    /// used, and otherwise the request fails with `OAuthError.sessionExpired`. The stored token is kept:
+    /// deleting it (`logout()`) would delete the synced Keychain item on every device, including a fresh
+    /// token the other device just stored. If one arrives later, the next request picks it up.
     private func exchangeRefreshToken(_ refresh: String, isRetry: Bool = false) async throws {
         do {
             // No `scope`: the new token keeps what the login granted. Asking for scopes added since
@@ -305,8 +313,8 @@ public actor TraewellingClient {
                     return try await exchangeRefreshToken(newer, isRetry: true)
                 }
             }
-            logout()
-            throw OAuthError.notLoggedIn
+            rejectedRefreshToken = refresh
+            throw OAuthError.sessionExpired
         }
     }
 

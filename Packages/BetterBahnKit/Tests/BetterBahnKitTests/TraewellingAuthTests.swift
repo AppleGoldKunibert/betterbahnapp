@@ -743,16 +743,24 @@ private final class CollidingCheckinProtocol: URLProtocol, @unchecked Sendable {
 /// Träwelling accepts a refresh token once. Rejected ones (400 `invalid_grant`) used to surface as
 /// "Serverfehler (400)" on the travel map for good, until the user logged out and in again.
 @Suite(.serialized) struct TraewellingTokenRefreshTests {
-    @Test func aRejectedRefreshTokenEndsTheLogin() async throws {
+    @Test func aRejectedRefreshTokenKeepsTheStoredTokenAndIsNotSentAgain() async throws {
         let store = expiredStore(refreshToken: "used-up")
         defer { store.clear() }
         RefreshTokenProtocol.mode = .rejected
         RefreshTokenProtocol.tokenRequests.withLock { $0 = [] }
         let client = client(store)
 
-        await #expect(throws: OAuthError.notLoggedIn) { try await client.currentUser() }
+        await #expect(throws: OAuthError.sessionExpired) { try await client.currentUser() }
+        await #expect(throws: OAuthError.sessionExpired) { try await client.currentUser() }
         #expect(RefreshTokenProtocol.tokenRequests.withLock { $0 } == ["used-up"])
-        #expect(store.load() == nil)
+        // Deleting it would delete the synced Keychain item on every device, a fresh token included.
+        #expect(store.load()?.refreshToken == "used-up")
+
+        // A token another device refreshed arrives through iCloud Keychain later.
+        store.save(OAuthToken(accessToken: "synced", refreshToken: "synced-next", expiresAt: .distantFuture))
+        let user = try await client.currentUser()
+        #expect(user.username == "gertrud")
+        #expect(RefreshTokenProtocol.tokenRequests.withLock { $0 } == ["used-up"])
     }
 
     @Test func usesTheTokenAnotherDeviceRefreshedMeanwhile() async throws {
