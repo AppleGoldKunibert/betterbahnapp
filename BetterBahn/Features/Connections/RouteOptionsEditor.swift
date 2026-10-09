@@ -108,7 +108,7 @@ struct ProductChips: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Button("Nur Züge") { products = Set(Product.allCases.filter(\.isTrain)) }
-                Button("Nur Fernverkehr") { products = [.highSpeed, .longDistance] }
+                Button("Nur Fernverkehr") { products = Product.longDistanceProducts }
                 Button("Alle") { products = Set(Product.allCases) }
             }
             .font(.caption.weight(.semibold))
@@ -119,8 +119,9 @@ struct ProductChips: View {
                     Button {
                         if isOn { products.remove(product) } else { products.insert(product) }
                     } label: {
-                        Label(product == .highSpeed ? "ICE" : product.displayName, systemImage: product.symbolName)
-                            .font(.caption.weight(.semibold))
+                        Label(product.displayName, systemImage: product.symbolName)
+                            // "Hochgeschwindigkeit" is much longer than the other names.
+                            .font(product == .highSpeed ? .system(size: 10, weight: .semibold) : .caption.weight(.semibold))
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
                             .frame(maxWidth: .infinity)
