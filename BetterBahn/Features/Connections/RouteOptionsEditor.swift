@@ -121,7 +121,7 @@ struct ProductChips: View {
                     } label: {
                         Label(product.displayName, systemImage: product.symbolName)
                             // "Hochgeschwindigkeit" is much longer than the other names.
-                            .font((product == .highSpeed ? Font.caption2 : Font.caption).weight(.semibold))
+                            .font(product == .highSpeed ? .system(size: 10, weight: .semibold) : .caption.weight(.semibold))
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
                             .frame(maxWidth: .infinity)
