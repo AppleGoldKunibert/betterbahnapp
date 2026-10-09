@@ -97,4 +97,27 @@ struct RefreshTraceTests {
         #expect(steps.first { $0.source == "DB Timetables (Start/Ziel)" }?.outcome == .skipped)
         #expect(steps.first { $0.source == "bahn.de" }?.outcome == .skipped)
     }
+
+    /// The trip views record what each source gave for one train, plus what they show in the end.
+    @Test func tripTraceEndsWithWhatTheViewShows() {
+        func stop(_ id: String, _ minutes: TimeInterval, delay: TimeInterval?) -> Stopover {
+            let planned = now.addingTimeInterval(minutes * 60)
+            let time = TimeInfo(planned: planned, actual: delay.map { planned.addingTimeInterval($0 * 60) })
+            return Stopover(station: station(id, id, source: .transitous), arrival: time, departure: time,
+                            arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+        }
+        let stops = [stop("a", 0, delay: 13), stop("b", 10, delay: 7), stop("c", 20, delay: 0)]
+        let trace = RefreshTrace.trip(id: "t1", line: "RE3 (3354)", stopovers: stops, steps: [
+            .init(source: "bahn.de", outcome: .failed, detail: "Keine Antwort."),
+        ], date: now)
+
+        #expect(trace.id == "trip|t1")
+        #expect(trace.title == "Zug RE3 (3354)")
+        let steps = trace.legs.first?.steps ?? []
+        #expect(steps.map(\.source) == ["bahn.de", "Angezeigt"])
+        #expect(steps.last?.detail == "3 Halte, 3 mit Live-Zeit, erster +13, letzter ±0")
+        // Nothing to show (the train didn't load): no empty "Angezeigt" line.
+        let failed = RefreshTrace.trip(id: "t2", line: "RE3", stopovers: [], steps: [], date: now)
+        #expect(failed.legs.first?.steps.isEmpty == true)
+    }
 }

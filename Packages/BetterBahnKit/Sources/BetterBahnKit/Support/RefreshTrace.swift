@@ -82,13 +82,13 @@ public struct RefreshTrace: Codable, Sendable, Hashable, Identifiable {
     }
 
     /// How many of `stops` carry a live time, and the delay at the first and the last of them.
-    static func summary(ofStopovers stops: [Stopover]) -> String {
+    public static func summary(ofStopovers stops: [Stopover]) -> String {
         let times = stops.compactMap { $0.departure ?? $0.arrival }
         return summary(ofTimes: times)
     }
 
     /// The same for bahn.de's stops.
-    static func summary(ofStops stops: [JourneyStop]) -> String {
+    public static func summary(ofStops stops: [JourneyStop]) -> String {
         summary(ofTimes: stops.compactMap { $0.departure ?? $0.arrival })
     }
 
@@ -128,6 +128,18 @@ public struct RefreshTrace: Codable, Sendable, Hashable, Identifiable {
 
     static func legTrace(for leg: Leg, steps: [Step]) -> LegTrace {
         LegTrace(train: leg.line?.name ?? "Fußweg", route: "\(leg.origin.displayName) → \(leg.destination.displayName)", steps: steps)
+    }
+
+    /// The trace of one train's stop list (the trip views): `steps` are what each source answered while it
+    /// loaded; the last one is what the view shows afterwards.
+    public static func trip(id: String, line: String, stopovers: [Stopover], steps: [Step], date: Date = .now) -> RefreshTrace {
+        var steps = steps
+        if !stopovers.isEmpty {
+            steps.append(Step(source: "Angezeigt", outcome: .ok, detail: summary(ofStopovers: stopovers)))
+        }
+        let route = [stopovers.first, stopovers.last].compactMap { $0?.station.displayName }.joined(separator: " → ")
+        return RefreshTrace(id: "trip|\(id)", title: "Zug \(line)", date: date,
+                            legs: [LegTrace(train: line, route: route, steps: steps)])
     }
 
     static func title(of journey: Journey) -> String {

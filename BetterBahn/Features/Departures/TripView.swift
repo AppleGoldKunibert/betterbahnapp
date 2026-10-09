@@ -120,8 +120,10 @@ struct TripView: View {
 
     private func load() async {
         let tripId = tripId
+        var steps: [RefreshTrace.Step] = []
         do {
             var loaded = try await model.provider.trip(id: tripId, source: entry.source)
+            steps.append(.init(source: "Transitous", outcome: .ok, detail: RefreshTrace.summary(ofStopovers: loaded.stopovers)))
             if tripId != entry.tripId, let train = runs.first(where: { $0.tripId == tripId }) {
                 // A coupled train: it leads, this one becomes the coupled one.
                 loaded.line = entry.line.riding(train, ownDirection: ownDirection, ownTripId: entry.tripId)
@@ -146,13 +148,20 @@ struct TripView: View {
                 // Switched to another train meanwhile.
                 guard tripId == self.tripId else { return }
                 show(live)
+                steps.append(.init(source: "DB Timetables", outcome: .ok, detail: RefreshTrace.summary(ofStopovers: live.stopovers)))
             } else {
                 show(loaded)
+                steps.append(.init(source: "DB Timetables", outcome: .skipped, detail: "nicht verfügbar (kein App Attest)"))
             }
-            await insertZusatzhalte()
-            if let trip { model.rememberLive(trip) }
+            await insertZusatzhalte(trace: &steps)
+            if let trip {
+                model.rememberLive(trip)
+                model.record(.trip(id: tripId, line: entry.line.displayName, stopovers: trip.stopovers, steps: steps))
+            }
         } catch is CancellationError {
         } catch {
+            steps.append(.init(source: "Transitous", outcome: .failed, detail: error.localizedDescription))
+            model.record(.trip(id: tripId, line: entry.line.displayName, stopovers: trip?.stopovers ?? [], steps: steps))
             self.error = error
         }
     }
@@ -178,9 +187,24 @@ struct TripView: View {
     /// Only bahn.de's journey details report a Zusatzhalt (an unscheduled stop the train additionally
     /// picked up today) at all — Transitous and DB Timetables above only ever overlay onto stops already there.
     /// Their live times also beat both where bahn.de has one (`BahnDeClient.applyingLiveTimes`).
-    private func insertZusatzhalte() async {
-        guard let trip, let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: trip),
-              self.trip?.id == trip.id else { return }
+    private func insertZusatzhalte(trace: inout [RefreshTrace.Step]) async {
+        guard let trip, let bahnDe = model.provider.bahnDe else {
+            trace.append(.init(source: "bahn.de", outcome: .skipped, detail: "nicht eingerichtet"))
+            return
+        }
+        let stops: [JourneyStop]?
+        do {
+            stops = try await bahnDe.journeyStops(for: trip)
+        } catch {
+            trace.append(.init(source: "bahn.de", outcome: .failed, detail: error.localizedDescription))
+            return
+        }
+        guard let stops else {
+            trace.append(.init(source: "bahn.de", outcome: .empty, detail: "Zug dort nicht abfragbar"))
+            return
+        }
+        guard self.trip?.id == trip.id else { return }
+        trace.append(.init(source: "bahn.de", outcome: .ok, detail: RefreshTrace.summary(ofStops: stops)))
         self.trip?.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: BahnDeClient.inserting(stops, into: trip.stopovers))
         if (try? await bahnDe.hasSleepingCars(for: trip)) == true, self.trip?.id == trip.id { self.trip?.line?.nightRail = true }
     }
@@ -606,12 +630,14 @@ struct LegTripSheet: View {
             error = TransitError.notFound("Fahrt")
             return
         }
+        var steps: [RefreshTrace.Step] = []
         do {
             // The leg's own run is looked up again if a feed import renumbered it (a saved journey's).
             var loaded = tripId == leg.tripId
                 ? try await model.provider.trip(for: leg)
                 : try await model.provider.trip(id: tripId, source: leg.source)
             guard tripId == self.tripId else { return }
+            steps.append(.init(source: "Transitous", outcome: .ok, detail: RefreshTrace.summary(ofStopovers: loaded.stopovers)))
             // The leg's own line knows the trains coupled to it, so the trainsets of both show.
             if tripId == leg.tripId {
                 loaded.line = leg.line ?? loaded.line
@@ -629,13 +655,20 @@ struct LegTripSheet: View {
                 // Switched to another train meanwhile.
                 guard tripId == self.tripId else { return }
                 trip = live
+                steps.append(.init(source: "DB Timetables", outcome: .ok, detail: RefreshTrace.summary(ofStopovers: live.stopovers)))
             } else {
                 trip = loaded
+                steps.append(.init(source: "DB Timetables", outcome: .skipped, detail: "nicht verfügbar (kein App Attest)"))
             }
-            await insertZusatzhalte()
-            if let trip { model.rememberLive(trip) }
+            await insertZusatzhalte(trace: &steps)
+            if let trip {
+                model.rememberLive(trip)
+                model.record(.trip(id: tripId, line: leg.line?.displayName ?? "Zug", stopovers: trip.stopovers, steps: steps))
+            }
         } catch is CancellationError {
         } catch {
+            steps.append(.init(source: "Transitous", outcome: .failed, detail: error.localizedDescription))
+            model.record(.trip(id: tripId, line: leg.line?.displayName ?? "Zug", stopovers: trip?.stopovers ?? [], steps: steps))
             // The leg's own train, gone from Transitous (long past) or not reachable: its saved stops
             // rather than an error. Seen live before, that version stays.
             if tripId == leg.tripId, let saved = leg.savedTrip {
@@ -652,13 +685,24 @@ struct LegTripSheet: View {
     /// bahn.de only reports them while the train runs, so the leg's own train also keeps the ones the
     /// saved journey remembered (where you may have got on, off or changed). bahn.de's live times also
     /// beat Transitous' and DB Timetables' where it has one (`BahnDeClient.applyingLiveTimes`).
-    private func insertZusatzhalte() async {
+    private func insertZusatzhalte(trace: inout [RefreshTrace.Step]) async {
         guard var updated = trip else { return }
         let ownTrain = shownTripId == nil
         var hasSleepingCars = false
-        if let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: updated) {
-            updated.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: BahnDeClient.inserting(stops, into: updated.stopovers))
-            hasSleepingCars = (try? await bahnDe.hasSleepingCars(for: updated)) == true
+        if let bahnDe = model.provider.bahnDe {
+            do {
+                if let stops = try await bahnDe.journeyStops(for: updated) {
+                    updated.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: BahnDeClient.inserting(stops, into: updated.stopovers))
+                    hasSleepingCars = (try? await bahnDe.hasSleepingCars(for: updated)) == true
+                    trace.append(.init(source: "bahn.de", outcome: .ok, detail: RefreshTrace.summary(ofStops: stops)))
+                } else {
+                    trace.append(.init(source: "bahn.de", outcome: .empty, detail: "Zug dort nicht abfragbar"))
+                }
+            } catch {
+                trace.append(.init(source: "bahn.de", outcome: .failed, detail: error.localizedDescription))
+            }
+        } else {
+            trace.append(.init(source: "bahn.de", outcome: .skipped, detail: "nicht eingerichtet"))
         }
         if ownTrain { updated = updated.keepingAdditionalStops(of: leg) }
         guard self.trip?.id == updated.id, ownTrain == (shownTripId == nil) else { return }

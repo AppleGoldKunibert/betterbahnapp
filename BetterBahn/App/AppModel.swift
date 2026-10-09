@@ -205,10 +205,10 @@ final class AppModel {
         return refreshed
     }
 
-    private func record(_ trace: RefreshTrace) {
+    func record(_ trace: RefreshTrace) {
         refreshTraces.removeAll { $0.id == trace.id }
         refreshTraces.insert(trace, at: 0)
-        if refreshTraces.count > 8 { refreshTraces.removeLast(refreshTraces.count - 8) }
+        if refreshTraces.count > 12 { refreshTraces.removeLast(refreshTraces.count - 12) }
         Storage.saveInBackground(refreshTraces, key: "refreshTraces")
     }
 
