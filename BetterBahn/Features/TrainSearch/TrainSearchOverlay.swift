@@ -275,7 +275,8 @@ private struct TrainSearchRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            IconTile(systemImage: result.product.symbolName, color: result.product.color, size: 34)
+            IconTile(systemImage: result.product.symbolName(nightTrain: result.product.isTrain && Line.isNightTrainCategory(result.category)),
+                     color: result.product.color, size: 34)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(result.name).font(.headline)

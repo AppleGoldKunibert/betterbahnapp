@@ -113,21 +113,27 @@ extension BahnDeClient {
         /// trains run by several, e.g. `{"key": "BEF", "value": "DB Fernverkehr AG",
         /// "teilstreckenHinweis": "(Berlin Hbf - Bad Schandau)"}` (as parsed by db-vendo-client). The
         /// journey details of RJ 171 Hamburg → Praha (2026-10-07) had none, only each stop's `adminID`.
-        struct Attribute: Decodable { var key: String?; var value: String?; var teilstreckenHinweis: String? }
+        struct Attribute: Decodable { var kategorie: String?; var key: String?; var value: String?; var teilstreckenHinweis: String? }
         var halte: [Stop]
         var zugattribute: [Attribute]?
         /// The train's name, e.g. "RJ 383".
         var zugName: String?
 
+        /// The attributes list sleeping ("Schlafwagen", SW) or couchette cars ("Liegewagen", LW): a night
+        /// train, also one the timetable feeds don't mark (#241), e.g. Snälltåget's "D 301".
+        var hasSleepingCars: Bool {
+            zugattribute?.contains { $0.kategorie == "SCHLAFWAGEN" || ["SW", "LW"].contains($0.key) } == true
+        }
         /// DB marks trains where a seat reservation is mandatory (e.g. Snälltåget, Nightjet) with the attribute `RP`.
         /// Only the key counts: "FR" is "Fahrradmitnahme reservierungspflichtig", which concerns bikes alone.
         var requiresReservation: Bool { zugattribute?.contains { $0.key == "RP" } ?? false }
     }
 
-    /// A train's journey details: its realtime stops and the operators running it.
+    /// A train's journey details: its realtime stops, the operators running it and what its attributes say.
     struct JourneyCourse: Sendable {
         var stops: [JourneyStop]
         var operators: [TrainOperator]
+        var hasSleepingCars = false
         /// Whether a seat reservation is mandatory on the train (attribute `RP`).
         var requiresReservation = false
     }
@@ -154,6 +160,28 @@ extension BahnDeClient {
     private func journeyStops(line: Line?, station: Station, plannedDeparture: Date,
                               maxAge: TimeInterval = BahnDeClient.journeyStopsMaxAge) async throws -> [JourneyStop]? {
         try await journeyCourse(line: line, station: station, plannedDeparture: plannedDeparture, maxAge: maxAge)?.stops
+    }
+
+    /// `journeyStops(for:)` together with the rest of bahn.de's journey details, same request and cache.
+    func journeyCourse(for leg: Leg, maxAge: TimeInterval = BahnDeClient.journeyStopsMaxAge) async throws -> JourneyCourse? {
+        try await journeyCourse(line: leg.line, station: leg.origin, plannedDeparture: leg.departure.planned, maxAge: maxAge)
+    }
+
+    /// Whether bahn.de lists sleeping or couchette cars for `trip`'s train (`JourneyDetails.hasSleepingCars`);
+    /// shares the request and cache of `journeyStops(for:)`.
+    public func hasSleepingCars(for trip: Trip) async throws -> Bool {
+        guard let first = trip.stopovers.first(where: { $0.departure != nil }), let departure = first.departure,
+              let course = try await journeyCourse(line: trip.line, station: first.station, plannedDeparture: departure.planned)
+        else { return false }
+        return course.hasSleepingCars
+    }
+
+    /// `leg` marked as a night train when bahn.de's journey details list sleeping or couchette cars.
+    static func markingNightTrain(_ leg: Leg, hasSleepingCars: Bool) -> Leg {
+        guard hasSleepingCars, leg.line?.isNightTrain == false else { return leg }
+        var leg = leg
+        leg.line?.nightRail = true
+        return leg
     }
 
     /// The operators bahn.de lists for the part of `leg`'s train you ride: on an international train run
@@ -562,6 +590,7 @@ extension BahnDeClient {
         let details = try await get(Self.journeyURL(journeyId), as: JourneyDetails.self)
         return JourneyCourse(stops: details.halte.compactMap(JourneyStop.init),
                              operators: Self.operators(of: details, feedOperator: feedOperator),
+                             hasSleepingCars: details.hasSleepingCars,
                              requiresReservation: details.requiresReservation)
     }
 

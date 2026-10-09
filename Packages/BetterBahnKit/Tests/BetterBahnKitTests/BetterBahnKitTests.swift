@@ -2199,6 +2199,52 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
     }
 }
 
+@Suite struct NightTrainTests {
+    private func line(_ name: String, _ product: Product, operator op: String? = nil, nightRail: Bool? = nil) -> Line {
+        Line(name: name, number: nil, product: product, operatorName: op, nightRail: nightRail)
+    }
+
+    /// Names, products and operators as Transitous gives them (#241).
+    @Test func recognizesNightTrains() {
+        #expect(line("NJ 402", .longDistance, operator: "NS International", nightRail: true).isNightTrain)
+        // SNCB's feed has the Nightjet as a plain high-speed "NJ", MÁV's and PKP's the EuroNight as long-distance.
+        #expect(line("NJ", .highSpeed, operator: "NMBS/SNCB").isNightTrain)
+        #expect(line("EN", .longDistance, operator: "PKP Intercity").isNightTrain)
+        #expect(line("EN 40406", .longDistance).isNightTrain)
+        #expect(line("ES 401", .longDistance, operator: "European Sleeper", nightRail: true).isNightTrain)
+        #expect(line("300", .longDistance, operator: "Snälltåget").isNightTrain)
+        #expect(line("NT", .longDistance, operator: "Snälltåget", nightRail: true).isNightTrain)
+        #expect(line("D 13", .longDistance, operator: "Alpen-Sylt Nachtexpress").isNightTrain)
+    }
+
+    @Test func leavesOtherTrainsAndBusesAlone() {
+        #expect(!line("ICE 645", .highSpeed, operator: "DB Fernverkehr AG").isNightTrain)
+        #expect(!line("EC 177", .longDistance, operator: "České dráhy").isNightTrain)
+        #expect(!line("RE 5", .regionalExpress).isNightTrain)
+        #expect(!line("EN1", .bus).isNightTrain)
+        #expect(!line("FLX 30", .longDistance, operator: "FlixTrain").isNightTrain)
+    }
+
+    @Test func transitousNightRailModeMarksTheLine() {
+        let night = MLineInfo(mode: "NIGHT_RAIL", displayName: "NT", routeShortName: nil, tripShortName: nil,
+                              agencyName: "SJ").toLine()
+        #expect(night.nightRail == true)
+        #expect(night.isNightTrain)
+        let day = MLineInfo(mode: "LONG_DISTANCE", displayName: "IC 2013", routeShortName: nil, tripShortName: nil,
+                            agencyName: "DB Fernverkehr AG").toLine()
+        #expect(day.nightRail == nil)
+        #expect(!day.isNightTrain)
+    }
+
+    /// Saved journeys from before the flag existed still decode.
+    @Test func decodesLinesWithoutTheFlag() throws {
+        let json = #"{"name":"NJ 40490","product":"longDistance"}"#
+        let line = try JSONDecoder().decode(Line.self, from: Data(json.utf8))
+        #expect(line.nightRail == nil)
+        #expect(line.isNightTrain)
+    }
+}
+
 @Suite struct CombinedProviderTests {
     @Test func fallsBackAndCoolsDown() async throws {
         let primary = MockProvider(source: .bahnDe)
@@ -3725,6 +3771,28 @@ private final class TrainSearchProtocol: URLProtocol, @unchecked Sendable {
         #expect(stops[2].departurePlatform == PlatformInfo(planned: "6", actual: "7"))
         let coordinate = try #require(stops[2].coordinate)
         #expect(abs(coordinate.latitude - 50.099365) < 0.000001 && abs(coordinate.longitude - 8.686303) < 0.000001)
+    }
+
+    /// bahn.de's "Liegewagen"/"Schlafwagen" attributes mark a night train the feeds don't (#241):
+    /// Snälltåget's "D 301" Malmö → Berlin and SJ's "EN 345", trimmed to the attributes.
+    @Test func sleepingCarsMarkANightTrain() throws {
+        func details(_ attributes: String) throws -> BahnDeClient.JourneyDetails {
+            let json = #"{"zugName": "D 301", "halte": [], "zugattribute": "# + attributes + #"}"#
+            return try JSONDecoding.decoder.decode(BahnDeClient.JourneyDetails.self, from: Data(json.utf8))
+        }
+        #expect(try details(#"[{"kategorie": "BORDBISTRO", "key": "BR", "value": "Bordrestaurant"}, {"kategorie": "INFORMATION", "key": "LW", "value": "Liegewagen"}]"#).hasSleepingCars)
+        #expect(try details(#"[{"kategorie": "SCHLAFWAGEN", "key": "SW", "value": "Schlafwagen"}]"#).hasSleepingCars)
+        #expect(try !details(#"[{"kategorie": "BORDBISTRO", "key": "BR", "value": "Bordrestaurant"}]"#).hasSleepingCars)
+        #expect(try !JSONDecoding.decoder.decode(BahnDeClient.JourneyDetails.self, from: Data(Self.details.utf8)).hasSleepingCars)
+
+        let day = Line(name: "D 301", number: "301", product: .longDistance, operatorName: nil)
+        let leg = Leg(origin: station("7400004", "Malmö C"), destination: station("8011102", "Berlin Gesundbrunnen"),
+                      departure: TimeInfo(planned: .now, actual: nil), arrival: TimeInfo(planned: .now, actual: nil),
+                      departurePlatform: nil, arrivalPlatform: nil, tripId: "t", line: day, direction: nil,
+                      isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+        #expect(!leg.line!.isNightTrain)
+        #expect(BahnDeClient.markingNightTrain(leg, hasSleepingCars: true).line?.isNightTrain == true)
+        #expect(BahnDeClient.markingNightTrain(leg, hasSleepingCars: false).line?.isNightTrain == false)
     }
 
     /// Real Snälltåget D 301 Malmö Central – Berlin Gesundbrunnen (2026-10-08): bahn.de marks the train with

@@ -227,13 +227,14 @@ public struct JourneyRefresher: Sendable {
         // for legs up to a week ahead that miss a platform, so many saved journeys don't flood bahn.de.
         let runningSoon = Self.isRunningSoon(leg)
         if let bahnDe = provider.bahnDe, runningSoon || Self.needsPlatforms(leg),
-           let stops = try? await bahnDe.journeyStops(for: leg, maxAge: runningSoon ? BahnDeClient.journeyStopsMaxAge : 3600) {
+           let course = try? await bahnDe.journeyCourse(for: leg, maxAge: runningSoon ? BahnDeClient.journeyStopsMaxAge : 3600) {
             if runningSoon {
-                if !leg.stopovers.isEmpty { leg.stopovers = BahnDeClient.inserting(stops, into: leg.stopovers) }
+                if !leg.stopovers.isEmpty { leg.stopovers = BahnDeClient.inserting(course.stops, into: leg.stopovers) }
                 // DB's own live times beat Transitous' and fill stops DB Timetables missed.
-                leg = BahnDeClient.applyingLiveTimes(from: stops, to: leg)
+                leg = BahnDeClient.applyingLiveTimes(from: course.stops, to: leg)
             }
-            leg = BahnDeClient.fillingMissingPlatforms(in: leg, from: stops)
+            leg = BahnDeClient.fillingMissingPlatforms(in: leg, from: course.stops)
+            leg = BahnDeClient.markingNightTrain(leg, hasSleepingCars: course.hasSleepingCars)
         }
         // International trains from DB's feed have no platforms in Czechia; the Czech timetable has them.
         if let transitous = provider.primary as? TransitousProvider {

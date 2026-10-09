@@ -182,6 +182,7 @@ struct TripView: View {
         guard let trip, let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: trip),
               self.trip?.id == trip.id else { return }
         self.trip?.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: BahnDeClient.inserting(stops, into: trip.stopovers))
+        if (try? await bahnDe.hasSleepingCars(for: trip)) == true, self.trip?.id == trip.id { self.trip?.line?.nightRail = true }
     }
 }
 
@@ -255,7 +256,7 @@ struct TripContent: View {
             Card {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(spacing: 12) {
-                        LiveTrainIconTile(route: LiveTrainRoute(trip: trip), systemImage: trip.line?.product.symbolName ?? "tram.fill",
+                        LiveTrainIconTile(route: LiveTrainRoute(trip: trip), systemImage: trip.line?.symbolName ?? "tram.fill",
                                           color: color, size: 46)
                         VStack(alignment: .leading, spacing: 3) {
                             TrainNameRow(name: trip.line?.nameWithTripNumber ?? "Zug", font: .title3.weight(.bold), spacing: 8) {
@@ -654,12 +655,15 @@ struct LegTripSheet: View {
     private func insertZusatzhalte() async {
         guard var updated = trip else { return }
         let ownTrain = shownTripId == nil
+        var hasSleepingCars = false
         if let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: updated) {
             updated.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: BahnDeClient.inserting(stops, into: updated.stopovers))
+            hasSleepingCars = (try? await bahnDe.hasSleepingCars(for: updated)) == true
         }
         if ownTrain { updated = updated.keepingAdditionalStops(of: leg) }
         guard self.trip?.id == updated.id, ownTrain == (shownTripId == nil) else { return }
         self.trip?.stopovers = updated.stopovers
+        if hasSleepingCars { self.trip?.line?.nightRail = true }
     }
 }
 

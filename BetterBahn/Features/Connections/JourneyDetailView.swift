@@ -525,7 +525,7 @@ struct LegCard: View {
             VStack(alignment: .leading, spacing: 14) {
                 // A tap gesture rather than a Button, so the warning triangle inside can be its own button.
                 HStack(spacing: 10) {
-                    LiveTrainIconTile(route: LiveTrainRoute(leg: leg), systemImage: leg.line?.product.symbolName ?? "tram.fill",
+                    LiveTrainIconTile(route: LiveTrainRoute(leg: leg), systemImage: leg.line?.symbolName ?? "tram.fill",
                                       color: color, size: 38)
                     VStack(alignment: .leading, spacing: 2) {
                         // Coupled trains have a long name; their series tag goes below it rather than being cut off.

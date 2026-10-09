@@ -313,7 +313,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   delay, countdown target; `changeDates` for the widget's timeline entries), `WidgetTimer` (countdowns more than 12 h ahead read
   "2d 3h 49m" instead of a running timer, with a timeline entry every minute), `TrainMapLink` (`betterbahn://map`).
 - `Geometry/` – polyline decode, `RouteGeometryService`, `SegmentHeatmap`.
-- `Support/HTTPClient.swift` – shared HTTP + `TransitError`, `JSONDecoding`. Every request sends `identifyingUserAgent` (app version + `/support` contact, as Transitous/OpenRailwayMap/Träwelling ask); only `BahnDeClient` sends browser agents. `ProductStyle` colors.
+- `Support/HTTPClient.swift` – shared HTTP + `TransitError`, `JSONDecoding`. Every request sends `identifyingUserAgent` (app version + `/support` contact, as Transitous/OpenRailwayMap/Träwelling ask); only `BahnDeClient` sends browser agents. `ProductStyle` colors and symbols: night trains (`Line.isNightTrain`: Transitous' `NIGHT_RAIL` mode as `Line.nightRail`, NJ/EN/UEx, night-only operators like Snälltåget or European Sleeper; bahn.de's "Liegewagen"/"Schlafwagen" train attributes wherever its `fahrt` is loaded anyway, `JourneyDetails.hasSleepingCars`; #241) get a bed via `Line.symbolName`, carried into the widgets and the Live Activity as `isNightTrain`.
 - `Statistics/TrainSightings.swift` – collects the bahn.de journey IDs of trains the app showed (hooked into
   `BahnDeClient`: `correctingFromBoard`, `correctingTrainNames`, `findJourneyId`; no S-Bahn/bus, only on the real
   session) and reports them in batches to `Cloudflare/stats`, while Settings → "Zugdaten für Statistik teilen"
