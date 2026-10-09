@@ -57,9 +57,20 @@ struct TrainSearchOverlay: View {
                 .padding(.bottom, 24)
                 .frame(maxWidth: 560)
                 .frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .top)
-                // Tapping anywhere outside the bar and the results closes the search.
-                .contentShape(.rect)
-                .onTapGesture(perform: close)
+                // Tapping anywhere outside the bar and the results closes the search (with the calendar open,
+                // only the calendar). A background, not a gesture on the stack: a tap gesture around the
+                // calendar swallows the day taps of its graphical DatePicker (only month and year still worked).
+                .background {
+                    Color.clear
+                        .contentShape(.rect)
+                        .onTapGesture {
+                            if showsCalendar {
+                                showsCalendar = false
+                            } else {
+                                close()
+                            }
+                        }
+                }
             }
             .scrollBounceBehavior(.basedOnSize)
             .scrollDismissesKeyboard(.interactively)
@@ -174,7 +185,7 @@ struct TrainSearchOverlay: View {
         }
         .padding(12)
         .glassEffect(.regular, in: .rect(cornerRadius: 26))
-        .onTapGesture {}
+        // No tap gesture here, not even an empty one: it would block the DatePicker's day taps.
     }
 
     // MARK: Results
