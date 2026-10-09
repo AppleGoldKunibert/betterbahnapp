@@ -101,6 +101,18 @@ Do not run iOS Simulator tests yourself; only try building.
 - Cloudflare: the `betterbahn` worker (`Cloudflare/worker.mjs`, serves `/datenschutz`) is deployed by Alfred
   via the dashboard, so text changes there only go live once he redeploys. `betterbahn2` is the bahn.de
   proxy; don't touch it.
+- Checking live data (delays, boards, a train's stops) while debugging, measured 2026-10-09:
+  - From the cloud session, Transitous (`api.transitous.org`) and bahn.expert answer. bahn.expert is
+    `POST https://bahn.expert/api/orpc/<procedure>` with `Referer: https://bahn.expert/` and a browser
+    User-Agent (see `BahnExpertClient`); `journey/find` then `journey/detailsByJourneyId` give DB's own times
+    per stop and are the reference for what the real delay was.
+  - bahn.de (`www.bahn.de/web/api/...`) answers `403 OPS_BLOCKED` from the cloud session, also with a browser
+    User-Agent. On Alfred's Mac it works with **curl** and a Safari User-Agent plus `Origin: https://www.bahn.de`,
+    `Referer: https://www.bahn.de/buchung/fahrplan/suche` and `Accept-Language: de-DE`; the same headers from
+    Python's `urllib` got a 403, so the block is not about the User-Agent alone (likely the TLS fingerprint).
+  - So when bahn.de data is needed, don't try it from the cloud session: give Alfred a complete curl command
+    (parse the saved JSON with `python3`, no network in Python) and ask him to paste the output.
+  - The app itself reaches bahn.de through the `betterbahn2` Worker, and falls back to a hidden WebKit page.
 - The repo is public: never commit secrets or internal operational details (billing, Actions minutes etc.).
 
 ## Attribution
