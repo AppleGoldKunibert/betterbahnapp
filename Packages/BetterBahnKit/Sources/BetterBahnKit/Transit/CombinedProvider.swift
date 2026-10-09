@@ -252,8 +252,8 @@ public final class CombinedProvider: TransitProvider {
     /// Departures over a long window to find one train in (`TrainRoutePlanner`): Transitous' board without
     /// loading every long-distance train's full run for its destination (see `TransitousProvider.board`'s
     /// `correctingEnds`), which made such a lookup at a hub run past the deadline ("Keine Antwort").
-    public func departuresForTrainLookup(at station: Station, date: Date, duration: Int) async throws -> [BoardEntry] {
-        let all = Set(Product.allCases)
+    public func departuresForTrainLookup(at station: Station, date: Date, duration: Int,
+                                         products all: Set<Product> = Set(Product.allCases)) async throws -> [BoardEntry] {
         let entries = try await withFallback(deadline: .seconds(15), { provider in
             if let transitous = provider as? TransitousProvider {
                 return try await transitous.board(.departures, at: station, date: date, duration: duration,

@@ -50,6 +50,11 @@ public struct TripActivityAttributes: ActivityAttributes {
         private var followUpStorage: [Self]?
         /// Optional so activities started by older versions still decode; see `arrived`.
         private var arrivedFlag: Bool?
+        /// Optional so activities started by older versions still decode; see `isNightTrain`.
+        private var nightTrainFlag: Bool?
+
+        /// The train is a night train (`Line.isNightTrain`), shown with a bed.
+        public var isNightTrain: Bool { nightTrainFlag == true }
 
         /// The journey's final arrival has passed: the widget shows "Angekommen" instead of a
         /// countdown stuck at 0:00, until the activity is removed `arrivedDisplayDuration` after arriving.
@@ -68,7 +73,8 @@ public struct TripActivityAttributes: ActivityAttributes {
                     platform: String?, isDeparture: Bool, cancelled: Bool,
                     progressStart: Date, progressEnd: Date, product: Product, warning: String? = nil,
                     transfer: TransferDetails? = nil, currentDelayMinutes: Int? = nil,
-                    transferPlatform: String? = nil, replacedPlatform: String? = nil) {
+                    transferPlatform: String? = nil, replacedPlatform: String? = nil, isNightTrain: Bool = false) {
+            self.nightTrainFlag = isNightTrain ? true : nil
             self.transferPlatform = transferPlatform
             self.replacedPlatform = replacedPlatform
             self.currentDelayMinutes = currentDelayMinutes
@@ -145,6 +151,7 @@ public extension TripActivityAttributes.ContentState {
         for (index, leg) in legs.enumerated() {
             let line = leg.line?.name ?? "Zug"
             let product = leg.line?.product ?? .other
+            let isNightTrain = leg.line?.isNightTrain ?? false
             if now < leg.departure.best {
                 var transfer: TripActivityAttributes.TransferDetails?
                 if let previousLeg, leg.departure.best.timeIntervalSince(now) <= 10 * 60 {
@@ -159,7 +166,7 @@ public extension TripActivityAttributes.ContentState {
                             isDeparture: true, cancelled: leg.cancelled,
                             progressStart: previousArrival, progressEnd: leg.departure.best, product: product,
                             transfer: transfer, currentDelayMinutes: leg.departure.delayMinutes ?? 0,
-                            replacedPlatform: Self.replacedPlatform(leg.departurePlatform))
+                            replacedPlatform: Self.replacedPlatform(leg.departurePlatform), isNightTrain: isNightTrain)
             }
             // Stays on this leg for a minute after arrival: if the delay grows in that time we're
             // still on the train, so the state jumps back instead of already moving on. Never
@@ -174,7 +181,8 @@ public extension TripActivityAttributes.ContentState {
                             progressStart: leg.departure.best, progressEnd: leg.arrival.best, product: product,
                             currentDelayMinutes: nextStopDelay(of: leg, now: now),
                             transferPlatform: showsTransfer ? legs[index + 1].departurePlatform?.best : nil,
-                            replacedPlatform: showsTransfer ? Self.replacedPlatform(legs[index + 1].departurePlatform) : nil)
+                            replacedPlatform: showsTransfer ? Self.replacedPlatform(legs[index + 1].departurePlatform) : nil,
+                            isNightTrain: isNightTrain)
             }
             previousArrival = leg.arrival.best
             previousLeg = leg
@@ -184,7 +192,8 @@ public extension TripActivityAttributes.ContentState {
                     plannedTime: last.arrival.planned, expectedTime: last.arrival.best,
                     platform: last.arrivalPlatform?.best, isDeparture: false, cancelled: last.cancelled,
                     progressStart: last.departure.best, progressEnd: last.arrival.best,
-                    product: last.line?.product ?? .other, currentDelayMinutes: last.arrival.delayMinutes ?? 0)
+                    product: last.line?.product ?? .other, currentDelayMinutes: last.arrival.delayMinutes ?? 0,
+                    isNightTrain: last.line?.isNightTrain ?? false)
     }
 
     /// Delay at the next stop the train has yet to reach; falls back to the leg's arrival.

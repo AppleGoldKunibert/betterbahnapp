@@ -62,7 +62,33 @@ public struct JourneyReplanner: Sendable {
             (journey.departure?.best ?? .distantPast) >= arrival && !journey.isCancelled
                 && !journey.connectionIssues().contains(where: \.isBlocking)
         }
-        return Array(results.prefix(limit))
+        return Array(Self.fastestFirst(results).prefix(limit))
+    }
+
+    /// Earliest arrival first (live times), without routes another one beats outright: one that leaves
+    /// no earlier, arrives no later and changes no more often (#225). Searches list by departure, so
+    /// a slow early route used to come first although a later one gets there sooner.
+    public static func fastestFirst(_ journeys: [Journey]) -> [Journey] {
+        func times(_ journey: Journey) -> (departure: Date, arrival: Date) {
+            (journey.departure?.best ?? .distantPast, journey.arrival?.best ?? .distantFuture)
+        }
+        let sorted = journeys.enumerated().sorted { a, b in
+            let ta = times(a.element), tb = times(b.element)
+            if ta.arrival != tb.arrival { return ta.arrival < tb.arrival }
+            if ta.departure != tb.departure { return ta.departure > tb.departure }
+            if a.element.transfers != b.element.transfers { return a.element.transfers < b.element.transfers }
+            return a.offset < b.offset
+        }.map(\.element)
+        var kept: [Journey] = []
+        for journey in sorted {
+            let own = times(journey)
+            // Everything kept so far arrives no later; it wins if it also leaves no earlier with no more changes.
+            let beaten = kept.contains { other in
+                times(other).departure >= own.departure && other.transfers <= journey.transfers
+            }
+            if !beaten { kept.append(journey) }
+        }
+        return kept
     }
 
     /// `journeys` with DB Timetables' live times, platforms and cancellations laid over each train,

@@ -159,16 +159,24 @@ struct JourneyReplanSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    if let appliedJourney, let appliedExit {
-                        appliedContent(appliedJourney, exit: appliedExit)
-                    } else {
-                        configureContent
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 16) {
+                        if let appliedJourney, let appliedExit {
+                            appliedContent(appliedJourney, exit: appliedExit)
+                        } else {
+                            configureContent
+                        }
                     }
+                    .padding(.horizontal)
+                    .padding(.bottom, 32)
                 }
-                .padding(.horizontal)
-                .padding(.bottom, 32)
+                // The stop list opens at the current exit, not at the train's first stop (#225).
+                .task(id: stopListKey) {
+                    guard stopListKey != nil, let target = exitID ?? boardingID else { return }
+                    try? await Task.sleep(for: .milliseconds(200))
+                    withAnimation(.snappy) { proxy.scrollTo(target, anchor: .center) }
+                }
             }
             .background { AppBackground() }
             .scrollDismissesKeyboard(.interactively)
@@ -190,12 +198,30 @@ struct JourneyReplanSheet: View {
             }
             .sheet(isPresented: $showTrainSheet) {
                 TrainNumberSheet(search: continuationSearch, suggestions: trainSuggestions,
-                                 defaultBoarding: requirements.last?.exit ?? exitStation) { requirement in
+                                 defaultBoarding: requirements.last?.exit ?? exitStation,
+                                 stations: [exitStation] + results.prefix(4).flatMap { $0.transitLegs.map(\.origin) },
+                                 date: exitArrival) { requirement in
                     requirements.append(requirement)
                     Task { await runSearch() }
                 }
             }
         }
+    }
+
+    /// Changes when the stop list opens or its stops change (the full trip loaded), to scroll to the exit.
+    private var stopListKey: String? {
+        guard showStops, let shownTrip else { return nil }
+        return shownTrip.id + "|\(shownTrip.stopovers.count)"
+    }
+
+    /// The journey's last train: a new exit there often means the journey ends there now.
+    private var isLastTrain: Bool { journey.transitLegs.last?.id == leg.id }
+
+    /// A new exit on the last train while the goal is still the old one: whether to end the journey
+    /// there or go on is asked right below the exit, instead of having to change the goal further up.
+    private var asksEndOrContinue: Bool {
+        isLastTrain && exitChanged && !endsAtExit && target.isSamePlace(as: finalDestination) && viaRows.isEmpty
+            && !hasSearched && !isSearching && applyingID == nil
     }
 
     private var navigationTitle: String {
@@ -215,6 +241,7 @@ struct JourneyReplanSheet: View {
     private var configureContent: some View {
         if journey.transitLegs.count > 1 { legPicker }
         exitCard
+        if asksEndOrContinue { endOrContinueCard }
         routeCard
         optionsCard
         if model.settings.trainChoiceEnabled { trainBar }
@@ -537,6 +564,39 @@ struct JourneyReplanSheet: View {
         }
     }
 
+    /// Asked after picking a new exit on the last train: end the journey there, or go on to the goal.
+    private var endOrContinueCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 12) {
+                OptionLabel(title: "Und dann?", subtitle: "Ausstieg in \(exitStation.displayName) um \(exitArrival.timeString)",
+                            icon: "arrow.triangle.branch")
+                Button {
+                    endJourneyAtExit()
+                } label: {
+                    Label("Reise in \(exitStation.displayName) beenden", systemImage: "flag.checkered")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glassProminent)
+                .tint(.brand)
+                .controlSize(.large)
+                .disabled(exitLeg == nil || legIndex == nil)
+                Button {
+                    searchOnwards()
+                } label: {
+                    Label("Weiter nach \(finalDestination.displayName)", systemImage: "arrow.right.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glass)
+                .tint(.brand)
+                .controlSize(.large)
+                .disabled(products.isEmpty || destination == nil)
+            }
+        }
+        .transition(.opacity.combined(with: .move(edge: .top)))
+    }
+
     /// For a halt that isn't in the timetable, e.g. doors opened at a station during a disruption.
     private var manualStopButton: some View {
         VStack(spacing: 6) {
@@ -702,10 +762,7 @@ struct JourneyReplanSheet: View {
             }
         } else {
             Button {
-                Task {
-                    await runSearch()
-                    await scanForFasterExit()
-                }
+                searchOnwards()
             } label: {
                 Label("Verbindungen suchen", systemImage: "magnifyingglass")
                     .font(.headline)
@@ -848,7 +905,8 @@ struct JourneyReplanSheet: View {
         exitPicked()
     }
 
-    /// A hand-picked exit invalidates results found for the previous one.
+    /// A hand-picked exit invalidates results found for the previous one. The new ones are searched
+    /// right away, unless the journey may end there (last train, asked first) or already does.
     private func exitPicked() {
         withAnimation(.snappy) {
             showStops = false
@@ -856,6 +914,22 @@ struct JourneyReplanSheet: View {
             hasSearched = false
             fasterOption = nil
         }
+        guard !asksEndOrContinue, !endsAtExit, exitChanged else { return }
+        searchOnwards()
+    }
+
+    private func searchOnwards() {
+        guard destination != nil, !products.isEmpty, !viaRows.contains(where: { $0.station == nil }) else { return }
+        Task {
+            await runSearch()
+            await scanForFasterExit()
+        }
+    }
+
+    /// The new exit becomes the goal and the journey ends there.
+    private func endJourneyAtExit() {
+        destination = exitStation
+        apply(continuation: nil)
     }
 
     // MARK: Actions

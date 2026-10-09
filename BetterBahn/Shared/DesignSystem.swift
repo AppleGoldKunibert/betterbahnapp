@@ -178,7 +178,7 @@ struct LineBadge: View {
     var body: some View {
         if let line {
             HStack(spacing: 4) {
-                Image(systemName: line.product.symbolName)
+                Image(systemName: line.symbolName)
                     .font(badgeFont)
                 Text(line.displayName)
                     .font(badgeFont)

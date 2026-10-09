@@ -149,7 +149,8 @@ struct JourneyResultsView: View {
         .navigationTitle("Verbindungen")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showTrainSheet) {
-            TrainNumberSheet(search: search, suggestions: trainSuggestions, defaultBoarding: nextBoardingDefault) { requirement in
+            TrainNumberSheet(search: search, suggestions: trainSuggestions, defaultBoarding: nextBoardingDefault,
+                             stations: trainSearchStations, date: nextBoardingTime) { requirement in
                 requirements.append(requirement)
                 Task { await replan() }
             }
@@ -316,9 +317,35 @@ struct JourneyResultsView: View {
         return "ab \(requirement.boarding.displayName) → schnellster Weg"
     }
 
-    /// A new requirement usually continues where the last one ends.
+    /// A new requirement usually continues where the last one ends: its exit, else where the planned
+    /// route leaves that train (#225: not the search's origin, where the next train doesn't call).
     private var nextBoardingDefault: Station {
-        requirements.last.flatMap { $0.exit } ?? search.from
+        guard let last = requirements.last else { return search.from }
+        if let exit = last.exit { return exit }
+        return lastRequiredLeg?.destination ?? last.boarding
+    }
+
+    /// When the traveller stands at `nextBoardingDefault`, as far as the plan knows.
+    private var nextBoardingTime: Date {
+        lastRequiredLeg?.arrival.best ?? searchDate
+    }
+
+    /// The leg of the best planned route that rides the last required train.
+    private var lastRequiredLeg: Leg? {
+        guard let last = requirements.last, let best = plan?.best else { return nil }
+        let name = plan?.resolvedNames[last.id]
+        return best.transitLegs.last { leg in
+            if let tripId = last.tripId { return leg.tripId == tripId }
+            return name != nil && leg.line?.name == name
+        }
+    }
+
+    /// Where a required train could be boarded: the planned route's stations, the origin, then the
+    /// stations the results change at.
+    private var trainSearchStations: [Station] {
+        let planned = (plan?.journeys ?? []).prefix(2).flatMap { $0.transitLegs.map(\.origin) }
+        let found = journeys.prefix(4).flatMap { $0.transitLegs.map(\.origin) }
+        return planned + [search.from] + found
     }
 
     private func remove(_ requirement: TrainRequirement) {
@@ -637,119 +664,6 @@ struct JourneyCard: View {
                 }
             }
         }
-    }
-}
-
-/// Collects one "ride this train" requirement: which train, where to board, and optionally where
-/// to get off again. The route itself is planned by the results view once the sheet is done.
-struct TrainNumberSheet: View {
-    let search: ConnectionSearch
-    let suggestions: [String]
-    /// Pre-selected boarding station – the end of the previous requirement, or the search origin.
-    let defaultBoarding: Station
-    let onAdd: (TrainRequirement) -> Void
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var train = ""
-    @State private var boardingStation: Station?
-    @State private var exitStation: Station?
-    @FocusState private var focused: Field?
-
-    private enum Field: Hashable { case train, boardingStation, exitStation }
-
-    init(search: ConnectionSearch, suggestions: [String], defaultBoarding: Station,
-         onAdd: @escaping (TrainRequirement) -> Void) {
-        self.search = search
-        self.suggestions = suggestions
-        self.defaultBoarding = defaultBoarding
-        self.onAdd = onAdd
-        _boardingStation = State(initialValue: defaultBoarding)
-    }
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    Card {
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack(spacing: 12) {
-                                IconTile(systemImage: "number", color: .brand, size: 38)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Zugnummer").font(.headline)
-                                    Text("Ziel: \(search.to.displayName)")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                }
-                            }
-                            TextField("z. B. ICE 423 oder 423", text: $train)
-                                .font(.title3.weight(.semibold))
-                                .textInputAutocapitalization(.characters)
-                                .autocorrectionDisabled()
-                                .submitLabel(.done)
-                                .focused($focused, equals: .train)
-                                .onSubmit(add)
-                                .padding(12)
-                                .background(Color.secondary.opacity(0.1), in: .rect(cornerRadius: 12, style: .continuous))
-                        }
-                    }
-
-                    Card(padding: 0) {
-                        VStack(spacing: 0) {
-                            StationInput(label: "Einstieg", placeholder: "Ab wo einsteigen?", systemImage: "figure.walk",
-                                         station: $boardingStation, focus: $focused, focusValue: .boardingStation)
-                            Divider().padding(.leading, 54)
-                            StationInput(label: "Ausstieg (optional)", placeholder: "Ideal: \(search.to.displayName)",
-                                         systemImage: "mappin.circle.fill",
-                                         station: $exitStation, focus: $focused, focusValue: .exitStation)
-                        }
-                    }
-
-                    Text(exitStation == nil
-                         ? "Ohne Ausstieg suchen wir den schnellsten Weg zum Ziel."
-                         : "Ab dem Ausstieg suchen wir den schnellsten Weg zum Ziel.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 4)
-
-                    if !suggestions.isEmpty {
-                        SectionHeader(title: "Züge aus den Ergebnissen", systemImage: "tram.fill")
-                        FlowChips(items: suggestions) { name in
-                            train = name
-                            focused = boardingStation == nil ? .boardingStation : nil
-                        }
-                    }
-
-                    Button(action: add) {
-                        Label("Zug vorgeben", systemImage: "pin.fill")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.glassProminent)
-                    .tint(.brand)
-                    .controlSize(.large)
-                    .disabled(train.trimmingCharacters(in: .whitespaces).isEmpty || boardingStation == nil)
-                }
-                .padding()
-            }
-            .background { AppBackground() }
-            .navigationTitle("Bestimmter Zug")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen", systemImage: "xmark", role: .cancel) { dismiss() }
-                }
-            }
-            .onAppear { focused = .train }
-        }
-        .presentationDetents([.medium, .large])
-    }
-
-    private func add() {
-        let name = train.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty, let boarding = boardingStation else { return }
-        onAdd(TrainRequirement(trainName: name, boarding: boarding, exit: exitStation))
-        dismiss()
     }
 }
 
