@@ -18,6 +18,11 @@ public extension Product {
         }
     }
 
+    /// Night trains get a bed instead, so they're easy to spot (#241).
+    func symbolName(nightTrain: Bool) -> String { nightTrain ? Self.nightTrainSymbolName : symbolName }
+
+    static let nightTrainSymbolName = "bed.double.fill"
+
     var color: Color {
         switch self {
         case .highSpeed, .longDistance: Self.longDistanceColor
@@ -39,5 +44,10 @@ public extension Product {
         Color(white: 0.12)
         #endif
     }
+}
+
+public extension Line {
+    /// The product's symbol, or a bed for a night train.
+    var symbolName: String { product.symbolName(nightTrain: isNightTrain) }
 }
 #endif

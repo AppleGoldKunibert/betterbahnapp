@@ -67,10 +67,14 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   the app goes to the background) writes the `WidgetSnapshot` for `widgetJourney` (the Live Activity's pick
   `liveJourneyCandidate`, else the next saved journey not switched off) and reloads the widgets only if it changed.
 - `Features/Connections/` – search form (`ConnectionsView`, `ConnectionSearch`, `RouteOptionsEditor`
-  for via stops/products/max transfers), `JourneyResultsView` (+ `JourneyCard`, `TrainNumberSheet`),
+  for via stops/products/max transfers), `JourneyResultsView` (+ `JourneyCard`), `TrainNumberSheet` ("Bestimmten Zug
+  wählen", #225: lists the trains fitting what is typed via Kit `TrainCandidateFinder`, picking one shows its stops in
+  `TripContent` with boarding/exit preselected and pins that run; "Ein- und Ausstieg selbst angeben" for the typed name),
   `JourneyDetailView` (+ `LegCard`, `TransferRow`, alternatives sheets), `JourneyMapView` (MapKit),
   `JourneyReplanSheet` (replan from mid-journey; "Halt hinzufügen" via `ManualStopSheet` adds a stop outside the
-  timetable as exit, and a Träwelling check-in then becomes a manual trip via `AppModel.replaceCheckinWithManualTrip`, #207).
+  timetable as exit, and a Träwelling check-in then becomes a manual trip via `AppModel.replaceCheckinWithManualTrip`, #207;
+  the stop list opens scrolled to the exit, a new exit on the last train asks "Reise … beenden" / "Weiter nach …",
+  on other trains it searches right away, #225).
 - `Features/Departures/` – `StationBoardView`/`BoardRow`, `TripView` (single train's stops),
   `CoachSequenceView.swift`: the Wagenreihung unfolds in place, no sheet. `CoachSequenceDisclosure` ("Wagenreihung ⌄" row in
   `LegCard` between the stops and "Mehr", in `TripContent`'s header; the train search has its own row) shows once bahn.de has a
@@ -103,7 +107,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `TicketButton` (next to "Gespeichert" in `JourneyDetailView`, only once the journey has tickets), `AddTicketButton` ("Via Ticket hinzufügen" icon next to "Verbindungen suchen", opens `TicketLookupView`), `TicketsListView` (Settings → Gespeicherte Tickets, list + delete; also "Zeitkarten": passes like the Deutschland-Ticket added from a screenshot via `PhotosPicker`, shown in `TravelPassView` with `AddToWalletButton`),
   `SeatReservationViews` (`ReservationRow` in `LegCard` above "Mehr", read-only). Reservations come from the journey's
   tickets (`AppModel.reservations(for:)`) and only show on the leg whose train matches.
-- `Features/Trips/TripsView.swift` – upcoming/past saved journeys, `SaveJourneyButton`.
+- `Features/Trips/TripsView.swift` – upcoming/past saved journeys, `SaveJourneyButton` (before saving it asks bahn.de via
+  `AppModel.reservationRequiredLegs` and warns "Zug ist reservierungspflichtig" with Abbrechen / Verstanden, weiter; journeys added by
+  a ticket/reservation import are saved without the button and never warn).
 - `Features/Traewelling/` – `CheckinSheet` (`MenuPickerRow`: the Sichtbarkeit/Reiseart menus of both check-in sheets, constant width so the closing menu doesn't jump; the keyboard goes away as soon as the check-in/save is tapped and only comes back when Träwelling rejects the input, `TraewellingError.isInvalidInput`; when Träwelling already has the user on another train at that time (`.collision`, e.g. the previous train arrived early) it offers "Trotzdem einchecken", `CheckinDraft.force`, no points), `TraewellingLoginButton`, `CustomEmojiViews` (`EmojiMessageField`: text field
   with emoji suggestions + preview, `EmojiText`), `CheckinDetailSheet` ("Check-in ansehen" in a leg's "Mehr" once the leg was
   checked in from the app, `AppModel.checkinStatusIDs`; shows and edits text, visibility, trip type and tags, deletes the
@@ -164,6 +170,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   loading on the Worker's first blocked answer (`prepare`) and is dropped once the Worker answers again (`release`), after
   5 min without a request, or reloaded after 30 min.
   The privacy policy (`Cloudflare/worker.mjs`) says so: the user's IP and bahn.de's cookies then reach DB.
+  The journey details' train attribute `RP` ("Reservierungspflicht") says a reservation is mandatory (`requiresReservation(for:)`, also for other
+  railways' trains like SJ's D 301 or a Nightjet via `lookupReference`; shares the `journeyCourse` cache).
 - `Transit/Vagonweb/` – vagonweb.cz (used with their permission, #95): scheduled train compositions for the
   whole timetable year, read from the train's HTML page (`VagonwebComposition.scheduled`, fixtures
   `vagonweb-ice*.html`). Used when bahn.de has no coach sequence: the train type (`AppModel.trainType`) and the
@@ -251,7 +259,18 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   A stop DB schedules without a change only counts as on time when the train runs within 2 h
   (`infersOnTime`); a journey tomorrow shows plain times, and `JourneyRefresher.droppingInferredOnTime` clears
   such made-up "pünktlich" from journeys saved earlier.
-- Logic: `JourneyReplanner`, `ConnectionCheck` (`ConnectionIssue`, `JourneyRefresher`), `PlatformChange`
+- `Transit/TrainChoice.swift` – picking a train for a route (#225): `TrainNameQuery` reads "ICE 423", "423", "RE 3300",
+  "RE 3 (3300)" and matches a line by name, train or run number (`Line.tripNumber`), with `score` for prefixes while
+  typing (regional trains and S-Bahn only by their category, "S9"/"RE 3", or their whole run number, never by "3" or "91") (used by `TrainRoutePlanner`, `TrainPicker`); `TrainCandidateFinder` (actor): a number is listed like the train search (`numberTrains`:
+  one bahn.expert request, kinds from Settings → Zugschnellsuche), each run's stops (`routeFit`) then mark where it
+  boards on the route, whether it reaches the target and whether it passes one of the settings' countries (`ranked`);
+  only the picked run's trip is loaded (`candidate(for:)`, from the boarding station's board, else `TrainNumberSearch.run`).
+  Lines ("RE 3") and other trains come from the boards of up to 4 route stations (`routeCandidates`:
+  `departuresForTrainLookup`, trains only, loaded in parallel, `prefetch`ed when the sheet opens, never cached when
+  failed; `boardExtras` leaves out runs already listed by number). A picked run is pinned in
+  `TrainRequirement.tripId`, so the planner loads it instead of searching boards.
+- Logic: `JourneyReplanner` (`continuations` come `fastestFirst`: by live arrival, without routes another one beats
+  leaving no earlier, arriving no later with no more changes), `ConnectionCheck` (`ConnectionIssue`, `JourneyRefresher`), `PlatformChange`
   (platform changes since the last refresh → push, ignores sectors/bus bays), `TrainRoutePlanner`,
   `ViaRoutePlanner` (vias without minimum stay keep a through train as one leg), `TrainPicker` ("Anderer Zug": `replacing` keeps
   the rest of the plan and reports a `MissedConnection` the user may ignore or pick another train for, #226; `reroutes`
@@ -294,7 +313,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   delay, countdown target; `changeDates` for the widget's timeline entries), `WidgetTimer` (countdowns more than 12 h ahead read
   "2d 3h 49m" instead of a running timer, with a timeline entry every minute), `TrainMapLink` (`betterbahn://map`).
 - `Geometry/` – polyline decode, `RouteGeometryService`, `SegmentHeatmap`.
-- `Support/HTTPClient.swift` – shared HTTP + `TransitError`, `JSONDecoding`. Every request sends `identifyingUserAgent` (app version + `/support` contact, as Transitous/OpenRailwayMap/Träwelling ask); only `BahnDeClient` sends browser agents. `ProductStyle` colors.
+- `Support/HTTPClient.swift` – shared HTTP + `TransitError`, `JSONDecoding`. Every request sends `identifyingUserAgent` (app version + `/support` contact, as Transitous/OpenRailwayMap/Träwelling ask); only `BahnDeClient` sends browser agents. `ProductStyle` colors and symbols: night trains (`Line.isNightTrain`: Transitous' `NIGHT_RAIL` mode as `Line.nightRail`, NJ/EN/UEx, night-only operators like Snälltåget or European Sleeper; bahn.de's "Liegewagen"/"Schlafwagen" train attributes wherever its `fahrt` is loaded anyway, `JourneyDetails.hasSleepingCars`; #241) get a bed via `Line.symbolName`, carried into the widgets and the Live Activity as `isNightTrain`.
 - `Statistics/TrainSightings.swift` – collects the bahn.de journey IDs of trains the app showed (hooked into
   `BahnDeClient`: `correctingFromBoard`, `correctingTrainNames`, `findJourneyId`; no S-Bahn/bus, only on the real
   session) and reports them in batches to `Cloudflare/stats`, while Settings → "Zugdaten für Statistik teilen"

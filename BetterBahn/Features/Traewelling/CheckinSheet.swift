@@ -477,7 +477,7 @@ struct CheckinTicket: View {
                 }
                 Spacer()
                 VStack(spacing: 6) {
-                    Image(systemName: leg.line?.product.symbolName ?? "tram.fill")
+                    Image(systemName: leg.line?.symbolName ?? "tram.fill")
                         .font(.title3)
                         .foregroundStyle(color)
                     Text(leg.arrival.best.timeIntervalSince(leg.departure.best).compactDuration)
