@@ -86,12 +86,13 @@ struct RootView: View {
             if model.showsTrainSearch {
                 TrainSearchOverlay()
                     .tint(.brand)
-                    // Appears at once, so the dimming doesn't fade from light to dark gray (#229); the bar
-                    // fades in itself. Closing still fades out.
+                    // Appears at once, dimming and bar, so nothing fades from light to dark gray (#229).
+                    // Closing still fades out.
                     .transition(.asymmetric(insertion: .identity, removal: .opacity))
             }
         }
-        .animation(.snappy, value: model.showsTrainSearch)
+        // No animation while opening: a parent animation would still fade the overlay's content in.
+        .animation(model.showsTrainSearch ? nil : .snappy, value: model.showsTrainSearch)
         .onChange(of: scenePhase, initial: true) { _, phase in
             if phase == .active {
                 model.cancelLiveActivityBackgroundCheck()
