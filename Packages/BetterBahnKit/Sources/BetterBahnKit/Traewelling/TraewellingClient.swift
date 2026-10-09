@@ -42,7 +42,7 @@ public struct TraewellingUser: Decodable, Sendable {
     public var likesEnabled: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case id, displayName, username, points, mastodonUrl, likesEnabled = "likes_enabled"
+        case id, displayName, username, points, pointsEnabled, mastodonUrl, likesEnabled = "likes_enabled"
     }
 }
 
