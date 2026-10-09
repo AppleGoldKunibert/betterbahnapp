@@ -133,6 +133,13 @@ struct TripView: View {
                 // An extra train Transitous has no line for, which the board named ("S1" for "?").
                 loaded.line = entry.line
             }
+            // A ring line's trip is the vehicle's whole day: only the lap of the board's departure (or
+            // arrival) is the run shown here, with the run number the board knows.
+            if tripId == entry.tripId,
+               let lap = loaded.lap(at: entry.station, near: entry.time.planned, arriving: entry.kind == .arrivals) {
+                loaded = lap
+                if let run = entry.line.tripNumber { loaded.line?.tripNumber = run }
+            }
             guard tripId == self.tripId else { return }
             error = nil
             // DB's delays and the platforms Transitous lacks (e.g. for the S15's own first/last stop at
@@ -159,6 +166,9 @@ struct TripView: View {
 
     private func show(_ loaded: Trip) {
         trip = loaded
+        // A pick from a trip seen before that this one doesn't have (another lap of a ring line).
+        if let id = boardingID, !loaded.stopovers.contains(where: { $0.id == id }) { boardingID = nil }
+        if let id = exitID, !loaded.stopovers.contains(where: { $0.id == id }) { exitID = nil }
         guard boardingID == nil, exitID == nil else { return }
         if let keptStops {
             boardingID = keptStops.boarding.flatMap { kept in loaded.stopovers.first { $0.station.isSamePlace(as: kept) }?.id }
