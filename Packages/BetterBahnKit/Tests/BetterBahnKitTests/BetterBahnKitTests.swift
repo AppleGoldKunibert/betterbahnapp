@@ -2265,6 +2265,46 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(!line("FLX 30", .longDistance, operator: "FlixTrain").isNightTrain)
     }
 
+    /// The filter groups ICE/RJX/TGV, IC/EC, night trains and IR/FLX; `product` itself stays as it was.
+    @Test func sortsLongDistanceTrainsIntoFilterGroups() {
+        #expect(line("ICE 645", .highSpeed).filterProduct == .highSpeed)
+        #expect(line("RJX 765", .highSpeed).filterProduct == .highSpeed)
+        #expect(line("IC 2013", .longDistance).filterProduct == .longDistance)
+        #expect(line("EC 177", .longDistance).filterProduct == .longDistance)
+        #expect(line("NJ 402", .longDistance, nightRail: true).filterProduct == .nightTrain)
+        #expect(line("NJ", .highSpeed, operator: "NMBS/SNCB").filterProduct == .nightTrain)
+        #expect(line("IR 2432", .longDistance).filterProduct == .interregio)
+        #expect(line("FLX 30", .longDistance, operator: "FlixTrain").filterProduct == .interregio)
+        #expect(line("FLX 30", .longDistance, operator: "FlixTrain").product == .longDistance)
+        #expect(line("RE 5", .regionalExpress).filterProduct == .regionalExpress)
+        // A bus or tram line with the letters "IR" or "EN" is no train.
+        #expect(line("IR1", .bus).filterProduct == .bus)
+    }
+
+    @Test func boardFilterUsesTheFilterGroups() {
+        let night = line("NJ 402", .longDistance, nightRail: true)
+        let ic = line("IC 2013", .longDistance)
+        let withoutNight = BoardFilter(products: Product.longDistanceProducts.subtracting([.nightTrain]))
+        #expect(!withoutNight.products.contains(night.filterProduct))
+        #expect(withoutNight.products.contains(ic.filterProduct))
+        #expect(Product.allCases.filter(\.isLongDistance) == [.highSpeed, .longDistance, .nightTrain, .interregio])
+        #expect(Product.nightTrain.isTrain && Product.interregio.isTrain)
+    }
+
+    /// Searches saved before the two groups existed meant all of IC/EC's trains.
+    @Test func upgradesSavedProductSelections() throws {
+        #expect(Product.upgradingLegacySelection([.highSpeed, .longDistance]) == [.highSpeed, .longDistance, .nightTrain, .interregio])
+        #expect(Product.upgradingLegacySelection([.highSpeed, .regional]) == [.highSpeed, .regional])
+        let station = Station(id: "1", name: "Hamburg Hbf", coordinate: Coordinate(latitude: 53.55, longitude: 10.0),
+                              evaNumber: nil, source: .transitous)
+        let legacy = #"{"station":\#(String(decoding: try JSONEncoder().encode(station), as: UTF8.self)),"minStayMinutes":0,"products":["longDistance"]}"#
+        #expect(try JSONDecoder().decode(ViaWaypoint.self, from: Data(legacy.utf8)).products == [.longDistance, .nightTrain, .interregio])
+        // Saved by this version, a deliberate IC/EC-only choice stays that way.
+        let current = ViaWaypoint(station: station, products: [.longDistance])
+        let roundTrip = try JSONDecoder().decode(ViaWaypoint.self, from: JSONEncoder().encode(current))
+        #expect(roundTrip.products == [.longDistance])
+    }
+
     @Test func transitousNightRailModeMarksTheLine() {
         let night = MLineInfo(mode: "NIGHT_RAIL", displayName: "NT", routeShortName: nil, tripShortName: nil,
                               agencyName: "SJ").toLine()
