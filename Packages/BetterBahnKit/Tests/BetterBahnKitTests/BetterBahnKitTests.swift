@@ -2177,6 +2177,19 @@ private final class Ril100GeocodeProtocol: URLProtocol, @unchecked Sendable {
         #expect(!filter.includes(entry(regio)))
     }
 
+    @Test func boardLongDistanceAndRegionalFilters() {
+        let sBahn = Line(name: "S 1", number: nil, product: .suburban, operatorName: "S-Bahn Berlin GmbH")
+        let longDistance = BoardFilter(products: Product.longDistanceProducts)
+        #expect(longDistance.includes(entry(ice)))
+        #expect(longDistance.includes(entry(flix)))
+        #expect(!longDistance.includes(entry(regio)))
+        #expect(!longDistance.includes(entry(sBahn)))
+        let regional = BoardFilter(products: Product.regionalProducts)
+        #expect(regional.includes(entry(regio)))
+        #expect(!regional.includes(entry(ice)))
+        #expect(!regional.includes(entry(sBahn)))
+    }
+
     @Test func pkceMatchesRFC7636() {
         #expect(PKCE.challenge(for: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk") == "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM")
         #expect(PKCE().verifier.count == 64)
