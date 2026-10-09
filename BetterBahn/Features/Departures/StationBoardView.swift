@@ -15,7 +15,8 @@ struct StationBoardView: View {
     @State private var isLoading = false
     @State private var error: Error?
     @State private var lastUpdate: Date?
-    /// `reloadKey` the current `entries` belong to; the board is only cleared when it changes, not when the tab reappears.
+    /// `boardKey` the current `entries` belong to; the board is only cleared when it changes, not when the tab reappears
+    /// or the filter changes.
     @State private var loadedKey: String?
     /// When the board was last on screen (tab left or app in the background); see `resumeAfterAbsence`.
     @State private var leftAt: Date?
@@ -26,9 +27,16 @@ struct StationBoardView: View {
         BoardFilter(products: products, ticketFilter: onlyValidTicket ? model.ticketFilter : nil)
     }
 
+    /// What the shown board is about; when it changes the old rows are dropped.
+    private var boardKey: String {
+        "\(station?.id ?? "")|\(kind)|\(useNow ? "now" : date.description)"
+    }
+
+    /// `boardKey` plus the transport filter. A new filter reloads the board (the feed filters by mode too) but keeps
+    /// the rows on screen, which are filtered locally meanwhile; clearing them made the open filter menu jump.
     private var reloadKey: String {
         let productsKey = products.map(\.rawValue).sorted().joined(separator: ",")
-        return "\(station?.id ?? "")|\(kind)|\(useNow ? "now" : date.description)|\(productsKey)"
+        return "\(boardKey)|\(productsKey)"
     }
 
     private var isFiltered: Bool { onlyValidTicket || products.count != Product.allCases.count }
@@ -107,10 +115,10 @@ struct StationBoardView: View {
             }
             .refreshable { await load() }
             .task(id: reloadKey) {
-                if loadedKey != reloadKey {
+                if loadedKey != boardKey {
                     entries = []
                     lastUpdate = nil
-                    loadedKey = reloadKey
+                    loadedKey = boardKey
                 }
                 // Auto-refresh every 60 seconds while visible; coming back to the tab keeps the
                 // rows on screen and just updates them.
