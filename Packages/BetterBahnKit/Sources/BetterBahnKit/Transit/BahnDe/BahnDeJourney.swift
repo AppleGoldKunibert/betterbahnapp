@@ -808,33 +808,48 @@ extension BahnDeClient {
     /// at its start, its end and its stops. Transitous' realtime for cross-border trains often carries
     /// no delay at all and DB Timetables can miss a stop, so RJ 383 showed +59 at Dresden Hbf but none
     /// at Bad Schandau, where bahn.de had +57. Matched like the platforms, by planned time and place.
-    public static func applyingLiveTimes(from stops: [JourneyStop], to leg: Leg) -> Leg {
+    ///
+    /// `keepingDelays` is for when DB Timetables has been asked already: a time it put a delay on stays, and
+    /// bahn.de only fills what is missing or on time. bahn.de's forecast can be far off for some trains
+    /// (RE 3 3354 on 9 Oct 2026: +7 at Gesundbrunnen and ±0 at the end, where DB Timetables and DB Navigator had
+    /// +19 and +7), and it used to overwrite DB Timetables' times.
+    public static func applyingLiveTimes(from stops: [JourneyStop], to leg: Leg, keepingDelays: Bool = false) -> Leg {
         var leg = leg
-        if let actual = stop(in: stops, at: leg.origin, planned: leg.departure.planned, side: \.departure)?.departure?.actual {
+        if let actual = stop(in: stops, at: leg.origin, planned: leg.departure.planned, side: \.departure)?.departure?.actual,
+           replaces(leg.departure, with: actual, keepingDelays: keepingDelays) {
             leg.departure.actual = actual
         }
-        if let actual = stop(in: stops, at: leg.destination, planned: leg.arrival.planned, side: \.arrival)?.arrival?.actual {
+        if let actual = stop(in: stops, at: leg.destination, planned: leg.arrival.planned, side: \.arrival)?.arrival?.actual,
+           replaces(leg.arrival, with: actual, keepingDelays: keepingDelays) {
             leg.arrival.actual = actual
         }
-        leg.stopovers = applyingLiveTimes(from: stops, to: leg.stopovers)
+        leg.stopovers = applyingLiveTimes(from: stops, to: leg.stopovers, keepingDelays: keepingDelays)
         return leg
     }
 
-    /// `stopovers` with bahn.de's live times where it has one (see `applyingLiveTimes(from:to:)` for a leg).
-    public static func applyingLiveTimes(from stops: [JourneyStop], to stopovers: [Stopover]) -> [Stopover] {
+    /// `stopovers` with bahn.de's live times where it has one (see `applyingLiveTimes(from:to:keepingDelays:)` for a leg).
+    public static func applyingLiveTimes(from stops: [JourneyStop], to stopovers: [Stopover], keepingDelays: Bool = false) -> [Stopover] {
         var stopovers = stopovers
         for index in stopovers.indices {
             let stopover = stopovers[index]
             if let planned = stopover.arrival?.planned,
-               let actual = stop(in: stops, at: stopover.station, planned: planned, side: \.arrival)?.arrival?.actual {
+               let actual = stop(in: stops, at: stopover.station, planned: planned, side: \.arrival)?.arrival?.actual,
+               replaces(stopover.arrival, with: actual, keepingDelays: keepingDelays) {
                 stopovers[index].arrival?.actual = actual
             }
             if let planned = stopover.departure?.planned,
-               let actual = stop(in: stops, at: stopover.station, planned: planned, side: \.departure)?.departure?.actual {
+               let actual = stop(in: stops, at: stopover.station, planned: planned, side: \.departure)?.departure?.actual,
+               replaces(stopover.departure, with: actual, keepingDelays: keepingDelays) {
                 stopovers[index].departure?.actual = actual
             }
         }
         return stopovers
+    }
+
+    /// Whether bahn.de's `actual` replaces `time`: always, unless `keepingDelays` and `time` already carries a delay.
+    static func replaces(_ time: TimeInfo?, with actual: Date, keepingDelays: Bool) -> Bool {
+        guard keepingDelays, let time, time.actual != nil else { return true }
+        return time.delayMinutes == 0
     }
 
     /// Whether `leg` lacks a platform at its start, its end or any of its stops.

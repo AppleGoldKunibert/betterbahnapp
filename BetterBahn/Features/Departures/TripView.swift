@@ -205,7 +205,8 @@ struct TripView: View {
         }
         guard self.trip?.id == trip.id else { return }
         trace.append(.init(source: "bahn.de", outcome: .ok, detail: RefreshTrace.summary(ofStops: stops)))
-        self.trip?.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: BahnDeClient.inserting(stops, into: trip.stopovers))
+        self.trip?.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: BahnDeClient.inserting(stops, into: trip.stopovers),
+                                                               keepingDelays: model.timetablesClient != nil)
         if (try? await bahnDe.hasSleepingCars(for: trip)) == true, self.trip?.id == trip.id { self.trip?.line?.nightRail = true }
     }
 }
@@ -692,7 +693,8 @@ struct LegTripSheet: View {
         if let bahnDe = model.provider.bahnDe {
             do {
                 if let stops = try await bahnDe.journeyStops(for: updated) {
-                    updated.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: BahnDeClient.inserting(stops, into: updated.stopovers))
+                    updated.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: BahnDeClient.inserting(stops, into: updated.stopovers),
+                                                                      keepingDelays: model.timetablesClient != nil)
                     hasSleepingCars = (try? await bahnDe.hasSleepingCars(for: updated)) == true
                     trace.append(.init(source: "bahn.de", outcome: .ok, detail: RefreshTrace.summary(ofStops: stops)))
                 } else {

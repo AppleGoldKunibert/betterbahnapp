@@ -162,7 +162,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   (`fillingMissingPlatforms`, e.g. Hamburg Hbf; saved journeys via `JourneyRefresher`, which also applies the names below), and bahn.de's
   own train names for boards (departures and arrivals) and journey legs (`correctingTrainNames`, e.g. "RJ 171" that Transitous calls "ICE 171"),
   and DB's live times (`ezZeit`) for every train on boards (not subway, tram, bus; RE/RB, S-Bahn and other brands by run number or name) (`correctingFromBoard`, `applyingLiveTimes`), which
-  beat DELFI's forecasts in Transitous; the journey details' live times likewise win on legs and trains (`applyingLiveTimes(from:to:)`, RJ 383 had no delay at Bad Schandau otherwise). Responses are
+  beat DELFI's forecasts in Transitous; the journey details' live times likewise win on legs and trains (`applyingLiveTimes(from:to:)`, RJ 383 had no delay at Bad Schandau otherwise), but not over a delay DB Timetables already put on a stop (`keepingDelays`: bahn.de showed +7 for RE 3 3354 at Gesundbrunnen where DB had +19). Responses are
   cached; a 403/429 pauses all bahn.de requests through the Worker for 10 min (`BahnDeGate`). Then (and on that first
   blocked answer) the app asks bahn.de from the phone instead: `BahnDeBrowserFallback` (set at launch in `AppModel.init`,
   none in widgets/tests) loads the same `/web/api/…` path at www.bahn.de through `BahnDeBrowser` (hidden `WebPage` on
