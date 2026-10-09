@@ -4,27 +4,20 @@ import Foundation
 /// `Resources/Ril100.json` built by `scripts/make-ril100.py` from DB InfraGO's operating points
 /// (Deutsche Bahn AG, CC BY 4.0) (#165). Station search finds a station by its code, typed in any
 /// case; the picker can show a station's code next to its name. DB's list has no EVA numbers, so
-/// stops are matched to codes by position and name. Stations abroad ("XS ZH" Zürich HB: X + country
-/// letter, Z for eastern Europe) come from DB's other list of operating points and have no
-/// positions: they are matched by their exact name.
+/// stops are matched to codes by position and name.
 public enum Ril100 {
     public struct Entry: Decodable, Sendable, Hashable {
         /// E.g. "FF", or "LL T" for Leipzig Hbf's lower level.
         public let code: String
         /// DB's name, e.g. "Berlin Hauptbahnhof - Lehrter Bahnhof".
         public let name: String
-        /// Where the station lies on each of its lines: a big one spans kilometres. Empty for
-        /// stations abroad.
+        /// Where the station lies on each of its lines: a big one spans kilometres.
         public let points: [Coordinate]
-
-        /// What a stop abroad may be called to be this station (`isSameName`); empty with positions.
-        let abroadNameKeys: Set<String>
 
         init(code: String, name: String, points: [Coordinate]) {
             self.code = code
             self.name = name
             self.points = points
-            abroadNameKeys = points.isEmpty ? Ril100.abroadNameKeys(for: name) : []
         }
 
         public init(from decoder: any Decoder) throws {
@@ -33,13 +26,9 @@ public enum Ril100 {
             name = try row.decode(String.self)
             let flat = try row.decode([Double].self)
             points = stride(from: 0, to: flat.count - 1, by: 2).map { Coordinate(latitude: flat[$0], longitude: flat[$0 + 1]) }
-            abroadNameKeys = points.isEmpty ? Ril100.abroadNameKeys(for: name) : []
         }
 
         var nameKey: String { Ril100.nameKey(name) }
-
-        /// True for a station abroad ("XSZH"), which DB's list gives no position.
-        var isAbroad: Bool { points.isEmpty }
     }
 
     static let all: [Entry] = {
@@ -87,29 +76,10 @@ public enum Ril100 {
     /// Nearer than this, a stop counts as the station whatever it's called ("Frankfurt(M) Hbf").
     static let sameSpotRadius: Double = 80
 
-    /// A name for comparing stations abroad: brackets kept ("Hof (Saale)" is not an Austrian "Hof"),
-    /// but not a country mark ("Basel SBB (CH)"); spaces, case, accents and "Hauptbahnhof" ignored, as
-    /// DB writes "Wroclaw Glowny" and feeds "Wrocław Główny".
-    static func exactNameKey(_ name: String) -> String {
-        let shown = Station.displayName(for: name)
-            .replacingOccurrences(of: #" \([A-Z]{2}\)$"#, with: "", options: .regularExpression)
-            .replacingOccurrences(of: "ł", with: "l").replacingOccurrences(of: "Ł", with: "L")
-        return Station.normalize(shown.folding(options: .diacriticInsensitive, locale: nil))
-    }
-
-    /// The names a stop abroad may have to be the station `name`: the whole name, or one of the two names
-    /// of a station DB gives both ("Bruxelles-Midi / Brussel-Zuid").
-    static func abroadNameKeys(for name: String) -> Set<String> {
-        let parts = name.components(separatedBy: " / ") + name.components(separatedBy: " - ")
-        return Set(([name] + parts).map(exactNameKey).filter { !$0.isEmpty })
-    }
-
     /// How far `station` is from `entry` if it is that station: within `matchRadius` of one of its
     /// positions with one name part of the other ("Alexanderplatz" in "Berlin Alexanderplatz",
-    /// "Hamburg Hbf" in "Hamburg Hbf (S-Bahn)"), or right at it; nil otherwise. A station abroad has
-    /// no positions: it counts when the names are the same, at distance 0.
-    static func distance(of station: Station, to entry: Entry, nameKey: String? = nil) -> Double? {
-        if entry.isAbroad { return entry.abroadNameKeys.contains(nameKey ?? exactNameKey(station.name)) ? 0 : nil }
+    /// "Hamburg Hbf" in "Hamburg Hbf (S-Bahn)"), or right at it; nil otherwise.
+    static func distance(of station: Station, to entry: Entry) -> Double? {
         guard let coordinate = station.coordinate else { return nil }
         // Roughly `matchRadius` in degrees, so most points are skipped without the haversine.
         let near = entry.points.filter {
@@ -131,16 +101,14 @@ public enum Ril100 {
     }
 
     /// The code shown next to `station`: of the codes it matches, the shortest – a station's levels
-    /// have longer ones ("FF" before "FFT", "BL" before "BLS") – then the nearest. A match by position
-    /// beats one by name alone.
+    /// have longer ones ("FF" before "FFT", "BL" before "BLS") – then the nearest.
     public static func code(for station: Station) -> String? {
         entry(for: station, in: all)?.code
     }
 
     static func entry(for station: Station, in entries: [Entry]) -> Entry? {
-        let key = exactNameKey(station.name)
-        return entries.compactMap { entry in distance(of: station, to: entry, nameKey: key).map { (entry, $0) } }
-            .min { ($0.0.isAbroad ? 1 : 0, $0.0.code.count, $0.1) < ($1.0.isAbroad ? 1 : 0, $1.0.code.count, $1.1) }?.0
+        entries.compactMap { entry in distance(of: station, to: entry).map { (entry, $0) } }
+            .min { ($0.0.code.count, $0.1) < ($1.0.code.count, $1.1) }?.0
     }
 
     /// Search hits for the code `entry` was found by: `hit` (the station looked up by DB's name) first,
