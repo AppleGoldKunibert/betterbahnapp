@@ -258,10 +258,44 @@ public actor TraewellingClient {
         store.save(newToken)
     }
 
+    /// The refresh in progress, if any. An actor lets other calls in while it waits for the network,
+    /// and Träwelling accepts a refresh token only once: two calls refreshing together (the map's sync
+    /// next to the followed check-ins, say) made the second one fail with 400 `invalid_grant`.
+    private var refreshing: Task<Void, Error>?
+
     private func validAccessToken() async throws -> String {
         token = store.load()
         guard let token else { throw OAuthError.notLoggedIn }
         if token.isExpired, let refresh = token.refreshToken {
+            try await refreshToken(refresh)
+        }
+        guard let access = self.token?.accessToken else { throw OAuthError.notLoggedIn }
+        return access
+    }
+
+    /// The refresh token Träwelling last rejected, so it isn't sent again on every request until the
+    /// Keychain holds another one.
+    private var rejectedRefreshToken: String?
+
+    private func refreshToken(_ refresh: String) async throws {
+        if refresh == rejectedRefreshToken { throw OAuthError.sessionExpired }
+        if let refreshing { return try await refreshing.value }
+        let task = Task { try await self.exchangeRefreshToken(refresh) }
+        refreshing = task
+        defer { refreshing = nil }
+        try await task.value
+    }
+
+    /// Träwelling answers a refresh token it no longer accepts with 400 `invalid_grant`. Access tokens last
+    /// only an hour, so this is common: another device already used the refresh token (it syncs through
+    /// iCloud Keychain, which may not have delivered the new one yet), or the answer to an earlier refresh
+    /// never arrived (a train in a tunnel). Without handling it every request failed with
+    /// "Serverfehler (400)" until the user logged out and in again; now a newer token in the Keychain is
+    /// used, and otherwise the request fails with `OAuthError.sessionExpired`. The stored token is kept:
+    /// deleting it (`logout()`) would delete the synced Keychain item on every device, including a fresh
+    /// token the other device just stored. If one arrives later, the next request picks it up.
+    private func exchangeRefreshToken(_ refresh: String, isRetry: Bool = false) async throws {
+        do {
             // No `scope`: the new token keeps what the login granted. Asking for scopes added since
             // (e.g. "write-likes") would make Träwelling reject the refresh and end older logins.
             try await requestToken([
@@ -269,9 +303,26 @@ public actor TraewellingClient {
                 "client_id": config.clientID,
                 "refresh_token": refresh,
             ])
+        } catch TransitError.http(let status, let body) where [400, 401].contains(status) && Self.isRejectedGrant(body) {
+            if !isRetry, let stored = store.load(), stored.refreshToken != refresh {
+                if !stored.isExpired {
+                    token = stored
+                    return
+                }
+                if let newer = stored.refreshToken {
+                    return try await exchangeRefreshToken(newer, isRetry: true)
+                }
+            }
+            rejectedRefreshToken = refresh
+            throw OAuthError.sessionExpired
         }
-        guard let access = self.token?.accessToken else { throw OAuthError.notLoggedIn }
-        return access
+    }
+
+    /// Whether a token endpoint answer says the grant (here: the refresh token) is invalid, expired or revoked.
+    static func isRejectedGrant(_ body: String?) -> Bool {
+        guard let data = body?.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+        return json["error"] as? String == "invalid_grant"
     }
 
     // MARK: API
