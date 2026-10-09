@@ -46,6 +46,9 @@ final class AppModel {
     }
     /// Live versions of journeys and train runs already loaded once (see `LiveDataCache`), kept on disk
     /// so after a restart too they show at once while a background refresh runs instead of a spinner.
+    /// What the latest refresh of each of the last few journeys asked every live source and got back
+    /// (Settings → Live-Daten-Diagnose), newest first. Kept on this device only.
+    private(set) var refreshTraces: [RefreshTrace] = []
     @ObservationIgnored private(set) var liveJourneys = LiveDataCache<Journey>()
     @ObservationIgnored private(set) var liveTrips = LiveDataCache<Trip>()
     /// Saved journey to open on the Verbindungen tab (set when the Live Activity is tapped);
@@ -118,6 +121,7 @@ final class AppModel {
         savedJourneys = Storage.load(key: "savedJourneys") ?? []
         trackedManualCheckins = Storage.load(key: "trackedManualCheckins") ?? []
         checkinStatusIDs = Storage.load(key: "checkinStatusIDs") ?? [:]
+        refreshTraces = Storage.load(key: "refreshTraces") ?? []
         liveJourneys = Storage.load(key: "liveJourneys") ?? LiveDataCache()
         liveTrips = Storage.load(key: "liveTrips") ?? LiveDataCache()
         tickets = TicketStore.load()
@@ -193,6 +197,20 @@ final class AppModel {
     }
 
     var journeyRefresher: JourneyRefresher { JourneyRefresher(provider: provider, timetables: timetablesClient) }
+
+    /// `journeyRefresher.refresh(_:)` that also keeps what each live source answered (`refreshTraces`).
+    func refreshJourney(_ journey: Journey, using refresher: JourneyRefresher? = nil) async -> Journey {
+        let (refreshed, trace) = await (refresher ?? journeyRefresher).refreshTracing(journey)
+        record(trace)
+        return refreshed
+    }
+
+    private func record(_ trace: RefreshTrace) {
+        refreshTraces.removeAll { $0.id == trace.id }
+        refreshTraces.insert(trace, at: 0)
+        if refreshTraces.count > 8 { refreshTraces.removeLast(refreshTraces.count - 8) }
+        Storage.saveInBackground(refreshTraces, key: "refreshTraces")
+    }
 
     /// Whether `journey` was already loaded with live data: saved (refreshed in the background, also
     /// right after launch) or opened or prepared before. Only an unseen one waits for live data.
@@ -1037,7 +1055,7 @@ final class AppModel {
 
     /// Fetches realtime data for one saved journey, stores it and sends notifications for new issues.
     private func refresh(_ entry: SavedJourney, using refresher: JourneyRefresher) async {
-        let refreshed = await refresher.refresh(entry.journey)
+        let refreshed = await refreshJourney(entry.journey, using: refresher)
         guard let index = savedJourneys.firstIndex(where: { $0.id == entry.id }) else { return }
         var updated = savedJourneys[index]
         let previous = updated.journey

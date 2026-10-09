@@ -189,7 +189,7 @@ struct JourneyDetailView: View {
     /// Pull-to-refresh: re-fetches realtime data (delays, platforms, cancellations) for every leg.
     private func refreshRealtime() async {
         guard !readOnly else { return }
-        let refreshed = await model.journeyRefresher.refresh(journey)
+        let refreshed = await model.refreshJourney(journey)
         if model.savedEntry(for: journey) == nil { model.rememberLive(refreshed) }
         guard refreshed != journey else { return }
         if let entry = model.savedEntry(for: journey) {

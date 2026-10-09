@@ -324,6 +324,12 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `liveTrips`, on disk as `liveJourneys.json`/`liveTrips.json`, 12 h, 50 each) shows at once and refreshes in the
   background; saved journeys count as seen. Search results prepare the first connection's live data
   (`AppModel.prepareLiveData`).
+- `Support/RefreshTrace.swift` – diagnostics for stale delays: `JourneyRefresher.refreshTracing` returns, besides the
+  journey, one `RefreshTrace` with a step per source asked per leg (Transitous trip, DB Timetables ends/stops, bahn.de:
+  ok / empty / failed with the error / skipped with the reason, plus the times the leg shows afterwards). The refresh
+  itself is unchanged; it swallows failed requests and keeps the last known time, which this makes visible.
+  `AppModel.refreshJourney` keeps the latest 8 (`refreshTraces`, `refreshTraces.json`, this device only), shown in
+  Settings → Live-Daten-Diagnose (`RefreshDiagnosticsView`, share button) after a pull-to-refresh or background refresh.
 - `Support/WorkerAuth.swift` – App Attest for BetterBahn's own Workers: attests the device key once, then
   gets hourly access tokens (`X-BetterBahn-Token`); `HTTPClient.sendRaw(_:auth:)` adds the token and retries
   once after a 401. Clients use `WorkerAuth.shared` only on the real `URLSession.shared` (tests' mocked

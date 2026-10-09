@@ -196,6 +196,11 @@ struct SettingsView: View {
                     } label: {
                         IconLabel(title: "Datenquellen", systemImage: "server.rack", color: .gray)
                     }
+                    NavigationLink {
+                        RefreshDiagnosticsView()
+                    } label: {
+                        IconLabel(title: "Live-Daten-Diagnose", systemImage: "stethoscope", color: .gray)
+                    }
                     Link(destination: Self.privacyPolicyURL) {
                         IconLabel(title: "Datenschutz", systemImage: "hand.raised.fill", color: .blue)
                     }

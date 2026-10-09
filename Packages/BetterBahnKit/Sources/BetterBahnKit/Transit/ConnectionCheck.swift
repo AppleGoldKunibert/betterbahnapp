@@ -117,6 +117,11 @@ public struct JourneyRefresher: Sendable {
     }
 
     public func refresh(_ journey: Journey, now: Date = .now) async -> Journey {
+        await refreshTracing(journey, now: now).journey
+    }
+
+    /// `refresh(_:now:)` together with what each live source answered per leg (`RefreshTrace`).
+    public func refreshTracing(_ journey: Journey, now: Date = .now) async -> (journey: Journey, trace: RefreshTrace) {
         // Journeys saved before "RJ 177" stopped counting as coupled to its DB twin "ICE 177"
         // (`Line.isSameTrain(as:)`) drop that entry; a leg left without any is looked up again.
         let journey = Self.withoutSelfCoupling(journey)
@@ -124,18 +129,29 @@ public struct JourneyRefresher: Sendable {
         // Coupled trains the search had no time to find (see `CombinedProvider.journeys`).
         async let coupled = provider.coupledTrains(in: [journey], deadline: .seconds(6))
         // Legs are looked up side by side, so a journey with transfers loads as fast as its slowest leg.
-        await withTaskGroup(of: (Int, Leg).self) { group in
+        var legTraces = [RefreshTrace.LegTrace?](repeating: nil, count: journey.legs.count)
+        await withTaskGroup(of: (Int, Leg, RefreshTrace.LegTrace).self) { group in
             for (index, leg) in journey.legs.enumerated() {
-                group.addTask { (index, await refresh(leg, now: now)) }
+                group.addTask {
+                    var steps: [RefreshTrace.Step] = []
+                    let refreshed = await refresh(leg, now: now, trace: &steps)
+                    return (index, refreshed, RefreshTrace.legTrace(for: leg, steps: steps))
+                }
             }
-            for await (index, leg) in group { updated.legs[index] = leg }
+            for await (index, leg, legTrace) in group {
+                updated.legs[index] = leg
+                legTraces[index] = legTrace
+            }
         }
         // Journeys saved from results where bahn.de didn't answer in time keep Transitous' generic
         // names (e.g. "ICE 175" for the Railjet "RJ 175"); bahn.de's answers are cached for the day.
         if let bahnDe = provider.bahnDe, let named = await bahnDe.correctingTrainNames(in: [updated]).first {
             updated = named
         }
-        return CombinedProvider.applying(await coupled, to: [updated]).first ?? updated
+        let result = CombinedProvider.applying(await coupled, to: [updated]).first ?? updated
+        let trace = RefreshTrace(id: journey.id, title: RefreshTrace.title(of: journey), date: now,
+                                 legs: zip(journey.legs, legTraces).compactMap { leg, trace in leg.isWalking ? nil : trace })
+        return (result, trace)
     }
 
     static func withoutSelfCoupling(_ journey: Journey) -> Journey {
@@ -180,19 +196,49 @@ public struct JourneyRefresher: Sendable {
     }
 
     private func refreshEnds(of originalLeg: Leg, now: Date) async -> Leg {
-        guard !Self.isLongOver(originalLeg, now: now) else { return originalLeg }
+        var ignored: [RefreshTrace.Step] = []
+        return await refreshEnds(of: originalLeg, now: now, trace: &ignored)
+    }
+
+    /// `trace` gets one step per source asked, in order, for the journey diagnostics (`RefreshTrace`).
+    private func refreshEnds(of originalLeg: Leg, now: Date, trace: inout [RefreshTrace.Step]) async -> Leg {
+        trace.append(.init(source: "Gespeichert", outcome: .ok, detail: RefreshTrace.summary(of: originalLeg)))
+        guard !Self.isLongOver(originalLeg, now: now) else {
+            trace.append(.init(source: "Aktualisierung", outcome: .skipped, detail: "Ankunft über 30 min her, letzter Stand bleibt"))
+            return originalLeg
+        }
         var leg = Self.droppingInferredOnTime(originalLeg, now: now)
-        if !leg.isWalking, leg.tripId != nil, leg.source != .traewelling,
-           let trip = try? await provider.trip(for: leg) {
-            leg = Self.apply(trip, to: leg)
+        if !leg.isWalking, leg.tripId != nil, leg.source != .traewelling {
+            do {
+                let trip = try await provider.trip(for: leg)
+                leg = Self.apply(trip, to: leg)
+                trace.append(.init(source: "Transitous", outcome: .ok, detail: RefreshTrace.summary(of: leg)))
+            } catch {
+                trace.append(.init(source: "Transitous", outcome: .failed, detail: error.localizedDescription))
+            }
+        } else if !leg.isWalking {
+            trace.append(.init(source: "Transitous", outcome: .skipped, detail: "keine Trip-ID oder Träwelling-Eintrag"))
         }
         let timetables = TimetablesClient.knowsChanges(until: leg.arrival.planned, now: now) ? self.timetables : nil
         // DB Timetables wins wherever it knows the stop; the trip data above only fills in
         // what DB can't match (regional operators, far-off stops).
-        if let timetables, let override = await timetables.realtime(for: leg, now: now) {
-            leg = Self.apply(override, to: leg)
+        if let timetables {
+            if let override = await timetables.realtime(for: leg, now: now) {
+                leg = Self.apply(override, to: leg)
+                trace.append(.init(source: "DB Timetables (Start/Ziel)", outcome: .ok, detail: RefreshTrace.summary(of: leg)))
+            } else {
+                trace.append(.init(source: "DB Timetables (Start/Ziel)", outcome: .empty,
+                                   detail: "nichts erhalten (Zug nicht gefunden, nichts gemeldet oder Abfrage fehlgeschlagen), Stand bleibt"))
+            }
+        } else {
+            trace.append(.init(source: "DB Timetables (Start/Ziel)", outcome: .skipped, detail: timetablesSkipReason))
         }
         return leg
+    }
+
+    private var timetablesSkipReason: String {
+        timetables == nil ? "nicht verfügbar (kein App Attest oder nicht eingerichtet)"
+            : "außerhalb des Zeitfensters, in dem DB Änderungen kennt"
     }
 
     /// A leg that arrived over 30 minutes ago keeps what was last seen live. Later answers only lose
@@ -203,9 +249,13 @@ public struct JourneyRefresher: Sendable {
         leg.arrival.best.addingTimeInterval(30 * 60) < now
     }
 
-    private func refresh(_ originalLeg: Leg, now: Date) async -> Leg {
-        guard !Self.isLongOver(originalLeg, now: now) else { return originalLeg }
-        var leg = await refreshEnds(of: originalLeg, now: now)
+    private func refresh(_ originalLeg: Leg, now: Date, trace: inout [RefreshTrace.Step]) async -> Leg {
+        guard !Self.isLongOver(originalLeg, now: now) else {
+            trace.append(.init(source: "Gespeichert", outcome: .ok, detail: RefreshTrace.summary(of: originalLeg)))
+            trace.append(.init(source: "Aktualisierung", outcome: .skipped, detail: "Ankunft über 30 min her, letzter Stand bleibt"))
+            return originalLeg
+        }
+        var leg = await refreshEnds(of: originalLeg, now: now, trace: &trace)
         // Stops the leg's own feed leaves out (ÖBB's RJ 177 has none between Südkreuz and Děčín), before
         // DB's live data and bahn.de's Zusatzhalte are laid over them.
         if let transitous = provider.primary as? TransitousProvider {
@@ -218,6 +268,11 @@ public struct JourneyRefresher: Sendable {
             leg.stopovers = live.stopovers
             leg.messages = TrainMessage.merged(leg.messages + live.messages)
             leg = Self.syncingEnds(of: leg, toStopovers: false)
+            trace.append(.init(source: "DB Timetables (Halte)", outcome: .ok,
+                               detail: "\(RefreshTrace.summary(ofStopovers: leg.stopovers)); danach \(RefreshTrace.summary(of: leg))"))
+        } else {
+            trace.append(.init(source: "DB Timetables (Halte)", outcome: .skipped,
+                               detail: timetables == nil ? timetablesSkipReason : "Zug hat keine abfragbare Nummer"))
         }
         // Neither Transitous nor DB Timetables above ever *inserts* a stop — only bahn.de's journey
         // details report a Zusatzhalt (an unscheduled stop the train additionally picked up today)
@@ -226,15 +281,28 @@ public struct JourneyRefresher: Sendable {
         // Timetables knows them. Asked for legs underway or departing within 12 hours, and hourly
         // for legs up to a week ahead that miss a platform, so many saved journeys don't flood bahn.de.
         let runningSoon = Self.isRunningSoon(leg)
-        if let bahnDe = provider.bahnDe, runningSoon || Self.needsPlatforms(leg),
-           let course = try? await bahnDe.journeyCourse(for: leg, maxAge: runningSoon ? BahnDeClient.journeyStopsMaxAge : 3600) {
-            if runningSoon {
-                if !leg.stopovers.isEmpty { leg.stopovers = BahnDeClient.inserting(course.stops, into: leg.stopovers) }
-                // DB's own live times beat Transitous' and fill stops DB Timetables missed.
-                leg = BahnDeClient.applyingLiveTimes(from: course.stops, to: leg)
+        if let bahnDe = provider.bahnDe, runningSoon || Self.needsPlatforms(leg) {
+            do {
+                if let course = try await bahnDe.journeyCourse(for: leg, maxAge: runningSoon ? BahnDeClient.journeyStopsMaxAge : 3600) {
+                    if runningSoon {
+                        if !leg.stopovers.isEmpty { leg.stopovers = BahnDeClient.inserting(course.stops, into: leg.stopovers) }
+                        // DB's own live times beat Transitous' and fill stops DB Timetables missed.
+                        leg = BahnDeClient.applyingLiveTimes(from: course.stops, to: leg)
+                    }
+                    leg = BahnDeClient.fillingMissingPlatforms(in: leg, from: course.stops)
+                    leg = BahnDeClient.markingNightTrain(leg, hasSleepingCars: course.hasSleepingCars)
+                    trace.append(.init(source: "bahn.de", outcome: .ok,
+                                       detail: "bahn.de: \(RefreshTrace.summary(ofStops: course.stops)); danach \(RefreshTrace.summary(of: leg))"
+                                           + (runningSoon ? "" : " (nur Gleise übernommen)")))
+                } else {
+                    trace.append(.init(source: "bahn.de", outcome: .empty, detail: "Zug dort nicht abfragbar"))
+                }
+            } catch {
+                trace.append(.init(source: "bahn.de", outcome: .failed, detail: error.localizedDescription))
             }
-            leg = BahnDeClient.fillingMissingPlatforms(in: leg, from: course.stops)
-            leg = BahnDeClient.markingNightTrain(leg, hasSleepingCars: course.hasSleepingCars)
+        } else {
+            trace.append(.init(source: "bahn.de", outcome: .skipped,
+                               detail: provider.bahnDe == nil ? "nicht eingerichtet" : "Zug fährt erst in über 12 h und hat alle Gleise"))
         }
         // International trains from DB's feed have no platforms in Czechia; the Czech timetable has them.
         if let transitous = provider.primary as? TransitousProvider {
