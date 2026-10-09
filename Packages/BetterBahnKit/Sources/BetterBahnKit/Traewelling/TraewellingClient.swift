@@ -671,7 +671,7 @@ public actor TraewellingClient {
     static func hafasCategory(for product: Product) -> String {
         switch product {
         case .highSpeed: "nationalExpress"
-        case .longDistance: "national"
+        case .longDistance, .nightTrain, .interregio: "national"
         case .regionalExpress: "regionalExp"
         case .regional, .other: "regional"
         case .suburban: "suburban"
