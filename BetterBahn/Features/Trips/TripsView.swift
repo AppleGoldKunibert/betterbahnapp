@@ -8,6 +8,7 @@ struct UpcomingTripsSection: View {
     var body: some View {
         let upcoming = model.upcomingJourneys
         VStack(alignment: .leading, spacing: 10) {
+            FollowedCheckinsSection()
             SectionHeader(title: "Deine Reisen", systemImage: "bookmark.fill",
                           trailing: upcoming.isEmpty ? nil : "\(upcoming.count)")
             if upcoming.isEmpty {
@@ -138,6 +139,10 @@ struct SaveJourneyButton: View {
     var shortLabel = false
     @Environment(AppModel.self) private var model
     @State private var journeyToRemove: Journey?
+    /// Trains of the journey that need a reservation, while the warning is up.
+    @State private var reservationTrains: [String] = []
+    @State private var showsReservationWarning = false
+    @State private var isCheckingReservation = false
 
     private var title: String {
         if shortLabel { return model.isSaved(journey) ? "Gespeichert" : "Speichern" }
@@ -157,12 +162,37 @@ struct SaveJourneyButton: View {
         .tint(saved ? Color.punctual : Color.brand)
         .controlSize(.large)
         .sensoryFeedback(.success, trigger: saved)
+        .disabled(isCheckingReservation)
         .checkoutPrompt($journeyToRemove)
+        .alert("Achtung: Zug ist reservierungspflichtig", isPresented: $showsReservationWarning) {
+            Button("Abbrechen", role: .cancel) {}
+            Button("Verstanden, weiter") { save() }
+        } message: {
+            Text("\(reservationTrains.formatted(.list(type: .and))): Ohne Reservierung (Sitz- oder Liegeplatz) darfst du nicht mitfahren. Reservierungen kannst du über „Via Ticket hinzufügen“ importieren.")
+        }
     }
 
     private func toggle(_ saved: Bool) {
-        withAnimation(.snappy) {
-            if saved { model.remove(journey, askingToCheckOut: &journeyToRemove) } else { model.save(journey, search: search) }
+        if saved {
+            withAnimation(.snappy) { model.remove(journey, askingToCheckOut: &journeyToRemove) }
+            return
         }
+        // A journey added from a ticket or reservation import is saved by the import itself and never
+        // gets here, so every journey saved with this button still lacks a reservation.
+        isCheckingReservation = true
+        Task {
+            let legs = await model.reservationRequiredLegs(in: journey)
+            isCheckingReservation = false
+            if legs.isEmpty {
+                save()
+            } else {
+                reservationTrains = legs.compactMap { $0.line?.displayName }
+                showsReservationWarning = true
+            }
+        }
+    }
+
+    private func save() {
+        withAnimation(.snappy) { model.save(journey, search: search) }
     }
 }

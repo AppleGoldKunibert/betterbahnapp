@@ -11,6 +11,10 @@ public struct TransitousProvider: TransitProvider {
     private let coupledCache = ExpiringCache<[Line.CoupledTrain]>()
     /// `withBusierStop(for:)` answers per stop ID.
     private let stopCache = ExpiringCache<Station?>()
+    /// `czechTimetableStops(number:along:)` answers per train and stop (see `CzechPlatforms.swift`).
+    let czechTimetableCache = ExpiringCache<[Stopover]?>()
+    /// `twinStops(for:)` answers per leg (see `TwinTrainStops.swift`).
+    let twinStopsCache = ExpiringCache<[Stopover]?>()
 
     public init(baseURL: URL = TransitousProvider.defaultBaseURL, http: HTTPClient = HTTPClient()) {
         self.baseURL = baseURL
@@ -27,7 +31,8 @@ public struct TransitousProvider: TransitProvider {
 
     public func searchStations(_ query: String, near location: Coordinate?) async throws -> [Station] {
         let matches = try await geocode(query, addingMainStation: true, near: location)
-        return Self.rankedAndMerged(matches, query: query, near: location).map { $0.toStation() }
+        return Self.placingNamedStation(for: StationSearch(text: query),
+                                        in: Self.rankedAndMerged(matches, query: query, near: location).map { $0.toStation() })
     }
 
     /// With a mode filter the geocoder itself only returns stops with those modes, so its 50 hits
@@ -38,10 +43,26 @@ public struct TransitousProvider: TransitProvider {
         async let rilHit = station(for: ril)
         let matches = try await geocode(search.text, addingMainStation: true, near: location, modes: modes)
         let merged = Self.rankedAndMerged(matches, query: search.text, near: location)
-        let stations = Self.applying(search, to: merged, near: location).map { $0.toStation() }
+        let stations = Self.placingNamedStation(for: search, in: Self.applying(search, to: merged, near: location).map { $0.toStation() })
         guard let ril else { return stations }
         let placed = Ril100.placing(await rilHit, for: ril, typed: search.text, in: stations)
         return search.byDistance ? search.ordered(placed, near: location) : placed
+    }
+
+    /// Places named after their main station in German: "prag" (also "prag hbf") is Praha hlavní nádraží,
+    /// listed first as "Prag". CZPTT's stop (Správa železnic's station number 57076), which journeys reach
+    /// on every train to Praha, from Germany too.
+    static let namedStations: [String: Station] = [
+        "prag": Station(id: "cz-CZPTT_czptt:stop:CZ:57076", name: "Prag",
+                        coordinate: Coordinate(latitude: 50.0831, longitude: 14.4360), evaNumber: nil, source: .transitous),
+    ]
+
+    /// `stations` with the station of `namedStations` that `search` names on top, instead of its
+    /// other hits at the same place ("Praha, Hlavní nádraží"). Not with a mode filter or "l".
+    static func placingNamedStation(for search: StationSearch, in stations: [Station]) -> [Station] {
+        guard !search.hasShortcuts,
+              let named = namedStations[withoutStationWords(search.text).lowercased()] else { return stations }
+        return [named] + stations.filter { !$0.isSamePlace(as: named) }
     }
 
     /// The stop of the station with a typed RIL100 code ("ff"), looked up by DB's name for it, its
@@ -1143,8 +1164,11 @@ public struct TransitousProvider: TransitProvider {
     /// Gesundbrunnen"), and it lands in recents and favorites that way. Its own board can be nearly
     /// empty: SNCF's Gesundbrunnen only has the bus 247. So boards and journeys use another feed's far
     /// busier train station at the same place (`busierStop(for:among:)`), looked up by its name once a day.
+    /// A station of `namedStations` already is the busiest stop there; the geocoder doesn't even list
+    /// it for its name ("Prag"), so it would be swapped for ÖBB's far emptier "Praha hl.n.".
     private func withBusierStop(for station: Station) async -> Station {
-        guard !station.id.hasPrefix("de-"), station.coordinate != nil else { return station }
+        guard !station.id.hasPrefix("de-"), station.coordinate != nil,
+              !Self.namedStations.values.contains(where: { $0.id == station.id }) else { return station }
         let busier = try? await stopCache.value(for: station.id, maxAge: 24 * 3600) {
             [station] in
             let matches = try await CombinedProvider.withDeadline(Self.extraQueryDeadline) {
@@ -1288,7 +1312,7 @@ public struct TransitousProvider: TransitProvider {
     /// `board(_:at:date:duration:products:)`).
     private static let longDistanceModes: [Product] = [.highSpeed, .longDistance]
 
-    private func fetchStopTimes(stopId: String, date: Date, duration: Int, kind: BoardKind, modes: [String]?,
+    func fetchStopTimes(stopId: String, date: Date, duration: Int, kind: BoardKind, modes: [String]?,
                                 count: Int = 150) async throws -> [MStopTime] {
         var items: [URLQueryItem] = [
             .init(name: "stopId", value: stopId),
@@ -1309,6 +1333,14 @@ public struct TransitousProvider: TransitProvider {
     }
 
     public func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int, products: Set<Product>) async throws -> [BoardEntry] {
+        try await board(kind, at: station, date: date, duration: duration, products: products, correctingEnds: true)
+    }
+
+    /// `correctingEnds: false` skips `withCorrectedLongDistanceEnds`, which loads the full trip of every
+    /// long-distance train on the board: fine for an hour's board, but a long window at a hub (8 h at
+    /// Frankfurt Hbf has 150+ of them) can't finish in time. For looking up one train by name (`TrainRoutePlanner`).
+    func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int, products: Set<Product>,
+               correctingEnds: Bool) async throws -> [BoardEntry] {
         let stop = try await resolve(station)
         // MOTIS picks stop times by their live time, so a train leaving early drops out while its
         // planned-only twin from another feed (ICE 146: DB's row live at 9:08, NS's row planned 9:09)
@@ -1333,6 +1365,7 @@ public struct TransitousProvider: TransitProvider {
             .filter { ($0.time.actual ?? $0.time.planned) >= date && $0.time.planned <= end }
         let deduplicated = Self.namingUnknownLines(Self.combiningCoupledTrains(Self.deduplicated(entries)))
             .sorted { $0.time.planned < $1.time.planned }
+        guard correctingEnds else { return deduplicated }
         return await withCorrectedLongDistanceEnds(deduplicated, kind: kind)
     }
 

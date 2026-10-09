@@ -59,9 +59,10 @@ public struct StationCalls: Sendable {
     public func isDetour(_ journey: Journey) -> Bool {
         let legs = journey.transitLegs
         guard legs.count > 1, let start = journey.departure?.planned, let end = journey.arrival?.planned else { return false }
-        let during = start...end
-        if legs.dropFirst().contains(where: { $0.tripId.flatMap { atOrigin[$0] }.map(during.contains) ?? false }) { return true }
-        return legs.dropLast().contains { $0.tripId.flatMap { atDestination[$0] }.map(during.contains) ?? false }
+        // Feed data can have an arrival before the departure; `start...end` would then trap.
+        func during(_ time: Date) -> Bool { time >= start && time <= end }
+        if legs.dropFirst().contains(where: { $0.tripId.flatMap { atOrigin[$0] }.map(during) ?? false }) { return true }
+        return legs.dropLast().contains { $0.tripId.flatMap { atDestination[$0] }.map(during) ?? false }
     }
 }
 

@@ -32,9 +32,18 @@ public struct TraewellingUser: Decodable, Sendable {
     public var displayName: String
     public var username: String
     public var points: Int?
+    /// Whether the user has Träwelling's points system switched on (off by default); without it
+    /// check-ins earn 0 points, which the app then doesn't show.
+    public var pointsEnabled: Bool?
     /// The connected Mastodon profile (e.g. "https://zug.network/@name"), whose instance's
     /// custom emojis the check-in text offers.
     public var mastodonUrl: String?
+    /// Whether the user has likes on; Träwelling answers 403 to their likes otherwise.
+    public var likesEnabled: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case id, displayName, username, points, pointsEnabled, mastodonUrl, likesEnabled = "likes_enabled"
+    }
 }
 
 public struct TraewellingStation: Decodable, Sendable, Hashable {
@@ -101,14 +110,19 @@ public struct CheckinDraft: Sendable, Hashable {
     public var visibility: TraewellingVisibility
     public var business: TraewellingBusiness
     public var toot: Bool
+    /// Checks in even though Träwelling has the user on another train at that time (`.collision`),
+    /// e.g. when the previous train arrived early and Träwelling still has its scheduled arrival.
+    /// Träwelling gives no points for such a check-in.
+    public var force: Bool
 
     public init(leg: Leg, message: String = "", visibility: TraewellingVisibility = .publicVisible,
-                business: TraewellingBusiness = .privateTrip, toot: Bool = false) {
+                business: TraewellingBusiness = .privateTrip, toot: Bool = false, force: Bool = false) {
         self.leg = leg
         self.message = message
         self.visibility = visibility
         self.business = business
         self.toot = toot
+        self.force = force
     }
 }
 
@@ -154,6 +168,8 @@ public enum TraewellingError: Error, LocalizedError, Equatable {
     case stopNotOnTrip(String, tripStops: [String])
     case tripNotFound(String)
     case collision
+    /// Liking was refused (403): the login predates the "write-likes" scope, or likes are off.
+    case likeNotAllowed
     case api(status: Int, message: String?)
 
     public var errorDescription: String? {
@@ -163,8 +179,16 @@ public enum TraewellingError: Error, LocalizedError, Equatable {
             "„\(name)“ ist auf der Träwelling-Fahrt nicht enthalten. Halte dort: \(stops.joined(separator: ", "))."
         case .tripNotFound(let line): "\(line) wurde auf Träwelling nicht gefunden."
         case .collision: "Du bist zu dieser Zeit schon eingecheckt."
+        case .likeNotAllowed:
+            "Träwelling lässt das Liken nicht zu. Melde dich in den Einstellungen einmal ab und wieder bei Träwelling an, damit BetterBahn Likes vergeben darf."
         case .api(let status, let message): message ?? "Träwelling-Fehler (\(status))"
         }
+    }
+
+    /// Träwelling rejected what was typed in (its validation answers 422, e.g. a text that's too long),
+    /// so the form brings the keyboard back to fix it. Other errors leave it hidden.
+    public var isInvalidInput: Bool {
+        if case .api(422, _) = self { true } else { false }
     }
 }
 
@@ -238,11 +262,12 @@ public actor TraewellingClient {
         token = store.load()
         guard let token else { throw OAuthError.notLoggedIn }
         if token.isExpired, let refresh = token.refreshToken {
+            // No `scope`: the new token keeps what the login granted. Asking for scopes added since
+            // (e.g. "write-likes") would make Träwelling reject the refresh and end older logins.
             try await requestToken([
                 "grant_type": "refresh_token",
                 "client_id": config.clientID,
                 "refresh_token": refresh,
-                "scope": config.scopes.joined(separator: " "),
             ])
         }
         guard let access = self.token?.accessToken else { throw OAuthError.notLoggedIn }
@@ -380,7 +405,7 @@ public actor TraewellingClient {
             // The user's message/toot belong on the first part only, so a split train doesn't post
             // the same note twice.
             let segmentDraft = result == nil ? draft
-                : CheckinDraft(leg: draft.leg, visibility: draft.visibility, business: draft.business)
+                : CheckinDraft(leg: draft.leg, visibility: draft.visibility, business: draft.business, force: draft.force)
             let part = try await sendCheckin(segmentDraft, tripId: segment.tripId, lineName: segment.lineName,
                                              startID: segment.startID, destinationID: segment.destinationID,
                                              departure: segment.departure, arrival: segment.arrival)
@@ -468,6 +493,24 @@ public actor TraewellingClient {
     /// Creates a Träwelling trip for a train its own timetable data doesn't have, then checks into it.
     private func checkinManualTrip(_ draft: CheckinDraft) async throws -> CheckinResult {
         let leg = draft.leg
+        let trip = try await createManualTrip(for: leg)
+        var result = try await sendCheckin(draft, tripId: trip.tripId, lineName: trip.lineName,
+                                           startID: trip.origin.id, destinationID: trip.destination.id,
+                                           departure: leg.departure.planned, arrival: leg.arrival.planned)
+        result.isManualTrip = true
+        return result
+    }
+
+    private struct ManualTrip: Decodable, Sendable {
+        struct StationRef: Decodable, Sendable { var id: Int }
+        var tripId: String
+        var lineName: String
+        var origin: StationRef
+        var destination: StationRef
+    }
+
+    /// Creates a Träwelling trip for `leg`'s train, running from its origin to its destination.
+    private func createManualTrip(for leg: Leg) async throws -> ManualTrip {
         guard let line = leg.line else { throw TraewellingError.tripNotFound("Fußweg") }
         let origin = try await matchStation(leg.origin)
         let destination = try await matchStation(leg.destination)
@@ -481,21 +524,34 @@ public actor TraewellingClient {
             "destinationArrivalPlanned": JSONDecoding.isoString(leg.arrival.planned),
         ]
         if let number = line.number, let journeyNumber = Int(number) { body["journeyNumber"] = journeyNumber }
-
-        struct ManualTrip: Decodable, Sendable {
-            struct StationRef: Decodable, Sendable { var id: Int }
-            var tripId: String
-            var lineName: String
-            var origin: StationRef
-            var destination: StationRef
-        }
         let data = try JSONSerialization.data(withJSONObject: body)
-        let trip = try await api("trips", method: "POST", body: data, as: DataWrapper<ManualTrip>.self).data
+        return try await api("trips", method: "POST", body: data, as: DataWrapper<ManualTrip>.self).data
+    }
 
+    /// Turns a check-in into one on a manual trip covering `leg`, for an exit Träwelling's trip
+    /// doesn't have (a stop added by hand, see `Stopover.manual(at:time:)`): `changeDestination`
+    /// only accepts the trip's own stops, and a check-in can't be moved to another trip. So the old
+    /// check-in is deleted and checked in again – only once the manual trip exists, so a failure
+    /// before that leaves it untouched. Text, visibility, trip type and tags carry over; likes and
+    /// comments can't. Not tooted again.
+    public func replaceWithManualTrip(_ status: TraewellingStatus, leg: Leg) async throws -> CheckinResult {
+        let draft = CheckinDraft(leg: leg, message: status.body ?? "",
+                                 visibility: status.visibility ?? .publicVisible,
+                                 business: status.business ?? .privateTrip)
+        let trip = try await createManualTrip(for: leg)
+        let tags = (try? await tags(statusId: status.id)) ?? status.tags
+        try await deleteStatus(id: status.id)
         var result = try await sendCheckin(draft, tripId: trip.tripId, lineName: trip.lineName,
                                            startID: trip.origin.id, destinationID: trip.destination.id,
                                            departure: leg.departure.planned, arrival: leg.arrival.planned)
         result.isManualTrip = true
+        if let statusId = result.statusId {
+            // A tag that doesn't come along isn't worth failing the new check-in over.
+            for tag in tags {
+                _ = try? await addTag(statusId: statusId, key: tag.key, value: tag.value,
+                                      visibility: tag.visibility ?? draft.visibility)
+            }
+        }
         return result
     }
 
@@ -532,13 +588,15 @@ public actor TraewellingClient {
         hopLeg.stopovers = []
         // The user's message/toot belong on the main checkin below, not this short bridging hop, so
         // boarding at a Zusatzhalt doesn't post the same note to Träwelling twice.
-        let hopResult = try await checkinManualTrip(CheckinDraft(leg: hopLeg, visibility: draft.visibility, business: draft.business))
+        let hopResult = try await checkinManualTrip(CheckinDraft(leg: hopLeg, visibility: draft.visibility,
+                                                                 business: draft.business, force: draft.force))
 
         var mainLeg = leg
         mainLeg.origin = nextStation
         mainLeg.departure = nextRegular.departure ?? arrival
         mainLeg.departurePlatform = nextRegular.departurePlatform
-        let mainDraft = CheckinDraft(leg: mainLeg, message: draft.message, visibility: draft.visibility, business: draft.business, toot: draft.toot)
+        var mainDraft = draft
+        mainDraft.leg = mainLeg
 
         var result = try await checkin(mainDraft, allowManualTrip: false)
         result.points += hopResult.points
@@ -593,6 +651,7 @@ public actor TraewellingClient {
             "toot": draft.toot,
         ]
         if !draft.message.isEmpty { body["body"] = String(draft.message.prefix(280)) }
+        if draft.force { body["force"] = true }
 
         struct Response: Decodable, Sendable {
             struct Status: Decodable, Sendable { var id: Int? }

@@ -107,7 +107,8 @@ struct LiveTrainProvider: TimelineProvider {
         options.region = MKCoordinateRegion(center: center, latitudinalMeters: 15_000,
                                             longitudinalMeters: 15_000 * size.width / size.height)
         options.pointOfInterestFilter = .excludingAll
-        let route = leg.geometry ?? leg.stopovers.compactMap(\.station.coordinate)
+        // Without track geometry no line at all: the stops joined up would cut straight across country.
+        let route = leg.geometry.flatMap { RouteGeometryService.followsTracks($0) ? $0 : nil } ?? []
         return await withCheckedContinuation { continuation in
             MKMapSnapshotter(options: options).start(with: .main) { snapshot, _ in
                 continuation.resume(returning: snapshot.map { draw($0, center: center, route: route, color: color, size: size) })
@@ -188,7 +189,7 @@ struct LiveSpeedView: View {
     private func small(_ state: JourneyWidgetState) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 4) {
-                TrainBadge(name: state.trainName, product: state.product)
+                TrainBadge(name: state.trainName, product: state.product, nightTrain: state.isNightTrain)
                 Spacer(minLength: 0)
                 RefreshButton()
             }
@@ -279,7 +280,7 @@ struct LivePositionView: View {
                     Image(uiImage: map).resizable().scaledToFill()
                     VStack(alignment: .leading) {
                         HStack(alignment: .top) {
-                            TrainBadge(name: state.trainName, product: state.product)
+                            TrainBadge(name: state.trainName, product: state.product, nightTrain: state.isNightTrain)
                             Spacer(minLength: 0)
                             if let speed = entry.position?.speedKmh {
                                 Text("\(Int(speed.rounded())) km/h")
@@ -308,7 +309,7 @@ struct LivePositionView: View {
                 // No position (or no map): the same as the speed widget without live data.
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 4) {
-                        TrainBadge(name: state.trainName, product: state.product)
+                        TrainBadge(name: state.trainName, product: state.product, nightTrain: state.isNightTrain)
                         Spacer(minLength: 0)
                         RefreshButton()
                     }

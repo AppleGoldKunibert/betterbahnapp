@@ -104,6 +104,9 @@ struct DebugScreen: View {
                         LegCard(leg: PreviewData.firstLeg, onReplace: {}, onCheckin: {})
                         TransferRow(from: PreviewData.firstLeg, to: PreviewData.secondLeg, walk: PreviewData.walk)
                         LegCard(leg: PreviewData.secondLeg, onReplace: {}, onCheckin: {})
+                    case "transfers":
+                        TransferRow(from: PreviewData.firstLeg, to: PreviewData.secondLeg, disposition: .waiting)
+                        TransferRow(from: PreviewData.firstLeg, to: PreviewData.secondLeg, walk: PreviewData.walk, disposition: .notWaiting)
                     case "board":
                         Card(padding: 0) {
                             VStack(spacing: 0) {

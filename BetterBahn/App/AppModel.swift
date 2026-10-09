@@ -51,6 +51,8 @@ final class AppModel {
     /// Saved journey to open on the Verbindungen tab (set when the Live Activity is tapped);
     /// `ConnectionsView` pushes it and clears this.
     var journeyToOpen: SavedJourney?
+    /// Shows the train search (`TrainSearchOverlay`) over every tab.
+    var showsTrainSearch = false
     /// Recently picked stations, newest first (used as suggestions).
     var recentStations: [Station] {
         didSet { Storage.save(recentStations, key: "recentStations") }
@@ -100,6 +102,12 @@ final class AppModel {
 
     init() {
         provider = CombinedProvider(vagonweb: VagonwebClient(browserLoader: { url in try await VagonwebBrowser.shared.html(at: url) }))
+        // When bahn.de blocks our Worker, the phone asks bahn.de itself in a hidden web view.
+        Task {
+            await BahnDeBrowserFallback.shared.use({ url in try await BahnDeBrowser.shared.fetch(url) },
+                                                   prepare: { await BahnDeBrowser.shared.prepare() },
+                                                   release: { await BahnDeBrowser.shared.release() })
+        }
         traewelling = TraewellingClient(config: TraewellingConfig())
         // Older versions stored everything in UserDefaults; move the raw bytes into files once
         // (re-encoding everything on every launch is what used to slow the start down).
@@ -242,6 +250,17 @@ final class AppModel {
     }
 
     // MARK: Träwelling sync
+
+    /// Check-ins of the people the user follows on Träwelling on a train or leaving soon (#196), kept fresh by
+    /// `keepFollowedCheckinsFresh()` while the Verbindungen tab is shown.
+    var followedCheckins: FollowedCheckins?
+    @ObservationIgnored var followedCheckinsLoadedAt: Date?
+    /// What opening a followed check-in looked up, by status ID, so opening it again shows it at once:
+    /// Träwelling's track of the ride (empty: it has none) and the train found in the timetable (nil: none).
+    @ObservationIgnored var followedTracks: [Int: [Coordinate]] = [:]
+    @ObservationIgnored var followedTrains: [Int: Leg?] = [:]
+    /// The custom emojis for each followed check-in's text, loaded with the list so its pictures are ready on opening.
+    @ObservationIgnored var followedEmojis: [Int: [CustomEmoji]] = [:]
 
     /// Check-ins imported from Träwelling (newest first), shown on the travel map. Empty until
     /// loaded from disk after launch; `loadTraewellingTrips()` waits for that.
@@ -549,6 +568,33 @@ final class AppModel {
         updated.append(SavedJourney(journey: journey, search: search))
         updated.sort { ($0.journey.departure?.planned ?? .distantPast) < ($1.journey.departure?.planned ?? .distantPast) }
         savedJourneys = updated
+    }
+
+    /// The trains of `journey` that bahn.de lists as reservation-only (a seat reservation is mandatory).
+    /// Answers within `limit`: a train bahn.de doesn't know, or doesn't answer for in time, counts as free,
+    /// so saving never waits long. The answers stay cached, so a second try is instant.
+    func reservationRequiredLegs(in journey: Journey, within limit: Duration = .seconds(3)) async -> [Leg] {
+        guard let bahnDe = provider.bahnDe else { return [] }
+        let legs = journey.transitLegs
+        return await withTaskGroup(of: [Leg]?.self) { group in
+            group.addTask {
+                await withTaskGroup(of: Leg?.self) { lookups in
+                    for leg in legs {
+                        lookups.addTask { (try? await bahnDe.requiresReservation(for: leg)) == true ? leg : nil }
+                    }
+                    var required: [Leg] = []
+                    for await leg in lookups { if let leg { required.append(leg) } }
+                    return legs.filter { leg in required.contains { $0.id == leg.id } }
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(for: limit)
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first ?? []
+        }
     }
 
     func unsave(_ journey: Journey) {
@@ -907,17 +953,31 @@ final class AppModel {
         }
     }
 
-    /// The custom emojis of the Mastodon instance connected to the Träwelling account, or of
+    /// The logged-in Träwelling account, nil when logged out or it can't be loaded.
+    func traewellingUser() async -> TraewellingUser? {
+        guard await traewelling.isLoggedIn else { return nil }
+        return try? await traewelling.currentUser()
+    }
+
+    /// The custom emojis of the Mastodon instance connected to the Träwelling account `user`, or of
     /// zug.network without one. Empty if neither can be loaded; emojis are only a nicety.
-    func checkinEmojis() async -> [CustomEmoji] {
-        // Asked each time a check-in opens, so a newly connected Mastodon account counts at once.
-        var user: TraewellingUser?
-        if await traewelling.isLoggedIn { user = try? await traewelling.currentUser() }
+    func checkinEmojis(for user: TraewellingUser?) async -> [CustomEmoji] {
         let instance = CustomEmojiText.instance(fromMastodonURL: user?.mastodonUrl) ?? CustomEmojiText.defaultInstance
         return (try? await customEmojis.emojis(instance: instance)) ?? []
     }
 
     // MARK: Manual Träwelling check-ins
+
+    /// Replaces a check-in by one on a manual trip that ends at `leg`'s exit, a stop Träwelling's
+    /// trip doesn't have (see `TraewellingClient.replaceWithManualTrip`), and keeps its delay updated
+    /// like any other manual trip.
+    func replaceCheckinWithManualTrip(_ status: TraewellingStatus, leg: Leg) async throws {
+        let result = try await traewelling.replaceWithManualTrip(status, leg: leg)
+        forgetCheckin(statusId: status.id)
+        guard let statusId = result.statusId else { return }
+        rememberCheckin(statusId: statusId, leg: leg)
+        trackManualCheckin(statusId: statusId, leg: leg)
+    }
 
     func trackManualCheckin(statusId: Int, leg: Leg) {
         trackedManualCheckins.removeAll { $0.leg.id == leg.id }
@@ -1001,8 +1061,14 @@ final class AppModel {
             for change in newPlatforms {
                 await ConnectionNotifier.notify(change, journey: refreshed)
             }
+            // DB's dispatchers decided whether a connecting train waits (from bahn.expert).
+            let newDispositions = await (provider.bahnExpert?.dispositions(in: refreshed) ?? [])
+                .filter { $0.notificationID.map { !known.contains($0) } ?? false }
+            for update in newDispositions {
+                await ConnectionNotifier.notify(update, journey: refreshed)
+            }
             updated.notifiedIssues = Array(known.union(newIssues.map(\.id)).union(newReasons.map(\.id))
-                .union(newPlatforms.map(\.id)))
+                .union(newPlatforms.map(\.id)).union(newDispositions.compactMap(\.notificationID)))
         }
         if updated != savedJourneys[index] { savedJourneys[index] = updated }
     }
@@ -1308,6 +1374,22 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(trainPositionRefresh.rawValue, forKey: "trainPositionRefresh") }
     }
 
+    /// Which kinds of trains the train search (#183) lists.
+    var trainSearchKinds: Set<TrainSearchKind> {
+        didSet {
+            UserDefaults.standard.set(trainSearchKinds.map(\.rawValue).sorted(), forKey: "trainSearchKinds")
+            uploadToCloud()
+        }
+    }
+    /// The train search only lists trains running through one of these countries (ISO codes); empty: anywhere.
+    var trainSearchCountries: Set<String> {
+        didSet {
+            UserDefaults.standard.set(trainSearchCountries.sorted(), forKey: "trainSearchCountries")
+            uploadToCloud()
+        }
+    }
+    var trainSearchFilter: TrainSearchFilter { TrainSearchFilter(kinds: trainSearchKinds, countries: trainSearchCountries) }
+
     /// Reports the regional and long-distance trains the app shows to BetterBahn's statistics server
     /// (`TrainSightings`, #169). On by default, per device.
     var shareTrainStatistics: Bool {
@@ -1391,6 +1473,9 @@ final class AppSettings {
         traewellingImportNextPage = defaults.object(forKey: "traewellingImportNextPage") as? Int
         connectionWarnings = defaults.object(forKey: "connectionWarnings") as? Bool ?? true
         quickTags = Storage.load(key: "quickTags") ?? QuickTag.defaults
+        trainSearchKinds = defaults.stringArray(forKey: "trainSearchKinds").map { Set($0.compactMap(TrainSearchKind.init)) }
+            ?? TrainSearchKind.defaults
+        trainSearchCountries = defaults.stringArray(forKey: "trainSearchCountries").map(Set.init) ?? TrainSearchCountry.defaults
     }
 
     // MARK: iCloud
@@ -1414,6 +1499,8 @@ final class AppSettings {
         /// Optional: settings synced by older versions don't have it.
         var expertIgnoreBoardingRules: Bool?
         var expertRil100: Bool?
+        var trainSearchKinds: [TrainSearchKind]?
+        var trainSearchCountries: [String]?
     }
 
     /// What iCloud stores: the settings and when they were last changed.
@@ -1427,7 +1514,9 @@ final class AppSettings {
         traewellingVisibility: TraewellingVisibility(rawValue: 0) ?? .publicVisible, bc100Rules: .default,
         syncTraewellingToMap: true, connectionWarnings: true, quickTags: QuickTag.defaults,
         liveActivitiesEnabled: true, expertMode: false, expertTraewelling: false, expertEditJourney: false,
-        expertTrainChoice: false, expertIgnoreBoardingRules: false, expertRil100: false)
+        expertTrainChoice: false, expertIgnoreBoardingRules: false, expertRil100: false,
+        trainSearchKinds: TrainSearchKind.defaults.sorted(by: { $0.rawValue < $1.rawValue }),
+        trainSearchCountries: TrainSearchCountry.defaults.sorted())
 
     @ObservationIgnored private var isApplyingCloudValue = false
 
@@ -1438,7 +1527,9 @@ final class AppSettings {
                    quickTags: quickTags, liveActivitiesEnabled: liveActivitiesEnabled, expertMode: expertMode,
                    expertTraewelling: expertTraewelling, expertEditJourney: expertEditJourney,
                    expertTrainChoice: expertTrainChoice, expertIgnoreBoardingRules: expertIgnoreBoardingRules,
-                   expertRil100: expertRil100)
+                   expertRil100: expertRil100,
+                   trainSearchKinds: trainSearchKinds.sorted(by: { $0.rawValue < $1.rawValue }),
+                   trainSearchCountries: trainSearchCountries.sorted())
     }
 
     /// When the settings were last changed on this device or taken over from iCloud. Before
@@ -1485,6 +1576,8 @@ final class AppSettings {
         expertTrainChoice = value.expertTrainChoice
         expertIgnoreBoardingRules = value.expertIgnoreBoardingRules ?? expertIgnoreBoardingRules
         expertRil100 = value.expertRil100 ?? expertRil100
+        trainSearchKinds = value.trainSearchKinds.map(Set.init) ?? trainSearchKinds
+        trainSearchCountries = value.trainSearchCountries.map(Set.init) ?? trainSearchCountries
     }
 }
 
@@ -1512,6 +1605,17 @@ enum ConnectionNotifier {
         content.sound = .default
         content.interruptionLevel = change.isTight ? .timeSensitive : .active
         let request = UNNotificationRequest(identifier: change.id + journey.id, content: content, trigger: nil)
+        try? await UNUserNotificationCenter.current().add(request)
+    }
+
+    static func notify(_ update: TransferDispositionUpdate, journey: Journey) async {
+        guard let disposition = update.disposition, let id = update.notificationID else { return }
+        let content = UNMutableNotificationContent()
+        content.title = disposition.title
+        content.body = disposition.message(arriving: update.arriving, departing: update.departing)
+        content.sound = disposition == .notWaiting ? .defaultCritical : .default
+        content.interruptionLevel = .timeSensitive
+        let request = UNNotificationRequest(identifier: id + journey.id, content: content, trigger: nil)
         try? await UNUserNotificationCenter.current().add(request)
     }
 
