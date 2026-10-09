@@ -262,10 +262,7 @@ public struct JourneyRefresher: Sendable {
             leg = await transitous.fillingMissingStops(in: leg)
         }
         let timetables = TimetablesClient.knowsChanges(until: leg.arrival.planned, now: now) ? self.timetables : nil
-        // Asked DB Timetables: its delays stay where bahn.de's forecast differs (see `BahnDeClient.applyingLiveTimes`).
-        var timetablesAnswered = false
         if let timetables, timetables.canLookUp(leg) {
-            timetablesAnswered = true
             leg = Self.syncingEnds(of: leg, toStopovers: true)
             let live = await timetables.liveStopovers(for: leg, now: now)
             leg.stopovers = live.stopovers
@@ -290,7 +287,7 @@ public struct JourneyRefresher: Sendable {
                     if runningSoon {
                         if !leg.stopovers.isEmpty { leg.stopovers = BahnDeClient.inserting(course.stops, into: leg.stopovers) }
                         // DB's own live times beat Transitous' and fill stops DB Timetables missed.
-                        leg = BahnDeClient.applyingLiveTimes(from: course.stops, to: leg, keepingDelays: timetablesAnswered)
+                        leg = BahnDeClient.applyingLiveTimes(from: course.stops, to: leg)
                     }
                     leg = BahnDeClient.fillingMissingPlatforms(in: leg, from: course.stops)
                     leg = BahnDeClient.markingNightTrain(leg, hasSleepingCars: course.hasSleepingCars)
