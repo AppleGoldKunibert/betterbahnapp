@@ -1310,7 +1310,7 @@ public struct TransitousProvider: TransitProvider {
     /// Modes rare enough, next to a busy station's local traffic, to get crowded out of the
     /// fixed-size `n` stoptimes page entirely before their own departure is ever reached (see
     /// `board(_:at:date:duration:products:)`).
-    private static let longDistanceModes: [Product] = [.highSpeed, .longDistance]
+    private static let longDistanceModes: [Product] = Array(Product.longDistanceProducts)
 
     func fetchStopTimes(stopId: String, date: Date, duration: Int, kind: BoardKind, modes: [String]?,
                                 count: Int = 150) async throws -> [MStopTime] {
@@ -1416,7 +1416,7 @@ public struct TransitousProvider: TransitProvider {
             let modes = Set(products.flatMap(MLineInfo.motisModes(for:)))
             stopTimes = try await fetchStopTimes(stopId: stopId, date: date, duration: duration, kind: kind,
                                                  modes: modes.isEmpty ? nil : Array(modes))
-        } else if products.contains(.highSpeed) || products.contains(.longDistance) {
+        } else if products.contains(where: \.isLongDistance) {
             // Unfiltered (or `.other`-inclusive) requests would otherwise send no `mode` param at
             // all, so at a busy multimodal hub (e.g. Amsterdam Centraal, with dozens of bus/tram/
             // metro/ferry departures sharing the stop cluster) the fixed-size page can fill up with
