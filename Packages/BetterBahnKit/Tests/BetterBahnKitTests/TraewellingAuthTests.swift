@@ -739,3 +739,137 @@ private final class CollidingCheckinProtocol: URLProtocol, @unchecked Sendable {
         return body
     }
 }
+
+/// Träwelling accepts a refresh token once. Rejected ones (400 `invalid_grant`) used to surface as
+/// "Serverfehler (400)" on the travel map for good, until the user logged out and in again.
+@Suite(.serialized) struct TraewellingTokenRefreshTests {
+    @Test func aRejectedRefreshTokenEndsTheLogin() async throws {
+        let store = expiredStore(refreshToken: "used-up")
+        defer { store.clear() }
+        RefreshTokenProtocol.mode = .rejected
+        RefreshTokenProtocol.tokenRequests.withLock { $0 = [] }
+        let client = client(store)
+
+        await #expect(throws: OAuthError.notLoggedIn) { try await client.currentUser() }
+        #expect(RefreshTokenProtocol.tokenRequests.withLock { $0 } == ["used-up"])
+        #expect(store.load() == nil)
+    }
+
+    @Test func usesTheTokenAnotherDeviceRefreshedMeanwhile() async throws {
+        let store = expiredStore(refreshToken: "used-up")
+        defer { store.clear() }
+        RefreshTokenProtocol.mode = .rotatedElsewhere(store)
+        RefreshTokenProtocol.tokenRequests.withLock { $0 = [] }
+        let client = client(store)
+
+        let user = try await client.currentUser()
+
+        #expect(user.username == "gertrud")
+        #expect(RefreshTokenProtocol.tokenRequests.withLock { $0 } == ["used-up"])
+        #expect(store.load()?.accessToken == "from-other-device")
+    }
+
+    @Test func callsRunningTogetherRefreshOnce() async throws {
+        let store = expiredStore(refreshToken: "single-use")
+        defer { store.clear() }
+        RefreshTokenProtocol.mode = .slowSuccess
+        RefreshTokenProtocol.tokenRequests.withLock { $0 = [] }
+        let client = client(store)
+
+        async let first = client.currentUser()
+        async let second = client.currentUser()
+        let users = try await [first, second]
+
+        #expect(users.map(\.username) == ["gertrud", "gertrud"])
+        #expect(RefreshTokenProtocol.tokenRequests.withLock { $0 } == ["single-use"])
+        #expect(store.load()?.refreshToken == "next")
+    }
+
+    @Test func onlyAnInvalidGrantCountsAsRejected() {
+        #expect(TraewellingClient.isRejectedGrant(#"{"error":"invalid_grant","error_description":"The refresh token is invalid."}"#))
+        #expect(!TraewellingClient.isRejectedGrant(#"{"error":"invalid_request"}"#))
+        #expect(!TraewellingClient.isRejectedGrant("<html>Bad Request</html>"))
+        #expect(!TraewellingClient.isRejectedGrant(nil))
+    }
+
+    private func expiredStore(refreshToken: String) -> TokenStore {
+        let store = TokenStore(service: "BetterBahnKitTests.\(UUID().uuidString)")
+        store.save(OAuthToken(accessToken: "expired", refreshToken: refreshToken, expiresAt: .distantPast))
+        return store
+    }
+
+    private func client(_ store: TokenStore) -> TraewellingClient {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RefreshTokenProtocol.self]
+        return TraewellingClient(config: TraewellingConfig(clientID: "public-client"),
+                                 http: HTTPClient(session: URLSession(configuration: configuration)), store: store)
+    }
+}
+
+/// Answers the token endpoint like `mode` says and every other request with a user.
+private final class RefreshTokenProtocol: URLProtocol, @unchecked Sendable {
+    enum Mode {
+        case rejected
+        /// Rejects the token, but only after another device has put a newer one into the store.
+        case rotatedElsewhere(TokenStore)
+        /// Hands out a new token after a moment, long enough for a second call to come in.
+        case slowSuccess
+    }
+
+    nonisolated(unsafe) static var mode = Mode.rejected
+    static let tokenRequests = Mutex<[String]>([])
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard request.url?.path == "/oauth/token" else {
+            finish(status: 200, json: #"{"data":{"id":1,"displayName":"Gertrud","username":"gertrud"}}"#)
+            return
+        }
+        var components = URLComponents()
+        components.percentEncodedQuery = String(data: Self.body(of: request), encoding: .utf8)
+        let refresh = components.queryItems?.first { $0.name == "refresh_token" }?.value ?? ""
+        Self.tokenRequests.withLock { $0.append(refresh) }
+        let rejection = #"{"error":"invalid_grant","error_description":"The refresh token is invalid."}"#
+        switch Self.mode {
+        case .rejected:
+            finish(status: 400, json: rejection)
+        case .rotatedElsewhere(let store):
+            store.save(OAuthToken(accessToken: "from-other-device", refreshToken: "other-device-next", expiresAt: .distantFuture))
+            finish(status: 400, json: rejection)
+        case .slowSuccess:
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) {
+                self.finish(status: 200, json: #"{"access_token":"fresh","refresh_token":"next","expires_in":3600}"#)
+            }
+        }
+    }
+
+    override func stopLoading() {}
+
+    private func finish(status: Int, json: String) {
+        guard let url = request.url,
+              let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil) else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(json.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    private static func body(of request: URLRequest) -> Data {
+        var body = request.httpBody ?? Data()
+        if let stream = request.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            var buffer = [UInt8](repeating: 0, count: 1024)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                guard count > 0 else { break }
+                body.append(contentsOf: buffer.prefix(count))
+            }
+        }
+        return body
+    }
+}

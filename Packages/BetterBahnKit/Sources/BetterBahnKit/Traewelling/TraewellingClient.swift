@@ -258,10 +258,36 @@ public actor TraewellingClient {
         store.save(newToken)
     }
 
+    /// The refresh in progress, if any. An actor lets other calls in while it waits for the network,
+    /// and Träwelling accepts a refresh token only once: two calls refreshing together (the map's sync
+    /// next to the followed check-ins, say) made the second one fail with 400 `invalid_grant`.
+    private var refreshing: Task<Void, Error>?
+
     private func validAccessToken() async throws -> String {
         token = store.load()
         guard let token else { throw OAuthError.notLoggedIn }
         if token.isExpired, let refresh = token.refreshToken {
+            try await refreshToken(refresh)
+        }
+        guard let access = self.token?.accessToken else { throw OAuthError.notLoggedIn }
+        return access
+    }
+
+    private func refreshToken(_ refresh: String) async throws {
+        if let refreshing { return try await refreshing.value }
+        let task = Task { try await self.exchangeRefreshToken(refresh) }
+        refreshing = task
+        defer { refreshing = nil }
+        try await task.value
+    }
+
+    /// Träwelling answers a refresh token it no longer accepts with 400 `invalid_grant`. That happens when
+    /// another device already used it (the token syncs through iCloud Keychain), or when the answer to
+    /// an earlier refresh never arrived (a train in a tunnel). Without handling it every request failed
+    /// with "Serverfehler (400)" until the user logged out and in again; now a newer token in the
+    /// Keychain is used, and otherwise the login ends so the app asks to log in.
+    private func exchangeRefreshToken(_ refresh: String, isRetry: Bool = false) async throws {
+        do {
             // No `scope`: the new token keeps what the login granted. Asking for scopes added since
             // (e.g. "write-likes") would make Träwelling reject the refresh and end older logins.
             try await requestToken([
@@ -269,9 +295,26 @@ public actor TraewellingClient {
                 "client_id": config.clientID,
                 "refresh_token": refresh,
             ])
+        } catch TransitError.http(let status, let body) where [400, 401].contains(status) && Self.isRejectedGrant(body) {
+            if !isRetry, let stored = store.load(), stored.refreshToken != refresh {
+                if !stored.isExpired {
+                    token = stored
+                    return
+                }
+                if let newer = stored.refreshToken {
+                    return try await exchangeRefreshToken(newer, isRetry: true)
+                }
+            }
+            logout()
+            throw OAuthError.notLoggedIn
         }
-        guard let access = self.token?.accessToken else { throw OAuthError.notLoggedIn }
-        return access
+    }
+
+    /// Whether a token endpoint answer says the grant (here: the refresh token) is invalid, expired or revoked.
+    static func isRejectedGrant(_ body: String?) -> Bool {
+        guard let data = body?.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+        return json["error"] as? String == "invalid_grant"
     }
 
     // MARK: API
