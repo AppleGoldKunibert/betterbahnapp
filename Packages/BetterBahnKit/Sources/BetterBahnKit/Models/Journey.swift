@@ -36,6 +36,8 @@ public enum Product: String, Codable, Sendable, CaseIterable, Hashable {
     }
 
     public static let longDistanceProducts: Set<Product> = Set(allCases.filter(\.isLongDistance))
+    /// Products of the departure board's "Nur Regionalverkehr" filter: RE and RB only, no S-Bahn.
+    public static let regionalProducts: Set<Product> = [.regionalExpress, .regional]
 
     /// Searches and filters saved before night trains and IR/FLX had their own group: they meant all
     /// of IC/EC's trains, so a selection with `.longDistance` gets both groups added.

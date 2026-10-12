@@ -236,6 +236,12 @@ struct StationBoardView: View {
             Button("Nur Züge", systemImage: "train.side.front.car") {
                 products = Set(Product.allCases.filter(\.isTrain))
             }
+            Button("Nur Fernverkehr", systemImage: "train.side.front.car") {
+                products = Product.longDistanceProducts
+            }
+            Button("Nur Regionalverkehr", systemImage: "train.side.rear.car") {
+                products = Product.regionalProducts
+            }
             Button("Alle anzeigen", systemImage: "square.grid.2x2") {
                 products = Set(Product.allCases)
             }
