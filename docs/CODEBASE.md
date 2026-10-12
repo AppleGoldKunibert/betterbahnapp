@@ -34,8 +34,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 
 ## App target (`BetterBahn/`)
 
-- `App/BetterBahnApp.swift` – `@main`, `AppDelegate` (registers BG task for ending Live
-  Activities), `RootView` with 4 tabs: Verbindungen (`ConnectionsView`), Karte (`TravelMapView`),
+- `App/BetterBahnApp.swift` – `@main`, `AppDelegate` (registers the BG tasks for ending Live
+  Activities and for followed check-ins; notification delegate: a tapped check-in notification → `AppModel.openFollowedCheckin`), `RootView` with 4 tabs: Verbindungen (`ConnectionsView`), Karte (`TravelMapView`),
   Abfahrten (`StationBoardView`), Einstellungen (`SettingsView`). Handles `onOpenURL`
   (`DBShare.text(fromAppURL:)` → `ImportedJourneyView`, `JourneyShareLink` → `SharedJourneyPreviewView` (short links via
   `ShortShareLinkClient`, also as Universal Links), `LiveActivityLink` from tapping the Live Activity → that saved
@@ -122,6 +122,10 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   button (only when the user's `likes_enabled` and the status `isLikable`). Track and train are looked up separately and kept
   per status (`AppModel.followedTracks`/`followedTrains`), so opening it again shows them at once; the text shows the custom
   emojis of the author's Mastodon instance (`User.mastodonServer`), else zug.network's (`AppModel.emojis(forTextOf:)`), loaded with the list together with their pictures (`followedEmojis`).
+  Notifications for new check-ins of followed users (#266, Settings → Träwelling "Check-ins von Gefolgten melden", per device,
+  off by default): no server, a `BGAppRefreshTask` (`followedCheckinsBackgroundTaskID`, every ≥15 min, iOS decides) runs
+  `loadFollowedCheckins(inBackground: true)`; Kit `FollowedCheckinAlerts` (persisted) reports each check-in once, not the ones
+  running when it was turned on. In the foreground new ones only count as seen. Tapping one opens it in the list (`followedCheckinToOpen`).
 - `Features/Sharing/` – preview of shared journeys and imported DB shares; `JourneyShareButton` (in `JourneyDetailView`)
   uploads for a short link, falls back to the long link, and opens `UIActivityViewController`.
 - `Features/Settings/` – settings (incl. privacy policy link and "not affiliated with DB" note), `DataSourcesView`
@@ -287,6 +291,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `TraewellingCheckinEdit`: `status(id:)`, `updateStatus` (text, visibility, trip type), `deleteStatus`, tags
   (`tags`, `applyTagChanges` with `StatusTagChanges`), moving the exit, `earlyExit` (where checking out now ends a ride),
   `fellowTravellers(of:)` (others checked in to the same trip, `trips/{id}/statuses`, whose ride overlaps).
+  `FollowedCheckinAlerts` (#266): which followed check-ins are new since the last look, and the notification text.
   `TraewellingFollowed`: `followedCheckins()` (the `dashboard`, paged back up to 12 h, filtered to others' rides under way or leaving within 20 min by plan, `checkedIn`),
   `like`/`unlike` (`status/{id}/like`, scope `write-likes`; a 403 → `TraewellingError.likeNotAllowed`, logins from before
   the scope existed must log in again), `CombinedProvider.leg(forCheckin:)` (the run on Transitous' board at the check-in's

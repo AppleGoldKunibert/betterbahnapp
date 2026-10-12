@@ -261,6 +261,12 @@ final class AppModel {
     @ObservationIgnored var followedTrains: [Int: Leg?] = [:]
     /// The custom emojis for each followed check-in's text, loaded with the list so its pictures are ready on opening.
     @ObservationIgnored var followedEmojis: [Int: [CustomEmoji]] = [:]
+    /// Which followed check-ins already got a notification (#266).
+    @ObservationIgnored var followedCheckinAlerts: FollowedCheckinAlerts = Storage.load(key: "followedCheckinAlerts") ?? FollowedCheckinAlerts() {
+        didSet { Storage.save(followedCheckinAlerts, key: "followedCheckinAlerts") }
+    }
+    /// A followed check-in to show, from tapping its notification; the Verbindungen tab opens it once it's in the list.
+    var followedCheckinToOpen: Int?
 
     /// Check-ins imported from Träwelling (newest first), shown on the travel map. Empty until
     /// loaded from disk after launch; `loadTraewellingTrips()` waits for that.
@@ -1356,6 +1362,11 @@ final class AppSettings {
             uploadToCloud()
         }
     }
+    /// Notifications when someone the user follows checks in on Träwelling (#266). Per device, like
+    /// the permission to show notifications.
+    var notifyFollowedCheckins: Bool {
+        didSet { UserDefaults.standard.set(notifyFollowedCheckins, forKey: "notifyFollowedCheckins") }
+    }
     var lastTraewellingSync: Date? {
         didSet { UserDefaults.standard.set(lastTraewellingSync, forKey: "lastTraewellingSync") }
     }
@@ -1480,6 +1491,7 @@ final class AppSettings {
         traewellingVisibility = TraewellingVisibility(rawValue: defaults.integer(forKey: "traewellingVisibility")) ?? .publicVisible
         bc100Rules = Storage.load(key: "bc100Rules") ?? .default
         syncTraewellingToMap = defaults.object(forKey: "syncTraewellingToMap") as? Bool ?? true
+        notifyFollowedCheckins = defaults.bool(forKey: "notifyFollowedCheckins")
         lastTraewellingSync = defaults.object(forKey: "lastTraewellingSync") as? Date
         traewellingImportNextPage = defaults.object(forKey: "traewellingImportNextPage") as? Int
         connectionWarnings = defaults.object(forKey: "connectionWarnings") as? Bool ?? true

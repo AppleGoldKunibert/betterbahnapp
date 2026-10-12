@@ -297,6 +297,18 @@ struct SettingsView: View {
                 .foregroundStyle(.primary)
                 .disabled(model.isSyncingTraewelling)
             }
+            Toggle(isOn: $settings.notifyFollowedCheckins) {
+                IconLabel(title: "Check-ins von Gefolgten melden", systemImage: "bell.badge.fill", color: .orange)
+            }
+            .tint(.brand)
+            .onChange(of: settings.notifyFollowedCheckins) { _, enabled in
+                guard enabled else { return }
+                Task {
+                    await ConnectionNotifier.requestAuthorization()
+                    // Who is checked in already now doesn't get a notification later.
+                    await model.loadFollowedCheckins()
+                }
+            }
             Picker(selection: $settings.traewellingVisibility) {
                 ForEach(TraewellingVisibility.allCases, id: \.self) { Text($0.label).tag($0) }
             } label: {
@@ -309,6 +321,10 @@ struct SettingsView: View {
             }
         } header: {
             Text("Träwelling")
+        } footer: {
+            if settings.notifyFollowedCheckins {
+                Text("Die App schaut im Hintergrund nach neuen Check-ins der Leute, denen du folgst. Wann das passiert, entscheidet iOS – die Meldung kann daher auch später kommen.")
+            }
         }
     }
 
