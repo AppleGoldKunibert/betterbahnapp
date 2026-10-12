@@ -30,7 +30,7 @@ public struct JourneyQuery: Sendable, Hashable {
     /// since not every provider filters server-side.
     public func allows(_ journey: Journey) -> Bool {
         if let maxTransfers, journey.transfers > maxTransfers { return false }
-        return journey.transitLegs.allSatisfy { leg in leg.line.map { products.contains($0.product) } ?? true }
+        return journey.transitLegs.allSatisfy { leg in leg.line.map { products.contains($0.filterProduct) } ?? true }
     }
 }
 

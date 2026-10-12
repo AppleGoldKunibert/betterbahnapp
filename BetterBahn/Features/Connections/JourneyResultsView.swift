@@ -539,7 +539,7 @@ struct JourneyResultsView: View {
         let direct = await picker.journeysIgnoringBoardingRules(from: search.from, to: search.to, calls: calls)
         var extra = (direct + (await continuing))
             .filter { journey in
-                journey.transitLegs.allSatisfy { search.products.contains($0.line?.product ?? .other) }
+                journey.transitLegs.allSatisfy { search.products.contains($0.line?.filterProduct ?? .other) }
             }
         if search.onlyValidTicket {
             let filter = model.ticketFilter

@@ -96,7 +96,7 @@ public extension TrainPicker {
                                                 minTransferMinutes: Int = 5) async -> [Journey] {
         let candidates = calls.departuresAtOrigin
             .filter { $0.access == .exitOnly && !$0.cancelled && $0.line.product.isTrain
-                && query.products.contains($0.line.product)
+                && query.products.contains($0.line.filterProduct)
                 && $0.time.best >= query.date && $0.time.planned <= end }
             .sorted { $0.time.planned < $1.time.planned }
         var seen = Set<String>()
