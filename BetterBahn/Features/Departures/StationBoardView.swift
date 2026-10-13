@@ -26,12 +26,6 @@ struct StationBoardView: View {
     @State private var windowLength = Self.page
     @State private var loadingPage = false
     @State private var scrollPosition = ScrollPosition()
-    @State private var scrollOffset: CGFloat = 0
-    /// Start of the window once Später moved it: rows before it are dropped after the new page is laid
-    /// out, so that height change (and only that one) is taken off the scroll offset (`keepsRowsInPlace`).
-    @State private var pendingTopTrim: Date?
-    /// Set while rows above the visible ones are dropped, so the scroll offset follows and nothing jumps.
-    @State private var keepsRowsInPlace = false
     @Environment(\.scenePhase) private var scenePhase
     @FocusState private var stationFocused: Bool?
 
@@ -87,6 +81,7 @@ struct StationBoardView: View {
                                         BoardRow(entry: entry)
                                     }
                                     .buttonStyle(.plain)
+                                    .id(entry.id)
                                 }
                             }
                         }
@@ -115,17 +110,6 @@ struct StationBoardView: View {
                 .padding(.bottom, 24)
             }
             .scrollPosition($scrollPosition)
-            .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { _, offset in
-                scrollOffset = offset
-            }
-            .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { old, new in
-                if keepsRowsInPlace {
-                    keepsRowsInPlace = false
-                    if new < old { scrollPosition.scrollTo(y: scrollOffset - (old - new)) }
-                } else if let start = pendingTopTrim {
-                    trimTop(before: start)
-                }
-            }
             .tabBarSafePadding()
             .background { AppBackground() }
             .overlay {
@@ -400,9 +384,11 @@ struct StationBoardView: View {
             let windowStart = baseTime.addingTimeInterval(TimeInterval(windowOffset * 60))
             let windowEnd = windowStart.addingTimeInterval(TimeInterval(windowLength * 60))
             if later {
-                // Rows above the visible ones go once the new page is laid out (or right away if it adds
-                // no visible row, so the height won't change).
-                if filter.apply(page).isEmpty { trimTop(before: windowStart) } else { pendingTopTrim = windowStart }
+                // The rows above the visible ones go. Keep the first new row at the bottom edge, where the
+                // button was, so the board doesn't jump.
+                let anchor = filter.apply(page).first?.id ?? filter.apply(entries).last?.id
+                entries.removeAll { $0.time.best < windowStart }
+                if let anchor { scrollPosition.scrollTo(id: anchor, anchor: .bottom) }
             } else {
                 entries.removeAll { $0.time.planned > windowEnd }
             }
@@ -411,15 +397,6 @@ struct StationBoardView: View {
         } catch {
             self.error = error
         }
-    }
-
-    /// Drops the rows before `start` and keeps the scroll offset in step, so the board doesn't jump.
-    private func trimTop(before start: Date) {
-        pendingTopTrim = nil
-        let dropped = entries.filter { $0.time.best < start }
-        guard !dropped.isEmpty else { return }
-        keepsRowsInPlace = !filter.apply(dropped).isEmpty
-        entries.removeAll { $0.time.best < start }
     }
 }
 
