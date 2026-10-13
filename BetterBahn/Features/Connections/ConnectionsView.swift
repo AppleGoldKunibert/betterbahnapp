@@ -34,8 +34,48 @@ nonisolated struct ConnectionSearch: Hashable, Codable {
 
     /// Stored under the old "onlyBC100" key so journeys saved before the Deutschlandticket filter still load.
     enum CodingKeys: String, CodingKey {
-        case from, to, via, date, isArrival, products, maxTransfers
+        case from, to, via, date, isArrival, products, maxTransfers, hasProductGroups
         case onlyValidTicket = "onlyBC100"
+    }
+
+    init(from: Station, to: Station, via: [ViaWaypoint] = [], date: Date, isArrival: Bool, onlyValidTicket: Bool,
+         products: Set<Product> = Set(Product.allCases), maxTransfers: Int? = nil) {
+        self.from = from
+        self.to = to
+        self.via = via
+        self.date = date
+        self.isArrival = isArrival
+        self.onlyValidTicket = onlyValidTicket
+        self.products = products
+        self.maxTransfers = maxTransfers
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        from = try container.decode(Station.self, forKey: .from)
+        to = try container.decode(Station.self, forKey: .to)
+        via = try container.decodeIfPresent([ViaWaypoint].self, forKey: .via) ?? []
+        date = try container.decode(Date.self, forKey: .date)
+        isArrival = try container.decode(Bool.self, forKey: .isArrival)
+        onlyValidTicket = try container.decode(Bool.self, forKey: .onlyValidTicket)
+        maxTransfers = try container.decodeIfPresent(Int.self, forKey: .maxTransfers)
+        let stored = try container.decodeIfPresent(Set<Product>.self, forKey: .products) ?? Set(Product.allCases)
+        // Searches saved before night trains and IR/FLX were groups of their own lack the marker.
+        let isCurrent = try container.decodeIfPresent(Bool.self, forKey: .hasProductGroups) == true
+        products = isCurrent ? stored : Product.upgradingLegacySelection(stored)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(from, forKey: .from)
+        try container.encode(to, forKey: .to)
+        try container.encode(via, forKey: .via)
+        try container.encode(date, forKey: .date)
+        try container.encode(isArrival, forKey: .isArrival)
+        try container.encode(onlyValidTicket, forKey: .onlyValidTicket)
+        try container.encode(products, forKey: .products)
+        try container.encodeIfPresent(maxTransfers, forKey: .maxTransfers)
+        try container.encode(true, forKey: .hasProductGroups)
     }
 }
 

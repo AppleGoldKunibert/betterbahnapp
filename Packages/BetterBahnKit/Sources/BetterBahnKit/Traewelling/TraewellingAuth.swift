@@ -111,6 +111,8 @@ public enum OAuthError: Error, LocalizedError, Equatable {
     case stateMismatch
     case missingCode
     case notLoggedIn
+    /// Träwelling no longer accepts the stored login (refresh token used up or expired).
+    case sessionExpired
     case invalidRedirectURI
 
     public var errorDescription: String? {
@@ -118,6 +120,7 @@ public enum OAuthError: Error, LocalizedError, Equatable {
         case .stateMismatch: "Anmeldung abgebrochen (ungültiger Status)."
         case .missingCode: "Träwelling hat keinen Code zurückgegeben."
         case .notLoggedIn: "Nicht bei Träwelling angemeldet."
+        case .sessionExpired: "Die Träwelling-Anmeldung ist abgelaufen. Melde dich in den Einstellungen ab und wieder an."
         case .invalidRedirectURI: "Ungültige Träwelling-OAuth-Konfiguration: Die Weiterleitungs-URL muss eine gültige HTTPS-Adresse mit Host und Callback-Pfad sein."
         }
     }

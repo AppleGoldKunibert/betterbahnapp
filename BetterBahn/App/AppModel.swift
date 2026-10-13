@@ -1297,11 +1297,22 @@ nonisolated enum Storage {
         }
     }
 
+    private static let log = Logger(subsystem: "de.goldkunibert.BetterBahn", category: "storage")
+
     static func load<T: Decodable>(key: String) -> T? {
         // Older versions stored everything in UserDefaults.
         let data = (try? Data(contentsOf: file(key))) ?? UserDefaults.standard.data(forKey: key)
         guard let data else { return nil }
-        return try? JSONDecoder().decode(T.self, from: data)
+        do {
+            return try JSONDecoder().decode(T.self, from: data)
+        } catch {
+            // An unreadable file (e.g. written by a newer build) would otherwise start the app with
+            // an empty list, and the next save would overwrite it. Name the error and keep a copy.
+            log.error("\(key, privacy: .public).json is unreadable: \(String(describing: error), privacy: .public)")
+            let copy = directory.appending(path: key + ".unreadable.json")
+            if !FileManager.default.fileExists(atPath: copy.path()) { try? data.write(to: copy, options: .atomic) }
+            return nil
+        }
     }
 }
 

@@ -1,8 +1,15 @@
 import Foundation
 
+/// The vehicle groups of the "Verkehrsmittel" filters. The order is the order the chips show them in.
+///
+/// `nightTrain` and `interregio` only exist as filter groups: a `Line` of such a train keeps
+/// `product == .longDistance` (so saved journeys and everything that tells long-distance from regional
+/// trains keep working) and reports its group as `Line.filterProduct`.
 public enum Product: String, Codable, Sendable, CaseIterable, Hashable {
-    case highSpeed      // ICE, TGV, ...
+    case highSpeed      // ICE, TGV, RJX, ...
     case longDistance   // IC, EC, ...
+    case nightTrain     // Nightjet, EuroNight, ... (`Line.isNightTrain`)
+    case interregio     // IR, FLX
     case regionalExpress
     case regional
     case suburban
@@ -15,15 +22,33 @@ public enum Product: String, Codable, Sendable, CaseIterable, Hashable {
 
     public var isTrain: Bool {
         switch self {
-        case .highSpeed, .longDistance, .regionalExpress, .regional, .suburban: true
+        case .highSpeed, .longDistance, .nightTrain, .interregio, .regionalExpress, .regional, .suburban: true
         default: false
         }
     }
 
+    /// ICE, IC/EC, night trains and IR/FLX: what "Nur Fernverkehr" selects.
+    public var isLongDistance: Bool {
+        switch self {
+        case .highSpeed, .longDistance, .nightTrain, .interregio: true
+        default: false
+        }
+    }
+
+    public static let longDistanceProducts: Set<Product> = Set(allCases.filter(\.isLongDistance))
+
+    /// Searches and filters saved before night trains and IR/FLX had their own group: they meant all
+    /// of IC/EC's trains, so a selection with `.longDistance` gets both groups added.
+    public static func upgradingLegacySelection(_ products: Set<Product>) -> Set<Product> {
+        products.contains(.longDistance) ? products.union([.nightTrain, .interregio]) : products
+    }
+
     public var displayName: String {
         switch self {
-        case .highSpeed: "ICE / Hochgeschwindigkeit"
+        case .highSpeed: "Hochgeschwindigkeit"
         case .longDistance: "IC / EC"
+        case .nightTrain: "Nachtzug"
+        case .interregio: "IR / FLX"
         case .regionalExpress: "RE"
         case .regional: "RB"
         case .suburban: "S-Bahn"
@@ -66,6 +91,20 @@ public struct Line: Codable, Sendable, Hashable {
         guard let op = operatorName?.lowercased() else { return false }
         return Self.nightTrainOperators.contains { op.contains($0) }
     }
+
+    /// The group of the product filters this line falls into: `product`, except that night trains and
+    /// IR/FLX are their own groups next to IC/EC.
+    public var filterProduct: Product {
+        guard product == .longDistance || product == .highSpeed else { return product }
+        // SNCB's feed has the Nightjet as a plain high-speed "NJ".
+        if isNightTrain { return .nightTrain }
+        guard product == .longDistance else { return product }
+        let category = String(name.prefix { $0.isLetter }).uppercased()
+        return Self.interregioCategories.contains(category) ? .interregio : .longDistance
+    }
+
+    /// Interregio and FlixTrain.
+    static let interregioCategories: Set<String> = ["IR", "FLX"]
 
     /// Train categories that only run at night: Nightjet, EuroNight, DB's Urlaubs-Express.
     static let nightTrainPrefixes: Set<String> = ["NJ", "EN", "UEX"]

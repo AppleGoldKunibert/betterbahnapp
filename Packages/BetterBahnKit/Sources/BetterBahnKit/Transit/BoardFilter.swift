@@ -20,7 +20,7 @@ public struct BoardFilter: Sendable, Hashable {
     }
 
     public func includes(_ entry: BoardEntry) -> Bool {
-        guard products.contains(entry.line.product) else { return false }
+        guard products.contains(entry.line.filterProduct) else { return false }
         if entry.access == .passThrough { return false }
         if hideCancelled, entry.cancelled { return false }
         if let ticketFilter, !ticketFilter.isValid(entry) { return false }

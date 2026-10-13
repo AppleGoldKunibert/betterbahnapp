@@ -6,7 +6,8 @@ public extension Product {
     var symbolName: String {
         switch self {
         case .highSpeed: "train.side.front.car"
-        case .longDistance: "train.side.middle.car"
+        case .longDistance, .interregio: "train.side.middle.car"
+        case .nightTrain: Self.nightTrainSymbolName
         case .regionalExpress, .regional: "tram.fill"
         case .suburban: "lightrail.fill"
         case .subway: "tram.fill.tunnel"
@@ -25,7 +26,7 @@ public extension Product {
 
     var color: Color {
         switch self {
-        case .highSpeed, .longDistance: Self.longDistanceColor
+        case .highSpeed, .longDistance, .nightTrain, .interregio: Self.longDistanceColor
         case .regionalExpress, .regional: Color(red: 0.86, green: 0.09, blue: 0.19)
         case .suburban: Color(red: 0.10, green: 0.60, blue: 0.30)
         case .bus, .coach: Color(red: 0.52, green: 0.28, blue: 0.74)

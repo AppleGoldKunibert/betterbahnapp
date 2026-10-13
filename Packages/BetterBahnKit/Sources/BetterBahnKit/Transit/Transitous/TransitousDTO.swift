@@ -181,7 +181,9 @@ struct MLineInfo {
     static func motisModes(for product: Product) -> [String] {
         switch product {
         case .highSpeed: return ["HIGHSPEED_RAIL"]
-        case .longDistance: return ["LONG_DISTANCE", "NIGHT_RAIL"]
+        // Feeds disagree on what a night train or an IR/FLX is, so all three groups ask for both modes
+        // and the client-side filter (`Line.filterProduct`) tells them apart.
+        case .longDistance, .nightTrain, .interregio: return ["LONG_DISTANCE", "NIGHT_RAIL"]
         case .regionalExpress: return ["REGIONAL_FAST_RAIL", "REGIONAL_RAIL"]
         case .regional: return ["REGIONAL_RAIL"]
         case .suburban: return ["SUBURBAN"]

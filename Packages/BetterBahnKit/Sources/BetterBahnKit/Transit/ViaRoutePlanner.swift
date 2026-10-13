@@ -16,6 +16,28 @@ public struct ViaWaypoint: Codable, Sendable, Hashable, Identifiable {
     }
 
     var minStay: TimeInterval { TimeInterval(minStayMinutes * 60) }
+
+    private enum CodingKeys: String, CodingKey {
+        case station, minStayMinutes, products, hasProductGroups
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        station = try container.decode(Station.self, forKey: .station)
+        minStayMinutes = try container.decode(Int.self, forKey: .minStayMinutes)
+        let stored = try container.decodeIfPresent(Set<Product>.self, forKey: .products)
+        // Waypoints saved before night trains and IR/FLX were groups of their own lack the marker.
+        let isCurrent = try container.decodeIfPresent(Bool.self, forKey: .hasProductGroups) == true
+        products = isCurrent ? stored : stored.map(Product.upgradingLegacySelection)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(station, forKey: .station)
+        try container.encode(minStayMinutes, forKey: .minStayMinutes)
+        try container.encodeIfPresent(products, forKey: .products)
+        try container.encode(true, forKey: .hasProductGroups)
+    }
 }
 
 /// Routes a journey through up to a handful of waypoints by searching each leg separately and
