@@ -78,6 +78,14 @@ public struct TraewellingConfig: Sendable {
         ])
     }
 
+    /// The authorization code in the redirect URL from `ASWebAuthenticationSession`, once its state matches.
+    public static func authorizationCode(in callbackURL: URL, pkce: PKCE) throws -> String {
+        let items = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        guard items.first(where: { $0.name == "state" })?.value == pkce.state else { throw OAuthError.stateMismatch }
+        guard let code = items.first(where: { $0.name == "code" })?.value else { throw OAuthError.missingCode }
+        return code
+    }
+
     public var tokenURL: URL { baseURL.appending(path: "oauth/token") }
     public var apiURL: URL { baseURL.appending(path: "api/v1") }
 }

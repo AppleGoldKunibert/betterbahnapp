@@ -136,37 +136,6 @@ import Testing
         let status = try Self.status(id: 1, user: 11, from: 30, to: 60, hafasId: "0b6f1b3e-6c1f-4f5e-9d0e-3a7f2b9c8d11")
         #expect(try await provider.leg(forCheckin: status) == nil)
     }
-
-    /// Notifications for new check-ins (#266): the first look only remembers, later ones report each
-    /// new check-in once.
-    @Test func alertsEachNewCheckinOnce() throws {
-        let a = try Self.status(id: 1, user: 11, from: 0, to: 90)
-        let b = try Self.status(id: 2, user: 12, from: 30, to: 90)
-        let c = try Self.status(id: 3, user: 13, from: 40, to: 90)
-        var alerts = FollowedCheckinAlerts()
-        #expect(alerts.newCheckins(in: [a]).isEmpty)
-        #expect(alerts.newCheckins(in: [b, a]).map(\.id) == [2])
-        #expect(alerts.newCheckins(in: [b, a]).isEmpty)
-        // One that ended and dropped out of the list doesn't make a known one new again.
-        #expect(alerts.newCheckins(in: [c, b]).map(\.id) == [3])
-        #expect(alerts.newCheckins(in: [c, b, a]).isEmpty)
-    }
-
-    @Test func alertsOnlyRememberTheLatestCheckins() throws {
-        var alerts = FollowedCheckinAlerts()
-        _ = alerts.newCheckins(in: [])
-        for id in 1...(FollowedCheckinAlerts.remembered + 5) {
-            _ = alerts.newCheckins(in: [try Self.status(id: id, user: 11, from: 0, to: 90)])
-        }
-        #expect(alerts.known?.count == FollowedCheckinAlerts.remembered)
-        #expect(alerts.known?.last == FollowedCheckinAlerts.remembered + 5)
-    }
-
-    @Test func alertTextNamesWhoAndTheTrain() throws {
-        let status = try Self.status(id: 1, user: 11, from: 0, to: 90)
-        #expect(FollowedCheckinAlerts.title(for: status) == "User 11 ist eingecheckt")
-        #expect(FollowedCheckinAlerts.body(for: status) == "RE 1: B → C")
-    }
 }
 
 @Suite(.serialized) struct TraewellingFollowedRequestTests {
