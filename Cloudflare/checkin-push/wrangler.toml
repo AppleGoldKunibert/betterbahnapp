@@ -1,0 +1,36 @@
+name = "betterbahn-push"
+main = "worker.mjs"
+compatibility_date = "2026-09-01"
+workers_dev = true
+
+# Push notifications for followed Träwelling check-ins (#266). Create the database once with
+# `npx wrangler d1 create betterbahn-push`, put its id here and load schema.sql (see README.md).
+[[d1_databases]]
+binding = "DB"
+database_name = "betterbahn-push"
+database_id = "509ef24e-2c0c-4c90-b798-cc00d242f94e"
+
+# Every minute: look at the subscriptions due in this minute.
+[triggers]
+crons = ["* * * * *"]
+
+# Per app install (App Attest key): 10 sign-ups / updates per minute. namespace_id is any number unique within the account.
+[[ratelimits]]
+name = "SUBSCRIBE_LIMITER"
+namespace_id = "1401"
+simple = { limit = 10, period = 60 }
+
+[vars]
+# How often each subscription is looked at, in minutes (1–60).
+INTERVAL_MINUTES = "2"
+APNS_TEAM_ID = "9NXP66M9UL"
+APNS_TOPIC = "de.goldkunibert.BetterBahn"
+# The key ID of the APNs auth key (APNS_KEY below), shown next to it in the Apple Developer account.
+APNS_KEY_ID = "9C64LU6XCX"
+TRAEWELLING_CLIENT_ID = "406"
+TRAEWELLING_REDIRECT_URI = "https://betterbahn.betterbahn.workers.dev/oauth/traewelling/callback"
+# Secrets (`npx wrangler secret put …`):
+#   TOKEN_SECRET – same value as in betterbahn2, betterbahn, betterbahn-stats and betterbahn-pass
+#   TOKEN_KEY    – 32 random bytes, base64 (`openssl rand -base64 32`); encrypts the stored Träwelling logins
+#   APNS_KEY     – the APNs auth key (.p8 file content)
+# ALLOW_UNATTESTED = "true" lets apps without App Attest (Simulator) sign up.

@@ -261,10 +261,17 @@ final class AppModel {
     @ObservationIgnored var followedTrains: [Int: Leg?] = [:]
     /// The custom emojis for each followed check-in's text, loaded with the list so its pictures are ready on opening.
     @ObservationIgnored var followedEmojis: [Int: [CustomEmoji]] = [:]
-    /// Which followed check-ins already got a notification (#266).
-    @ObservationIgnored var followedCheckinAlerts: FollowedCheckinAlerts = Storage.load(key: "followedCheckinAlerts") ?? FollowedCheckinAlerts() {
-        didSet { Storage.save(followedCheckinAlerts, key: "followedCheckinAlerts") }
+    /// This device's sign-up at the push Worker for notifications about followed check-ins (#266), nil
+    /// while they're off. Kept after turning them off until the Worker confirmed the sign-off.
+    @ObservationIgnored var followedCheckinPush: FollowedCheckinPushSubscription? = Storage.load(key: "followedCheckinPush") {
+        didSet { Storage.save(followedCheckinPush, key: "followedCheckinPush") }
     }
+    /// The Worker dropped the sign-up (Träwelling ended its login); Settings says so.
+    var followedCheckinPushEnded = false
+    /// The APNs device token iOS gave this launch, the one the Worker last got, and who waits for one.
+    @ObservationIgnored var pushDeviceToken: String?
+    @ObservationIgnored var followedCheckinPushSentToken: String?
+    @ObservationIgnored var pushDeviceTokenWaiters: [CheckedContinuation<String?, Never>] = []
     /// A followed check-in to show, from tapping its notification; the Verbindungen tab opens it once it's in the list.
     var followedCheckinToOpen: Int?
 
