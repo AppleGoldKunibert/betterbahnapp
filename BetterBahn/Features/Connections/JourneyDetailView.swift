@@ -1,5 +1,4 @@
 import BetterBahnKit
-import OSLog
 import SwiftUI
 import UIKit
 
@@ -842,12 +841,6 @@ struct AlternativeTrainsSheet: View {
         do { foundDirect = try await direct } catch { failure = error }
         do { foundWithTransfers = try await withTransfers } catch { failure = failure ?? error }
         do { foundReroutes = try await rerouted } catch { failure = failure ?? error }
-        Self.log.info("""
-            \(leg.line?.name ?? "?", privacy: .public) \(leg.origin.id, privacy: .public) → \(leg.destination.id, privacy: .public) \
-            trip \(leg.tripId ?? "-", privacy: .public), filter \(filter != nil): \(foundDirect.count) direct, \
-            \(foundWithTransfers.count) with transfers, \(foundReroutes.count) reroutes, \
-            error \(failure.map { String(describing: $0) } ?? "-", privacy: .public), cancelled \(Task.isCancelled)
-            """)
         guard !Task.isCancelled else { return }
         alternatives = foundDirect
         connections = foundWithTransfers
@@ -856,8 +849,6 @@ struct AlternativeTrainsSheet: View {
         let shown = failure is CancellationError ? TransitError.timeout : failure
         error = foundDirect.isEmpty && foundWithTransfers.isEmpty && foundReroutes.isEmpty ? shown : nil
     }
-
-    private static let log = Logger(subsystem: "de.goldkunibert.BetterBahn", category: "trainpicker")
 
     /// An entry of the list: a direct train, a connection with transfers, or one straight on to the
     /// next via or destination ("Andere Routenführung").
