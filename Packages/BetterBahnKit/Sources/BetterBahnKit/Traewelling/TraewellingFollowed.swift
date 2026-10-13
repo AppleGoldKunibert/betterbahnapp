@@ -13,6 +13,20 @@ public struct FollowedCheckins: Sendable {
     }
 }
 
+/// One followed person with all their check-ins that are under way or about to start (#267).
+public struct FollowedPerson: Sendable, Identifiable {
+    public var user: TraewellingStatus.User
+    /// Their check-ins by departure, the earliest first (10:00–11:00 before 10:30–10:55).
+    public var statuses: [TraewellingStatus]
+
+    public var id: Int { user.id }
+
+    public init(user: TraewellingStatus.User, statuses: [TraewellingStatus]) {
+        self.user = user
+        self.statuses = statuses
+    }
+}
+
 public extension TraewellingClient {
     /// No ride runs longer, so the dashboard isn't paged back further for rides still running.
     static let longestRide: TimeInterval = 12 * 3600
@@ -39,25 +53,34 @@ public extension TraewellingClient {
 
     /// The check-ins of others in `statuses` whose ride hasn't ended at `now` and that are on the train
     /// or wait for it to leave within `boardingWindow` (by plan, so a delay doesn't hide them), each once.
-    /// Someone with several of them (checked in again two minutes after getting off, #267) counts once,
-    /// with the one that starts first: the ride under way, else the next.
     /// Ones without a user are left out too: they can't be told from the user's own.
     static func checkedIn(_ statuses: [TraewellingStatus], excludingUser me: Int, at now: Date) -> [TraewellingStatus] {
         var seen = Set<Int>()
-        let current = statuses.filter { status in
+        return statuses.filter { status in
             guard seen.insert(status.id).inserted, let user = status.user, user.id != me,
                   let start = status.checkin.start, let end = status.checkin.end else { return false }
             let leaves = min(start, status.checkin.origin.departurePlanned ?? start)
             return leaves <= now.addingTimeInterval(boardingWindow) && now < end
         }
-        var first: [Int: TraewellingStatus] = [:]
-        for status in current {
-            guard let user = status.user?.id else { continue }
-            if let kept = first[user], (kept.checkin.start ?? .distantFuture) <= (status.checkin.start ?? .distantFuture) { continue }
-            first[user] = status
-        }
-        return current.filter { status in status.user.flatMap { first[$0.id] }?.id == status.id }
         .sorted { ($0.checkin.start ?? .distantPast) > ($1.checkin.start ?? .distantPast) }
+    }
+
+    /// `statuses` grouped by their user, each person's check-ins by departure (earliest first, a tie by ID),
+    /// the people by their first check-in, the latest departure first. Statuses without a user are dropped.
+    static func grouped(_ statuses: [TraewellingStatus]) -> [FollowedPerson] {
+        func start(_ status: TraewellingStatus) -> Date { status.checkin.start ?? .distantPast }
+        var byUser: [Int: FollowedPerson] = [:]
+        for status in statuses {
+            guard let user = status.user else { continue }
+            byUser[user.id, default: FollowedPerson(user: user, statuses: [])].statuses.append(status)
+        }
+        return byUser.values
+            .map { person in
+                var person = person
+                person.statuses.sort { (start($0), $0.id) < (start($1), $1.id) }
+                return person
+            }
+            .sorted { (start($0.statuses[0]), $0.id) > (start($1.statuses[0]), $1.id) }
     }
 
     /// Likes someone's check-in and returns how many like it now. One liked before (409) counts as liked.

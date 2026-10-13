@@ -116,7 +116,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   check-in, lists the "Mitreisende" on the same train (#184)), `CheckoutPrompt` (removing a saved journey with such check-ins asks: check out at the last stop reached
   (`TraewellingClient.earlyExit`, later check-ins deleted), delete the check-ins, or keep them).
   `FollowedCheckinsSection` (#196): small button above "Deine Reisen" (`UpcomingTripsSection`) listing who of the people the
-  user follows is checked in right now (`AppModel.followedCheckins`, refreshed every 2 min while the Verbindungen tab shows,
+  user follows is checked in right now, each person once (#267, Kit `TraewellingClient.grouped`: someone with several check-ins gets a
+  header that unfolds them by departure, all open; a single one is the card itself) (`AppModel.followedCheckins`, refreshed every 2 min while the Verbindungen tab shows,
   `keepFollowedCheckinsFresh`): tags, train, from → to; opening one shows its train (`LegTripSheet`, hidden for manual trips),
   a small map with the ride and the live position/speed (bahn.jetzt, tap → `LiveTrainMapView`), a Träwelling link and a like
   button (only when the user's `likes_enabled` and the status `isLikable`). Track and train are looked up separately and kept
