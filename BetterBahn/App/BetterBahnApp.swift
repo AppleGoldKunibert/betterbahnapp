@@ -21,10 +21,9 @@ struct BetterBahnApp: App {
     }
 }
 
-/// Registers the background tasks (the one that ends the Live Activity while the app is backgrounded,
-/// the look for new check-ins of followed Träwelling users) – `BGTaskScheduler.register` must run before
-/// the app finishes launching, which SwiftUI's `App` protocol gives no hook for on its own – and opens
-/// what a tapped notification is about.
+/// Registers the background task that ends the Live Activity while the app is backgrounded –
+/// `BGTaskScheduler.register` must run before the app finishes launching, which SwiftUI's `App` protocol
+/// gives no hook for on its own –, passes on the APNs device token and opens what a tapped notification is about.
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     weak var model: AppModel?
 
@@ -39,15 +38,17 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             }
             model.handleLiveActivityBackgroundTask(refreshTask)
         }
-        BGTaskScheduler.shared.register(forTaskWithIdentifier: AppModel.followedCheckinsBackgroundTaskID, using: nil) { [weak self] task in
-            guard let model = self?.model, let refreshTask = task as? BGAppRefreshTask else {
-                task.setTaskCompleted(success: false)
-                return
-            }
-            model.handleFollowedCheckinsBackgroundTask(refreshTask)
-        }
         UNUserNotificationCenter.current().delegate = self
         return true
+    }
+
+    /// The APNs device token for the notifications about followed check-ins (#266).
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        model?.didRegisterForPush(deviceToken: FollowedCheckinPush.hex(deviceToken))
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        model?.didRegisterForPush(deviceToken: nil)
     }
 
     /// A followed user's check-in notification (#266) opens that check-in; the others just open the app.
@@ -120,12 +121,12 @@ struct RootView: View {
                 model.syncLiveActivity()
                 model.startRefreshing()
                 Task { await model.syncTraewelling() }
+                Task { await model.syncFollowedCheckinPush() }
                 // Build the travel map's heatmap in the background so its tab opens instantly.
                 model.prewarmTravelMap()
             } else if phase == .background {
                 model.stopRefreshing()
                 model.scheduleLiveActivityBackgroundCheck()
-                model.scheduleFollowedCheckinsBackgroundCheck()
                 model.updateWidgets(force: true)
                 Task { await TrainSightings.shared.flush() }
             }
