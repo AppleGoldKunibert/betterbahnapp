@@ -256,6 +256,10 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   found at a station's EVA is looked for at its other levels (`/station` `meta`, e.g. "Hamburg Hbf (S-Bahn)").
   Trains that ran over 4 hours ago aren't asked about (`changesMemory`): DB has dropped their changes and
   would report them on time. Without live data a time has no `actual`, so no delay shows (not "+0").
+  The departure board gets DB's data as well (`applyingRealtime(to:at:)`, called by `StationBoardView` after bahn.de's
+  and Transitous' times are in): its delay, early time, cancellation and platform swap win, a train it reports no
+  change for keeps its time, and nothing changes without `fchg`. The Worker asks the keyless IRIS first and the
+  API Marketplace only when IRIS fails (60 calls/minute).
   A stop DB schedules without a change only counts as on time when the train runs within 2 h
   (`infersOnTime`); a journey tomorrow shows plain times, and `JourneyRefresher.droppingInferredOnTime` clears
   such made-up "pünktlich" from journeys saved earlier.
