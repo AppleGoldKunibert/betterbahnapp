@@ -12,6 +12,16 @@ Alfred writes in German (sometimes English); answer in the language he used.
 - Alfred wants to follow your reasoning: keep a detailed todo list and update it as you go (what you
   checked, what you found, with file names, and what you do next).
 
+## UI texts
+
+- Explanations in the app (footers, hints, alerts, widget descriptions) stay short and plain: say what
+  the user gets or needs to know, not how it works internally. One or two short sentences.
+- Leave out technical details, internal names and parenthetical asides (auth, tokens, APIs, read-only
+  scopes, which server). Write "unser Server" instead of "der BetterBahn-Server".
+- Privacy notes: one plain statement ("Dabei wird nichts gespeichert.") instead of describing the mechanism.
+- Example: „Der BetterBahn-Server schaut alle 2 Minuten nach neuen Check-Ins. (eigene Anmeldung, nur
+  lesen)" → „Unser Server schaut alle 2 Minuten nach neuen Check-ins. Dabei wird nichts gespeichert."
+
 ## Branching und Pull Requests
 
 - Arbeite für jedes Issue bzw. jedes Feature/jeden Bugfix in einem eigenen Branch.
