@@ -39,15 +39,24 @@ public extension TraewellingClient {
 
     /// The check-ins of others in `statuses` whose ride hasn't ended at `now` and that are on the train
     /// or wait for it to leave within `boardingWindow` (by plan, so a delay doesn't hide them), each once.
+    /// Someone with several of them (checked in again two minutes after getting off, #267) counts once,
+    /// with the one that starts first: the ride under way, else the next.
     /// Ones without a user are left out too: they can't be told from the user's own.
     static func checkedIn(_ statuses: [TraewellingStatus], excludingUser me: Int, at now: Date) -> [TraewellingStatus] {
         var seen = Set<Int>()
-        return statuses.filter { status in
+        let current = statuses.filter { status in
             guard seen.insert(status.id).inserted, let user = status.user, user.id != me,
                   let start = status.checkin.start, let end = status.checkin.end else { return false }
             let leaves = min(start, status.checkin.origin.departurePlanned ?? start)
             return leaves <= now.addingTimeInterval(boardingWindow) && now < end
         }
+        var first: [Int: TraewellingStatus] = [:]
+        for status in current {
+            guard let user = status.user?.id else { continue }
+            if let kept = first[user], (kept.checkin.start ?? .distantFuture) <= (status.checkin.start ?? .distantFuture) { continue }
+            first[user] = status
+        }
+        return current.filter { status in status.user.flatMap { first[$0.id] }?.id == status.id }
         .sorted { ($0.checkin.start ?? .distantPast) > ($1.checkin.start ?? .distantPast) }
     }
 

@@ -82,6 +82,20 @@ import Testing
         #expect(checkedIn.map(\.id) == [5, 7, 1, 4])
     }
 
+    @Test func countsSomeoneCheckedInTwiceOnce() throws {
+        // 11:00 now: user 11 is on a train until 11:10 and checked in again for 11:12–11:30, user 12 only once.
+        let statuses = [
+            try Self.status(id: 1, user: 11, from: 72, to: 90),
+            try Self.status(id: 2, user: 11, from: 50, to: 70),
+            try Self.status(id: 3, user: 12, from: 55, to: 80),
+        ]
+        let checkedIn = TraewellingClient.checkedIn(statuses, excludingUser: 10, at: Self.now)
+        #expect(checkedIn.map(\.id) == [3, 2])
+        // Once the first ride is over, the second one is shown.
+        let later = TraewellingClient.checkedIn(statuses, excludingUser: 10, at: Self.now.addingTimeInterval(11 * 60))
+        #expect(later.map(\.id) == [1, 3])
+    }
+
     @Test func aDelayDoesntHideSomeoneWaitingForTheTrain() throws {
         // Planned at 11:15, but leaving only at 11:45.
         let late = try JSONDecoding.decoder.decode(TraewellingStatus.self, from: Data(#"""
