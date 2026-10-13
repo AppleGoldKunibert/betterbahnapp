@@ -26,6 +26,9 @@ struct TripView: View {
 
     private var tripId: String { shownTripId ?? entry.tripId }
 
+    /// Where the loaded laps are remembered (see `LoadedLaps`).
+    private var lapsKey: String { LoadedLaps.key(tripId: entry.tripId, station: entry.station, near: entry.time.planned) }
+
     private var ownDirection: String? { entry.kind == .departures ? entry.otherEnd : nil }
 
     private var runs: [Line.CoupledTrain] { entry.line.runs(ownDirection: ownDirection, ownTripId: entry.tripId) }
@@ -63,11 +66,17 @@ struct TripView: View {
         .navigationTitle(entry.line.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .task(id: tripId) {
+            if tripId == entry.tripId {
+                let remembered = model.openLoadedLaps(lapsKey, tripId: entry.tripId)
+                extraLapsBefore = remembered.before
+                extraLapsAfter = remembered.after
+            }
             // Seen before: its last live data right away, refreshed below.
             if trip == nil, let seen = model.liveTrips.value(for: tripId) { show(seen) }
             await load()
             await autoRefresh(tripId: tripId)
         }
+        .onDisappear { model.closeLoadedLaps(lapsKey) }
         .refreshable {
             await TimetablesClient.invalidateDelays()
             await load()
@@ -179,6 +188,7 @@ struct TripView: View {
         guard !isLoadingLap else { return }
         extraLapsBefore += before
         extraLapsAfter += after
+        model.rememberLoadedLaps(.init(before: extraLapsBefore, after: extraLapsAfter), for: lapsKey, tripId: entry.tripId)
         isLoadingLap = true
         Task {
             await load()
@@ -595,6 +605,11 @@ struct LegTripSheet: View {
 
     private var tripId: String? { shownTripId ?? leg.tripId }
 
+    /// Where the loaded laps are remembered (see `LoadedLaps`).
+    private var lapsKey: String? {
+        leg.tripId.map { LoadedLaps.key(tripId: $0, station: leg.origin, near: leg.departure.planned) }
+    }
+
     private var runs: [Line.CoupledTrain] {
         guard let line = leg.line, let tripId = leg.tripId else { return [] }
         return line.runs(ownDirection: leg.direction, ownTripId: tripId)
@@ -638,7 +653,13 @@ struct LegTripSheet: View {
                     Button("Fertig", systemImage: "xmark", role: .cancel) { dismiss() }
                 }
             }
+            .onDisappear { if let lapsKey { model.closeLoadedLaps(lapsKey) } }
             .task(id: tripId) {
+                if tripId == leg.tripId, let lapsKey, let own = leg.tripId {
+                    let remembered = model.openLoadedLaps(lapsKey, tripId: own)
+                    extraLapsBefore = remembered.before
+                    extraLapsAfter = remembered.after
+                }
                 if trip == nil, let tripId, let seen = model.liveTrips.value(for: tripId) { trip = seen }
                 await load()
                 guard let tripId else { return }
@@ -667,6 +688,9 @@ struct LegTripSheet: View {
         guard !isLoadingLap else { return }
         extraLapsBefore += before
         extraLapsAfter += after
+        if let lapsKey, let own = leg.tripId {
+            model.rememberLoadedLaps(.init(before: extraLapsBefore, after: extraLapsAfter), for: lapsKey, tripId: own)
+        }
         isLoadingLap = true
         Task {
             await load()
