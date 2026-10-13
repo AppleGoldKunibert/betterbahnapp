@@ -43,7 +43,7 @@ struct TrainSearchOverlay: View {
                     bar
                     if showsCalendar {
                         calendar
-                            .transition(.move(edge: .top).combined(with: .opacity))
+                            .transition(.fold)
                     }
                     if submitted != nil {
                         resultsPanel
@@ -409,7 +409,7 @@ struct TrainSearchResultView: View {
                         Card {
                             CoachSequencePanel(request: request, sequence: sequence)
                         }
-                        .transition(.coachSequenceFold)
+                        .transition(.fold)
                     }
                 }
             }

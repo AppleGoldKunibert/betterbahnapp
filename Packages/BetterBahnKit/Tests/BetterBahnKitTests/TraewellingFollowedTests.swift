@@ -82,6 +82,29 @@ import Testing
         #expect(checkedIn.map(\.id) == [5, 7, 1, 4])
     }
 
+    @Test func groupsSomeoneCheckedInTwiceIntoOnePerson() throws {
+        // User 11 checked in for 10:50–11:10 and again for 11:12–11:30 and for 10:40–11:20; user 12 once.
+        let statuses = [
+            try Self.status(id: 1, user: 11, from: 72, to: 90),
+            try Self.status(id: 3, user: 12, from: 55, to: 80),
+            try Self.status(id: 2, user: 11, from: 50, to: 70),
+            try Self.status(id: 4, user: 11, from: 40, to: 80),
+        ]
+        let checkedIn = TraewellingClient.checkedIn(statuses, excludingUser: 10, at: Self.now)
+        // Both of user 11's stay in the list.
+        #expect(checkedIn.count == 4)
+        let people = TraewellingClient.grouped(checkedIn)
+        #expect(people.map(\.id) == [12, 11])
+        // By departure: 10:00–11:00 comes before 10:30–10:55.
+        #expect(people[1].statuses.map(\.id) == [4, 2, 1])
+        #expect(people[0].statuses.map(\.id) == [3])
+    }
+
+    @Test func sameDepartureIsOrderedByID() throws {
+        let statuses = [try Self.status(id: 8, user: 11, from: 50, to: 70), try Self.status(id: 7, user: 11, from: 50, to: 90)]
+        #expect(TraewellingClient.grouped(statuses).first?.statuses.map(\.id) == [7, 8])
+    }
+
     @Test func aDelayDoesntHideSomeoneWaitingForTheTrain() throws {
         // Planned at 11:15, but leaving only at 11:45.
         let late = try JSONDecoding.decoder.decode(TraewellingStatus.self, from: Data(#"""

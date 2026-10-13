@@ -13,6 +13,20 @@ public struct FollowedCheckins: Sendable {
     }
 }
 
+/// One followed person with all their check-ins that are under way or about to start (#267).
+public struct FollowedPerson: Sendable, Identifiable {
+    public var user: TraewellingStatus.User
+    /// Their check-ins by departure, the earliest first (10:00–11:00 before 10:30–10:55).
+    public var statuses: [TraewellingStatus]
+
+    public var id: Int { user.id }
+
+    public init(user: TraewellingStatus.User, statuses: [TraewellingStatus]) {
+        self.user = user
+        self.statuses = statuses
+    }
+}
+
 public extension TraewellingClient {
     /// No ride runs longer, so the dashboard isn't paged back further for rides still running.
     static let longestRide: TimeInterval = 12 * 3600
@@ -49,6 +63,24 @@ public extension TraewellingClient {
             return leaves <= now.addingTimeInterval(boardingWindow) && now < end
         }
         .sorted { ($0.checkin.start ?? .distantPast) > ($1.checkin.start ?? .distantPast) }
+    }
+
+    /// `statuses` grouped by their user, each person's check-ins by departure (earliest first, a tie by ID),
+    /// the people by their first check-in, the latest departure first. Statuses without a user are dropped.
+    static func grouped(_ statuses: [TraewellingStatus]) -> [FollowedPerson] {
+        func start(_ status: TraewellingStatus) -> Date { status.checkin.start ?? .distantPast }
+        var byUser: [Int: FollowedPerson] = [:]
+        for status in statuses {
+            guard let user = status.user else { continue }
+            byUser[user.id, default: FollowedPerson(user: user, statuses: [])].statuses.append(status)
+        }
+        return byUser.values
+            .map { person in
+                var person = person
+                person.statuses.sort { (start($0), $0.id) < (start($1), $1.id) }
+                return person
+            }
+            .sorted { (start($0.statuses[0]), $0.id) > (start($1.statuses[0]), $1.id) }
     }
 
     /// Likes someone's check-in and returns how many like it now. One liked before (409) counts as liked.
