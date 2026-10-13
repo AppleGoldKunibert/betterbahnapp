@@ -831,7 +831,10 @@ struct AlternativeTrainsSheet: View {
 
     private func load() async {
         isLoading = true
-        defer { isLoading = false }
+        // A cancelled load has already been replaced by a new one (the ticket toggle, also set by
+        // `onAppear` right after the first load starts): only that one may end the loading state,
+        // or "Keine anderen Züge" shows while it is still searching (#279).
+        defer { if !Task.isCancelled { isLoading = false } }
         let filter = onlyValidTicket ? model.ticketFilter : nil
         let picker = model.trainPicker, leg = leg, notBefore = notBefore, target = rerouteTarget
         // The lists load together; one failing still shows the others.
