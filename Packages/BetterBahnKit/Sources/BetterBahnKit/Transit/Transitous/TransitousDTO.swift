@@ -111,7 +111,8 @@ struct MLineInfo {
 
     func toLine() -> Line {
         let name = trainNameInsteadOfLine ?? displayName ?? tripShortName ?? routeShortName ?? mode
-        let prefix = name.split(separator: " ").first.map { String($0).uppercased() } ?? ""
+        // Only the letters: DELFI writes the line number right after the category, "RE3 (3349)", "RB10".
+        let prefix = String(name.prefix { $0.isLetter }).uppercased()
         let product = MLineInfo.product(mode: mode, prefix: prefix)
         let digitsInName = name.split(separator: " ").last.map(String.init)?.filter(\.isNumber)
         var number = (digitsInName?.isEmpty == false ? digitsInName : tripShortName?.filter(\.isNumber))
@@ -409,7 +410,7 @@ private enum ProductGuess {
         switch prefix {
         case "ICE", "TGV", "RJ", "RJX", "ECE", "EST", "THA": .highSpeed
         case "IC", "EC", "EN", "NJ", "FLX", "ES", "D", "IRE": .longDistance
-        case "RE", "RS", "MEX": .regionalExpress
+        case "RE", "RS", "MEX", "FEX": .regionalExpress
         case "RB", "ERB", "NWB", "HLB", "BRB", "WFB": .regional
         case "S": .suburban
         case "U": .subway
