@@ -593,7 +593,7 @@ struct PlannedPlatformNote: View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Gleis laut Fahrplan", systemImage: "calendar")
                 .font(.subheadline.weight(.semibold))
-            Text("Dieses Gleis stammt aus dem tschechischen Fahrplan (Správa železnic). Es sind nur Plandaten: Kurzfristige Gleisänderungen fehlen, bitte vor Ort auf die Anzeigen achten.")
+            Text("Gleis laut tschechischem Fahrplan. Achte vor Ort auf die Anzeigen.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

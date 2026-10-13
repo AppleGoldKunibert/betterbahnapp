@@ -81,7 +81,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Meine Reisen")
                 } footer: {
-                    Text("Wir sagen dir Bescheid, wenn ein Zug ausfällt, das Gleis wechselt oder du deinen Anschluss verpasst. Live-Aktivitäten zeigen deine nächste Reise auf dem Sperrbildschirm.")
+                    Text("Wir sagen dir Bescheid bei Ausfällen, Gleiswechseln und verpassten Anschlüssen.")
                 }
 
                 Section {
@@ -131,7 +131,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Zugschnellsuche")
                 } footer: {
-                    Text("Die Suche nach Zugnummer (Zug-Symbol bei Verbindungen, Lupe auf der Karte) zeigt nur diese Zugarten und nur Züge, die durch eines der Länder fahren.")
+                    Text("Die Zugsuche zeigt nur diese Zugarten und Länder.")
                 }
 
                 Section {
@@ -142,7 +142,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Statistik")
                 } footer: {
-                    Text("Schickt Zugnummer und Fahrt der Regional- und Fernzüge, die du dir ansiehst, an den BetterBahn-Server. Er merkt sich dann Verspätungen, Gleiswechsel, Ausfälle und Wagenreihung dieser Fahrt für spätere Statistiken. Ohne Bezug zu dir oder deinem Standort.")
+                    Text("Hilft uns, Statistiken zu Verspätungen und Ausfällen zu sammeln. Dabei wird nichts über dich gespeichert.")
                 }
 
                 Section {
@@ -405,7 +405,7 @@ struct QuickTagsView: View {
                     save()
                 }
             } footer: {
-                Text("Diese Tags schlagen wir dir beim Einchecken vor. Ohne festen Wert fragen wir dich jedes Mal, z. B. nach deinem Sitzplatz.")
+                Text("Diese Tags schlagen wir dir beim Einchecken vor.")
             }
             Section {
                 Button {

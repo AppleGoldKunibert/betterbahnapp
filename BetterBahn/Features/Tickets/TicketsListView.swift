@@ -57,7 +57,7 @@ struct AddTicketButton: View {
         .alert("Verbindung nicht gefunden", isPresented: $notMatched) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("Das Ticket ist gespeichert, aber die gebuchte Verbindung wurde in den Fahrplandaten nicht gefunden. Du findest es in den Einstellungen unter „Gespeicherte Tickets“.")
+            Text("Ticket gespeichert, aber die Verbindung wurde nicht gefunden. Du findest es unter Einstellungen › Gespeicherte Tickets.")
         }
     }
 }
