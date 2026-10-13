@@ -28,7 +28,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     weak var model: AppModel?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
-        BGTaskScheduler.shared.register(forTaskWithIdentifier: AppModel.liveActivityBackgroundTaskID, using: nil) { [weak self] task in
+        // `using: .main`, not nil: this class is MainActor-isolated by default, so the handler asserts
+        // that it runs on the main queue. On BGTaskScheduler's own queue that assertion crashed the app
+        // (EXC_BREAKPOINT in `_dispatch_assert_queue_fail`) whenever iOS ran the task.
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: AppModel.liveActivityBackgroundTaskID, using: .main) { [weak self] task in
             guard let model = self?.model, let refreshTask = task as? BGAppRefreshTask else {
                 task.setTaskCompleted(success: false)
                 return
@@ -86,12 +89,13 @@ struct RootView: View {
             if model.showsTrainSearch {
                 TrainSearchOverlay()
                     .tint(.brand)
-                    // Appears at once, so the dimming doesn't fade from light to dark gray (#229); the bar
-                    // fades in itself. Closing still fades out.
+                    // Appears at once, dimming and bar, so nothing fades from light to dark gray (#229).
+                    // Closing still fades out.
                     .transition(.asymmetric(insertion: .identity, removal: .opacity))
             }
         }
-        .animation(.snappy, value: model.showsTrainSearch)
+        // No animation while opening: a parent animation would still fade the overlay's content in.
+        .animation(model.showsTrainSearch ? nil : .snappy, value: model.showsTrainSearch)
         .onChange(of: scenePhase, initial: true) { _, phase in
             if phase == .active {
                 model.cancelLiveActivityBackgroundCheck()
