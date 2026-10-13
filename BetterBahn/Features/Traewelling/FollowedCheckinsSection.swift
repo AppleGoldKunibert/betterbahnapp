@@ -68,7 +68,7 @@ extension AppModel {
 
 /// Who of the people the user follows on Träwelling is on a train right now (#196): a small button
 /// above "Deine Reisen" that lists them, each person once (#267). Someone with several check-ins (19:10–19:20
-/// and 19:22–19:30) opens into their check-ins by departure, each open at first; a single one is the card
+/// and 19:22–19:30) opens into their check-ins by departure, each open at first (up to 2, else folded); a single one is the card
 /// itself. A check-in lists its tags, train, from → to; opening it shows its train, a small map of the ride
 /// with the train's live position and speed, a link to the check-in on Träwelling and a like button.
 /// Nothing shows while nobody is checked in.
@@ -79,6 +79,8 @@ struct FollowedCheckinsSection: View {
     @State private var openIDs: Set<Int> = []
     /// The people with several check-ins whose list is unfolded.
     @State private var openPeople: Set<Int> = []
+    /// Up to this many check-ins open together with their person; more stay folded.
+    private static let unfoldingLimit = 2
 
     var body: some View {
         if let followed = model.followedCheckins {
@@ -108,8 +110,8 @@ struct FollowedCheckinsSection: View {
                     withAnimation(.snappy) {
                         if openPeople.remove(person.id) == nil {
                             openPeople.insert(person.id)
-                            // Their check-ins unfold with them.
-                            openIDs.formUnion(person.statuses.map(\.id))
+                            // Their check-ins unfold with them, unless there are so many that the list would get long.
+                            if person.statuses.count <= Self.unfoldingLimit { openIDs.formUnion(person.statuses.map(\.id)) }
                         }
                     }
                 }
