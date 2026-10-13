@@ -110,7 +110,7 @@ struct StationBoardView: View {
                     }
                 }
                 ToolbarItem {
-                    filterMenu
+                    BoardFilterMenu(products: $products, onlyValidTicket: $onlyValidTicket)
                 }
             }
             .refreshable { await load() }
@@ -225,41 +225,6 @@ struct StationBoardView: View {
         }
     }
 
-    private var filterMenu: some View {
-        Menu {
-            Toggle(isOn: $onlyValidTicket) {
-                Label(model.settings.ticketType.filterTitle, systemImage: model.settings.ticketType.symbolName)
-            }
-            productFilterItems
-        } label: {
-            Image(systemName: isFiltered ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
-        }
-        .menuActionDismissBehavior(.disabled)
-        .accessibilityLabel("Filter")
-    }
-
-    @ViewBuilder
-    private var productFilterItems: some View {
-        Section("Verkehrsmittel") {
-            Button("Nur Züge", systemImage: "train.side.front.car") {
-                products = Set(Product.allCases.filter(\.isTrain))
-            }
-            Button("Alle anzeigen", systemImage: "square.grid.2x2") {
-                products = Set(Product.allCases)
-            }
-        }
-        Section {
-            ForEach(Product.allCases, id: \.self) { product in
-                Toggle(isOn: Binding(
-                    get: { products.contains(product) },
-                    set: { if $0 { products.insert(product) } else { products.remove(product) } }
-                )) {
-                    Label(product.displayName, systemImage: product.symbolName)
-                }
-            }
-        }
-    }
-
     /// After 5 minutes away the board jumps back to "jetzt"; after 7.5 minutes the station is closed.
     private func resumeAfterAbsence() {
         guard let leftAt else { return }
@@ -274,6 +239,16 @@ struct StationBoardView: View {
         }
     }
 
+    /// Takes over a loaded board. Animates only if the rows on screen change: after a filter change the board is
+    /// already filtered locally, so the answer for the same filter must not move anything while the menu is open.
+    private func show(_ loaded: [BoardEntry]) {
+        if filter.apply(loaded) == filter.apply(entries) {
+            entries = loaded
+        } else {
+            withAnimation(.snappy) { entries = loaded }
+        }
+    }
+
     private func load() async {
         guard let station else { return }
         isLoading = true
@@ -281,7 +256,7 @@ struct StationBoardView: View {
         do {
             let start = useNow ? Date.now.addingTimeInterval(-5 * 60) : date
             let loaded = try await model.provider.board(kind, at: station, date: start, duration: 90, products: products)
-            withAnimation(.snappy) { entries = loaded }
+            show(loaded)
             lastUpdate = .now
             error = nil
             // Some feeds (e.g. S-Bahn Berlin's own) leave the platform out entirely even at stations
@@ -289,13 +264,53 @@ struct StationBoardView: View {
             // the board is already showing, so this never blocks the initial render.
             if let timetables = model.timetablesClient {
                 let filled = await timetables.fillMissingPlatforms(in: loaded, at: station)
-                if filled != entries { withAnimation(.snappy) { entries = filled } }
+                if filled != entries { show(filled) }
             }
         } catch is CancellationError {
         } catch let urlError as URLError where urlError.code == .cancelled {
         } catch {
             self.error = error
         }
+    }
+}
+
+/// The toolbar's filter menu. A view of its own, so loading the board (which changes `StationBoardView`'s state several
+/// times) doesn't rebuild the menu while it is open: only the two filters it edits can.
+private struct BoardFilterMenu: View {
+    @Environment(AppModel.self) private var model
+    @Binding var products: Set<Product>
+    @Binding var onlyValidTicket: Bool
+
+    private var isFiltered: Bool { onlyValidTicket || products.count != Product.allCases.count }
+
+    var body: some View {
+        Menu {
+            Toggle(isOn: $onlyValidTicket) {
+                Label(model.settings.ticketType.filterTitle, systemImage: model.settings.ticketType.symbolName)
+            }
+            Section("Verkehrsmittel") {
+                Button("Nur Züge", systemImage: "train.side.front.car") {
+                    products = Set(Product.allCases.filter(\.isTrain))
+                }
+                Button("Alle anzeigen", systemImage: "square.grid.2x2") {
+                    products = Set(Product.allCases)
+                }
+            }
+            Section {
+                ForEach(Product.allCases, id: \.self) { product in
+                    Toggle(isOn: Binding(
+                        get: { products.contains(product) },
+                        set: { if $0 { products.insert(product) } else { products.remove(product) } }
+                    )) {
+                        Label(product.displayName, systemImage: product.symbolName)
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: isFiltered ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+        }
+        .menuActionDismissBehavior(.disabled)
+        .accessibilityLabel("Filter")
     }
 }
 
