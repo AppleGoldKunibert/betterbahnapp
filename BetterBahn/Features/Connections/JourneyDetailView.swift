@@ -763,26 +763,21 @@ struct AlternativeTrainsSheet: View {
                             .padding(.top, 6)
                     }
 
-                    // One list by departure; a note on each says how it gets there.
+                    // One list by arrival; a note on each says how it gets there.
                     ForEach(options) { option in
                         Button {
                             apply(option.legs, id: option.id)
                         } label: {
-                            switch option {
-                            case .direct(let alternative):
-                                AlternativeRow(leg: alternative, current: leg, nextLeg: nextLeg, note: option.note,
-                                               isApplying: applyingID == option.id)
-                            case .withTransfer(let route), .reroute(let route):
-                                let next = option.isReroute ? rerouteNextLeg : nextLeg
-                                VStack(alignment: .leading, spacing: 6) {
-                                    JourneyCard(journey: route)
-                                        .overlay(alignment: .topTrailing) {
-                                            if applyingID == option.id { ProgressView().padding(14) }
-                                        }
-                                    RouteNote(text: option.note, systemImage: option.symbolName).padding(.horizontal, 14)
-                                    if let next, let last = route.legs.last, !last.catches(next) {
-                                        MissedConnectionHint(next: next).padding(.horizontal, 14)
+                            // Direct trains too as a connection card, so all options look alike.
+                            let next = option.isReroute ? rerouteNextLeg : nextLeg
+                            VStack(alignment: .leading, spacing: 6) {
+                                JourneyCard(journey: option.journey)
+                                    .overlay(alignment: .topTrailing) {
+                                        if applyingID == option.id { ProgressView().padding(14) }
                                     }
+                                RouteNote(text: option.note, systemImage: option.symbolName).padding(.horizontal, 14)
+                                if let next, let last = option.legs.last, !last.catches(next) {
+                                    MissedConnectionHint(next: next).padding(.horizontal, 14)
                                 }
                             }
                         }
@@ -882,6 +877,12 @@ struct AlternativeTrainsSheet: View {
             case .withTransfer(let route), .reroute(let route): route.legs
             }
         }
+        var journey: Journey {
+            switch self {
+            case .direct(let leg): Journey(legs: [leg], source: leg.source)
+            case .withTransfer(let route), .reroute(let route): route
+            }
+        }
         var isReroute: Bool { if case .reroute = self { true } else { false } }
         var note: String {
             switch self {
@@ -899,9 +900,15 @@ struct AlternativeTrainsSheet: View {
         }
     }
 
+    /// By arrival (live time), so a 3-minute train comes before a slower bus leaving at the same time;
+    /// on a tie the later departure first.
     private var options: [Option] {
         (alternatives.map(Option.direct) + connections.map(Option.withTransfer) + reroutes.map(Option.reroute))
-            .sorted { ($0.legs.first?.departure.planned ?? .distantFuture) < ($1.legs.first?.departure.planned ?? .distantFuture) }
+            .sorted { a, b in
+                let arrivalA = a.legs.last?.arrival.best ?? .distantFuture, arrivalB = b.legs.last?.arrival.best ?? .distantFuture
+                if arrivalA != arrivalB { return arrivalA < arrivalB }
+                return (a.legs.first?.departure.best ?? .distantPast) > (b.legs.first?.departure.best ?? .distantPast)
+            }
     }
 
     private static func reroutes(_ picker: TrainPicker, for leg: Leg, to target: Station?, notBefore: Date?,
