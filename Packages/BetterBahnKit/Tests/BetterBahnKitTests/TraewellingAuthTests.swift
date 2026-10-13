@@ -981,3 +981,120 @@ private final class LateTrainCheckinProtocol: URLProtocol, @unchecked Sendable {
 
     override func stopLoading() {}
 }
+
+/// Finding the train mustn't keep a checkin waiting (#289): it checks in as soon as the best station
+/// has the train, and gives up on boards still loading once the search budget is spent.
+@Suite(.serialized) struct TraewellingSearchBudgetTests {
+    static let leg: Leg = {
+        let planned = Date(timeIntervalSince1970: 1_791_965_460) // 2026-10-14T08:11:00Z
+        return Leg(origin: station("de-DELFI_de:11000:900029101:3:55", "S Spandau Bhf (Berlin)", 52.5345, 13.1971, source: .transitous),
+                   destination: station("de-DELFI_de:09162:6", "München Hbf", 48.1402, 11.5600, source: .transitous),
+                   departure: TimeInfo(planned: planned, actual: nil),
+                   arrival: TimeInfo(planned: planned.addingTimeInterval(6 * 3600), actual: nil),
+                   departurePlatform: nil, arrivalPlatform: nil, tripId: "transitous-trip",
+                   line: Line(name: "ICE 507", number: "507", product: .highSpeed, operatorName: "DB Fernverkehr AG"),
+                   direction: "München Hbf", isWalking: false, cancelled: false,
+                   stopovers: [], remarks: [], source: .transitous)
+    }()
+
+    static func client(budget: TraewellingSearchBudget = TraewellingSearchBudget()) -> (TraewellingClient, URLSession) {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [SlowNeighboursProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let store = TokenStore(service: "BetterBahnKitTests.\(UUID().uuidString)")
+        store.save(OAuthToken(accessToken: "test-token", refreshToken: nil, expiresAt: .distantFuture))
+        let client = TraewellingClient(config: TraewellingConfig(clientID: "public-client"), http: HTTPClient(session: session),
+                                       store: store, searchBudget: budget)
+        return (client, session)
+    }
+
+    @Test func checksInWithoutWaitingForTheOtherStations() async throws {
+        SlowNeighboursProtocol.reset(spandauHasTheTrain: true)
+        let (client, session) = Self.client()
+        defer { session.invalidateAndCancel() }
+
+        let result = try await client.checkin(CheckinDraft(leg: Self.leg))
+
+        #expect(result.statusId == 5070)
+        #expect(!SlowNeighboursProtocol.slowBoardAnswered.withLock { $0 })
+    }
+
+    @Test func givesUpOnBoardsStillLoadingWhenTheTimeIsUp() async throws {
+        SlowNeighboursProtocol.reset(spandauHasTheTrain: false)
+        let (client, session) = Self.client(budget: TraewellingSearchBudget(fast: .seconds(5), slow: .seconds(5)))
+        defer { session.invalidateAndCancel() }
+
+        await #expect(throws: TraewellingError.tripNotFound("ICE 507")) { try await client.checkin(CheckinDraft(leg: Self.leg)) }
+        #expect(!SlowNeighboursProtocol.slowBoardAnswered.withLock { $0 })
+    }
+
+    @Test func allowsMoreTimeWhenTheStationSearchWasSlow() {
+        let budget = TraewellingSearchBudget()
+        #expect(budget.time(afterStationSearchTook: nil) == .seconds(15))
+        #expect(budget.time(afterStationSearchTook: .milliseconds(800)) == .seconds(15))
+        #expect(budget.time(afterStationSearchTook: .seconds(5)) == .seconds(45))
+    }
+}
+
+/// Berlin-Spandau answers at once; the two stops around it only after 8 s – within the 15 s a
+/// checkin may take, so they are only left unanswered if the search stops waiting for them.
+private final class SlowNeighboursProtocol: URLProtocol, @unchecked Sendable {
+    static let spandauHasTheTrain = Mutex(false)
+    static let slowBoardAnswered = Mutex(false)
+    private let stopped = Mutex(false)
+
+    static func reset(spandauHasTheTrain hasTrain: Bool) {
+        spandauHasTheTrain.withLock { $0 = hasTrain }
+        slowBoardAnswered.withLock { $0 = false }
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let url = request.url!
+        let path = url.path
+        let json: String
+        switch true {
+        case path.contains("autocomplete"):
+            json = """
+            {"data":[{"id":30,"name":"Berlin-Spandau","latitude":52.5348,"longitude":13.1975},
+                     {"id":33,"name":"S+U Rathaus Spandau (Berlin)","latitude":52.5352,"longitude":13.1999},
+                     {"id":34,"name":"Galenstr. (Berlin)","latitude":52.5357,"longitude":13.1946}]}
+            """
+        case path == "/api/v1/station/30/departures":
+            let ice = #"{"tripId":"ice-507","plannedWhen":"2026-10-14T08:11:00Z","line":{"name":"ICE 507","fahrtNr":"507"},"station":{"id":31,"name":"S Spandau Bhf (Berlin)"}}"#
+            let bus = #"{"tripId":"bus","plannedWhen":"2026-10-14T08:12:00Z","line":{"name":"M32","fahrtNr":""}}"#
+            json = Self.spandauHasTheTrain.withLock { $0 } ? #"{"data":[\#(ice)]}"# : #"{"data":[\#(bus)]}"#
+        case path.hasSuffix("/departures"):
+            DispatchQueue.global().asyncAfter(deadline: .now() + 8) { [self] in
+                guard !stopped.withLock({ $0 }) else { return }
+                Self.slowBoardAnswered.withLock { $0 = true }
+                respond(#"{"data":[]}"#)
+            }
+            return
+        case path == "/api/v1/trains/trip":
+            json = """
+            {"data":{"id":1,"lineName":"ICE 507","stopovers":[
+                {"id":31,"name":"S Spandau Bhf (Berlin)","station":{"id":31,"name":"S Spandau Bhf (Berlin)"},"departurePlanned":"2026-10-14T08:11:00Z"},
+                {"id":40,"name":"München Hbf","station":{"id":40,"name":"München Hbf"},"arrivalPlanned":"2026-10-14T14:11:00Z"}
+            ]}}
+            """
+        case path == "/api/v1/trains/checkin":
+            json = #"{"data":{"status":{"id":5070},"points":{"points":20},"alsoOnThisConnection":[]}}"#
+        default:
+            client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
+            return
+        }
+        respond(json)
+    }
+
+    private func respond(_ json: String) {
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(json.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() { stopped.withLock { $0 = true } }
+}

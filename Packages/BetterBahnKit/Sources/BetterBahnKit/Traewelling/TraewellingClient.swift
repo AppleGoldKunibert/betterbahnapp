@@ -192,6 +192,28 @@ public enum TraewellingError: Error, LocalizedError, Equatable {
     }
 }
 
+/// How long finding a train for a checkin may take before it gives up and offers a manual trip:
+/// short when Träwelling answers quickly, longer on a slow connection, judged by how long its
+/// station search took.
+public struct TraewellingSearchBudget: Sendable {
+    public var fast: Duration
+    public var slow: Duration
+    /// A station search taking longer than this counts as a slow connection.
+    public var slowStationSearch: Duration
+
+    public init(fast: Duration = .seconds(15), slow: Duration = .seconds(45), slowStationSearch: Duration = .seconds(3)) {
+        self.fast = fast
+        self.slow = slow
+        self.slowStationSearch = slowStationSearch
+    }
+
+    /// The time for the whole search after a station search that took `stationSearch` (`nil`: unknown).
+    func time(afterStationSearchTook stationSearch: Duration?) -> Duration {
+        guard let stationSearch, stationSearch > slowStationSearch else { return fast }
+        return slow
+    }
+}
+
 public actor TraewellingClient {
     public nonisolated let config: TraewellingConfig
     let http: HTTPClient
@@ -201,13 +223,15 @@ public actor TraewellingClient {
     /// tries again (under another train name, then as a manual trip) doesn't repeat every lookup (#106).
     private var stationCache: [String: [TraewellingStation]] = [:]
     private var departuresCache: [String: (fetched: Date, departures: [TraewellingDeparture])] = [:]
-    /// Träwelling asks DB for every departure board, which can hang; one slow station mustn't keep a
-    /// checkin waiting for the full request timeout.
-    static let departuresTimeout: TimeInterval = 12
+    let searchBudget: TraewellingSearchBudget
+    /// How long the last station search that reached Träwelling took, to tell a slow connection.
+    private var lastStationSearch: Duration?
 
-    public init(config: TraewellingConfig, http: HTTPClient = HTTPClient(timeout: 30), store: TokenStore = TokenStore()) {
+    public init(config: TraewellingConfig, http: HTTPClient = HTTPClient(timeout: 30), store: TokenStore = TokenStore(),
+                searchBudget: TraewellingSearchBudget = TraewellingSearchBudget()) {
         self.config = config
         self.http = http
+        self.searchBudget = searchBudget
         self.store = store
         store.migrateToSynchronizable()
         self.token = store.load()
@@ -391,21 +415,23 @@ public actor TraewellingClient {
         // whatever it's given — pre-encoding here too would double-encode (e.g. "Berlin Hbf" →
         // "Berlin%20Hbf" → "Berlin%2520Hbf" on the wire), so the raw name is passed straight through.
         if let cached = stationCache[query] { return cached }
+        let started = ContinuousClock.now
         let found = try await api("trains/station/autocomplete/\(query)", as: DataWrapper<[TraewellingStation]>.self).data
+        lastStationSearch = ContinuousClock.now - started
         if stationCache.count > 200 { stationCache.removeAll() }
         stationCache[query] = found
         return found
     }
 
     /// `travelType` ("express", "regional", …, see `travelType(for:)`) leaves out every other kind of departure.
-    public func departures(stationID: Int, when: Date, travelType: String? = nil) async throws -> [TraewellingDeparture] {
+    public func departures(stationID: Int, when: Date, travelType: String? = nil, timeout: TimeInterval = 15) async throws -> [TraewellingDeparture] {
         let key = "\(stationID)|\(Int(when.timeIntervalSince1970))|\(travelType ?? "")"
         if let cached = departuresCache[key], cached.fetched.timeIntervalSinceNow > -120 { return cached.departures }
         var query: [URLQueryItem] = [.init(name: "when", value: JSONDecoding.isoString(when))]
         if let travelType { query.append(.init(name: "travelType", value: travelType)) }
         let found = try await api("station/\(stationID)/departures",
                                   query: query,
-                                  timeout: Self.departuresTimeout,
+                                  timeout: timeout,
                                   as: DataWrapper<[TraewellingDeparture]>.self).data
         departuresCache = departuresCache.filter { $0.value.fetched.timeIntervalSinceNow > -120 }
         departuresCache[key] = (.now, found)
@@ -805,52 +831,106 @@ public actor TraewellingClient {
     /// Matches a departure to a HAFAS trip Träwelling knows about. Beyond the nearest station and a
     /// tight time window, this widens to nearby stations and a looser tolerance before giving up —
     /// Träwelling's own timetable data sometimes only has the train under a neighbouring stop or a
-    /// fahrtNr/time that drifted a bit from our plan.
+    /// fahrtNr/time that drifted a bit from our plan. All of it within `searchBudget`: then the boards
+    /// still loading are given up on.
     private func findDeparture(for leg: Leg) async throws -> (station: TraewellingStation, departure: TraewellingDeparture)? {
         guard leg.line != nil else { return nil }
+        let started = ContinuousClock.now
         let candidates = try await candidateStations(for: leg.origin)
+        let deadline = started + searchBudget.time(afterStationSearchTook: lastStationSearch)
         var answered = false
         var lastError: Error?
+        var timedOut = false
         // Only the nearest few: in a big city the autocomplete has a dozen stations within 8 km, and
         // asking each of them one after the other kept the checkin loading for minutes (#106).
         for (maxDistance, tolerance, limit, alsoUnfiltered) in [(1_500.0, 2.0 * 60, 3, true), (8_000.0, 15.0 * 60, 4, false)] {
+            let remaining = deadline - ContinuousClock.now
+            guard remaining > .zero else { timedOut = true; break }
             let stations = candidates.filter { $0.1 <= maxDistance }.prefix(limit).map(\.0)
             let when = leg.departure.planned.addingTimeInterval(-tolerance)
             let travelTypes = Self.boardTravelTypes(for: leg, alsoUnfiltered: alsoUnfiltered)
             let requests = stations.indices.flatMap { station in
-                travelTypes.map { (station: station, travelType: $0) }
+                travelTypes.map { BoardRequest(station: station, travelType: $0) }
             }
-            let boards = await withTaskGroup(of: (Int, Result<[TraewellingDeparture], any Error>).self) { group in
+            // No station that far: nothing to wait for.
+            guard !requests.isEmpty else { continue }
+            let timeout = max(1, Double(remaining.components.seconds))
+            let (boards, deadlinePassed) = await withTaskGroup(of: BoardAnswer.self) { group in
                 for (index, request) in requests.enumerated() {
                     let stationID = stations[request.station].id
                     group.addTask {
-                        do { return (index, .success(try await self.departures(stationID: stationID, when: when, travelType: request.travelType))) }
-                        catch { return (index, .failure(error)) }
+                        do {
+                            let board = try await self.departures(stationID: stationID, when: when, travelType: request.travelType, timeout: timeout)
+                            return .board(index, .success(board))
+                        } catch {
+                            return .board(index, .failure(error))
+                        }
                     }
+                }
+                group.addTask {
+                    try? await Task.sleep(until: deadline, clock: .continuous)
+                    return .deadline
                 }
                 var boards = [Result<[TraewellingDeparture], any Error>?](repeating: nil, count: requests.count)
-                for await (index, board) in group { boards[index] = board }
-                return boards
-            }
-            // Best station first (see `ranked(_:for:)`); a station whose boards all failed is skipped.
-            for (index, station) in stations.enumerated() {
-                var departures: [TraewellingDeparture] = []
-                for (request, board) in zip(requests, boards) where request.station == index {
-                    switch board {
-                    case .success(let found):
-                        answered = true
-                        departures += found
-                    case .failure(let error): lastError = error
-                    case nil: break
+                var pending = requests.count
+                var deadlinePassed = false
+                for await answer in group {
+                    guard case .board(let index, let board) = answer else { deadlinePassed = true; break }
+                    boards[index] = board
+                    pending -= 1
+                    // Check in as soon as the best station that has the train is known, without
+                    // waiting for the others.
+                    if pending == 0 || Self.match(leg, on: boards, of: requests, at: stations, tolerance: tolerance, waitingForBetter: true) != nil {
+                        break
                     }
                 }
-                if let departure = Self.bestMatch(departures, for: leg, tolerance: tolerance) {
-                    return (station, departure)
+                group.cancelAll()
+                return (boards, deadlinePassed)
+            }
+            for board in boards {
+                switch board {
+                case .success: answered = true
+                case .failure(let error): lastError = error
+                case nil: break
                 }
             }
+            if let match = Self.match(leg, on: boards, of: requests, at: stations, tolerance: tolerance, waitingForBetter: false) {
+                return match
+            }
+            if deadlinePassed { timedOut = true; break }
         }
-        // Not a single board loaded (offline, logged out): that's an error, not an unknown train.
-        if !answered, let lastError { throw lastError }
+        // Not a single board loaded (offline, logged out, no answer in time): that's an error, not an unknown train.
+        if !answered {
+            if timedOut { throw TransitError.timeout }
+            if let lastError { throw lastError }
+        }
+        return nil
+    }
+
+    private struct BoardRequest: Sendable {
+        var station: Int
+        var travelType: String?
+    }
+
+    private enum BoardAnswer: Sendable {
+        case board(Int, Result<[TraewellingDeparture], any Error>)
+        case deadline
+    }
+
+    /// The best station (first in `stations`, see `ranked(_:for:)`) whose boards have `leg`'s train.
+    /// A station whose boards are still loading is skipped, or with `waitingForBetter` ends the
+    /// search, since it may yet have the train.
+    private static func match(_ leg: Leg, on boards: [Result<[TraewellingDeparture], any Error>?], of requests: [BoardRequest],
+                              at stations: [TraewellingStation], tolerance: TimeInterval,
+                              waitingForBetter: Bool) -> (station: TraewellingStation, departure: TraewellingDeparture)? {
+        for (index, station) in stations.enumerated() {
+            let stationBoards = zip(requests, boards).filter { $0.0.station == index }.map(\.1)
+            if waitingForBetter, stationBoards.contains(where: { $0 == nil }) { return nil }
+            let departures = stationBoards.flatMap { board -> [TraewellingDeparture] in
+                if case .success(let departures)? = board { departures } else { [] }
+            }
+            if let departure = bestMatch(departures, for: leg, tolerance: tolerance) { return (station, departure) }
+        }
         return nil
     }
 
