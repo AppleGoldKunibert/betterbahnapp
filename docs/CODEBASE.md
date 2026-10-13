@@ -23,6 +23,7 @@ comments are English.
 | `Cloudflare/bahnde-proxy/` | Separate Worker (`betterbahn2`) proxying bahn.de's web API (`/web/api/…` paths), because bahn.de blocks Apple's URL loading stack, and DB Timetables (`/timetables/v1/…`, API key as Worker secret). Also hands out the App Attest tokens (`/auth/…`). See its README. `BahnDeClient.baseURL`, `TimetablesClient.baseURL` point at it. |
 | `Cloudflare/pass-signer/` | Worker (`betterbahn-pass`) that signs Apple Wallet passes for DB tickets with the Pass Type ID certificate (secrets), since that can't ship in the app. Needs an App Attest token, and only signs UIC (`#UT`) barcodes whose issuer signature verifies against UIC's public key list (`uicsignature.mjs`). `npm install && npm test` (see its README). |
 | `Cloudflare/stats/` | Worker (`betterbahn-stats`, D1 database) for train statistics (#169): the app reports bahn.de journey IDs of regional/long-distance trains it showed (`POST /sightings`), a cron trigger asks bahn.de for each run's schedule, its Wagenreihung at departure and its final realtime state after arrival, stored one row per run (`schema.sql`, compact stops). `backup.sh` downloads runs older than a year, then deletes them. `node --test Cloudflare/stats/worker.test.mjs` (see its README). |
+| `Cloudflare/checkin-push/` | Worker (`betterbahn-push`, D1 database, cron every minute) for notifications about new check-ins of followed Träwelling users (#266): keeps its own read-only Träwelling login per device (from the app's authorization code, AES-GCM encrypted), looks at the dashboard every 2 min and sends APNs pushes (`followedStatusID`). `node --test Cloudflare/checkin-push/worker.test.mjs` (see its README for the APNs key setup). |
 | `Cloudflare/shared/` | `appattest.mjs`: App Attest verification and the signed tokens both Workers check (`X-BetterBahn-Token`); `node --test Cloudflare/shared/appattest.test.mjs`. |
 | `.github/workflows/` | GitHub Actions: `pr-build.yml` (macOS: Kit tests + unsigned app build on PRs touching code), `pr-secrets.yml` (Linux: gitleaks secret scan + guard against committing `DefaultCredentials.swift`), `sync-prod.yml` (merges prod into every other branch except `appstorerelease`). |
 | `scripts/` | `make-station-hints.py`: rebuilds BetterBahnKit's offline station list for search (see Transitous below). `make-ril100.py`: rebuilds the RIL100 code list (`Ril100.swift`), also from DB's XLSX of all operating points for the codes abroad (needs `openpyxl`). `searchsim/`: Linux package that copies the platform-neutral Kit sources in (`./sync.sh`), so `swift test` runs `BetterBahnKitTests.swift` without a Mac and `swift run SearchSim scenarios.txt` runs the real station search against live Transitous for ~1150 place/query scenarios (rerun after changing search ranking). |
@@ -34,8 +35,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 
 ## App target (`BetterBahn/`)
 
-- `App/BetterBahnApp.swift` – `@main`, `AppDelegate` (registers BG task for ending Live
-  Activities), `RootView` with 4 tabs: Verbindungen (`ConnectionsView`), Karte (`TravelMapView`),
+- `App/BetterBahnApp.swift` – `@main`, `AppDelegate` (registers the BG tasks for ending Live
+  Activities and for followed check-ins; notification delegate: a tapped check-in notification → `AppModel.openFollowedCheckin`), `RootView` with 4 tabs: Verbindungen (`ConnectionsView`), Karte (`TravelMapView`),
   Abfahrten (`StationBoardView`), Einstellungen (`SettingsView`). Handles `onOpenURL`
   (`DBShare.text(fromAppURL:)` → `ImportedJourneyView`, `JourneyShareLink` → `SharedJourneyPreviewView` (short links via
   `ShortShareLinkClient`, also as Universal Links), `LiveActivityLink` from tapping the Live Activity → that saved
@@ -122,6 +123,14 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   button (only when the user's `likes_enabled` and the status `isLikable`). Track and train are looked up separately and kept
   per status (`AppModel.followedTracks`/`followedTrains`), so opening it again shows them at once; the text shows the custom
   emojis of the author's Mastodon instance (`User.mastodonServer`), else zug.network's (`AppModel.emojis(forTextOf:)`), loaded with the list together with their pictures (`followedEmojis`).
+  Notifications for new check-ins of followed users (#266, Settings → Träwelling "Check-ins von Gefolgten melden", per device,
+  off by default, only while logged in): push from the `betterbahn-push` Worker (`Cloudflare/checkin-push`), which looks every
+  2 min. Turning it on asks to confirm ("erneute Anmeldung"), then `AppModel.enableFollowedCheckinPush` gets the APNs device token
+  (`AppDelegate` → `didRegisterForPush`) and runs a second Träwelling login, read-only (Kit `FollowedCheckinPush.config`), whose code
+  goes to the Worker – the app's own login can't be shared, since access tokens last an hour and refresh tokens work once. The
+  sign-up (`FollowedCheckinPushSubscription`, persisted) is kept current by `syncFollowedCheckinPush()` on every start (device
+  token; a 404 = Träwelling ended the Worker's login → setting off, `followedCheckinPushEnded`) and ended on turning off or logout.
+  Tapping one opens it in the list (`followedCheckinToOpen`).
 - `Features/Sharing/` – preview of shared journeys and imported DB shares; `JourneyShareButton` (in `JourneyDetailView`)
   uploads for a short link, falls back to the long link, and opens `UIActivityViewController`.
 - `Features/Settings/` – settings (incl. privacy policy link and "not affiliated with DB" note), `DataSourcesView`
@@ -298,6 +307,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `TraewellingCheckinEdit`: `status(id:)`, `updateStatus` (text, visibility, trip type), `deleteStatus`, tags
   (`tags`, `applyTagChanges` with `StatusTagChanges`), moving the exit, `earlyExit` (where checking out now ends a ride),
   `fellowTravellers(of:)` (others checked in to the same trip, `trips/{id}/statuses`, whose ride overlaps).
+  `FollowedCheckinPush` (#266): sign-up at the push Worker (`subscribe`/`update`/`unsubscribe`, App Attest), its read-only login config.
   `TraewellingFollowed`: `followedCheckins()` (the `dashboard`, paged back up to 12 h, filtered to others' rides under way or leaving within 20 min by plan, `checkedIn`),
   `like`/`unlike` (`status/{id}/like`, scope `write-likes`; a 403 → `TraewellingError.likeNotAllowed`, logins from before
   the scope existed must log in again), `CombinedProvider.leg(forCheckin:)` (the run on Transitous' board at the check-in's

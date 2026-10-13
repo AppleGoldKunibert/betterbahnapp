@@ -1,3 +1,4 @@
+import AuthenticationServices
 import BetterBahnKit
 import SwiftUI
 
@@ -9,6 +10,10 @@ struct SettingsView: View {
     @State private var user: TraewellingUser?
     @State private var isLoggedIn = false
     @State private var showClearHistoryConfirmation = false
+    @State private var showFollowedCheckinPushConfirmation = false
+    @State private var isEnablingFollowedCheckinPush = false
+    @State private var followedCheckinPushError: Error?
+    @Environment(\.webAuthenticationSession) private var webAuthenticationSession
 
     var body: some View {
         @Bindable var settings = model.settings
@@ -264,6 +269,7 @@ struct SettingsView: View {
                 }
                 Button(role: .destructive) {
                     Task {
+                        await model.disableFollowedCheckinPush()
                         await model.traewelling.logout()
                         await refreshLogin()
                     }
@@ -298,6 +304,36 @@ struct SettingsView: View {
                 .foregroundStyle(.primary)
                 .disabled(model.isSyncingTraewelling)
             }
+            if isLoggedIn {
+                Toggle(isOn: Binding {
+                    settings.notifyFollowedCheckins || isEnablingFollowedCheckinPush
+                } set: { on in
+                    followedCheckinPushError = nil
+                    if on {
+                        showFollowedCheckinPushConfirmation = true
+                    } else {
+                        Task { await model.disableFollowedCheckinPush() }
+                    }
+                }) {
+                    HStack {
+                        IconLabel(title: "Check-ins von Gefolgten melden", systemImage: "bell.badge.fill", color: .orange)
+                        if isEnablingFollowedCheckinPush {
+                            Spacer()
+                            ProgressView()
+                        }
+                    }
+                }
+                .tint(.brand)
+                .disabled(isEnablingFollowedCheckinPush)
+                .alert("Dieses Feature benötigt eine erneute Anmeldung mit Träwelling. Möchtest du fortfahren?",
+                       isPresented: $showFollowedCheckinPushConfirmation) {
+                    Button("Fortfahren") { enableFollowedCheckinPush() }
+                    Button("Abbrechen", role: .cancel) {}
+                }
+                if let followedCheckinPushError {
+                    ErrorBanner(error: followedCheckinPushError)
+                }
+            }
             Picker(selection: $settings.traewellingVisibility) {
                 ForEach(TraewellingVisibility.allCases, id: \.self) { Text($0.label).tag($0) }
             } label: {
@@ -310,6 +346,30 @@ struct SettingsView: View {
             }
         } header: {
             Text("Träwelling")
+        } footer: {
+            if isLoggedIn, settings.notifyFollowedCheckins {
+                Text("Unser Server schaut alle 2 Minuten nach neuen Check-ins. Dabei wird nichts gespeichert.")
+            } else if isLoggedIn, model.followedCheckinPushEnded {
+                Text("Träwelling hat die Anmeldung für die Meldungen beendet. Zum Weitermachen wieder einschalten.")
+            }
+        }
+    }
+
+    /// Signs in with Träwelling once more for the push Worker (#266), in the same browser session as the
+    /// app's own login; cancelling it leaves the setting off.
+    private func enableFollowedCheckinPush() {
+        isEnablingFollowedCheckinPush = true
+        Task {
+            defer { isEnablingFollowedCheckinPush = false }
+            do {
+                try await model.enableFollowedCheckinPush { url, scheme in
+                    try await webAuthenticationSession.authenticate(using: url, callback: .customScheme(scheme),
+                                                                    preferredBrowserSession: .ephemeral, additionalHeaderFields: [:])
+                }
+            } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
+            } catch {
+                followedCheckinPushError = error
+            }
         }
     }
 
