@@ -552,7 +552,7 @@ struct JourneyReplanSheet: View {
                                     onSelectStop: { _ in exitPicked() })
                         manualStopButton
                     }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .transition(.fold)
                 } else if let tripError {
                     ErrorBanner(error: tripError)
                 } else {
@@ -594,7 +594,7 @@ struct JourneyReplanSheet: View {
                 .disabled(products.isEmpty || destination == nil)
             }
         }
-        .transition(.opacity.combined(with: .move(edge: .top)))
+        .transition(.fold)
     }
 
     /// For a halt that isn't in the timetable, e.g. doors opened at a station during a disruption.

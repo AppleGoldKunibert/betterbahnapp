@@ -538,6 +538,46 @@ public struct TimetablesClient: Sendable {
         return entries
     }
 
+    /// `entries` (one station's board) with DB Timetables' live data laid over every train, as the stop lists
+    /// do (`stopoversWithRealtime`): a delay or early time DB reports wins over bahn.de's and Transitous', a
+    /// cancellation DB reports or doesn't report wins too, a platform swap is overlaid. A train DB reports no
+    /// change for keeps the time it had, or counts as on time once it is about to run (`infersOnTime`). A
+    /// train DB can't find, or every train when `fchg` can't be had (it would otherwise read as "on time,
+    /// running"), stays as it was. One `fchg` and a few `plan` hours serve the whole board (cached, requests
+    /// for the same path merged).
+    public func applyingRealtime(to entries: [BoardEntry], at station: Station, now: Date = .now) async -> [BoardEntry] {
+        guard let eva = await eva(for: station) else { return entries }
+        var entries = entries
+        await withTaskGroup(of: (Int, TimetablesEvent?).self) { group in
+            for index in entries.indices {
+                let entry = entries[index]
+                guard entry.line.product.isTrain, let number = entry.line.dispatchNumber,
+                      let category = Self.category(from: entry.line.name),
+                      Self.knowsChanges(until: entry.time.planned, now: now) else { continue }
+                group.addTask {
+                    let event = entry.kind == .arrivals
+                        ? await self.liveEvent(eva: eva, category: category, number: number, time: entry.time.planned, side: \.arrival)
+                        : await self.liveEvent(eva: eva, category: category, number: number, time: entry.time.planned, side: \.departure)
+                    return (index, event)
+                }
+            }
+            for await (index, event) in group {
+                guard let event else { continue }
+                entries[index] = Self.applying(event, to: entries[index], now: now)
+            }
+        }
+        return entries
+    }
+
+    static func applying(_ event: TimetablesEvent, to entry: BoardEntry, now: Date) -> BoardEntry {
+        var entry = entry
+        let onTime = infersOnTime(departing: entry.time.planned, now: now)
+        entry.time.actual = event.actual ?? entry.time.actual ?? (onTime ? entry.time.planned : nil)
+        entry.cancelled = event.cancelled
+        if let platform = mergedPlatform(existing: entry.platform, event: event) { entry.platform = platform }
+        return entry
+    }
+
     /// Every scheduled departure/arrival at `station` matching `category` (optional, case-insensitive)
     /// and `number`, across the requested window – straight from DB's own dispatching plan (`/plan`),
     /// which lists every train by its real category and number regardless of how any particular

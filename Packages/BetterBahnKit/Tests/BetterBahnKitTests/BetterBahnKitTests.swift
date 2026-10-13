@@ -1474,6 +1474,22 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         let regional = MLineInfo(mode: "REGIONAL_RAIL", displayName: "RE3 (3349)", routeShortName: "RE3", tripShortName: "003349",
                                  agencyName: "DB Regio AG Nordost").toLine()
         #expect(regional.name == "RE3 (3349)")
+        #expect(regional.product == .regionalExpress)
+    }
+
+    /// DELFI has every German RE and RB as "REGIONAL_RAIL", named "RE3 (…)"/"RB10 (…)" without a space:
+    /// the "Nur RB" filter must not show the REs.
+    @Test func regionalExpressWithoutSpaceAfterCategory() {
+        let re = MLineInfo(mode: "REGIONAL_RAIL", displayName: "RE70 (21312)", routeShortName: "RE70", tripShortName: "21312",
+                           agencyName: "DB Regio AG Nord").toLine()
+        #expect(re.product == .regionalExpress)
+        let rb = MLineInfo(mode: "REGIONAL_RAIL", displayName: "RB31 (81607)", routeShortName: "RB31", tripShortName: "81607",
+                           agencyName: "erixx").toLine()
+        #expect(rb.product == .regional)
+        // Berlin's Flughafen-Express only stops at a few stations: an RE, not an RB.
+        let fex = MLineInfo(mode: "REGIONAL_RAIL", displayName: "FEX (21803)", routeShortName: "FEX", tripShortName: "21803",
+                            agencyName: "DB Regio AG Nordost").toLine()
+        #expect(fex.product == .regionalExpress)
     }
 
     /// A short walk between two nearby stops is only folded away when the numbered train actually

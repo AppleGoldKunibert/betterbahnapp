@@ -20,8 +20,11 @@ Query strings are forwarded unchanged (not for Timetables). Only these GET paths
 everything else is 404. bahn.de errors (including 403/429 blocks) are passed through uncached, so
 the app's `BahnDeGate` cooldown still applies. `GET /health` answers without calling bahn.de.
 
-Timetables requests go to DB's API Marketplace with `DB-Client-Id`/`DB-Api-Key` from this Worker's
-secrets, so the key never ships in the app.
+Timetables requests go to the keyless IRIS (`iris.noncd.db.de`, the service behind Timetables, which DB's own
+departure board uses) first. Only when IRIS fails (error, timeout, 5xx, 429) they go to DB's API Marketplace with
+`DB-Client-Id`/`DB-Api-Key` from this Worker's secrets, so the key never ships in the app and the Marketplace's
+60 calls/minute are kept for when IRIS is down. IRIS's "no data" answers (400/404/410) are passed on without a
+fallback. DB marked IRIS deprecated, so the Marketplace stays configured.
 
 ## App Attest
 

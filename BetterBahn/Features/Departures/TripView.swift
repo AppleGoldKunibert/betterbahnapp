@@ -18,8 +18,16 @@ struct TripView: View {
     @State private var shownTripId: String?
     /// Where you got on/off before switching trains, picked again in the other one.
     @State private var keptStops: (boarding: Station?, exit: Station?)?
+    /// Laps of a looping train (Ringbahn) loaded before / after the one the board opened, by "Vorherige /
+    /// Nächste Runde laden".
+    @State private var extraLapsBefore = 0
+    @State private var extraLapsAfter = 0
+    @State private var isLoadingLap = false
 
     private var tripId: String { shownTripId ?? entry.tripId }
+
+    /// Where the loaded laps are remembered (see `LoadedLaps`).
+    private var lapsKey: String { LoadedLaps.key(tripId: entry.tripId, station: entry.station, near: entry.time.planned) }
 
     private var ownDirection: String? { entry.kind == .departures ? entry.otherEnd : nil }
 
@@ -39,7 +47,9 @@ struct TripView: View {
                     ErrorBanner(error: error)
                 }
                 if let trip {
-                    TripContent(trip: trip, highlight: selectsStation ? entry.station : nil, boardingID: $boardingID, exitID: $exitID)
+                    TripContent(trip: trip, highlight: selectsStation ? entry.station : nil, boardingID: $boardingID, exitID: $exitID,
+                                onLoadPreviousLap: { loadLap(before: 1) }, onLoadNextLap: { loadLap(after: 1) },
+                                isLoadingLap: isLoadingLap)
                 }
             }
             .padding(.horizontal)
@@ -56,11 +66,17 @@ struct TripView: View {
         .navigationTitle(entry.line.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .task(id: tripId) {
+            if tripId == entry.tripId {
+                let remembered = model.openLoadedLaps(lapsKey, tripId: entry.tripId)
+                extraLapsBefore = remembered.before
+                extraLapsAfter = remembered.after
+            }
             // Seen before: its last live data right away, refreshed below.
             if trip == nil, let seen = model.liveTrips.value(for: tripId) { show(seen) }
             await load()
             await autoRefresh(tripId: tripId)
         }
+        .onDisappear { model.closeLoadedLaps(lapsKey) }
         .refreshable {
             await TimetablesClient.invalidateDelays()
             await load()
@@ -109,6 +125,8 @@ struct TripView: View {
         boardingID = nil
         exitID = nil
         error = nil
+        extraLapsBefore = 0
+        extraLapsAfter = 0
         shownTripId = id == entry.tripId ? nil : id
         trip = nil
         if let seen = model.liveTrips.value(for: id) { show(seen) }
@@ -132,6 +150,14 @@ struct TripView: View {
             } else if loaded.line?.isUnknown ?? true, tripId == entry.tripId, !entry.line.isUnknown {
                 // An extra train Transitous has no line for, which the board named ("S1" for "?").
                 loaded.line = entry.line
+            }
+            // A ring line's trip is the vehicle's whole day: only the lap of the board's departure (or
+            // arrival) is the run shown here, with the run number the board knows.
+            if tripId == entry.tripId,
+               let lap = loaded.lap(at: entry.station, near: entry.time.planned, arriving: entry.kind == .arrivals,
+                                    extraBefore: extraLapsBefore, extraAfter: extraLapsAfter) {
+                loaded = lap
+                if let run = entry.line.tripNumber { loaded.line?.tripNumber = run }
             }
             guard tripId == self.tripId else { return }
             error = nil
@@ -157,8 +183,24 @@ struct TripView: View {
         }
     }
 
+    /// Adds the lap before / after the ones shown and loads the trip again with it.
+    private func loadLap(before: Int = 0, after: Int = 0) {
+        guard !isLoadingLap else { return }
+        extraLapsBefore += before
+        extraLapsAfter += after
+        model.rememberLoadedLaps(.init(before: extraLapsBefore, after: extraLapsAfter), for: lapsKey, tripId: entry.tripId)
+        isLoadingLap = true
+        Task {
+            await load()
+            isLoadingLap = false
+        }
+    }
+
     private func show(_ loaded: Trip) {
         trip = loaded
+        // A pick from a trip seen before that this one doesn't have (another lap of a ring line).
+        if let id = boardingID, !loaded.stopovers.contains(where: { $0.id == id }) { boardingID = nil }
+        if let id = exitID, !loaded.stopovers.contains(where: { $0.id == id }) { exitID = nil }
         guard boardingID == nil, exitID == nil else { return }
         if let keptStops {
             boardingID = keptStops.boarding.flatMap { kept in loaded.stopovers.first { $0.station.isSamePlace(as: kept) }?.id }
@@ -181,7 +223,14 @@ struct TripView: View {
     private func insertZusatzhalte() async {
         guard let trip, let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: trip),
               self.trip?.id == trip.id else { return }
-        self.trip?.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: BahnDeClient.inserting(stops, into: trip.stopovers))
+        let keepingDelays = model.timetablesClient != nil
+        let inserted = BahnDeClient.inserting(stops, into: trip.stopovers)
+        self.trip?.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: inserted, keepingDelays: keepingDelays)
+        // Where bahn.de and DB Timetables disagree on a stop, bahn.expert is asked which is right; shown once it answers.
+        let refereed = await BahnDeClient.applyingLiveTimes(from: stops, to: inserted, line: trip.line, keepingDelays: keepingDelays,
+                                                            referee: model.provider.bahnExpert)
+        guard self.trip?.id == trip.id else { return }
+        self.trip?.stopovers = refereed
         if (try? await bahnDe.hasSleepingCars(for: trip)) == true, self.trip?.id == trip.id { self.trip?.line?.nightRail = true }
     }
 }
@@ -236,6 +285,12 @@ struct TripContent: View {
     var onSelectStop: ((Stopover) -> Void)?
     /// The saved journey's leg riding this train, whose remembered Tz shows once nothing answers any more.
     var savedLeg: Leg? = nil
+    /// A looping train (Ringbahn) shows one lap: these load the one before / after it, and are only shown
+    /// while `trip` says there is one (`Trip.hasPreviousLap`).
+    var onLoadPreviousLap: (() -> Void)? = nil
+    var onLoadNextLap: (() -> Void)? = nil
+    /// A lap is being loaded: the buttons wait.
+    var isLoadingLap = false
     /// Tapping any stop time flips every stop between real-time and scheduled times — app-wide, and remembered.
     @AppStorage("showPlannedTimes") private var showPlannedTimes = false
     /// Set once a boarding/exit stop was picked by hand; from then on the "Tippe auf Halte" tip stays hidden.
@@ -310,9 +365,15 @@ struct TripContent: View {
 
             Card {
                 VStack(spacing: 0) {
+                    if trip.hasPreviousLap, let onLoadPreviousLap {
+                        lapButton("Vorherige Runde laden", systemImage: "arrow.up.circle", action: onLoadPreviousLap)
+                    }
                     ForEach(Array(trip.stopovers.enumerated()), id: \.element.id) { index, stop in
                         // Scroll target, so a sheet can open the list at the exit (#225).
                         stopNode(stop, index: index).id(stop.id)
+                    }
+                    if trip.hasNextLap, let onLoadNextLap {
+                        lapButton("Nächste Runde laden", systemImage: "arrow.down.circle", action: onLoadNextLap)
                     }
                 }
             }
@@ -323,6 +384,23 @@ struct TripContent: View {
             guard let bahnDe = model.provider.bahnDe, let found = try? await bahnDe.operatorStops(for: trip) else { return }
             operatorStops = found
         }
+    }
+
+    /// Loads the lap before / after the one shown, at the top / bottom of the stops.
+    private func lapButton(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                if isLoadingLap { ProgressView().controlSize(.small) } else { Image(systemName: systemImage) }
+                Text(title)
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Color.brand)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(isLoadingLap)
     }
 
     private var boardingIndex: Int? { trip.stopovers.firstIndex { $0.id == boardingID } }
@@ -404,7 +482,7 @@ struct TripContent: View {
                 }
                 if sequenceStopID == stop.id, let request = coachSequenceRequest(at: stop) {
                     CoachSequencePanel(request: request)
-                        .transition(.coachSequenceFold)
+                        .transition(.fold)
                 }
             }
         }
@@ -527,8 +605,17 @@ struct LegTripSheet: View {
     @State private var showsSavedStops = false
     /// The coupled train whose stops are shown instead of this one's (nil: this one).
     @State private var shownTripId: String?
+    /// Laps of a looping train (Ringbahn) loaded before / after the leg's own, by "Vorherige / Nächste Runde laden".
+    @State private var extraLapsBefore = 0
+    @State private var extraLapsAfter = 0
+    @State private var isLoadingLap = false
 
     private var tripId: String? { shownTripId ?? leg.tripId }
+
+    /// Where the loaded laps are remembered (see `LoadedLaps`).
+    private var lapsKey: String? {
+        leg.tripId.map { LoadedLaps.key(tripId: $0, station: leg.origin, near: leg.departure.planned) }
+    }
 
     private var runs: [Line.CoupledTrain] {
         guard let line = leg.line, let tripId = leg.tripId else { return [] }
@@ -557,7 +644,9 @@ struct LegTripSheet: View {
                     if let trip {
                         TripContent(trip: trip, highlight: leg.origin,
                                     boardingID: .constant(boardingID(in: trip)), exitID: .constant(exitID(in: trip)),
-                                    interactive: false, savedLeg: tripId == leg.tripId ? leg : nil)
+                                    interactive: false, savedLeg: tripId == leg.tripId ? leg : nil,
+                                    onLoadPreviousLap: { loadLap(before: 1) }, onLoadNextLap: { loadLap(after: 1) },
+                                    isLoadingLap: isLoadingLap)
                     }
                 }
                 .padding(.horizontal)
@@ -571,7 +660,13 @@ struct LegTripSheet: View {
                     Button("Fertig", systemImage: "xmark", role: .cancel) { dismiss() }
                 }
             }
+            .onDisappear { if let lapsKey { model.closeLoadedLaps(lapsKey) } }
             .task(id: tripId) {
+                if tripId == leg.tripId, let lapsKey, let own = leg.tripId {
+                    let remembered = model.openLoadedLaps(lapsKey, tripId: own)
+                    extraLapsBefore = remembered.before
+                    extraLapsAfter = remembered.after
+                }
                 if trip == nil, let tripId, let seen = model.liveTrips.value(for: tripId) { trip = seen }
                 await load()
                 guard let tripId else { return }
@@ -584,12 +679,30 @@ struct LegTripSheet: View {
         }
     }
 
+    /// Where the leg starts: the visit at its planned time, for a looping train that calls here every lap.
     private func boardingID(in trip: Trip) -> String? {
-        trip.stopovers.first { $0.station.isSamePlace(as: leg.origin) }?.id
+        let visits = trip.stopovers.filter { $0.station.isSamePlace(as: leg.origin) }
+        return (visits.first { $0.departure?.planned == leg.departure.planned } ?? visits.first)?.id
     }
 
     private func exitID(in trip: Trip) -> String? {
-        trip.stopovers.last { $0.station.isSamePlace(as: leg.destination) }?.id
+        let visits = trip.stopovers.filter { $0.station.isSamePlace(as: leg.destination) }
+        return (visits.last { $0.arrival?.planned == leg.arrival.planned } ?? visits.last)?.id
+    }
+
+    /// Adds the lap before / after the ones shown and loads the trip again with it.
+    private func loadLap(before: Int = 0, after: Int = 0) {
+        guard !isLoadingLap else { return }
+        extraLapsBefore += before
+        extraLapsAfter += after
+        if let lapsKey, let own = leg.tripId {
+            model.rememberLoadedLaps(.init(before: extraLapsBefore, after: extraLapsAfter), for: lapsKey, tripId: own)
+        }
+        isLoadingLap = true
+        Task {
+            await load()
+            isLoadingLap = false
+        }
     }
 
     /// Shows the stops of another of the coupled trains.
@@ -597,6 +710,8 @@ struct LegTripSheet: View {
         guard id != tripId else { return }
         error = nil
         showsSavedStops = false
+        extraLapsBefore = 0
+        extraLapsAfter = 0
         shownTripId = id == leg.tripId ? nil : id
         trip = model.liveTrips.value(for: id)
     }
@@ -609,7 +724,7 @@ struct LegTripSheet: View {
         do {
             // The leg's own run is looked up again if a feed import renumbered it (a saved journey's).
             var loaded = tripId == leg.tripId
-                ? try await model.provider.trip(for: leg)
+                ? try await model.provider.trip(for: leg, extraLapsBefore: extraLapsBefore, extraLapsAfter: extraLapsAfter)
                 : try await model.provider.trip(id: tripId, source: leg.source)
             guard tripId == self.tripId else { return }
             // The leg's own line knows the trains coupled to it, so the trainsets of both show.
@@ -657,7 +772,13 @@ struct LegTripSheet: View {
         let ownTrain = shownTripId == nil
         var hasSleepingCars = false
         if let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: updated) {
-            updated.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: BahnDeClient.inserting(stops, into: updated.stopovers))
+            let keepingDelays = model.timetablesClient != nil
+            let inserted = BahnDeClient.inserting(stops, into: updated.stopovers)
+            updated.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: inserted, keepingDelays: keepingDelays)
+            // Shown right away; where bahn.de and DB Timetables disagree on a stop, bahn.expert is asked which is right.
+            if ownTrain, self.trip?.id == updated.id, shownTripId == nil { self.trip?.stopovers = updated.keepingAdditionalStops(of: leg).stopovers }
+            updated.stopovers = await BahnDeClient.applyingLiveTimes(from: stops, to: inserted, line: updated.line,
+                                                                     keepingDelays: keepingDelays, referee: model.provider.bahnExpert)
             hasSleepingCars = (try? await bahnDe.hasSleepingCars(for: updated)) == true
         }
         if ownTrain { updated = updated.keepingAdditionalStops(of: leg) }

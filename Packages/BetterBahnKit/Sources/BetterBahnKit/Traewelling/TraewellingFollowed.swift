@@ -13,6 +13,20 @@ public struct FollowedCheckins: Sendable {
     }
 }
 
+/// One followed person with all their check-ins that are under way or about to start (#267).
+public struct FollowedPerson: Sendable, Identifiable {
+    public var user: TraewellingStatus.User
+    /// Their check-ins by departure, the earliest first (10:00–11:00 before 10:30–10:55).
+    public var statuses: [TraewellingStatus]
+
+    public var id: Int { user.id }
+
+    public init(user: TraewellingStatus.User, statuses: [TraewellingStatus]) {
+        self.user = user
+        self.statuses = statuses
+    }
+}
+
 public extension TraewellingClient {
     /// No ride runs longer, so the dashboard isn't paged back further for rides still running.
     static let longestRide: TimeInterval = 12 * 3600
@@ -49,6 +63,24 @@ public extension TraewellingClient {
             return leaves <= now.addingTimeInterval(boardingWindow) && now < end
         }
         .sorted { ($0.checkin.start ?? .distantPast) > ($1.checkin.start ?? .distantPast) }
+    }
+
+    /// `statuses` grouped by their user, each person's check-ins by departure (earliest first, a tie by ID),
+    /// the people by their first check-in, the latest departure first. Statuses without a user are dropped.
+    static func grouped(_ statuses: [TraewellingStatus]) -> [FollowedPerson] {
+        func start(_ status: TraewellingStatus) -> Date { status.checkin.start ?? .distantPast }
+        var byUser: [Int: FollowedPerson] = [:]
+        for status in statuses {
+            guard let user = status.user else { continue }
+            byUser[user.id, default: FollowedPerson(user: user, statuses: [])].statuses.append(status)
+        }
+        return byUser.values
+            .map { person in
+                var person = person
+                person.statuses.sort { (start($0), $0.id) < (start($1), $1.id) }
+                return person
+            }
+            .sorted { (start($0.statuses[0]), $0.id) > (start($1.statuses[0]), $1.id) }
     }
 
     /// Likes someone's check-in and returns how many like it now. One liked before (409) counts as liked.
@@ -88,14 +120,32 @@ public extension CombinedProvider {
 
     /// The timetable run of someone's Träwelling check-in (#196), so it shows like any other train:
     /// the train leaving the check-in's origin at its planned time under its name or number, from the
-    /// boarding stop to the exit. `nil` for trips typed in on Träwelling and when no train fits.
+    /// boarding stop to the exit. `nil` for trips typed in on Träwelling and when no train fits, but only
+    /// when the timetable really answered: a board or trip that couldn't be loaded throws, so it isn't
+    /// taken for a train that doesn't exist.
     func leg(forCheckin status: TraewellingStatus) async throws -> Leg? {
         guard !status.checkin.isManualTrip, let ride = status.journey(geometry: nil)?.legs.first else { return nil }
-        let entries = try await departures(at: ride.origin, date: ride.departure.planned.addingTimeInterval(-2 * 60), duration: 6)
-        for entry in Self.candidates(for: status, departingAt: ride.departure.planned, in: entries) {
-            guard let trip = try? await trip(id: entry.tripId, source: entry.source) else { continue }
-            if let leg = Self.leg(of: trip, riding: ride) { return leg }
+        // Träwelling takes its trips from Transitous, so the check-in names the run itself: no need to find it on a board.
+        if let id = status.checkin.hafasId, let run = try? await trip(id: id, source: primary.source),
+           let leg = Self.leg(of: run, riding: ride) {
+            return leg
         }
+        // The lookup board skips loading every ICE's whole run, which a hub like Berlin Hbf has several of
+        // in a few minutes and which could run into the deadline ("Keine Antwort") before the S-Bahn showed.
+        let entries = try await departuresForTrainLookup(at: ride.origin, date: ride.departure.planned.addingTimeInterval(-2 * 60), duration: 6)
+        var failure: Error?
+        for entry in Self.candidates(for: status, departingAt: ride.departure.planned, in: entries) {
+            do {
+                let run = try await trip(id: entry.tripId, source: entry.source)
+                if let leg = Self.leg(of: run, riding: ride) { return leg }
+            } catch let error as TransitError where error.isNotFound {
+                continue
+            } catch {
+                try Task.checkCancellation()
+                failure = error
+            }
+        }
+        if let failure { throw failure }
         return nil
     }
 

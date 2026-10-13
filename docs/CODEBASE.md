@@ -117,7 +117,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   check-in, lists the "Mitreisende" on the same train (#184)), `CheckoutPrompt` (removing a saved journey with such check-ins asks: check out at the last stop reached
   (`TraewellingClient.earlyExit`, later check-ins deleted), delete the check-ins, or keep them).
   `FollowedCheckinsSection` (#196): small button above "Deine Reisen" (`UpcomingTripsSection`) listing who of the people the
-  user follows is checked in right now (`AppModel.followedCheckins`, refreshed every 2 min while the Verbindungen tab shows,
+  user follows is checked in right now, each person once (#267, Kit `TraewellingClient.grouped`: someone with several check-ins gets a
+  header that unfolds them by departure, open when there are 2 at most; a single one is the card itself) (`AppModel.followedCheckins`, refreshed every 2 min while the Verbindungen tab shows,
   `keepFollowedCheckinsFresh`): tags, train, from → to; opening one shows its train (`LegTripSheet`, hidden for manual trips),
   a small map with the ride and the live position/speed (bahn.jetzt, tap → `LiveTrainMapView`), a Träwelling link and a like
   button (only when the user's `likes_enabled` and the status `isLikable`). Track and train are looked up separately and kept
@@ -147,6 +148,17 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `PlatformInfo`, `Trip`, `JourneyPage`; `Station` (+ `DataSource`, `Coordinate`); `BoardEntry`;
   `TrainMessage` (DB delay reasons/notices); `RideMatch`; `OperatorBrand` (feed agency name → EVU logo, #166: PNGs rendered from Wikimedia Commons SVGs in
   `BetterBahn/Assets.xcassets/Operators/Operator-<brand>`, shown by `OperatorLabel` on a transparent background, in dark mode on a light plate if `needsPlateInDarkMode`; unknown operators keep the building icon; DB S-Bahns with their own name ("S-Bahn Berlin GmbH", "DB Regio AG S-Bahn München") show the S-Bahn "S", other "DB Regio AG …" trains the DB Regio logo; `OperatorBrand.displayName` shortens names: "ODEG", "Transdev" for "S-Bahn Hannover (Transdev)"). International trains have several operators: bahn.de's journey details give each stop's railway (`adminID`, UIC code: 80 DB, 54 ČD, …; "BEF" attributes if present) (`BahnDeClient.trainOperators(for:)` → `[TrainOperator]`, narrowed to a leg's section), shown by `TrainOperatorsLabel` as logos side by side (`OperatorLogo`) and in the route at the stops where the train changes hands (`operatorStops(for:)`); the feed only ever names one.
+- `Models/TripLap.swift` – `Trip.lap(at:near:arriving:)`: Transitous' trip for a ring line (S41/S42) is the vehicle's whole day
+  (the S42: 490 stops, each station ~19 times, under the block's number), so stops looked up by station landed on the first lap
+  ("ab 17:50" showed "ab 3:50"). Cuts out the one lap from the board's departure (or to its arrival); applied in
+  `TripView.load()` and `CombinedProvider.trip(for:)`. Needs a station visited ≥ 3 times, so turn-round trains keep all stops.
+  A lap runs from one visit of that station to the next; `extraBefore`/`extraAfter` add laps and `Trip.hasPreviousLap`/`hasNextLap`
+  (not stored) tell `TripContent` to show "Vorherige / Nächste Runde laden" at the top / bottom of the stops (`TripView`, `LegTripSheet`
+  count the extra laps and reload; works for any looping train, not just the Ringbahn). `Support/LoadedLaps.swift` remembers the
+  loaded laps per trip and stop (`AppModel.loadedLaps`, on disk as `loadedLaps.json`) and forgets them after 15 min without a look
+  unless the trip is saved. `coveringUntil` (the leg's planned arrival, from `CombinedProvider.trip(for:)`) adds laps until the trip
+  reaches a leg's destination, for a leg that rides round more than once; `JourneyRefresher.apply` never snaps a destination to a visit
+  before the leg's own intermediate stops.
 - `Transit/TransitProvider.swift` – `TransitProvider` protocol (`searchStations`, `journeys`,
   `board`, `trip`) and `JourneyQuery`.
 - `Transit/StationSearch.swift` – station-field shortcuts (#90): "b" bus stops, "t" tram stops, "l" nearest
@@ -182,7 +194,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   (`fillingMissingPlatforms`, e.g. Hamburg Hbf; saved journeys via `JourneyRefresher`, which also applies the names below), and bahn.de's
   own train names for boards (departures and arrivals) and journey legs (`correctingTrainNames`, e.g. "RJ 171" that Transitous calls "ICE 171"),
   and DB's live times (`ezZeit`) for every train on boards (not subway, tram, bus; RE/RB, S-Bahn and other brands by run number or name) (`correctingFromBoard`, `applyingLiveTimes`), which
-  beat DELFI's forecasts in Transitous; the journey details' live times likewise win on legs and trains (`applyingLiveTimes(from:to:)`, RJ 383 had no delay at Bad Schandau otherwise). Responses are
+  beat DELFI's forecasts in Transitous; the journey details' live times likewise win on legs and trains (`applyingLiveTimes(from:to:)`, RJ 383 had no delay at Bad Schandau otherwise), but not over a delay or early time DB Timetables already put on a stop (`keepingDelays`: bahn.de showed +7 for RE 3 3354 at Gesundbrunnen where DB had +19), and never turning a time that is 2+ minutes early into "on time" (`turnsEarlyIntoOnTime`: bahn.de shows early trains as ±0, on boards too). Responses are
   cached; a 403/429 pauses all bahn.de requests through the Worker for 10 min (`BahnDeGate`). Then (and on that first
   blocked answer) the app asks bahn.de from the phone instead: `BahnDeBrowserFallback` (set at launch in `AppModel.init`,
   none in widgets/tests) loads the same `/web/api/…` path at www.bahn.de through `BahnDeBrowser` (hidden `WebPage` on
@@ -215,6 +227,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   in `connections/connections` (by run number and planned time) and reads DB's `dispositionStatus`
   (`WAITING`/`NOT_WAITING`). `dispositions(in:now:)` asks for transfers from 15 min ago up to 3 h ahead, for
   `JourneyDetailView` and for saved journeys' refresh, which notifies once per decision (`notificationID`).
+  `ExpertTimes` (`liveTimes(category:number:day:)`, cached 2 min per run in `ExpertTimesCache`) is the referee where bahn.de and DB
+  Timetables disagree on a stop: `BahnDeClient.applyingLiveTimes(…referee:)` asks only then, and the value closer to bahn.expert's stays
+  (DB Timetables' on a tie); an early time still never becomes "on time". Without an answer DB Timetables' rule stands.
 - `Transit/TrainNumberSearch.swift` – train search by number (#183): bahn.expert's `journey/find` lists the runs with
   that number on a day (`TrainNumberQuery` reads "ICE 123"/"123"; `ranked` keeps the `TrainSearchFilter`'s kinds, the typed
   category or the same kind of train; countries from the end stops' IFOPT/EVA, `TrainSearchCountry`; trains that may cross
@@ -276,6 +291,10 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   found at a station's EVA is looked for at its other levels (`/station` `meta`, e.g. "Hamburg Hbf (S-Bahn)").
   Trains that ran over 4 hours ago aren't asked about (`changesMemory`): DB has dropped their changes and
   would report them on time. Without live data a time has no `actual`, so no delay shows (not "+0").
+  The departure board gets DB's data as well (`applyingRealtime(to:at:)`, called by `StationBoardView` after bahn.de's
+  and Transitous' times are in): its delay, early time, cancellation and platform swap win, a train it reports no
+  change for keeps its time, and nothing changes without `fchg`. The Worker asks the keyless IRIS first and the
+  API Marketplace only when IRIS fails (60 calls/minute).
   A stop DB schedules without a change only counts as on time when the train runs within 2 h
   (`infersOnTime`); a journey tomorrow shows plain times, and `JourneyRefresher.droppingInferredOnTime` clears
   such made-up "pünktlich" from journeys saved earlier.
@@ -301,8 +320,14 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   the origin, or leave one also calling at the destination – e.g. Berlin Hbf → Halle → back via Hbf; not for via searches), `TicketFilter`/`BC100Rules`, `BoardFilter`,
   `ManualStop` (`Stopover.manual` with `isManual`, which refreshes keep unlike `isAdditional`; `Trip.inserting(manualStop:boardingAt:)` sorts it in by time).
 - `Traewelling/` – OAuth PKCE (`TraewellingAuth`, `TokenStore`), `TraewellingClient`
-  (check-ins, history), `QuickTag`. Finding the train asks only the nearest few stations' departures, in parallel
-  (12 s timeout), and caches autocomplete/departures, so retries and "Manuell eintragen" (`checkinAsManualTrip`) don't search again (#106).
+  (check-ins, history), `QuickTag`. Finding the train asks only the nearest few stations' departures, in parallel,
+  and caches autocomplete/departures, so retries and "Manuell eintragen" (`checkinAsManualTrip`) don't search again (#106).
+  It checks in as soon as the best station's boards have the train and gives up after `TraewellingSearchBudget`
+  (15 s, 45 s when Träwelling's station search took over 3 s), then offers the manual trip (#289).
+  Träwelling's board is MOTIS' stop times: the next 50 departures by live time from every stop within 200 m (so a
+  departure can belong to another Träwelling station, "fährt ab S+U Gesundbrunnen"); at busy interchanges that spans
+  only minutes and a late train fell off the end (#289). So it also loads the board of only the leg's kind of train
+  (Träwelling's `travelType` filter, `boardTravelTypes`/`travelType(for:)`), which spans hours; the wider second pass only that one.
   `replaceWithManualTrip` turns a check-in into one on a manual trip (creates the trip first, then deletes and re-checks in, keeping text/visibility/tags).
   `TraewellingCheckinEdit`: `status(id:)`, `updateStatus` (text, visibility, trip type), `deleteStatus`, tags
   (`tags`, `applyTagChanges` with `StatusTagChanges`), moving the exit, `earlyExit` (where checking out now ends a ride),
@@ -310,7 +335,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `FollowedCheckinPush` (#266): sign-up at the push Worker (`subscribe`/`update`/`unsubscribe`, App Attest), its read-only login config.
   `TraewellingFollowed`: `followedCheckins()` (the `dashboard`, paged back up to 12 h, filtered to others' rides under way or leaving within 20 min by plan, `checkedIn`),
   `like`/`unlike` (`status/{id}/like`, scope `write-likes`; a 403 → `TraewellingError.likeNotAllowed`, logins from before
-  the scope existed must log in again), `CombinedProvider.leg(forCheckin:)` (the run on Transitous' board at the check-in's
+  the scope existed must log in again), `CombinedProvider.leg(forCheckin:)` (the run by the check-in's `hafasId`, which is Transitous' trip ID, else on Transitous' board at the check-in's
   origin, by planned time and name or run number; `nil` for manual trips, whose `hafasId` is a UUID). Token refreshes send
   no `scope`, so adding a scope never invalidates existing logins.
 - `Mastodon/CustomEmoji.swift` – Mastodon custom emojis for check-in texts (#168): `CustomEmojiClient` loads
@@ -369,6 +394,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 
 - Put logic and models in BetterBahnKit (testable, `Sendable`, `public`); keep views thin.
 - Add a Kit test for behaviour changes; mock HTTP with a `URLProtocol` subclass like existing tests.
+- Content that folds in or out of the page uses `.transition(.fold)` (fade only, `Shared/DesignSystem.swift`), never `.move(edge: .top)`: it slides over the text above (#227, #267).
 - German, plain user-facing wording; DB-style station names (e.g. "Frankfurt (Oder)", "Bernau (bei Berlin)").
 - Commit titles: short imperative sentence ("Show …", "Stop …", "Keep …"), add `(fixes #N)` only
   when an issue is really fixed. No Claude co-author trailer.

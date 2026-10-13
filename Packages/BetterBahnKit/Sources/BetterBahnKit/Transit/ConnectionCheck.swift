@@ -212,7 +212,10 @@ public struct JourneyRefresher: Sendable {
             leg = await transitous.fillingMissingStops(in: leg)
         }
         let timetables = TimetablesClient.knowsChanges(until: leg.arrival.planned, now: now) ? self.timetables : nil
+        // Asked DB Timetables: its delays stay where bahn.de's forecast differs (see `BahnDeClient.applyingLiveTimes`).
+        var timetablesAnswered = false
         if let timetables, timetables.canLookUp(leg) {
+            timetablesAnswered = true
             leg = Self.syncingEnds(of: leg, toStopovers: true)
             let live = await timetables.liveStopovers(for: leg, now: now)
             leg.stopovers = live.stopovers
@@ -231,7 +234,9 @@ public struct JourneyRefresher: Sendable {
             if runningSoon {
                 if !leg.stopovers.isEmpty { leg.stopovers = BahnDeClient.inserting(course.stops, into: leg.stopovers) }
                 // DB's own live times beat Transitous' and fill stops DB Timetables missed.
-                leg = BahnDeClient.applyingLiveTimes(from: course.stops, to: leg)
+                // Where bahn.de and DB Timetables disagree, bahn.expert is asked which is right.
+                leg = await BahnDeClient.applyingLiveTimes(from: course.stops, to: leg, keepingDelays: timetablesAnswered,
+                                                           referee: provider.bahnExpert)
             }
             leg = BahnDeClient.fillingMissingPlatforms(in: leg, from: course.stops)
             leg = BahnDeClient.markingNightTrain(leg, hasSleepingCars: course.hasSleepingCars)
@@ -291,7 +296,11 @@ public struct JourneyRefresher: Sendable {
             if start.departureCancelled { leg.cancelled = true }
         }
         let rest = trip.stopovers[((startIndex ?? -1) + 1)...]
-        if let endIndex = closestStop(in: rest, at: leg.destination, plannedTime: leg.arrival.planned, side: \.arrival) {
+        // A leg riding round a ring more than once has its destination after its own intermediate stops: a
+        // visit of the destination before them (the first lap's) is not it, however close in name.
+        let lastIntermediate = leg.stopovers.compactMap { $0.departure?.planned ?? $0.arrival?.planned }.max()
+        if let endIndex = closestStop(in: rest, at: leg.destination, plannedTime: leg.arrival.planned, side: \.arrival),
+           lastIntermediate.map({ (trip.stopovers[endIndex].arrival?.planned ?? .distantFuture) >= $0 }) ?? true {
             let end = trip.stopovers[endIndex]
             if let arrival = end.arrival { leg.arrival = Self.keepingActual(arrival, from: leg.arrival) }
             if end.arrivalPlatform?.best != nil { leg.arrivalPlatform = end.arrivalPlatform }

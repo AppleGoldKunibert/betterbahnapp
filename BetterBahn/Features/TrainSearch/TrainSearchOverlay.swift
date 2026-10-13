@@ -16,8 +16,6 @@ struct TrainSearchOverlay: View {
     @State private var searching = false
     @State private var error: Error?
     @State private var selected: TrainSearchResult?
-    /// The bar fades in on its own; the dimming behind it is there from the first frame.
-    @State private var appeared = false
     @FocusState private var focused: Bool
 
     private struct Submitted: Equatable {
@@ -45,7 +43,7 @@ struct TrainSearchOverlay: View {
                     bar
                     if showsCalendar {
                         calendar
-                            .transition(.move(edge: .top).combined(with: .opacity))
+                            .transition(.fold)
                     }
                     if submitted != nil {
                         resultsPanel
@@ -75,7 +73,6 @@ struct TrainSearchOverlay: View {
             .scrollBounceBehavior(.basedOnSize)
             .scrollDismissesKeyboard(.interactively)
         }
-        .opacity(appeared ? 1 : 0)
         .background {
             Color.black.opacity(0.35)
                 .ignoresSafeArea()
@@ -84,10 +81,7 @@ struct TrainSearchOverlay: View {
         .animation(.snappy, value: isBarOnly)
         .animation(.snappy, value: showsCalendar)
         .animation(.snappy, value: results)
-        .onAppear {
-            focused = true
-            withAnimation(.snappy) { appeared = true }
-        }
+        .onAppear { focused = true }
         .onChange(of: date) {
             showsCalendar = false
             submit(again: false)
@@ -415,7 +409,7 @@ struct TrainSearchResultView: View {
                         Card {
                             CoachSequencePanel(request: request, sequence: sequence)
                         }
-                        .transition(.coachSequenceFold)
+                        .transition(.fold)
                     }
                 }
             }

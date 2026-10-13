@@ -17,6 +17,27 @@ extension AppModel {
         }
     }
 
+    /// The train of someone's check-in in the timetable. The lookup runs on its own, so folding the card away
+    /// (which cancels whoever waits for it) doesn't stop it: it still ends in `followedTrains`, and opening
+    /// the card again joins one that is still running instead of starting over.
+    func followedTrain(for status: TraewellingStatus) async throws -> Leg? {
+        if let known = followedTrains[status.id] { return known }
+        let load: Task<Leg?, Error>
+        if let running = followedTrainLoads[status.id] {
+            load = running
+        } else {
+            let lookup = provider
+            load = Task { try await lookup.leg(forCheckin: status) }
+            followedTrainLoads[status.id] = load
+            Task { [weak self] in
+                let result = await load.result
+                self?.followedTrainLoads[status.id] = nil
+                if case .success(let leg?) = result { self?.followedTrains[status.id] = leg }
+            }
+        }
+        return try await load.value
+    }
+
     /// Loads the check-ins of the people the user follows, or clears them without Träwelling (all that
     /// happens without `reload`).
     func loadFollowedCheckins(reload: Bool = true) async {
@@ -199,59 +220,100 @@ enum FollowedCheckinNotifier {
 }
 
 /// Who of the people the user follows on Träwelling is on a train right now (#196): a small button
-/// above "Deine Reisen" that lists their check-ins (tags, train, from → to). Opening one shows its
-/// train, a small map of the ride with the train's live position and speed, a link to the check-in on
-/// Träwelling and a like button. Nothing shows while nobody is checked in.
+/// above "Deine Reisen" that lists them, each person once (#267). Someone with several check-ins (19:10–19:20
+/// and 19:22–19:30) opens into their check-ins by departure, each open at first (up to 2, else folded); a single one is the card
+/// itself. A check-in lists its tags, train, from → to; opening it shows its train, a small map of the ride
+/// with the train's live position and speed, a link to the check-in on Träwelling and a like button.
+/// Nothing shows while nobody is checked in.
 struct FollowedCheckinsSection: View {
     @Environment(AppModel.self) private var model
     @State private var showsList = false
-    @State private var openID: Int?
+    /// The check-ins shown open.
+    @State private var openIDs: Set<Int> = []
+    /// The people with several check-ins whose list is unfolded.
+    @State private var openPeople: Set<Int> = []
+    /// Up to this many check-ins open together with their person; more stay folded.
+    private static let unfoldingLimit = 2
 
     var body: some View {
         if let followed = model.followedCheckins {
             // A ride that ended since the last refresh is gone right away.
-            let statuses = followed.statuses.filter { ($0.checkin.end ?? .distantPast) > .now }
-            if !statuses.isEmpty {
+            let people = TraewellingClient.grouped(followed.statuses.filter { ($0.checkin.end ?? .distantPast) > .now })
+            if !people.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
-                    toggleButton(statuses)
+                    toggleButton(people)
                     if showsList {
-                        ForEach(statuses, id: \.id) { status in
-                            FollowedCheckinCard(status: status, likesEnabled: followed.likesEnabled,
-                                                isOpen: openID == status.id) {
-                                withAnimation(.snappy) { openID = openID == status.id ? nil : status.id }
-                            }
-                            .transition(.opacity.combined(with: .move(edge: .top)))
+                        ForEach(people) { person in
+                            personRow(person, likesEnabled: followed.likesEnabled)
+                                .transition(.fold)
                         }
                     }
                 }
                 // A tapped notification's check-in (#266), as soon as the list has it.
-                .onChange(of: model.followedCheckinToOpen, initial: true) { openRequested(in: statuses) }
-                .onChange(of: statuses.map(\.id)) { openRequested(in: statuses) }
+                .onChange(of: model.followedCheckinToOpen, initial: true) { openRequested(in: people) }
+                .onChange(of: people.flatMap(\.statuses).map(\.id)) { openRequested(in: people) }
             }
         }
     }
 
-    private func openRequested(in statuses: [TraewellingStatus]) {
-        guard let id = model.followedCheckinToOpen, statuses.contains(where: { $0.id == id }) else { return }
-        model.followedCheckinToOpen = nil
-        withAnimation(.snappy) {
-            showsList = true
-            openID = id
+    @ViewBuilder
+    private func personRow(_ person: FollowedPerson, likesEnabled: Bool) -> some View {
+        if person.statuses.count == 1, let status = person.statuses.first {
+            checkinCard(status, likesEnabled: likesEnabled, showsPerson: true)
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                FollowedPersonHeader(person: person, isOpen: openPeople.contains(person.id)) {
+                    withAnimation(.snappy) {
+                        if openPeople.remove(person.id) == nil {
+                            openPeople.insert(person.id)
+                            // Their check-ins unfold with them, unless there are so many that the list would get long.
+                            if person.statuses.count <= Self.unfoldingLimit { openIDs.formUnion(person.statuses.map(\.id)) }
+                        }
+                    }
+                }
+                if openPeople.contains(person.id) {
+                    ForEach(person.statuses, id: \.id) { status in
+                        checkinCard(status, likesEnabled: likesEnabled, showsPerson: false)
+                            .padding(.leading, 16)
+                            .transition(.fold)
+                    }
+                }
+            }
         }
     }
 
-    private func toggleButton(_ statuses: [TraewellingStatus]) -> some View {
-        let users = statuses.compactMap(\.user)
-        let title = statuses.count == 1
-            ? "\(users.first?.displayName ?? "Jemand") ist eingecheckt"
-            : "\(statuses.count) Leute sind eingecheckt"
+    private func checkinCard(_ status: TraewellingStatus, likesEnabled: Bool, showsPerson: Bool) -> some View {
+        FollowedCheckinCard(status: status, likesEnabled: likesEnabled, showsPerson: showsPerson,
+                            isOpen: openIDs.contains(status.id)) {
+            withAnimation(.snappy) {
+                if openIDs.remove(status.id) == nil { openIDs.insert(status.id) }
+            }
+        }
+    }
+
+    private func openRequested(in people: [FollowedPerson]) {
+        guard let id = model.followedCheckinToOpen,
+              let person = people.first(where: { $0.statuses.contains { $0.id == id } }) else { return }
+        model.followedCheckinToOpen = nil
+        withAnimation(.snappy) {
+            showsList = true
+            // Someone with several check-ins unfolds, else the card would stay hidden in their list.
+            if person.statuses.count > 1 { openPeople.insert(person.id) }
+            openIDs.insert(id)
+        }
+    }
+
+    private func toggleButton(_ people: [FollowedPerson]) -> some View {
+        let title = people.count == 1
+            ? "\(people[0].user.displayName) ist eingecheckt"
+            : "\(people.count) Leute sind eingecheckt"
         return Button {
             withAnimation(.snappy) { showsList.toggle() }
         } label: {
             HStack(spacing: 8) {
                 HStack(spacing: -8) {
-                    ForEach(users.prefix(3), id: \.id) { user in
-                        TraewellingAvatar(url: user.profilePicture, size: 22)
+                    ForEach(people.prefix(3)) { person in
+                        TraewellingAvatar(url: person.user.profilePicture, size: 22)
                             .overlay { Circle().stroke(Color.card, lineWidth: 1.5) }
                     }
                 }
@@ -268,10 +330,49 @@ struct FollowedCheckinsSection: View {
     }
 }
 
+/// A person with several check-ins: their name once, unfolding into the check-ins.
+private struct FollowedPersonHeader: View {
+    let person: FollowedPerson
+    let isOpen: Bool
+    let toggle: () -> Void
+
+    var body: some View {
+        Card {
+            Button(action: toggle) {
+                HStack(spacing: 12) {
+                    TraewellingAvatar(url: person.user.profilePicture, size: 36)
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 4) {
+                            Text(person.user.displayName)
+                                .font(.subheadline.weight(.semibold))
+                            Text("@\(person.user.username)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .lineLimit(1)
+                        Text("\(person.statuses.count) Check-ins")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 4)
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(isOpen ? 180 : 0))
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+}
+
 /// One followed user's running check-in: the preview, and when opened its train, map, link and like.
 private struct FollowedCheckinCard: View {
     let status: TraewellingStatus
     let likesEnabled: Bool
+    /// Whether the card names the person; inside their own list it doesn't repeat it.
+    let showsPerson: Bool
     let isOpen: Bool
     let toggle: () -> Void
 
@@ -281,6 +382,8 @@ private struct FollowedCheckinCard: View {
     @State private var trainLeg: Leg?
     @State private var isSearchingTrain = false
     @State private var searchedTrain = false
+    /// The timetable couldn't be asked (no answer, server error), as opposed to not having the train.
+    @State private var trainLookupFailed = false
     @State private var showTrain = false
     /// The ride's track from Träwelling once asked for (empty: it has none, or it couldn't be loaded).
     @State private var geometry: [Coordinate]?
@@ -294,7 +397,7 @@ private struct FollowedCheckinCard: View {
     private var checkin: TraewellingStatus.Checkin { status.checkin }
     // What an earlier opening looked up counts at once (`AppModel.followedTracks`/`followedTrains`).
     private var track: [Coordinate]? { geometry ?? model.followedTracks[status.id] }
-    private var train: Leg? { trainLeg ?? model.followedTrains[status.id] ?? nil }
+    private var train: Leg? { trainLeg ?? model.followedTrains[status.id] }
     private var trainSearched: Bool { searchedTrain || model.followedTrains[status.id] != nil }
     private var ride: Leg? { status.journey(geometry: track.flatMap { $0.isEmpty ? nil : $0 })?.legs.first }
     private var origin: String { checkin.origin.station?.name ?? checkin.origin.name ?? "?" }
@@ -337,6 +440,13 @@ private struct FollowedCheckinCard: View {
             guard isOpen else { return }
             await findTrain()
         }
+        // A train not found is looked for again the next time the card opens.
+        .onChange(of: isOpen) {
+            if !isOpen, train == nil {
+                searchedTrain = false
+                trainLookupFailed = false
+            }
+        }
         .task(id: isOpen) {
             guard isOpen, emojis.isEmpty, model.followedEmojis[status.id] == nil,
                   status.body?.contains(":") ?? false else { return }
@@ -353,18 +463,20 @@ private struct FollowedCheckinCard: View {
     private var preview: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 12) {
-                TraewellingAvatar(url: status.user?.profilePicture, size: 36)
+                if showsPerson { TraewellingAvatar(url: status.user?.profilePicture, size: 36) }
                 VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 4) {
-                        Text(status.user?.displayName ?? "Träwelling-Nutzer")
-                            .font(.subheadline.weight(.semibold))
-                        if let username = status.user?.username {
-                            Text("@\(username)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                    if showsPerson {
+                        HStack(spacing: 4) {
+                            Text(status.user?.displayName ?? "Träwelling-Nutzer")
+                                .font(.subheadline.weight(.semibold))
+                            if let username = status.user?.username {
+                                Text("@\(username)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
+                        .lineLimit(1)
                     }
-                    .lineLimit(1)
                     HStack(spacing: 6) {
                         if let line = ride?.line { LineBadge(line: line, size: .small) }
                         if let runNumber {
@@ -443,6 +555,14 @@ private struct FollowedCheckinCard: View {
                 Text("Den Zug gibt es in den Fahrplandaten nicht.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            } else if trainLookupFailed, !isSearchingTrain {
+                HStack(spacing: 8) {
+                    Text("Der Zug konnte nicht geladen werden.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Erneut versuchen") { Task { await findTrain() } }
+                        .font(.caption.weight(.semibold))
+                }
             }
             if let error { ErrorBanner(error: error) }
         }
@@ -495,13 +615,17 @@ private struct FollowedCheckinCard: View {
     private func findTrain() async {
         guard !checkin.isManualTrip, !trainSearched else { return }
         isSearchingTrain = true
+        trainLookupFailed = false
         defer { isSearchingTrain = false }
         do {
-            let found = try await model.provider.leg(forCheckin: status)
-            model.followedTrains[status.id] = .some(found)
+            let found = try await model.followedTrain(for: status)
             trainLeg = found
-        } catch {}
-        searchedTrain = true
+            searchedTrain = true
+        } catch {
+            // Folding the card away cancels the lookup: that says nothing about the train, so it isn't
+            // taken for one the timetable doesn't have. Other errors are shown, with a way to retry.
+            if !Task.isCancelled { trainLookupFailed = true }
+        }
     }
 
     private func toggleLike() async {

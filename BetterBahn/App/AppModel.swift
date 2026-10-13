@@ -48,6 +48,9 @@ final class AppModel {
     /// so after a restart too they show at once while a background refresh runs instead of a spinner.
     @ObservationIgnored private(set) var liveJourneys = LiveDataCache<Journey>()
     @ObservationIgnored private(set) var liveTrips = LiveDataCache<Trip>()
+    /// Laps of looping trains (Ringbahn) loaded by "Vorherige / Nächste Runde laden", kept on disk; unsaved
+    /// trips forget them after 15 minutes without a look (see `LoadedLaps`).
+    @ObservationIgnored private var loadedLaps = LoadedLaps()
     /// Saved journey to open on the Verbindungen tab (set when the Live Activity is tapped);
     /// `ConnectionsView` pushes it and clears this.
     var journeyToOpen: SavedJourney?
@@ -120,6 +123,7 @@ final class AppModel {
         checkinStatusIDs = Storage.load(key: "checkinStatusIDs") ?? [:]
         liveJourneys = Storage.load(key: "liveJourneys") ?? LiveDataCache()
         liveTrips = Storage.load(key: "liveTrips") ?? LiveDataCache()
+        loadedLaps = Storage.load(key: "loadedLaps") ?? LoadedLaps()
         tickets = TicketStore.load()
         travelPasses = TicketStore.loadPasses()
         manualLiveActivityJourneyID = UserDefaults.standard.string(forKey: "manualLiveActivityJourneyID").flatMap(UUID.init)
@@ -212,6 +216,29 @@ final class AppModel {
         Task.detached(priority: .utility) { Storage.save(snapshot, key: "liveTrips") }
     }
 
+    /// The laps to show when a looping train's trip is opened (`LoadedLaps.open`).
+    func openLoadedLaps(_ key: String, tripId: String) -> LoadedLaps.Extra {
+        let extra = loadedLaps.open(key, isSaved: isTripSaved(tripId))
+        saveLoadedLaps()
+        return extra
+    }
+
+    func rememberLoadedLaps(_ extra: LoadedLaps.Extra, for key: String, tripId: String) {
+        loadedLaps.store(extra, for: key, tripId: tripId, isSaved: { isTripSaved($0) })
+        saveLoadedLaps()
+    }
+
+    /// The trip was left: its laps stay another 15 minutes.
+    func closeLoadedLaps(_ key: String) {
+        loadedLaps.viewed(key)
+        saveLoadedLaps()
+    }
+
+    private func saveLoadedLaps() {
+        let snapshot = loadedLaps
+        Task.detached(priority: .utility) { Storage.save(snapshot, key: "loadedLaps") }
+    }
+
     /// Loads the live data of a search result before it's opened (the first one), so its plan shows
     /// without waiting.
     func prepareLiveData(for journey: Journey) {
@@ -256,9 +283,12 @@ final class AppModel {
     var followedCheckins: FollowedCheckins?
     @ObservationIgnored var followedCheckinsLoadedAt: Date?
     /// What opening a followed check-in looked up, by status ID, so opening it again shows it at once:
-    /// Träwelling's track of the ride (empty: it has none) and the train found in the timetable (nil: none).
+    /// Träwelling's track of the ride (empty: it has none) and the train found in the timetable. A train not
+    /// found isn't remembered: it is looked for again whenever the check-in is opened.
     @ObservationIgnored var followedTracks: [Int: [Coordinate]] = [:]
-    @ObservationIgnored var followedTrains: [Int: Leg?] = [:]
+    @ObservationIgnored var followedTrains: [Int: Leg] = [:]
+    /// Train lookups under way, by status ID: they finish even when the card that asked is folded away.
+    @ObservationIgnored var followedTrainLoads: [Int: Task<Leg?, Error>] = [:]
     /// The custom emojis for each followed check-in's text, loaded with the list so its pictures are ready on opening.
     @ObservationIgnored var followedEmojis: [Int: [CustomEmoji]] = [:]
     /// This device's sign-up at the push Worker for notifications about followed check-ins (#266), nil

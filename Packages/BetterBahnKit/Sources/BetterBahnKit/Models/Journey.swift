@@ -20,6 +20,14 @@ public enum Product: String, Codable, Sendable, CaseIterable, Hashable {
     case ferry
     case other
 
+    /// A value this version doesn't know (saved by a newer build, e.g. a branch build with more product
+    /// groups) reads as `.other`. Otherwise one unknown value made the whole saved list unreadable, and the
+    /// app started without any saved journey.
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = Product(rawValue: raw) ?? .other
+    }
+
     public var isTrain: Bool {
         switch self {
         case .highSpeed, .longDistance, .nightTrain, .interregio, .regionalExpress, .regional, .suburban: true
@@ -661,6 +669,10 @@ public struct Trip: Codable, Sendable, Hashable {
     public var source: DataSource
     /// Track geometry of the whole run, if known.
     public var geometry: [Coordinate]?
+    /// Set on a trip cut from a looping train's block (`lap(at:near:)`): whether laps before / after the
+    /// ones shown exist. Not stored.
+    public var hasPreviousLap = false
+    public var hasNextLap = false
 
     public init(id: String, line: Line?, direction: String?, stopovers: [Stopover],
                 cancelled: Bool, remarks: [String], messages: [TrainMessage] = [], source: DataSource,
