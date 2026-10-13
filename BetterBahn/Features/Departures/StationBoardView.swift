@@ -20,6 +20,13 @@ struct StationBoardView: View {
     @State private var loadedKey: String?
     /// When the board was last on screen (tab left or app in the background); see `resumeAfterAbsence`.
     @State private var leftAt: Date?
+    /// Minutes the board's window starts after its base time ("jetzt" or the chosen time); moved by Früher/Später.
+    @State private var windowOffset = 0
+    /// Minutes the window covers: one page, two once Früher/Später was tapped. Never more: another tap
+    /// drops the page at the other end and quietly moves `windowOffset` on.
+    @State private var windowLength = Self.page
+    @State private var loadingPage = false
+    @State private var scrollPosition = ScrollPosition()
     @Environment(\.scenePhase) private var scenePhase
     @FocusState private var stationFocused: Bool?
 
@@ -40,6 +47,12 @@ struct StationBoardView: View {
     }
 
     private var isFiltered: Bool { onlyValidTicket || products.count != Product.allCases.count }
+
+    /// Minutes one board page covers (the initial board and each Früher/Später step).
+    private static let page = 90
+
+    /// Time the window is measured from; `windowOffset` is added on top.
+    private var baseTime: Date { useNow ? Date.now.addingTimeInterval(-5 * 60) : date }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -63,6 +76,11 @@ struct StationBoardView: View {
                                           trailing: lastUpdate.map { "Stand \($0.timeString)" })
                                 .padding(.top, 4)
                         }
+                        if lastUpdate != nil {
+                            pageButton(kind == .departures ? "Frühere Abfahrten" : "Frühere Ankünfte", systemImage: "chevron.up") {
+                                await loadPage(later: false)
+                            }
+                        }
                         Card(padding: 0) {
                             VStack(spacing: 0) {
                                 ForEach(Array(visible.enumerated()), id: \.element.id) { index, entry in
@@ -71,15 +89,25 @@ struct StationBoardView: View {
                                         BoardRow(entry: entry)
                                     }
                                     .buttonStyle(.plain)
+                                    .id(entry.id)
                                 }
                             }
                         }
                         .opacity(visible.isEmpty ? 0 : 1)
 
+                        if lastUpdate != nil, !visible.isEmpty {
+                            pageButton(kind == .departures ? "Spätere Abfahrten" : "Spätere Ankünfte", systemImage: "chevron.down") {
+                                await loadPage(later: true)
+                            }
+                        }
+
                         if !isLoading, visible.isEmpty, error == nil, lastUpdate != nil {
                             ContentUnavailableView("Keine Züge", systemImage: "tram.fill",
                                                    description: Text(isFiltered ? "Versuch es ohne Filter." : "In den nächsten 90 Minuten fährt hier nichts."))
                                 .padding(.top, 40)
+                            pageButton(kind == .departures ? "Spätere Abfahrten" : "Spätere Ankünfte", systemImage: "chevron.down") {
+                                await loadPage(later: true)
+                            }
                         }
                         if entries.first?.source == .transitous {
                             SourceNotice()
@@ -89,6 +117,7 @@ struct StationBoardView: View {
                 .padding(.horizontal)
                 .padding(.bottom, 24)
             }
+            .scrollPosition($scrollPosition)
             .tabBarSafePadding()
             .background { AppBackground() }
             .overlay {
@@ -119,6 +148,7 @@ struct StationBoardView: View {
                     entries = []
                     lastUpdate = nil
                     loadedKey = boardKey
+                    resetWindow()
                 }
                 // Auto-refresh every 60 seconds while visible; coming back to the tab keeps the
                 // rows on screen and just updates them.
@@ -233,6 +263,10 @@ struct StationBoardView: View {
         guard away >= 5 * 60 else { return }
         useNow = true
         date = .now
+        if windowOffset != 0 || windowLength != Self.page {
+            resetWindow()
+            Task { await load() }
+        }
         if away >= 7.5 * 60 {
             station = nil
             error = nil
@@ -249,13 +283,21 @@ struct StationBoardView: View {
         }
     }
 
+    private func resetWindow() {
+        windowOffset = 0
+        windowLength = Self.page
+    }
+
     private func load() async {
         guard let station else { return }
         isLoading = true
         defer { isLoading = false }
+        // A Früher/Später tap while this loads changes the window; this answer is stale then.
+        let window = (windowOffset, windowLength)
         do {
-            let start = useNow ? Date.now.addingTimeInterval(-5 * 60) : date
-            let loaded = try await model.provider.board(kind, at: station, date: start, duration: 90, products: products)
+            let start = baseTime.addingTimeInterval(TimeInterval(windowOffset * 60))
+            let loaded = try await model.provider.board(kind, at: station, date: start, duration: windowLength, products: products)
+            guard window == (windowOffset, windowLength) else { return }
             show(loaded)
             lastUpdate = .now
             error = nil
@@ -266,7 +308,68 @@ struct StationBoardView: View {
             if let timetables = model.timetablesClient {
                 let live = await timetables.applyingRealtime(to: loaded, at: station)
                 let filled = await timetables.fillMissingPlatforms(in: live, at: station)
+                guard window == (windowOffset, windowLength) else { return }
                 if filled != entries { show(filled) }
+            }
+        } catch is CancellationError {
+        } catch let urlError as URLError where urlError.code == .cancelled {
+        } catch {
+            self.error = error
+        }
+    }
+
+    private func pageButton(_ title: String, systemImage: String, action: @escaping () async -> Void) -> some View {
+        Button {
+            loadingPage = true
+            Task {
+                await action()
+                loadingPage = false
+            }
+        } label: {
+            Label(title, systemImage: systemImage)
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.glass)
+        .controlSize(.large)
+        .disabled(loadingPage)
+    }
+
+    /// Loads one page before or after the window and adds it. With two pages on the board already,
+    /// the page at the other end goes: the board stays two pages long and its start moves along
+    /// without reloading the rows that stay.
+    private func loadPage(later: Bool) async {
+        guard let station else { return }
+        let key = reloadKey
+        let pageOffset = later ? windowOffset + windowLength : windowOffset - Self.page
+        let start = baseTime.addingTimeInterval(TimeInterval(pageOffset * 60))
+        do {
+            var page = try await model.provider.board(kind, at: station, date: start, duration: Self.page, products: products)
+            if let timetables = model.timetablesClient {
+                page = await timetables.fillMissingPlatforms(in: page, at: station)
+            }
+            guard key == reloadKey else { return }
+            let shown = Set(entries.map(\.id))
+            page.removeAll { shown.contains($0.id) }
+            withAnimation(.snappy) { entries = later ? entries + page : page + entries }
+            error = nil
+
+            guard windowLength > Self.page else {
+                windowLength += Self.page
+                if !later { windowOffset -= Self.page }
+                return
+            }
+            windowOffset += later ? Self.page : -Self.page
+            let windowStart = baseTime.addingTimeInterval(TimeInterval(windowOffset * 60))
+            let windowEnd = windowStart.addingTimeInterval(TimeInterval(windowLength * 60))
+            if later {
+                // The rows above the visible ones go. Keep the first new row at the bottom edge, where the
+                // button was, so the board doesn't jump.
+                let anchor = filter.apply(page).first?.id ?? filter.apply(entries).last?.id
+                entries.removeAll { $0.time.best < windowStart }
+                if let anchor { scrollPosition.scrollTo(id: anchor, anchor: .bottom) }
+            } else {
+                entries.removeAll { $0.time.planned > windowEnd }
             }
         } catch is CancellationError {
         } catch let urlError as URLError where urlError.code == .cancelled {

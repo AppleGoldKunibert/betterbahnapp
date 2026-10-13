@@ -35,7 +35,7 @@ struct ManualStopSheet: View {
                             OptionLabel(title: "Ankunft", subtitle: "Wann der Zug dort hält", icon: "clock")
                         }
                     }
-                    Text("Für Halte, die nicht im Fahrplan stehen, z. B. wenn bei einer Störung die Türen geöffnet werden. Der Halt wird nach der Ankunftszeit in die Halteliste einsortiert.")
+                    Text("Für Halte, die nicht im Fahrplan stehen, z. B. bei einer Störung.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)

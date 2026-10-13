@@ -291,6 +291,19 @@ final class AppModel {
     @ObservationIgnored var followedTrainLoads: [Int: Task<Leg?, Error>] = [:]
     /// The custom emojis for each followed check-in's text, loaded with the list so its pictures are ready on opening.
     @ObservationIgnored var followedEmojis: [Int: [CustomEmoji]] = [:]
+    /// This device's sign-up at the push Worker for notifications about followed check-ins (#266), nil
+    /// while they're off. Kept after turning them off until the Worker confirmed the sign-off.
+    @ObservationIgnored var followedCheckinPush: FollowedCheckinPushSubscription? = Storage.load(key: "followedCheckinPush") {
+        didSet { Storage.save(followedCheckinPush, key: "followedCheckinPush") }
+    }
+    /// The Worker dropped the sign-up (Träwelling ended its login); Settings says so.
+    var followedCheckinPushEnded = false
+    /// The APNs device token iOS gave this launch, the one the Worker last got, and who waits for one.
+    @ObservationIgnored var pushDeviceToken: String?
+    @ObservationIgnored var followedCheckinPushSentToken: String?
+    @ObservationIgnored var pushDeviceTokenWaiters: [CheckedContinuation<String?, Never>] = []
+    /// A followed check-in to show, from tapping its notification; the Verbindungen tab opens it once it's in the list.
+    var followedCheckinToOpen: Int?
 
     /// Check-ins imported from Träwelling (newest first), shown on the travel map. Empty until
     /// loaded from disk after launch; `loadTraewellingTrips()` waits for that.
@@ -1389,6 +1402,11 @@ final class AppSettings {
             uploadToCloud()
         }
     }
+    /// Notifications when someone the user follows checks in on Träwelling (#266). Per device, like
+    /// the permission to show notifications.
+    var notifyFollowedCheckins: Bool {
+        didSet { UserDefaults.standard.set(notifyFollowedCheckins, forKey: "notifyFollowedCheckins") }
+    }
     var lastTraewellingSync: Date? {
         didSet { UserDefaults.standard.set(lastTraewellingSync, forKey: "lastTraewellingSync") }
     }
@@ -1513,6 +1531,7 @@ final class AppSettings {
         traewellingVisibility = TraewellingVisibility(rawValue: defaults.integer(forKey: "traewellingVisibility")) ?? .publicVisible
         bc100Rules = Storage.load(key: "bc100Rules") ?? .default
         syncTraewellingToMap = defaults.object(forKey: "syncTraewellingToMap") as? Bool ?? true
+        notifyFollowedCheckins = defaults.bool(forKey: "notifyFollowedCheckins")
         lastTraewellingSync = defaults.object(forKey: "lastTraewellingSync") as? Date
         traewellingImportNextPage = defaults.object(forKey: "traewellingImportNextPage") as? Int
         connectionWarnings = defaults.object(forKey: "connectionWarnings") as? Bool ?? true

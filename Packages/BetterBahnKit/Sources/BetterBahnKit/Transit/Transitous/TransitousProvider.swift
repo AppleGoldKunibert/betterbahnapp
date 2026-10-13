@@ -41,11 +41,30 @@ public struct TransitousProvider: TransitProvider {
         let modes = search.modes.reduce(into: Set<String>()) { $0.formUnion($1.motisModes) }
         let ril = search.modes.isEmpty ? Ril100.entry(forCode: search.text) : nil
         async let rilHit = station(for: ril)
-        let matches = try await geocode(search.text, addingMainStation: true, near: location, modes: modes)
+        var matches: [MGeocodeMatch] = []
+        var failure: (any Error)?
+        do {
+            if ril == nil {
+                matches = try await geocode(search.text, addingMainStation: true, near: location, modes: modes)
+            } else {
+                // A typed code has its own lookup above, which the plain search for the letters ("xszh"
+                // finds nothing) mustn't hold up: `CombinedProvider` gives up on the whole search after
+                // 2.5 s and would take the station with it.
+                matches = try await CombinedProvider.withDeadline(Self.extraQueryDeadline) {
+                    try await geocode(search.text, addingMainStation: true, near: location, modes: modes)
+                }
+            }
+        } catch {
+            guard ril != nil, !Task.isCancelled else { throw error }
+            failure = error
+        }
         let merged = Self.rankedAndMerged(matches, query: search.text, near: location)
         let stations = Self.placingNamedStation(for: search, in: Self.applying(search, to: merged, near: location).map { $0.toStation() })
         guard let ril else { return stations }
-        let placed = Ril100.placing(await rilHit, for: ril, typed: search.text, in: stations)
+        let hit = await rilHit
+        // Neither the code's station nor the plain search: the search failed, not the code.
+        if hit == nil, let failure { throw failure }
+        let placed = Ril100.placing(hit, for: ril, typed: search.text, in: stations)
         return search.byDistance ? search.ordered(placed, near: location) : placed
     }
 
@@ -1541,7 +1560,7 @@ public struct TransitousProvider: TransitProvider {
                 guard lines.count == 1, let known = candidates.first?.line else { continue }
                 var named = entry
                 named.line = Line(name: known.name, number: known.number, product: known.product,
-                                  operatorName: known.operatorName)
+                                  operatorName: known.operatorName, feedColorHex: known.feedColorHex)
                 return named
             }
             return entry

@@ -102,6 +102,10 @@ struct StationInput<Focus: Hashable>: View {
         .animation(.snappy(duration: 0.25), value: showsSuggestions)
         .animation(.snappy(duration: 0.25), value: suggestions.map(\.id))
         .onAppear { query = station?.displayName ?? "" }
+        .task {
+            // The RIL100 list is large: load it before the first row asks for a code.
+            if model.settings.ril100Enabled { await Ril100.preload() }
+        }
         .onChange(of: station) { _, new in
             if !showsSuggestions { query = new?.displayName ?? "" }
         }

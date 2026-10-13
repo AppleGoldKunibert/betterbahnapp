@@ -517,7 +517,7 @@ struct LegCard: View {
     @State private var showDetails = false
     @State private var showFullTrip = false
 
-    private var color: Color { leg.line?.product.color ?? .gray }
+    private var color: Color { leg.line?.color ?? .gray }
     private var intermediate: [Stopover] { Array(leg.stopovers.dropFirst().dropLast()) }
 
     var body: some View {
