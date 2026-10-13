@@ -157,10 +157,22 @@ struct IconLabel: View {
     let title: String
     let systemImage: String
     let color: Color
+    /// Optional short explanation in small grey text under the title (wraps to a second line if needed).
+    var subtitle: String? = nil
 
     var body: some View {
         Label {
-            Text(title)
+            if let subtitle {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            } else {
+                Text(title)
+            }
         } icon: {
             IconTile(systemImage: systemImage, color: color, size: 28)
         }
@@ -188,7 +200,7 @@ struct LineBadge: View {
             .padding(.horizontal, size == .small ? 6 : 8)
             .padding(.vertical, size == .small ? 3 : 4)
             .foregroundStyle(.white)
-            .background(line.product.color.gradient, in: .capsule)
+            .background(line.color.gradient, in: .capsule)
         } else {
             HStack(spacing: 3) {
                 Image(systemName: "figure.walk")
@@ -580,7 +592,7 @@ struct PlannedPlatformNote: View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Gleis laut Fahrplan", systemImage: "calendar")
                 .font(.subheadline.weight(.semibold))
-            Text("Dieses Gleis stammt aus dem tschechischen Fahrplan (Správa železnic). Es sind nur Plandaten: Kurzfristige Gleisänderungen fehlen, bitte vor Ort auf die Anzeigen achten.")
+            Text("Gleis laut tschechischem Fahrplan. Achte vor Ort auf die Anzeigen.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -736,7 +748,7 @@ struct JourneySegmentBar: View {
                     let length = spans[index].duration / total
                     Capsule()
                         .fill(leg.isWalking ? AnyShapeStyle(Color.secondary.opacity(0.3))
-                                            : AnyShapeStyle((leg.line?.product.color ?? .gray).gradient))
+                                            : AnyShapeStyle((leg.line?.color ?? .gray).gradient))
                         .frame(width: max(proxy.size.width * length - 2, 4), height: leg.isWalking ? 3 : 6)
                         .offset(x: proxy.size.width * offset)
                 }

@@ -518,7 +518,8 @@ extension BahnDeClient {
             var named = entry
             // "S 1" → "S1", like the other S- and U-Bahn rows.
             let compact = [.suburban, .subway].contains(product) ? name.replacingOccurrences(of: " ", with: "") : name
-            named.line = Line(name: compact, number: trainNumber(in: name), product: product, operatorName: entry.line.operatorName)
+            named.line = Line(name: compact, number: trainNumber(in: name), product: product, operatorName: entry.line.operatorName,
+                              feedColorHex: entry.line.feedColorHex)
             return named
         }
     }

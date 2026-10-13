@@ -21,10 +21,10 @@ struct BetterBahnApp: App {
     }
 }
 
-/// Only exists to register the background task that ends the Live Activity while the app is
-/// backgrounded (`BGTaskScheduler.register` must run before the app finishes launching, which
-/// SwiftUI's `App` protocol gives no hook for on its own).
-final class AppDelegate: NSObject, UIApplicationDelegate {
+/// Registers the background task that ends the Live Activity while the app is backgrounded –
+/// `BGTaskScheduler.register` must run before the app finishes launching, which SwiftUI's `App` protocol
+/// gives no hook for on its own –, passes on the APNs device token and opens what a tapped notification is about.
+final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     weak var model: AppModel?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
@@ -38,7 +38,27 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             }
             model.handleLiveActivityBackgroundTask(refreshTask)
         }
+        UNUserNotificationCenter.current().delegate = self
         return true
+    }
+
+    /// The APNs device token for the notifications about followed check-ins (#266).
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        model?.didRegisterForPush(deviceToken: FollowedCheckinPush.hex(deviceToken))
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        model?.didRegisterForPush(deviceToken: nil)
+    }
+
+    /// A followed user's check-in notification (#266) opens that check-in; the others just open the app.
+    /// Without `willPresent` notifications still don't show while the app is open, as before.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                            withCompletionHandler completionHandler: @escaping () -> Void) {
+        let statusID = FollowedCheckinNotifier.statusID(in: response.notification.request.content.userInfo)
+        completionHandler()
+        guard let statusID else { return }
+        Task { @MainActor in await self.model?.openFollowedCheckin(id: statusID) }
     }
 }
 
@@ -102,6 +122,7 @@ struct RootView: View {
                 model.syncLiveActivity()
                 model.startRefreshing()
                 Task { await model.syncTraewelling() }
+                Task { await model.syncFollowedCheckinPush() }
                 // Build the travel map's heatmap in the background so its tab opens instantly.
                 model.prewarmTravelMap()
             } else if phase == .background {
@@ -110,6 +131,14 @@ struct RootView: View {
                 model.updateWidgets(force: true)
                 Task { await TrainSightings.shared.flush() }
             }
+        }
+        // A followed user's check-in notification was tapped (#266): its list is on the Verbindungen tab.
+        .onChange(of: model.followedCheckinToOpen) { _, id in
+            guard id != nil else { return }
+            incomingSharedJourney = nil
+            incomingDBShare = nil
+            linkedTrainMap = nil
+            selectedTab = .connections
         }
         #if DEBUG
         .task {

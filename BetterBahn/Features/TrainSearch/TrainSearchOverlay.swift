@@ -323,7 +323,7 @@ struct TrainSearchResultView: View {
     @State private var sequenceExpanded: Bool?
     @State private var showMap = false
 
-    private var color: Color { trip?.line?.product.color ?? result.product.color }
+    private var color: Color { trip?.line?.color ?? result.product.color }
 
     var body: some View {
         ScrollView {

@@ -248,9 +248,7 @@ public actor TraewellingClient {
 
     /// Exchanges the redirect URL from `ASWebAuthenticationSession` for a token.
     public func completeLogin(callbackURL: URL, pkce: PKCE) async throws {
-        let items = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)?.queryItems ?? []
-        guard items.first(where: { $0.name == "state" })?.value == pkce.state else { throw OAuthError.stateMismatch }
-        guard let code = items.first(where: { $0.name == "code" })?.value else { throw OAuthError.missingCode }
+        let code = try TraewellingConfig.authorizationCode(in: callbackURL, pkce: pkce)
         try await requestToken([
             "grant_type": "authorization_code",
             "client_id": config.clientID,

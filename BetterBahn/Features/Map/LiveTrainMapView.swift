@@ -142,7 +142,7 @@ struct LiveTrainMapView: View {
     /// than straight lines across country.
     @State private var track: [Coordinate]?
 
-    private var color: Color { route.line?.product.color ?? .brand }
+    private var color: Color { route.line?.color ?? .brand }
 
     var body: some View {
         NavigationStack {
