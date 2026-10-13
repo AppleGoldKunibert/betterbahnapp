@@ -300,8 +300,14 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   the origin, or leave one also calling at the destination – e.g. Berlin Hbf → Halle → back via Hbf; not for via searches), `TicketFilter`/`BC100Rules`, `BoardFilter`,
   `ManualStop` (`Stopover.manual` with `isManual`, which refreshes keep unlike `isAdditional`; `Trip.inserting(manualStop:boardingAt:)` sorts it in by time).
 - `Traewelling/` – OAuth PKCE (`TraewellingAuth`, `TokenStore`), `TraewellingClient`
-  (check-ins, history), `QuickTag`. Finding the train asks only the nearest few stations' departures, in parallel
-  (12 s timeout), and caches autocomplete/departures, so retries and "Manuell eintragen" (`checkinAsManualTrip`) don't search again (#106).
+  (check-ins, history), `QuickTag`. Finding the train asks only the nearest few stations' departures, in parallel,
+  and caches autocomplete/departures, so retries and "Manuell eintragen" (`checkinAsManualTrip`) don't search again (#106).
+  It checks in as soon as the best station's boards have the train and gives up after `TraewellingSearchBudget`
+  (15 s, 45 s when Träwelling's station search took over 3 s), then offers the manual trip (#289).
+  Träwelling's board is MOTIS' stop times: the next 50 departures by live time from every stop within 200 m (so a
+  departure can belong to another Träwelling station, "fährt ab S+U Gesundbrunnen"); at busy interchanges that spans
+  only minutes and a late train fell off the end (#289). So it also loads the board of only the leg's kind of train
+  (Träwelling's `travelType` filter, `boardTravelTypes`/`travelType(for:)`), which spans hours; the wider second pass only that one.
   `replaceWithManualTrip` turns a check-in into one on a manual trip (creates the trip first, then deletes and re-checks in, keeping text/visibility/tags).
   `TraewellingCheckinEdit`: `status(id:)`, `updateStatus` (text, visibility, trip type), `deleteStatus`, tags
   (`tags`, `applyTagChanges` with `StatusTagChanges`), moving the exit, `earlyExit` (where checking out now ends a ride),
