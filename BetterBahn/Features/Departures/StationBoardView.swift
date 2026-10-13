@@ -295,22 +295,30 @@ private struct BoardFilterMenu: View {
                 Button("Alle anzeigen", systemImage: "square.grid.2x2") {
                     products = Set(Product.allCases)
                 }
-            }
-            Section {
-                ForEach(Product.allCases, id: \.self) { product in
-                    Toggle(isOn: Binding(
-                        get: { products.contains(product) },
-                        set: { if $0 { products.insert(product) } else { products.remove(product) } }
-                    )) {
-                        Label(product.displayName, systemImage: product.symbolName)
-                    }
-                }
+                productMenu("Züge", systemImage: "tram.fill", products: Product.allCases.filter(\.isTrain))
+                productMenu("Bus, Tram & Co.", systemImage: "bus.fill", products: Product.allCases.filter { !$0.isTrain })
             }
         } label: {
             Image(systemName: isFiltered ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
         }
         .menuActionDismissBehavior(.disabled)
         .accessibilityLabel("Filter")
+    }
+
+    /// One menu per group, so none is taller than the screen: iOS rebuilds an open menu on every change and set a
+    /// scrolling one back by a bit, which made the single long list jump whenever a vehicle was switched.
+    private func productMenu(_ title: String, systemImage: String, products group: [Product]) -> some View {
+        Menu(title, systemImage: systemImage) {
+            ForEach(group, id: \.self) { product in
+                Toggle(isOn: Binding(
+                    get: { products.contains(product) },
+                    set: { if $0 { products.insert(product) } else { products.remove(product) } }
+                )) {
+                    Label(product.displayName, systemImage: product.symbolName)
+                }
+            }
+        }
+        .menuActionDismissBehavior(.disabled)
     }
 }
 
