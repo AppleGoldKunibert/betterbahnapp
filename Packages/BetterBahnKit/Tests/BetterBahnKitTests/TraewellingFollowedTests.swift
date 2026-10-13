@@ -159,6 +159,49 @@ import Testing
         let status = try Self.status(id: 1, user: 11, from: 30, to: 60, hafasId: "0b6f1b3e-6c1f-4f5e-9d0e-3a7f2b9c8d11")
         #expect(try await provider.leg(forCheckin: status) == nil)
     }
+
+    /// A board or trip that can't be loaded is no answer: the train is not "not in the timetable" (#267).
+    @Test func unreachableTimetableIsNotATrainThatDoesntExist() async throws {
+        let mock = MockProvider(source: .transitous)
+        mock.failing = true
+        let provider = CombinedProvider(primary: mock, bahnDe: nil, bahnExpert: nil, vagonweb: nil, bahnJetzt: nil)
+        let status = try Self.status(id: 1, user: 11, from: 30, to: 60)
+        await #expect(throws: TransitError.self) { try await provider.leg(forCheckin: status) }
+    }
+
+    /// Träwelling takes its trips from Transitous: the check-in's `hafasId` is the run's ID, no board needed.
+    @Test func findsTheRunByTheCheckinsOwnTripID() async throws {
+        let status = try Self.status(id: 1, user: 11, from: 30, to: 60)
+        let ride = try #require(status.journey(geometry: nil)?.legs.first)
+        func stop(_ name: String, _ lat: Double, _ lon: Double, at minutes: Double) -> Stopover {
+            let time = TimeInfo(planned: ride.departure.planned.addingTimeInterval((minutes - 30) * 60), actual: nil)
+            return Stopover(station: station(name, name, lat, lon, source: .transitous), arrival: time, departure: time,
+                            arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+        }
+        let mock = MockProvider(source: .transitous)
+        mock.trips["20261006_10_ab12"] = Trip(id: "20261006_10_ab12", line: Line(name: "RE 1", number: "1", product: .regional, operatorName: nil),
+                                              direction: "D", stopovers: [stop("A", 51.5, 12.5, at: 0), stop("B", 52.0, 13.0, at: 30),
+                                                                          stop("C", 52.5, 13.5, at: 60)],
+                                              cancelled: false, remarks: [], source: .transitous)
+        let provider = CombinedProvider(primary: mock, bahnDe: nil, bahnExpert: nil, vagonweb: nil, bahnJetzt: nil)
+        let leg = try #require(try await provider.leg(forCheckin: status))
+        #expect(leg.stopovers.map(\.station.name) == ["B", "C"])
+        #expect(!mock.calls.contains("board"))
+    }
+
+    @Test func trainTheTimetableDoesntKnowIsNil() async throws {
+        let status = try Self.status(id: 1, user: 11, from: 30, to: 60)
+        let planned = try #require(status.checkin.origin.departurePlanned)
+        let mock = MockProvider(source: .transitous)
+        mock.boards = [BoardEntry(kind: .departures, tripId: "gone", station: station("b", "B"),
+                                  line: Line(name: "RE 1", number: "1", product: .regional, operatorName: nil, tripNumber: "4711"),
+                                  otherEnd: nil, time: TimeInfo(planned: planned, actual: nil),
+                                  platform: PlatformInfo(planned: nil, actual: nil), cancelled: false,
+                                  terminatesOrOriginatesHere: nil, remarks: [], source: .transitous)]
+        let provider = CombinedProvider(primary: mock, bahnDe: nil, bahnExpert: nil, vagonweb: nil, bahnJetzt: nil)
+        // Its trip is gone (404 / not found): that is an answer.
+        #expect(try await provider.leg(forCheckin: status) == nil)
+    }
 }
 
 @Suite(.serialized) struct TraewellingFollowedRequestTests {
