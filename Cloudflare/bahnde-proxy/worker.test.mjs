@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { TOKEN_HEADER, signToken } from "../shared/appattest.mjs";
-import { handleRequest, upstreamHeaders } from "./worker.mjs";
+import { handleRequest, timetablesFingerprint, upstreamHeaders } from "./worker.mjs";
 
 const base = "https://betterbahn-bahnde.example.workers.dev";
 // Routing tests run like the rollout, without App Attest tokens.
@@ -78,24 +78,119 @@ test("forwards shared connections by their vbid", async () => {
     assert.equal(fetch.calls[0].url, `https://www.bahn.de/web/api/angebote/verbindung/${vbid}`);
 });
 
-test("forwards Timetables with the API key from the secrets, only with a token", async () => {
-    const fetch = fakeFetch(200, "<timetable/>");
-    const env = { ...open, TOKEN_SECRET: "secret", DB_CLIENT_ID: "client", DB_API_KEY: "key" };
-    const url = `${base}/timetables/v1/plan/8000105/261001/14`;
-    // Never without a token, not even during the rollout: it spends our API key.
-    assert.equal((await handleRequest(new Request(url), env, { fetch, cache: null })).status, 401);
-    const request = new Request(`${url}?ignored=1`, { headers: { [TOKEN_HEADER]: await accessToken("secret") } });
-    const response = await handleRequest(request, env, { fetch, cache: null });
+const IRIS = "https://iris.noncd.db.de/iris-tts/timetable/";
+const MARKETPLACE = "https://apis.deutschebahn.com/db-api-marketplace/apis/timetables/v1/";
+const timetablesEnv = { ...open, TOKEN_SECRET: "secret", DB_CLIENT_ID: "client", DB_API_KEY: "key" };
+const timetablesRequest = async path => new Request(`${base}/timetables/v1/${path}`, { headers: { [TOKEN_HEADER]: await accessToken("secret") } });
+
+/// Answers per upstream host: a status, a body, or "down" for a network error.
+function fakeTimetables({ iris = [200, "<timetable/>"], marketplace = [200, "<timetable/>"] } = {}) {
+    const calls = [];
+    const fn = async (url, init) => {
+        calls.push({ url, init });
+        const [status, body] = url.startsWith(IRIS) ? iris : marketplace;
+        if (status === "down") throw new Error("unreachable");
+        return new Response(body, { status, headers: { "Content-Type": "application/xml" } });
+    };
+    fn.calls = calls;
+    return fn;
+}
+
+test("Timetables needs an App Attest token, it spends our API key", async () => {
+    const fetch = fakeTimetables();
+    const response = await handleRequest(new Request(`${base}/timetables/v1/plan/8000105/261001/14`), timetablesEnv, { fetch, cache: null });
+    assert.equal(response.status, 401);
+    assert.equal(fetch.calls.length, 0);
+});
+
+test("Timetables asks the keyless IRIS first and never the Marketplace while it answers", async () => {
+    const fetch = fakeTimetables({ iris: [200, "<timetable>iris</timetable>"] });
+    const response = await handleRequest(await timetablesRequest("plan/8000105/261001/14?ignored=1"), timetablesEnv, { fetch, cache: null });
     assert.equal(response.status, 200);
-    assert.equal(fetch.calls[0].url, "https://apis.deutschebahn.com/db-api-marketplace/apis/timetables/v1/plan/8000105/261001/14");
-    assert.equal(fetch.calls[0].init.headers["DB-Api-Key"], "key");
-    assert.equal(fetch.calls[0].init.headers["DB-Client-Id"], "client");
-    const station = new Request(`${base}/timetables/v1/station/8002549`, { headers: { [TOKEN_HEADER]: await accessToken("secret") } });
-    assert.equal((await handleRequest(station, env, { fetch, cache: null })).status, 200);
-    assert.equal(fetch.calls[1].url, "https://apis.deutschebahn.com/db-api-marketplace/apis/timetables/v1/station/8002549");
-    const missing = await handleRequest(new Request(url, { headers: { [TOKEN_HEADER]: await accessToken("secret") } }),
-        { TOKEN_SECRET: "secret" }, { fetch, cache: null });
-    assert.equal(missing.status, 503);
+    assert.equal(await response.text(), "<timetable>iris</timetable>");
+    assert.deepEqual(fetch.calls.map(call => call.url), [`${IRIS}plan/8000105/261001/14`]);
+    assert.equal(fetch.calls[0].init.headers["DB-Api-Key"], undefined);
+    assert.equal(response.headers.get("X-Timetables-Source"), "iris");
+    assert.match(response.headers.get("X-Timetables-Diag"), /^iris=200\/\d+ms; marketplace=skipped; same=-$/);
+});
+
+test("Timetables falls back to the Marketplace with the key when IRIS fails", async () => {
+    for (const iris of [[503, "down"], [429, "slow down"], ["down"], [500, "x"]]) {
+        const fetch = fakeTimetables({ iris, marketplace: [200, "<timetable>marketplace</timetable>"] });
+        const response = await handleRequest(await timetablesRequest("fchg/8000105"), timetablesEnv, { fetch, cache: null });
+        assert.equal(response.status, 200, String(iris[0]));
+        assert.equal(await response.text(), "<timetable>marketplace</timetable>");
+        assert.deepEqual(fetch.calls.map(call => call.url), [`${IRIS}fchg/8000105`, `${MARKETPLACE}fchg/8000105`]);
+        assert.equal(fetch.calls[1].init.headers["DB-Api-Key"], "key");
+        assert.equal(fetch.calls[1].init.headers["DB-Client-Id"], "client");
+        assert.equal(response.headers.get("X-Timetables-Source"), "marketplace");
+    }
+});
+
+test("Timetables passes the Marketplace error on when both fail", async () => {
+    const fetch = fakeTimetables({ iris: [503, "down"], marketplace: [429, "quota"] });
+    const response = await handleRequest(await timetablesRequest("fchg/8000105"), timetablesEnv, { fetch, cache: null });
+    assert.equal(response.status, 429);
+    assert.equal(await response.text(), "quota");
+    assert.equal(response.headers.get("X-Timetables-Source"), "failed");
+    assert.equal((await handleRequest(await timetablesRequest("fchg/8000105"), timetablesEnv,
+        { fetch: fakeTimetables({ iris: ["down"], marketplace: ["down"] }), cache: null })).status, 502);
+});
+
+test("Timetables takes IRIS's 'no data' answers without spending the Marketplace", async () => {
+    for (const status of [400, 404, 410]) {
+        const fetch = fakeTimetables({ iris: [status, "none"] });
+        const response = await handleRequest(await timetablesRequest("fchg/8000105"), timetablesEnv, { fetch, cache: null });
+        assert.equal(response.status, status);
+        assert.equal(fetch.calls.length, 1);
+    }
+});
+
+test("Timetables works with IRIS alone when the API key is not configured", async () => {
+    const fetch = fakeTimetables();
+    const env = { ...open, TOKEN_SECRET: "secret" };
+    assert.equal((await handleRequest(await timetablesRequest("station/8002549"), env, { fetch, cache: null })).status, 200);
+    const down = fakeTimetables({ iris: [503, "down"] });
+    assert.equal((await handleRequest(await timetablesRequest("station/8002549"), env, { fetch: down, cache: null })).status, 503);
+    assert.equal(down.calls.length, 1);
+});
+
+test("Timetables answers are cached whichever source gave them", async () => {
+    const fetch = fakeTimetables();
+    const cache = fakeCache();
+    const first = await handleRequest(await timetablesRequest("fchg/8000105"), timetablesEnv, { fetch, cache });
+    assert.equal(first.headers.get("X-Proxy-Cache"), "MISS");
+    assert.equal(first.headers.get("Cache-Control"), "public, max-age=30");
+    const second = await handleRequest(await timetablesRequest("fchg/8000105"), timetablesEnv, { fetch, cache });
+    assert.equal(second.headers.get("X-Proxy-Cache"), "HIT");
+    assert.equal(fetch.calls.length, 1);
+    const failing = fakeCache();
+    await handleRequest(await timetablesRequest("fchg/8000105"), timetablesEnv,
+        { fetch: fakeTimetables({ iris: [503, "x"], marketplace: [429, "x"] }), cache: failing });
+    assert.equal(failing.store.size, 0);
+});
+
+test("diagnostics: compare mode asks the Marketplace too and reports whether both agree", async () => {
+    const env = { ...timetablesEnv, TIMETABLES_DIAGNOSE: "compare" };
+    const stop = (ct, volatile) => `<timetable station="X"><s id="1-2" eva="8000105"><ar pt="2610131306" ct="${ct}" l="ICE"><m ts="${volatile}"/></ar></s></timetable>`;
+    const same = await handleRequest(await timetablesRequest("fchg/8000105"), env,
+        { fetch: fakeTimetables({ iris: [200, stop("2610131255", "a")], marketplace: [200, stop("2610131255", "b")] }), cache: null });
+    assert.match(same.headers.get("X-Timetables-Diag"), /same=yes$/);
+    assert.equal(same.headers.get("X-Timetables-Source"), "iris");
+    const differs = await handleRequest(await timetablesRequest("fchg/8000105"), env,
+        { fetch: fakeTimetables({ iris: [200, stop("2610131255", "a")], marketplace: [200, stop("2610131300", "a")] }), cache: null });
+    assert.match(differs.headers.get("X-Timetables-Diag"), /same=NO$/);
+    assert.equal(differs.headers.get("X-Timetables-Source"), "iris");
+    const quota = await handleRequest(await timetablesRequest("fchg/8000105"), env,
+        { fetch: fakeTimetables({ marketplace: [429, "quota"] }), cache: null });
+    assert.equal(quota.status, 200);
+    assert.match(quota.headers.get("X-Timetables-Diag"), /marketplace=429\/\d+ms; same=-$/);
+});
+
+test("timetablesFingerprint ignores message timestamps but not times", () => {
+    const a = '<s id="1" eva="8"><dp pt="2610131306" ct="2610131310" ppth="A|B"><m ts="x"/></dp></s>';
+    assert.equal(timetablesFingerprint(a), timetablesFingerprint(a.replace('ts="x"', 'ts="y"')));
+    assert.notEqual(timetablesFingerprint(a), timetablesFingerprint(a.replace('ct="2610131310"', 'ct="2610131311"')));
 });
 
 test("caches successful answers per route TTL", async () => {
