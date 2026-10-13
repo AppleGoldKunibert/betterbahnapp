@@ -397,11 +397,14 @@ public actor TraewellingClient {
         return found
     }
 
-    public func departures(stationID: Int, when: Date) async throws -> [TraewellingDeparture] {
-        let key = "\(stationID)|\(Int(when.timeIntervalSince1970))"
+    /// `travelType` ("express", "regional", …, see `travelType(for:)`) leaves out every other kind of departure.
+    public func departures(stationID: Int, when: Date, travelType: String? = nil) async throws -> [TraewellingDeparture] {
+        let key = "\(stationID)|\(Int(when.timeIntervalSince1970))|\(travelType ?? "")"
         if let cached = departuresCache[key], cached.fetched.timeIntervalSinceNow > -120 { return cached.departures }
+        var query: [URLQueryItem] = [.init(name: "when", value: JSONDecoding.isoString(when))]
+        if let travelType { query.append(.init(name: "travelType", value: travelType)) }
         let found = try await api("station/\(stationID)/departures",
-                                  query: [.init(name: "when", value: JSONDecoding.isoString(when))],
+                                  query: query,
                                   timeout: Self.departuresTimeout,
                                   as: DataWrapper<[TraewellingDeparture]>.self).data
         departuresCache = departuresCache.filter { $0.value.fetched.timeIntervalSinceNow > -120 }
@@ -810,16 +813,18 @@ public actor TraewellingClient {
         var lastError: Error?
         // Only the nearest few: in a big city the autocomplete has a dozen stations within 8 km, and
         // asking each of them one after the other kept the checkin loading for minutes (#106).
-        for (maxDistance, tolerance, limit) in [(1_500.0, 2.0 * 60, 3), (8_000.0, 15.0 * 60, 4)] {
+        for (maxDistance, tolerance, limit, alsoUnfiltered) in [(1_500.0, 2.0 * 60, 3, true), (8_000.0, 15.0 * 60, 4, false)] {
             let stations = candidates.filter { $0.1 <= maxDistance }.prefix(limit).map(\.0)
+            let when = leg.departure.planned.addingTimeInterval(-tolerance)
+            let travelTypes = Self.boardTravelTypes(for: leg, alsoUnfiltered: alsoUnfiltered)
             let requests = stations.indices.flatMap { station in
-                Self.boardStarts(for: leg, tolerance: tolerance).map { (station: station, when: $0) }
+                travelTypes.map { (station: station, travelType: $0) }
             }
             let boards = await withTaskGroup(of: (Int, Result<[TraewellingDeparture], any Error>).self) { group in
                 for (index, request) in requests.enumerated() {
                     let stationID = stations[request.station].id
                     group.addTask {
-                        do { return (index, .success(try await self.departures(stationID: stationID, when: request.when))) }
+                        do { return (index, .success(try await self.departures(stationID: stationID, when: when, travelType: request.travelType))) }
                         catch { return (index, .failure(error)) }
                     }
                 }
@@ -849,18 +854,29 @@ public actor TraewellingClient {
         return nil
     }
 
-    /// Where each station's departure board starts for `leg`. Träwelling's board (MOTIS' stop times)
-    /// lists the next 50 departures by their live time, bundled from every stop within 200 m, so at a
-    /// busy interchange it spans only minutes (Berlin-Spandau with its bus stops: about ten). A late
-    /// train is then past the end of a board starting at its planned time, and the checkin offered a
-    /// manual trip (#289) – so a second board starts shortly before its expected departure.
-    static func boardStarts(for leg: Leg, tolerance: TimeInterval) -> [Date] {
-        let planned = leg.departure.planned
-        var starts = [planned.addingTimeInterval(-tolerance)]
-        if let actual = leg.departure.actual, actual.timeIntervalSince(planned) >= 3 * 60 {
-            starts.append(actual.addingTimeInterval(-5 * 60))
+    /// The departure boards to load per station for `leg`, by Träwelling travel type (`nil`: all).
+    /// Träwelling's board (MOTIS' stop times) lists the next 50 departures by their live time, bundled
+    /// from every stop within 200 m, so at a busy interchange it spans only minutes (Berlin-Spandau with
+    /// its bus stops: about ten) and a late train was past its end, so the checkin offered a manual
+    /// trip (#289). Only the leg's kind of train spans hours there. The first, tight pass also loads
+    /// the full board, in case Träwelling files the train under another kind.
+    static func boardTravelTypes(for leg: Leg, alsoUnfiltered: Bool) -> [String?] {
+        guard let travelType = leg.line.flatMap({ Self.travelType(for: $0.product) }) else { return [nil] }
+        return alsoUnfiltered ? [nil, travelType] : [travelType]
+    }
+
+    /// Träwelling's travel type (departure filter) for a product.
+    static func travelType(for product: Product) -> String? {
+        switch product {
+        case .highSpeed, .longDistance, .nightTrain, .interregio: "express"
+        case .regionalExpress, .regional: "regional"
+        case .suburban: "suburban"
+        case .subway: "subway"
+        case .tram: "tram"
+        case .bus, .coach: "bus"
+        case .ferry: "ferry"
+        case .other: nil
         }
-        return starts
     }
 
     static func bestMatch(_ departures: [TraewellingDeparture], for leg: Leg, tolerance: TimeInterval) -> TraewellingDeparture? {

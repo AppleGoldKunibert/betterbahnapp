@@ -590,19 +590,20 @@ private final class RotatedTokenProtocol: URLProtocol, @unchecked Sendable {
 
         await #expect(throws: TraewellingError.tripNotFound("ICE 594")) { try await client.checkin(draft) }
         let departureRequests = { UnknownTrainCheckinProtocol.paths.withLock { $0.filter { $0.hasSuffix("/departures") }.count } }
-        // 3 nearest within 1.5 km, then the 4 nearest within 8 km with the wider time window.
-        #expect(departureRequests() == 7)
+        // 3 nearest within 1.5 km (all departures and only long-distance trains), then the 4 nearest
+        // within 8 km with the wider time window (only long-distance trains).
+        #expect(departureRequests() == 10)
 
         // Trying again under another name reuses what was just loaded.
         var renamed = draft
         renamed.leg.line?.name = "ICE 1594"
         await #expect(throws: TraewellingError.tripNotFound("ICE 1594")) { try await client.checkin(renamed) }
-        #expect(departureRequests() == 7)
+        #expect(departureRequests() == 10)
 
         let result = try await client.checkinAsManualTrip(draft)
         #expect(result.isManualTrip)
         #expect(result.statusId == 7001)
-        #expect(departureRequests() == 7)
+        #expect(departureRequests() == 10)
         #expect(UnknownTrainCheckinProtocol.paths.withLock { $0.filter { $0.contains("autocomplete") }.count } == 2)
     }
 }
@@ -885,22 +886,23 @@ private final class RefreshTokenProtocol: URLProtocol, @unchecked Sendable {
 /// #289: Träwelling's departure board lists the next 50 departures by their live time, bundled from
 /// every stop within 200 m. At Berlin-Spandau, with its bus stops, that's about ten minutes, so an
 /// ICE running 20 minutes late wasn't on the board starting at its planned time and the checkin
-/// offered a manual trip. A second board now starts shortly before its expected departure.
+/// offered a manual trip. A board of only long-distance trains spans hours there.
 @Suite(.serialized) struct TraewellingLateTrainCheckinTests {
-    @Test func findsALateTrainOnABoardStartingNearItsExpectedDeparture() async throws {
+    @Test func findsALateTrainOnTheBoardOfItsKindOfTrain() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [LateTrainCheckinProtocol.self]
         let session = URLSession(configuration: configuration)
         defer { session.invalidateAndCancel() }
-        LateTrainCheckinProtocol.boardStarts.withLock { $0 = [] }
+        LateTrainCheckinProtocol.boards.withLock { $0 = [] }
         let store = TokenStore(service: "BetterBahnKitTests.\(UUID().uuidString)")
         store.save(OAuthToken(accessToken: "test-token", refreshToken: nil, expiresAt: .distantFuture))
         let client = TraewellingClient(config: TraewellingConfig(clientID: "public-client"), http: HTTPClient(session: session), store: store)
 
+        // The delay isn't known yet.
         let planned = try Date("2026-10-14T08:11:00Z", strategy: .iso8601)
         let leg = Leg(origin: station("de-DELFI_de:11000:900029101:3:55", "S Spandau Bhf (Berlin)", 52.5345, 13.1971, source: .transitous),
                       destination: station("de-DELFI_de:09162:6", "München Hbf", 48.1402, 11.5600, source: .transitous),
-                      departure: TimeInfo(planned: planned, actual: planned.addingTimeInterval(20 * 60)),
+                      departure: TimeInfo(planned: planned, actual: nil),
                       arrival: TimeInfo(planned: planned.addingTimeInterval(6 * 3600), actual: nil),
                       departurePlatform: nil, arrivalPlatform: nil, tripId: "transitous-trip",
                       line: Line(name: "ICE 507", number: "507", product: .highSpeed, operatorName: "DB Fernverkehr AG"),
@@ -911,29 +913,32 @@ private final class RefreshTokenProtocol: URLProtocol, @unchecked Sendable {
 
         #expect(result.statusId == 5070)
         #expect(!result.isManualTrip)
-        // The board at the planned time, and one 5 minutes before the expected departure.
-        #expect(LateTrainCheckinProtocol.boardStarts.withLock { $0.sorted() } == ["2026-10-14T08:09:00Z", "2026-10-14T08:26:00Z"])
+        // All departures, and only long-distance trains, both from 2 minutes before the planned time.
+        #expect(LateTrainCheckinProtocol.boards.withLock { $0.sorted() }
+                == ["2026-10-14T08:09:00Z|", "2026-10-14T08:09:00Z|express"])
     }
 
-    @Test func aTrainOnTimeOrBarelyLateGetsOneBoard() throws {
-        let planned = try Date("2026-10-14T08:11:00Z", strategy: .iso8601)
-        func leg(delay: TimeInterval?) -> Leg {
+    @Test func loadsTheBoardOfTheLegsKindOfTrain() {
+        func leg(_ product: Product) -> Leg {
             Leg(origin: station("a", "A"), destination: station("b", "B"),
-                departure: TimeInfo(planned: planned, actual: delay.map { planned.addingTimeInterval($0) }),
-                arrival: TimeInfo(planned: planned.addingTimeInterval(3600), actual: nil),
+                departure: TimeInfo(planned: .now, actual: nil), arrival: TimeInfo(planned: .now, actual: nil),
                 departurePlatform: nil, arrivalPlatform: nil, tripId: "t",
-                line: Line(name: "ICE 507", number: "507", product: .highSpeed, operatorName: nil),
+                line: Line(name: "X 1", number: "1", product: product, operatorName: nil),
                 direction: nil, isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
         }
-        #expect(TraewellingClient.boardStarts(for: leg(delay: nil), tolerance: 120) == [planned.addingTimeInterval(-120)])
-        #expect(TraewellingClient.boardStarts(for: leg(delay: 2 * 60), tolerance: 120) == [planned.addingTimeInterval(-120)])
-        #expect(TraewellingClient.boardStarts(for: leg(delay: 20 * 60), tolerance: 120)
-                == [planned.addingTimeInterval(-120), planned.addingTimeInterval(15 * 60)])
+        #expect(TraewellingClient.boardTravelTypes(for: leg(.highSpeed), alsoUnfiltered: true) == [nil, "express"])
+        #expect(TraewellingClient.boardTravelTypes(for: leg(.interregio), alsoUnfiltered: false) == ["express"])
+        #expect(TraewellingClient.boardTravelTypes(for: leg(.regionalExpress), alsoUnfiltered: false) == ["regional"])
+        #expect(TraewellingClient.boardTravelTypes(for: leg(.suburban), alsoUnfiltered: false) == ["suburban"])
+        // Without a kind to filter by, only the full board.
+        #expect(TraewellingClient.boardTravelTypes(for: leg(.other), alsoUnfiltered: true) == [nil])
+        #expect(TraewellingClient.boardTravelTypes(for: leg(.other), alsoUnfiltered: false) == [nil])
     }
 }
 
 private final class LateTrainCheckinProtocol: URLProtocol, @unchecked Sendable {
-    static let boardStarts = Mutex<[String]>([])
+    /// "<when>|<travelType>" of every departure board asked for.
+    static let boards = Mutex<[String]>([])
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -941,18 +946,20 @@ private final class LateTrainCheckinProtocol: URLProtocol, @unchecked Sendable {
     override func startLoading() {
         let url = request.url!
         let path = url.path
-        let when = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "when" }?.value
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let when = query.first { $0.name == "when" }?.value ?? ""
+        let travelType = query.first { $0.name == "travelType" }?.value
         let json: String
         switch true {
         case path.contains("autocomplete"):
             json = #"{"data":[{"id":30,"name":"Berlin-Spandau","latitude":52.5348,"longitude":13.1975}]}"#
         case path == "/api/v1/station/30/departures":
-            Self.boardStarts.withLock { $0.append(when ?? "") }
-            // 50 departures, mostly buses from the stops around, cover only until 08:18; the ICE
-            // (planned 08:11, leaving 08:31) only shows on a board starting after that.
+            Self.boards.withLock { $0.append("\(when)|\(travelType ?? "")") }
+            // All departures, mostly buses from the stops around, cover only until 08:18; the ICE
+            // (planned 08:11, leaving 08:31) is only on the board of long-distance trains.
             let bus = #"{"tripId":"bus","plannedWhen":"2026-10-14T08:12:00Z","when":"2026-10-14T08:12:00Z","line":{"name":"M32","fahrtNr":""},"station":{"id":32,"name":"S+U Rathaus Spandau (Berlin)"}}"#
             let ice = #"{"tripId":"ice-507","plannedWhen":"2026-10-14T08:11:00Z","when":"2026-10-14T08:31:00Z","line":{"name":"ICE 507","fahrtNr":"507"},"station":{"id":31,"name":"S Spandau Bhf (Berlin)"}}"#
-            json = (when ?? "") >= "2026-10-14T08:20:00Z" ? #"{"data":[\#(ice),\#(bus)]}"# : #"{"data":[\#(bus)]}"#
+            json = travelType == "express" ? #"{"data":[\#(ice)]}"# : #"{"data":[\#(bus)]}"#
         case path == "/api/v1/trains/trip":
             json = """
             {"data":{"id":1,"lineName":"ICE 507","stopovers":[
