@@ -1169,7 +1169,10 @@ final class AppModel {
             scheduleLiveActivityBackgroundCheck()
             task.setTaskCompleted(success: true)
         }
-        task.expirationHandler = { work.cancel() }
+        // `@Sendable` keeps the closure nonisolated: a plain closure here would inherit MainActor and
+        // crash on the assertion if iOS calls the expiration handler from another queue.
+        let cancelWork: @Sendable () -> Void = { work.cancel() }
+        task.expirationHandler = cancelWork
     }
 
     func rememberStation(_ station: Station) {
