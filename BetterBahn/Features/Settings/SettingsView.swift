@@ -147,7 +147,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Statistik")
                 } footer: {
-                    Text("Schickt Zugnummer und Fahrt der Regional- und Fernzüge, die du dir ansiehst, an den BetterBahn-Server. Er merkt sich dann Verspätungen, Gleiswechsel, Ausfälle und Wagenreihung dieser Fahrt für spätere Statistiken. Ohne Bezug zu dir oder deinem Standort.")
+                    Text("Schickt Zugnummer und Fahrt der Regional- und Fernzüge, die du dir ansiehst, an unsere Datenbank. Ohne Bezug zu dir oder deinem Standort.")
                 }
 
                 Section {
@@ -347,7 +347,7 @@ struct SettingsView: View {
             Text("Träwelling")
         } footer: {
             if isLoggedIn, settings.notifyFollowedCheckins {
-                Text("Der BetterBahn-Server schaut alle 2 Minuten nach neuen Check-ins (eigene Anmeldung, nur lesen).")
+                Text("Unser Server schaut alle 2 Minuten nach neuen Check-ins. Dabei wird nichts gespeichert.")
             } else if isLoggedIn, model.followedCheckinPushEnded {
                 Text("Träwelling hat die Anmeldung für die Meldungen beendet. Zum Weitermachen wieder einschalten.")
             }
