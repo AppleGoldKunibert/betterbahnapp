@@ -10,12 +10,15 @@ extension Trip {
     static let minimumVisitsOfARingTrip = 3
 
     /// The one lap of this trip that calls at `station` closest to `time` (the planned time at that
-    /// stop): from that visit up to the next visit of the same station, or for an arrival (`arriving`)
-    /// from the previous visit up to it. `nil` when this isn't a trip of repeated laps, or when `station`
-    /// isn't on it.
-    public func lap(at station: Station, near time: Date, arriving: Bool = false) -> Trip? {
+    /// stop): a lap runs from one visit of `station` to the next, so the stop it is opened from starts it
+    /// (for an arrival, `arriving`, ends it). The first and last lap of the block are cut at its ends.
+    /// `extraBefore` / `extraAfter` add the laps before / after, one more each time the user asks for
+    /// them; `hasPreviousLap` / `hasNextLap` of the result say whether there are still more.
+    /// `nil` when this isn't a trip of repeated laps, or when `station` isn't on it.
+    public func lap(at station: Station, near time: Date, arriving: Bool = false,
+                    extraBefore: Int = 0, extraAfter: Int = 0) -> Trip? {
         let visits = stopovers.indices.filter { stopovers[$0].station.isSamePlace(as: station) }
-        guard visits.count >= Self.minimumVisitsOfARingTrip else { return nil }
+        guard visits.count >= Self.minimumVisitsOfARingTrip, let lastStop = stopovers.indices.last else { return nil }
         let side: KeyPath<Stopover, TimeInfo?> = arriving ? \.arrival : \.departure
         let other: KeyPath<Stopover, TimeInfo?> = arriving ? \.departure : \.arrival
         func distance(_ index: Int) -> TimeInterval {
@@ -23,16 +26,20 @@ extension Trip {
             else { return .infinity }
             return abs(planned.timeIntervalSince(time))
         }
-        guard let visit = visits.min(by: { distance($0) < distance($1) }), distance(visit).isFinite,
-              let position = visits.firstIndex(of: visit) else { return nil }
-        let range: ClosedRange<Int>
-        if arriving {
-            range = (position > 0 ? visits[position - 1] : 0)...visit
-        } else {
-            range = visit...(position + 1 < visits.count ? visits[position + 1] : stopovers.count - 1)
-        }
+        guard let visit = visits.min(by: { distance($0) < distance($1) }), distance(visit).isFinite else { return nil }
+        // Lap n runs from boundaries[n] to boundaries[n + 1].
+        var boundaries = visits
+        if boundaries[0] > 0 { boundaries.insert(0, at: 0) }
+        if boundaries[boundaries.count - 1] < lastStop { boundaries.append(lastStop) }
+        guard let position = boundaries.firstIndex(of: visit) else { return nil }
+        let lastLap = boundaries.count - 2
+        let shown = arriving ? max(position - 1, 0) : min(position, lastLap)
+        let first = max(shown - max(extraBefore, 0), 0)
+        let last = min(shown + max(extraAfter, 0), lastLap)
         var lap = self
-        lap.stopovers = Array(stopovers[range])
+        lap.stopovers = Array(stopovers[boundaries[first]...boundaries[last + 1]])
+        lap.hasPreviousLap = first > 0
+        lap.hasNextLap = last < lastLap
         return lap
     }
 }

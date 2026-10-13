@@ -142,6 +142,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   (the S42: 490 stops, each station ~19 times, under the block's number), so stops looked up by station landed on the first lap
   ("ab 17:50" showed "ab 3:50"). Cuts out the one lap from the board's departure (or to its arrival); applied in
   `TripView.load()` and `CombinedProvider.trip(for:)`. Needs a station visited ≥ 3 times, so turn-round trains keep all stops.
+  A lap runs from one visit of that station to the next; `extraBefore`/`extraAfter` add laps and `Trip.hasPreviousLap`/`hasNextLap`
+  (not stored) tell `TripContent` to show "Vorherige / Nächste Runde laden" at the top / bottom of the stops (`TripView`, `LegTripSheet`
+  count the extra laps and reload; works for any looping train, not just the Ringbahn).
 - `Transit/TransitProvider.swift` – `TransitProvider` protocol (`searchStations`, `journeys`,
   `board`, `trip`) and `JourneyQuery`.
 - `Transit/StationSearch.swift` – station-field shortcuts (#90): "b" bus stops, "t" tram stops, "l" nearest

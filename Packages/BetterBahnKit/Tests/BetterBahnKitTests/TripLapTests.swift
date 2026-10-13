@@ -60,13 +60,48 @@ import Testing
     @Test func firstAndLastLapAreCutAtTheTripsEnds() throws {
         let trip = ring(laps: 3)
         let schoenhauser = trip.stopovers[3].station
+        // The block's last stop: the lap ending there.
         let last = try #require(trip.lap(at: schoenhauser, near: start.addingTimeInterval((120 + 30) * 60)))
-        #expect(minutes(last.stopovers.first!) == 150)
+        #expect(minutes(last.stopovers.first!) == 90)
         #expect(minutes(last.stopovers.last!) == 150)
 
         let first = try #require(trip.lap(at: schoenhauser, near: start.addingTimeInterval(30 * 60), arriving: true))
         #expect(minutes(first.stopovers.first!) == 0)
         #expect(minutes(first.stopovers.last!) == 30)
+    }
+
+    @Test func extraLapsAddTheOnesAroundWithoutRepeatingTheJoiningStop() throws {
+        let trip = ring(laps: 4)
+        let gesundbrunnen = trip.stopovers[0].station
+        let time = start.addingTimeInterval(60 * 60)   // the 2nd lap: 60...120
+
+        let one = try #require(trip.lap(at: gesundbrunnen, near: time))
+        #expect(one.stopovers.count == 5)
+        #expect(one.hasPreviousLap && one.hasNextLap)
+
+        let next = try #require(trip.lap(at: gesundbrunnen, near: time, extraAfter: 1))
+        #expect(next.stopovers.count == 9)   // 60...180, Gesundbrunnen at 120 only once
+        #expect(next.stopovers.filter { minutes($0) == 120 }.count == 1)
+        #expect(minutes(next.stopovers.first!) == 60 && minutes(next.stopovers.last!) == 180)
+
+        let both = try #require(trip.lap(at: gesundbrunnen, near: time, extraBefore: 1, extraAfter: 1))
+        #expect(minutes(both.stopovers.first!) == 0 && minutes(both.stopovers.last!) == 180)
+        #expect(Set(both.stopovers.map(\.id)).count == both.stopovers.count)
+    }
+
+    @Test func noMoreLapsOnceTheBlocksEndsAreReached() throws {
+        let trip = ring(laps: 3)
+        let gesundbrunnen = trip.stopovers[0].station
+        let time = start.addingTimeInterval(60 * 60)
+
+        let everything = try #require(trip.lap(at: gesundbrunnen, near: time, extraBefore: 5, extraAfter: 5))
+        #expect(everything.stopovers.count == trip.stopovers.count)
+        #expect(!everything.hasPreviousLap && !everything.hasNextLap)
+
+        let firstLap = try #require(trip.lap(at: gesundbrunnen, near: start))
+        #expect(!firstLap.hasPreviousLap && firstLap.hasNextLap)
+        let lastLap = try #require(trip.lap(at: gesundbrunnen, near: start.addingTimeInterval(2 * 3600), arriving: true))
+        #expect(lastLap.hasPreviousLap)
     }
 
     @Test func tripThatOnlyTurnsRoundKeepsAllItsStops() {
