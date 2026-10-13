@@ -29,7 +29,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     weak var model: AppModel?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
-        BGTaskScheduler.shared.register(forTaskWithIdentifier: AppModel.liveActivityBackgroundTaskID, using: nil) { [weak self] task in
+        // `using: .main`, not nil: this class is MainActor-isolated by default, so the handler asserts
+        // that it runs on the main queue. On BGTaskScheduler's own queue that assertion crashed the app
+        // (EXC_BREAKPOINT in `_dispatch_assert_queue_fail`) whenever iOS ran the task.
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: AppModel.liveActivityBackgroundTaskID, using: .main) { [weak self] task in
             guard let model = self?.model, let refreshTask = task as? BGAppRefreshTask else {
                 task.setTaskCompleted(success: false)
                 return
