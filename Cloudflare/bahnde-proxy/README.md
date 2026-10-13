@@ -26,12 +26,6 @@ departure board uses) first. Only when IRIS fails (error, timeout, 5xx, 429) the
 60 calls/minute are kept for when IRIS is down. IRIS's "no data" answers (400/404/410) are passed on without a
 fallback. DB marked IRIS deprecated, so the Marketplace stays configured.
 
-Diagnostics (temporary, remove once IRIS has proven itself): every Timetables answer carries
-`X-Timetables-Source` (`iris`, `marketplace`, `failed`) and `X-Timetables-Diag` (`iris=200/312ms;
-marketplace=skipped; same=-`), and the Worker logs one line per upstream request (`npx wrangler tail`).
-With the variable `TIMETABLES_DIAGNOSE=compare` the Marketplace is asked as well and `same=yes|NO` says whether
-both agree (the IRIS answer is still what the app gets); unset it again afterwards, it spends the quota.
-
 ## App Attest
 
 Only the genuine app may use the proxy (and the pass signer): every request needs an

@@ -82,62 +82,29 @@ export function upstreamHeaders() {
     };
 }
 
-// DIAGNOSTICS (remove later): what decides whether two Timetables answers say the same thing: the stops (`s`)
-// and their planned/changed times, platforms, status and path. Message timestamps and formatting don't count.
-const COMPARED_ATTRIBUTES = new Set(["id", "eva", "name", "pt", "ct", "pp", "cp", "ps", "cs", "l", "ppth", "cpth"]);
-
-export function timetablesFingerprint(xml) {
-    const parts = [];
-    for (const [, tag, attributes] of xml.matchAll(/<(station|s|ar|dp)\b([^>]*)>/g)) {
-        const kept = [...attributes.matchAll(/([\w-]+)="([^"]*)"/g)]
-            .filter(([, name]) => COMPARED_ATTRIBUTES.has(name))
-            .map(([, name, value]) => `${name}=${value}`)
-            .sort();
-        parts.push(`${tag} ${kept.join(" ")}`);
-    }
-    return parts.join("\n");
-}
-
 async function timetablesAnswer(url, headers, fetchUpstream) {
-    const started = Date.now();
     try {
         const response = await fetchUpstream(url, { headers, signal: AbortSignal.timeout(TIMETABLES_TIMEOUT) });
-        return { response, body: await response.arrayBuffer(), ms: Date.now() - started };
+        return { response, body: await response.arrayBuffer() };
     } catch {
-        return { response: null, body: null, ms: Date.now() - started };
+        return { response: null, body: null };
     }
 }
 
-const describe = answer => answer ? `${answer.response?.status ?? "error"}/${answer.ms}ms` : "skipped";
-
 /// DB Timetables: the keyless IRIS first, the API Marketplace (with our key, 60 calls/minute) only when IRIS fails
-/// (error, timeout, 5xx, 429 …). Returns `{ upstream, body, source }` where `upstream` is the successful response or
-/// the error to pass on (the Marketplace's if both failed), or null if nothing was reachable.
-/// DIAGNOSTICS (remove later): `diagnostics` says what each source answered. With `TIMETABLES_DIAGNOSE=compare`
-/// the Marketplace is asked as well, even when IRIS answered, and `same` tells whether both say the same.
+/// (error, timeout, 5xx, 429 …). Returns `{ upstream, body }` where `upstream` is the successful response or the
+/// error to pass on (the Marketplace's if both failed), or null if nothing was reachable.
 export async function fetchTimetables(path, env, fetchUpstream) {
-    const hasKey = Boolean(env.DB_CLIENT_ID && env.DB_API_KEY);
-    const askMarketplace = () => timetablesAnswer(TIMETABLES_UPSTREAM + path,
-        { "DB-Client-Id": env.DB_CLIENT_ID, "DB-Api-Key": env.DB_API_KEY, Accept: "application/xml" }, fetchUpstream);
-
     const iris = await timetablesAnswer(IRIS_UPSTREAM + path, { Accept: "application/xml" }, fetchUpstream);
-    const irisUsable = iris.response && (iris.response.ok || NO_DATA_STATUSES.has(iris.response.status));
-    const compare = irisUsable && hasKey && env.TIMETABLES_DIAGNOSE === "compare";
-    const marketplace = !irisUsable && hasKey || compare ? await askMarketplace() : null;
-
-    let same = "-";
-    if (compare && iris.response.ok && marketplace.response?.ok) {
-        const text = answer => new TextDecoder().decode(answer.body);
-        same = timetablesFingerprint(text(iris)) === timetablesFingerprint(text(marketplace)) ? "yes" : "NO";
+    if (iris.response && (iris.response.ok || NO_DATA_STATUSES.has(iris.response.status))) {
+        return { upstream: iris.response, body: iris.body };
     }
-    const diagnostics = `iris=${describe(iris)}; marketplace=${describe(marketplace)}; same=${same}`;
-
-    if (irisUsable) return { ...iris, upstream: iris.response, source: "iris", diagnostics };
-    if (marketplace?.response) {
-        return { ...marketplace, upstream: marketplace.response, source: marketplace.response.ok ? "marketplace" : "failed", diagnostics };
+    if (env.DB_CLIENT_ID && env.DB_API_KEY) {
+        const marketplace = await timetablesAnswer(TIMETABLES_UPSTREAM + path,
+            { "DB-Client-Id": env.DB_CLIENT_ID, "DB-Api-Key": env.DB_API_KEY, Accept: "application/xml" }, fetchUpstream);
+        if (marketplace.response) return { upstream: marketplace.response, body: marketplace.body };
     }
-    if (iris.response) return { ...iris, upstream: iris.response, source: "failed", diagnostics };
-    return null;
+    return iris.response ? { upstream: iris.response, body: iris.body } : null;
 }
 
 function json(status, body, extra = {}) {
@@ -201,10 +168,7 @@ async function timetablesResponse(path, ttl, env, fetchUpstream, cache, deps) {
 
     const result = await fetchTimetables(path, env, fetchUpstream);
     if (!result) return json(502, { error: "upstream_unreachable" });
-    // DIAGNOSTICS (remove later): visible with `wrangler tail` and in the X-Timetables-* response headers.
-    console.log(`timetables ${path} source=${result.source} ${result.diagnostics}`);
-    return await answer(result.upstream, result.body, ttl, cacheKey, cache, deps,
-        { "X-Timetables-Source": result.source, "X-Timetables-Diag": result.diagnostics });
+    return await answer(result.upstream, result.body, ttl, cacheKey, cache, deps);
 }
 
 // A successful upstream answer is cached for `ttl`; errors (including 403 OPS_BLOCKED / 429) pass

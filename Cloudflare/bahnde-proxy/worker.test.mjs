@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { TOKEN_HEADER, signToken } from "../shared/appattest.mjs";
-import { handleRequest, timetablesFingerprint, upstreamHeaders } from "./worker.mjs";
+import { handleRequest, upstreamHeaders } from "./worker.mjs";
 
 const base = "https://betterbahn-bahnde.example.workers.dev";
 // Routing tests run like the rollout, without App Attest tokens.
@@ -110,8 +110,6 @@ test("Timetables asks the keyless IRIS first and never the Marketplace while it 
     assert.equal(await response.text(), "<timetable>iris</timetable>");
     assert.deepEqual(fetch.calls.map(call => call.url), [`${IRIS}plan/8000105/261001/14`]);
     assert.equal(fetch.calls[0].init.headers["DB-Api-Key"], undefined);
-    assert.equal(response.headers.get("X-Timetables-Source"), "iris");
-    assert.match(response.headers.get("X-Timetables-Diag"), /^iris=200\/\d+ms; marketplace=skipped; same=-$/);
 });
 
 test("Timetables falls back to the Marketplace with the key when IRIS fails", async () => {
@@ -123,7 +121,6 @@ test("Timetables falls back to the Marketplace with the key when IRIS fails", as
         assert.deepEqual(fetch.calls.map(call => call.url), [`${IRIS}fchg/8000105`, `${MARKETPLACE}fchg/8000105`]);
         assert.equal(fetch.calls[1].init.headers["DB-Api-Key"], "key");
         assert.equal(fetch.calls[1].init.headers["DB-Client-Id"], "client");
-        assert.equal(response.headers.get("X-Timetables-Source"), "marketplace");
     }
 });
 
@@ -132,7 +129,6 @@ test("Timetables passes the Marketplace error on when both fail", async () => {
     const response = await handleRequest(await timetablesRequest("fchg/8000105"), timetablesEnv, { fetch, cache: null });
     assert.equal(response.status, 429);
     assert.equal(await response.text(), "quota");
-    assert.equal(response.headers.get("X-Timetables-Source"), "failed");
     assert.equal((await handleRequest(await timetablesRequest("fchg/8000105"), timetablesEnv,
         { fetch: fakeTimetables({ iris: ["down"], marketplace: ["down"] }), cache: null })).status, 502);
 });
@@ -168,29 +164,6 @@ test("Timetables answers are cached whichever source gave them", async () => {
     await handleRequest(await timetablesRequest("fchg/8000105"), timetablesEnv,
         { fetch: fakeTimetables({ iris: [503, "x"], marketplace: [429, "x"] }), cache: failing });
     assert.equal(failing.store.size, 0);
-});
-
-test("diagnostics: compare mode asks the Marketplace too and reports whether both agree", async () => {
-    const env = { ...timetablesEnv, TIMETABLES_DIAGNOSE: "compare" };
-    const stop = (ct, volatile) => `<timetable station="X"><s id="1-2" eva="8000105"><ar pt="2610131306" ct="${ct}" l="ICE"><m ts="${volatile}"/></ar></s></timetable>`;
-    const same = await handleRequest(await timetablesRequest("fchg/8000105"), env,
-        { fetch: fakeTimetables({ iris: [200, stop("2610131255", "a")], marketplace: [200, stop("2610131255", "b")] }), cache: null });
-    assert.match(same.headers.get("X-Timetables-Diag"), /same=yes$/);
-    assert.equal(same.headers.get("X-Timetables-Source"), "iris");
-    const differs = await handleRequest(await timetablesRequest("fchg/8000105"), env,
-        { fetch: fakeTimetables({ iris: [200, stop("2610131255", "a")], marketplace: [200, stop("2610131300", "a")] }), cache: null });
-    assert.match(differs.headers.get("X-Timetables-Diag"), /same=NO$/);
-    assert.equal(differs.headers.get("X-Timetables-Source"), "iris");
-    const quota = await handleRequest(await timetablesRequest("fchg/8000105"), env,
-        { fetch: fakeTimetables({ marketplace: [429, "quota"] }), cache: null });
-    assert.equal(quota.status, 200);
-    assert.match(quota.headers.get("X-Timetables-Diag"), /marketplace=429\/\d+ms; same=-$/);
-});
-
-test("timetablesFingerprint ignores message timestamps but not times", () => {
-    const a = '<s id="1" eva="8"><dp pt="2610131306" ct="2610131310" ppth="A|B"><m ts="x"/></dp></s>';
-    assert.equal(timetablesFingerprint(a), timetablesFingerprint(a.replace('ts="x"', 'ts="y"')));
-    assert.notEqual(timetablesFingerprint(a), timetablesFingerprint(a.replace('ct="2610131310"', 'ct="2610131311"')));
 });
 
 test("caches successful answers per route TTL", async () => {
