@@ -54,7 +54,7 @@ private struct TicketPage: View {
             if ticket.isPartnerDocument {
                 partnerNotice
             } else if ticket.isReservationOnly {
-                Label("Nur Sitzplatzreservierung. Deine Fahrkarte (z. B. BahnCard 100 oder Ticket) zeigst du bei der Kontrolle separat vor.",
+                Label("Nur Reservierung. Zeig bei der Kontrolle zusätzlich deine Fahrkarte.",
                       systemImage: "carseat.right.fill")
                     .font(.callout)
                     .padding(12)
@@ -204,7 +204,7 @@ struct AddToWalletButton: View {
                     .frame(height: 50)
                     .disabled(isLoading)
                     .overlay { if isLoading { ProgressView() } }
-                Text("Für Apple Wallet wird der Pass auf einem Server signiert. Dabei wird nichts gespeichert.")
+                Text("Unser Server bereitet den Pass für Apple Wallet vor. Dabei wird nichts gespeichert.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)

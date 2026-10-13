@@ -154,7 +154,7 @@ struct LiveSpeedWidget: Widget {
                 .widgetURL(entry.mapLink)
         }
         .configurationDisplayName("Live-Geschwindigkeit")
-        .description("Wie schnell dein Zug gerade fährt. Ohne Live-Daten: nächster Halt mit Timer und Verspätung.")
+        .description("Wie schnell dein Zug gerade fährt.")
         .supportedFamilies([.systemSmall, .accessoryCircular, .accessoryRectangular, .accessoryInline])
     }
 }
