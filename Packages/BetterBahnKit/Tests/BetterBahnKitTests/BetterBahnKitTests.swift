@@ -2324,6 +2324,36 @@ private final class Ril100GeocodeProtocol: URLProtocol, @unchecked Sendable {
         #expect(line("S5", "S-Bahn Berlin", .bus).lineColorHex == nil)
     }
 
+    @Test func uBahnAndFeedLineColors() {
+        func line(_ name: String, _ op: String?, _ product: Product, feed: String? = nil) -> Line {
+            Line(name: name, number: nil, product: product, operatorName: op, feedColorHex: Line.hex(fromFeedColor: feed))
+        }
+        // Berlin's U-Bahn from the table, only with BVG as operator.
+        #expect(line("U 2", "Berliner Verkehrsbetriebe", .subway).lineColorHex == 0xDA421E)
+        #expect(line("U9", "BVG", .subway).lineColorHex == 0xF3791D)
+        #expect(line("U2", "Hamburger Hochbahn AG", .subway).lineColorHex == nil)
+        // Other cities take the feed's route color, S-Bahn and U-Bahn only.
+        #expect(line("S19", "DB Regio AG NRW", .suburban, feed: "00658e").lineColorHex == 0x00658E)
+        #expect(line("S6", "DB Regio AG NRW", .suburban, feed: "#E21D3C").lineColorHex == 0xE21D3C)
+        #expect(line("U3", "Hamburger Hochbahn AG", .subway, feed: "ff6600").lineColorHex == 0xFF6600)
+        #expect(line("RE1", "DB Regio", .regional, feed: "00658e").lineColorHex == nil)
+        #expect(line("S1", nil, .suburban, feed: "nonsense").lineColorHex == nil)
+        // White text must stay readable: a near-white feed color falls back to the product's.
+        #expect(line("S1", nil, .suburban, feed: "ffffcc").lineColorHex == nil)
+        // The tables win over the feed.
+        #expect(line("S1", "S-Bahn Berlin GmbH", .suburban, feed: "123456").lineColorHex == 0xDA6BA2)
+    }
+
+    @Test func transitousLineTakesRouteColor() throws {
+        let json = #"{"mode":"SUBURBAN","displayName":"S19","routeShortName":"S19","agencyName":"DB","routeColor":"00658e","routeTextColor":"ffffff"}"#
+        struct Probe: Decodable { var mode: String; var displayName: String?; var routeShortName: String?; var agencyName: String?; var routeColor: String? }
+        let probe = try JSONDecoder().decode(Probe.self, from: Data(json.utf8))
+        let info = MLineInfo(mode: probe.mode, displayName: probe.displayName, routeShortName: probe.routeShortName,
+                             tripShortName: nil, agencyName: probe.agencyName, routeColor: probe.routeColor)
+        #expect(info.toLine().feedColorHex == 0x00658E)
+        #expect(info.toLine().lineColorHex == 0x00658E)
+    }
+
     @Test func pkceMatchesRFC7636() {
         #expect(PKCE.challenge(for: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk") == "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM")
         #expect(PKCE().verifier.count == 64)

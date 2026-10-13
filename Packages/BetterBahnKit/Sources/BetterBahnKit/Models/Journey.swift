@@ -82,6 +82,9 @@ public struct Line: Codable, Sendable, Hashable {
     /// Set when the feed classes the train as a night train (Transitous' `NIGHT_RAIL` mode). Not every
     /// feed does (SNCB's "NJ", Snälltåget's "300"), so `isNightTrain` also goes by name and operator.
     public var nightRail: Bool?
+    /// The color (0xRRGGBB) the feed gives the route (GTFS `route_color`, Transitous' `routeColor`), if any.
+    /// Only used for S-Bahn and U-Bahn lines, see `lineColorHex`.
+    public var feedColorHex: UInt32?
 
     /// A night train (Nightjet, EuroNight, European Sleeper, Snälltåget, Alpen-Sylt Nachtexpress, …),
     /// shown with a bed instead of the product's train symbol (#241).
@@ -122,13 +125,43 @@ public struct Line: Codable, Sendable, Hashable {
         product == .other && name.trimmingCharacters(in: CharacterSet(charactersIn: "? ")).isEmpty
     }
 
-    /// The line's own color (0xRRGGBB) where its network has fixed line colors, otherwise nil for the
-    /// product's color. So far S-Bahn Berlin (#206): only with its operator, since S1–S9 exist in other
-    /// cities too (Dresden, München, …). bahn.de writes "S 41", Transitous "S41".
+    /// The line's own color (0xRRGGBB) where it has one, otherwise nil for the product's color (#206, #291).
+    /// S-Bahn and U-Bahn Berlin have fixed tables (matched by operator, since S1–S9/U1–U9 exist in other
+    /// cities too); other S-/U-Bahn lines take the feed's route color (Transitous), unless white text
+    /// would be hard to read on it. bahn.de writes "S 41", Transitous "S41".
     public var lineColorHex: UInt32? {
-        guard product == .suburban, operatorName?.lowercased().contains("s-bahn berlin") == true else { return nil }
-        return Self.sBahnBerlinColors[name.uppercased().filter { !$0.isWhitespace }]
+        guard product == .suburban || product == .subway else { return nil }
+        let key = name.uppercased().filter { !$0.isWhitespace }
+        let op = operatorName?.lowercased() ?? ""
+        if product == .suburban, op.contains("s-bahn berlin"), let hex = Self.sBahnBerlinColors[key] { return hex }
+        if product == .subway, op.contains("berliner verkehrsbetriebe") || op.contains("bvg"),
+           let hex = Self.uBahnBerlinColors[key] { return hex }
+        guard let hex = feedColorHex, Self.hasContrastToWhite(hex) else { return nil }
+        return hex
     }
+
+    /// Whether white text is readable on the color (WCAG contrast of at least 2.5 – badges are bold and big).
+    static func hasContrastToWhite(_ hex: UInt32) -> Bool {
+        func channel(_ shift: UInt32) -> Double {
+            let c = Double(hex >> shift & 0xFF) / 255
+            return c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+        }
+        let luminance = 0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0)
+        return 1.05 / (luminance + 0.05) >= 2.5
+    }
+
+    /// Parses a GTFS color ("00658e", with or without "#").
+    static func hex(fromFeedColor text: String?) -> UInt32? {
+        guard let text else { return nil }
+        let digits = text.trimmingCharacters(in: CharacterSet(charactersIn: "# \n"))
+        return digits.count == 6 ? UInt32(digits, radix: 16) : nil
+    }
+
+    /// BVG's U-Bahn Berlin line colors.
+    static let uBahnBerlinColors: [String: UInt32] = [
+        "U1": 0x7DAD4C, "U2": 0xDA421E, "U3": 0x007A5B, "U4": 0xF0D722, "U5": 0x7E5330,
+        "U6": 0x8C6DAB, "U7": 0x528DBA, "U8": 0x224F86, "U9": 0xF3791D,
+    ]
 
     /// VBB's S-Bahn Berlin line colors.
     static let sBahnBerlinColors: [String: UInt32] = [
@@ -252,7 +285,9 @@ public struct Line: Codable, Sendable, Hashable {
     }
 
     public init(name: String, number: String?, product: Product, operatorName: String?, alternateName: String? = nil,
-                tripNumber: String? = nil, coupledTrains: [CoupledTrain]? = nil, nightRail: Bool? = nil) {
+                tripNumber: String? = nil, coupledTrains: [CoupledTrain]? = nil, nightRail: Bool? = nil,
+                feedColorHex: UInt32? = nil) {
+        self.feedColorHex = feedColorHex
         self.nightRail = nightRail
         self.coupledTrains = coupledTrains
         self.tripNumber = tripNumber
