@@ -108,6 +108,7 @@ struct MLineInfo {
     var routeShortName: String?
     var tripShortName: String?
     var agencyName: String?
+    var routeColor: String?
 
     func toLine() -> Line {
         let name = trainNameInsteadOfLine ?? displayName ?? tripShortName ?? routeShortName ?? mode
@@ -130,7 +131,7 @@ struct MLineInfo {
             number = tripNumber
         }
         return Line(name: displayedName, number: number, product: product, operatorName: agencyName, tripNumber: tripNumber,
-                    nightRail: mode == "NIGHT_RAIL" ? true : nil)
+                    nightRail: mode == "NIGHT_RAIL" ? true : nil, feedColorHex: Line.hex(fromFeedColor: routeColor))
     }
 
     /// Long-distance train categories a Czech feed puts behind its line name.
@@ -214,6 +215,7 @@ struct MLeg: Decodable {
     var displayName: String?
     var tripShortName: String?
     var agencyName: String?
+    var routeColor: String?
     var intermediateStops: [MPlace]?
     var cancelled: Bool?
     var tripCancelled: Bool?
@@ -229,7 +231,7 @@ struct MLeg: Decodable {
 
     var lineInfo: MLineInfo {
         MLineInfo(mode: mode, displayName: displayName, routeShortName: routeShortName,
-                  tripShortName: tripShortName, agencyName: agencyName)
+                  tripShortName: tripShortName, agencyName: agencyName, routeColor: routeColor)
     }
 
     /// `headsign` as reported by the feed, corrected for a border-truncated source trip: a leg that
@@ -292,12 +294,13 @@ struct MStopTime: Decodable {
     var displayName: String?
     var tripShortName: String?
     var agencyName: String?
+    var routeColor: String?
     var cancelled: Bool?
     var tripCancelled: Bool?
 
     var lineInfo: MLineInfo {
         MLineInfo(mode: mode, displayName: displayName, routeShortName: routeShortName,
-                  tripShortName: tripShortName, agencyName: agencyName)
+                  tripShortName: tripShortName, agencyName: agencyName, routeColor: routeColor)
     }
 
     func toEntry(kind: BoardKind) -> BoardEntry? {

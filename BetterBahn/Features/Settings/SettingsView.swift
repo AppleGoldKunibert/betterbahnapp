@@ -1,3 +1,4 @@
+import AuthenticationServices
 import BetterBahnKit
 import SwiftUI
 
@@ -9,6 +10,10 @@ struct SettingsView: View {
     @State private var user: TraewellingUser?
     @State private var isLoggedIn = false
     @State private var showClearHistoryConfirmation = false
+    @State private var showFollowedCheckinPushConfirmation = false
+    @State private var isEnablingFollowedCheckinPush = false
+    @State private var followedCheckinPushError: Error?
+    @Environment(\.webAuthenticationSession) private var webAuthenticationSession
 
     var body: some View {
         @Bindable var settings = model.settings
@@ -81,7 +86,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Meine Reisen")
                 } footer: {
-                    Text("Wir sagen dir Bescheid, wenn ein Zug ausfällt, das Gleis wechselt oder du deinen Anschluss verpasst. Live-Aktivitäten zeigen deine nächste Reise auf dem Sperrbildschirm.")
+                    Text("Wir sagen dir Bescheid bei Ausfällen, Gleiswechseln und verpassten Anschlüssen.")
                 }
 
                 Section {
@@ -131,7 +136,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Zugschnellsuche")
                 } footer: {
-                    Text("Die Suche nach Zugnummer (Zug-Symbol bei Verbindungen, Lupe auf der Karte) zeigt nur diese Zugarten und nur Züge, die durch eines der Länder fahren.")
+                    Text("Die Zugsuche zeigt nur diese Zugarten und Länder.")
                 }
 
                 Section {
@@ -142,7 +147,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Statistik")
                 } footer: {
-                    Text("Schickt Zugnummer und Fahrt der Regional- und Fernzüge, die du dir ansiehst, an den BetterBahn-Server. Er merkt sich dann Verspätungen, Gleiswechsel, Ausfälle und Wagenreihung dieser Fahrt für spätere Statistiken. Ohne Bezug zu dir oder deinem Standort.")
+                    Text("Hilft uns, Statistiken zu Verspätungen und Ausfällen zu sammeln. Dabei wird nichts über dich gespeichert.")
                 }
 
                 Section {
@@ -162,32 +167,35 @@ struct SettingsView: View {
                     .tint(.brand)
                     if settings.expertMode {
                         Toggle(isOn: $settings.expertTraewelling) {
-                            IconLabel(title: "Träwelling", systemImage: "checkmark.seal.fill", color: .brand)
+                            IconLabel(title: "Träwelling", systemImage: "checkmark.seal.fill", color: .brand,
+                                      subtitle: "Bei Träwelling in Züge einchecken.")
                         }
                         .tint(.brand)
                         Toggle(isOn: $settings.expertEditJourney) {
-                            IconLabel(title: "Reise bearbeiten", systemImage: "pencil", color: .orange)
+                            IconLabel(title: "Reise bearbeiten", systemImage: "pencil", color: .orange,
+                                      subtitle: "Reisen ändern und ab einem Halt neu planen.")
                         }
                         .tint(.brand)
                         Toggle(isOn: $settings.expertTrainChoice) {
-                            IconLabel(title: "Bestimmten Zug wählen", systemImage: "number", color: .purple)
+                            IconLabel(title: "Bestimmten Zug wählen", systemImage: "number", color: .purple,
+                                      subtitle: "Einen bestimmten Zug in die Reise übernehmen.")
                         }
                         .tint(.brand)
                         Toggle(isOn: $settings.expertIgnoreBoardingRules) {
-                            IconLabel(title: "„Nur Ein-/Ausstieg“ ignorieren", systemImage: "arrow.up.arrow.down.circle.fill", color: .teal)
+                            IconLabel(title: "„Nur Ein-/Ausstieg“ ignorieren", systemImage: "arrow.up.arrow.down.circle.fill", color: .teal,
+                                      subtitle: "Auch Züge, die nur zum Ein- oder Aussteigen halten.")
                         }
                         .tint(.brand)
                         Toggle(isOn: $settings.expertRil100) {
-                            IconLabel(title: "RIL100-Codes in der Suche", systemImage: "character.textbox", color: .gray)
+                            IconLabel(title: "RIL100-Codes in der Suche", systemImage: "character.textbox", color: .gray,
+                                      subtitle: "Kürzel wie „FF“ zeigen und danach suchen.")
                         }
                         .tint(.brand)
                     }
                 } header: {
                     Text("Für Profis")
                 } footer: {
-                    Text(settings.expertMode
-                         ? "Zusätzliche Funktionen für Vielfahrer. „Nur Ein-/Ausstieg“ ignorieren zeigt in der Suche auch direkte Züge, die laut Fahrplan dort keinen Einstieg oder Ausstieg erlauben. RIL100-Codes zeigt in der Bahnhofssuche die DB-Abkürzung rechts neben dem Bahnhof (z. B. FF); suchen kann man mit „ff“ auch so."
-                         : "Zusätzliche Funktionen für Vielfahrer.")
+                    Text("Zusätzliche Funktionen für Vielfahrer.")
                 }
 
                 Section {
@@ -224,10 +232,8 @@ struct SettingsView: View {
         switch model.settings.trainPositionRefresh {
         case .off:
             "Karten laden die Positionen der Züge nur einmal beim Öffnen."
-        case .automatic:
-            "Wie oft Karten die Positionen fahrender Züge neu laden: alle 15 Sekunden, mit mobilen Daten oder im Datensparmodus jede Minute. Häufigeres Aktualisieren kann mehr Daten verbrauchen."
         default:
-            "Wie oft Karten die Positionen fahrender Züge neu laden. Häufigeres Aktualisieren kann mehr Daten verbrauchen, vor allem mit mobilen Daten."
+            "Wie oft die Live-Position aktualisiert wird. Öfter verbraucht mehr Daten."
         }
     }
 
@@ -263,6 +269,7 @@ struct SettingsView: View {
                 }
                 Button(role: .destructive) {
                     Task {
+                        await model.disableFollowedCheckinPush()
                         await model.traewelling.logout()
                         await refreshLogin()
                     }
@@ -297,6 +304,36 @@ struct SettingsView: View {
                 .foregroundStyle(.primary)
                 .disabled(model.isSyncingTraewelling)
             }
+            if isLoggedIn {
+                Toggle(isOn: Binding {
+                    settings.notifyFollowedCheckins || isEnablingFollowedCheckinPush
+                } set: { on in
+                    followedCheckinPushError = nil
+                    if on {
+                        showFollowedCheckinPushConfirmation = true
+                    } else {
+                        Task { await model.disableFollowedCheckinPush() }
+                    }
+                }) {
+                    HStack {
+                        IconLabel(title: "Check-ins von Gefolgten melden", systemImage: "bell.badge.fill", color: .orange)
+                        if isEnablingFollowedCheckinPush {
+                            Spacer()
+                            ProgressView()
+                        }
+                    }
+                }
+                .tint(.brand)
+                .disabled(isEnablingFollowedCheckinPush)
+                .alert("Dieses Feature benötigt eine erneute Anmeldung mit Träwelling. Möchtest du fortfahren?",
+                       isPresented: $showFollowedCheckinPushConfirmation) {
+                    Button("Fortfahren") { enableFollowedCheckinPush() }
+                    Button("Abbrechen", role: .cancel) {}
+                }
+                if let followedCheckinPushError {
+                    ErrorBanner(error: followedCheckinPushError)
+                }
+            }
             Picker(selection: $settings.traewellingVisibility) {
                 ForEach(TraewellingVisibility.allCases, id: \.self) { Text($0.label).tag($0) }
             } label: {
@@ -309,6 +346,30 @@ struct SettingsView: View {
             }
         } header: {
             Text("Träwelling")
+        } footer: {
+            if isLoggedIn, settings.notifyFollowedCheckins {
+                Text("Unser Server schaut alle 2 Minuten nach neuen Check-ins. Dabei wird nichts gespeichert.")
+            } else if isLoggedIn, model.followedCheckinPushEnded {
+                Text("Träwelling hat die Anmeldung für die Meldungen beendet. Zum Weitermachen wieder einschalten.")
+            }
+        }
+    }
+
+    /// Signs in with Träwelling once more for the push Worker (#266), in the same browser session as the
+    /// app's own login; cancelling it leaves the setting off.
+    private func enableFollowedCheckinPush() {
+        isEnablingFollowedCheckinPush = true
+        Task {
+            defer { isEnablingFollowedCheckinPush = false }
+            do {
+                try await model.enableFollowedCheckinPush { url, scheme in
+                    try await webAuthenticationSession.authenticate(using: url, callback: .customScheme(scheme),
+                                                                    preferredBrowserSession: .ephemeral, additionalHeaderFields: [:])
+                }
+            } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
+            } catch {
+                followedCheckinPushError = error
+            }
         }
     }
 
@@ -404,7 +465,7 @@ struct QuickTagsView: View {
                     save()
                 }
             } footer: {
-                Text("Diese Tags schlagen wir dir beim Einchecken vor. Ohne festen Wert fragen wir dich jedes Mal, z. B. nach deinem Sitzplatz.")
+                Text("Diese Tags schlagen wir dir beim Einchecken vor.")
             }
             Section {
                 Button {

@@ -91,7 +91,7 @@ struct CheckinSheet: View {
                 Button("Trotzdem einchecken") { send(asManualTrip: forcedAsManualTrip, force: true) }
                 Button("Abbrechen", role: .cancel) {}
             } message: {
-                Text("Träwelling hat dich zu dieser Zeit noch in einem anderen Zug, z. B. weil dein letzter Zug früher angekommen ist. Trotzdem einchecken?"
+                Text("Du bist bei Träwelling zu dieser Zeit schon in einem anderen Zug eingecheckt. Trotzdem einchecken?"
                      + (showsPoints ? " Dafür gibt es keine Punkte." : ""))
             }
         }
@@ -454,7 +454,7 @@ struct CheckinTicket: View {
     let leg: Leg
 
     var body: some View {
-        let color = leg.line?.product.color ?? .brand
+        let color = leg.line?.color ?? .brand
         VStack(spacing: 0) {
             HStack {
                 LineBadge(line: leg.line)

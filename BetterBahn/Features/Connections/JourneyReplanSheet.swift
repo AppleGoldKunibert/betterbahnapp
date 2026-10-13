@@ -870,7 +870,7 @@ struct JourneyReplanSheet: View {
                 .confirmationDialog("Check-in ersetzen?", isPresented: $confirmManualTrip, titleVisibility: .visible) {
                     Button("Check-in ersetzen", role: .destructive) { replaceCheckin(status, exit: exit) }
                 } message: {
-                    Text("Dein bisheriger Check-in wird gelöscht und als manuelle Fahrt neu angelegt. Text, Sichtbarkeit und Tags werden übernommen, Likes und Kommentare gehen verloren.")
+                    Text("Dein Check-in wird neu angelegt. Likes und Kommentare gehen dabei verloren.")
                 }
             }
         }

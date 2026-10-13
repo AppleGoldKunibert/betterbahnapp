@@ -168,7 +168,7 @@ struct SaveJourneyButton: View {
             Button("Abbrechen", role: .cancel) {}
             Button("Verstanden, weiter") { save() }
         } message: {
-            Text("\(reservationTrains.formatted(.list(type: .and))): Ohne Reservierung (Sitz- oder Liegeplatz) darfst du nicht mitfahren. Reservierungen kannst du über „Via Ticket hinzufügen“ importieren.")
+            Text("\(reservationTrains.formatted(.list(type: .and))): Nur mit Reservierung. Du kannst sie über „Via Ticket hinzufügen“ importieren.")
         }
     }
 

@@ -1,6 +1,7 @@
 import BetterBahnKit
 import MapKit
 import SwiftUI
+import UserNotifications
 
 extension AppModel {
     /// How often the check-ins of the people the user follows are reloaded while they're on screen.
@@ -10,23 +11,131 @@ extension AppModel {
     /// Coming back to the tab within the interval doesn't load again.
     func keepFollowedCheckinsFresh() async {
         while !Task.isCancelled {
-            if settings.traewellingEnabled, await traewelling.isLoggedIn {
-                let due = followedCheckinsLoadedAt.map { Date.now.timeIntervalSince($0) >= 110 } ?? true
-                if due, let fresh = try? await traewelling.followedCheckins() {
-                    followedCheckins = fresh
-                    followedCheckinsLoadedAt = .now
-                    let current = Set(fresh.statuses.map(\.id))
-                    followedTracks = followedTracks.filter { current.contains($0.key) }
-                    followedTrains = followedTrains.filter { current.contains($0.key) }
-                    followedEmojis = followedEmojis.filter { current.contains($0.key) }
-                    await prepareEmojis(for: fresh.statuses)
-                }
-            } else {
-                followedCheckins = nil
-                followedCheckinsLoadedAt = nil
-            }
+            let due = followedCheckinsLoadedAt.map { Date.now.timeIntervalSince($0) >= 110 } ?? true
+            await loadFollowedCheckins(reload: due)
             try? await Task.sleep(for: Self.followedCheckinsInterval)
         }
+    }
+
+    /// Loads the check-ins of the people the user follows, or clears them without Träwelling (all that
+    /// happens without `reload`).
+    func loadFollowedCheckins(reload: Bool = true) async {
+        guard settings.traewellingEnabled, await traewelling.isLoggedIn else {
+            followedCheckins = nil
+            followedCheckinsLoadedAt = nil
+            return
+        }
+        guard reload, let fresh = try? await traewelling.followedCheckins() else { return }
+        followedCheckins = fresh
+        followedCheckinsLoadedAt = .now
+        let current = Set(fresh.statuses.map(\.id))
+        followedTracks = followedTracks.filter { current.contains($0.key) }
+        followedTrains = followedTrains.filter { current.contains($0.key) }
+        followedEmojis = followedEmojis.filter { current.contains($0.key) }
+        await prepareEmojis(for: fresh.statuses)
+    }
+
+    /// Shows a followed check-in whose notification was tapped: loads the list first if it isn't in it yet.
+    /// Nothing opens when the ride has ended meanwhile.
+    func openFollowedCheckin(id: Int) async {
+        followedCheckinToOpen = id
+        guard followedCheckins?.statuses.contains(where: { $0.id == id }) != true else { return }
+        await loadFollowedCheckins()
+        if followedCheckins?.statuses.contains(where: { $0.id == id }) != true, followedCheckinToOpen == id {
+            followedCheckinToOpen = nil
+        }
+    }
+
+    // MARK: Notifications (#266)
+
+    /// Whether this build's device token belongs to APNs' sandbox (development builds from Xcode).
+    static var pushUsesSandbox: Bool {
+        #if DEBUG
+        true
+        #else
+        false
+        #endif
+    }
+
+    /// Turns the notifications about followed check-ins on: asks for permission and the device token,
+    /// signs in with Träwelling once more (read-only, for the push Worker; `authenticate` runs the browser
+    /// session) and signs the device up. Throws when something is missing; a cancelled login throws too.
+    func enableFollowedCheckinPush(authenticate: (URL, String) async throws -> URL) async throws {
+        let center = UNUserNotificationCenter.current()
+        guard (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) == true else {
+            throw FollowedCheckinPushError.notificationsDenied
+        }
+        guard let deviceToken = await pushDeviceTokenForFollowedCheckins() else { throw FollowedCheckinPushError.noDeviceToken }
+        let user = try await traewelling.currentUser()
+        let config = FollowedCheckinPush.config(from: traewelling.config)
+        let pkce = PKCE()
+        let callback = try await authenticate(config.authorizeURL(pkce: pkce), config.callbackScheme)
+        let code = try TraewellingConfig.authorizationCode(in: callback, pkce: pkce)
+        // A sign-up left from turning it off offline ends first, so its notifications don't come twice.
+        if let old = followedCheckinPush { try? await FollowedCheckinPush().unsubscribe(old) }
+        followedCheckinPush = try await FollowedCheckinPush().subscribe(
+            code: code, codeVerifier: pkce.verifier, deviceToken: deviceToken, sandbox: Self.pushUsesSandbox, userID: user.id)
+        followedCheckinPushSentToken = deviceToken
+        followedCheckinPushEnded = false
+        settings.notifyFollowedCheckins = true
+    }
+
+    /// Turns the notifications off and signs the device off at the Worker. Offline the sign-up is kept and
+    /// ended on a later `syncFollowedCheckinPush()`.
+    func disableFollowedCheckinPush() async {
+        settings.notifyFollowedCheckins = false
+        guard let subscription = followedCheckinPush else { return }
+        if (try? await FollowedCheckinPush().unsubscribe(subscription)) != nil, followedCheckinPush == subscription {
+            followedCheckinPush = nil
+        }
+    }
+
+    /// On every start: sends the Worker the current device token (it can change), ends a sign-up that is
+    /// no longer wanted (setting off, logged out of Träwelling) and notices one the Worker dropped.
+    func syncFollowedCheckinPush() async {
+        guard let subscription = followedCheckinPush else {
+            // Turned on in a build that looked in the background itself: there's no sign-up yet.
+            if settings.notifyFollowedCheckins { settings.notifyFollowedCheckins = false }
+            return
+        }
+        guard settings.notifyFollowedCheckins, settings.traewellingEnabled, await traewelling.isLoggedIn else {
+            await disableFollowedCheckinPush()
+            return
+        }
+        guard let deviceToken = await pushDeviceTokenForFollowedCheckins(), deviceToken != followedCheckinPushSentToken,
+              let known = try? await FollowedCheckinPush().update(subscription, deviceToken: deviceToken, sandbox: Self.pushUsesSandbox),
+              followedCheckinPush == subscription else { return }
+        if known {
+            followedCheckinPushSentToken = deviceToken
+        } else {
+            followedCheckinPush = nil
+            followedCheckinPushEnded = true
+            settings.notifyFollowedCheckins = false
+        }
+    }
+
+    /// The APNs device token: asks iOS to register (again) and waits up to 20 seconds for its answer
+    /// (`AppDelegate` → `didRegisterForPush`).
+    func pushDeviceTokenForFollowedCheckins() async -> String? {
+        if let pushDeviceToken { return pushDeviceToken }
+        let first = pushDeviceTokenWaiters.isEmpty
+        return await withCheckedContinuation { continuation in
+            pushDeviceTokenWaiters.append(continuation)
+            guard first else { return }
+            UIApplication.shared.registerForRemoteNotifications()
+            Task {
+                try? await Task.sleep(for: .seconds(20))
+                self.didRegisterForPush(deviceToken: nil)
+            }
+        }
+    }
+
+    /// iOS's answer to `registerForRemoteNotifications()`: the device token, or nil when it failed.
+    func didRegisterForPush(deviceToken: String?) {
+        if let deviceToken { pushDeviceToken = deviceToken }
+        let waiters = pushDeviceTokenWaiters
+        pushDeviceTokenWaiters = []
+        for waiter in waiters { waiter.resume(returning: deviceToken ?? pushDeviceToken) }
     }
 
     /// The custom emojis for someone else's check-in text: those of the Mastodon instance connected to
@@ -66,6 +175,29 @@ extension AppModel {
     }
 }
 
+/// Turning on the notifications about followed check-ins failed before Träwelling was asked.
+enum FollowedCheckinPushError: LocalizedError {
+    case notificationsDenied, noDeviceToken
+
+    var errorDescription: String? {
+        switch self {
+        case .notificationsDenied: "Mitteilungen sind für BetterBahn aus. Erlaube sie in den iOS-Einstellungen."
+        case .noDeviceToken: "iOS hat keine Mitteilungen eingerichtet. Bitte versuch es später noch mal."
+        }
+    }
+}
+
+/// The notification for a new check-in of someone the user follows (#266), sent by the push Worker
+/// (`Cloudflare/checkin-push`); tapping it opens the check-in.
+enum FollowedCheckinNotifier {
+    nonisolated static let statusIDKey = "followedStatusID"
+
+    /// The followed check-in a tapped notification is about, if it is one of these.
+    nonisolated static func statusID(in userInfo: [AnyHashable: Any]) -> Int? {
+        userInfo[statusIDKey] as? Int
+    }
+}
+
 /// Who of the people the user follows on Träwelling is on a train right now (#196): a small button
 /// above "Deine Reisen" that lists their check-ins (tags, train, from → to). Opening one shows its
 /// train, a small map of the ride with the train's live position and speed, a link to the check-in on
@@ -92,7 +224,19 @@ struct FollowedCheckinsSection: View {
                         }
                     }
                 }
+                // A tapped notification's check-in (#266), as soon as the list has it.
+                .onChange(of: model.followedCheckinToOpen, initial: true) { openRequested(in: statuses) }
+                .onChange(of: statuses.map(\.id)) { openRequested(in: statuses) }
             }
+        }
+    }
+
+    private func openRequested(in statuses: [TraewellingStatus]) {
+        guard let id = model.followedCheckinToOpen, statuses.contains(where: { $0.id == id }) else { return }
+        model.followedCheckinToOpen = nil
+        withAnimation(.snappy) {
+            showsList = true
+            openID = id
         }
     }
 
@@ -391,7 +535,7 @@ private struct FollowedRideMap: View {
     @State private var camera: MapCameraPosition = .automatic
     @State private var showMap = false
 
-    private var color: Color { route.line?.product.color ?? .brand }
+    private var color: Color { route.line?.color ?? .brand }
 
     var body: some View {
         Button {

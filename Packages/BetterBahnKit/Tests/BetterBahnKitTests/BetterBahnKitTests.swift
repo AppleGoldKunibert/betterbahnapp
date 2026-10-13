@@ -2012,6 +2012,85 @@ private final class TwinTrainProtocol: URLProtocol, @unchecked Sendable {
         #expect(Ril100.matches(station("h", "Berlin Hbf", 52.5251, 13.3692), bls))
     }
 
+    /// Codes of stations abroad start with X (west) or Z (east) and the country: XA Austria, XS Switzerland.
+    /// They can be typed like the German ones.
+    @Test func findsStationsAbroadByCode() {
+        #expect(Ril100.entry(forCode: "xszh")?.name == "Zürich HB")
+        #expect(Ril100.entry(forCode: "XASB")?.name == "Salzburg Hbf")
+        #expect(Ril100.entry(forCode: "xai")?.name == "Innsbruck Hbf")
+        #expect(Ril100.entry(forCode: "XNAC")?.name == "Amsterdam C")
+        #expect(Ril100.entry(forCode: "XSZH")?.points.isEmpty == true)
+    }
+
+    /// DB's list has no positions abroad: a stop counts when its name is the same, whatever the case or
+    /// spelling of "Hauptbahnhof", wherever it lies; a different name or a different bracket isn't.
+    @Test func matchesStationsAbroadByName() throws {
+        #expect(Ril100.code(for: station("a", "Zürich HB", 47.3779, 8.5403)) == "XSZH")
+        #expect(Ril100.code(for: station("b", "Salzburg Hauptbahnhof", 47.8130, 13.0453)) == "XASB")
+        #expect(Ril100.code(for: station("c", "Innsbruck Hbf", 47.2634, 11.4008)) == "XAI")
+        #expect(Ril100.code(for: station("d", "Zürich Flughafen", 47.4503, 8.5624)) == "XSZF")
+        // A stop with no position is matched by its name as well.
+        let unplaced = Station(id: "e", name: "Zürich HB", coordinate: nil, evaNumber: nil, source: .transitous)
+        #expect(Ril100.code(for: unplaced) == "XSZH")
+        // Only the whole name: not "Zürich" alone, and a German station keeps its German code (Hof
+        // (Saale) isn't taken for an Austrian "Hof" or "Hof bei Salzburg").
+        #expect(Ril100.code(for: station("f", "Zürich", 47.3779, 8.5403)) == nil)
+        #expect(Ril100.code(for: station("g", "Hof (Saale)", 50.3126, 11.9183)) == "NHO")
+        #expect(Ril100.code(for: station("i", "Basel SBB (CH)", 47.5476, 7.5896)) == "XSB")
+        #expect(Ril100.code(for: station("j", "Poznań Główny", 52.4017, 16.9111)) == "XPPG")
+        #expect(Ril100.code(for: station("k", "Brussel-Zuid", 50.8353, 4.3364)) == "XBB")
+        #expect(Ril100.matches(station("h", "Zürich HB", 47.3779, 8.5403), try #require(Ril100.entry(forCode: "xszh"))))
+    }
+
+    /// Feeds name stations abroad differently than DB: "Utrecht C" is "Utrecht Centraal", "Aalborg" is
+    /// "Aalborg St.", "Broenderslev" is "Brønderslev".
+    @Test func looseNamesOfStationsAbroad() {
+        func same(_ a: String, _ b: String) -> Bool { Ril100.looseNameKey(a) == Ril100.looseNameKey(b) }
+        #expect(same("Utrecht C", "Utrecht Centraal"))
+        #expect(same("Malmö Central", "Malmö Centralstation"))
+        #expect(same("Friesach", "Friesach Bahnhof"))
+        #expect(same("Aalborg", "Aalborg St."))
+        #expect(same("Voss", "Voss stasjon"))
+        #expect(same("Broenderslev", "Brønderslev St."))
+        #expect(same("Basel SBB", "Basel SBB (CH)"))
+        // Brackets are kept, and a lone word is a name, not a trailing station word.
+        #expect(!same("Hof (Saale)", "Hof"))
+        #expect(Ril100.looseNameKey("Station") == "station")
+        #expect(!same("Friesach", "Friesach Busbahnhof"))
+    }
+
+    @Test func matchesLooselyNamedStationsAbroadInTheirCountry() {
+        #expect(Ril100.code(for: station("a", "Utrecht Centraal", 52.0894, 5.1103)) == "XNU")
+        #expect(Ril100.code(for: station("b", "Amsterdam Centraal", 52.3789, 4.9003)) == "XNAC")
+        #expect(Ril100.code(for: station("c", "Aalborg St.", 57.0434, 9.9166)) == "XDA")
+        #expect(Ril100.code(for: station("d", "Friesach Bahnhof", 46.9565, 14.4003)) == "XAF")
+        #expect(Ril100.code(for: station("e", "Malmö Centralstation", 55.6094, 13.0006)) == "XVM")
+        #expect(Ril100.code(for: station("f", "Brønderslev St.", 57.2706, 9.9411)) == "XDB")
+        // The same name in another country, or without a position, isn't it.
+        #expect(Ril100.code(for: station("g", "Friesach Bahnhof", 49.0, 8.0)) == nil)
+        let unplaced = Station(id: "h", name: "Aalborg St.", coordinate: nil, evaNumber: nil, source: .transitous)
+        #expect(Ril100.code(for: unplaced) == nil)
+    }
+
+    /// The same name beats a similar one even if the other code is shorter.
+    @Test func sameNameBeatsSimilarNameAbroad() {
+        let loose = Ril100.Entry(code: "XN", name: "Utrecht C", points: [])
+        let exact = Ril100.Entry(code: "XNUCX", name: "Utrecht Centraal", points: [])
+        let stop = station("a", "Utrecht Centraal", 52.0894, 5.1103)
+        #expect(Ril100.entry(for: stop, in: [loose, exact])?.code == "XNUCX")
+        #expect(Ril100.entry(for: stop, in: [exact, loose])?.code == "XNUCX")
+    }
+
+    /// A match by position beats one by name: a German station keeps its German code even if a station
+    /// abroad is called alike.
+    @Test func positionBeatsNameAbroad() {
+        let german = Ril100.Entry(code: "ZZ", name: "Zürich HB", points: [Coordinate(latitude: 50, longitude: 8)])
+        let abroad = Ril100.Entry(code: "A", name: "Zürich HB", points: [])
+        let stop = station("a", "Zürich HB", 50.0001, 8.0001)
+        #expect(Ril100.entry(for: stop, in: [abroad, german])?.code == "ZZ")
+        #expect(Ril100.entry(for: stop, in: [german, abroad])?.code == "ZZ")
+    }
+
     /// The station the code belongs to comes first and only once; behind a first hit whose name starts
     /// with the typed word.
     @Test func placesTheCodesStationFirstAndOnce() throws {
@@ -2062,6 +2141,87 @@ private final class TwinTrainProtocol: URLProtocol, @unchecked Sendable {
         let stations = try await provider.searchStations(StationSearch(parsing: "ff"), near: nil)
 
         #expect(stations.map(\.id) == ["frankfurtHbf", "fulda"])
+    }
+
+    /// A slow plain search for the letters of a code mustn't lose the code's station: `CombinedProvider`
+    /// drops the whole search after 2.5 s, which left "xszh" with nothing.
+    @Test func slowPlainSearchDoesntLoseTheCodesStation() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [SlowCodeGeocodeProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let provider = TransitousProvider(http: HTTPClient(session: session))
+
+        let stations = try await provider.searchStations(StationSearch(parsing: "xszh"), near: nil)
+
+        #expect(stations.map(\.id) == ["zurichHb"])
+        // Checked against the slow answer itself, not a stopwatch, so a busy test runner can't fail it.
+        #expect(!SlowCodeGeocodeProtocol.answeredSlowly.withLock { $0 })
+    }
+
+    /// "xnac" is DB's "Amsterdam C", which the feed calls "Amsterdam Centraal": found, with the bus stop
+    /// of the same station left out.
+    @Test func searchFindsAStationAbroadUnderAnotherName() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [AbroadGeocodeProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let provider = TransitousProvider(http: HTTPClient(session: session))
+
+        let stations = try await provider.searchStations(StationSearch(parsing: "xnac"), near: nil)
+
+        #expect(stations.first?.id == "amsterdamCentraal")
+        #expect(!stations.contains { $0.id == "amsterdamBus" })
+    }
+}
+
+/// Every query finds Amsterdam's station and a bus stop of it.
+private final class AbroadGeocodeProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let body = #"[{"type":"STOP","id":"amsterdamBus","name":"Amsterdam, Centraal Station","lat":52.3786,"lon":4.9005,"country":"NL","modes":["BUS"],"importance":0.001},"#
+            + #"{"type":"STOP","id":"amsterdamCentraal","name":"Amsterdam Centraal","lat":52.3789,"lon":4.9003,"country":"NL","modes":["HIGHSPEED_RAIL","REGIONAL_RAIL"],"importance":0.02}]"#
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+/// "Zürich HB" gives the station at once; the plain search for the typed letters "xszh" answers only after 5 s.
+private final class SlowCodeGeocodeProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    private let stopped = Mutex(false)
+    /// Set once the slow answer is due, whether or not the request was still waiting for it.
+    static let answeredSlowly = Mutex(false)
+    override func stopLoading() { stopped.withLock { $0 = true } }
+
+    override func startLoading() {
+        let url = request.url!
+        let text = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?.first { $0.name == "text" }?.value ?? ""
+        let body = text == "Zürich HB"
+            ? #"[{"type":"STOP","id":"zurichHb","name":"Zürich HB","lat":47.3779,"lon":8.5403,"country":"CH","modes":["HIGHSPEED_RAIL","REGIONAL_RAIL"],"importance":0.01}]"#
+            : "[]"
+        nonisolated(unsafe) let loader = self
+        let finish: @Sendable () -> Void = {
+            guard !loader.stopped.withLock({ $0 }) else { return }
+            let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            loader.client?.urlProtocol(loader, didReceive: response, cacheStoragePolicy: .notAllowed)
+            loader.client?.urlProtocol(loader, didLoad: Data(body.utf8))
+            loader.client?.urlProtocolDidFinishLoading(loader)
+        }
+        if text == "xszh" {
+            DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
+                Self.answeredSlowly.withLock { $0 = true }
+                finish()
+            }
+        } else {
+            finish()
+        }
     }
 }
 
@@ -2135,6 +2295,63 @@ private final class Ril100GeocodeProtocol: URLProtocol, @unchecked Sendable {
         #expect(filter.includes(entry(ice)))
         #expect(!filter.includes(entry(flix)))
         #expect(!filter.includes(entry(regio)))
+    }
+
+    @Test func boardLongDistanceAndRegionalFilters() {
+        let sBahn = Line(name: "S 1", number: nil, product: .suburban, operatorName: "S-Bahn Berlin GmbH")
+        let longDistance = BoardFilter(products: Product.longDistanceProducts)
+        #expect(longDistance.includes(entry(ice)))
+        #expect(longDistance.includes(entry(flix)))
+        #expect(!longDistance.includes(entry(regio)))
+        #expect(!longDistance.includes(entry(sBahn)))
+        let regional = BoardFilter(products: Product.regionalProducts)
+        #expect(regional.includes(entry(regio)))
+        #expect(!regional.includes(entry(ice)))
+        #expect(!regional.includes(entry(sBahn)))
+    }
+
+    @Test func sBahnBerlinLineColors() {
+        func line(_ name: String, _ op: String?, _ product: Product = .suburban) -> Line {
+            Line(name: name, number: nil, product: product, operatorName: op)
+        }
+        #expect(line("S 41", "S-Bahn Berlin GmbH").lineColorHex == 0xAD5937)
+        #expect(line("S5", "S-Bahn Berlin").lineColorHex == 0xEB7405)
+        #expect(line("S 1", "S-Bahn Berlin GmbH").lineColorHex == 0xDA6BA2)
+        // Same names elsewhere keep the S-Bahn green.
+        #expect(line("S 1", "DB Regio AG S-Bahn München").lineColorHex == nil)
+        #expect(line("S1", nil).lineColorHex == nil)
+        #expect(line("S 99", "S-Bahn Berlin GmbH").lineColorHex == nil)
+        #expect(line("S5", "S-Bahn Berlin", .bus).lineColorHex == nil)
+    }
+
+    @Test func uBahnAndFeedLineColors() {
+        func line(_ name: String, _ op: String?, _ product: Product, feed: String? = nil) -> Line {
+            Line(name: name, number: nil, product: product, operatorName: op, feedColorHex: Line.hex(fromFeedColor: feed))
+        }
+        // Berlin's U-Bahn from the table, only with BVG as operator.
+        #expect(line("U 2", "Berliner Verkehrsbetriebe", .subway).lineColorHex == 0xDA421E)
+        #expect(line("U9", "BVG", .subway).lineColorHex == 0xF3791D)
+        #expect(line("U2", "Hamburger Hochbahn AG", .subway).lineColorHex == nil)
+        // Other cities take the feed's route color, S-Bahn and U-Bahn only.
+        #expect(line("S19", "DB Regio AG NRW", .suburban, feed: "00658e").lineColorHex == 0x00658E)
+        #expect(line("S6", "DB Regio AG NRW", .suburban, feed: "#E21D3C").lineColorHex == 0xE21D3C)
+        #expect(line("U3", "Hamburger Hochbahn AG", .subway, feed: "ff6600").lineColorHex == 0xFF6600)
+        #expect(line("RE1", "DB Regio", .regional, feed: "00658e").lineColorHex == nil)
+        #expect(line("S1", nil, .suburban, feed: "nonsense").lineColorHex == nil)
+        // White text must stay readable: a near-white feed color falls back to the product's.
+        #expect(line("S1", nil, .suburban, feed: "ffffcc").lineColorHex == nil)
+        // The tables win over the feed.
+        #expect(line("S1", "S-Bahn Berlin GmbH", .suburban, feed: "123456").lineColorHex == 0xDA6BA2)
+    }
+
+    @Test func transitousLineTakesRouteColor() throws {
+        let json = #"{"mode":"SUBURBAN","displayName":"S19","routeShortName":"S19","agencyName":"DB","routeColor":"00658e","routeTextColor":"ffffff"}"#
+        struct Probe: Decodable { var mode: String; var displayName: String?; var routeShortName: String?; var agencyName: String?; var routeColor: String? }
+        let probe = try JSONDecoder().decode(Probe.self, from: Data(json.utf8))
+        let info = MLineInfo(mode: probe.mode, displayName: probe.displayName, routeShortName: probe.routeShortName,
+                             tripShortName: nil, agencyName: probe.agencyName, routeColor: probe.routeColor)
+        #expect(info.toLine().feedColorHex == 0x00658E)
+        #expect(info.toLine().lineColorHex == 0x00658E)
     }
 
     @Test func pkceMatchesRFC7636() {
