@@ -174,6 +174,10 @@ struct ConnectionsView: View {
                 path = [.journey(entry.route())]
                 model.journeyToOpen = nil
             }
+            // The followed check-ins list sits on the first page (#266).
+            .onChange(of: model.followedCheckinToOpen, initial: true) { _, id in
+                if id != nil { path = [] }
+            }
         }
         .toolbar(showsJourney ? .hidden : .automatic, for: .tabBar)
     }

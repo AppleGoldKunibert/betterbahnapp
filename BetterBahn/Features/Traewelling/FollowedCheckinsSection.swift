@@ -1,6 +1,8 @@
+import BackgroundTasks
 import BetterBahnKit
 import MapKit
 import SwiftUI
+import UserNotifications
 
 extension AppModel {
     /// How often the check-ins of the people the user follows are reloaded while they're on screen.
@@ -10,23 +12,74 @@ extension AppModel {
     /// Coming back to the tab within the interval doesn't load again.
     func keepFollowedCheckinsFresh() async {
         while !Task.isCancelled {
-            if settings.traewellingEnabled, await traewelling.isLoggedIn {
-                let due = followedCheckinsLoadedAt.map { Date.now.timeIntervalSince($0) >= 110 } ?? true
-                if due, let fresh = try? await traewelling.followedCheckins() {
-                    followedCheckins = fresh
-                    followedCheckinsLoadedAt = .now
-                    let current = Set(fresh.statuses.map(\.id))
-                    followedTracks = followedTracks.filter { current.contains($0.key) }
-                    followedTrains = followedTrains.filter { current.contains($0.key) }
-                    followedEmojis = followedEmojis.filter { current.contains($0.key) }
-                    await prepareEmojis(for: fresh.statuses)
-                }
-            } else {
-                followedCheckins = nil
-                followedCheckinsLoadedAt = nil
-            }
+            let due = followedCheckinsLoadedAt.map { Date.now.timeIntervalSince($0) >= 110 } ?? true
+            await loadFollowedCheckins(reload: due)
             try? await Task.sleep(for: Self.followedCheckinsInterval)
         }
+    }
+
+    /// Loads the check-ins of the people the user follows, or clears them without Träwelling (all that
+    /// happens without `reload`). New ones get a notification `inBackground` (#266); on screen the button
+    /// above "Deine Reisen" shows them, so there they only count as seen.
+    func loadFollowedCheckins(reload: Bool = true, inBackground: Bool = false) async {
+        guard settings.traewellingEnabled, await traewelling.isLoggedIn else {
+            followedCheckins = nil
+            followedCheckinsLoadedAt = nil
+            return
+        }
+        guard reload, let fresh = try? await traewelling.followedCheckins() else { return }
+        followedCheckins = fresh
+        followedCheckinsLoadedAt = .now
+        let current = Set(fresh.statuses.map(\.id))
+        followedTracks = followedTracks.filter { current.contains($0.key) }
+        followedTrains = followedTrains.filter { current.contains($0.key) }
+        followedEmojis = followedEmojis.filter { current.contains($0.key) }
+        if settings.notifyFollowedCheckins {
+            let new = followedCheckinAlerts.newCheckins(in: fresh.statuses)
+            if inBackground {
+                for status in new { await FollowedCheckinNotifier.notify(status) }
+            }
+        } else if followedCheckinAlerts != FollowedCheckinAlerts() {
+            // Turned off: turning it on again starts afresh instead of reporting everything in between.
+            followedCheckinAlerts = FollowedCheckinAlerts()
+        }
+        if !inBackground { await prepareEmojis(for: fresh.statuses) }
+    }
+
+    /// Shows a followed check-in whose notification was tapped: loads the list first if it isn't in it yet.
+    /// Nothing opens when the ride has ended meanwhile.
+    func openFollowedCheckin(id: Int) async {
+        followedCheckinToOpen = id
+        guard followedCheckins?.statuses.contains(where: { $0.id == id }) != true else { return }
+        await loadFollowedCheckins()
+        if followedCheckins?.statuses.contains(where: { $0.id == id }) != true, followedCheckinToOpen == id {
+            followedCheckinToOpen = nil
+        }
+    }
+
+    // MARK: Background check (#266)
+
+    /// Identifier of the background refresh that looks for new check-ins of the people the user follows.
+    /// Must match an entry in `BGTaskSchedulerPermittedIdentifiers` in Info.plist.
+    static let followedCheckinsBackgroundTaskID = "de.goldkunibert.BetterBahn.followedCheckins"
+
+    /// Asks iOS to wake the app for the next look at the followed check-ins. iOS decides when it really
+    /// runs (often later, less when the app is rarely used); called when the app backgrounds and after each look.
+    func scheduleFollowedCheckinsBackgroundCheck() {
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.followedCheckinsBackgroundTaskID)
+        guard settings.traewellingEnabled, settings.notifyFollowedCheckins else { return }
+        let request = BGAppRefreshTaskRequest(identifier: Self.followedCheckinsBackgroundTaskID)
+        request.earliestBeginDate = .now.addingTimeInterval(15 * 60)
+        try? BGTaskScheduler.shared.submit(request)
+    }
+
+    func handleFollowedCheckinsBackgroundTask(_ task: BGAppRefreshTask) {
+        scheduleFollowedCheckinsBackgroundCheck()
+        let work = Task {
+            await loadFollowedCheckins(inBackground: true)
+            task.setTaskCompleted(success: true)
+        }
+        task.expirationHandler = { work.cancel() }
     }
 
     /// The custom emojis for someone else's check-in text: those of the Mastodon instance connected to
@@ -66,6 +119,26 @@ extension AppModel {
     }
 }
 
+/// The notification for a new check-in of someone the user follows (#266); tapping it opens the check-in.
+enum FollowedCheckinNotifier {
+    nonisolated static let statusIDKey = "followedStatusID"
+
+    static func notify(_ status: TraewellingStatus) async {
+        let content = UNMutableNotificationContent()
+        content.title = FollowedCheckinAlerts.title(for: status)
+        content.body = FollowedCheckinAlerts.body(for: status)
+        content.sound = .default
+        content.userInfo = [statusIDKey: status.id]
+        let request = UNNotificationRequest(identifier: "followedCheckin-\(status.id)", content: content, trigger: nil)
+        try? await UNUserNotificationCenter.current().add(request)
+    }
+
+    /// The followed check-in a tapped notification is about, if it is one of these.
+    nonisolated static func statusID(in userInfo: [AnyHashable: Any]) -> Int? {
+        userInfo[statusIDKey] as? Int
+    }
+}
+
 /// Who of the people the user follows on Träwelling is on a train right now (#196): a small button
 /// above "Deine Reisen" that lists their check-ins (tags, train, from → to). Opening one shows its
 /// train, a small map of the ride with the train's live position and speed, a link to the check-in on
@@ -92,7 +165,19 @@ struct FollowedCheckinsSection: View {
                         }
                     }
                 }
+                // A tapped notification's check-in (#266), as soon as the list has it.
+                .onChange(of: model.followedCheckinToOpen, initial: true) { openRequested(in: statuses) }
+                .onChange(of: statuses.map(\.id)) { openRequested(in: statuses) }
             }
+        }
+    }
+
+    private func openRequested(in statuses: [TraewellingStatus]) {
+        guard let id = model.followedCheckinToOpen, statuses.contains(where: { $0.id == id }) else { return }
+        model.followedCheckinToOpen = nil
+        withAnimation(.snappy) {
+            showsList = true
+            openID = id
         }
     }
 
