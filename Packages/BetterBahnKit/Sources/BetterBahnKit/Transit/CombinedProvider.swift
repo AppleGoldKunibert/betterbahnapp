@@ -298,8 +298,16 @@ public final class CombinedProvider: TransitProvider {
     /// time, and its new ID remembered while the app runs. The returned trip carries the new ID.
     /// Stops its feed leaves out come from the same train in another feed (see `TwinTrainStops.swift`),
     /// platforms it lacks in Czechia from the Czech timetable (see `CzechPlatforms.swift`).
-    public func trip(for leg: Leg) async throws -> Trip {
-        let trip = try await uncorrectedTrip(for: leg)
+    /// A looping train's trip (see `Trip.lap`) comes as the lap the leg rides; `extraLapsBefore` /
+    /// `extraLapsAfter` add the ones around it.
+    public func trip(for leg: Leg, extraLapsBefore: Int = 0, extraLapsAfter: Int = 0) async throws -> Trip {
+        var trip = try await uncorrectedTrip(for: leg)
+        // A ring line's trip is the vehicle's whole day: only the lap the leg rides is this run.
+        if let lap = trip.lap(at: leg.origin, near: leg.departure.planned,
+                              extraBefore: extraLapsBefore, extraAfter: extraLapsAfter, coveringUntil: leg.arrival.planned) {
+            trip = lap
+            if let run = leg.line?.tripNumber { trip.line?.tripNumber = run }
+        }
         guard let transitous = primary as? TransitousProvider, trip.source == transitous.source else { return trip }
         return await transitous.fillingCzechPlatforms(in: transitous.fillingMissingStops(in: trip, of: leg))
     }

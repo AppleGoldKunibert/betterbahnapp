@@ -611,6 +611,10 @@ public struct Trip: Codable, Sendable, Hashable {
     public var source: DataSource
     /// Track geometry of the whole run, if known.
     public var geometry: [Coordinate]?
+    /// Set on a trip cut from a looping train's block (`lap(at:near:)`): whether laps before / after the
+    /// ones shown exist. Not stored.
+    public var hasPreviousLap = false
+    public var hasNextLap = false
 
     public init(id: String, line: Line?, direction: String?, stopovers: [Stopover],
                 cancelled: Bool, remarks: [String], messages: [TrainMessage] = [], source: DataSource,

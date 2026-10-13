@@ -296,7 +296,11 @@ public struct JourneyRefresher: Sendable {
             if start.departureCancelled { leg.cancelled = true }
         }
         let rest = trip.stopovers[((startIndex ?? -1) + 1)...]
-        if let endIndex = closestStop(in: rest, at: leg.destination, plannedTime: leg.arrival.planned, side: \.arrival) {
+        // A leg riding round a ring more than once has its destination after its own intermediate stops: a
+        // visit of the destination before them (the first lap's) is not it, however close in name.
+        let lastIntermediate = leg.stopovers.compactMap { $0.departure?.planned ?? $0.arrival?.planned }.max()
+        if let endIndex = closestStop(in: rest, at: leg.destination, plannedTime: leg.arrival.planned, side: \.arrival),
+           lastIntermediate.map({ (trip.stopovers[endIndex].arrival?.planned ?? .distantFuture) >= $0 }) ?? true {
             let end = trip.stopovers[endIndex]
             if let arrival = end.arrival { leg.arrival = Self.keepingActual(arrival, from: leg.arrival) }
             if end.arrivalPlatform?.best != nil { leg.arrivalPlatform = end.arrivalPlatform }
