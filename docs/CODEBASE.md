@@ -146,7 +146,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   (not stored) tell `TripContent` to show "Vorherige / Nächste Runde laden" at the top / bottom of the stops (`TripView`, `LegTripSheet`
   count the extra laps and reload; works for any looping train, not just the Ringbahn). `Support/LoadedLaps.swift` remembers the
   loaded laps per trip and stop (`AppModel.loadedLaps`, on disk as `loadedLaps.json`) and forgets them after 15 min without a look
-  unless the trip is saved.
+  unless the trip is saved. `coveringUntil` (the leg's planned arrival, from `CombinedProvider.trip(for:)`) adds laps until the trip
+  reaches a leg's destination, for a leg that rides round more than once; `JourneyRefresher.apply` never snaps a destination to a visit
+  before the leg's own intermediate stops.
 - `Transit/TransitProvider.swift` – `TransitProvider` protocol (`searchStations`, `journeys`,
   `board`, `trip`) and `JourneyQuery`.
 - `Transit/StationSearch.swift` – station-field shortcuts (#90): "b" bus stops, "t" tram stops, "l" nearest

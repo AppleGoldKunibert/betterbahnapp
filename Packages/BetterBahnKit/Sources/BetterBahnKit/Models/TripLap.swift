@@ -14,9 +14,11 @@ extension Trip {
     /// (for an arrival, `arriving`, ends it). The first and last lap of the block are cut at its ends.
     /// `extraBefore` / `extraAfter` add the laps before / after, one more each time the user asks for
     /// them; `hasPreviousLap` / `hasNextLap` of the result say whether there are still more.
+    /// `coveringUntil` adds laps after as long as the lap ends before that time, so a leg that deliberately
+    /// rides round more than once (Wedding → Gesundbrunnen the long way) keeps its destination.
     /// `nil` when this isn't a trip of repeated laps, or when `station` isn't on it.
     public func lap(at station: Station, near time: Date, arriving: Bool = false,
-                    extraBefore: Int = 0, extraAfter: Int = 0) -> Trip? {
+                    extraBefore: Int = 0, extraAfter: Int = 0, coveringUntil: Date? = nil) -> Trip? {
         let visits = stopovers.indices.filter { stopovers[$0].station.isSamePlace(as: station) }
         guard visits.count >= Self.minimumVisitsOfARingTrip, let lastStop = stopovers.indices.last else { return nil }
         let side: KeyPath<Stopover, TimeInfo?> = arriving ? \.arrival : \.departure
@@ -35,7 +37,12 @@ extension Trip {
         let lastLap = boundaries.count - 2
         let shown = arriving ? max(position - 1, 0) : min(position, lastLap)
         let first = max(shown - max(extraBefore, 0), 0)
-        let last = min(shown + max(extraAfter, 0), lastLap)
+        var last = min(shown + max(extraAfter, 0), lastLap)
+        while last < lastLap, let until = coveringUntil,
+              let end = stopovers[boundaries[last + 1]].arrival?.planned ?? stopovers[boundaries[last + 1]].departure?.planned,
+              end < until {
+            last += 1
+        }
         var lap = self
         lap.stopovers = Array(stopovers[boundaries[first]...boundaries[last + 1]])
         lap.hasPreviousLap = first > 0

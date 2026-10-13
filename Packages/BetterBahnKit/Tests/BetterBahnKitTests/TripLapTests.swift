@@ -89,6 +89,53 @@ import Testing
         #expect(Set(both.stopovers.map(\.id)).count == both.stopovers.count)
     }
 
+    @Test func aLegRidingRoundMoreThanOnceKeepsItsDestination() throws {
+        // Boards at Gesundbrunnen (60), leaves at Schönhauser Allee in the next lap (150): the lap from
+        // the origin alone ends at 120, before the destination.
+        let trip = ring(laps: 4)
+        let gesundbrunnen = trip.stopovers[0].station
+        let time = start.addingTimeInterval(60 * 60)
+        let alone = try #require(trip.lap(at: gesundbrunnen, near: time))
+        #expect(minutes(alone.stopovers.last!) == 120)
+
+        let covering = try #require(trip.lap(at: gesundbrunnen, near: time, coveringUntil: start.addingTimeInterval(150 * 60)))
+        #expect(minutes(covering.stopovers.first!) == 60 && minutes(covering.stopovers.last!) == 180)
+        #expect(covering.stopovers.contains { minutes($0) == 150 })
+        #expect(covering.hasNextLap)
+
+        // A leg within the lap doesn't pull in another one.
+        let within = try #require(trip.lap(at: gesundbrunnen, near: time, coveringUntil: start.addingTimeInterval(90 * 60)))
+        #expect(minutes(within.stopovers.last!) == 120)
+        // Past the block's end it stops at the last lap.
+        let past = try #require(trip.lap(at: gesundbrunnen, near: time, coveringUntil: start.addingTimeInterval(1000 * 60)))
+        #expect(!past.hasNextLap)
+    }
+
+    /// The reported case: Wedding → round the ring → Gesundbrunnen showed "2 min" with 27 stops in between,
+    /// because the refresh snapped the destination to the first lap's visit (the only one in the trip).
+    @Test func refreshKeepsADestinationALapLater() throws {
+        let block = ring(laps: 4)
+        let origin = block.stopovers[4]            // Gesundbrunnen at 60
+        let destination = block.stopovers[11]      // Schönhauser Allee at 150, the next lap
+        let leg = Leg(origin: origin.station, destination: destination.station,
+                      departure: origin.departure!, arrival: destination.arrival!,
+                      departurePlatform: nil, arrivalPlatform: nil, tripId: "ring", line: block.line,
+                      direction: "Ringbahn", isWalking: false, cancelled: false,
+                      stopovers: Array(block.stopovers[5...10]), remarks: [], source: .transitous)
+        let alone = try #require(block.lap(at: origin.station, near: origin.departure!.planned))
+        let covering = try #require(block.lap(at: origin.station, near: origin.departure!.planned,
+                                              coveringUntil: leg.arrival.planned))
+
+        // A trip that lacks the destination's visit leaves it be, instead of the 90-minute one.
+        #expect(JourneyRefresher.apply(alone, to: leg).arrival.planned == leg.arrival.planned)
+        // One that has it still applies.
+        var live = covering
+        live.stopovers[live.stopovers.firstIndex { $0.id == destination.id }!].arrival?.actual = leg.arrival.planned.addingTimeInterval(120)
+        let refreshed = JourneyRefresher.apply(live, to: leg)
+        #expect(refreshed.arrival.planned == leg.arrival.planned)
+        #expect(refreshed.arrival.actual == leg.arrival.planned.addingTimeInterval(120))
+    }
+
     @Test func noMoreLapsOnceTheBlocksEndsAreReached() throws {
         let trip = ring(laps: 3)
         let gesundbrunnen = trip.stopovers[0].station

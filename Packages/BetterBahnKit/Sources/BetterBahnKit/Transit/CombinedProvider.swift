@@ -304,7 +304,7 @@ public final class CombinedProvider: TransitProvider {
         var trip = try await uncorrectedTrip(for: leg)
         // A ring line's trip is the vehicle's whole day: only the lap the leg rides is this run.
         if let lap = trip.lap(at: leg.origin, near: leg.departure.planned,
-                              extraBefore: extraLapsBefore, extraAfter: extraLapsAfter) {
+                              extraBefore: extraLapsBefore, extraAfter: extraLapsAfter, coveringUntil: leg.arrival.planned) {
             trip = lap
             if let run = leg.line?.tripNumber { trip.line?.tripNumber = run }
         }
