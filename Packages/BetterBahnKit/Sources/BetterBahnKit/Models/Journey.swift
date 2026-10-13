@@ -122,6 +122,27 @@ public struct Line: Codable, Sendable, Hashable {
         product == .other && name.trimmingCharacters(in: CharacterSet(charactersIn: "? ")).isEmpty
     }
 
+    /// The line's own color (0xRRGGBB) where its network has fixed line colors, otherwise nil for the
+    /// product's color. So far S-Bahn Berlin (#206): only with its operator, since S1–S9 exist in other
+    /// cities too (Dresden, München, …). bahn.de writes "S 41", Transitous "S41".
+    public var lineColorHex: UInt32? {
+        guard product == .suburban, operatorName?.lowercased().contains("s-bahn berlin") == true else { return nil }
+        return Self.sBahnBerlinColors[name.uppercased().filter { !$0.isWhitespace }]
+    }
+
+    /// VBB's S-Bahn Berlin line colors.
+    static let sBahnBerlinColors: [String: UInt32] = [
+        "S1": 0xDA6BA2,
+        "S2": 0x007734, "S25": 0x007734, "S26": 0x007734,
+        "S3": 0x0066AD,
+        "S41": 0xAD5937, "S42": 0xCB6418,
+        "S45": 0xCD9C53, "S46": 0xCD9C53, "S47": 0xCD9C53,
+        "S5": 0xEB7405,
+        "S7": 0x816DA6, "S75": 0x816DA6,
+        "S8": 0x66AA22, "S85": 0x66AA22,
+        "S9": 0x992746,
+    ]
+
     /// Another train coupled to this one for the whole stretch ridden, under its own number.
     public struct CoupledTrain: Codable, Sendable, Hashable {
         /// "ICE 940"

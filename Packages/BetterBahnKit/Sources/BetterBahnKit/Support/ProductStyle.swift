@@ -50,5 +50,11 @@ public extension Product {
 public extension Line {
     /// The product's symbol, or a bed for a night train.
     var symbolName: String { product.symbolName(nightTrain: isNightTrain) }
+
+    /// The line's own color where it has one (S-Bahn Berlin, #206), else the product's.
+    var color: Color {
+        guard let hex = lineColorHex else { return product.color }
+        return Color(red: Double(hex >> 16 & 0xFF) / 255, green: Double(hex >> 8 & 0xFF) / 255, blue: Double(hex & 0xFF) / 255)
+    }
 }
 #endif

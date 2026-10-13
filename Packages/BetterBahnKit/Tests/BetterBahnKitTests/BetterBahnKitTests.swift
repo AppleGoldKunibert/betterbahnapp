@@ -2310,6 +2310,20 @@ private final class Ril100GeocodeProtocol: URLProtocol, @unchecked Sendable {
         #expect(!regional.includes(entry(sBahn)))
     }
 
+    @Test func sBahnBerlinLineColors() {
+        func line(_ name: String, _ op: String?, _ product: Product = .suburban) -> Line {
+            Line(name: name, number: nil, product: product, operatorName: op)
+        }
+        #expect(line("S 41", "S-Bahn Berlin GmbH").lineColorHex == 0xAD5937)
+        #expect(line("S5", "S-Bahn Berlin").lineColorHex == 0xEB7405)
+        #expect(line("S 1", "S-Bahn Berlin GmbH").lineColorHex == 0xDA6BA2)
+        // Same names elsewhere keep the S-Bahn green.
+        #expect(line("S 1", "DB Regio AG S-Bahn München").lineColorHex == nil)
+        #expect(line("S1", nil).lineColorHex == nil)
+        #expect(line("S 99", "S-Bahn Berlin GmbH").lineColorHex == nil)
+        #expect(line("S5", "S-Bahn Berlin", .bus).lineColorHex == nil)
+    }
+
     @Test func pkceMatchesRFC7636() {
         #expect(PKCE.challenge(for: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk") == "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM")
         #expect(PKCE().verifier.count == 64)

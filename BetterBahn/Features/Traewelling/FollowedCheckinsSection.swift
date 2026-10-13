@@ -535,7 +535,7 @@ private struct FollowedRideMap: View {
     @State private var camera: MapCameraPosition = .automatic
     @State private var showMap = false
 
-    private var color: Color { route.line?.product.color ?? .brand }
+    private var color: Color { route.line?.color ?? .brand }
 
     var body: some View {
         Button {
