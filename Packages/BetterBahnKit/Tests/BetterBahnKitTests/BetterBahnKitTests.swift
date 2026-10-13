@@ -2103,6 +2103,57 @@ private final class TwinTrainProtocol: URLProtocol, @unchecked Sendable {
 
         #expect(stations.map(\.id) == ["frankfurtHbf", "fulda"])
     }
+
+    /// A slow plain search for the letters of a code mustn't lose the code's station: `CombinedProvider`
+    /// drops the whole search after 2.5 s, which left "xszh" with nothing.
+    @Test func slowPlainSearchDoesntLoseTheCodesStation() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [SlowCodeGeocodeProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let provider = TransitousProvider(http: HTTPClient(session: session))
+
+        let stations = try await provider.searchStations(StationSearch(parsing: "xszh"), near: nil)
+
+        #expect(stations.map(\.id) == ["zurichHb"])
+        // Checked against the slow answer itself, not a stopwatch, so a busy test runner can't fail it.
+        #expect(!SlowCodeGeocodeProtocol.answeredSlowly.withLock { $0 })
+    }
+}
+
+/// "Zürich HB" gives the station at once; the plain search for the typed letters "xszh" answers only after 5 s.
+private final class SlowCodeGeocodeProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    private let stopped = Mutex(false)
+    /// Set once the slow answer is due, whether or not the request was still waiting for it.
+    static let answeredSlowly = Mutex(false)
+    override func stopLoading() { stopped.withLock { $0 = true } }
+
+    override func startLoading() {
+        let url = request.url!
+        let text = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?.first { $0.name == "text" }?.value ?? ""
+        let body = text == "Zürich HB"
+            ? #"[{"type":"STOP","id":"zurichHb","name":"Zürich HB","lat":47.3779,"lon":8.5403,"country":"CH","modes":["HIGHSPEED_RAIL","REGIONAL_RAIL"],"importance":0.01}]"#
+            : "[]"
+        nonisolated(unsafe) let loader = self
+        let finish: @Sendable () -> Void = {
+            guard !loader.stopped.withLock({ $0 }) else { return }
+            let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            loader.client?.urlProtocol(loader, didReceive: response, cacheStoragePolicy: .notAllowed)
+            loader.client?.urlProtocol(loader, didLoad: Data(body.utf8))
+            loader.client?.urlProtocolDidFinishLoading(loader)
+        }
+        if text == "xszh" {
+            DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
+                Self.answeredSlowly.withLock { $0 = true }
+                finish()
+            }
+        } else {
+            finish()
+        }
+    }
 }
 
 /// "Frankfurt (Main) Hbf" gives the station, anything else ("ff" and its extras) its lower level and Fulda.

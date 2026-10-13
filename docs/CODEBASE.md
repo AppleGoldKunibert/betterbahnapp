@@ -157,6 +157,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   "XSZH" Zürich HB. That file has no positions, so these entries have an empty point list (`Entry.isAbroad`) and a stop
   is matched by its exact name (`exactNameKey`: brackets kept, case/accents/"(CH)" ignored, both names of "A / B"
   count); a match by position always wins.
+  For a typed code the plain search for its letters gets `extraQueryDeadline` like the code's own lookup, so a slow
+  answer can't run into `CombinedProvider`'s 2.5 s and take the code's station with it ("xszh" found nothing).
 - `Transit/CombinedProvider.swift` – what the app uses: primary `TransitousProvider`, optional
   fallback (none configured), cooldown health check, `BahnDeClient`, `VagonwebClient`, `BahnExpertClient`, `BahnJetztClient`.
 - `Transit/BahnDe/` – bahn.de web API via the `Cloudflare/bahnde-proxy` Worker (same endpoints/headers as Travel::Status::DE::DBRIS):
