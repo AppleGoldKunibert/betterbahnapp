@@ -20,6 +20,14 @@ public enum Product: String, Codable, Sendable, CaseIterable, Hashable {
     case ferry
     case other
 
+    /// A value this version doesn't know (saved by a newer build, e.g. a branch build with more product
+    /// groups) reads as `.other`. Otherwise one unknown value made the whole saved list unreadable, and the
+    /// app started without any saved journey.
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = Product(rawValue: raw) ?? .other
+    }
+
     public var isTrain: Bool {
         switch self {
         case .highSpeed, .longDistance, .nightTrain, .interregio, .regionalExpress, .regional, .suburban: true
