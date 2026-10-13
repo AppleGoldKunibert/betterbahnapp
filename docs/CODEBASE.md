@@ -156,7 +156,11 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   X + country letter (XA Austria, XS Switzerland, XB Belgium, XN Netherlands, XT Czechia, …) or Z (eastern Europe), e.g.
   "XSZH" Zürich HB. That file has no positions, so these entries have an empty point list (`Entry.isAbroad`) and a stop
   is matched by its exact name (`exactNameKey`: brackets kept, case/accents/"(CH)" ignored, both names of "A / B"
-  count); a match by position always wins.
+  count) or, inside a rough border box of its country (`countryBounds`, from the code's second letter), by a looser
+  one (`looseNameKey`: without a trailing "Bahnhof"/"St."/"stasjon", "C"/"Central"/"Centraal"/"Centralstation" alike,
+  oe/ø/ö alike: DB's "Utrecht C", "Aalborg", "Broenderslev" are the feeds' "Utrecht Centraal", "Aalborg St.",
+  "Brønderslev"); a match by position always wins, then the same name before a similar one. `Ril100.preload()` loads
+  the list off the main thread when the picker appears.
   For a typed code the plain search for its letters gets `extraQueryDeadline` like the code's own lookup, so a slow
   answer can't run into `CombinedProvider`'s 2.5 s and take the code's station with it ("xszh" found nothing).
 - `Transit/CombinedProvider.swift` – what the app uses: primary `TransitousProvider`, optional

@@ -2042,6 +2042,45 @@ private final class TwinTrainProtocol: URLProtocol, @unchecked Sendable {
         #expect(Ril100.matches(station("h", "Zürich HB", 47.3779, 8.5403), try #require(Ril100.entry(forCode: "xszh"))))
     }
 
+    /// Feeds name stations abroad differently than DB: "Utrecht C" is "Utrecht Centraal", "Aalborg" is
+    /// "Aalborg St.", "Broenderslev" is "Brønderslev".
+    @Test func looseNamesOfStationsAbroad() {
+        func same(_ a: String, _ b: String) -> Bool { Ril100.looseNameKey(a) == Ril100.looseNameKey(b) }
+        #expect(same("Utrecht C", "Utrecht Centraal"))
+        #expect(same("Malmö Central", "Malmö Centralstation"))
+        #expect(same("Friesach", "Friesach Bahnhof"))
+        #expect(same("Aalborg", "Aalborg St."))
+        #expect(same("Voss", "Voss stasjon"))
+        #expect(same("Broenderslev", "Brønderslev St."))
+        #expect(same("Basel SBB", "Basel SBB (CH)"))
+        // Brackets are kept, and a lone word is a name, not a trailing station word.
+        #expect(!same("Hof (Saale)", "Hof"))
+        #expect(Ril100.looseNameKey("Station") == "station")
+        #expect(!same("Friesach", "Friesach Busbahnhof"))
+    }
+
+    @Test func matchesLooselyNamedStationsAbroadInTheirCountry() {
+        #expect(Ril100.code(for: station("a", "Utrecht Centraal", 52.0894, 5.1103)) == "XNU")
+        #expect(Ril100.code(for: station("b", "Amsterdam Centraal", 52.3789, 4.9003)) == "XNAC")
+        #expect(Ril100.code(for: station("c", "Aalborg St.", 57.0434, 9.9166)) == "XDA")
+        #expect(Ril100.code(for: station("d", "Friesach Bahnhof", 46.9565, 14.4003)) == "XAF")
+        #expect(Ril100.code(for: station("e", "Malmö Centralstation", 55.6094, 13.0006)) == "XVM")
+        #expect(Ril100.code(for: station("f", "Brønderslev St.", 57.2706, 9.9411)) == "XDB")
+        // The same name in another country, or without a position, isn't it.
+        #expect(Ril100.code(for: station("g", "Friesach Bahnhof", 49.0, 8.0)) == nil)
+        let unplaced = Station(id: "h", name: "Aalborg St.", coordinate: nil, evaNumber: nil, source: .transitous)
+        #expect(Ril100.code(for: unplaced) == nil)
+    }
+
+    /// The same name beats a similar one even if the other code is shorter.
+    @Test func sameNameBeatsSimilarNameAbroad() {
+        let loose = Ril100.Entry(code: "XN", name: "Utrecht C", points: [])
+        let exact = Ril100.Entry(code: "XNUCX", name: "Utrecht Centraal", points: [])
+        let stop = station("a", "Utrecht Centraal", 52.0894, 5.1103)
+        #expect(Ril100.entry(for: stop, in: [loose, exact])?.code == "XNUCX")
+        #expect(Ril100.entry(for: stop, in: [exact, loose])?.code == "XNUCX")
+    }
+
     /// A match by position beats one by name: a German station keeps its German code even if a station
     /// abroad is called alike.
     @Test func positionBeatsNameAbroad() {
@@ -2119,6 +2158,36 @@ private final class TwinTrainProtocol: URLProtocol, @unchecked Sendable {
         // Checked against the slow answer itself, not a stopwatch, so a busy test runner can't fail it.
         #expect(!SlowCodeGeocodeProtocol.answeredSlowly.withLock { $0 })
     }
+
+    /// "xnac" is DB's "Amsterdam C", which the feed calls "Amsterdam Centraal": found, with the bus stop
+    /// of the same station left out.
+    @Test func searchFindsAStationAbroadUnderAnotherName() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [AbroadGeocodeProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let provider = TransitousProvider(http: HTTPClient(session: session))
+
+        let stations = try await provider.searchStations(StationSearch(parsing: "xnac"), near: nil)
+
+        #expect(stations.first?.id == "amsterdamCentraal")
+        #expect(!stations.contains { $0.id == "amsterdamBus" })
+    }
+}
+
+/// Every query finds Amsterdam's station and a bus stop of it.
+private final class AbroadGeocodeProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let body = #"[{"type":"STOP","id":"amsterdamBus","name":"Amsterdam, Centraal Station","lat":52.3786,"lon":4.9005,"country":"NL","modes":["BUS"],"importance":0.001},"#
+            + #"{"type":"STOP","id":"amsterdamCentraal","name":"Amsterdam Centraal","lat":52.3789,"lon":4.9003,"country":"NL","modes":["HIGHSPEED_RAIL","REGIONAL_RAIL"],"importance":0.02}]"#
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }
 
 /// "Zürich HB" gives the station at once; the plain search for the typed letters "xszh" answers only after 5 s.
