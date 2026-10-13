@@ -464,11 +464,20 @@ extension BahnDeClient {
     /// planned time, while DB had it on time. Entries bahn.de has no live time for keep Transitous'.
     static func applyingLiveTimes(_ entries: [BoardEntry], using board: [Board.Entry], kind: BoardKind = .departures) -> [BoardEntry] {
         entries.map { entry in
-            guard entry.kind == kind, let live = boardMatch(for: entry, in: board)?.ezZeit.flatMap(parseBerlinTime) else { return entry }
+            guard entry.kind == kind, let live = boardMatch(for: entry, in: board)?.ezZeit.flatMap(parseBerlinTime),
+                  !turnsEarlyIntoOnTime(entry.time, with: live) else { return entry }
             var corrected = entry
             corrected.time.actual = live
             return corrected
         }
+    }
+
+    /// bahn.de shows a train that runs early as on time (±0, even at −10). A time that is early by two minutes or
+    /// more is therefore not traded for bahn.de's "on time". Below that, DB's "on time" still wins over a forecast a
+    /// minute early (ICE 146 above).
+    static func turnsEarlyIntoOnTime(_ time: TimeInfo, with live: Date) -> Bool {
+        guard let current = time.actual else { return false }
+        return time.planned.timeIntervalSince(current) >= 120 && abs(live.timeIntervalSince(time.planned)) < 60
     }
 
     /// bahn.de's board entry for `entry`'s train: long-distance trains by number, other trains by run
@@ -808,33 +817,120 @@ extension BahnDeClient {
     /// at its start, its end and its stops. Transitous' realtime for cross-border trains often carries
     /// no delay at all and DB Timetables can miss a stop, so RJ 383 showed +59 at Dresden Hbf but none
     /// at Bad Schandau, where bahn.de had +57. Matched like the platforms, by planned time and place.
-    public static func applyingLiveTimes(from stops: [JourneyStop], to leg: Leg) -> Leg {
+    ///
+    /// `keepingDelays` is for when DB Timetables has been asked already: a time it put a delay (or an early
+    /// time) on stays, and bahn.de only fills what is missing or on time. bahn.de's forecast can be far off for
+    /// some trains (RE 3 3354 on 9 Oct 2026: +7 at Gesundbrunnen and ±0 at the end, where DB Timetables and
+    /// bahn.expert had +19 and +7), and it used to overwrite DB Timetables' times.
+    public static func applyingLiveTimes(from stops: [JourneyStop], to leg: Leg, keepingDelays: Bool = false,
+                                         expert: ExpertTimes? = nil) -> Leg {
         var leg = leg
-        if let actual = stop(in: stops, at: leg.origin, planned: leg.departure.planned, side: \.departure)?.departure?.actual {
+        if let stop = stop(in: stops, at: leg.origin, planned: leg.departure.planned, side: \.departure),
+           let actual = stop.departure?.actual,
+           replaces(leg.departure, with: actual, keepingDelays: keepingDelays,
+                    expert: expert?.actual(eva: stop.evaNumber, planned: leg.departure.planned, side: .departure)) {
             leg.departure.actual = actual
         }
-        if let actual = stop(in: stops, at: leg.destination, planned: leg.arrival.planned, side: \.arrival)?.arrival?.actual {
+        if let stop = stop(in: stops, at: leg.destination, planned: leg.arrival.planned, side: \.arrival),
+           let actual = stop.arrival?.actual,
+           replaces(leg.arrival, with: actual, keepingDelays: keepingDelays,
+                    expert: expert?.actual(eva: stop.evaNumber, planned: leg.arrival.planned, side: .arrival)) {
             leg.arrival.actual = actual
         }
-        leg.stopovers = applyingLiveTimes(from: stops, to: leg.stopovers)
+        leg.stopovers = applyingLiveTimes(from: stops, to: leg.stopovers, keepingDelays: keepingDelays, expert: expert)
         return leg
     }
 
-    /// `stopovers` with bahn.de's live times where it has one (see `applyingLiveTimes(from:to:)` for a leg).
-    public static func applyingLiveTimes(from stops: [JourneyStop], to stopovers: [Stopover]) -> [Stopover] {
+    /// `stopovers` with bahn.de's live times where it has one (see `applyingLiveTimes(from:to:keepingDelays:)` for a leg).
+    public static func applyingLiveTimes(from stops: [JourneyStop], to stopovers: [Stopover], keepingDelays: Bool = false,
+                                         expert: ExpertTimes? = nil) -> [Stopover] {
         var stopovers = stopovers
         for index in stopovers.indices {
             let stopover = stopovers[index]
             if let planned = stopover.arrival?.planned,
-               let actual = stop(in: stops, at: stopover.station, planned: planned, side: \.arrival)?.arrival?.actual {
+               let stop = stop(in: stops, at: stopover.station, planned: planned, side: \.arrival),
+               let actual = stop.arrival?.actual,
+               replaces(stopover.arrival, with: actual, keepingDelays: keepingDelays,
+                        expert: expert?.actual(eva: stop.evaNumber, planned: planned, side: .arrival)) {
                 stopovers[index].arrival?.actual = actual
             }
             if let planned = stopover.departure?.planned,
-               let actual = stop(in: stops, at: stopover.station, planned: planned, side: \.departure)?.departure?.actual {
+               let stop = stop(in: stops, at: stopover.station, planned: planned, side: \.departure),
+               let actual = stop.departure?.actual,
+               replaces(stopover.departure, with: actual, keepingDelays: keepingDelays,
+                        expert: expert?.actual(eva: stop.evaNumber, planned: planned, side: .departure)) {
                 stopovers[index].departure?.actual = actual
             }
         }
         return stopovers
+    }
+
+    /// Whether bahn.de's `actual` replaces `time`: not when it would turn an early time into "on time"
+    /// (`turnsEarlyIntoOnTime`), and with `keepingDelays` not when `time` already carries a delay or an early
+    /// time (anything but "on time") either.
+    ///
+    /// Where the two disagree and bahn.expert's time for the stop (`expert`) is known, it decides: the value
+    /// closer to it stays, and DB Timetables' on a tie.
+    static func replaces(_ time: TimeInfo?, with actual: Date, keepingDelays: Bool, expert: Date? = nil) -> Bool {
+        guard let time, let current = time.actual else { return true }
+        if turnsEarlyIntoOnTime(time, with: actual) { return false }
+        if let expert, keepingDelays, abs(actual.timeIntervalSince(current)) >= 60 {
+            return abs(actual.timeIntervalSince(expert)) < abs(current.timeIntervalSince(expert))
+        }
+        guard keepingDelays else { return true }
+        return time.delayMinutes == 0
+    }
+
+    /// Whether bahn.de's live time differs by a minute or more from one `stopovers` already have, which is
+    /// when asking bahn.expert is worth a request.
+    static func disagrees(_ stops: [JourneyStop], with stopovers: [Stopover]) -> Bool {
+        stopovers.contains { stopover in
+            differs(stops, stopover.station, stopover.arrival, side: \.arrival)
+                || differs(stops, stopover.station, stopover.departure, side: \.departure)
+        }
+    }
+
+    /// `disagrees(_:with:)` for a leg: its stops, and its ends where it has none.
+    static func disagrees(_ stops: [JourneyStop], with leg: Leg) -> Bool {
+        differs(stops, leg.origin, leg.departure, side: \.departure)
+            || differs(stops, leg.destination, leg.arrival, side: \.arrival)
+            || disagrees(stops, with: leg.stopovers)
+    }
+
+    private static func differs(_ stops: [JourneyStop], _ station: Station, _ time: TimeInfo?,
+                                side: KeyPath<JourneyStop, TimeInfo?>) -> Bool {
+        guard let time, let current = time.actual,
+              let live = stop(in: stops, at: station, planned: time.planned, side: side)?[keyPath: side]?.actual else { return false }
+        return abs(live.timeIntervalSince(current)) >= 60
+    }
+
+    /// `stopovers` with bahn.de's live times (`applyingLiveTimes(from:to:keepingDelays:expert:)`), asking bahn.expert
+    /// first when bahn.de and DB Timetables disagree on a stop of this train. Without an answer from bahn.expert
+    /// DB Timetables' times stay, as before.
+    public static func applyingLiveTimes(from stops: [JourneyStop], to stopovers: [Stopover], line: Line?, keepingDelays: Bool,
+                                         referee: BahnExpertClient?) async -> [Stopover] {
+        var expert: ExpertTimes?
+        if keepingDelays, disagrees(stops, with: stopovers),
+           let day = stopovers.first.flatMap({ $0.departure?.planned ?? $0.arrival?.planned }).map(berlinDay) {
+            expert = await expertTimes(for: line, day: day, referee: referee)
+        }
+        return applyingLiveTimes(from: stops, to: stopovers, keepingDelays: keepingDelays, expert: expert)
+    }
+
+    /// `applyingLiveTimes(from:to:line:keepingDelays:referee:)` for a leg.
+    public static func applyingLiveTimes(from stops: [JourneyStop], to leg: Leg, keepingDelays: Bool,
+                                         referee: BahnExpertClient?) async -> Leg {
+        var expert: ExpertTimes?
+        if keepingDelays, disagrees(stops, with: leg) {
+            expert = await expertTimes(for: leg.line, day: berlinDay(leg.departure.planned), referee: referee)
+        }
+        return applyingLiveTimes(from: stops, to: leg, keepingDelays: keepingDelays, expert: expert)
+    }
+
+    private static func expertTimes(for line: Line?, day: String, referee: BahnExpertClient?) async -> ExpertTimes? {
+        guard let referee, let line, let number = line.dispatchNumber.flatMap({ Int($0) }) else { return nil }
+        return await ExpertTimesCache.shared.times(category: TimetablesClient.category(from: line.name), number: number,
+                                                    day: day, using: referee)
     }
 
     /// Whether `leg` lacks a platform at its start, its end or any of its stops.

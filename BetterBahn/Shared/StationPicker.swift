@@ -94,7 +94,8 @@ struct StationInput<Focus: Hashable>: View {
 
             if showsSuggestions {
                 suggestionList
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    // Only fades: sliding up on removal would pass over the buttons and fields above.
+                    .transition(.opacity)
             }
         }
         .preference(key: StationSuggestionsShownKey.self, value: showsSuggestions)
@@ -285,6 +286,10 @@ struct StationInput<Focus: Hashable>: View {
     }
 
     private func select(_ suggestion: Station) {
+        // The list is already closed after a pick, but its rows stay on screen (and tappable) while
+        // they fade out: a tap on the button next to them – "+" in the route card – must not pick
+        // another station from them.
+        guard showsSuggestions else { return }
         submitPending = false
         showsSuggestions = false
         station = suggestion

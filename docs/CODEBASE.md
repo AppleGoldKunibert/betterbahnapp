@@ -162,7 +162,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   (`fillingMissingPlatforms`, e.g. Hamburg Hbf; saved journeys via `JourneyRefresher`, which also applies the names below), and bahn.de's
   own train names for boards (departures and arrivals) and journey legs (`correctingTrainNames`, e.g. "RJ 171" that Transitous calls "ICE 171"),
   and DB's live times (`ezZeit`) for every train on boards (not subway, tram, bus; RE/RB, S-Bahn and other brands by run number or name) (`correctingFromBoard`, `applyingLiveTimes`), which
-  beat DELFI's forecasts in Transitous; the journey details' live times likewise win on legs and trains (`applyingLiveTimes(from:to:)`, RJ 383 had no delay at Bad Schandau otherwise). Responses are
+  beat DELFI's forecasts in Transitous; the journey details' live times likewise win on legs and trains (`applyingLiveTimes(from:to:)`, RJ 383 had no delay at Bad Schandau otherwise), but not over a delay or early time DB Timetables already put on a stop (`keepingDelays`: bahn.de showed +7 for RE 3 3354 at Gesundbrunnen where DB had +19), and never turning a time that is 2+ minutes early into "on time" (`turnsEarlyIntoOnTime`: bahn.de shows early trains as ±0, on boards too). Responses are
   cached; a 403/429 pauses all bahn.de requests through the Worker for 10 min (`BahnDeGate`). Then (and on that first
   blocked answer) the app asks bahn.de from the phone instead: `BahnDeBrowserFallback` (set at launch in `AppModel.init`,
   none in widgets/tests) loads the same `/web/api/…` path at www.bahn.de through `BahnDeBrowser` (hidden `WebPage` on
@@ -195,6 +195,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   in `connections/connections` (by run number and planned time) and reads DB's `dispositionStatus`
   (`WAITING`/`NOT_WAITING`). `dispositions(in:now:)` asks for transfers from 15 min ago up to 3 h ahead, for
   `JourneyDetailView` and for saved journeys' refresh, which notifies once per decision (`notificationID`).
+  `ExpertTimes` (`liveTimes(category:number:day:)`, cached 2 min per run in `ExpertTimesCache`) is the referee where bahn.de and DB
+  Timetables disagree on a stop: `BahnDeClient.applyingLiveTimes(…referee:)` asks only then, and the value closer to bahn.expert's stays
+  (DB Timetables' on a tie); an early time still never becomes "on time". Without an answer DB Timetables' rule stands.
 - `Transit/TrainNumberSearch.swift` – train search by number (#183): bahn.expert's `journey/find` lists the runs with
   that number on a day (`TrainNumberQuery` reads "ICE 123"/"123"; `ranked` keeps the `TrainSearchFilter`'s kinds, the typed
   category or the same kind of train; countries from the end stops' IFOPT/EVA, `TrainSearchCountry`; trains that may cross
@@ -256,6 +259,10 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   found at a station's EVA is looked for at its other levels (`/station` `meta`, e.g. "Hamburg Hbf (S-Bahn)").
   Trains that ran over 4 hours ago aren't asked about (`changesMemory`): DB has dropped their changes and
   would report them on time. Without live data a time has no `actual`, so no delay shows (not "+0").
+  The departure board gets DB's data as well (`applyingRealtime(to:at:)`, called by `StationBoardView` after bahn.de's
+  and Transitous' times are in): its delay, early time, cancellation and platform swap win, a train it reports no
+  change for keeps its time, and nothing changes without `fchg`. The Worker asks the keyless IRIS first and the
+  API Marketplace only when IRIS fails (60 calls/minute).
   A stop DB schedules without a change only counts as on time when the train runs within 2 h
   (`infersOnTime`); a journey tomorrow shows plain times, and `JourneyRefresher.droppingInferredOnTime` clears
   such made-up "pünktlich" from journeys saved earlier.

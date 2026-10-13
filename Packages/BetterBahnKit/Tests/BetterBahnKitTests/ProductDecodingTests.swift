@@ -2,11 +2,11 @@ import Foundation
 import Testing
 @testable import BetterBahnKit
 
-/// Saved data written by a build with more product groups must stay readable by one with fewer.
-/// The unknown values are made up on purpose: real groups like `nightTrain` become known once a build adds them.
+/// Saved data written by a build with more product groups must stay readable by one with fewer. The values
+/// below are made up on purpose: real new groups (nightTrain, interregio) become known cases once a build has them.
 struct ProductDecodingTests {
     @Test func anUnknownProductReadsAsOther() throws {
-        let decoded = try JSONDecoder().decode(Set<Product>.self, from: Data(#"["highSpeed","hyperloop","zeppelin","regional"]"#.utf8))
+        let decoded = try JSONDecoder().decode(Set<Product>.self, from: Data(#"["highSpeed","hyperloop","teleporter","regional"]"#.utf8))
         #expect(decoded == [.highSpeed, .regional, .other])
     }
 
@@ -20,7 +20,7 @@ struct ProductDecodingTests {
     /// One unknown value inside a struct must not make the whole struct fail.
     @Test func anUnknownProductInsideAStructStillDecodes() throws {
         struct Holder: Codable { var products: Set<Product>; var line: Product }
-        let json = #"{"products":["hyperloop","longDistance"],"line":"zeppelin"}"#
+        let json = #"{"products":["hyperloop","longDistance"],"line":"teleporter"}"#
         let holder = try JSONDecoder().decode(Holder.self, from: Data(json.utf8))
         #expect(holder.products == [.other, .longDistance])
         #expect(holder.line == .other)
