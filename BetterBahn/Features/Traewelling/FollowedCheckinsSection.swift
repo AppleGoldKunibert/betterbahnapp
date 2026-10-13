@@ -90,7 +90,7 @@ struct FollowedCheckinsSection: View {
                     if showsList {
                         ForEach(people) { person in
                             personRow(person, likesEnabled: followed.likesEnabled)
-                                .transition(.opacity.combined(with: .move(edge: .top)))
+                                .transition(.fold)
                         }
                     }
                 }
@@ -117,7 +117,7 @@ struct FollowedCheckinsSection: View {
                     ForEach(person.statuses, id: \.id) { status in
                         checkinCard(status, likesEnabled: likesEnabled, showsPerson: false)
                             .padding(.leading, 16)
-                            .transition(.opacity.combined(with: .move(edge: .top)))
+                            .transition(.fold)
                     }
                 }
             }

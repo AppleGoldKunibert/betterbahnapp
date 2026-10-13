@@ -367,6 +367,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 
 - Put logic and models in BetterBahnKit (testable, `Sendable`, `public`); keep views thin.
 - Add a Kit test for behaviour changes; mock HTTP with a `URLProtocol` subclass like existing tests.
+- Content that folds in or out of the page uses `.transition(.fold)` (fade only, `Shared/DesignSystem.swift`), never `.move(edge: .top)`: it slides over the text above (#227, #267).
 - German, plain user-facing wording; DB-style station names (e.g. "Frankfurt (Oder)", "Bernau (bei Berlin)").
 - Commit titles: short imperative sentence ("Show …", "Stop …", "Keep …"), add `(fixes #N)` only
   when an issue is really fixed. No Claude co-author trailer.
