@@ -157,7 +157,7 @@ struct IconLabel: View {
     let title: String
     let systemImage: String
     let color: Color
-    /// Optional one-line explanation in small grey text under the title.
+    /// Optional short explanation in small grey text under the title (wraps to a second line if needed).
     var subtitle: String? = nil
 
     var body: some View {
@@ -168,8 +168,7 @@ struct IconLabel: View {
                     Text(subtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
+                        .lineLimit(2)
                 }
             } else {
                 Text(title)
