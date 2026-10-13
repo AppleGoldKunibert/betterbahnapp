@@ -93,6 +93,11 @@ public extension CombinedProvider {
     /// taken for a train that doesn't exist.
     func leg(forCheckin status: TraewellingStatus) async throws -> Leg? {
         guard !status.checkin.isManualTrip, let ride = status.journey(geometry: nil)?.legs.first else { return nil }
+        // Träwelling takes its trips from Transitous, so the check-in names the run itself: no need to find it on a board.
+        if let id = status.checkin.hafasId, let run = try? await trip(id: id, source: primary.source),
+           let leg = Self.leg(of: run, riding: ride) {
+            return leg
+        }
         // The lookup board skips loading every ICE's whole run, which a hub like Berlin Hbf has several of
         // in a few minutes and which could run into the deadline ("Keine Antwort") before the S-Bahn showed.
         let entries = try await departuresForTrainLookup(at: ride.origin, date: ride.departure.planned.addingTimeInterval(-2 * 60), duration: 6)

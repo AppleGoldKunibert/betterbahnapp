@@ -29,6 +29,27 @@ extension AppModel {
         }
     }
 
+    /// The train of someone's check-in in the timetable. The lookup runs on its own, so folding the card away
+    /// (which cancels whoever waits for it) doesn't stop it: it still ends in `followedTrains`, and opening
+    /// the card again joins one that is still running instead of starting over.
+    func followedTrain(for status: TraewellingStatus) async throws -> Leg? {
+        if let known = followedTrains[status.id] { return known }
+        let load: Task<Leg?, Error>
+        if let running = followedTrainLoads[status.id] {
+            load = running
+        } else {
+            let lookup = provider
+            load = Task { try await lookup.leg(forCheckin: status) }
+            followedTrainLoads[status.id] = load
+            Task { [weak self] in
+                let result = await load.result
+                self?.followedTrainLoads[status.id] = nil
+                if case .success(let leg?) = result { self?.followedTrains[status.id] = leg }
+            }
+        }
+        return try await load.value
+    }
+
     /// The custom emojis for someone else's check-in text: those of the Mastodon instance connected to
     /// their account, else (none connected, or it can't be reached) zug.network's, like for the user's own.
     func emojis(forTextOf status: TraewellingStatus) async -> [CustomEmoji] {
@@ -152,7 +173,7 @@ private struct FollowedCheckinCard: View {
     private var checkin: TraewellingStatus.Checkin { status.checkin }
     // What an earlier opening looked up counts at once (`AppModel.followedTracks`/`followedTrains`).
     private var track: [Coordinate]? { geometry ?? model.followedTracks[status.id] }
-    private var train: Leg? { trainLeg ?? model.followedTrains[status.id] ?? nil }
+    private var train: Leg? { trainLeg ?? model.followedTrains[status.id] }
     private var trainSearched: Bool { searchedTrain || model.followedTrains[status.id] != nil }
     private var ride: Leg? { status.journey(geometry: track.flatMap { $0.isEmpty ? nil : $0 })?.legs.first }
     private var origin: String { checkin.origin.station?.name ?? checkin.origin.name ?? "?" }
@@ -194,6 +215,13 @@ private struct FollowedCheckinCard: View {
         .task(id: isOpen) {
             guard isOpen else { return }
             await findTrain()
+        }
+        // A train not found is looked for again the next time the card opens.
+        .onChange(of: isOpen) {
+            if !isOpen, train == nil {
+                searchedTrain = false
+                trainLookupFailed = false
+            }
         }
         .task(id: isOpen) {
             guard isOpen, emojis.isEmpty, model.followedEmojis[status.id] == nil,
@@ -364,8 +392,7 @@ private struct FollowedCheckinCard: View {
         trainLookupFailed = false
         defer { isSearchingTrain = false }
         do {
-            let found = try await model.provider.leg(forCheckin: status)
-            model.followedTrains[status.id] = .some(found)
+            let found = try await model.followedTrain(for: status)
             trainLeg = found
             searchedTrain = true
         } catch {

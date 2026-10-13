@@ -283,9 +283,12 @@ final class AppModel {
     var followedCheckins: FollowedCheckins?
     @ObservationIgnored var followedCheckinsLoadedAt: Date?
     /// What opening a followed check-in looked up, by status ID, so opening it again shows it at once:
-    /// Träwelling's track of the ride (empty: it has none) and the train found in the timetable (nil: none).
+    /// Träwelling's track of the ride (empty: it has none) and the train found in the timetable. A train not
+    /// found isn't remembered: it is looked for again whenever the check-in is opened.
     @ObservationIgnored var followedTracks: [Int: [Coordinate]] = [:]
-    @ObservationIgnored var followedTrains: [Int: Leg?] = [:]
+    @ObservationIgnored var followedTrains: [Int: Leg] = [:]
+    /// Train lookups under way, by status ID: they finish even when the card that asked is folded away.
+    @ObservationIgnored var followedTrainLoads: [Int: Task<Leg?, Error>] = [:]
     /// The custom emojis for each followed check-in's text, loaded with the list so its pictures are ready on opening.
     @ObservationIgnored var followedEmojis: [Int: [CustomEmoji]] = [:]
 
