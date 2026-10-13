@@ -204,7 +204,7 @@ struct AddToWalletButton: View {
                     .frame(height: 50)
                     .disabled(isLoading)
                     .overlay { if isLoading { ProgressView() } }
-                Text("Für Apple Wallet wird der Pass auf dem BetterBahn-Server signiert. Dabei wird nichts gespeichert.")
+                Text("Für Apple Wallet wird der Pass auf einem Server signiert. Dabei wird nichts gespeichert.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
