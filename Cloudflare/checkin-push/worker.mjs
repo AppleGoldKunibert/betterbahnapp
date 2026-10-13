@@ -330,13 +330,15 @@ class APNs {
     constructor(env, now, fetchUpstream) {
         this.env = env;
         this.now = now;
-        this.fetch = fetchUpstream;
+        // Called as a plain function: Cloudflare's `fetch` refuses to run as a method of this object.
+        this.fetchUpstream = fetchUpstream;
     }
 
     /// "sent", "gone" (the app was deleted or the token belongs elsewhere) or "failed".
     async send(subscription, payload) {
         const host = subscription.sandbox ? "api.sandbox.push.apple.com" : "api.push.apple.com";
-        const response = await this.fetch(`https://${host}/3/device/${subscription.device_token}`, {
+        const fetchUpstream = this.fetchUpstream;
+        const response = await fetchUpstream(`https://${host}/3/device/${subscription.device_token}`, {
             method: "POST",
             headers: {
                 authorization: `bearer ${await this.providerToken()}`,

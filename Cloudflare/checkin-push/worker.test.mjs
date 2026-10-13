@@ -46,10 +46,12 @@ async function environment(extra = {}) {
     };
 }
 
-/// Träwelling and APNs stand-in: answers by URL and records each request.
+/// Träwelling and APNs stand-in: answers by URL and records each request. Like Cloudflare's `fetch`, it
+/// refuses to be called as a method of another object ("Illegal invocation").
 function fakeUpstream(routes) {
     const calls = [];
-    const fetch = async (url, init = {}) => {
+    const fetch = async function (url, init = {}) {
+        if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation");
         calls.push({ url, init });
         const answer = Object.entries(routes).find(([prefix]) => url.includes(prefix))?.[1];
         if (!answer) return new Response("", { status: 404 });
