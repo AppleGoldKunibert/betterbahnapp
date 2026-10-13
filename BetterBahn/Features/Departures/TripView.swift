@@ -249,7 +249,7 @@ struct TripContent: View {
     @State private var operatorStops: [String: [String]] = [:]
     @Environment(AppModel.self) private var model
 
-    private var color: Color { trip.line?.product.color ?? .gray }
+    private var color: Color { trip.line?.color ?? .gray }
 
     var body: some View {
         VStack(spacing: 16) {

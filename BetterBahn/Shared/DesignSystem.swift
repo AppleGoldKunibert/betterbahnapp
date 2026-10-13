@@ -200,7 +200,7 @@ struct LineBadge: View {
             .padding(.horizontal, size == .small ? 6 : 8)
             .padding(.vertical, size == .small ? 3 : 4)
             .foregroundStyle(.white)
-            .background(line.product.color.gradient, in: .capsule)
+            .background(line.color.gradient, in: .capsule)
         } else {
             HStack(spacing: 3) {
                 Image(systemName: "figure.walk")
@@ -748,7 +748,7 @@ struct JourneySegmentBar: View {
                     let length = spans[index].duration / total
                     Capsule()
                         .fill(leg.isWalking ? AnyShapeStyle(Color.secondary.opacity(0.3))
-                                            : AnyShapeStyle((leg.line?.product.color ?? .gray).gradient))
+                                            : AnyShapeStyle((leg.line?.color ?? .gray).gradient))
                         .frame(width: max(proxy.size.width * length - 2, 4), height: leg.isWalking ? 3 : 6)
                         .offset(x: proxy.size.width * offset)
                 }

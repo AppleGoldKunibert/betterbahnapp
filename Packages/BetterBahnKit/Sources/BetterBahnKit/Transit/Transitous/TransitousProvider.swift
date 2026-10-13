@@ -1560,7 +1560,7 @@ public struct TransitousProvider: TransitProvider {
                 guard lines.count == 1, let known = candidates.first?.line else { continue }
                 var named = entry
                 named.line = Line(name: known.name, number: known.number, product: known.product,
-                                  operatorName: known.operatorName)
+                                  operatorName: known.operatorName, feedColorHex: known.feedColorHex)
                 return named
             }
             return entry

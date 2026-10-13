@@ -454,7 +454,7 @@ struct CheckinTicket: View {
     let leg: Leg
 
     var body: some View {
-        let color = leg.line?.product.color ?? .brand
+        let color = leg.line?.color ?? .brand
         VStack(spacing: 0) {
             HStack {
                 LineBadge(line: leg.line)
