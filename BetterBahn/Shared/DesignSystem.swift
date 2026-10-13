@@ -1021,3 +1021,10 @@ private struct NameTagLayout: Layout {
         }
     }
 }
+
+extension AnyTransition {
+    /// Folding something in or out of the page (a stop list, the Wagenreihung, a check-in's details). It only
+    /// fades: sliding it up by its own height (`.move(edge: .top)`) took it out of its frame while the rest of
+    /// the screen moved up under it, so it was drawn over the text above it (#227, #267).
+    static var fold: AnyTransition { .opacity }
+}

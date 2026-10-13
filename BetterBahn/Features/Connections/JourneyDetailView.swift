@@ -610,7 +610,7 @@ struct LegCard: View {
                                     }
                                     .strikethrough(stop.cancelled)
                                 }
-                                .transition(.opacity.combined(with: .move(edge: .top)))
+                                .transition(.fold)
                             }
                         }
                     }
@@ -668,7 +668,7 @@ struct LegCard: View {
                                     ActionTileButton(title: "Träwelling", systemImage: "checkmark.seal.fill", tint: .brand, action: onCheckin)
                                 }
                             }
-                            .transition(.opacity.combined(with: .move(edge: .top)))
+                            .transition(.fold)
                         }
                     }
                 }

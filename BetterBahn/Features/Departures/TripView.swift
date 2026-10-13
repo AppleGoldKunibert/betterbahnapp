@@ -482,7 +482,7 @@ struct TripContent: View {
                 }
                 if sequenceStopID == stop.id, let request = coachSequenceRequest(at: stop) {
                     CoachSequencePanel(request: request)
-                        .transition(.coachSequenceFold)
+                        .transition(.fold)
                 }
             }
         }
