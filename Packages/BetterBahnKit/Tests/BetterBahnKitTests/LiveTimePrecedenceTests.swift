@@ -78,4 +78,44 @@ struct LiveTimePrecedenceTests {
         #expect(delays(BahnDeClient.applyingLiveTimes(from: bahnDe, to: timetables, keepingDelays: true)) == [-2, -1])
         #expect(delays(BahnDeClient.applyingLiveTimes(from: bahnDe, to: timetables)) == [0, 0])
     }
+
+    /// bahn.de shows early trains as on time. Without DB Timetables (`keepingDelays` off) an early time of two
+    /// minutes or more still isn't replaced by "on time"; a minute early (a forecast) is, and a real delay is.
+    @Test func bahnDeNeverTurnsAnEarlyTimeIntoOnTime() {
+        let known = [stopover("a", 0, delay: -10), stopover("b", 10, delay: -1), stopover("c", 20, delay: -5)]
+        let bahnDe = [bahnDeStop("a", 0, delay: 0), bahnDeStop("b", 10, delay: 0), bahnDeStop("c", 20, delay: 3)]
+
+        #expect(delays(BahnDeClient.applyingLiveTimes(from: bahnDe, to: known)) == [-10, 0, 3])
+        #expect(delays(BahnDeClient.applyingLiveTimes(from: bahnDe, to: known, keepingDelays: true)) == [-10, -1, -5])
+    }
+
+    /// The departure board takes bahn.de's times too, and kept turning an early train into on time.
+    @Test func theBoardKeepsAnEarlyTimeToo() throws {
+        let json = #"""
+        {"entries": [
+            {"journeyId": "a", "zeit": "2026-10-06T09:09:00", "ezZeit": "2026-10-06T09:09:00", "verkehrmittel": {"name": "ICE 146"}},
+            {"journeyId": "b", "zeit": "2026-10-06T09:20:00", "ezZeit": "2026-10-06T09:20:00", "verkehrmittel": {"name": "ICE 1005"}}
+        ]}
+        """#
+        let board = try JSONDecoding.decoder.decode(BahnDeClient.Board.self, from: Data(json.utf8)).entries
+        let berlin = station("8011160", "Berlin Hbf")
+        func departure(_ name: String, _ number: String, _ utc: String, earlyMinutes: TimeInterval) throws -> BoardEntry {
+            let planned = try #require(JSONDecoding.parseISODate(utc))
+            return BoardEntry(kind: .departures, tripId: name, station: berlin,
+                              line: Line(name: name, number: number, product: .highSpeed, operatorName: nil),
+                              otherEnd: "Hamburg Hbf",
+                              time: TimeInfo(planned: planned, actual: planned.addingTimeInterval(-earlyMinutes * 60)),
+                              platform: PlatformInfo(planned: "13", actual: nil), cancelled: false,
+                              terminatesOrOriginatesHere: false, remarks: [], source: .transitous)
+        }
+        let entries = [
+            try departure("ICE 146", "146", "2026-10-06T07:09:00Z", earlyMinutes: 10),
+            try departure("ICE 1005", "1005", "2026-10-06T07:20:00Z", earlyMinutes: 1),
+        ]
+
+        let corrected = BahnDeClient.applyingLiveTimes(entries, using: board)
+
+        #expect(corrected[0].time.delayMinutes == -10)
+        #expect(corrected[1].time.delayMinutes == 0)
+    }
 }

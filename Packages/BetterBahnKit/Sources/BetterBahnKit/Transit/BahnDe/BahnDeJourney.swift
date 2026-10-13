@@ -464,11 +464,20 @@ extension BahnDeClient {
     /// planned time, while DB had it on time. Entries bahn.de has no live time for keep Transitous'.
     static func applyingLiveTimes(_ entries: [BoardEntry], using board: [Board.Entry], kind: BoardKind = .departures) -> [BoardEntry] {
         entries.map { entry in
-            guard entry.kind == kind, let live = boardMatch(for: entry, in: board)?.ezZeit.flatMap(parseBerlinTime) else { return entry }
+            guard entry.kind == kind, let live = boardMatch(for: entry, in: board)?.ezZeit.flatMap(parseBerlinTime),
+                  !turnsEarlyIntoOnTime(entry.time, with: live) else { return entry }
             var corrected = entry
             corrected.time.actual = live
             return corrected
         }
+    }
+
+    /// bahn.de shows a train that runs early as on time (±0, even at −10). A time that is early by two minutes or
+    /// more is therefore not traded for bahn.de's "on time". Below that, DB's "on time" still wins over a forecast a
+    /// minute early (ICE 146 above).
+    static func turnsEarlyIntoOnTime(_ time: TimeInfo, with live: Date) -> Bool {
+        guard let current = time.actual else { return false }
+        return time.planned.timeIntervalSince(current) >= 120 && abs(live.timeIntervalSince(time.planned)) < 60
     }
 
     /// bahn.de's board entry for `entry`'s train: long-distance trains by number, other trains by run
@@ -846,10 +855,13 @@ extension BahnDeClient {
         return stopovers
     }
 
-    /// Whether bahn.de's `actual` replaces `time`: always, unless `keepingDelays` and `time` already carries a
-    /// delay or an early time (anything but "on time").
+    /// Whether bahn.de's `actual` replaces `time`: not when it would turn an early time into "on time"
+    /// (`turnsEarlyIntoOnTime`), and with `keepingDelays` not when `time` already carries a delay or an early
+    /// time (anything but "on time") either.
     static func replaces(_ time: TimeInfo?, with actual: Date, keepingDelays: Bool) -> Bool {
-        guard keepingDelays, let time, time.actual != nil else { return true }
+        guard let time, time.actual != nil else { return true }
+        if turnsEarlyIntoOnTime(time, with: actual) { return false }
+        guard keepingDelays else { return true }
         return time.delayMinutes == 0
     }
 
