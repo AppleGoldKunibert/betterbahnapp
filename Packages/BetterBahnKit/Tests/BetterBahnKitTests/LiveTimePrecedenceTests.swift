@@ -76,7 +76,8 @@ struct LiveTimePrecedenceTests {
         let bahnDe = [bahnDeStop("a", 0, delay: 0), bahnDeStop("b", 10, delay: 0)]
 
         #expect(delays(BahnDeClient.applyingLiveTimes(from: bahnDe, to: timetables, keepingDelays: true)) == [-2, -1])
-        #expect(delays(BahnDeClient.applyingLiveTimes(from: bahnDe, to: timetables)) == [0, 0])
+        // Without DB Timetables' answer, two minutes early still stays (bahn.de never turns it into on time); a minute early is a forecast and gives way.
+        #expect(delays(BahnDeClient.applyingLiveTimes(from: bahnDe, to: timetables)) == [-2, 0])
     }
 
     /// bahn.de shows early trains as on time. Without DB Timetables (`keepingDelays` off) an early time of two
