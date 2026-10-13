@@ -25,7 +25,7 @@ comments are English.
 | `Cloudflare/stats/` | Worker (`betterbahn-stats`, D1 database) for train statistics (#169): the app reports bahn.de journey IDs of regional/long-distance trains it showed (`POST /sightings`), a cron trigger asks bahn.de for each run's schedule, its Wagenreihung at departure and its final realtime state after arrival, stored one row per run (`schema.sql`, compact stops). `backup.sh` downloads runs older than a year, then deletes them. `node --test Cloudflare/stats/worker.test.mjs` (see its README). |
 | `Cloudflare/shared/` | `appattest.mjs`: App Attest verification and the signed tokens both Workers check (`X-BetterBahn-Token`); `node --test Cloudflare/shared/appattest.test.mjs`. |
 | `.github/workflows/` | GitHub Actions: `pr-build.yml` (macOS: Kit tests + unsigned app build on PRs touching code), `pr-secrets.yml` (Linux: gitleaks secret scan + guard against committing `DefaultCredentials.swift`), `sync-prod.yml` (merges prod into every other branch except `appstorerelease`). |
-| `scripts/` | `make-station-hints.py`: rebuilds BetterBahnKit's offline station list for search (see Transitous below). `make-ril100.py`: rebuilds the RIL100 code list (`Ril100.swift`). `searchsim/`: Linux package that copies the platform-neutral Kit sources in (`./sync.sh`), so `swift test` runs `BetterBahnKitTests.swift` without a Mac and `swift run SearchSim scenarios.txt` runs the real station search against live Transitous for ~1150 place/query scenarios (rerun after changing search ranking). |
+| `scripts/` | `make-station-hints.py`: rebuilds BetterBahnKit's offline station list for search (see Transitous below). `make-ril100.py`: rebuilds the RIL100 code list (`Ril100.swift`), also from DB's XLSX of all operating points for the codes abroad (needs `openpyxl`). `searchsim/`: Linux package that copies the platform-neutral Kit sources in (`./sync.sh`), so `swift test` runs `BetterBahnKitTests.swift` without a Mac and `swift run SearchSim scenarios.txt` runs the real station search against live Transitous for ~1150 place/query scenarios (rerun after changing search ranking). |
 | `docs/transit-providers.md` | Why Transitous is the primary data source and fallback options. |
 | `docs/app-review-notes.md` | App Store submission checklist (privacy URL, App Privacy, demo access) and review notes. |
 
@@ -152,6 +152,11 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   that are the same station; behind the first hit only when that starts with the typed word ("Bad …"). Stops are
   matched to codes by position and name (`matches`); the shortest matching code is shown ("BL", not "BLS"), on the
   right in the picker with the expert option "RIL100-Codes in der Suche" (`AppSettings.ril100Enabled`).
+  Stations abroad (~5,300 from DB's "Übersicht der Betriebsstellen und deren Abkürzungen" XLSX, newest sheet, not "ehemals"):
+  X + country letter (XA Austria, XS Switzerland, XB Belgium, XN Netherlands, XT Czechia, …) or Z (eastern Europe), e.g.
+  "XSZH" Zürich HB. That file has no positions, so these entries have an empty point list (`Entry.isAbroad`) and a stop
+  is matched by its exact name (`exactNameKey`: brackets kept, case/accents/"(CH)" ignored, both names of "A / B"
+  count); a match by position always wins.
 - `Transit/CombinedProvider.swift` – what the app uses: primary `TransitousProvider`, optional
   fallback (none configured), cooldown health check, `BahnDeClient`, `VagonwebClient`, `BahnExpertClient`, `BahnJetztClient`.
 - `Transit/BahnDe/` – bahn.de web API via the `Cloudflare/bahnde-proxy` Worker (same endpoints/headers as Travel::Status::DE::DBRIS):

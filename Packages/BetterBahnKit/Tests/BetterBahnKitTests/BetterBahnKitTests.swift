@@ -2012,6 +2012,46 @@ private final class TwinTrainProtocol: URLProtocol, @unchecked Sendable {
         #expect(Ril100.matches(station("h", "Berlin Hbf", 52.5251, 13.3692), bls))
     }
 
+    /// Codes of stations abroad start with X (west) or Z (east) and the country: XA Austria, XS Switzerland.
+    /// They can be typed like the German ones.
+    @Test func findsStationsAbroadByCode() {
+        #expect(Ril100.entry(forCode: "xszh")?.name == "Zürich HB")
+        #expect(Ril100.entry(forCode: "XASB")?.name == "Salzburg Hbf")
+        #expect(Ril100.entry(forCode: "xai")?.name == "Innsbruck Hbf")
+        #expect(Ril100.entry(forCode: "XNAC")?.name == "Amsterdam C")
+        #expect(Ril100.entry(forCode: "XSZH")?.points.isEmpty == true)
+    }
+
+    /// DB's list has no positions abroad: a stop counts when its name is the same, whatever the case or
+    /// spelling of "Hauptbahnhof", wherever it lies; a different name or a different bracket isn't.
+    @Test func matchesStationsAbroadByName() throws {
+        #expect(Ril100.code(for: station("a", "Zürich HB", 47.3779, 8.5403)) == "XSZH")
+        #expect(Ril100.code(for: station("b", "Salzburg Hauptbahnhof", 47.8130, 13.0453)) == "XASB")
+        #expect(Ril100.code(for: station("c", "Innsbruck Hbf", 47.2634, 11.4008)) == "XAI")
+        #expect(Ril100.code(for: station("d", "Zürich Flughafen", 47.4503, 8.5624)) == "XSZF")
+        // A stop with no position is matched by its name as well.
+        let unplaced = Station(id: "e", name: "Zürich HB", coordinate: nil, evaNumber: nil, source: .transitous)
+        #expect(Ril100.code(for: unplaced) == "XSZH")
+        // Only the whole name: not "Zürich" alone, and a German station keeps its German code (Hof
+        // (Saale) isn't taken for an Austrian "Hof" or "Hof bei Salzburg").
+        #expect(Ril100.code(for: station("f", "Zürich", 47.3779, 8.5403)) == nil)
+        #expect(Ril100.code(for: station("g", "Hof (Saale)", 50.3126, 11.9183)) == "NHO")
+        #expect(Ril100.code(for: station("i", "Basel SBB (CH)", 47.5476, 7.5896)) == "XSB")
+        #expect(Ril100.code(for: station("j", "Poznań Główny", 52.4017, 16.9111)) == "XPPG")
+        #expect(Ril100.code(for: station("k", "Brussel-Zuid", 50.8353, 4.3364)) == "XBB")
+        #expect(Ril100.matches(station("h", "Zürich HB", 47.3779, 8.5403), try #require(Ril100.entry(forCode: "xszh"))))
+    }
+
+    /// A match by position beats one by name: a German station keeps its German code even if a station
+    /// abroad is called alike.
+    @Test func positionBeatsNameAbroad() {
+        let german = Ril100.Entry(code: "ZZ", name: "Zürich HB", points: [Coordinate(latitude: 50, longitude: 8)])
+        let abroad = Ril100.Entry(code: "A", name: "Zürich HB", points: [])
+        let stop = station("a", "Zürich HB", 50.0001, 8.0001)
+        #expect(Ril100.entry(for: stop, in: [abroad, german])?.code == "ZZ")
+        #expect(Ril100.entry(for: stop, in: [german, abroad])?.code == "ZZ")
+    }
+
     /// The station the code belongs to comes first and only once; behind a first hit whose name starts
     /// with the typed word.
     @Test func placesTheCodesStationFirstAndOnce() throws {

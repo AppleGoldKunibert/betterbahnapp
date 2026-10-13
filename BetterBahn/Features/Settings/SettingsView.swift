@@ -186,7 +186,7 @@ struct SettingsView: View {
                     Text("Für Profis")
                 } footer: {
                     Text(settings.expertMode
-                         ? "Zusätzliche Funktionen für Vielfahrer. „Nur Ein-/Ausstieg“ ignorieren zeigt in der Suche auch direkte Züge, die laut Fahrplan dort keinen Einstieg oder Ausstieg erlauben. RIL100-Codes zeigt in der Bahnhofssuche die DB-Abkürzung rechts neben dem Bahnhof (z. B. FF); suchen kann man mit „ff“ auch so."
+                         ? "Zusätzliche Funktionen für Vielfahrer. „Nur Ein-/Ausstieg“ ignorieren zeigt in der Suche auch direkte Züge, die laut Fahrplan dort keinen Einstieg oder Ausstieg erlauben. RIL100-Codes zeigt in der Bahnhofssuche die DB-Abkürzung rechts neben dem Bahnhof (z. B. FF, im Ausland XSZH für Zürich HB); suchen kann man mit „ff“ oder „xszh“ auch so."
                          : "Zusätzliche Funktionen für Vielfahrer.")
                 }
 
