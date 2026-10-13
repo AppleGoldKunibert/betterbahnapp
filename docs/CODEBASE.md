@@ -301,6 +301,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 - `Traewelling/` – OAuth PKCE (`TraewellingAuth`, `TokenStore`), `TraewellingClient`
   (check-ins, history), `QuickTag`. Finding the train asks only the nearest few stations' departures, in parallel
   (12 s timeout), and caches autocomplete/departures, so retries and "Manuell eintragen" (`checkinAsManualTrip`) don't search again (#106).
+  Träwelling's board is MOTIS' stop times: the next 50 departures by live time from every stop within 200 m (so a
+  departure can belong to another Träwelling station, "fährt ab S+U Gesundbrunnen"); at busy interchanges that spans
+  only minutes, so for a train 3+ min late a second board starts 5 min before its expected departure (`boardStarts`, #289).
   `replaceWithManualTrip` turns a check-in into one on a manual trip (creates the trip first, then deletes and re-checks in, keeping text/visibility/tags).
   `TraewellingCheckinEdit`: `status(id:)`, `updateStatus` (text, visibility, trip type), `deleteStatus`, tags
   (`tags`, `applyTagChanges` with `StatusTagChanges`), moving the exit, `earlyExit` (where checking out now ends a ride),

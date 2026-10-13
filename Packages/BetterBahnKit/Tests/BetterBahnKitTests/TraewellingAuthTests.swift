@@ -881,3 +881,96 @@ private final class RefreshTokenProtocol: URLProtocol, @unchecked Sendable {
         return body
     }
 }
+
+/// #289: Träwelling's departure board lists the next 50 departures by their live time, bundled from
+/// every stop within 200 m. At Berlin-Spandau, with its bus stops, that's about ten minutes, so an
+/// ICE running 20 minutes late wasn't on the board starting at its planned time and the checkin
+/// offered a manual trip. A second board now starts shortly before its expected departure.
+@Suite(.serialized) struct TraewellingLateTrainCheckinTests {
+    @Test func findsALateTrainOnABoardStartingNearItsExpectedDeparture() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [LateTrainCheckinProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        LateTrainCheckinProtocol.boardStarts.withLock { $0 = [] }
+        let store = TokenStore(service: "BetterBahnKitTests.\(UUID().uuidString)")
+        store.save(OAuthToken(accessToken: "test-token", refreshToken: nil, expiresAt: .distantFuture))
+        let client = TraewellingClient(config: TraewellingConfig(clientID: "public-client"), http: HTTPClient(session: session), store: store)
+
+        let planned = try Date("2026-10-14T08:11:00Z", strategy: .iso8601)
+        let leg = Leg(origin: station("de-DELFI_de:11000:900029101:3:55", "S Spandau Bhf (Berlin)", 52.5345, 13.1971, source: .transitous),
+                      destination: station("de-DELFI_de:09162:6", "München Hbf", 48.1402, 11.5600, source: .transitous),
+                      departure: TimeInfo(planned: planned, actual: planned.addingTimeInterval(20 * 60)),
+                      arrival: TimeInfo(planned: planned.addingTimeInterval(6 * 3600), actual: nil),
+                      departurePlatform: nil, arrivalPlatform: nil, tripId: "transitous-trip",
+                      line: Line(name: "ICE 507", number: "507", product: .highSpeed, operatorName: "DB Fernverkehr AG"),
+                      direction: "München Hbf", isWalking: false, cancelled: false,
+                      stopovers: [], remarks: [], source: .transitous)
+
+        let result = try await client.checkin(CheckinDraft(leg: leg))
+
+        #expect(result.statusId == 5070)
+        #expect(!result.isManualTrip)
+        // The board at the planned time, and one 5 minutes before the expected departure.
+        #expect(LateTrainCheckinProtocol.boardStarts.withLock { $0.sorted() } == ["2026-10-14T08:09:00Z", "2026-10-14T08:26:00Z"])
+    }
+
+    @Test func aTrainOnTimeOrBarelyLateGetsOneBoard() throws {
+        let planned = try Date("2026-10-14T08:11:00Z", strategy: .iso8601)
+        func leg(delay: TimeInterval?) -> Leg {
+            Leg(origin: station("a", "A"), destination: station("b", "B"),
+                departure: TimeInfo(planned: planned, actual: delay.map { planned.addingTimeInterval($0) }),
+                arrival: TimeInfo(planned: planned.addingTimeInterval(3600), actual: nil),
+                departurePlatform: nil, arrivalPlatform: nil, tripId: "t",
+                line: Line(name: "ICE 507", number: "507", product: .highSpeed, operatorName: nil),
+                direction: nil, isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+        }
+        #expect(TraewellingClient.boardStarts(for: leg(delay: nil), tolerance: 120) == [planned.addingTimeInterval(-120)])
+        #expect(TraewellingClient.boardStarts(for: leg(delay: 2 * 60), tolerance: 120) == [planned.addingTimeInterval(-120)])
+        #expect(TraewellingClient.boardStarts(for: leg(delay: 20 * 60), tolerance: 120)
+                == [planned.addingTimeInterval(-120), planned.addingTimeInterval(15 * 60)])
+    }
+}
+
+private final class LateTrainCheckinProtocol: URLProtocol, @unchecked Sendable {
+    static let boardStarts = Mutex<[String]>([])
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let url = request.url!
+        let path = url.path
+        let when = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "when" }?.value
+        let json: String
+        switch true {
+        case path.contains("autocomplete"):
+            json = #"{"data":[{"id":30,"name":"Berlin-Spandau","latitude":52.5348,"longitude":13.1975}]}"#
+        case path == "/api/v1/station/30/departures":
+            Self.boardStarts.withLock { $0.append(when ?? "") }
+            // 50 departures, mostly buses from the stops around, cover only until 08:18; the ICE
+            // (planned 08:11, leaving 08:31) only shows on a board starting after that.
+            let bus = #"{"tripId":"bus","plannedWhen":"2026-10-14T08:12:00Z","when":"2026-10-14T08:12:00Z","line":{"name":"M32","fahrtNr":""},"station":{"id":32,"name":"S+U Rathaus Spandau (Berlin)"}}"#
+            let ice = #"{"tripId":"ice-507","plannedWhen":"2026-10-14T08:11:00Z","when":"2026-10-14T08:31:00Z","line":{"name":"ICE 507","fahrtNr":"507"},"station":{"id":31,"name":"S Spandau Bhf (Berlin)"}}"#
+            json = (when ?? "") >= "2026-10-14T08:20:00Z" ? #"{"data":[\#(ice),\#(bus)]}"# : #"{"data":[\#(bus)]}"#
+        case path == "/api/v1/trains/trip":
+            json = """
+            {"data":{"id":1,"lineName":"ICE 507","stopovers":[
+                {"id":31,"name":"S Spandau Bhf (Berlin)","station":{"id":31,"name":"S Spandau Bhf (Berlin)"},"departurePlanned":"2026-10-14T08:11:00Z"},
+                {"id":40,"name":"München Hbf","station":{"id":40,"name":"München Hbf"},"arrivalPlanned":"2026-10-14T14:11:00Z"}
+            ]}}
+            """
+        case path == "/api/v1/trains/checkin":
+            json = #"{"data":{"status":{"id":5070},"points":{"points":20},"alsoOnThisConnection":[]}}"#
+        default:
+            client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
+            return
+        }
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(json.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}

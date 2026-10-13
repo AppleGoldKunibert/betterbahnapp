@@ -812,34 +812,55 @@ public actor TraewellingClient {
         // asking each of them one after the other kept the checkin loading for minutes (#106).
         for (maxDistance, tolerance, limit) in [(1_500.0, 2.0 * 60, 3), (8_000.0, 15.0 * 60, 4)] {
             let stations = candidates.filter { $0.1 <= maxDistance }.prefix(limit).map(\.0)
-            let when = leg.departure.planned.addingTimeInterval(-tolerance)
+            let requests = stations.indices.flatMap { station in
+                Self.boardStarts(for: leg, tolerance: tolerance).map { (station: station, when: $0) }
+            }
             let boards = await withTaskGroup(of: (Int, Result<[TraewellingDeparture], any Error>).self) { group in
-                for (index, station) in stations.enumerated() {
+                for (index, request) in requests.enumerated() {
+                    let stationID = stations[request.station].id
                     group.addTask {
-                        do { return (index, .success(try await self.departures(stationID: station.id, when: when))) }
+                        do { return (index, .success(try await self.departures(stationID: stationID, when: request.when))) }
                         catch { return (index, .failure(error)) }
                     }
                 }
-                var boards = [Result<[TraewellingDeparture], any Error>?](repeating: nil, count: stations.count)
+                var boards = [Result<[TraewellingDeparture], any Error>?](repeating: nil, count: requests.count)
                 for await (index, board) in group { boards[index] = board }
                 return boards
             }
-            // Best station first (see `ranked(_:for:)`); a station whose board failed is skipped.
-            for (station, board) in zip(stations, boards) {
-                switch board {
-                case .success(let departures):
-                    answered = true
-                    if let departure = Self.bestMatch(departures, for: leg, tolerance: tolerance) {
-                        return (station, departure)
+            // Best station first (see `ranked(_:for:)`); a station whose boards all failed is skipped.
+            for (index, station) in stations.enumerated() {
+                var departures: [TraewellingDeparture] = []
+                for (request, board) in zip(requests, boards) where request.station == index {
+                    switch board {
+                    case .success(let found):
+                        answered = true
+                        departures += found
+                    case .failure(let error): lastError = error
+                    case nil: break
                     }
-                case .failure(let error): lastError = error
-                case nil: break
+                }
+                if let departure = Self.bestMatch(departures, for: leg, tolerance: tolerance) {
+                    return (station, departure)
                 }
             }
         }
         // Not a single board loaded (offline, logged out): that's an error, not an unknown train.
         if !answered, let lastError { throw lastError }
         return nil
+    }
+
+    /// Where each station's departure board starts for `leg`. Träwelling's board (MOTIS' stop times)
+    /// lists the next 50 departures by their live time, bundled from every stop within 200 m, so at a
+    /// busy interchange it spans only minutes (Berlin-Spandau with its bus stops: about ten). A late
+    /// train is then past the end of a board starting at its planned time, and the checkin offered a
+    /// manual trip (#289) – so a second board starts shortly before its expected departure.
+    static func boardStarts(for leg: Leg, tolerance: TimeInterval) -> [Date] {
+        let planned = leg.departure.planned
+        var starts = [planned.addingTimeInterval(-tolerance)]
+        if let actual = leg.departure.actual, actual.timeIntervalSince(planned) >= 3 * 60 {
+            starts.append(actual.addingTimeInterval(-5 * 60))
+        }
+        return starts
     }
 
     static func bestMatch(_ departures: [TraewellingDeparture], for leg: Leg, tolerance: TimeInterval) -> TraewellingDeparture? {
