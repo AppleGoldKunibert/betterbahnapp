@@ -22,6 +22,9 @@ struct StationBoardView: View {
     @State private var leftAt: Date?
     @Environment(\.scenePhase) private var scenePhase
     @FocusState private var stationFocused: Bool?
+    /// Used to put the list back where it was when rows above the visible ones come or go (see `keepScrollPosition`).
+    @State private var scrollPosition = ScrollPosition()
+    @State private var scrollTracker = ScrollAnchorTracker()
 
     private var filter: BoardFilter {
         BoardFilter(products: products, ticketFilter: onlyValidTicket ? model.ticketFilter : nil)
@@ -73,8 +76,13 @@ struct StationBoardView: View {
                                     .buttonStyle(.plain)
                                 }
                             }
+                            .scrollTargetLayout()
                         }
                         .opacity(visible.isEmpty ? 0 : 1)
+                        // Only when the list's top is scrolled off is there a position to keep.
+                        .onGeometryChange(for: Bool.self) { $0.frame(in: .scrollView).minY < 0 } action: {
+                            scrollTracker.isInList = $0
+                        }
 
                         if !isLoading, visible.isEmpty, error == nil, lastUpdate != nil {
                             ContentUnavailableView("Keine Züge", systemImage: "tram.fill",
@@ -88,6 +96,11 @@ struct StationBoardView: View {
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 24)
+            }
+            .scrollPosition($scrollPosition)
+            .onScrollTargetVisibilityChange(idType: String.self) { ids in
+                let rows = filter.apply(entries).map(\.id)
+                scrollTracker.topID = ids.compactMap { rows.firstIndex(of: $0) }.min().map { rows[$0] }
             }
             .tabBarSafePadding()
             .background { AppBackground() }
@@ -128,6 +141,9 @@ struct StationBoardView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
+            .onChange(of: filter) { old, new in
+                keepScrollPosition(from: old.apply(entries), to: new.apply(entries))
+            }
             .onAppear {
                 onlyValidTicket = model.settings.ticketFilterByDefault
                 resumeAfterAbsence()
@@ -242,11 +258,29 @@ struct StationBoardView: View {
     /// Takes over a loaded board. Animates only if the rows on screen change: after a filter change the board is
     /// already filtered locally, so the answer for the same filter must not move anything while the menu is open.
     private func show(_ loaded: [BoardEntry]) {
-        if filter.apply(loaded) == filter.apply(entries) {
+        let old = filter.apply(entries)
+        let new = filter.apply(loaded)
+        if new == old {
             entries = loaded
         } else {
             withAnimation(.snappy) { entries = loaded }
+            keepScrollPosition(from: old, to: new)
         }
+    }
+
+    /// When the list is scrolled down and rows above the visible ones come or go (a filter, a reload), the rows on
+    /// screen would slide. Put the topmost visible row, or the next one that is still there, back at the top edge.
+    private func keepScrollPosition(from old: [BoardEntry], to new: [BoardEntry]) {
+        guard scrollTracker.isInList, let top = scrollTracker.topID,
+              let topIndex = old.firstIndex(where: { $0.id == top }) else { return }
+        let newIDs = new.map(\.id)
+        let anchor = old[topIndex...].first { newIDs.contains($0.id) }?.id
+            ?? old[..<topIndex].last { newIDs.contains($0.id) }?.id
+        guard let anchor, let newIndex = newIDs.firstIndex(of: anchor),
+              let oldIndex = old.firstIndex(where: { $0.id == anchor }) else { return }
+        // Nothing above the anchor changed: nothing slides.
+        guard old[..<oldIndex].map(\.id) != Array(newIDs[..<newIndex]) else { return }
+        scrollPosition.scrollTo(id: anchor, anchor: .top)
     }
 
     private func load() async {
@@ -272,6 +306,15 @@ struct StationBoardView: View {
             self.error = error
         }
     }
+}
+
+/// What `StationBoardView` last saw of its scroll view. A class on purpose: the scroll view reports every few rows,
+/// which must not re-evaluate the whole board.
+private final class ScrollAnchorTracker {
+    /// The topmost board row that is visible.
+    var topID: String?
+    /// Whether the board's top edge is scrolled off, i.e. the visible part is inside the list.
+    var isInList = false
 }
 
 /// The toolbar's filter menu. A view of its own, so loading the board (which changes `StationBoardView`'s state several
