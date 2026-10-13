@@ -137,6 +137,8 @@ private struct FollowedCheckinCard: View {
     @State private var trainLeg: Leg?
     @State private var isSearchingTrain = false
     @State private var searchedTrain = false
+    /// The timetable couldn't be asked (no answer, server error), as opposed to not having the train.
+    @State private var trainLookupFailed = false
     @State private var showTrain = false
     /// The ride's track from Träwelling once asked for (empty: it has none, or it couldn't be loaded).
     @State private var geometry: [Coordinate]?
@@ -299,6 +301,14 @@ private struct FollowedCheckinCard: View {
                 Text("Den Zug gibt es in den Fahrplandaten nicht.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            } else if trainLookupFailed, !isSearchingTrain {
+                HStack(spacing: 8) {
+                    Text("Der Zug konnte nicht geladen werden.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Erneut versuchen") { Task { await findTrain() } }
+                        .font(.caption.weight(.semibold))
+                }
             }
             if let error { ErrorBanner(error: error) }
         }
@@ -351,13 +361,18 @@ private struct FollowedCheckinCard: View {
     private func findTrain() async {
         guard !checkin.isManualTrip, !trainSearched else { return }
         isSearchingTrain = true
+        trainLookupFailed = false
         defer { isSearchingTrain = false }
         do {
             let found = try await model.provider.leg(forCheckin: status)
             model.followedTrains[status.id] = .some(found)
             trainLeg = found
-        } catch {}
-        searchedTrain = true
+            searchedTrain = true
+        } catch {
+            // Folding the card away cancels the lookup: that says nothing about the train, so it isn't
+            // taken for one the timetable doesn't have. Other errors are shown, with a way to retry.
+            if !Task.isCancelled { trainLookupFailed = true }
+        }
     }
 
     private func toggleLike() async {
