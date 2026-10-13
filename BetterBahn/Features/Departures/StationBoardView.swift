@@ -15,7 +15,8 @@ struct StationBoardView: View {
     @State private var isLoading = false
     @State private var error: Error?
     @State private var lastUpdate: Date?
-    /// `reloadKey` the current `entries` belong to; the board is only cleared when it changes, not when the tab reappears.
+    /// `boardKey` the current `entries` belong to; the board is only cleared when it changes, not when the tab reappears
+    /// or the filter changes.
     @State private var loadedKey: String?
     /// When the board was last on screen (tab left or app in the background); see `resumeAfterAbsence`.
     @State private var leftAt: Date?
@@ -26,9 +27,16 @@ struct StationBoardView: View {
         BoardFilter(products: products, ticketFilter: onlyValidTicket ? model.ticketFilter : nil)
     }
 
+    /// What the shown board is about; when it changes the old rows are dropped.
+    private var boardKey: String {
+        "\(station?.id ?? "")|\(kind)|\(useNow ? "now" : date.description)"
+    }
+
+    /// `boardKey` plus the transport filter. A new filter reloads the board (the feed filters by mode too) but keeps
+    /// the rows on screen, which are filtered locally meanwhile; clearing them made the open filter menu jump.
     private var reloadKey: String {
         let productsKey = products.map(\.rawValue).sorted().joined(separator: ",")
-        return "\(station?.id ?? "")|\(kind)|\(useNow ? "now" : date.description)|\(productsKey)"
+        return "\(boardKey)|\(productsKey)"
     }
 
     private var isFiltered: Bool { onlyValidTicket || products.count != Product.allCases.count }
@@ -102,15 +110,15 @@ struct StationBoardView: View {
                     }
                 }
                 ToolbarItem {
-                    filterMenu
+                    BoardFilterMenu(products: $products, onlyValidTicket: $onlyValidTicket)
                 }
             }
             .refreshable { await load() }
             .task(id: reloadKey) {
-                if loadedKey != reloadKey {
+                if loadedKey != boardKey {
                     entries = []
                     lastUpdate = nil
-                    loadedKey = reloadKey
+                    loadedKey = boardKey
                 }
                 // Auto-refresh every 60 seconds while visible; coming back to the tab keeps the
                 // rows on screen and just updates them.
@@ -217,41 +225,6 @@ struct StationBoardView: View {
         }
     }
 
-    private var filterMenu: some View {
-        Menu {
-            Toggle(isOn: $onlyValidTicket) {
-                Label(model.settings.ticketType.filterTitle, systemImage: model.settings.ticketType.symbolName)
-            }
-            productFilterItems
-        } label: {
-            Image(systemName: isFiltered ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
-        }
-        .menuActionDismissBehavior(.disabled)
-        .accessibilityLabel("Filter")
-    }
-
-    @ViewBuilder
-    private var productFilterItems: some View {
-        Section("Verkehrsmittel") {
-            Button("Nur Züge", systemImage: "train.side.front.car") {
-                products = Set(Product.allCases.filter(\.isTrain))
-            }
-            Button("Alle anzeigen", systemImage: "square.grid.2x2") {
-                products = Set(Product.allCases)
-            }
-        }
-        Section {
-            ForEach(Product.allCases, id: \.self) { product in
-                Toggle(isOn: Binding(
-                    get: { products.contains(product) },
-                    set: { if $0 { products.insert(product) } else { products.remove(product) } }
-                )) {
-                    Label(product.displayName, systemImage: product.symbolName)
-                }
-            }
-        }
-    }
-
     /// After 5 minutes away the board jumps back to "jetzt"; after 7.5 minutes the station is closed.
     private func resumeAfterAbsence() {
         guard let leftAt else { return }
@@ -266,6 +239,16 @@ struct StationBoardView: View {
         }
     }
 
+    /// Takes over a loaded board. Animates only if the rows on screen change: after a filter change the board is
+    /// already filtered locally, so the answer for the same filter must not move anything while the menu is open.
+    private func show(_ loaded: [BoardEntry]) {
+        if filter.apply(loaded) == filter.apply(entries) {
+            entries = loaded
+        } else {
+            withAnimation(.snappy) { entries = loaded }
+        }
+    }
+
     private func load() async {
         guard let station else { return }
         isLoading = true
@@ -273,7 +256,7 @@ struct StationBoardView: View {
         do {
             let start = useNow ? Date.now.addingTimeInterval(-5 * 60) : date
             let loaded = try await model.provider.board(kind, at: station, date: start, duration: 90, products: products)
-            withAnimation(.snappy) { entries = loaded }
+            show(loaded)
             lastUpdate = .now
             error = nil
             // Once the board is already showing (so this never blocks the initial render): DB's own delays,
@@ -283,13 +266,61 @@ struct StationBoardView: View {
             if let timetables = model.timetablesClient {
                 let live = await timetables.applyingRealtime(to: loaded, at: station)
                 let filled = await timetables.fillMissingPlatforms(in: live, at: station)
-                if filled != entries { withAnimation(.snappy) { entries = filled } }
+                if filled != entries { show(filled) }
             }
         } catch is CancellationError {
         } catch let urlError as URLError where urlError.code == .cancelled {
         } catch {
             self.error = error
         }
+    }
+}
+
+/// The toolbar's filter menu. A view of its own, so loading the board (which changes `StationBoardView`'s state several
+/// times) doesn't rebuild the menu while it is open: only the two filters it edits can.
+private struct BoardFilterMenu: View {
+    @Environment(AppModel.self) private var model
+    @Binding var products: Set<Product>
+    @Binding var onlyValidTicket: Bool
+
+    private var isFiltered: Bool { onlyValidTicket || products.count != Product.allCases.count }
+
+    var body: some View {
+        Menu {
+            Toggle(isOn: $onlyValidTicket) {
+                Label(model.settings.ticketType.filterTitle, systemImage: model.settings.ticketType.symbolName)
+            }
+            Section("Verkehrsmittel") {
+                Button("Nur Züge", systemImage: "train.side.front.car") {
+                    products = Set(Product.allCases.filter(\.isTrain))
+                }
+                Button("Alle anzeigen", systemImage: "square.grid.2x2") {
+                    products = Set(Product.allCases)
+                }
+                productMenu("Züge", systemImage: "tram.fill", products: Product.allCases.filter(\.isTrain))
+                productMenu("Bus, Tram & Co.", systemImage: "bus.fill", products: Product.allCases.filter { !$0.isTrain })
+            }
+        } label: {
+            Image(systemName: isFiltered ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+        }
+        .menuActionDismissBehavior(.disabled)
+        .accessibilityLabel("Filter")
+    }
+
+    /// One menu per group, so none is taller than the screen: iOS rebuilds an open menu on every change and set a
+    /// scrolling one back by a bit, which made the single long list jump whenever a vehicle was switched.
+    private func productMenu(_ title: String, systemImage: String, products group: [Product]) -> some View {
+        Menu(title, systemImage: systemImage) {
+            ForEach(group, id: \.self) { product in
+                Toggle(isOn: Binding(
+                    get: { products.contains(product) },
+                    set: { if $0 { products.insert(product) } else { products.remove(product) } }
+                )) {
+                    Label(product.displayName, systemImage: product.symbolName)
+                }
+            }
+        }
+        .menuActionDismissBehavior(.disabled)
     }
 }
 
