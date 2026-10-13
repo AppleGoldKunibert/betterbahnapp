@@ -195,6 +195,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   in `connections/connections` (by run number and planned time) and reads DB's `dispositionStatus`
   (`WAITING`/`NOT_WAITING`). `dispositions(in:now:)` asks for transfers from 15 min ago up to 3 h ahead, for
   `JourneyDetailView` and for saved journeys' refresh, which notifies once per decision (`notificationID`).
+  `ExpertTimes` (`liveTimes(category:number:day:)`, cached 2 min per run in `ExpertTimesCache`) is the referee where bahn.de and DB
+  Timetables disagree on a stop: `BahnDeClient.applyingLiveTimes(…referee:)` asks only then, and the value closer to bahn.expert's stays
+  (DB Timetables' on a tie); an early time still never becomes "on time". Without an answer DB Timetables' rule stands.
 - `Transit/TrainNumberSearch.swift` – train search by number (#183): bahn.expert's `journey/find` lists the runs with
   that number on a day (`TrainNumberQuery` reads "ICE 123"/"123"; `ranked` keeps the `TrainSearchFilter`'s kinds, the typed
   category or the same kind of train; countries from the end stops' IFOPT/EVA, `TrainSearchCountry`; trains that may cross

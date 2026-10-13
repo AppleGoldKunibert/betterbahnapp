@@ -234,7 +234,9 @@ public struct JourneyRefresher: Sendable {
             if runningSoon {
                 if !leg.stopovers.isEmpty { leg.stopovers = BahnDeClient.inserting(course.stops, into: leg.stopovers) }
                 // DB's own live times beat Transitous' and fill stops DB Timetables missed.
-                leg = BahnDeClient.applyingLiveTimes(from: course.stops, to: leg, keepingDelays: timetablesAnswered)
+                // Where bahn.de and DB Timetables disagree, bahn.expert is asked which is right.
+                leg = await BahnDeClient.applyingLiveTimes(from: course.stops, to: leg, keepingDelays: timetablesAnswered,
+                                                           referee: provider.bahnExpert)
             }
             leg = BahnDeClient.fillingMissingPlatforms(in: leg, from: course.stops)
             leg = BahnDeClient.markingNightTrain(leg, hasSleepingCars: course.hasSleepingCars)

@@ -181,8 +181,14 @@ struct TripView: View {
     private func insertZusatzhalte() async {
         guard let trip, let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: trip),
               self.trip?.id == trip.id else { return }
-        self.trip?.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: BahnDeClient.inserting(stops, into: trip.stopovers),
-                                                               keepingDelays: model.timetablesClient != nil)
+        let keepingDelays = model.timetablesClient != nil
+        let inserted = BahnDeClient.inserting(stops, into: trip.stopovers)
+        self.trip?.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: inserted, keepingDelays: keepingDelays)
+        // Where bahn.de and DB Timetables disagree on a stop, bahn.expert is asked which is right; shown once it answers.
+        let refereed = await BahnDeClient.applyingLiveTimes(from: stops, to: inserted, line: trip.line, keepingDelays: keepingDelays,
+                                                            referee: model.provider.bahnExpert)
+        guard self.trip?.id == trip.id else { return }
+        self.trip?.stopovers = refereed
         if (try? await bahnDe.hasSleepingCars(for: trip)) == true, self.trip?.id == trip.id { self.trip?.line?.nightRail = true }
     }
 }
@@ -658,8 +664,13 @@ struct LegTripSheet: View {
         let ownTrain = shownTripId == nil
         var hasSleepingCars = false
         if let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: updated) {
-            updated.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: BahnDeClient.inserting(stops, into: updated.stopovers),
-                                                                      keepingDelays: model.timetablesClient != nil)
+            let keepingDelays = model.timetablesClient != nil
+            let inserted = BahnDeClient.inserting(stops, into: updated.stopovers)
+            updated.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: inserted, keepingDelays: keepingDelays)
+            // Shown right away; where bahn.de and DB Timetables disagree on a stop, bahn.expert is asked which is right.
+            if ownTrain, self.trip?.id == updated.id, shownTripId == nil { self.trip?.stopovers = updated.keepingAdditionalStops(of: leg).stopovers }
+            updated.stopovers = await BahnDeClient.applyingLiveTimes(from: stops, to: inserted, line: updated.line,
+                                                                     keepingDelays: keepingDelays, referee: model.provider.bahnExpert)
             hasSleepingCars = (try? await bahnDe.hasSleepingCars(for: updated)) == true
         }
         if ownTrain { updated = updated.keepingAdditionalStops(of: leg) }
