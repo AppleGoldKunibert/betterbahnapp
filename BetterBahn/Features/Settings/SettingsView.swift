@@ -162,32 +162,35 @@ struct SettingsView: View {
                     .tint(.brand)
                     if settings.expertMode {
                         Toggle(isOn: $settings.expertTraewelling) {
-                            IconLabel(title: "Träwelling", systemImage: "checkmark.seal.fill", color: .brand)
+                            IconLabel(title: "Träwelling", systemImage: "checkmark.seal.fill", color: .brand,
+                                      subtitle: "Bei Träwelling in Züge einchecken.")
                         }
                         .tint(.brand)
                         Toggle(isOn: $settings.expertEditJourney) {
-                            IconLabel(title: "Reise bearbeiten", systemImage: "pencil", color: .orange)
+                            IconLabel(title: "Reise bearbeiten", systemImage: "pencil", color: .orange,
+                                      subtitle: "Reisen ändern und ab einem Halt neu planen.")
                         }
                         .tint(.brand)
                         Toggle(isOn: $settings.expertTrainChoice) {
-                            IconLabel(title: "Bestimmten Zug wählen", systemImage: "number", color: .purple)
+                            IconLabel(title: "Bestimmten Zug wählen", systemImage: "number", color: .purple,
+                                      subtitle: "Einen bestimmten Zug in die Reise übernehmen.")
                         }
                         .tint(.brand)
                         Toggle(isOn: $settings.expertIgnoreBoardingRules) {
-                            IconLabel(title: "„Nur Ein-/Ausstieg“ ignorieren", systemImage: "arrow.up.arrow.down.circle.fill", color: .teal)
+                            IconLabel(title: "„Nur Ein-/Ausstieg“ ignorieren", systemImage: "arrow.up.arrow.down.circle.fill", color: .teal,
+                                      subtitle: "Auch Züge, die nur zum Ein- oder Aussteigen halten.")
                         }
                         .tint(.brand)
                         Toggle(isOn: $settings.expertRil100) {
-                            IconLabel(title: "RIL100-Codes in der Suche", systemImage: "character.textbox", color: .gray)
+                            IconLabel(title: "RIL100-Codes in der Suche", systemImage: "character.textbox", color: .gray,
+                                      subtitle: "Kürzel wie „FF“ zeigen und danach suchen.")
                         }
                         .tint(.brand)
                     }
                 } header: {
                     Text("Für Profis")
                 } footer: {
-                    Text(settings.expertMode
-                         ? "Zusätzliche Funktionen für Vielfahrer. „Nur Ein-/Ausstieg“ ignorieren zeigt in der Suche auch direkte Züge, die laut Fahrplan dort keinen Einstieg oder Ausstieg erlauben. RIL100-Codes zeigt in der Bahnhofssuche die DB-Abkürzung rechts neben dem Bahnhof (z. B. FF, im Ausland XSZH für Zürich HB); suchen kann man mit „ff“ oder „xszh“ auch so."
-                         : "Zusätzliche Funktionen für Vielfahrer.")
+                    Text("Zusätzliche Funktionen für Vielfahrer.")
                 }
 
                 Section {
@@ -224,10 +227,8 @@ struct SettingsView: View {
         switch model.settings.trainPositionRefresh {
         case .off:
             "Karten laden die Positionen der Züge nur einmal beim Öffnen."
-        case .automatic:
-            "Wie oft Karten die Positionen fahrender Züge neu laden: alle 15 Sekunden, mit mobilen Daten oder im Datensparmodus jede Minute. Häufigeres Aktualisieren kann mehr Daten verbrauchen."
         default:
-            "Wie oft Karten die Positionen fahrender Züge neu laden. Häufigeres Aktualisieren kann mehr Daten verbrauchen, vor allem mit mobilen Daten."
+            "Wie oft die Live-Position aktualisiert wird. Öfter verbraucht mehr Daten."
         }
     }
 

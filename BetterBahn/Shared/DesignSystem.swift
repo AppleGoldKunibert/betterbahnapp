@@ -157,10 +157,23 @@ struct IconLabel: View {
     let title: String
     let systemImage: String
     let color: Color
+    /// Optional one-line explanation in small grey text under the title.
+    var subtitle: String? = nil
 
     var body: some View {
         Label {
-            Text(title)
+            if let subtitle {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                }
+            } else {
+                Text(title)
+            }
         } icon: {
             IconTile(systemImage: systemImage, color: color, size: 28)
         }
