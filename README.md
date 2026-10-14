@@ -37,8 +37,8 @@ DB realtime messages, Wallet passes) unless you deploy your own Workers and poin
 
 ## Contributing
 
-Issues and pull requests are welcome. Please open pull requests against `prod-other`,
-`prod-bugs` or `prod-features` rather than `prod`.
+Issues and pull requests are welcome. Please open pull requests against `indevelopment`
+rather than `prod`.
 
 Found a security problem? Please don't open a public issue; see [SECURITY.md](SECURITY.md).
 
