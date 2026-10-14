@@ -8,7 +8,8 @@
 // Runs older than a year are downloaded and deleted with backup.sh.
 //
 // Long-distance trains are also found by the Worker itself (`seedLongDistance`): every few minutes it
-// reads the departure boards of a few big stations, so the statistics don't depend on what app users look at.
+// reads the departure boards of the stations long-distance trains stop at (learned from the trains it
+// has followed), so the statistics don't depend on what app users look at.
 //
 // The same data answers the app (`POST /train-stats`): per train number and stop, how late the train
 // was, how often it was cancelled, which platforms it used and which vehicles ran it (#316).
@@ -139,18 +140,17 @@ const SEED_PRODUCTS = ["ICE", "EC_IC"];
 /// Cron expression of `seedLongDistance` (wrangler.toml).
 export const SEED_CRON = "*/5 * * * *";
 
-/// Reads the long-distance departures of the next few stations in turn and stores their runs like app
-/// sightings. Every `SEED_PER_RUN` (env, default 3; 0 switches seeding off) stations per call, five
-/// minutes apart, so each station is read about every half hour. Returns how many runs were found.
+/// Reads the long-distance departures of the stations that were read longest ago and stores their runs like
+/// app sightings. The stations are the big ones above plus every German stop of the long-distance trains
+/// followed so far (`seed_stations`), so with time every station with long-distance trains is read and
+/// no train is missed. `SEED_PER_RUN` (env, default 3; 0 switches seeding off) stations per call, five
+/// minutes apart; `SEED_STATIONS` (comma-separated EVA numbers) reads just these, in turns, instead.
+/// Returns how many runs were found.
 export async function seedLongDistance(env, now = Date.now(), deps = {}) {
     const fetchUpstream = deps.fetch ?? fetch;
-    const stations = (env.SEED_STATIONS ?? SEED_STATIONS.join(",")).split(",").map(eva => eva.trim()).filter(eva => EVA_PATTERN.test(eva));
     const perRun = env.SEED_PER_RUN === undefined ? DEFAULT_SEED_PER_RUN : Number(env.SEED_PER_RUN);
-    if (stations.length === 0 || !(perRun > 0)) return 0;
-
-    const slot = Math.floor(now / (5 * MINUTE * 1000));
-    const slots = Math.ceil(stations.length / perRun);
-    const turn = stations.slice((slot % slots) * perRun, (slot % slots) * perRun + perRun);
+    if (!(perRun > 0)) return 0;
+    const turn = env.SEED_STATIONS === undefined ? await dueSeedStations(env, perRun, now) : fixedSeedStations(env.SEED_STATIONS, perRun, now);
 
     const ids = new Set();
     for (const eva of turn) {
@@ -164,7 +164,30 @@ export async function seedLongDistance(env, now = Date.now(), deps = {}) {
             // A station that fails is read again next time.
         }
     }
-    return ids.size > 0 ? recordRuns(env, [...ids].slice(0, MAX_SIGHTINGS), now) : 0;
+    let found = 0;
+    const all = [...ids];
+    for (let start = 0; start < all.length; start += MAX_SIGHTINGS) found += await recordRuns(env, all.slice(start, start + MAX_SIGHTINGS), now);
+    return found;
+}
+
+/// `perRun` of the stations, a different group each time.
+function fixedSeedStations(list, perRun, now) {
+    const stations = list.split(",").map(eva => eva.trim()).filter(eva => EVA_PATTERN.test(eva));
+    const slots = Math.ceil(stations.length / perRun);
+    const slot = Math.floor(now / (5 * MINUTE * 1000)) % Math.max(slots, 1);
+    return stations.slice(slot * perRun, slot * perRun + perRun);
+}
+
+/// The `perRun` stations read longest ago, marked as read now.
+async function dueSeedStations(env, perRun, now) {
+    await env.DB.prepare("INSERT OR IGNORE INTO seed_stations (eva) SELECT value FROM json_each(?)").bind(JSON.stringify(SEED_STATIONS)).run();
+    const { results } = await env.DB.prepare("SELECT eva FROM seed_stations ORDER BY last_read, eva LIMIT ?").bind(perRun).all();
+    const evas = (results ?? []).map(row => row.eva);
+    if (evas.length > 0) {
+        await env.DB.prepare("UPDATE seed_stations SET last_read = ? WHERE eva IN (SELECT value FROM json_each(?))")
+            .bind(Math.floor(now / 1000), JSON.stringify(evas)).run();
+    }
+    return evas;
 }
 
 /// bahn.de's departure board of a station from `time` on, long-distance trains only.
@@ -386,13 +409,20 @@ async function step(run, now, fetchUpstream) {
         // The Wagenreihung is asked for at the first stop, 10 minutes before departure. A train
         // already gone by more than a quarter of an hour skips it: bahn.de no longer has it there.
         const askFormation = departure - now > -15 * MINUTE;
-        return db => db.prepare(
-            "UPDATE runs SET state = ?, attempts = 0, next_check = ?, service_day = ?, name = ?, category = ?, number = ?, line = ?, " +
-            "origin_eva = ?, destination_eva = ?, planned_departure = ?, planned_arrival = ? WHERE key = ?",
-        ).bind(askFormation ? "planned" : "formed",
-            askFormation ? Math.max(now, departure - 10 * MINUTE) : Math.max(now, arrival + AFTER_ARRIVAL),
-            parsed.plannedDeparture.slice(0, 10), parsed.name, parsed.category, parsed.number, parsed.line,
-            parsed.originEva, parsed.destinationEva, parsed.plannedDeparture, parsed.plannedArrival, run.key);
+        // Where a long-distance train stops, long-distance trains can be found: the seeding reads these stations.
+        const seedEvas = LONG_DISTANCE.has(parsed.category.toUpperCase())
+            ? parsed.stops.map(stop => stop.eva).filter(eva => eva.startsWith("80")) : [];
+        return db => [
+            db.prepare(
+                "UPDATE runs SET state = ?, attempts = 0, next_check = ?, service_day = ?, name = ?, category = ?, number = ?, line = ?, " +
+                "origin_eva = ?, destination_eva = ?, planned_departure = ?, planned_arrival = ? WHERE key = ?",
+            ).bind(askFormation ? "planned" : "formed",
+                askFormation ? Math.max(now, departure - 10 * MINUTE) : Math.max(now, arrival + AFTER_ARRIVAL),
+                parsed.plannedDeparture.slice(0, 10), parsed.name, parsed.category, parsed.number, parsed.line,
+                parsed.originEva, parsed.destinationEva, parsed.plannedDeparture, parsed.plannedArrival, run.key),
+            ...(seedEvas.length > 0
+                ? [db.prepare("INSERT OR IGNORE INTO seed_stations (eva) SELECT value FROM json_each(?)").bind(JSON.stringify(seedEvas))] : []),
+        ];
     }
 
     // state "formed": the final look. Still running late → again half an hour after it's now expected.

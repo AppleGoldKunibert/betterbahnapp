@@ -392,3 +392,30 @@ test("seeding can be switched off, and a failing station doesn't stop the others
     assert.ok(SEED_STATIONS.every(eva => /^\d{7}$/.test(eva)));
     assert.match(boardURL("8000105", Date.parse("2026-12-06T17:30:00Z")), /datum=2026-12-06&zeit=18:30&ortExtId=8000105&ortId=A=1@L=8000105@/);
 });
+
+test("learns the stations long-distance trains stop at and reads the ones read longest ago first", async () => {
+    const env = { DB: new FakeD1(), ALLOW_UNATTESTED: "true", SEED_PER_RUN: "2" };
+    await report(env, [ICE_ID]);
+    const bahnDe = fakeBahnDe({ "reiseloesung/fahrt": { body: journey() } });
+    await processDueRuns(env, Date.parse("2026-10-06T13:00:00Z"), bahnDe);
+    const known = () => env.DB.db.prepare("SELECT eva, last_read FROM seed_stations ORDER BY eva").all().map(row => row.eva);
+    // The ICE's stops join the big stations; a regional train's would not.
+    assert.ok(["8000261", "8000284", "8000105"].every(eva => known().includes(eva)));
+    const regional = journey();
+    regional.zugName = "RE 4711";
+    regional.halte[1].extId = "8099999";
+    const regionalId = ICE_ID.replace("#CA#ICE#ZE#1095#ZB#ICE  1095#", "#CA#RE#ZE#4711#ZB#RE 4711#").replace("#DA#61026", "#DA#61027");
+    await report(env, [regionalId]);
+    await processDueRuns(env, Date.parse("2026-10-06T13:01:00Z"), fakeBahnDe({ "reiseloesung/fahrt": { body: regional } }));
+    assert.ok(!known().includes("8099999"));
+
+    const asked = [];
+    const fetch = async url => { asked.push(new URL(url).searchParams.get("ortExtId")); return new Response(JSON.stringify({ entries: [] })); };
+    const now = Date.parse("2026-10-06T14:00:00Z");
+    await seedLongDistance(env, now, { fetch });
+    await seedLongDistance(env, now + 5 * 60 * 1000, { fetch });
+    assert.equal(asked.length, 4);
+    assert.equal(new Set(asked).size, 4, "each station once before any is read again");
+    const read = env.DB.db.prepare("SELECT count(*) AS n FROM seed_stations WHERE last_read > 0").get().n;
+    assert.equal(read, 4);
+});

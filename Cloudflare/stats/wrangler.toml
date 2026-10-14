@@ -28,10 +28,13 @@ namespace_id = "1302"
 simple = { limit = 60, period = 60 }
 
 [vars]
-# Runs per cron invocation (one bahn.de request each). 8 fits the free plan's 10 ms CPU; raise it on Workers Paid.
-BATCH = "8"
-# Stations per five-minute round (see seedLongDistance); "0" switches seeding off. SEED_STATIONS (EVA numbers,
-# comma-separated) replaces the built-in list.
-SEED_PER_RUN = "3"
+# Workers Paid ($5/month) values, enough to follow every long-distance train in Germany. On the free plan
+# (50 requests and 10 ms CPU per invocation) use BATCH = "8" and SEED_PER_RUN = "3".
+# Runs per cron invocation (one bahn.de request each).
+BATCH = "20"
+# Departure boards read per five-minute round (see seedLongDistance); "0" switches seeding off. 30 reads each
+# of the ~400 stations with long-distance trains about every 70 minutes. SEED_STATIONS (EVA numbers,
+# comma-separated) reads just these instead.
+SEED_PER_RUN = "30"
 # Secrets (`npx wrangler secret put …`): TOKEN_SECRET (same value as in betterbahn2, betterbahn and betterbahn-pass).
 # ALLOW_UNATTESTED = "true" lets apps without App Attest (Simulator) report trains.

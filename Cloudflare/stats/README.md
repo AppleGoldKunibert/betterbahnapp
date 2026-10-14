@@ -10,8 +10,11 @@ in Germany and realtime data.
    30 requests per minute per install). No user ID, no location. Users can switch this off in
    Settings → "Zugdaten für Statistik teilen".
    Long-distance trains are also found by the Worker itself: every five minutes it reads the ICE/IC/EC
-   departure boards of 3 of 18 big stations in turn (`SEED_PER_RUN`, `SEED_STATIONS`; "0" switches it off)
-   and stores their runs the same way, so the data doesn't depend on what app users look at.
+   departure boards of the `SEED_PER_RUN` stations read longest ago and stores their runs the same way.
+   It starts with 18 big stations and learns every German stop of the long-distance trains it follows
+   (`seed_stations`), so in time all of the ~400 stations with long-distance trains are read and no train
+   is missed. `wrangler.toml` has the values for Workers Paid (30 stations per round, `BATCH` 20); on the
+   free plan use 3 and 8. `SEED_PER_RUN = "0"` switches it off.
 2. Every minute the cron trigger looks at the due runs (`BATCH`, default 8) and asks bahn.de itself:
    - right away: the run's schedule (`reiseloesung/fahrt`). Trains without a German stop are dropped.
    - 10 minutes before departure: the Wagenreihung at the first stop.
@@ -28,7 +31,8 @@ in Germany and realtime data.
 
 Size: a finished run takes well under 1 KB, so the free plan's 5 GB hold roughly 10,000–25,000 runs a
 day for a year. The free plan's CPU limit allows about `BATCH` = 8 runs a minute, i.e. roughly 4,000
-trains a day (three looks each). Above that, switch to Workers Paid (5 $/month) and raise `BATCH`.
+trains a day (three looks each), which is more than all long-distance trains (~1,000–1,500 a day); the
+boards of the seeding are what needs the paid plan's CPU time. Above that, switch to Workers Paid (5 $/month) and raise `BATCH`.
 
 ## Setup (once)
 
