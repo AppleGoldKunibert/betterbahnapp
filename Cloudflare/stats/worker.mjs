@@ -133,6 +133,8 @@ export const SEED_STATIONS = [
     "8000050", "8000191", // Bremen, Karlsruhe
 ];
 const DEFAULT_SEED_PER_RUN = 3;
+// Only the busiest stations are read: nearly every long-distance train stops at one of them.
+const DEFAULT_SEED_POOL = 40;
 /// The boards start this long from now, so a train is known well before its Wagenreihung is due.
 const SEED_AHEAD = 20 * MINUTE;
 /// bahn.de's product filters for its boards: ICE, and IC/EC.
@@ -140,17 +142,17 @@ const SEED_PRODUCTS = ["ICE", "EC_IC"];
 /// Cron expression of `seedLongDistance` (wrangler.toml).
 export const SEED_CRON = "*/5 * * * *";
 
-/// Reads the long-distance departures of the stations that were read longest ago and stores their runs like
-/// app sightings. The stations are the big ones above plus every German stop of the long-distance trains
-/// followed so far (`seed_stations`), so with time every station with long-distance trains is read and
-/// no train is missed. `SEED_PER_RUN` (env, default 3; 0 switches seeding off) stations per call, five
-/// minutes apart; `SEED_STATIONS` (comma-separated EVA numbers) reads just these, in turns, instead.
+/// Reads the long-distance departures of the busiest stations, those read longest ago first, and stores
+/// their runs like app sightings. The stations are the big ones above plus every German stop of the
+/// long-distance trains followed so far (`seed_stations`, counted per run); the `SEED_POOL` (env,
+/// default 40) busiest of them are read in turns, `SEED_PER_RUN` (default 3; 0 switches seeding off) per
+/// call, five minutes apart. `SEED_STATIONS` (comma-separated EVA numbers) reads just these instead.
 /// Returns how many runs were found.
 export async function seedLongDistance(env, now = Date.now(), deps = {}) {
     const fetchUpstream = deps.fetch ?? fetch;
     const perRun = env.SEED_PER_RUN === undefined ? DEFAULT_SEED_PER_RUN : Number(env.SEED_PER_RUN);
     if (!(perRun > 0)) return 0;
-    const turn = env.SEED_STATIONS === undefined ? await dueSeedStations(env, perRun, now) : fixedSeedStations(env.SEED_STATIONS, perRun, now);
+    const turn = env.SEED_STATIONS === undefined ? await dueSeedStations(env, perRun, now, Number(env.SEED_POOL) > 0 ? Number(env.SEED_POOL) : DEFAULT_SEED_POOL) : fixedSeedStations(env.SEED_STATIONS, perRun, now);
 
     const ids = new Set();
     for (const eva of turn) {
@@ -178,10 +180,12 @@ function fixedSeedStations(list, perRun, now) {
     return stations.slice(slot * perRun, slot * perRun + perRun);
 }
 
-/// The `perRun` stations read longest ago, marked as read now.
-async function dueSeedStations(env, perRun, now) {
+/// Of the `pool` busiest stations, the `perRun` read longest ago, marked as read now.
+async function dueSeedStations(env, perRun, now, pool) {
     await env.DB.prepare("INSERT OR IGNORE INTO seed_stations (eva) SELECT value FROM json_each(?)").bind(JSON.stringify(SEED_STATIONS)).run();
-    const { results } = await env.DB.prepare("SELECT eva FROM seed_stations ORDER BY last_read, eva LIMIT ?").bind(perRun).all();
+    const { results } = await env.DB.prepare(
+        "SELECT eva FROM (SELECT eva, last_read FROM seed_stations ORDER BY trains DESC, eva LIMIT ?) ORDER BY last_read, eva LIMIT ?",
+    ).bind(pool, perRun).all();
     const evas = (results ?? []).map(row => row.eva);
     if (evas.length > 0) {
         await env.DB.prepare("UPDATE seed_stations SET last_read = ? WHERE eva IN (SELECT value FROM json_each(?))")
@@ -421,7 +425,8 @@ async function step(run, now, fetchUpstream) {
                 parsed.plannedDeparture.slice(0, 10), parsed.name, parsed.category, parsed.number, parsed.line,
                 parsed.originEva, parsed.destinationEva, parsed.plannedDeparture, parsed.plannedArrival, run.key),
             ...(seedEvas.length > 0
-                ? [db.prepare("INSERT OR IGNORE INTO seed_stations (eva) SELECT value FROM json_each(?)").bind(JSON.stringify(seedEvas))] : []),
+                ? [db.prepare("INSERT INTO seed_stations (eva, trains) SELECT value, 1 FROM json_each(?) WHERE true " +
+                "ON CONFLICT (eva) DO UPDATE SET trains = trains + 1").bind(JSON.stringify(seedEvas))] : []),
         ];
     }
 

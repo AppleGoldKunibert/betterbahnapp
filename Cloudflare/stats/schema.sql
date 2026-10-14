@@ -57,9 +57,11 @@ CREATE TABLE IF NOT EXISTS stations (
 );
 
 -- Stations long-distance trains stop at, for the seeding (`seedLongDistance` in worker.mjs): the big ones
--- from the code, and every German stop of the long-distance trains followed so far. `last_read`: Unix
--- seconds of the last departure board read, 0 for none yet.
+-- from the code, and every German stop of the long-distance trains followed so far, with the number of
+-- those runs (`trains`: the busiest stations are read). `last_read`: Unix seconds of the last departure
+-- board read, 0 for none yet. (Created in an earlier form without `trains`? DROP TABLE seed_stations first.)
 CREATE TABLE IF NOT EXISTS seed_stations (
     eva TEXT PRIMARY KEY,
+    trains INTEGER NOT NULL DEFAULT 0,
     last_read INTEGER NOT NULL DEFAULT 0
 );

@@ -394,7 +394,7 @@ test("seeding can be switched off, and a failing station doesn't stop the others
 });
 
 test("learns the stations long-distance trains stop at and reads the ones read longest ago first", async () => {
-    const env = { DB: new FakeD1(), ALLOW_UNATTESTED: "true", SEED_PER_RUN: "2" };
+    const env = { DB: new FakeD1(), ALLOW_UNATTESTED: "true", SEED_PER_RUN: "2", SEED_POOL: "4" };
     await report(env, [ICE_ID]);
     const bahnDe = fakeBahnDe({ "reiseloesung/fahrt": { body: journey() } });
     await processDueRuns(env, Date.parse("2026-10-06T13:00:00Z"), bahnDe);
@@ -418,4 +418,10 @@ test("learns the stations long-distance trains stop at and reads the ones read l
     assert.equal(new Set(asked).size, 4, "each station once before any is read again");
     const read = env.DB.db.prepare("SELECT count(*) AS n FROM seed_stations WHERE last_read > 0").get().n;
     assert.equal(read, 4);
+    // Only the busiest stations are read: the three stops of the ICE, counted once, come first.
+    assert.ok(["8000261", "8000284", "8000105"].every(eva => asked.includes(eva)));
+    assert.equal(env.DB.db.prepare("SELECT trains FROM seed_stations WHERE eva = '8000284'").get().trains, 1);
+    asked.length = 0;
+    await seedLongDistance(env, now + 10 * 60 * 1000, { fetch });
+    assert.equal(asked.length, 2, "then the first two again");
 });
