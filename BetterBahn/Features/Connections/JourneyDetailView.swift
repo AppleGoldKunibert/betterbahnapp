@@ -28,6 +28,8 @@ struct JourneyDetailView: View {
     @State private var editedDestination: Station?
     /// Whether DB's dispatchers let a connecting train wait, keyed by the departing leg's id.
     @State private var dispositions: [String: TransferDisposition] = [:]
+    /// Transfers whose incoming train is often too late there (#316), keyed by the incoming leg's id.
+    @State private var transferWarnings: [String: String] = [:]
 
     /// Where the journey is going now.
     private var goal: Station { editedDestination ?? finalDestination }
@@ -66,6 +68,7 @@ struct JourneyDetailView: View {
             }, showingAfter: LoadingDeadline.liveData) { liveDataLoaded = true }
             liveDataLoaded = true
             await loadDispositions()
+            await loadTransferWarnings()
             // Keep a saved journey's delays current while it's open.
             while !Task.isCancelled {
                 try? await Task.sleep(for: AppModel.realtimeRefreshInterval)
@@ -153,7 +156,7 @@ struct JourneyDetailView: View {
                     )
                     if let info = transferInfo(after: leg) {
                         TransferRow(from: leg, to: info.next, walk: info.walk, isPast: journey.isOver(),
-                                    disposition: dispositions[info.next.id])
+                                    disposition: dispositions[info.next.id], warning: transferWarnings[leg.id])
                     }
                 }
             }
@@ -161,6 +164,12 @@ struct JourneyDetailView: View {
         }
         .padding(.horizontal)
         .padding(.bottom, 32)
+    }
+
+    /// Which tight transfers the incoming train usually misses (#316); not for a journey that is over.
+    private func loadTransferWarnings() async {
+        guard !journey.isOver() else { return }
+        transferWarnings = await TrainStatisticsModel.transferWarnings(for: journey, upTo: 15, here: true, bahnDe: model.provider.bahnDe)
     }
 
     /// Whether opening waits for live data (see the `.task` above): only for a journey not seen live yet.
@@ -434,6 +443,8 @@ struct TransferRow: View {
     var isPast = false
     /// Whether DB's dispatchers let the connecting train wait (from bahn.expert), if decided.
     var disposition: TransferDisposition?
+    /// Says the incoming train is often too late for this transfer, from past runs (#316).
+    var warning: String?
 
     private var minutes: Int {
         Int((to.departure.best.timeIntervalSince(from.arrival.best) / 60).rounded())
@@ -458,6 +469,9 @@ struct TransferRow: View {
                     Label(disposition.title, systemImage: disposition == .waiting ? "hourglass" : "xmark.circle.fill")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(disposition == .waiting ? Color.punctual : Color.heavyDelay)
+                }
+                if let warning, !isPast, !broken {
+                    TransferWarning(text: warning)
                 }
                 if let walk {
                     Text("\(Int((walk.arrival.best.timeIntervalSince(walk.departure.best) / 60).rounded())) min Fußweg")
@@ -516,8 +530,15 @@ struct LegCard: View {
     @State private var showStops = false
     @State private var showDetails = false
     @State private var showFullTrip = false
+    /// What past runs of this train say (#316), shown in the details.
+    @State private var statistics = TrainStatisticsModel()
+    @Environment(AppModel.self) private var model
 
     private var color: Color { leg.line?.color ?? .gray }
+    private var statisticsStops: [StatisticsStop] {
+        [StatisticsStop(station: leg.origin, role: .departure, platform: leg.departurePlatform?.planned),
+         StatisticsStop(station: leg.destination, role: .arrival, platform: leg.arrivalPlatform?.planned)]
+    }
     private var intermediate: [Stopover] { Array(leg.stopovers.dropFirst().dropLast()) }
 
     var body: some View {
@@ -632,7 +653,7 @@ struct LegCard: View {
                     ReservationRow(reservation: reservation)
                 }
 
-                if leg.line?.operatorName != nil || onReplace != nil || onReplan != nil || onCheckin != nil || onShowCheckin != nil {
+                if leg.line?.operatorName != nil || statistics.rows != nil || onReplace != nil || onReplan != nil || onCheckin != nil || onShowCheckin != nil {
                     Button {
                         withAnimation(.snappy) { showDetails.toggle() }
                     } label: {
@@ -651,6 +672,11 @@ struct LegCard: View {
                             TrainOperatorsLabel(source: .leg(leg))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                        }
+
+                        if let rows = statistics.rows {
+                            TrainStatisticsSection(content: rows)
+                                .transition(.fold)
                         }
 
                         if onReplace != nil || onReplan != nil || onCheckin != nil || onShowCheckin != nil {
@@ -676,6 +702,9 @@ struct LegCard: View {
         }
         .sheet(isPresented: $showFullTrip) {
             LegTripSheet(leg: leg)
+        }
+        .task(id: leg.id) {
+            await statistics.load(line: leg.line, stops: statisticsStops, date: leg.departure.planned, bahnDe: model.provider.bahnDe)
         }
     }
 

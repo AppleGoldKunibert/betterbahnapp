@@ -103,7 +103,7 @@ struct JourneyResultsView: View {
                 ForEach(Array(visibleJourneys.enumerated()), id: \.element.id) { index, result in
                     let journey = liveResults[result.id].map { JourneyRefresher.keepingPlatforms(of: result, in: $0) } ?? result
                     NavigationLink(value: ConnectionsRoute.journey(JourneyRoute(journey: journey, finalDestination: search.to, search: search))) {
-                        JourneyCard(journey: journey)
+                        JourneyCard(journey: journey, warnsAboutTransfers: true)
                             .overlay {
                                 if !requirements.isEmpty, index == 0 {
                                     RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -598,6 +598,12 @@ struct JourneyResultsView: View {
 
 struct JourneyCard: View {
     let journey: Journey
+    /// Search results warn when an incoming train is often too late for a tight transfer, from past
+    /// runs (#316). Off elsewhere, so lists of saved or alternative journeys don't ask the server.
+    var warnsAboutTransfers = false
+
+    @Environment(AppModel.self) private var model
+    @State private var transferWarning: String?
 
     var body: some View {
         Card {
@@ -662,7 +668,17 @@ struct JourneyCard: View {
                         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.slightDelay)
                     }
                 }
+
+                if let transferWarning {
+                    TransferWarning(text: transferWarning)
+                }
             }
+        }
+        .task(id: journey.id) {
+            guard warnsAboutTransfers, !journey.isCancelled else { return }
+            let warnings = await TrainStatisticsModel.transferWarnings(for: journey, upTo: 10, here: false, bahnDe: model.provider.bahnDe)
+            // The first of them, in the order of the journey.
+            transferWarning = journey.tightTransfers(upTo: 10).lazy.compactMap { warnings[$0.id] }.first
         }
     }
 }
@@ -742,6 +758,7 @@ struct ChipFlowLayout: Layout {
         .padding()
     }
     .background { AppBackground() }
+    .environment(AppModel())
 }
 
 private extension Task where Failure == Never {

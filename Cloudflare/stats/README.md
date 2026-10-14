@@ -17,6 +17,12 @@ in Germany and realtime data.
 3. Everything lands in D1, one row per run (`schema.sql` describes the columns and the compact stop
    format, with an example query).
 
+4. The app reads the data back (`POST /train-stats { trains: [{ category, number, evas: [...] }] }`,
+   same App Attest token, at most 8 trains with 6 stops each, 60 requests per minute per install):
+   per train the finished runs of the last 30 days (`STATS_DAYS`) – cancelled runs, the vehicles that ran
+   it – and per stop the arrival and departure delays, cancellations and platform moves
+   (planned → actual). The app shows them only from 5 runs on (#316).
+
 Size: a finished run takes well under 1 KB, so the free plan's 5 GB hold roughly 10,000–25,000 runs a
 day for a year. The free plan's CPU limit allows about `BATCH` = 8 runs a minute, i.e. roughly 4,000
 trains a day (three looks each). Above that, switch to Workers Paid (5 $/month) and raise `BATCH`.
@@ -29,6 +35,12 @@ npx wrangler d1 create betterbahn-stats          # put the printed database_id i
 npx wrangler d1 execute betterbahn-stats --remote --file=schema.sql
 npx wrangler secret put TOKEN_SECRET             # same value as in betterbahn2 / betterbahn / betterbahn-pass
 npx wrangler deploy
+```
+
+An existing database needs the index for `/train-stats` once (`CREATE INDEX IF NOT EXISTS`, safe to repeat):
+
+```sh
+npx wrangler d1 execute betterbahn-stats --remote --file=schema.sql
 ```
 
 Check it with `curl https://betterbahn-stats.betterbahn.workers.dev/health`. A look at the data:

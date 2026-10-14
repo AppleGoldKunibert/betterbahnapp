@@ -44,6 +44,8 @@ CREATE TABLE IF NOT EXISTS runs (
 -- Every index costs an extra written row per update, so only what the Worker and backup.sh need.
 CREATE INDEX IF NOT EXISTS runs_due ON runs (state, next_check);
 CREATE INDEX IF NOT EXISTS runs_day ON runs (service_day);
+-- A train's recent runs for `POST /train-stats` (#316). Written once per run, when its schedule is known.
+CREATE INDEX IF NOT EXISTS runs_train ON runs (category, number, service_day);
 
 -- Station names for the EVA numbers in runs.stops, written once per station.
 CREATE TABLE IF NOT EXISTS stations (

@@ -20,6 +20,12 @@ name = "SIGHTINGS_LIMITER"
 namespace_id = "1301"
 simple = { limit = 30, period = 60 }
 
+# Per app install: 60 train-statistics lookups per minute (#316).
+[[ratelimits]]
+name = "STATS_LIMITER"
+namespace_id = "1302"
+simple = { limit = 60, period = 60 }
+
 [vars]
 # Runs per cron invocation (one bahn.de request each). 8 fits the free plan's 10 ms CPU; raise it on Workers Paid.
 BATCH = "8"

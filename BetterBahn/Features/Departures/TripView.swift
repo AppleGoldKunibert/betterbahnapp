@@ -302,9 +302,30 @@ struct TripContent: View {
     /// Where a train run by several railways changes hands (stopover ID → operators), e.g. DB at the
     /// start and at Bad Schandau, ČD at Děčín; empty for one railway throughout.
     @State private var operatorStops: [String: [String]] = [:]
+    /// What past runs of this train say at the stops that matter (#316).
+    @State private var statistics = TrainStatisticsModel()
     @Environment(AppModel.self) private var model
 
     private var color: Color { trip.line?.color ?? .gray }
+
+    /// Where the experience values apply: the stops picked to get on and off, else the station the train
+    /// was opened from, else the whole run.
+    private var statisticsStops: [StatisticsStop] {
+        func stop(_ stopover: Stopover, _ role: StatisticsStop.Role) -> StatisticsStop {
+            let platform = role == .departure ? stopover.departurePlatform : stopover.arrivalPlatform
+            return StatisticsStop(station: stopover.station, role: role, platform: platform?.planned)
+        }
+        var stops: [StatisticsStop] = []
+        if let index = boardingIndex { stops.append(stop(trip.stopovers[index], .departure)) }
+        if let index = exitIndex { stops.append(stop(trip.stopovers[index], .arrival)) }
+        if stops.isEmpty, let highlight, let index = trip.stopovers.firstIndex(where: { $0.station.isSamePlace(as: highlight) }) {
+            stops.append(stop(trip.stopovers[index], index == 0 ? .departure : .arrival))
+        }
+        if stops.isEmpty, let first = trip.stopovers.first, let last = trip.stopovers.last {
+            stops = [stop(first, .departure), stop(last, .arrival)]
+        }
+        return stops
+    }
 
     var body: some View {
         VStack(spacing: 16) {
@@ -333,6 +354,10 @@ struct TripContent: View {
                     }
                     // At the next stop; any other stop's unfolds below it with a tap on its platform.
                     CoachSequenceDisclosure(trip: trip, spacing: 14)
+
+                    if let rows = statistics.rows {
+                        TrainStatisticsSection(content: rows).padding(.top, 14)
+                    }
                 }
             }
 
@@ -383,6 +408,10 @@ struct TripContent: View {
         .task(id: trip.stopovers.map(\.id)) {
             guard let bahnDe = model.provider.bahnDe, let found = try? await bahnDe.operatorStops(for: trip) else { return }
             operatorStops = found
+        }
+        .task(id: [boardingID ?? "", exitID ?? "", trip.stopovers.first?.id ?? ""]) {
+            await statistics.load(line: trip.line, stops: statisticsStops, date: trip.stopovers.first?.departure?.planned ?? .now,
+                                  bahnDe: model.provider.bahnDe)
         }
     }
 

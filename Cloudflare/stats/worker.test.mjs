@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { signToken } from "../shared/appattest.mjs";
-import { berlinToUnix, handleRequest, journeyFields, parseJourney, processDueRuns, runKey } from "./worker.mjs";
+import { berlinToUnix, handleRequest, journeyFields, parseJourney, processDueRuns, runKey, trainStatistics } from "./worker.mjs";
 
 const secret = "test-secret";
 const schema = readFileSync(new URL("./schema.sql", import.meta.url), "utf8");
@@ -230,4 +230,96 @@ test("a cancelled train is kept with its cancellation", () => {
 test("Berlin local times convert across daylight saving time", () => {
     assert.equal(berlinToUnix("2026-10-06T18:30"), Date.parse("2026-10-06T16:30:00Z") / 1000);
     assert.equal(berlinToUnix("2026-12-06T18:30"), Date.parse("2026-12-06T17:30:00Z") / 1000);
+});
+
+// MARK: - Train statistics (#316)
+
+const FULDA = "8000115";
+const ICE4 = { name: "ICE9465", category: "ICE", number: 1095, destination: "Berlin Hbf",
+    vehicles: [{ type: "I0812", id: "938058120011" }, { type: "I1412", id: "938054120029" }] };
+const ICE1 = { name: "ICE0160", category: "ICE", number: 1095, destination: "Berlin Hbf",
+    vehicles: [{ type: "I4010", id: "938054010021" }, { type: "I8010", id: "938058010034" }] };
+
+/// A finished run of ICE 1095 on `day`; `stop` is its row at Fulda (see schema.sql for the format).
+function addRun(db, day, stop, { cancelled = 0, formation = null, category = "ICE", number = "1095" } = {}) {
+    db.db.prepare("INSERT INTO runs (key, journey_id, state, next_check, first_seen, service_day, category, number, cancelled, formation, stops) " +
+        "VALUES (?, 'x', 'done', 0, 0, ?, ?, ?, ?, ?, ?)")
+        .run(`${day}|${category}|${number}`, day, category, number, cancelled, formation ? JSON.stringify({ status: "MATCHES_SCHEDULE", groups: [formation] }) : null,
+            JSON.stringify([["8000261", null, null, 0, 1, "19", null, 0], [FULDA, ...stop], ["8000105", 253, 4, null, null, "8", null, 0]]));
+}
+
+async function askStats(env, trains) {
+    return handleRequest(new Request("https://betterbahn-stats.example/train-stats", {
+        method: "POST", headers: { "Content-Type": "application/json", "X-BetterBahn-Token": await token() }, body: JSON.stringify({ trains }),
+    }), env, seenAt);
+}
+
+test("answers a train's delays, cancellations, platform moves and vehicles per stop", async () => {
+    const env = { DB: new FakeD1(), TOKEN_SECRET: secret };
+    // [arrival, arrivalDelay, departure, departureDelay, platform, changedPlatform, flags]
+    addRun(env.DB, "2026-10-01", [120, 0, 122, 1, "7", null, 0], { formation: ICE4 });
+    addRun(env.DB, "2026-10-02", [120, 12, 122, 12, "7", "8", 0], { formation: ICE4 });
+    addRun(env.DB, "2026-10-03", [120, 3, 122, 3, "7", null, 0], { formation: ICE1 });
+    addRun(env.DB, "2026-10-04", [120, null, 122, null, "7", null, 1], { formation: ICE4 });
+    addRun(env.DB, "2026-10-05", [120, null, 122, null, "7", null, 1], { cancelled: 1 });
+    // Too old, another train and another day's other number don't count.
+    addRun(env.DB, "2026-08-01", [120, 50, 122, 50, "7", null, 0]);
+    addRun(env.DB, "2026-10-01", [120, 99, 122, 99, "7", null, 0], { number: "1096" });
+
+    const response = await askStats(env, [{ category: "ice", number: "1095", evas: [FULDA, "8000105", "9999999"] }]);
+    assert.equal(response.status, 200);
+    const [train] = (await response.json()).trains;
+    assert.equal(train.category, "ICE");
+    assert.equal(train.days, 30);
+    assert.equal(train.runs, 5);
+    assert.equal(train.cancelled, 1);
+
+    const fulda = train.stops[FULDA];
+    assert.equal(fulda.runs, 5);
+    assert.equal(fulda.cancelled, 2);
+    assert.deepEqual(fulda.arrival.sort((a, b) => a - b), [0, 3, 12]);
+    assert.deepEqual(fulda.departure.sort((a, b) => a - b), [1, 3, 12]);
+    assert.deepEqual(fulda.platforms, [{ from: "7", to: "7", n: 2 }, { from: "7", to: "8", n: 1 }]);
+    assert.deepEqual(train.stops["8000105"].arrival, [4, 4, 4, 4]);
+    assert.equal(train.stops["9999999"], undefined, "a stop the train never had is left out");
+
+    assert.equal(train.formationRuns, 4);
+    assert.deepEqual(train.formations.map(f => f.n), [3, 1]);
+    // In bahn.de's Wagenreihung shape, so the app names the series with its own rules.
+    assert.deepEqual(train.formations[0].groups[0], {
+        name: "ICE9465", transport: { category: "ICE", number: 1095 },
+        vehicles: [{ vehicleID: "938058120011", type: { constructionType: "I0812" } }, { vehicleID: "938054120029", type: { constructionType: "I1412" } }],
+    });
+});
+
+test("treats trainsets of one series as one kind of vehicle and picks a coupled train's own half", () => {
+    const otherHalf = { ...ICE4, name: "ICE9999", number: 940 };
+    const run = group => ({ cancelled: 0, formation: JSON.stringify({ groups: group }), stops: "[]" });
+    const answer = trainStatistics([
+        run([{ ...ICE4, name: "ICE9465" }]), run([{ ...ICE4, name: "ICE9470" }]), run([otherHalf, ICE1]), run(null),
+    ], { category: "ICE", number: "1095", evas: [] });
+    assert.equal(answer.formationRuns, 3);
+    assert.deepEqual(answer.formations.map(f => [f.n, f.groups.length, f.groups[0].name]), [[2, 1, "ICE9465"], [1, 1, "ICE0160"]]);
+});
+
+test("refuses train statistics without a token, with malformed trains or too many", async () => {
+    const env = { DB: new FakeD1(), TOKEN_SECRET: secret };
+    const ask = (trains, headers) => handleRequest(new Request("https://betterbahn-stats.example/train-stats", {
+        method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify({ trains }),
+    }), env, seenAt);
+    assert.equal((await ask([])).status, 401);
+    assert.equal((await askStats(env, [{ category: "ICE", number: "1095", evas: [] }])).status, 200);
+    assert.equal((await askStats(env, Array(9).fill({ category: "ICE", number: "1095", evas: [] }))).status, 400);
+    assert.equal((await askStats(env, [{ category: "ICE; DROP", number: "1095", evas: [] }])).status, 400);
+    assert.equal((await askStats(env, [{ category: "ICE", number: "1095", evas: ["x"] }])).status, 400);
+    assert.equal((await askStats(env, [{ category: "ICE", number: "1095", evas: Array(7).fill("8000115") }])).status, 400);
+    const get = await handleRequest(new Request("https://betterbahn-stats.example/train-stats"), env, seenAt);
+    assert.equal(get.status, 405);
+});
+
+test("rate limits train statistics per app install", async () => {
+    const keys = [];
+    const env = { DB: new FakeD1(), TOKEN_SECRET: secret, STATS_LIMITER: { limit: async ({ key }) => { keys.push(key); return { success: false }; } } };
+    assert.equal((await askStats(env, [])).status, 429);
+    assert.deepEqual(keys, ["key-1"]);
 });
