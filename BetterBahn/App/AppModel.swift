@@ -1083,7 +1083,10 @@ final class AppModel {
     /// Fetches realtime data for one saved journey, stores it and sends notifications for new issues.
     private func refresh(_ entry: SavedJourney, using refresher: JourneyRefresher) async {
         let refreshed = await refresher.refresh(entry.journey)
-        guard let index = savedJourneys.firstIndex(where: { $0.id == entry.id }) else { return }
+        // The refresh takes seconds; if the user replanned meanwhile (same entry ID, new journey),
+        // this result belongs to the old plan and must neither overwrite nor notify. The next
+        // refresh picks up the new plan.
+        guard let index = stillSavedIndex(of: entry) else { return }
         var updated = savedJourneys[index]
         let previous = updated.journey
         updated.journey = refreshed
@@ -1115,7 +1118,15 @@ final class AppModel {
             updated.notifiedIssues = Array(known.union(newIssues.map(\.id)).union(newReasons.map(\.id))
                 .union(newPlatforms.map(\.id)).union(newDispositions.compactMap(\.notificationID)))
         }
-        if updated != savedJourneys[index] { savedJourneys[index] = updated }
+        // The notifications above await too, so check again before storing.
+        guard let storeIndex = stillSavedIndex(of: entry) else { return }
+        if updated != savedJourneys[storeIndex] { savedJourneys[storeIndex] = updated }
+    }
+
+    /// Where `entry` is saved, provided it still holds the journey it had when it was handed to a
+    /// refresh (`replaceSaved` keeps the entry ID but swaps the journey).
+    private func stillSavedIndex(of entry: SavedJourney) -> Int? {
+        savedJourneys.firstIndex { $0.id == entry.id && $0.journey.id == entry.journey.id }
     }
 
     /// Past journeys; once their live data is gone (`SavedJourney.liveDataLifetime`) shown as planned,
