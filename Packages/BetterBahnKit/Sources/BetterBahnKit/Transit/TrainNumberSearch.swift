@@ -386,8 +386,8 @@ extension BahnExpertClient {
         return TrainSearchResult(
             journeyId: run.journeyId, category: category, number: number, line: train.line,
             product: product(transportType: train.transportType, category: category),
-            origin: Station.displayName(for: run.firstStop?.stopPlace.name ?? ""),
-            destination: Station.displayName(for: run.lastStop?.stopPlace.name ?? ""),
+            origin: StationNames.displayName(forName: run.firstStop?.stopPlace.name ?? "", evaNumber: run.firstStop?.stopPlace.evaNumber),
+            destination: StationNames.displayName(forName: run.lastStop?.stopPlace.name ?? "", evaNumber: run.lastStop?.stopPlace.evaNumber),
             originEVA: run.firstStop?.stopPlace.evaNumber, destinationEVA: run.lastStop?.stopPlace.evaNumber,
             originCountry: run.firstStop.flatMap { TrainSearchCountry.code(eva: $0.stopPlace.evaNumber, ifopt: $0.stopPlace.ifopt) },
             destinationCountry: run.lastStop.flatMap { TrainSearchCountry.code(eva: $0.stopPlace.evaNumber, ifopt: $0.stopPlace.ifopt) })

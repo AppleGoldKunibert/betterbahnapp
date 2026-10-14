@@ -78,6 +78,21 @@ struct MPlace: Decodable {
         headsign == name ? stationName : headsign
     }
 
+    /// `headsign` as shown when it names this stop: like the stop itself, so a train's direction reads
+    /// like its stops ("Dresden-Neustadt", not DELFI's "Dresden Bahnhof Neustadt"); nil for another stop.
+    func displayName(ofHeadsign headsign: String) -> String? {
+        headsign == name || headsign == stationName ? toStation().displayName : nil
+    }
+
+    /// `headsign` as shown: like the first of `places` it names, else on its own
+    /// (`StationNames.displayName(forName:)`).
+    static func displayName(ofHeadsign headsign: String, namingOneOf places: [MPlace?]) -> String {
+        for place in places.compactMap({ $0 }) {
+            if let shown = place.displayName(ofHeadsign: headsign) { return shown }
+        }
+        return StationNames.displayName(forName: headsign)
+    }
+
     func toStation() -> Station {
         Station(
             id: parentId ?? stopId ?? "\(lat),\(lon)", name: stationName,
@@ -247,7 +262,8 @@ struct MLeg: Decodable {
         if let tripTo { headsign = tripTo.resolving(headsign) }
         let passesHeadsignAsIntermediateStop = (intermediateStops ?? [])
             .contains { Station.normalize($0.stationName) == Station.normalize(headsign) }
-        return Station.displayName(for: passesHeadsignAsIntermediateStop ? to.stationName : headsign)
+        if passesHeadsignAsIntermediateStop { return to.toStation().displayName }
+        return MPlace.displayName(ofHeadsign: headsign, namingOneOf: [to, tripTo])
     }
 
     func toLeg() -> Leg {
@@ -313,11 +329,11 @@ struct MStopTime: Decodable {
         let otherEnd = kind == .departures ? tripTo : tripFrom
         let line = lineInfo.toLine()
         let otherEndName = kind == .departures
-            ? (headsign.map { tripTo?.resolving($0) ?? $0 } ?? tripTo?.stationName)
-            : tripFrom?.stationName
+            ? (headsign.map { MPlace.displayName(ofHeadsign: $0, namingOneOf: [tripTo]) } ?? tripTo?.toStation().displayName)
+            : tripFrom?.toStation().displayName
         return BoardEntry(
             kind: kind, tripId: tripId, station: station, line: line,
-            otherEnd: otherEndName.map(Station.displayName(for:)),
+            otherEnd: otherEndName,
             time: time,
             platform: place.platform(isRail: lineInfo.isRail, realtime: realtime),
             cancelled: (cancelled ?? false) || (tripCancelled ?? false),

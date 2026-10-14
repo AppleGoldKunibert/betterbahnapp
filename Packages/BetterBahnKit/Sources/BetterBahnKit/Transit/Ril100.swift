@@ -124,7 +124,7 @@ public enum Ril100 {
     }
 
     /// `name` without a country mark at its end: "Basel SBB (CH)" → "Basel SBB".
-    private static func withoutCountryMark(_ name: String) -> String {
+    static func withoutCountryMark(_ name: String) -> String {
         let characters = Array(name)
         guard characters.count > 5, characters[characters.count - 1] == ")", characters[characters.count - 4] == "(",
               characters[characters.count - 5] == " ",

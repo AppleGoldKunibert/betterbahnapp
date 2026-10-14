@@ -1191,7 +1191,7 @@ public struct TransitousProvider: TransitProvider {
         let busier = try? await stopCache.value(for: station.id, maxAge: 24 * 3600) {
             [station] in
             let matches = try await CombinedProvider.withDeadline(Self.extraQueryDeadline) {
-                try await geocode(station.displayName)
+                try await geocode(Station.displayName(for: station.name))
             }
             return Self.busierStop(for: station, among: matches)?.toStation()
         }

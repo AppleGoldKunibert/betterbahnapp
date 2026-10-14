@@ -25,14 +25,13 @@ public struct BoardFilter: Sendable, Hashable {
         if hideCancelled, entry.cancelled { return false }
         if let ticketFilter, !ticketFilter.isValid(entry) { return false }
         // A departure whose final destination is this station ends here → not rideable.
-        if entry.kind == .departures, entry.terminatesOrOriginatesHere == true,
-           let other = entry.otherEnd, Station.normalize(other) == Station.normalize(entry.station.name) {
-            return false
-        }
-        if entry.kind == .arrivals, entry.terminatesOrOriginatesHere == true,
-           let other = entry.otherEnd, Station.normalize(other) == Station.normalize(entry.station.name) {
-            return false
-        }
+        if entry.terminatesOrOriginatesHere == true, Self.namesOwnStation(entry) { return false }
         return true
+    }
+
+    /// Whether the other end shown for `entry` is its own station, under the feed's name or as shown.
+    private static func namesOwnStation(_ entry: BoardEntry) -> Bool {
+        guard let other = entry.otherEnd.map(Station.normalize) else { return false }
+        return other == Station.normalize(entry.station.name) || other == Station.normalize(entry.station.displayName)
     }
 }
