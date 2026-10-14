@@ -67,9 +67,11 @@ public struct Station: Codable, Sendable, Hashable, Identifiable {
             .filter { $0.isLetter || $0.isNumber }
     }
 
-    /// User-facing name preferring DB's common short forms over the raw Hafas name,
-    /// e.g. "S+U Berlin Hauptbahnhof" -> "Berlin Hbf", "S Spandau Bhf (Berlin)" -> "Berlin-Spandau".
-    public var displayName: String { Station.displayName(for: name) }
+    /// User-facing name: DB's for a German station and the national railway's for one abroad
+    /// (`StationNames`, e.g. "Dresden-Neustadt" for DELFI's "Dresden Bahnhof Neustadt", "Děčín hl.n." for
+    /// "Decin hl.n."), else the feed's, both in DB's common short forms, e.g. "S+U Berlin Hauptbahnhof" ->
+    /// "Berlin Hbf", "S Spandau Bhf (Berlin)" -> "Berlin-Spandau".
+    public var displayName: String { Station.displayName(for: StationNames.name(for: self) ?? name) }
 
     /// Stations in the "<city> <stop>" form (no hyphen) despite matching the "<stop> Bhf (<city>)" pattern.
     private static let unhyphenatedStops: Set<String> = [
@@ -128,8 +130,9 @@ public struct Station: Codable, Sendable, Hashable, Identifiable {
             name.removeLast(", Bahnhof".count)
             name = delfiTownNames[name] ?? name
         }
-        // DB's own names leave out the space before the bracket ("Bernau(b Berlin)", "Frankfurt(Oder)").
+        // DB's own names leave out the spaces around brackets ("Bernau(b Berlin)", "Frankfurt(Main)Hbf").
         name = name.replacingOccurrences(of: #"(?<=\p{L})\("#, with: " (", options: .regularExpression)
+            .replacingOccurrences(of: #"\)(?=\p{L})"#, with: ") ", options: .regularExpression)
 
         while name.hasSuffix(")"), let openParen = name.range(of: " (", options: .backwards) {
             let qualifier = name[openParen.upperBound..<name.index(before: name.endIndex)].lowercased()
@@ -166,8 +169,14 @@ public struct Station: Codable, Sendable, Hashable, Identifiable {
         }
 
         if name.hasSuffix(" Flugh") { name += "afen" }
+        // Main stations in Czechia and Slovakia the way bahn.de writes them: "Děčín hl.n.", "Bratislava hl.st.".
+        for (long, short) in abroadMainStations where name.hasSuffix(long) && name.count > long.count {
+            name = String(name.dropLast(long.count)) + short
+        }
 
         return name.replacingOccurrences(of: ", Hauptbahnhof", with: " Hauptbahnhof")
             .replacingOccurrences(of: "Hauptbahnhof", with: "Hbf")
     }
+
+    private static let abroadMainStations = [(" hlavní nádraží", " hl.n."), (" hlavná stanica", " hl.st.")]
 }
