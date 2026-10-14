@@ -23,18 +23,34 @@ extension Station {
 
 /// Where a Deutschlandticket or BahnCard 100 stops being valid: at the border.
 enum CrossBorder {
-    /// Border stations both tickets reach (normalized names, see `Station.normalize`).
-    static let coveredStations: [String] = ["salzburghbf", "kufstein"]
+    /// Stops abroad the Deutschlandticket officially reaches, by name (bus-und-bahn.de/deutschlandticket/grenzverkehr).
+    /// Not Basel SBB and not Strasbourg. Basel Bad Bf is DB's own and counts as German anyway.
+    static let deutschlandticketStops: [String] = [
+        "Venlo", "Arnhem", "Enschede", "Hengelo", "Vaals", "Kerkrade",
+        "Salzburg Hbf", "Kufstein", "Ehrwald", "Reutte",
+        "Basel Bad", "Schaffhausen",
+        "Wissembourg", "Lauterbourg", "Sarreguemines", "Saargemünd",
+        "Świnoujście", "Swinoujscie", "Zgorzelec", "Krzewina Zgorzelecka",
+        "Hrádek nad Nisou", "Hradek nad Nisou", "Vejprty", "Varnsdorf",
+        "Tønder", "Tonder", "Kelmis",
+    ]
 
-    /// Whether `station` is known to be outside Germany and not one of the `coveredStations`.
-    static func isAbroad(_ station: Station) -> Bool {
+    /// Border stations the BahnCard 100 reaches (tariff-wise German border stations).
+    static let bahnCard100Stops: [String] = ["Salzburg Hbf", "Kufstein", "Basel Bad", "Schaffhausen"]
+
+    private static func fold(_ name: String) -> String {
+        Station.normalize(name.folding(options: .diacriticInsensitive, locale: nil))
+    }
+
+    /// Whether `station` is known to be outside Germany and not one of `covered` (matched by name start).
+    static func isAbroad(_ station: Station, covered: [String]) -> Bool {
         guard let code = station.countryCode, code != "DE" else { return false }
-        let name = Station.normalize(station.name)
-        return !coveredStations.contains { name.hasPrefix($0) }
+        let name = fold(station.name)
+        return !covered.contains { name.hasPrefix(fold($0)) }
     }
 
     /// Whether a ride starts or ends abroad, so the ticket does not cover all of it.
-    static func runsAbroad(_ leg: Leg) -> Bool {
-        !leg.isWalking && (isAbroad(leg.origin) || isAbroad(leg.destination))
+    static func runsAbroad(_ leg: Leg, covered: [String]) -> Bool {
+        !leg.isWalking && (isAbroad(leg.origin, covered: covered) || isAbroad(leg.destination, covered: covered))
     }
 }

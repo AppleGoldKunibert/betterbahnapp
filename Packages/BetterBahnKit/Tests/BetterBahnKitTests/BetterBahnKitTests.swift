@@ -2482,6 +2482,15 @@ private final class Ril100GeocodeProtocol: URLProtocol, @unchecked Sendable {
             #expect(filter.isValid(leg(rex, from: kufstein, to: rosenheim)))
             #expect(filter.isValid(leg(regio, from: dresden, to: rosenheim)))
         }
+        // Official D-Ticket stops abroad, but not Basel SBB or Strasbourg.
+        let venlo = Station(id: "8400597", name: "Venlo", coordinate: nil, evaNumber: nil, source: .transitous)
+        let baselSBB = Station(id: "8500010", name: "Basel SBB", coordinate: nil, evaNumber: nil, source: .transitous)
+        let strasbourg = Station(id: "8700011", name: "Strasbourg-Ville", coordinate: nil, evaNumber: nil, source: .transitous)
+        let duesseldorf = station("8000085", "Düsseldorf Hbf")
+        #expect(dTicket.isValid(leg(regio, from: duesseldorf, to: venlo)))
+        #expect(!dTicket.isValid(leg(regio, from: duesseldorf, to: baselSBB)))
+        #expect(!dTicket.isValid(leg(regio, from: rosenheim, to: strasbourg)))
+        #expect(!bc100.isValid(leg(regio, from: duesseldorf, to: venlo)))
     }
 
     @Test func boardAbroadIsNotCovered() {

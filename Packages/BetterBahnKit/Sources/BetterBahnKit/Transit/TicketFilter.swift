@@ -24,7 +24,7 @@ public enum TicketType: String, Codable, Sendable, CaseIterable, Hashable {
 /// Decides whether a train can be used with the chosen ticket.
 public enum TicketFilter: Sendable, Hashable {
     /// Local transport only: no ICE/IC/EC, no long-distance buses, no private long-distance trains and
-    /// nothing that starts or ends abroad (except Salzburg Hbf and Kufstein).
+    /// nothing that starts or ends abroad (except the border stops in `CrossBorder`).
     case deutschlandticket
     case bahnCard100(BC100Rules)
 
@@ -60,7 +60,19 @@ public enum TicketFilter: Sendable, Hashable {
     }
 
     /// Valid if the train is and the ride stays in Germany (see `CrossBorder`).
-    public func isValid(_ leg: Leg) -> Bool { leg.isWalking || (isValid(leg.line) && !CrossBorder.runsAbroad(leg)) }
+    public func isValid(_ leg: Leg) -> Bool {
+        switch self {
+        case .bahnCard100(let rules): rules.isValid(leg)
+        case .deutschlandticket:
+            leg.isWalking || (isValid(leg.line) && !CrossBorder.runsAbroad(leg, covered: CrossBorder.deutschlandticketStops))
+        }
+    }
     public func isValid(_ journey: Journey) -> Bool { journey.legs.allSatisfy(isValid) }
-    public func isValid(_ entry: BoardEntry) -> Bool { isValid(entry.line) && !CrossBorder.isAbroad(entry.station) }
+    public func isValid(_ entry: BoardEntry) -> Bool {
+        switch self {
+        case .bahnCard100(let rules): rules.isValid(entry)
+        case .deutschlandticket:
+            isValid(entry.line) && !CrossBorder.isAbroad(entry.station, covered: CrossBorder.deutschlandticketStops)
+        }
+    }
 }
