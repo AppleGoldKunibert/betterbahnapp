@@ -123,7 +123,8 @@ struct JourneyWidgetView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 4) {
                 TrainBadge(name: state.phase == .transfer ? state.transfer?.toTrain ?? state.trainName : state.trainName,
-                           product: state.transfer?.toProduct ?? state.product)
+                           product: state.transfer?.toProduct ?? state.product,
+                           nightTrain: state.transfer?.toNightTrain ?? state.isNightTrain)
                 Spacer(minLength: 0)
                 DelayBadge(minutes: state.nextStopDelayMinutes, cancelled: state.cancelled)
             }
@@ -144,7 +145,7 @@ struct JourneyWidgetView: View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    TrainBadge(name: state.trainName, product: state.product)
+                    TrainBadge(name: state.trainName, product: state.product, nightTrain: state.isNightTrain)
                     DelayBadge(minutes: state.nextStopDelayMinutes, cancelled: state.cancelled)
                 }
                 Spacer(minLength: 0)
@@ -241,11 +242,12 @@ struct CountdownText: View {
 struct TrainBadge: View {
     let name: String
     let product: Product
+    var nightTrain = false
     @Environment(\.widgetRenderingMode) private var renderingMode
 
     var body: some View {
         let label = HStack(spacing: 3) {
-            Image(systemName: product.symbolName)
+            Image(systemName: product.symbolName(nightTrain: nightTrain))
             Text(name).lineLimit(1)
         }
         .font(.caption.weight(.bold))

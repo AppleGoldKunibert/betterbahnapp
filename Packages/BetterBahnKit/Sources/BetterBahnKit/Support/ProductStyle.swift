@@ -6,7 +6,8 @@ public extension Product {
     var symbolName: String {
         switch self {
         case .highSpeed: "train.side.front.car"
-        case .longDistance: "train.side.middle.car"
+        case .longDistance, .interregio: "train.side.middle.car"
+        case .nightTrain: Self.nightTrainSymbolName
         case .regionalExpress, .regional: "tram.fill"
         case .suburban: "lightrail.fill"
         case .subway: "tram.fill.tunnel"
@@ -18,9 +19,14 @@ public extension Product {
         }
     }
 
+    /// Night trains get a bed instead, so they're easy to spot (#241).
+    func symbolName(nightTrain: Bool) -> String { nightTrain ? Self.nightTrainSymbolName : symbolName }
+
+    static let nightTrainSymbolName = "bed.double.fill"
+
     var color: Color {
         switch self {
-        case .highSpeed, .longDistance: Self.longDistanceColor
+        case .highSpeed, .longDistance, .nightTrain, .interregio: Self.longDistanceColor
         case .regionalExpress, .regional: Color(red: 0.86, green: 0.09, blue: 0.19)
         case .suburban: Color(red: 0.10, green: 0.60, blue: 0.30)
         case .bus, .coach: Color(red: 0.52, green: 0.28, blue: 0.74)
@@ -38,6 +44,17 @@ public extension Product {
         #else
         Color(white: 0.12)
         #endif
+    }
+}
+
+public extension Line {
+    /// The product's symbol, or a bed for a night train.
+    var symbolName: String { product.symbolName(nightTrain: isNightTrain) }
+
+    /// The line's own color where it has one (S-Bahn Berlin, #206), else the product's.
+    var color: Color {
+        guard let hex = lineColorHex else { return product.color }
+        return Color(red: Double(hex >> 16 & 0xFF) / 255, green: Double(hex >> 8 & 0xFF) / 255, blue: Double(hex & 0xFF) / 255)
     }
 }
 #endif

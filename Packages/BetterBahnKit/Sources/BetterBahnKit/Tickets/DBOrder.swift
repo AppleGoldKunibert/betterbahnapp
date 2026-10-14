@@ -126,8 +126,9 @@ public enum DBOrder {
     // MARK: - Mapping
 
     private static func leg(_ section: Section) -> DBTicket.Leg? {
-        // Walks between stations ("Übergang") aren't trains the ticket covers.
-        guard section.verkehrsmittel?.typ != "TRANSFER",
+        // Walks ("Übergang", "Fußweg") aren't trains the ticket covers. Kept as legs, the import would
+        // look for a train leaving at the walk's time and could ride along on any one, e.g. the Ring.
+        guard !walkTypes.contains(section.verkehrsmittel?.typ ?? section.typ ?? ""),
               let originName = section.startHalt?.name ?? section.abfahrtsOrt,
               let destinationName = section.zielHalt?.name ?? section.ankunftsOrt else { return nil }
         let originEVA = section.startHalt?.extId ?? section.abfahrtsOrtExtId
@@ -146,6 +147,9 @@ public enum DBOrder {
             departurePlatform: section.halte?.first?.gleis,
             arrivalPlatform: (section.halte?.count ?? 0) > 1 ? section.halte?.last?.gleis : nil)
     }
+
+    /// bahn.de's types for sections that are walked, not ridden.
+    static let walkTypes: Set<String> = ["TRANSFER", "WALK", "FUSSWEG"]
 
     private static func seat(_ reservation: Reservation) -> DBTicket.Seat {
         let train = reservation.zugname ?? [reservation.zugtyp, reservation.zugnummer].compactMap(\.self).joined(separator: " ")
@@ -314,6 +318,8 @@ public enum DBOrder {
         var ankunft: Time?
         var halte: [Stop]?
         var verkehrsmittel: Vehicle?
+        /// Some sections carry their type here instead of on `verkehrsmittel`.
+        var typ: String?
     }
 
     struct Validity: Decodable {

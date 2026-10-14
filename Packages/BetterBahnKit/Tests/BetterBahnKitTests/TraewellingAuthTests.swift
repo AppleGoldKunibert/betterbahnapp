@@ -42,7 +42,7 @@ import Testing
             "client_id": "public-client",
             "redirect_uri": redirectURI,
             "response_type": "code",
-            "scope": "read-statuses write-statuses read-search",
+            "scope": "read-statuses write-statuses read-search write-likes",
             "state": pkce.state,
             "code_challenge": pkce.challenge,
             "code_challenge_method": "S256",
@@ -141,6 +141,15 @@ import Testing
     }
 }
 
+@Suite struct TraewellingErrorTests {
+    @Test func onlyAValidationErrorAsksToFixTheInput() {
+        #expect(TraewellingError.api(status: 422, message: "The body field must not be greater than 280 characters.").isInvalidInput)
+        #expect(!TraewellingError.api(status: 500, message: nil).isInvalidInput)
+        #expect(!TraewellingError.collision.isInvalidInput)
+        #expect(!TraewellingError.tripNotFound("ICE 594").isInvalidInput)
+    }
+}
+
 /// Real-world case: a manual trip from Hamburg Hbf started at the U-Bahn stop "Hauptbahnhof Süd",
 /// because that stop lay closer to Transitous' coordinate than Träwelling's Hbf.
 @Suite struct TraewellingStationMatchTests {
@@ -177,6 +186,15 @@ import Testing
         #expect(text.ibnr == "8002549")
         let none = try JSONDecoding.decoder.decode(TraewellingStation.self, from: Data(#"{"id":1,"name":"Hamburg Hbf","ibnr":null}"#.utf8))
         #expect(none.ibnr == nil)
+    }
+
+    @Test func decodesWhetherThePointsSystemIsEnabled() throws {
+        let off = try JSONDecoding.decoder.decode(TraewellingUser.self, from: Data(#"{"id":1,"displayName":"Gertrud","username":"gertrud","points":0,"pointsEnabled":false}"#.utf8))
+        #expect(off.pointsEnabled == false)
+        let on = try JSONDecoding.decoder.decode(TraewellingUser.self, from: Data(#"{"id":1,"displayName":"Gertrud","username":"gertrud","points":42,"pointsEnabled":true}"#.utf8))
+        #expect(on.pointsEnabled == true)
+        let missing = try JSONDecoding.decoder.decode(TraewellingUser.self, from: Data(#"{"id":1,"displayName":"Gertrud","username":"gertrud"}"#.utf8))
+        #expect(missing.pointsEnabled == nil)
     }
 }
 
@@ -572,19 +590,20 @@ private final class RotatedTokenProtocol: URLProtocol, @unchecked Sendable {
 
         await #expect(throws: TraewellingError.tripNotFound("ICE 594")) { try await client.checkin(draft) }
         let departureRequests = { UnknownTrainCheckinProtocol.paths.withLock { $0.filter { $0.hasSuffix("/departures") }.count } }
-        // 3 nearest within 1.5 km, then the 4 nearest within 8 km with the wider time window.
-        #expect(departureRequests() == 7)
+        // 3 nearest within 1.5 km (all departures and only long-distance trains), then the 4 nearest
+        // within 8 km with the wider time window (only long-distance trains).
+        #expect(departureRequests() == 10)
 
         // Trying again under another name reuses what was just loaded.
         var renamed = draft
         renamed.leg.line?.name = "ICE 1594"
         await #expect(throws: TraewellingError.tripNotFound("ICE 1594")) { try await client.checkin(renamed) }
-        #expect(departureRequests() == 7)
+        #expect(departureRequests() == 10)
 
         let result = try await client.checkinAsManualTrip(draft)
         #expect(result.isManualTrip)
         #expect(result.statusId == 7001)
-        #expect(departureRequests() == 7)
+        #expect(departureRequests() == 10)
         #expect(UnknownTrainCheckinProtocol.paths.withLock { $0.filter { $0.contains("autocomplete") }.count } == 2)
     }
 }
@@ -629,4 +648,453 @@ private final class UnknownTrainCheckinProtocol: URLProtocol, @unchecked Sendabl
     }
 
     override func stopLoading() {}
+}
+
+/// Träwelling still has the user on the previous train when it arrived early (it only knows the
+/// scheduled arrival), so the next check-in collides. `CheckinDraft.force` sends it anyway.
+@Suite(.serialized) struct TraewellingForcedCheckinTests {
+    @Test func collisionThenForcedCheckinSendsForce() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [CollidingCheckinProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        CollidingCheckinProtocol.forceFlags.withLock { $0 = [] }
+        let store = TokenStore(service: "BetterBahnKitTests.\(UUID().uuidString)")
+        store.save(OAuthToken(accessToken: "test-token", refreshToken: nil, expiresAt: .distantFuture))
+        let client = TraewellingClient(config: TraewellingConfig(clientID: "public-client"), http: HTTPClient(session: session), store: store)
+
+        let departure = Date(timeIntervalSince1970: 1_790_000_000)
+        let leg = Leg(origin: Station(id: "8000105", name: "Frankfurt (Main) Hbf", coordinate: Coordinate(latitude: 50.1071, longitude: 8.6632),
+                                      evaNumber: "8000105", source: .transitous),
+                      destination: Station(id: "8000068", name: "Darmstadt Hbf", coordinate: Coordinate(latitude: 49.8725, longitude: 8.6294),
+                                           evaNumber: "8000068", source: .transitous),
+                      departure: TimeInfo(planned: departure, actual: nil),
+                      arrival: TimeInfo(planned: departure.addingTimeInterval(20 * 60), actual: nil),
+                      departurePlatform: nil, arrivalPlatform: nil, tripId: "transitous-trip",
+                      line: Line(name: "RE 60", number: "4560", product: .regional, operatorName: "DB Regio AG"),
+                      direction: "Darmstadt Hbf", isWalking: false, cancelled: false,
+                      stopovers: [], remarks: [], source: .transitous)
+        var draft = CheckinDraft(leg: leg)
+
+        await #expect(throws: TraewellingError.collision) { try await client.checkinAsManualTrip(draft) }
+        draft.force = true
+        let result = try await client.checkinAsManualTrip(draft)
+        #expect(result.statusId == 7002)
+        #expect(result.points == 0)
+        #expect(CollidingCheckinProtocol.forceFlags.withLock { $0 } == [false, true])
+    }
+}
+
+private final class CollidingCheckinProtocol: URLProtocol, @unchecked Sendable {
+    /// Whether each `trains/checkin` request carried `force: true`.
+    static let forceFlags = Mutex<[Bool]>([])
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let path = request.url!.path
+        var status = 200
+        let json: String
+        switch true {
+        case path.contains("autocomplete") && path.contains("Darmstadt"):
+            json = #"{"data":[{"id":2,"name":"Darmstadt Hbf","latitude":49.8725,"longitude":8.6294}]}"#
+        case path.contains("autocomplete"):
+            json = #"{"data":[{"id":1,"name":"Frankfurt (Main) Hbf","latitude":50.1071,"longitude":8.6632}]}"#
+        case path == "/api/v1/trips":
+            json = #"{"data":{"tripId":"manual-trip","lineName":"RE 60","origin":{"id":1},"destination":{"id":2}}}"#
+        case path == "/api/v1/trains/checkin":
+            let body = (try? JSONSerialization.jsonObject(with: Self.body(of: request))) as? [String: Any]
+            let force = body?["force"] as? Bool ?? false
+            Self.forceFlags.withLock { $0.append(force) }
+            if force {
+                json = #"{"data":{"status":{"id":7002},"points":{"points":0},"alsoOnThisConnection":[]}}"#
+            } else {
+                status = 409
+                json = #"{"message":{"status_id":7001,"lineName":"ICE 1"},"data":{"conflicts":[]}}"#
+            }
+        default:
+            client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
+            return
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(json.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+
+    private static func body(of request: URLRequest) -> Data {
+        var body = request.httpBody ?? Data()
+        if let stream = request.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            var buffer = [UInt8](repeating: 0, count: 1024)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                guard count > 0 else { break }
+                body.append(contentsOf: buffer.prefix(count))
+            }
+        }
+        return body
+    }
+}
+
+/// Träwelling accepts a refresh token once. Rejected ones (400 `invalid_grant`) used to surface as
+/// "Serverfehler (400)" on the travel map for good, until the user logged out and in again.
+@Suite(.serialized) struct TraewellingTokenRefreshTests {
+    @Test func aRejectedRefreshTokenKeepsTheStoredTokenAndIsNotSentAgain() async throws {
+        let store = expiredStore(refreshToken: "used-up")
+        defer { store.clear() }
+        RefreshTokenProtocol.mode = .rejected
+        RefreshTokenProtocol.tokenRequests.withLock { $0 = [] }
+        let client = client(store)
+
+        await #expect(throws: OAuthError.sessionExpired) { try await client.currentUser() }
+        await #expect(throws: OAuthError.sessionExpired) { try await client.currentUser() }
+        #expect(RefreshTokenProtocol.tokenRequests.withLock { $0 } == ["used-up"])
+        // Deleting it would delete the synced Keychain item on every device, a fresh token included.
+        #expect(store.load()?.refreshToken == "used-up")
+
+        // A token another device refreshed arrives through iCloud Keychain later.
+        store.save(OAuthToken(accessToken: "synced", refreshToken: "synced-next", expiresAt: .distantFuture))
+        let user = try await client.currentUser()
+        #expect(user.username == "gertrud")
+        #expect(RefreshTokenProtocol.tokenRequests.withLock { $0 } == ["used-up"])
+    }
+
+    @Test func usesTheTokenAnotherDeviceRefreshedMeanwhile() async throws {
+        let store = expiredStore(refreshToken: "used-up")
+        defer { store.clear() }
+        RefreshTokenProtocol.mode = .rotatedElsewhere(store)
+        RefreshTokenProtocol.tokenRequests.withLock { $0 = [] }
+        let client = client(store)
+
+        let user = try await client.currentUser()
+
+        #expect(user.username == "gertrud")
+        #expect(RefreshTokenProtocol.tokenRequests.withLock { $0 } == ["used-up"])
+        #expect(store.load()?.accessToken == "from-other-device")
+    }
+
+    @Test func callsRunningTogetherRefreshOnce() async throws {
+        let store = expiredStore(refreshToken: "single-use")
+        defer { store.clear() }
+        RefreshTokenProtocol.mode = .slowSuccess
+        RefreshTokenProtocol.tokenRequests.withLock { $0 = [] }
+        let client = client(store)
+
+        async let first = client.currentUser()
+        async let second = client.currentUser()
+        let users = try await [first, second]
+
+        #expect(users.map(\.username) == ["gertrud", "gertrud"])
+        #expect(RefreshTokenProtocol.tokenRequests.withLock { $0 } == ["single-use"])
+        #expect(store.load()?.refreshToken == "next")
+    }
+
+    @Test func onlyAnInvalidGrantCountsAsRejected() {
+        #expect(TraewellingClient.isRejectedGrant(#"{"error":"invalid_grant","error_description":"The refresh token is invalid."}"#))
+        #expect(!TraewellingClient.isRejectedGrant(#"{"error":"invalid_request"}"#))
+        #expect(!TraewellingClient.isRejectedGrant("<html>Bad Request</html>"))
+        #expect(!TraewellingClient.isRejectedGrant(nil))
+    }
+
+    private func expiredStore(refreshToken: String) -> TokenStore {
+        let store = TokenStore(service: "BetterBahnKitTests.\(UUID().uuidString)")
+        store.save(OAuthToken(accessToken: "expired", refreshToken: refreshToken, expiresAt: .distantPast))
+        return store
+    }
+
+    private func client(_ store: TokenStore) -> TraewellingClient {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RefreshTokenProtocol.self]
+        return TraewellingClient(config: TraewellingConfig(clientID: "public-client"),
+                                 http: HTTPClient(session: URLSession(configuration: configuration)), store: store)
+    }
+}
+
+/// Answers the token endpoint like `mode` says and every other request with a user.
+private final class RefreshTokenProtocol: URLProtocol, @unchecked Sendable {
+    enum Mode {
+        case rejected
+        /// Rejects the token, but only after another device has put a newer one into the store.
+        case rotatedElsewhere(TokenStore)
+        /// Hands out a new token after a moment, long enough for a second call to come in.
+        case slowSuccess
+    }
+
+    nonisolated(unsafe) static var mode = Mode.rejected
+    static let tokenRequests = Mutex<[String]>([])
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard request.url?.path == "/oauth/token" else {
+            finish(status: 200, json: #"{"data":{"id":1,"displayName":"Gertrud","username":"gertrud"}}"#)
+            return
+        }
+        var components = URLComponents()
+        components.percentEncodedQuery = String(data: Self.body(of: request), encoding: .utf8)
+        let refresh = components.queryItems?.first { $0.name == "refresh_token" }?.value ?? ""
+        Self.tokenRequests.withLock { $0.append(refresh) }
+        let rejection = #"{"error":"invalid_grant","error_description":"The refresh token is invalid."}"#
+        switch Self.mode {
+        case .rejected:
+            finish(status: 400, json: rejection)
+        case .rotatedElsewhere(let store):
+            store.save(OAuthToken(accessToken: "from-other-device", refreshToken: "other-device-next", expiresAt: .distantFuture))
+            finish(status: 400, json: rejection)
+        case .slowSuccess:
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) {
+                self.finish(status: 200, json: #"{"access_token":"fresh","refresh_token":"next","expires_in":3600}"#)
+            }
+        }
+    }
+
+    override func stopLoading() {}
+
+    private func finish(status: Int, json: String) {
+        guard let url = request.url,
+              let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil) else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(json.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    private static func body(of request: URLRequest) -> Data {
+        var body = request.httpBody ?? Data()
+        if let stream = request.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            var buffer = [UInt8](repeating: 0, count: 1024)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                guard count > 0 else { break }
+                body.append(contentsOf: buffer.prefix(count))
+            }
+        }
+        return body
+    }
+}
+
+/// #289: Träwelling's departure board lists the next 50 departures by their live time, bundled from
+/// every stop within 200 m. At Berlin-Spandau, with its bus stops, that's about ten minutes, so an
+/// ICE running 20 minutes late wasn't on the board starting at its planned time and the checkin
+/// offered a manual trip. A board of only long-distance trains spans hours there.
+@Suite(.serialized) struct TraewellingLateTrainCheckinTests {
+    @Test func findsALateTrainOnTheBoardOfItsKindOfTrain() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [LateTrainCheckinProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        LateTrainCheckinProtocol.boards.withLock { $0 = [] }
+        let store = TokenStore(service: "BetterBahnKitTests.\(UUID().uuidString)")
+        store.save(OAuthToken(accessToken: "test-token", refreshToken: nil, expiresAt: .distantFuture))
+        let client = TraewellingClient(config: TraewellingConfig(clientID: "public-client"), http: HTTPClient(session: session), store: store)
+
+        // The delay isn't known yet.
+        let planned = try Date("2026-10-14T08:11:00Z", strategy: .iso8601)
+        let leg = Leg(origin: station("de-DELFI_de:11000:900029101:3:55", "S Spandau Bhf (Berlin)", 52.5345, 13.1971, source: .transitous),
+                      destination: station("de-DELFI_de:09162:6", "München Hbf", 48.1402, 11.5600, source: .transitous),
+                      departure: TimeInfo(planned: planned, actual: nil),
+                      arrival: TimeInfo(planned: planned.addingTimeInterval(6 * 3600), actual: nil),
+                      departurePlatform: nil, arrivalPlatform: nil, tripId: "transitous-trip",
+                      line: Line(name: "ICE 507", number: "507", product: .highSpeed, operatorName: "DB Fernverkehr AG"),
+                      direction: "München Hbf", isWalking: false, cancelled: false,
+                      stopovers: [], remarks: [], source: .transitous)
+
+        let result = try await client.checkin(CheckinDraft(leg: leg))
+
+        #expect(result.statusId == 5070)
+        #expect(!result.isManualTrip)
+        // All departures, and only long-distance trains, both from 2 minutes before the planned time.
+        #expect(LateTrainCheckinProtocol.boards.withLock { $0.sorted() }
+                == ["2026-10-14T08:09:00Z|", "2026-10-14T08:09:00Z|express"])
+    }
+
+    @Test func loadsTheBoardOfTheLegsKindOfTrain() {
+        func leg(_ product: Product) -> Leg {
+            Leg(origin: station("a", "A"), destination: station("b", "B"),
+                departure: TimeInfo(planned: .now, actual: nil), arrival: TimeInfo(planned: .now, actual: nil),
+                departurePlatform: nil, arrivalPlatform: nil, tripId: "t",
+                line: Line(name: "X 1", number: "1", product: product, operatorName: nil),
+                direction: nil, isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+        }
+        #expect(TraewellingClient.boardTravelTypes(for: leg(.highSpeed), alsoUnfiltered: true) == [nil, "express"])
+        #expect(TraewellingClient.boardTravelTypes(for: leg(.interregio), alsoUnfiltered: false) == ["express"])
+        #expect(TraewellingClient.boardTravelTypes(for: leg(.regionalExpress), alsoUnfiltered: false) == ["regional"])
+        #expect(TraewellingClient.boardTravelTypes(for: leg(.suburban), alsoUnfiltered: false) == ["suburban"])
+        // Without a kind to filter by, only the full board.
+        #expect(TraewellingClient.boardTravelTypes(for: leg(.other), alsoUnfiltered: true) == [nil])
+        #expect(TraewellingClient.boardTravelTypes(for: leg(.other), alsoUnfiltered: false) == [nil])
+    }
+}
+
+private final class LateTrainCheckinProtocol: URLProtocol, @unchecked Sendable {
+    /// "<when>|<travelType>" of every departure board asked for.
+    static let boards = Mutex<[String]>([])
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let url = request.url!
+        let path = url.path
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let when = query.first { $0.name == "when" }?.value ?? ""
+        let travelType = query.first { $0.name == "travelType" }?.value
+        let json: String
+        switch true {
+        case path.contains("autocomplete"):
+            json = #"{"data":[{"id":30,"name":"Berlin-Spandau","latitude":52.5348,"longitude":13.1975}]}"#
+        case path == "/api/v1/station/30/departures":
+            Self.boards.withLock { $0.append("\(when)|\(travelType ?? "")") }
+            // All departures, mostly buses from the stops around, cover only until 08:18; the ICE
+            // (planned 08:11, leaving 08:31) is only on the board of long-distance trains.
+            let bus = #"{"tripId":"bus","plannedWhen":"2026-10-14T08:12:00Z","when":"2026-10-14T08:12:00Z","line":{"name":"M32","fahrtNr":""},"station":{"id":32,"name":"S+U Rathaus Spandau (Berlin)"}}"#
+            let ice = #"{"tripId":"ice-507","plannedWhen":"2026-10-14T08:11:00Z","when":"2026-10-14T08:31:00Z","line":{"name":"ICE 507","fahrtNr":"507"},"station":{"id":31,"name":"S Spandau Bhf (Berlin)"}}"#
+            json = travelType == "express" ? #"{"data":[\#(ice)]}"# : #"{"data":[\#(bus)]}"#
+        case path == "/api/v1/trains/trip":
+            json = """
+            {"data":{"id":1,"lineName":"ICE 507","stopovers":[
+                {"id":31,"name":"S Spandau Bhf (Berlin)","station":{"id":31,"name":"S Spandau Bhf (Berlin)"},"departurePlanned":"2026-10-14T08:11:00Z"},
+                {"id":40,"name":"München Hbf","station":{"id":40,"name":"München Hbf"},"arrivalPlanned":"2026-10-14T14:11:00Z"}
+            ]}}
+            """
+        case path == "/api/v1/trains/checkin":
+            json = #"{"data":{"status":{"id":5070},"points":{"points":20},"alsoOnThisConnection":[]}}"#
+        default:
+            client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
+            return
+        }
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(json.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+/// Finding the train mustn't keep a checkin waiting (#289): it checks in as soon as the best station
+/// has the train, and gives up on boards still loading once the search budget is spent.
+@Suite(.serialized) struct TraewellingSearchBudgetTests {
+    static let leg: Leg = {
+        let planned = Date(timeIntervalSince1970: 1_791_965_460) // 2026-10-14T08:11:00Z
+        return Leg(origin: station("de-DELFI_de:11000:900029101:3:55", "S Spandau Bhf (Berlin)", 52.5345, 13.1971, source: .transitous),
+                   destination: station("de-DELFI_de:09162:6", "München Hbf", 48.1402, 11.5600, source: .transitous),
+                   departure: TimeInfo(planned: planned, actual: nil),
+                   arrival: TimeInfo(planned: planned.addingTimeInterval(6 * 3600), actual: nil),
+                   departurePlatform: nil, arrivalPlatform: nil, tripId: "transitous-trip",
+                   line: Line(name: "ICE 507", number: "507", product: .highSpeed, operatorName: "DB Fernverkehr AG"),
+                   direction: "München Hbf", isWalking: false, cancelled: false,
+                   stopovers: [], remarks: [], source: .transitous)
+    }()
+
+    static func client(budget: TraewellingSearchBudget = TraewellingSearchBudget()) -> (TraewellingClient, URLSession) {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [SlowNeighboursProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let store = TokenStore(service: "BetterBahnKitTests.\(UUID().uuidString)")
+        store.save(OAuthToken(accessToken: "test-token", refreshToken: nil, expiresAt: .distantFuture))
+        let client = TraewellingClient(config: TraewellingConfig(clientID: "public-client"), http: HTTPClient(session: session),
+                                       store: store, searchBudget: budget)
+        return (client, session)
+    }
+
+    @Test func checksInWithoutWaitingForTheOtherStations() async throws {
+        SlowNeighboursProtocol.reset(spandauHasTheTrain: true)
+        let (client, session) = Self.client()
+        defer { session.invalidateAndCancel() }
+
+        let result = try await client.checkin(CheckinDraft(leg: Self.leg))
+
+        #expect(result.statusId == 5070)
+        #expect(!SlowNeighboursProtocol.slowBoardAnswered.withLock { $0 })
+    }
+
+    @Test func givesUpOnBoardsStillLoadingWhenTheTimeIsUp() async throws {
+        SlowNeighboursProtocol.reset(spandauHasTheTrain: false)
+        let (client, session) = Self.client(budget: TraewellingSearchBudget(fast: .seconds(5), slow: .seconds(5)))
+        defer { session.invalidateAndCancel() }
+
+        await #expect(throws: TraewellingError.tripNotFound("ICE 507")) { try await client.checkin(CheckinDraft(leg: Self.leg)) }
+        #expect(!SlowNeighboursProtocol.slowBoardAnswered.withLock { $0 })
+    }
+
+    @Test func allowsMoreTimeWhenTheStationSearchWasSlow() {
+        let budget = TraewellingSearchBudget()
+        #expect(budget.time(afterStationSearchTook: nil) == .seconds(15))
+        #expect(budget.time(afterStationSearchTook: .milliseconds(800)) == .seconds(15))
+        #expect(budget.time(afterStationSearchTook: .seconds(5)) == .seconds(45))
+    }
+}
+
+/// Berlin-Spandau answers at once; the two stops around it only after 8 s – within the 15 s a
+/// checkin may take, so they are only left unanswered if the search stops waiting for them.
+private final class SlowNeighboursProtocol: URLProtocol, @unchecked Sendable {
+    static let spandauHasTheTrain = Mutex(false)
+    static let slowBoardAnswered = Mutex(false)
+    private let stopped = Mutex(false)
+
+    static func reset(spandauHasTheTrain hasTrain: Bool) {
+        spandauHasTheTrain.withLock { $0 = hasTrain }
+        slowBoardAnswered.withLock { $0 = false }
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let url = request.url!
+        let path = url.path
+        let json: String
+        switch true {
+        case path.contains("autocomplete"):
+            json = """
+            {"data":[{"id":30,"name":"Berlin-Spandau","latitude":52.5348,"longitude":13.1975},
+                     {"id":33,"name":"S+U Rathaus Spandau (Berlin)","latitude":52.5352,"longitude":13.1999},
+                     {"id":34,"name":"Galenstr. (Berlin)","latitude":52.5357,"longitude":13.1946}]}
+            """
+        case path == "/api/v1/station/30/departures":
+            let ice = #"{"tripId":"ice-507","plannedWhen":"2026-10-14T08:11:00Z","line":{"name":"ICE 507","fahrtNr":"507"},"station":{"id":31,"name":"S Spandau Bhf (Berlin)"}}"#
+            let bus = #"{"tripId":"bus","plannedWhen":"2026-10-14T08:12:00Z","line":{"name":"M32","fahrtNr":""}}"#
+            json = Self.spandauHasTheTrain.withLock { $0 } ? #"{"data":[\#(ice)]}"# : #"{"data":[\#(bus)]}"#
+        case path.hasSuffix("/departures"):
+            DispatchQueue.global().asyncAfter(deadline: .now() + 8) { [self] in
+                guard !stopped.withLock({ $0 }) else { return }
+                Self.slowBoardAnswered.withLock { $0 = true }
+                respond(#"{"data":[]}"#)
+            }
+            return
+        case path == "/api/v1/trains/trip":
+            json = """
+            {"data":{"id":1,"lineName":"ICE 507","stopovers":[
+                {"id":31,"name":"S Spandau Bhf (Berlin)","station":{"id":31,"name":"S Spandau Bhf (Berlin)"},"departurePlanned":"2026-10-14T08:11:00Z"},
+                {"id":40,"name":"München Hbf","station":{"id":40,"name":"München Hbf"},"arrivalPlanned":"2026-10-14T14:11:00Z"}
+            ]}}
+            """
+        case path == "/api/v1/trains/checkin":
+            json = #"{"data":{"status":{"id":5070},"points":{"points":20},"alsoOnThisConnection":[]}}"#
+        default:
+            client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
+            return
+        }
+        respond(json)
+    }
+
+    private func respond(_ json: String) {
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(json.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() { stopped.withLock { $0 = true } }
 }

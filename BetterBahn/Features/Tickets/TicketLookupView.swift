@@ -90,7 +90,7 @@ struct TicketLookupView: View {
                     .submitLabel(.search)
                     .onSubmit { if canSearch { Task { await search() } } }
             } footer: {
-                Text("Die Auftragsnummer steht in der Buchungsbestätigung und auf dem Ticket unter dem Barcode. Auftragsnummer und Name gehen nur an bahn.de, das Ticket wird nur auf diesem Gerät gespeichert.")
+                Text("Die Auftragsnummer steht in deiner Buchungsbestätigung. Das Ticket bleibt nur auf diesem Gerät.")
             }
 
             if case .failed(let message) = state {

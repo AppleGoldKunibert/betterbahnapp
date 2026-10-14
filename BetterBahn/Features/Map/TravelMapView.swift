@@ -19,7 +19,6 @@ struct TravelMapView: View {
     @State private var showRangeSheet = false
     @State private var includeSaved = true
     @State private var includeTraewelling = true
-    @State private var hasJourneysInRange = true
     @State private var legendExpanded = true
 
     struct Stats {
@@ -47,11 +46,6 @@ struct TravelMapView: View {
                 .ignoresSafeArea(edges: [.top, .bottom])
                 .overlay(alignment: .top) { header }
                 .overlay(alignment: .bottomTrailing) { legend }
-                .overlay {
-                    if !hasJourneysInRange, !model.isSyncingTraewelling {
-                        emptyHint
-                    }
-                }
                 .toolbar(.hidden, for: .navigationBar)
                 .task(id: selection) { await load() }
                 .task { await model.syncTraewelling() }
@@ -137,6 +131,16 @@ struct TravelMapView: View {
                     sourceToggle("Träwelling", icon: "checkmark.seal.fill", isOn: $includeTraewelling)
                 }
                 Spacer(minLength: 0)
+                Button {
+                    model.showsTrainSearch = true
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(width: 34, height: 34)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(.regular, in: .circle)
+                .accessibilityLabel("Zug suchen")
                 if !model.settings.traewellingEnabled {
                     EmptyView()
                 } else if model.isSyncingTraewelling {
@@ -180,22 +184,6 @@ struct TravelMapView: View {
         }
         .padding(.horizontal)
         .padding(.top, 8)
-    }
-
-    private var emptyHint: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "map").font(.title).foregroundStyle(.secondary)
-            let hasAny = !model.savedJourneys.isEmpty || !model.traewellingTrips.isEmpty
-            Text(hasAny ? "Keine Fahrten in diesem Zeitraum" : "Noch keine Fahrten")
-                .font(.headline)
-            Text(hasAny ? "Wähle einen längeren Zeitraum." : "Deine gespeicherten Reisen erscheinen hier auf der Karte.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .padding(20)
-        .frame(maxWidth: 300)
-        .glassEffect(.regular, in: .rect(cornerRadius: 24))
     }
 
     private func sourceToggle(_ title: String, icon: String, isOn: Binding<Bool>) -> some View {
@@ -291,7 +279,6 @@ struct TravelMapView: View {
         // The background prewarm builds the same thing; let this one have the CPU and network.
         model.stopTravelMapPrewarm()
         let selection = selection
-        hasJourneysInRange = !model.mapJourneys(for: selection).isEmpty
         guard let heatmap = await model.mapHeatmap(
             for: selection,
             onProgress: { done, total in progress = (done, total) },

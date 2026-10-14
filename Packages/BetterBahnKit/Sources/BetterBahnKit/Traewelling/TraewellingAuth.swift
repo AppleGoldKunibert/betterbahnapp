@@ -40,7 +40,7 @@ public struct TraewellingConfig: Sendable {
 
     public init(baseURL: URL = URL(string: "https://traewelling.de")!, clientID: String = "406",
                 redirectURI: String = "https://betterbahn.betterbahn.workers.dev/oauth/traewelling/callback",
-                scopes: [String] = ["read-statuses", "write-statuses", "read-search"]) {
+                scopes: [String] = ["read-statuses", "write-statuses", "read-search", "write-likes"]) {
         self.baseURL = baseURL
         self.clientID = clientID
         self.redirectURI = redirectURI
@@ -78,6 +78,14 @@ public struct TraewellingConfig: Sendable {
         ])
     }
 
+    /// The authorization code in the redirect URL from `ASWebAuthenticationSession`, once its state matches.
+    public static func authorizationCode(in callbackURL: URL, pkce: PKCE) throws -> String {
+        let items = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        guard items.first(where: { $0.name == "state" })?.value == pkce.state else { throw OAuthError.stateMismatch }
+        guard let code = items.first(where: { $0.name == "code" })?.value else { throw OAuthError.missingCode }
+        return code
+    }
+
     public var tokenURL: URL { baseURL.appending(path: "oauth/token") }
     public var apiURL: URL { baseURL.appending(path: "api/v1") }
 }
@@ -111,6 +119,8 @@ public enum OAuthError: Error, LocalizedError, Equatable {
     case stateMismatch
     case missingCode
     case notLoggedIn
+    /// Träwelling no longer accepts the stored login (refresh token used up or expired).
+    case sessionExpired
     case invalidRedirectURI
 
     public var errorDescription: String? {
@@ -118,6 +128,7 @@ public enum OAuthError: Error, LocalizedError, Equatable {
         case .stateMismatch: "Anmeldung abgebrochen (ungültiger Status)."
         case .missingCode: "Träwelling hat keinen Code zurückgegeben."
         case .notLoggedIn: "Nicht bei Träwelling angemeldet."
+        case .sessionExpired: "Die Träwelling-Anmeldung ist abgelaufen. Melde dich in den Einstellungen ab und wieder an."
         case .invalidRedirectURI: "Ungültige Träwelling-OAuth-Konfiguration: Die Weiterleitungs-URL muss eine gültige HTTPS-Adresse mit Host und Callback-Pfad sein."
         }
     }

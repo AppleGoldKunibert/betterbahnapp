@@ -13,6 +13,8 @@ struct CheckinDetailSheet: View {
     @Environment(\.openURL) private var openURL
     @State private var status: TraewellingStatus?
     @State private var emojis: [CustomEmoji] = []
+    /// Whether the account collects Träwelling points, so deleting mentions losing them.
+    @State private var showsPoints = false
     @State private var isLoading = true
     @State private var isEditing = false
     @State private var isSaving = false
@@ -26,6 +28,11 @@ struct CheckinDetailSheet: View {
     @State private var confirmDelete = false
     @State private var isDeleting = false
     @State private var fellowTravellers: [TraewellingStatus] = []
+    @FocusState private var messageFocused: Bool
+    @FocusState private var focusedTag: String?
+    /// Where the keyboard was when "Speichern" was tapped: it goes away right then and only comes
+    /// back there if Träwelling rejects the input (`isInvalidInput`).
+    @State private var focusBeforeSave: (message: Bool, tag: String?) = (false, nil)
 
     private var statusURL: URL {
         model.traewelling.config.baseURL.appending(path: "status/\(statusId)")
@@ -182,13 +189,13 @@ struct CheckinDetailSheet: View {
     private var editCard: some View {
         Card {
             VStack(alignment: .leading, spacing: 14) {
-                EmojiMessageField(message: $message, emojis: emojis, placeholder: "Text (optional)")
+                EmojiMessageField(message: $message, emojis: emojis, placeholder: "Text (optional)", isFocused: $messageFocused)
                 Divider()
-                menuRow("Sichtbarkeit", icon: "eye.fill", color: .purple, selection: $visibility,
-                        options: TraewellingVisibility.allCases) { $0.label }
+                MenuPickerRow(title: "Sichtbarkeit", icon: "eye.fill", color: .purple, selection: $visibility,
+                              options: TraewellingVisibility.allCases) { $0.label }
                 Divider()
-                menuRow("Reiseart", icon: "briefcase.fill", color: .orange, selection: $business,
-                        options: TraewellingBusiness.allCases) { $0.label }
+                MenuPickerRow(title: "Reiseart", icon: "briefcase.fill", color: .orange, selection: $business,
+                              options: TraewellingBusiness.allCases) { $0.label }
                 Divider()
                 tagsEditor
             }
@@ -213,6 +220,7 @@ struct CheckinDetailSheet: View {
                     TextField(tagLabel(tag.key), text: $tag.value)
                         .textFieldStyle(.roundedBorder)
                         .font(.subheadline)
+                        .focused($focusedTag, equals: tag.key)
                     Button("Tag entfernen", systemImage: "minus.circle.fill") {
                         let key = tag.key
                         withAnimation(.snappy) { editedTags.removeAll { $0.key == key } }
@@ -269,22 +277,15 @@ struct CheckinDetailSheet: View {
             Button("Löschen", role: .destructive, action: delete)
             Button("Abbrechen", role: .cancel) {}
         } message: {
-            Text("Der Check-in wird bei Träwelling gelöscht, mit seinen Punkten.")
+            Text(showsPoints ? "Der Check-in wird bei Träwelling gelöscht, mit seinen Punkten."
+                             : "Der Check-in wird bei Träwelling gelöscht.")
         }
     }
 
     /// A tag's name: the quick tag's label for its key, else the key without Träwelling's prefix.
-    private func tagLabel(_ key: String) -> String {
-        quickTag(for: key)?.label ?? (key.hasPrefix("trwl:") ? String(key.dropFirst(5)) : key)
-    }
+    private func tagLabel(_ key: String) -> String { model.statusTagLabel(key) }
 
-    private func tagIcon(_ key: String) -> String {
-        quickTag(for: key)?.systemImage ?? "tag.fill"
-    }
-
-    private func quickTag(for key: String) -> QuickTag? {
-        (model.settings.quickTags + QuickTag.defaults).first { $0.key == key }
-    }
+    private func tagIcon(_ key: String) -> String { model.statusTagIcon(key) }
 
     private var goneCard: some View {
         Card {
@@ -318,41 +319,8 @@ struct CheckinDetailSheet: View {
         .disabled(isSaving || message.count > 280)
     }
 
-    /// Same row as the check-in form's pickers: a `Menu` so long values truncate instead of wrapping.
-    private func menuRow<T: Hashable>(_ title: String, icon: String, color: Color,
-                                      selection: Binding<T>, options: [T], label: @escaping (T) -> String) -> some View {
-        HStack(spacing: 12) {
-            IconTile(systemImage: icon, color: color, size: 32)
-            Text(title)
-                .font(.subheadline.weight(.medium))
-                .lineLimit(1)
-                .layoutPriority(1)
-            Spacer(minLength: 8)
-            Menu {
-                ForEach(options, id: \.self) { option in
-                    Button {
-                        selection.wrappedValue = option
-                    } label: {
-                        if option == selection.wrappedValue {
-                            Label(label(option), systemImage: "checkmark")
-                        } else {
-                            Text(label(option))
-                        }
-                    }
-                }
-            } label: {
-                Text(label(selection.wrappedValue))
-                    .font(.subheadline)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: 150, alignment: .trailing)
-        }
-    }
-
     private func load() async {
-        async let emojiList = model.checkinEmojis()
+        async let account = loadAccount()
         async let tagList = loadTags()
         do {
             status = try await model.traewelling.status(id: statusId)
@@ -362,11 +330,19 @@ struct CheckinDetailSheet: View {
         } catch {
             self.error = error
         }
-        emojis = await emojiList
+        let loaded = await account
+        showsPoints = loaded.showsPoints
+        emojis = loaded.emojis
         tags = await tagList
         isLoading = false
         // Extra too: the section only shows once someone else is on the train.
         if let status { fellowTravellers = (try? await model.traewelling.fellowTravellers(of: status)) ?? [] }
+    }
+
+    /// The account's points setting and Mastodon emojis: extras the check-in still shows without.
+    private func loadAccount() async -> (showsPoints: Bool, emojis: [CustomEmoji]) {
+        let user = await model.traewellingUser()
+        return (user?.pointsEnabled == true, await model.checkinEmojis(for: user))
     }
 
     /// Tags are extra: the check-in still shows when they can't be loaded.
@@ -385,6 +361,9 @@ struct CheckinDetailSheet: View {
     }
 
     private func save() {
+        focusBeforeSave = (messageFocused, focusedTag)
+        messageFocused = false
+        focusedTag = nil
         isSaving = true
         Task {
             defer { isSaving = false }
@@ -397,6 +376,10 @@ struct CheckinDetailSheet: View {
                 withAnimation(.snappy) { isEditing = false }
             } catch {
                 self.error = error
+                if (error as? TraewellingError)?.isInvalidInput == true {
+                    messageFocused = focusBeforeSave.message
+                    focusedTag = focusBeforeSave.tag
+                }
                 // Some tag changes may have gone through; the next try starts from what Träwelling has.
                 if let current = try? await model.traewelling.tags(statusId: statusId) { tags = current }
             }

@@ -31,6 +31,14 @@ public struct TraewellingStatus: Decodable, Sendable, Hashable {
         public var manualArrival: Date?
         public var origin: Stop
         public var destination: Stop
+
+        /// A trip the user typed in on Träwelling ("Manuell eintragen") rather than one from a
+        /// timetable: Träwelling gives those a UUID instead of a feed's trip ID.
+        public var isManualTrip: Bool { hafasId.map { UUID(uuidString: $0) != nil } ?? false }
+
+        /// When the ride starts and ends: times typed in on Träwelling, else live, else planned.
+        public var start: Date? { manualDeparture ?? origin.departureReal ?? origin.departure ?? origin.departurePlanned }
+        public var end: Date? { manualArrival ?? destination.arrivalReal ?? destination.arrival ?? destination.arrivalPlanned }
     }
 
     /// Who checked in (Träwelling's `LightUser`).
@@ -39,10 +47,22 @@ public struct TraewellingStatus: Decodable, Sendable, Hashable {
         public var displayName: String
         public var username: String
         public var profilePicture: URL? { profilePictureString.flatMap(URL.init(string:)) }
+        /// The host of the Mastodon instance connected to their account (e.g. "chaos.social"), whose
+        /// custom emojis their check-in texts use.
+        public var mastodonServer: String? {
+            mastodon?.value?.server.flatMap { CustomEmojiText.instance(fromMastodonURL: $0) }
+        }
         private var profilePictureString: String?
+        private var mastodon: LenientMastodon?
 
         enum CodingKeys: String, CodingKey {
-            case id, displayName, username, profilePictureString = "profilePicture"
+            case id, displayName, username, mastodon, profilePictureString = "profilePicture"
+        }
+
+        struct LenientMastodon: Decodable, Sendable, Hashable {
+            struct Account: Decodable, Sendable, Hashable { var server: String? }
+            var value: Account?
+            init(from decoder: Decoder) throws { value = try? Account(from: decoder) }
         }
     }
 
@@ -54,14 +74,22 @@ public struct TraewellingStatus: Decodable, Sendable, Hashable {
     public var body: String?
     public var visibility: TraewellingVisibility? { visibilityValue?.value.flatMap(TraewellingVisibility.init(rawValue:)) }
     public var business: TraewellingBusiness? { businessValue?.value.flatMap(TraewellingBusiness.init(rawValue:)) }
+    /// How many liked the check-in, whether the user did, and whether they may (Träwelling's
+    /// `isLikable`: false e.g. when its author has likes off).
+    public var likes: Int?
+    public var liked: Bool?
+    public var isLikable: Bool?
+    /// The check-in's tags (seat, wagon, …) the user may see; only sent with lists like the dashboard.
+    public var tags: [StatusTag] { tagsValue?.value ?? [] }
     // Read leniently: a value this app doesn't know must not break loading the whole history.
     private var visibilityValue: LenientInt?
     private var businessValue: LenientInt?
     private var userValue: LenientUser?
+    private var tagsValue: LenientTags?
 
     enum CodingKeys: String, CodingKey {
-        case id, checkin, createdAt, body
-        case visibilityValue = "visibility", businessValue = "business", userValue = "user"
+        case id, checkin, createdAt, body, likes, liked, isLikable
+        case visibilityValue = "visibility", businessValue = "business", userValue = "user", tagsValue = "tags"
     }
 
     struct LenientInt: Decodable, Sendable, Hashable {
@@ -72,6 +100,11 @@ public struct TraewellingStatus: Decodable, Sendable, Hashable {
     struct LenientUser: Decodable, Sendable, Hashable {
         var value: User?
         init(from decoder: Decoder) throws { value = try? User(from: decoder) }
+    }
+
+    struct LenientTags: Decodable, Sendable, Hashable {
+        var value: [StatusTag]?
+        init(from decoder: Decoder) throws { value = try? [StatusTag](from: decoder) }
     }
 
     public var product: Product {
@@ -89,9 +122,7 @@ public struct TraewellingStatus: Decodable, Sendable, Hashable {
         }
     }
 
-    public var departure: Date? {
-        checkin.manualDeparture ?? checkin.origin.departureReal ?? checkin.origin.departure ?? checkin.origin.departurePlanned
-    }
+    public var departure: Date? { checkin.start }
 
     /// Converts the check-in into a one-leg journey with its track geometry.
     public func journey(geometry: [Coordinate]?) -> Journey? {

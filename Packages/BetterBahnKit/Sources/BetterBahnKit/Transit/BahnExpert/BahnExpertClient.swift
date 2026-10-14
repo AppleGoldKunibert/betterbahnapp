@@ -20,13 +20,15 @@ public struct TrainTypeLookup: Codable, Sendable, Hashable {
         public var destination: String?
         public var coachCount: Int
 
-        /// Marketing family: "ICE 1", "ICE 2", "ICE 3", "ICE 3neo", "ICE 4", "ICE T", "ICE L", or the
+        /// Marketing family: "ICE 1", "ICE 2", "ICE 3", "ICE 3 Velaro" (as bahn.de names the BR 407), "ICE 3neo",
+        /// "ICE 4", "ICE T", "ICE L", or the
         /// cleaned-up bahn.expert name for anything else (e.g. "IC 2").
         public var family: String? {
             switch baureihe {
             case "401": "ICE 1"
             case "402": "ICE 2"
-            case "403", "406", "407": "ICE 3"
+            case "403", "406": "ICE 3"
+            case "407": "ICE 3 Velaro"
             case "408": "ICE 3neo"
             case "411", "415": "ICE T"
             case "412": "ICE 4"
@@ -182,9 +184,10 @@ public struct BahnExpertClient: Sendable {
         // run as the requested train so the other half's series doesn't leak in.
         let own = sequence.groups.filter { $0.journeyNumber == journeyNumber }
         let groups = (own.isEmpty ? sequence.groups : own).map { group in
-            TrainTypeLookup.Group(
-                seriesName: Self.seriesName(of: group, category: category), baureihe: group.baureihe?.baureihe,
-                unitNumber: sequenceResponse.isRealtime ? group.name.flatMap(BahnDeClient.unitNumber(from:)) : nil,
+            let seriesName = Self.seriesName(of: group, category: category)
+            return TrainTypeLookup.Group(
+                seriesName: seriesName, baureihe: group.baureihe?.baureihe,
+                unitNumber: sequenceResponse.isRealtime ? Self.unitNumber(of: group, seriesName: seriesName, category: category) : nil,
                 origin: group.originName, destination: group.destinationName, coachCount: group.coaches?.count ?? 0)
         }
         return TrainTypeLookup(category: category, number: number, date: date, administration: administration,
@@ -206,6 +209,16 @@ public struct BahnExpertClient: Sendable {
         if let name = group.baureihe?.name { return name }
         if category == "IC" || category == "EC", group.name?.hasPrefix("ICD") == true { return "IC 2 Twindexx" }
         return nil
+    }
+
+    /// The Tz from the group name ("ICE9465"). A loco-hauled IC 1 has a coach-set number there instead
+    /// ("IC450007", as in bahn.de's `isIC1`). bahn.expert has no vehicle numbers to tell it apart, and no
+    /// Baureihe for IC 2 sets either, so only an IC without any series and a number longer than any Tz counts.
+    static func unitNumber(of group: SequenceResponse.Sequence.Group, seriesName: String?, category: String) -> String? {
+        guard let number = group.name.flatMap(BahnDeClient.unitNumber(from:)) else { return nil }
+        let isIC1 = (category == "IC" || category == "EC") && group.baureihe?.baureihe == nil
+            && (seriesName.map(TrainTypeLookup.family(of:)).map { $0 == "IC 1" } ?? true) && number.count > 4
+        return isIC1 ? nil : number
     }
 
     /// Rejects malformed dates and impossible ones like 2026-02-31.
@@ -230,7 +243,7 @@ public struct BahnExpertClient: Sendable {
         return request
     }
 
-    private func call<T: Decodable>(_ procedure: String, input: [String: Any]) async throws -> T {
+    func call<T: Decodable>(_ procedure: String, input: [String: Any]) async throws -> T {
         let request = try Self.request(procedure: procedure, input: input)
         do {
             return try await http.send(request, as: Envelope<T>.self).json

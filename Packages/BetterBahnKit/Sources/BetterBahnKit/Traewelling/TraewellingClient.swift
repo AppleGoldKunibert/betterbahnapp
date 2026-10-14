@@ -32,9 +32,18 @@ public struct TraewellingUser: Decodable, Sendable {
     public var displayName: String
     public var username: String
     public var points: Int?
+    /// Whether the user has Träwelling's points system switched on (off by default); without it
+    /// check-ins earn 0 points, which the app then doesn't show.
+    public var pointsEnabled: Bool?
     /// The connected Mastodon profile (e.g. "https://zug.network/@name"), whose instance's
     /// custom emojis the check-in text offers.
     public var mastodonUrl: String?
+    /// Whether the user has likes on; Träwelling answers 403 to their likes otherwise.
+    public var likesEnabled: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case id, displayName, username, points, pointsEnabled, mastodonUrl, likesEnabled = "likes_enabled"
+    }
 }
 
 public struct TraewellingStation: Decodable, Sendable, Hashable {
@@ -101,14 +110,19 @@ public struct CheckinDraft: Sendable, Hashable {
     public var visibility: TraewellingVisibility
     public var business: TraewellingBusiness
     public var toot: Bool
+    /// Checks in even though Träwelling has the user on another train at that time (`.collision`),
+    /// e.g. when the previous train arrived early and Träwelling still has its scheduled arrival.
+    /// Träwelling gives no points for such a check-in.
+    public var force: Bool
 
     public init(leg: Leg, message: String = "", visibility: TraewellingVisibility = .publicVisible,
-                business: TraewellingBusiness = .privateTrip, toot: Bool = false) {
+                business: TraewellingBusiness = .privateTrip, toot: Bool = false, force: Bool = false) {
         self.leg = leg
         self.message = message
         self.visibility = visibility
         self.business = business
         self.toot = toot
+        self.force = force
     }
 }
 
@@ -154,6 +168,8 @@ public enum TraewellingError: Error, LocalizedError, Equatable {
     case stopNotOnTrip(String, tripStops: [String])
     case tripNotFound(String)
     case collision
+    /// Liking was refused (403): the login predates the "write-likes" scope, or likes are off.
+    case likeNotAllowed
     case api(status: Int, message: String?)
 
     public var errorDescription: String? {
@@ -163,8 +179,38 @@ public enum TraewellingError: Error, LocalizedError, Equatable {
             "„\(name)“ ist auf der Träwelling-Fahrt nicht enthalten. Halte dort: \(stops.joined(separator: ", "))."
         case .tripNotFound(let line): "\(line) wurde auf Träwelling nicht gefunden."
         case .collision: "Du bist zu dieser Zeit schon eingecheckt."
+        case .likeNotAllowed:
+            "Träwelling lässt das Liken nicht zu. Melde dich in den Einstellungen einmal ab und wieder bei Träwelling an, damit BetterBahn Likes vergeben darf."
         case .api(let status, let message): message ?? "Träwelling-Fehler (\(status))"
         }
+    }
+
+    /// Träwelling rejected what was typed in (its validation answers 422, e.g. a text that's too long),
+    /// so the form brings the keyboard back to fix it. Other errors leave it hidden.
+    public var isInvalidInput: Bool {
+        if case .api(422, _) = self { true } else { false }
+    }
+}
+
+/// How long finding a train for a checkin may take before it gives up and offers a manual trip:
+/// short when Träwelling answers quickly, longer on a slow connection, judged by how long its
+/// station search took.
+public struct TraewellingSearchBudget: Sendable {
+    public var fast: Duration
+    public var slow: Duration
+    /// A station search taking longer than this counts as a slow connection.
+    public var slowStationSearch: Duration
+
+    public init(fast: Duration = .seconds(15), slow: Duration = .seconds(45), slowStationSearch: Duration = .seconds(3)) {
+        self.fast = fast
+        self.slow = slow
+        self.slowStationSearch = slowStationSearch
+    }
+
+    /// The time for the whole search after a station search that took `stationSearch` (`nil`: unknown).
+    func time(afterStationSearchTook stationSearch: Duration?) -> Duration {
+        guard let stationSearch, stationSearch > slowStationSearch else { return fast }
+        return slow
     }
 }
 
@@ -177,13 +223,15 @@ public actor TraewellingClient {
     /// tries again (under another train name, then as a manual trip) doesn't repeat every lookup (#106).
     private var stationCache: [String: [TraewellingStation]] = [:]
     private var departuresCache: [String: (fetched: Date, departures: [TraewellingDeparture])] = [:]
-    /// Träwelling asks DB for every departure board, which can hang; one slow station mustn't keep a
-    /// checkin waiting for the full request timeout.
-    static let departuresTimeout: TimeInterval = 12
+    let searchBudget: TraewellingSearchBudget
+    /// How long the last station search that reached Träwelling took, to tell a slow connection.
+    private var lastStationSearch: Duration?
 
-    public init(config: TraewellingConfig, http: HTTPClient = HTTPClient(timeout: 30), store: TokenStore = TokenStore()) {
+    public init(config: TraewellingConfig, http: HTTPClient = HTTPClient(timeout: 30), store: TokenStore = TokenStore(),
+                searchBudget: TraewellingSearchBudget = TraewellingSearchBudget()) {
         self.config = config
         self.http = http
+        self.searchBudget = searchBudget
         self.store = store
         store.migrateToSynchronizable()
         self.token = store.load()
@@ -200,9 +248,7 @@ public actor TraewellingClient {
 
     /// Exchanges the redirect URL from `ASWebAuthenticationSession` for a token.
     public func completeLogin(callbackURL: URL, pkce: PKCE) async throws {
-        let items = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)?.queryItems ?? []
-        guard items.first(where: { $0.name == "state" })?.value == pkce.state else { throw OAuthError.stateMismatch }
-        guard let code = items.first(where: { $0.name == "code" })?.value else { throw OAuthError.missingCode }
+        let code = try TraewellingConfig.authorizationCode(in: callbackURL, pkce: pkce)
         try await requestToken([
             "grant_type": "authorization_code",
             "client_id": config.clientID,
@@ -234,19 +280,71 @@ public actor TraewellingClient {
         store.save(newToken)
     }
 
+    /// The refresh in progress, if any. An actor lets other calls in while it waits for the network,
+    /// and Träwelling accepts a refresh token only once: two calls refreshing together (the map's sync
+    /// next to the followed check-ins, say) made the second one fail with 400 `invalid_grant`.
+    private var refreshing: Task<Void, Error>?
+
     private func validAccessToken() async throws -> String {
         token = store.load()
         guard let token else { throw OAuthError.notLoggedIn }
         if token.isExpired, let refresh = token.refreshToken {
+            try await refreshToken(refresh)
+        }
+        guard let access = self.token?.accessToken else { throw OAuthError.notLoggedIn }
+        return access
+    }
+
+    /// The refresh token Träwelling last rejected, so it isn't sent again on every request until the
+    /// Keychain holds another one.
+    private var rejectedRefreshToken: String?
+
+    private func refreshToken(_ refresh: String) async throws {
+        if refresh == rejectedRefreshToken { throw OAuthError.sessionExpired }
+        if let refreshing { return try await refreshing.value }
+        let task = Task { try await self.exchangeRefreshToken(refresh) }
+        refreshing = task
+        defer { refreshing = nil }
+        try await task.value
+    }
+
+    /// Träwelling answers a refresh token it no longer accepts with 400 `invalid_grant`. Access tokens last
+    /// only an hour, so this is common: another device already used the refresh token (it syncs through
+    /// iCloud Keychain, which may not have delivered the new one yet), or the answer to an earlier refresh
+    /// never arrived (a train in a tunnel). Without handling it every request failed with
+    /// "Serverfehler (400)" until the user logged out and in again; now a newer token in the Keychain is
+    /// used, and otherwise the request fails with `OAuthError.sessionExpired`. The stored token is kept:
+    /// deleting it (`logout()`) would delete the synced Keychain item on every device, including a fresh
+    /// token the other device just stored. If one arrives later, the next request picks it up.
+    private func exchangeRefreshToken(_ refresh: String, isRetry: Bool = false) async throws {
+        do {
+            // No `scope`: the new token keeps what the login granted. Asking for scopes added since
+            // (e.g. "write-likes") would make Träwelling reject the refresh and end older logins.
             try await requestToken([
                 "grant_type": "refresh_token",
                 "client_id": config.clientID,
                 "refresh_token": refresh,
-                "scope": config.scopes.joined(separator: " "),
             ])
+        } catch TransitError.http(let status, let body) where [400, 401].contains(status) && Self.isRejectedGrant(body) {
+            if !isRetry, let stored = store.load(), stored.refreshToken != refresh {
+                if !stored.isExpired {
+                    token = stored
+                    return
+                }
+                if let newer = stored.refreshToken {
+                    return try await exchangeRefreshToken(newer, isRetry: true)
+                }
+            }
+            rejectedRefreshToken = refresh
+            throw OAuthError.sessionExpired
         }
-        guard let access = self.token?.accessToken else { throw OAuthError.notLoggedIn }
-        return access
+    }
+
+    /// Whether a token endpoint answer says the grant (here: the refresh token) is invalid, expired or revoked.
+    static func isRejectedGrant(_ body: String?) -> Bool {
+        guard let data = body?.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+        return json["error"] as? String == "invalid_grant"
     }
 
     // MARK: API
@@ -315,18 +413,23 @@ public actor TraewellingClient {
         // whatever it's given — pre-encoding here too would double-encode (e.g. "Berlin Hbf" →
         // "Berlin%20Hbf" → "Berlin%2520Hbf" on the wire), so the raw name is passed straight through.
         if let cached = stationCache[query] { return cached }
+        let started = ContinuousClock.now
         let found = try await api("trains/station/autocomplete/\(query)", as: DataWrapper<[TraewellingStation]>.self).data
+        lastStationSearch = ContinuousClock.now - started
         if stationCache.count > 200 { stationCache.removeAll() }
         stationCache[query] = found
         return found
     }
 
-    public func departures(stationID: Int, when: Date) async throws -> [TraewellingDeparture] {
-        let key = "\(stationID)|\(Int(when.timeIntervalSince1970))"
+    /// `travelType` ("express", "regional", …, see `travelType(for:)`) leaves out every other kind of departure.
+    public func departures(stationID: Int, when: Date, travelType: String? = nil, timeout: TimeInterval = 15) async throws -> [TraewellingDeparture] {
+        let key = "\(stationID)|\(Int(when.timeIntervalSince1970))|\(travelType ?? "")"
         if let cached = departuresCache[key], cached.fetched.timeIntervalSinceNow > -120 { return cached.departures }
+        var query: [URLQueryItem] = [.init(name: "when", value: JSONDecoding.isoString(when))]
+        if let travelType { query.append(.init(name: "travelType", value: travelType)) }
         let found = try await api("station/\(stationID)/departures",
-                                  query: [.init(name: "when", value: JSONDecoding.isoString(when))],
-                                  timeout: Self.departuresTimeout,
+                                  query: query,
+                                  timeout: timeout,
                                   as: DataWrapper<[TraewellingDeparture]>.self).data
         departuresCache = departuresCache.filter { $0.value.fetched.timeIntervalSinceNow > -120 }
         departuresCache[key] = (.now, found)
@@ -380,7 +483,7 @@ public actor TraewellingClient {
             // The user's message/toot belong on the first part only, so a split train doesn't post
             // the same note twice.
             let segmentDraft = result == nil ? draft
-                : CheckinDraft(leg: draft.leg, visibility: draft.visibility, business: draft.business)
+                : CheckinDraft(leg: draft.leg, visibility: draft.visibility, business: draft.business, force: draft.force)
             let part = try await sendCheckin(segmentDraft, tripId: segment.tripId, lineName: segment.lineName,
                                              startID: segment.startID, destinationID: segment.destinationID,
                                              departure: segment.departure, arrival: segment.arrival)
@@ -468,6 +571,24 @@ public actor TraewellingClient {
     /// Creates a Träwelling trip for a train its own timetable data doesn't have, then checks into it.
     private func checkinManualTrip(_ draft: CheckinDraft) async throws -> CheckinResult {
         let leg = draft.leg
+        let trip = try await createManualTrip(for: leg)
+        var result = try await sendCheckin(draft, tripId: trip.tripId, lineName: trip.lineName,
+                                           startID: trip.origin.id, destinationID: trip.destination.id,
+                                           departure: leg.departure.planned, arrival: leg.arrival.planned)
+        result.isManualTrip = true
+        return result
+    }
+
+    private struct ManualTrip: Decodable, Sendable {
+        struct StationRef: Decodable, Sendable { var id: Int }
+        var tripId: String
+        var lineName: String
+        var origin: StationRef
+        var destination: StationRef
+    }
+
+    /// Creates a Träwelling trip for `leg`'s train, running from its origin to its destination.
+    private func createManualTrip(for leg: Leg) async throws -> ManualTrip {
         guard let line = leg.line else { throw TraewellingError.tripNotFound("Fußweg") }
         let origin = try await matchStation(leg.origin)
         let destination = try await matchStation(leg.destination)
@@ -481,21 +602,34 @@ public actor TraewellingClient {
             "destinationArrivalPlanned": JSONDecoding.isoString(leg.arrival.planned),
         ]
         if let number = line.number, let journeyNumber = Int(number) { body["journeyNumber"] = journeyNumber }
-
-        struct ManualTrip: Decodable, Sendable {
-            struct StationRef: Decodable, Sendable { var id: Int }
-            var tripId: String
-            var lineName: String
-            var origin: StationRef
-            var destination: StationRef
-        }
         let data = try JSONSerialization.data(withJSONObject: body)
-        let trip = try await api("trips", method: "POST", body: data, as: DataWrapper<ManualTrip>.self).data
+        return try await api("trips", method: "POST", body: data, as: DataWrapper<ManualTrip>.self).data
+    }
 
+    /// Turns a check-in into one on a manual trip covering `leg`, for an exit Träwelling's trip
+    /// doesn't have (a stop added by hand, see `Stopover.manual(at:time:)`): `changeDestination`
+    /// only accepts the trip's own stops, and a check-in can't be moved to another trip. So the old
+    /// check-in is deleted and checked in again – only once the manual trip exists, so a failure
+    /// before that leaves it untouched. Text, visibility, trip type and tags carry over; likes and
+    /// comments can't. Not tooted again.
+    public func replaceWithManualTrip(_ status: TraewellingStatus, leg: Leg) async throws -> CheckinResult {
+        let draft = CheckinDraft(leg: leg, message: status.body ?? "",
+                                 visibility: status.visibility ?? .publicVisible,
+                                 business: status.business ?? .privateTrip)
+        let trip = try await createManualTrip(for: leg)
+        let tags = (try? await tags(statusId: status.id)) ?? status.tags
+        try await deleteStatus(id: status.id)
         var result = try await sendCheckin(draft, tripId: trip.tripId, lineName: trip.lineName,
                                            startID: trip.origin.id, destinationID: trip.destination.id,
                                            departure: leg.departure.planned, arrival: leg.arrival.planned)
         result.isManualTrip = true
+        if let statusId = result.statusId {
+            // A tag that doesn't come along isn't worth failing the new check-in over.
+            for tag in tags {
+                _ = try? await addTag(statusId: statusId, key: tag.key, value: tag.value,
+                                      visibility: tag.visibility ?? draft.visibility)
+            }
+        }
         return result
     }
 
@@ -532,13 +666,15 @@ public actor TraewellingClient {
         hopLeg.stopovers = []
         // The user's message/toot belong on the main checkin below, not this short bridging hop, so
         // boarding at a Zusatzhalt doesn't post the same note to Träwelling twice.
-        let hopResult = try await checkinManualTrip(CheckinDraft(leg: hopLeg, visibility: draft.visibility, business: draft.business))
+        let hopResult = try await checkinManualTrip(CheckinDraft(leg: hopLeg, visibility: draft.visibility,
+                                                                 business: draft.business, force: draft.force))
 
         var mainLeg = leg
         mainLeg.origin = nextStation
         mainLeg.departure = nextRegular.departure ?? arrival
         mainLeg.departurePlatform = nextRegular.departurePlatform
-        let mainDraft = CheckinDraft(leg: mainLeg, message: draft.message, visibility: draft.visibility, business: draft.business, toot: draft.toot)
+        var mainDraft = draft
+        mainDraft.leg = mainLeg
 
         var result = try await checkin(mainDraft, allowManualTrip: false)
         result.points += hopResult.points
@@ -593,6 +729,7 @@ public actor TraewellingClient {
             "toot": draft.toot,
         ]
         if !draft.message.isEmpty { body["body"] = String(draft.message.prefix(280)) }
+        if draft.force { body["force"] = true }
 
         struct Response: Decodable, Sendable {
             struct Status: Decodable, Sendable { var id: Int? }
@@ -612,7 +749,7 @@ public actor TraewellingClient {
     static func hafasCategory(for product: Product) -> String {
         switch product {
         case .highSpeed: "nationalExpress"
-        case .longDistance: "national"
+        case .longDistance, .nightTrain, .interregio: "national"
         case .regionalExpress: "regionalExp"
         case .regional, .other: "regional"
         case .suburban: "suburban"
@@ -692,44 +829,132 @@ public actor TraewellingClient {
     /// Matches a departure to a HAFAS trip Träwelling knows about. Beyond the nearest station and a
     /// tight time window, this widens to nearby stations and a looser tolerance before giving up —
     /// Träwelling's own timetable data sometimes only has the train under a neighbouring stop or a
-    /// fahrtNr/time that drifted a bit from our plan.
+    /// fahrtNr/time that drifted a bit from our plan. All of it within `searchBudget`: then the boards
+    /// still loading are given up on.
     private func findDeparture(for leg: Leg) async throws -> (station: TraewellingStation, departure: TraewellingDeparture)? {
         guard leg.line != nil else { return nil }
+        let started = ContinuousClock.now
         let candidates = try await candidateStations(for: leg.origin)
+        let deadline = started + searchBudget.time(afterStationSearchTook: lastStationSearch)
         var answered = false
         var lastError: Error?
+        var timedOut = false
         // Only the nearest few: in a big city the autocomplete has a dozen stations within 8 km, and
         // asking each of them one after the other kept the checkin loading for minutes (#106).
-        for (maxDistance, tolerance, limit) in [(1_500.0, 2.0 * 60, 3), (8_000.0, 15.0 * 60, 4)] {
+        for (maxDistance, tolerance, limit, alsoUnfiltered) in [(1_500.0, 2.0 * 60, 3, true), (8_000.0, 15.0 * 60, 4, false)] {
+            let remaining = deadline - ContinuousClock.now
+            guard remaining > .zero else { timedOut = true; break }
             let stations = candidates.filter { $0.1 <= maxDistance }.prefix(limit).map(\.0)
             let when = leg.departure.planned.addingTimeInterval(-tolerance)
-            let boards = await withTaskGroup(of: (Int, Result<[TraewellingDeparture], any Error>).self) { group in
-                for (index, station) in stations.enumerated() {
+            let travelTypes = Self.boardTravelTypes(for: leg, alsoUnfiltered: alsoUnfiltered)
+            let requests = stations.indices.flatMap { station in
+                travelTypes.map { BoardRequest(station: station, travelType: $0) }
+            }
+            // No station that far: nothing to wait for.
+            guard !requests.isEmpty else { continue }
+            let timeout = max(1, Double(remaining.components.seconds))
+            let (boards, deadlinePassed) = await withTaskGroup(of: BoardAnswer.self) { group in
+                for (index, request) in requests.enumerated() {
+                    let stationID = stations[request.station].id
                     group.addTask {
-                        do { return (index, .success(try await self.departures(stationID: station.id, when: when))) }
-                        catch { return (index, .failure(error)) }
+                        do {
+                            let board = try await self.departures(stationID: stationID, when: when, travelType: request.travelType, timeout: timeout)
+                            return .board(index, .success(board))
+                        } catch {
+                            return .board(index, .failure(error))
+                        }
                     }
                 }
-                var boards = [Result<[TraewellingDeparture], any Error>?](repeating: nil, count: stations.count)
-                for await (index, board) in group { boards[index] = board }
-                return boards
-            }
-            // Best station first (see `ranked(_:for:)`); a station whose board failed is skipped.
-            for (station, board) in zip(stations, boards) {
-                switch board {
-                case .success(let departures):
-                    answered = true
-                    if let departure = Self.bestMatch(departures, for: leg, tolerance: tolerance) {
-                        return (station, departure)
+                group.addTask {
+                    try? await Task.sleep(until: deadline, clock: .continuous)
+                    return .deadline
+                }
+                var boards = [Result<[TraewellingDeparture], any Error>?](repeating: nil, count: requests.count)
+                var pending = requests.count
+                var deadlinePassed = false
+                for await answer in group {
+                    guard case .board(let index, let board) = answer else { deadlinePassed = true; break }
+                    boards[index] = board
+                    pending -= 1
+                    // Check in as soon as the best station that has the train is known, without
+                    // waiting for the others.
+                    if pending == 0 || Self.match(leg, on: boards, of: requests, at: stations, tolerance: tolerance, waitingForBetter: true) != nil {
+                        break
                     }
+                }
+                group.cancelAll()
+                return (boards, deadlinePassed)
+            }
+            for board in boards {
+                switch board {
+                case .success: answered = true
                 case .failure(let error): lastError = error
                 case nil: break
                 }
             }
+            if let match = Self.match(leg, on: boards, of: requests, at: stations, tolerance: tolerance, waitingForBetter: false) {
+                return match
+            }
+            if deadlinePassed { timedOut = true; break }
         }
-        // Not a single board loaded (offline, logged out): that's an error, not an unknown train.
-        if !answered, let lastError { throw lastError }
+        // Not a single board loaded (offline, logged out, no answer in time): that's an error, not an unknown train.
+        if !answered {
+            if timedOut { throw TransitError.timeout }
+            if let lastError { throw lastError }
+        }
         return nil
+    }
+
+    private struct BoardRequest: Sendable {
+        var station: Int
+        var travelType: String?
+    }
+
+    private enum BoardAnswer: Sendable {
+        case board(Int, Result<[TraewellingDeparture], any Error>)
+        case deadline
+    }
+
+    /// The best station (first in `stations`, see `ranked(_:for:)`) whose boards have `leg`'s train.
+    /// A station whose boards are still loading is skipped, or with `waitingForBetter` ends the
+    /// search, since it may yet have the train.
+    private static func match(_ leg: Leg, on boards: [Result<[TraewellingDeparture], any Error>?], of requests: [BoardRequest],
+                              at stations: [TraewellingStation], tolerance: TimeInterval,
+                              waitingForBetter: Bool) -> (station: TraewellingStation, departure: TraewellingDeparture)? {
+        for (index, station) in stations.enumerated() {
+            let stationBoards = zip(requests, boards).filter { $0.0.station == index }.map(\.1)
+            if waitingForBetter, stationBoards.contains(where: { $0 == nil }) { return nil }
+            let departures = stationBoards.flatMap { board -> [TraewellingDeparture] in
+                if case .success(let departures)? = board { departures } else { [] }
+            }
+            if let departure = bestMatch(departures, for: leg, tolerance: tolerance) { return (station, departure) }
+        }
+        return nil
+    }
+
+    /// The departure boards to load per station for `leg`, by Träwelling travel type (`nil`: all).
+    /// Träwelling's board (MOTIS' stop times) lists the next 50 departures by their live time, bundled
+    /// from every stop within 200 m, so at a busy interchange it spans only minutes (Berlin-Spandau with
+    /// its bus stops: about ten) and a late train was past its end, so the checkin offered a manual
+    /// trip (#289). Only the leg's kind of train spans hours there. The first, tight pass also loads
+    /// the full board, in case Träwelling files the train under another kind.
+    static func boardTravelTypes(for leg: Leg, alsoUnfiltered: Bool) -> [String?] {
+        guard let travelType = leg.line.flatMap({ Self.travelType(for: $0.product) }) else { return [nil] }
+        return alsoUnfiltered ? [nil, travelType] : [travelType]
+    }
+
+    /// Träwelling's travel type (departure filter) for a product.
+    static func travelType(for product: Product) -> String? {
+        switch product {
+        case .highSpeed, .longDistance, .nightTrain, .interregio: "express"
+        case .regionalExpress, .regional: "regional"
+        case .suburban: "suburban"
+        case .subway: "subway"
+        case .tram: "tram"
+        case .bus, .coach: "bus"
+        case .ferry: "ferry"
+        case .other: nil
+        }
     }
 
     static func bestMatch(_ departures: [TraewellingDeparture], for leg: Leg, tolerance: TimeInterval) -> TraewellingDeparture? {

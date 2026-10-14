@@ -34,6 +34,8 @@ public struct JourneyWidgetState: Hashable, Sendable {
         public var departure: Date
         public var departureDelayMinutes: Int?
         public var toProduct: Product
+        /// The train changed to is a night train (`Line.isNightTrain`), shown with a bed.
+        public var toNightTrain = false
     }
 
     /// A stop of the current train still ahead (for the current-train widget).
@@ -77,6 +79,8 @@ public struct JourneyWidgetState: Hashable, Sendable {
     public var upcomingStops: [UpcomingStop]
     /// Not on the train yet: before the journey or waiting at a transfer.
     public var isWaitingToBoard = false
+    /// That train is a night train (`Line.isNightTrain`), shown with a bed.
+    public var isNightTrain = false
 
     public static let maxUpcomingStops = 3
 
@@ -109,13 +113,15 @@ public struct JourneyWidgetState: Hashable, Sendable {
             nextDeparture: nil, cancelled: last.cancelled,
             warning: journey.connectionIssues().first(where: \.isBlocking)?.title,
             exitName: last.destination.displayName, exitTime: last.arrival.best,
-            exitDelayMinutes: last.arrival.delayMinutes, exitPlatform: last.arrivalPlatform?.best, upcomingStops: [])
+            exitDelayMinutes: last.arrival.delayMinutes, exitPlatform: last.arrivalPlatform?.best, upcomingStops: [],
+            isNightTrain: last.line?.isNightTrain ?? false)
 
         for (position, (index, leg)) in legs.enumerated() {
             let previous = position > 0 ? legs[position - 1].element : nil
             let following = position + 1 < legs.count ? legs[position + 1].element : nil
             state.trainName = name(of: leg)
             state.product = leg.line?.product ?? .other
+            state.isNightTrain = leg.line?.isNightTrain ?? false
             state.legIndex = index
             state.direction = leg.direction
             state.cancelled = leg.cancelled
@@ -192,7 +198,7 @@ public struct JourneyWidgetState: Hashable, Sendable {
         Transfer(station: next.origin.displayName, fromTrain: name(of: previous), toTrain: name(of: next),
                  fromPlatform: previous.arrivalPlatform?.best, toPlatform: next.departurePlatform?.best,
                  departure: next.departure.best, departureDelayMinutes: next.departure.delayMinutes,
-                 toProduct: next.line?.product ?? .other)
+                 toProduct: next.line?.product ?? .other, toNightTrain: next.line?.isNightTrain ?? false)
     }
 }
 

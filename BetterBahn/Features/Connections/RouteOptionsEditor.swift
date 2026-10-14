@@ -53,6 +53,8 @@ struct ViaRowView<Focus: Hashable>: View {
                           systemImage: "clock.badge.checkmark")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(row.minStayMinutes > 0 ? Color.brand : Color.secondary)
+                        .padding(Self.hitPadding)
+                        .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
                 .popover(isPresented: $showStayPopover) {
@@ -65,16 +67,23 @@ struct ViaRowView<Focus: Hashable>: View {
                 Button(role: .destructive, action: onRemove) {
                     Image(systemName: "trash")
                         .font(.caption.weight(.semibold))
+                        .padding(Self.hitPadding)
+                        .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
                 .accessibilityLabel("Zwischenhalt entfernen")
             }
-            .padding(.leading, 54)
-            .padding(.trailing, 16)
-            .padding(.bottom, 12)
+            // The buttons' larger tap areas reach up into the field's bottom padding (drawn later, so
+            // they win there) without moving anything: the whole field row opens the search.
+            .padding(.leading, 54 - Self.hitPadding)
+            .padding(.trailing, 16 - Self.hitPadding)
+            .padding(.top, -Self.hitPadding)
+            .padding(.bottom, 12 - Self.hitPadding)
         }
     }
+
+    private static var hitPadding: CGFloat { 10 }
 }
 
 /// Stepper for how long to stay at a stop before travelling on.
@@ -108,7 +117,7 @@ struct ProductChips: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Button("Nur Züge") { products = Set(Product.allCases.filter(\.isTrain)) }
-                Button("Nur Fernverkehr") { products = [.highSpeed, .longDistance] }
+                Button("Nur Fernverkehr") { products = Product.longDistanceProducts }
                 Button("Alle") { products = Set(Product.allCases) }
             }
             .font(.caption.weight(.semibold))
@@ -119,8 +128,9 @@ struct ProductChips: View {
                     Button {
                         if isOn { products.remove(product) } else { products.insert(product) }
                     } label: {
-                        Label(product == .highSpeed ? "ICE" : product.displayName, systemImage: product.symbolName)
-                            .font(.caption.weight(.semibold))
+                        Label(product.displayName, systemImage: product.symbolName)
+                            // "Hochgeschwindigkeit" is much longer than the other names.
+                            .font(product == .highSpeed ? .system(size: 10, weight: .semibold) : .caption.weight(.semibold))
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
                             .frame(maxWidth: .infinity)

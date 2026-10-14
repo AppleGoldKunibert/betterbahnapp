@@ -113,17 +113,29 @@ extension BahnDeClient {
         /// trains run by several, e.g. `{"key": "BEF", "value": "DB Fernverkehr AG",
         /// "teilstreckenHinweis": "(Berlin Hbf - Bad Schandau)"}` (as parsed by db-vendo-client). The
         /// journey details of RJ 171 Hamburg → Praha (2026-10-07) had none, only each stop's `adminID`.
-        struct Attribute: Decodable { var key: String?; var value: String?; var teilstreckenHinweis: String? }
+        struct Attribute: Decodable { var kategorie: String?; var key: String?; var value: String?; var teilstreckenHinweis: String? }
         var halte: [Stop]
         var zugattribute: [Attribute]?
         /// The train's name, e.g. "RJ 383".
         var zugName: String?
+
+        /// The attributes list sleeping ("Schlafwagen", SW) or couchette cars ("Liegewagen", LW): a night
+        /// train, also one the timetable feeds don't mark (#241), e.g. Snälltåget's "D 301".
+        var hasSleepingCars: Bool {
+            zugattribute?.contains { $0.kategorie == "SCHLAFWAGEN" || ["SW", "LW"].contains($0.key) } == true
+        }
+        /// DB marks trains where a seat reservation is mandatory (e.g. Snälltåget, Nightjet) with the attribute `RP`.
+        /// Only the key counts: "FR" is "Fahrradmitnahme reservierungspflichtig", which concerns bikes alone.
+        var requiresReservation: Bool { zugattribute?.contains { $0.key == "RP" } ?? false }
     }
 
-    /// A train's journey details: its realtime stops and the operators running it.
+    /// A train's journey details: its realtime stops, the operators running it and what its attributes say.
     struct JourneyCourse: Sendable {
         var stops: [JourneyStop]
         var operators: [TrainOperator]
+        var hasSleepingCars = false
+        /// Whether a seat reservation is mandatory on the train (attribute `RP`).
+        var requiresReservation = false
     }
 
     // MARK: Journey stops
@@ -148,6 +160,28 @@ extension BahnDeClient {
     private func journeyStops(line: Line?, station: Station, plannedDeparture: Date,
                               maxAge: TimeInterval = BahnDeClient.journeyStopsMaxAge) async throws -> [JourneyStop]? {
         try await journeyCourse(line: line, station: station, plannedDeparture: plannedDeparture, maxAge: maxAge)?.stops
+    }
+
+    /// `journeyStops(for:)` together with the rest of bahn.de's journey details, same request and cache.
+    func journeyCourse(for leg: Leg, maxAge: TimeInterval = BahnDeClient.journeyStopsMaxAge) async throws -> JourneyCourse? {
+        try await journeyCourse(line: leg.line, station: leg.origin, plannedDeparture: leg.departure.planned, maxAge: maxAge)
+    }
+
+    /// Whether bahn.de lists sleeping or couchette cars for `trip`'s train (`JourneyDetails.hasSleepingCars`);
+    /// shares the request and cache of `journeyStops(for:)`.
+    public func hasSleepingCars(for trip: Trip) async throws -> Bool {
+        guard let first = trip.stopovers.first(where: { $0.departure != nil }), let departure = first.departure,
+              let course = try await journeyCourse(line: trip.line, station: first.station, plannedDeparture: departure.planned)
+        else { return false }
+        return course.hasSleepingCars
+    }
+
+    /// `leg` marked as a night train when bahn.de's journey details list sleeping or couchette cars.
+    static func markingNightTrain(_ leg: Leg, hasSleepingCars: Bool) -> Leg {
+        guard hasSleepingCars, leg.line?.isNightTrain == false else { return leg }
+        var leg = leg
+        leg.line?.nightRail = true
+        return leg
     }
 
     /// The operators bahn.de lists for the part of `leg`'s train you ride: on an international train run
@@ -208,9 +242,11 @@ extension BahnDeClient {
         return marks
     }
 
+    /// `includingOtherRailways` also looks up long-distance trains of other railways (`lookupReference`).
     private func journeyCourse(line: Line?, station: Station, plannedDeparture: Date,
-                               maxAge: TimeInterval = BahnDeClient.journeyStopsMaxAge) async throws -> JourneyCourse? {
-        guard let ref = Self.journeyReference(for: line), let line else { return nil }
+                               maxAge: TimeInterval = BahnDeClient.journeyStopsMaxAge,
+                               includingOtherRailways: Bool = false) async throws -> JourneyCourse? {
+        guard let ref = includingOtherRailways ? Self.lookupReference(for: line) : Self.journeyReference(for: line), let line else { return nil }
         let journeyKey = "\(ref.category) \(ref.number)|\(station.id)|\(plannedDeparture.timeIntervalSince1970)"
         guard usesSharedCaches else {
             let id = try await findJourneyId(line: line, station: station, plannedDeparture: plannedDeparture)
@@ -224,6 +260,16 @@ extension BahnDeClient {
         return try await Self.journeyCourseCache.value(for: id, maxAge: maxAge) {
             try await self.fetchJourneyCourse(journeyId: id, feedOperator: line.operatorName)
         }
+    }
+
+    /// Whether bahn.de lists `leg`'s train as reservation-only ("Reservierungspflicht" among the journey
+    /// details' train attributes, e.g. Snälltåget D 301 Malmö–Berlin or a Nightjet). `nil` if the train isn't
+    /// one bahn.de can be asked about (`lookupReference`); throws `TransitError.notFound` if bahn.de doesn't
+    /// list it. Shares the request and cache of `journeyStops`.
+    public func requiresReservation(for leg: Leg) async throws -> Bool? {
+        guard let line = leg.line, !leg.isWalking else { return nil }
+        return try await journeyCourse(line: line, station: leg.origin, plannedDeparture: leg.departure.planned,
+                                       includingOtherRailways: true)?.requiresReservation
     }
 
     private static let journeyIdCache = ExpiringCache<String>()
@@ -241,10 +287,20 @@ extension BahnDeClient {
         return (ref.category, ref.number, true)
     }
 
+    /// `journeyReference`, plus long-distance trains of other railways (SJ's "D 301", Nightjet, TGV …) by their
+    /// number (also with an unclassified product, which is how Nightjet may arrive), which bahn.de lists on its
+    /// board too but whose Zusatzhalte and platforms we never ask for.
+    static func lookupReference(for line: Line?) -> (category: String, number: String, isRegional: Bool)? {
+        if let ref = journeyReference(for: line) { return ref }
+        guard let line, [.highSpeed, .longDistance, .other].contains(line.product), let number = line.number,
+              let category = line.name.split(separator: " ").first.map({ String($0).uppercased() }) else { return nil }
+        return (category, number, false)
+    }
+
     /// bahn.de's journey ID for `line`, found on the departure board of `station` at its scheduled time.
     func findJourneyId(line: Line, station: Station, plannedDeparture: Date) async throws -> String {
         guard let eva = try await evaNumber(for: station) else { throw TransitError.notFound(line.name) }
-        let regional = Self.journeyReference(for: line)?.isRegional == true
+        let regional = Self.lookupReference(for: line)?.isRegional == true
         let board = try await get(Self.boardURL(eva: eva, at: plannedDeparture, products: regional ? Self.regionalProducts : Self.longDistanceProducts),
                                   as: Board.self)
         guard let id = Self.journeyId(in: board, for: line, plannedDeparture: plannedDeparture) else {
@@ -281,7 +337,7 @@ extension BahnDeClient {
     /// directions.
     static func journeyId(in board: Board, for line: Line, plannedDeparture: Date) -> String? {
         let targets = Set([line.name, line.alternateName].compactMap { $0 }.map(normalizedTrainName))
-        let number = journeyReference(for: line)?.number
+        let number = lookupReference(for: line)?.number
         return board.entries
             .filter { entry in
                 if let number, let run = journeyNumber(in: entry.journeyId) { return run == number }
@@ -408,11 +464,20 @@ extension BahnDeClient {
     /// planned time, while DB had it on time. Entries bahn.de has no live time for keep Transitous'.
     static func applyingLiveTimes(_ entries: [BoardEntry], using board: [Board.Entry], kind: BoardKind = .departures) -> [BoardEntry] {
         entries.map { entry in
-            guard entry.kind == kind, let live = boardMatch(for: entry, in: board)?.ezZeit.flatMap(parseBerlinTime) else { return entry }
+            guard entry.kind == kind, let live = boardMatch(for: entry, in: board)?.ezZeit.flatMap(parseBerlinTime),
+                  !turnsEarlyIntoOnTime(entry.time, with: live) else { return entry }
             var corrected = entry
             corrected.time.actual = live
             return corrected
         }
+    }
+
+    /// bahn.de shows a train that runs early as on time (±0, even at −10). A time that is early by two minutes or
+    /// more is therefore not traded for bahn.de's "on time". Below that, DB's "on time" still wins over a forecast a
+    /// minute early (ICE 146 above).
+    static func turnsEarlyIntoOnTime(_ time: TimeInfo, with live: Date) -> Bool {
+        guard let current = time.actual else { return false }
+        return time.planned.timeIntervalSince(current) >= 120 && abs(live.timeIntervalSince(time.planned)) < 60
     }
 
     /// bahn.de's board entry for `entry`'s train: long-distance trains by number, other trains by run
@@ -453,7 +518,8 @@ extension BahnDeClient {
             var named = entry
             // "S 1" → "S1", like the other S- and U-Bahn rows.
             let compact = [.suburban, .subway].contains(product) ? name.replacingOccurrences(of: " ", with: "") : name
-            named.line = Line(name: compact, number: trainNumber(in: name), product: product, operatorName: entry.line.operatorName)
+            named.line = Line(name: compact, number: trainNumber(in: name), product: product, operatorName: entry.line.operatorName,
+                              feedColorHex: entry.line.feedColorHex)
             return named
         }
     }
@@ -533,7 +599,9 @@ extension BahnDeClient {
     private func fetchJourneyCourse(journeyId: String, feedOperator: String?) async throws -> JourneyCourse {
         let details = try await get(Self.journeyURL(journeyId), as: JourneyDetails.self)
         return JourneyCourse(stops: details.halte.compactMap(JourneyStop.init),
-                             operators: Self.operators(of: details, feedOperator: feedOperator))
+                             operators: Self.operators(of: details, feedOperator: feedOperator),
+                             hasSleepingCars: details.hasSleepingCars,
+                             requiresReservation: details.requiresReservation)
     }
 
     /// The operators bahn.de names in the train's attributes, unless its stops' railways (`adminID`, else
@@ -750,33 +818,120 @@ extension BahnDeClient {
     /// at its start, its end and its stops. Transitous' realtime for cross-border trains often carries
     /// no delay at all and DB Timetables can miss a stop, so RJ 383 showed +59 at Dresden Hbf but none
     /// at Bad Schandau, where bahn.de had +57. Matched like the platforms, by planned time and place.
-    public static func applyingLiveTimes(from stops: [JourneyStop], to leg: Leg) -> Leg {
+    ///
+    /// `keepingDelays` is for when DB Timetables has been asked already: a time it put a delay (or an early
+    /// time) on stays, and bahn.de only fills what is missing or on time. bahn.de's forecast can be far off for
+    /// some trains (RE 3 3354 on 9 Oct 2026: +7 at Gesundbrunnen and ±0 at the end, where DB Timetables and
+    /// bahn.expert had +19 and +7), and it used to overwrite DB Timetables' times.
+    public static func applyingLiveTimes(from stops: [JourneyStop], to leg: Leg, keepingDelays: Bool = false,
+                                         expert: ExpertTimes? = nil) -> Leg {
         var leg = leg
-        if let actual = stop(in: stops, at: leg.origin, planned: leg.departure.planned, side: \.departure)?.departure?.actual {
+        if let stop = stop(in: stops, at: leg.origin, planned: leg.departure.planned, side: \.departure),
+           let actual = stop.departure?.actual,
+           replaces(leg.departure, with: actual, keepingDelays: keepingDelays,
+                    expert: expert?.actual(eva: stop.evaNumber, planned: leg.departure.planned, side: .departure)) {
             leg.departure.actual = actual
         }
-        if let actual = stop(in: stops, at: leg.destination, planned: leg.arrival.planned, side: \.arrival)?.arrival?.actual {
+        if let stop = stop(in: stops, at: leg.destination, planned: leg.arrival.planned, side: \.arrival),
+           let actual = stop.arrival?.actual,
+           replaces(leg.arrival, with: actual, keepingDelays: keepingDelays,
+                    expert: expert?.actual(eva: stop.evaNumber, planned: leg.arrival.planned, side: .arrival)) {
             leg.arrival.actual = actual
         }
-        leg.stopovers = applyingLiveTimes(from: stops, to: leg.stopovers)
+        leg.stopovers = applyingLiveTimes(from: stops, to: leg.stopovers, keepingDelays: keepingDelays, expert: expert)
         return leg
     }
 
-    /// `stopovers` with bahn.de's live times where it has one (see `applyingLiveTimes(from:to:)` for a leg).
-    public static func applyingLiveTimes(from stops: [JourneyStop], to stopovers: [Stopover]) -> [Stopover] {
+    /// `stopovers` with bahn.de's live times where it has one (see `applyingLiveTimes(from:to:keepingDelays:)` for a leg).
+    public static func applyingLiveTimes(from stops: [JourneyStop], to stopovers: [Stopover], keepingDelays: Bool = false,
+                                         expert: ExpertTimes? = nil) -> [Stopover] {
         var stopovers = stopovers
         for index in stopovers.indices {
             let stopover = stopovers[index]
             if let planned = stopover.arrival?.planned,
-               let actual = stop(in: stops, at: stopover.station, planned: planned, side: \.arrival)?.arrival?.actual {
+               let stop = stop(in: stops, at: stopover.station, planned: planned, side: \.arrival),
+               let actual = stop.arrival?.actual,
+               replaces(stopover.arrival, with: actual, keepingDelays: keepingDelays,
+                        expert: expert?.actual(eva: stop.evaNumber, planned: planned, side: .arrival)) {
                 stopovers[index].arrival?.actual = actual
             }
             if let planned = stopover.departure?.planned,
-               let actual = stop(in: stops, at: stopover.station, planned: planned, side: \.departure)?.departure?.actual {
+               let stop = stop(in: stops, at: stopover.station, planned: planned, side: \.departure),
+               let actual = stop.departure?.actual,
+               replaces(stopover.departure, with: actual, keepingDelays: keepingDelays,
+                        expert: expert?.actual(eva: stop.evaNumber, planned: planned, side: .departure)) {
                 stopovers[index].departure?.actual = actual
             }
         }
         return stopovers
+    }
+
+    /// Whether bahn.de's `actual` replaces `time`: not when it would turn an early time into "on time"
+    /// (`turnsEarlyIntoOnTime`), and with `keepingDelays` not when `time` already carries a delay or an early
+    /// time (anything but "on time") either.
+    ///
+    /// Where the two disagree and bahn.expert's time for the stop (`expert`) is known, it decides: the value
+    /// closer to it stays, and DB Timetables' on a tie.
+    static func replaces(_ time: TimeInfo?, with actual: Date, keepingDelays: Bool, expert: Date? = nil) -> Bool {
+        guard let time, let current = time.actual else { return true }
+        if turnsEarlyIntoOnTime(time, with: actual) { return false }
+        if let expert, keepingDelays, abs(actual.timeIntervalSince(current)) >= 60 {
+            return abs(actual.timeIntervalSince(expert)) < abs(current.timeIntervalSince(expert))
+        }
+        guard keepingDelays else { return true }
+        return time.delayMinutes == 0
+    }
+
+    /// Whether bahn.de's live time differs by a minute or more from one `stopovers` already have, which is
+    /// when asking bahn.expert is worth a request.
+    static func disagrees(_ stops: [JourneyStop], with stopovers: [Stopover]) -> Bool {
+        stopovers.contains { stopover in
+            differs(stops, stopover.station, stopover.arrival, side: \.arrival)
+                || differs(stops, stopover.station, stopover.departure, side: \.departure)
+        }
+    }
+
+    /// `disagrees(_:with:)` for a leg: its stops, and its ends where it has none.
+    static func disagrees(_ stops: [JourneyStop], with leg: Leg) -> Bool {
+        differs(stops, leg.origin, leg.departure, side: \.departure)
+            || differs(stops, leg.destination, leg.arrival, side: \.arrival)
+            || disagrees(stops, with: leg.stopovers)
+    }
+
+    private static func differs(_ stops: [JourneyStop], _ station: Station, _ time: TimeInfo?,
+                                side: KeyPath<JourneyStop, TimeInfo?>) -> Bool {
+        guard let time, let current = time.actual,
+              let live = stop(in: stops, at: station, planned: time.planned, side: side)?[keyPath: side]?.actual else { return false }
+        return abs(live.timeIntervalSince(current)) >= 60
+    }
+
+    /// `stopovers` with bahn.de's live times (`applyingLiveTimes(from:to:keepingDelays:expert:)`), asking bahn.expert
+    /// first when bahn.de and DB Timetables disagree on a stop of this train. Without an answer from bahn.expert
+    /// DB Timetables' times stay, as before.
+    public static func applyingLiveTimes(from stops: [JourneyStop], to stopovers: [Stopover], line: Line?, keepingDelays: Bool,
+                                         referee: BahnExpertClient?) async -> [Stopover] {
+        var expert: ExpertTimes?
+        if keepingDelays, disagrees(stops, with: stopovers),
+           let day = stopovers.first.flatMap({ $0.departure?.planned ?? $0.arrival?.planned }).map(berlinDay) {
+            expert = await expertTimes(for: line, day: day, referee: referee)
+        }
+        return applyingLiveTimes(from: stops, to: stopovers, keepingDelays: keepingDelays, expert: expert)
+    }
+
+    /// `applyingLiveTimes(from:to:line:keepingDelays:referee:)` for a leg.
+    public static func applyingLiveTimes(from stops: [JourneyStop], to leg: Leg, keepingDelays: Bool,
+                                         referee: BahnExpertClient?) async -> Leg {
+        var expert: ExpertTimes?
+        if keepingDelays, disagrees(stops, with: leg) {
+            expert = await expertTimes(for: leg.line, day: berlinDay(leg.departure.planned), referee: referee)
+        }
+        return applyingLiveTimes(from: stops, to: leg, keepingDelays: keepingDelays, expert: expert)
+    }
+
+    private static func expertTimes(for line: Line?, day: String, referee: BahnExpertClient?) async -> ExpertTimes? {
+        guard let referee, let line, let number = line.dispatchNumber.flatMap({ Int($0) }) else { return nil }
+        return await ExpertTimesCache.shared.times(category: TimetablesClient.category(from: line.name), number: number,
+                                                    day: day, using: referee)
     }
 
     /// Whether `leg` lacks a platform at its start, its end or any of its stops.

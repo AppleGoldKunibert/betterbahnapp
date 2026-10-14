@@ -9,6 +9,12 @@ import { handleAuth, isAuthorized, unauthorized } from "../shared/appattest.mjs"
 
 const UPSTREAM = "https://www.bahn.de/web/api/";
 const TIMETABLES_UPSTREAM = "https://apis.deutschebahn.com/db-api-marketplace/apis/timetables/v1/";
+// The same IRIS service that sits behind Timetables, as DB's own departure board uses it: no key and no
+// 60 calls/minute limit. DB marked it deprecated (it may be switched off), so Timetables stays as the fallback.
+const IRIS_UPSTREAM = "https://iris.noncd.db.de/iris-tts/timetable/";
+const TIMETABLES_TIMEOUT = 8000;
+// IRIS answers these for "no such data" (as bahn.expert treats them): Timetables would say the same, so no fallback.
+const NO_DATA_STATUSES = new Set([400, 404, 410]);
 
 // Allowed paths (relative to /web/api/) and how long a successful answer is cached, in seconds.
 // Short TTLs keep realtime data fresh while collapsing repeated app requests into one DB request.
@@ -76,6 +82,31 @@ export function upstreamHeaders() {
     };
 }
 
+async function timetablesAnswer(url, headers, fetchUpstream) {
+    try {
+        const response = await fetchUpstream(url, { headers, signal: AbortSignal.timeout(TIMETABLES_TIMEOUT) });
+        return { response, body: await response.arrayBuffer() };
+    } catch {
+        return { response: null, body: null };
+    }
+}
+
+/// DB Timetables: the keyless IRIS first, the API Marketplace (with our key, 60 calls/minute) only when IRIS fails
+/// (error, timeout, 5xx, 429 …). Returns `{ upstream, body }` where `upstream` is the successful response or the
+/// error to pass on (the Marketplace's if both failed), or null if nothing was reachable.
+export async function fetchTimetables(path, env, fetchUpstream) {
+    const iris = await timetablesAnswer(IRIS_UPSTREAM + path, { Accept: "application/xml" }, fetchUpstream);
+    if (iris.response && (iris.response.ok || NO_DATA_STATUSES.has(iris.response.status))) {
+        return { upstream: iris.response, body: iris.body };
+    }
+    if (env.DB_CLIENT_ID && env.DB_API_KEY) {
+        const marketplace = await timetablesAnswer(TIMETABLES_UPSTREAM + path,
+            { "DB-Client-Id": env.DB_CLIENT_ID, "DB-Api-Key": env.DB_API_KEY, Accept: "application/xml" }, fetchUpstream);
+        if (marketplace.response) return { upstream: marketplace.response, body: marketplace.body };
+    }
+    return iris.response ? { upstream: iris.response, body: iris.body } : null;
+}
+
 function json(status, body, extra = {}) {
     return new Response(JSON.stringify(body), {
         status,
@@ -103,38 +134,50 @@ export async function handleRequest(request, env = {}, deps = {}) {
     // Only the genuine app (App Attest token). Timetables always needs one: it spends our API key.
     if (!(await isAuthorized(request, env, { required: route.timetables }))) return unauthorized();
 
-    let upstreamURL, upstreamRequestHeaders;
-    if (route.timetables) {
-        if (!env.DB_CLIENT_ID || !env.DB_API_KEY) return json(503, { error: "not_configured" });
-        upstreamURL = TIMETABLES_UPSTREAM + path;
-        upstreamRequestHeaders = { "DB-Client-Id": env.DB_CLIENT_ID, "DB-Api-Key": env.DB_API_KEY, Accept: "application/xml" };
-    } else {
-        // url.search keeps the query exactly as sent, e.g. "%23" in journey IDs.
-        upstreamURL = UPSTREAM + path + url.search;
-        upstreamRequestHeaders = upstreamHeaders();
-    }
+    if (route.timetables) return timetablesResponse(path, ttl, env, fetchUpstream, cache, deps);
+
+    // url.search keeps the query exactly as sent, e.g. "%23" in journey IDs.
+    const upstreamURL = UPSTREAM + path + url.search;
     const cacheKey = new Request(upstreamURL);
 
-    if (cache) {
-        const cached = await cache.match(cacheKey);
-        if (cached) {
-            const hit = new Response(cached.body, cached);
-            hit.headers.set("X-Proxy-Cache", "HIT");
-            return hit;
-        }
-    }
+    const cached = await cachedAnswer(cache, cacheKey);
+    if (cached) return cached;
 
     let upstream;
     try {
-        upstream = await fetchUpstream(upstreamURL, { headers: upstreamRequestHeaders });
+        upstream = await fetchUpstream(upstreamURL, { headers: upstreamHeaders() });
     } catch {
         return json(502, { error: "upstream_unreachable" });
     }
+    return await answer(upstream, await upstream.arrayBuffer(), ttl, cacheKey, cache, deps);
+}
 
-    const body = await upstream.arrayBuffer();
+async function cachedAnswer(cache, cacheKey) {
+    const cached = cache ? await cache.match(cacheKey) : null;
+    if (!cached) return null;
+    const hit = new Response(cached.body, cached);
+    hit.headers.set("X-Proxy-Cache", "HIT");
+    return hit;
+}
+
+async function timetablesResponse(path, ttl, env, fetchUpstream, cache, deps) {
+    // Cached under the Marketplace URL as before, whichever source answered.
+    const cacheKey = new Request(TIMETABLES_UPSTREAM + path);
+    const cached = await cachedAnswer(cache, cacheKey);
+    if (cached) return cached;
+
+    const result = await fetchTimetables(path, env, fetchUpstream);
+    if (!result) return json(502, { error: "upstream_unreachable" });
+    return await answer(result.upstream, result.body, ttl, cacheKey, cache, deps);
+}
+
+// A successful upstream answer is cached for `ttl`; errors (including 403 OPS_BLOCKED / 429) pass
+// through unchanged and uncached, so the app's BahnDeGate cooldown still kicks in.
+async function answer(upstream, body, ttl, cacheKey, cache, deps, extra = {}) {
     const headers = {
         "Content-Type": upstream.headers.get("Content-Type") ?? "application/json; charset=utf-8",
         "X-Proxy-Cache": "MISS",
+        ...extra,
     };
     if (upstream.ok) {
         const response = new Response(body, {
@@ -147,8 +190,6 @@ export async function handleRequest(request, env = {}, deps = {}) {
         }
         return response;
     }
-    // Pass errors (including 403 OPS_BLOCKED / 429) through unchanged and uncached, so the app's
-    // BahnDeGate cooldown still kicks in.
     return new Response(body, { status: upstream.status, headers: { ...headers, "Cache-Control": "no-store" } });
 }
 

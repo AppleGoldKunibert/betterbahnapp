@@ -34,8 +34,48 @@ nonisolated struct ConnectionSearch: Hashable, Codable {
 
     /// Stored under the old "onlyBC100" key so journeys saved before the Deutschlandticket filter still load.
     enum CodingKeys: String, CodingKey {
-        case from, to, via, date, isArrival, products, maxTransfers
+        case from, to, via, date, isArrival, products, maxTransfers, hasProductGroups
         case onlyValidTicket = "onlyBC100"
+    }
+
+    init(from: Station, to: Station, via: [ViaWaypoint] = [], date: Date, isArrival: Bool, onlyValidTicket: Bool,
+         products: Set<Product> = Set(Product.allCases), maxTransfers: Int? = nil) {
+        self.from = from
+        self.to = to
+        self.via = via
+        self.date = date
+        self.isArrival = isArrival
+        self.onlyValidTicket = onlyValidTicket
+        self.products = products
+        self.maxTransfers = maxTransfers
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        from = try container.decode(Station.self, forKey: .from)
+        to = try container.decode(Station.self, forKey: .to)
+        via = try container.decodeIfPresent([ViaWaypoint].self, forKey: .via) ?? []
+        date = try container.decode(Date.self, forKey: .date)
+        isArrival = try container.decode(Bool.self, forKey: .isArrival)
+        onlyValidTicket = try container.decode(Bool.self, forKey: .onlyValidTicket)
+        maxTransfers = try container.decodeIfPresent(Int.self, forKey: .maxTransfers)
+        let stored = try container.decodeIfPresent(Set<Product>.self, forKey: .products) ?? Set(Product.allCases)
+        // Searches saved before night trains and IR/FLX were groups of their own lack the marker.
+        let isCurrent = try container.decodeIfPresent(Bool.self, forKey: .hasProductGroups) == true
+        products = isCurrent ? stored : Product.upgradingLegacySelection(stored)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(from, forKey: .from)
+        try container.encode(to, forKey: .to)
+        try container.encode(via, forKey: .via)
+        try container.encode(date, forKey: .date)
+        try container.encode(isArrival, forKey: .isArrival)
+        try container.encode(onlyValidTicket, forKey: .onlyValidTicket)
+        try container.encode(products, forKey: .products)
+        try container.encodeIfPresent(maxTransfers, forKey: .maxTransfers)
+        try container.encode(true, forKey: .hasProductGroups)
     }
 }
 
@@ -57,6 +97,8 @@ struct ConnectionsView: View {
     @State private var showProductsPopover = false
     @State private var productsTapCount = 0
     @FocusState private var focused: Field?
+    /// A station field shows its suggestions (they stay a moment after it loses focus).
+    @State private var suggestionsShown = false
     @State private var path: [ConnectionsRoute] = []
     @State private var swapRotation = 0.0
 
@@ -108,6 +150,11 @@ struct ConnectionsView: View {
             .tabBarSafePadding()
             .background { AppBackground() }
             .navigationTitle("Verbindungen")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Zug suchen", systemImage: "train.side.front.car") { model.showsTrainSearch = true }
+                }
+            }
             .navigationDestination(for: ConnectionsRoute.self) { route in
                 switch route {
                 case .search(let search):
@@ -120,11 +167,17 @@ struct ConnectionsView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
+            .closesStationSearchOnOutsideTap($focused)
             .onAppear { onlyValidTicket = model.settings.ticketFilterByDefault }
+            .task { await model.keepFollowedCheckinsFresh() }
             .onChange(of: model.journeyToOpen, initial: true) { _, entry in
                 guard let entry else { return }
                 path = [.journey(entry.route())]
                 model.journeyToOpen = nil
+            }
+            // The followed check-ins list sits on the first page (#266).
+            .onChange(of: model.followedCheckinToOpen, initial: true) { _, id in
+                if id != nil { path = [] }
             }
         }
         .toolbar(showsJourney ? .hidden : .automatic, for: .tabBar)
@@ -159,14 +212,19 @@ struct ConnectionsView: View {
             }
             .clipShape(.rect(cornerRadius: 22, style: .continuous))
         }
+        .onPreferenceChange(StationSuggestionsShownKey.self) { shown in
+            withAnimation(.snappy(duration: 0.25)) { suggestionsShown = shown }
+        }
     }
 
     /// A divider row between two stops, optionally carrying the leading "add via point" button
-    /// and/or the trailing "swap" button (both hidden while any field is focused).
+    /// and/or the trailing "swap" button (both hidden while suggestions are shown). Follows the
+    /// suggestions rather than focus: the buttons make the row taller, which would push the
+    /// suggestions below it away from a finger still on one.
     private func routeDivider(showAdd: Bool, showSwap: Bool) -> some View {
         ZStack {
-            Divider().padding(.leading, 54).padding(.trailing, focused == nil && showSwap ? 72 : 0)
-            if focused == nil {
+            Divider().padding(.leading, 54).padding(.trailing, !suggestionsShown && showSwap ? 72 : 0)
+            if !suggestionsShown {
                 if showAdd, viaRows.count < Self.maxViaPoints {
                     HStack {
                         addViaButton.padding(.leading, 20)

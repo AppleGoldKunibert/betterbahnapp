@@ -76,6 +76,10 @@ struct EmojiMessageField: View {
     @Binding var message: String
     let emojis: [CustomEmoji]
     var placeholder = "Was geht ab? (optional)"
+    /// Lets the form put the keyboard away (and bring it back) itself; the field's own focus otherwise.
+    var isFocused: FocusState<Bool>.Binding?
+
+    @FocusState private var ownFocus: Bool
 
     private var suggestions: [CustomEmoji] {
         guard let query = CustomEmojiText.query(in: message) else { return [] }
@@ -92,6 +96,7 @@ struct EmojiMessageField: View {
                 IconTile(systemImage: "text.bubble.fill", color: .blue, size: 32)
                 TextField(placeholder, text: $message, axis: .vertical)
                     .lineLimit(3...6)
+                    .focused(isFocused ?? $ownFocus)
                     .padding(.top, 5)
             }
             if !suggestions.isEmpty {

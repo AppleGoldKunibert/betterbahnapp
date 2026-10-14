@@ -20,19 +20,18 @@ public struct BoardFilter: Sendable, Hashable {
     }
 
     public func includes(_ entry: BoardEntry) -> Bool {
-        guard products.contains(entry.line.product) else { return false }
+        guard products.contains(entry.line.filterProduct) else { return false }
         if entry.access == .passThrough { return false }
         if hideCancelled, entry.cancelled { return false }
         if let ticketFilter, !ticketFilter.isValid(entry) { return false }
         // A departure whose final destination is this station ends here → not rideable.
-        if entry.kind == .departures, entry.terminatesOrOriginatesHere == true,
-           let other = entry.otherEnd, Station.normalize(other) == Station.normalize(entry.station.name) {
-            return false
-        }
-        if entry.kind == .arrivals, entry.terminatesOrOriginatesHere == true,
-           let other = entry.otherEnd, Station.normalize(other) == Station.normalize(entry.station.name) {
-            return false
-        }
+        if entry.terminatesOrOriginatesHere == true, Self.namesOwnStation(entry) { return false }
         return true
+    }
+
+    /// Whether the other end shown for `entry` is its own station, under the feed's name or as shown.
+    private static func namesOwnStation(_ entry: BoardEntry) -> Bool {
+        guard let other = entry.otherEnd.map(Station.normalize) else { return false }
+        return other == Station.normalize(entry.station.name) || other == Station.normalize(entry.station.displayName)
     }
 }

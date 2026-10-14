@@ -5,6 +5,9 @@ import SwiftUI
 /// or start a Live Activity.
 struct TripView: View {
     let entry: BoardEntry
+    /// Picks the board's station as where you get on (or off); off when the train was found by its
+    /// number, where that station is just where it was looked up.
+    var selectsStation = true
 
     @Environment(AppModel.self) private var model
     @State private var trip: Trip?
@@ -15,8 +18,16 @@ struct TripView: View {
     @State private var shownTripId: String?
     /// Where you got on/off before switching trains, picked again in the other one.
     @State private var keptStops: (boarding: Station?, exit: Station?)?
+    /// Laps of a looping train (Ringbahn) loaded before / after the one the board opened, by "Vorherige /
+    /// Nächste Runde laden".
+    @State private var extraLapsBefore = 0
+    @State private var extraLapsAfter = 0
+    @State private var isLoadingLap = false
 
     private var tripId: String { shownTripId ?? entry.tripId }
+
+    /// Where the loaded laps are remembered (see `LoadedLaps`).
+    private var lapsKey: String { LoadedLaps.key(tripId: entry.tripId, station: entry.station, near: entry.time.planned) }
 
     private var ownDirection: String? { entry.kind == .departures ? entry.otherEnd : nil }
 
@@ -36,7 +47,9 @@ struct TripView: View {
                     ErrorBanner(error: error)
                 }
                 if let trip {
-                    TripContent(trip: trip, highlight: entry.station, boardingID: $boardingID, exitID: $exitID)
+                    TripContent(trip: trip, highlight: selectsStation ? entry.station : nil, boardingID: $boardingID, exitID: $exitID,
+                                onLoadPreviousLap: { loadLap(before: 1) }, onLoadNextLap: { loadLap(after: 1) },
+                                isLoadingLap: isLoadingLap)
                 }
             }
             .padding(.horizontal)
@@ -53,11 +66,17 @@ struct TripView: View {
         .navigationTitle(entry.line.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .task(id: tripId) {
+            if tripId == entry.tripId {
+                let remembered = model.openLoadedLaps(lapsKey, tripId: entry.tripId)
+                extraLapsBefore = remembered.before
+                extraLapsAfter = remembered.after
+            }
             // Seen before: its last live data right away, refreshed below.
             if trip == nil, let seen = model.liveTrips.value(for: tripId) { show(seen) }
             await load()
             await autoRefresh(tripId: tripId)
         }
+        .onDisappear { model.closeLoadedLaps(lapsKey) }
         .refreshable {
             await TimetablesClient.invalidateDelays()
             await load()
@@ -106,6 +125,8 @@ struct TripView: View {
         boardingID = nil
         exitID = nil
         error = nil
+        extraLapsBefore = 0
+        extraLapsAfter = 0
         shownTripId = id == entry.tripId ? nil : id
         trip = nil
         if let seen = model.liveTrips.value(for: id) { show(seen) }
@@ -129,6 +150,14 @@ struct TripView: View {
             } else if loaded.line?.isUnknown ?? true, tripId == entry.tripId, !entry.line.isUnknown {
                 // An extra train Transitous has no line for, which the board named ("S1" for "?").
                 loaded.line = entry.line
+            }
+            // A ring line's trip is the vehicle's whole day: only the lap of the board's departure (or
+            // arrival) is the run shown here, with the run number the board knows.
+            if tripId == entry.tripId,
+               let lap = loaded.lap(at: entry.station, near: entry.time.planned, arriving: entry.kind == .arrivals,
+                                    extraBefore: extraLapsBefore, extraAfter: extraLapsAfter) {
+                loaded = lap
+                if let run = entry.line.tripNumber { loaded.line?.tripNumber = run }
             }
             guard tripId == self.tripId else { return }
             error = nil
@@ -154,14 +183,31 @@ struct TripView: View {
         }
     }
 
+    /// Adds the lap before / after the ones shown and loads the trip again with it.
+    private func loadLap(before: Int = 0, after: Int = 0) {
+        guard !isLoadingLap else { return }
+        extraLapsBefore += before
+        extraLapsAfter += after
+        model.rememberLoadedLaps(.init(before: extraLapsBefore, after: extraLapsAfter), for: lapsKey, tripId: entry.tripId)
+        isLoadingLap = true
+        Task {
+            await load()
+            isLoadingLap = false
+        }
+    }
+
     private func show(_ loaded: Trip) {
         trip = loaded
+        // A pick from a trip seen before that this one doesn't have (another lap of a ring line).
+        if let id = boardingID, !loaded.stopovers.contains(where: { $0.id == id }) { boardingID = nil }
+        if let id = exitID, !loaded.stopovers.contains(where: { $0.id == id }) { exitID = nil }
         guard boardingID == nil, exitID == nil else { return }
         if let keptStops {
             boardingID = keptStops.boarding.flatMap { kept in loaded.stopovers.first { $0.station.isSamePlace(as: kept) }?.id }
             exitID = keptStops.exit.flatMap { kept in loaded.stopovers.last { $0.station.isSamePlace(as: kept) }?.id }
             if boardingID != nil { return }
         }
+        guard selectsStation else { return }
         let here = loaded.stopovers.first { $0.station.isSamePlace(as: entry.station) }?.id
         if entry.kind == .arrivals {
             // For arrivals the selected station is where you get off; where you got on is picked by tapping.
@@ -177,7 +223,15 @@ struct TripView: View {
     private func insertZusatzhalte() async {
         guard let trip, let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: trip),
               self.trip?.id == trip.id else { return }
-        self.trip?.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: BahnDeClient.inserting(stops, into: trip.stopovers))
+        let keepingDelays = model.timetablesClient != nil
+        let inserted = BahnDeClient.inserting(stops, into: trip.stopovers)
+        self.trip?.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: inserted, keepingDelays: keepingDelays)
+        // Where bahn.de and DB Timetables disagree on a stop, bahn.expert is asked which is right; shown once it answers.
+        let refereed = await BahnDeClient.applyingLiveTimes(from: stops, to: inserted, line: trip.line, keepingDelays: keepingDelays,
+                                                            referee: model.provider.bahnExpert)
+        guard self.trip?.id == trip.id else { return }
+        self.trip?.stopovers = refereed
+        if (try? await bahnDe.hasSleepingCars(for: trip)) == true, self.trip?.id == trip.id { self.trip?.line?.nightRail = true }
     }
 }
 
@@ -217,7 +271,8 @@ private struct CoupledTrainPicker: View {
 /// Trip header + selectable stop timeline.
 struct TripContent: View {
     let trip: Trip
-    let highlight: Station
+    /// Shown in bold: the station the train was opened from.
+    let highlight: Station?
     @Binding var boardingID: String?
     @Binding var exitID: String?
     /// When false, stops are shown read-only (e.g. viewing the full route of a leg already booked).
@@ -230,46 +285,54 @@ struct TripContent: View {
     var onSelectStop: ((Stopover) -> Void)?
     /// The saved journey's leg riding this train, whose remembered Tz shows once nothing answers any more.
     var savedLeg: Leg? = nil
+    /// A looping train (Ringbahn) shows one lap: these load the one before / after it, and are only shown
+    /// while `trip` says there is one (`Trip.hasPreviousLap`).
+    var onLoadPreviousLap: (() -> Void)? = nil
+    var onLoadNextLap: (() -> Void)? = nil
+    /// A lap is being loaded: the buttons wait.
+    var isLoadingLap = false
     /// Tapping any stop time flips every stop between real-time and scheduled times — app-wide, and remembered.
     @AppStorage("showPlannedTimes") private var showPlannedTimes = false
     /// Set once a boarding/exit stop was picked by hand; from then on the "Tippe auf Halte" tip stays hidden.
     @AppStorage("pickedTripStop") private var pickedTripStop = false
     /// Read when the view appears, so the tip doesn't vanish (and move the stops) while picking them.
     @State private var showsStopTip = !UserDefaults.standard.bool(forKey: "pickedTripStop")
-    @State private var sequenceRequest: BahnDeClient.FormationRequest?
+    /// The stop whose platform was tapped: its Wagenreihung is unfolded below it.
+    @State private var sequenceStopID: String?
     /// Where a train run by several railways changes hands (stopover ID → operators), e.g. DB at the
     /// start and at Bad Schandau, ČD at Děčín; empty for one railway throughout.
     @State private var operatorStops: [String: [String]] = [:]
     @Environment(AppModel.self) private var model
 
-    private var color: Color { trip.line?.product.color ?? .gray }
+    private var color: Color { trip.line?.color ?? .gray }
 
     var body: some View {
         VStack(spacing: 16) {
             Card {
-                HStack(spacing: 12) {
-                    LiveTrainIconTile(route: LiveTrainRoute(trip: trip), systemImage: trip.line?.product.symbolName ?? "tram.fill",
-                                      color: color, size: 46)
-                    VStack(alignment: .leading, spacing: 3) {
-                        TrainNameRow(name: trip.line?.nameWithTripNumber ?? "Zug", font: .title3.weight(.bold), spacing: 8) {
-                            TrainSeriesTag(trip: trip, savedLeg: savedLeg)
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 12) {
+                        LiveTrainIconTile(route: LiveTrainRoute(trip: trip), systemImage: trip.line?.symbolName ?? "tram.fill",
+                                          color: color, size: 46)
+                        VStack(alignment: .leading, spacing: 3) {
+                            TrainNameRow(name: trip.line?.nameWithTripNumber ?? "Zug", font: .title3.weight(.bold), spacing: 8) {
+                                TrainSeriesTag(trip: trip, savedLeg: savedLeg)
+                            }
+                            if let origin = trip.origin, let destination = trip.destination {
+                                Text("\(origin.displayName) → \(destination.displayName)")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .fullTextPopup("\(origin.displayName) → \(destination.displayName)", lines: 2)
+                            }
+                            if trip.line?.operatorName != nil {
+                                TrainOperatorsLabel(source: .trip(trip)).font(.caption).foregroundStyle(.tertiary)
+                            }
+                            TrainFormationLabel(trip: trip, savedLeg: savedLeg)
                         }
-                        if let origin = trip.origin, let destination = trip.destination {
-                            Text("\(origin.displayName) → \(destination.displayName)")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .fullTextPopup("\(origin.displayName) → \(destination.displayName)", lines: 2)
-                        }
-                        if trip.line?.operatorName != nil {
-                            TrainOperatorsLabel(source: .trip(trip)).font(.caption).foregroundStyle(.tertiary)
-                        }
-                        TrainFormationLabel(trip: trip, savedLeg: savedLeg)
-                    }
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 6) {
+                        Spacer()
                         TrainMessagesButton(messages: trip.messages)
-                        CoachSequenceButton(trip: trip)
                     }
+                    // At the next stop; any other stop's unfolds below it with a tap on its platform.
+                    CoachSequenceDisclosure(trip: trip, spacing: 14)
                 }
             }
 
@@ -302,23 +365,42 @@ struct TripContent: View {
 
             Card {
                 VStack(spacing: 0) {
+                    if trip.hasPreviousLap, let onLoadPreviousLap {
+                        lapButton("Vorherige Runde laden", systemImage: "arrow.up.circle", action: onLoadPreviousLap)
+                    }
                     ForEach(Array(trip.stopovers.enumerated()), id: \.element.id) { index, stop in
-                        stopNode(stop, index: index)
+                        // Scroll target, so a sheet can open the list at the exit (#225).
+                        stopNode(stop, index: index).id(stop.id)
+                    }
+                    if trip.hasNextLap, let onLoadNextLap {
+                        lapButton("Nächste Runde laden", systemImage: "arrow.down.circle", action: onLoadNextLap)
                     }
                 }
             }
 
             ForEach(trip.remarks, id: \.self) { RemarkRow(text: $0) }
         }
-        .sheet(isPresented: Binding(get: { sequenceRequest != nil }, set: { if !$0 { sequenceRequest = nil } })) {
-            if let sequenceRequest {
-                CoachSequenceView(request: sequenceRequest, trainName: trip.line?.name)
-            }
-        }
         .task(id: trip.stopovers.map(\.id)) {
             guard let bahnDe = model.provider.bahnDe, let found = try? await bahnDe.operatorStops(for: trip) else { return }
             operatorStops = found
         }
+    }
+
+    /// Loads the lap before / after the one shown, at the top / bottom of the stops.
+    private func lapButton(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                if isLoadingLap { ProgressView().controlSize(.small) } else { Image(systemName: systemImage) }
+                Text(title)
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Color.brand)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(isLoadingLap)
     }
 
     private var boardingIndex: Int? { trip.stopovers.firstIndex { $0.id == boardingID } }
@@ -341,77 +423,95 @@ struct TripContent: View {
 
         return TimelineNode(kind: isMajor ? .major : .minor, color: isRidden(index) ? color : color.opacity(0.45),
                              lineAbove: segmentAbove, lineBelow: segmentBelow, dimmed: dimmed) {
-            HStack(alignment: .top, spacing: 10) {
-                Button {
-                    withAnimation(.snappy) { showPlannedTimes.toggle() }
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        if let arrival = stop.arrival {
-                            DelayTimeText(time: arrival, cancelled: stop.arrivalCancelled, showPlanned: showPlannedTimes,
-                                          font: isMajor ? .subheadline.weight(.semibold) : .caption.weight(.semibold))
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 10) {
+                    Button {
+                        withAnimation(.snappy) { showPlannedTimes.toggle() }
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            if let arrival = stop.arrival {
+                                DelayTimeText(time: arrival, cancelled: stop.arrivalCancelled, showPlanned: showPlannedTimes,
+                                              font: isMajor ? .subheadline.weight(.semibold) : .caption.weight(.semibold))
+                            }
+                            if let departure = stop.departure {
+                                DelayTimeText(time: departure, cancelled: stop.departureCancelled, showPlanned: showPlannedTimes,
+                                              font: isMajor ? .headline : .subheadline)
+                            }
                         }
-                        if let departure = stop.departure {
-                            DelayTimeText(time: departure, cancelled: stop.departureCancelled, showPlanned: showPlannedTimes,
-                                          font: isMajor ? .headline : .subheadline)
-                        }
+                        .fixedSize()
+                        .frame(minWidth: 68, alignment: .leading)
+                        .contentShape(.rect)
                     }
-                    .fixedSize()
-                    .frame(minWidth: 68, alignment: .leading)
-                    .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
+                    .buttonStyle(.plain)
 
-                Button {
-                    guard interactive else { return }
-                    select(index)
-                } label: {
-                    HStack(alignment: .top, spacing: 10) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(stop.station.displayName)
-                                .font(isMajor ? .headline : .subheadline)
-                                .fontWeight(stop.station.isSamePlace(as: highlight) ? .bold : nil)
-                                .lineLimit(2)
-                            if isBoarding {
-                                InfoChip(text: "Einstieg", systemImage: "arrow.up.right.circle.fill", tint: .punctual)
-                            } else if isExit {
-                                InfoChip(text: "Ausstieg", systemImage: "arrow.down.right.circle.fill", tint: .brand)
-                            }
-                            if stop.isAdditional {
-                                InfoChip(text: "Zusatzhalt", systemImage: "plus.circle.fill", tint: .brand)
-                            }
-                            if let operators = operatorStops[stop.id] {
-                                HStack(spacing: 6) {
-                                    ForEach(operators, id: \.self) { OperatorLogo(name: $0) }
+                    Button {
+                        guard interactive else { return }
+                        select(index)
+                    } label: {
+                        HStack(alignment: .top, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(stop.station.displayName)
+                                    .font(isMajor ? .headline : .subheadline)
+                                    .fontWeight(highlight.map { stop.station.isSamePlace(as: $0) } == true ? .bold : nil)
+                                    .lineLimit(2)
+                                if isBoarding {
+                                    InfoChip(text: "Einstieg", systemImage: "arrow.up.right.circle.fill", tint: .punctual)
+                                } else if isExit {
+                                    InfoChip(text: "Ausstieg", systemImage: "arrow.down.right.circle.fill", tint: .brand)
+                                }
+                                if stop.isAdditional {
+                                    InfoChip(text: "Zusatzhalt", systemImage: "plus.circle.fill", tint: .brand)
+                                }
+                                if stop.isManual {
+                                    InfoChip(text: "Selbst eingetragen", systemImage: "hand.point.up.left.fill", tint: .brand)
+                                }
+                                if let operators = operatorStops[stop.id] {
+                                    HStack(spacing: 6) {
+                                        ForEach(operators, id: \.self) { OperatorLogo(name: $0) }
+                                    }
                                 }
                             }
+                            Spacer()
                         }
-                        Spacer()
+                        .contentShape(.rect)
                     }
-                    .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .disabled(!interactive)
+                    .buttonStyle(.plain)
+                    .disabled(!interactive)
 
-                platformButton(stop)
+                    platformButton(stop)
+                }
+                if sequenceStopID == stop.id, let request = coachSequenceRequest(at: stop) {
+                    CoachSequencePanel(request: request)
+                        .transition(.fold)
+                }
             }
         }
     }
 
-    /// The stop's platform; tapping it opens the Wagenreihung at that stop when bahn.de can have one.
+    /// The stop's platform; tapping it unfolds the Wagenreihung at that stop below it when bahn.de can have one.
     @ViewBuilder
     private func platformButton(_ stop: Stopover) -> some View {
-        let badge = PlatformBadge(platform: stop.departurePlatform?.best != nil ? stop.departurePlatform : stop.arrivalPlatform)
-        if let request = coachSequenceRequest(at: stop) {
+        let platform = stop.departurePlatform?.best != nil ? stop.departurePlatform : stop.arrivalPlatform
+        let badge = PlatformBadge(platform: platform)
+        if platform?.source == .czechTimetable {
+            // Its tap tells where the platform comes from; that note offers the Wagenreihung.
+            let request = coachSequenceRequest(at: stop)
+            PlatformBadge(platform: platform, onCoachSequence: request.map { _ in { toggleSequence(at: stop) } })
+        } else if coachSequenceRequest(at: stop) != nil {
             Button {
-                sequenceRequest = request
+                toggleSequence(at: stop)
             } label: {
                 badge.contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .accessibilityHint("Zeigt die Wagenreihung an diesem Halt")
+            .accessibilityHint(sequenceStopID == stop.id ? "Blendet die Wagenreihung an diesem Halt aus" : "Zeigt die Wagenreihung an diesem Halt")
         } else {
             badge
         }
+    }
+
+    private func toggleSequence(at stop: Stopover) {
+        withAnimation(.snappy) { sequenceStopID = sequenceStopID == stop.id ? nil : stop.id }
     }
 
     private func coachSequenceRequest(at stop: Stopover) -> BahnDeClient.FormationRequest? {
@@ -505,8 +605,17 @@ struct LegTripSheet: View {
     @State private var showsSavedStops = false
     /// The coupled train whose stops are shown instead of this one's (nil: this one).
     @State private var shownTripId: String?
+    /// Laps of a looping train (Ringbahn) loaded before / after the leg's own, by "Vorherige / Nächste Runde laden".
+    @State private var extraLapsBefore = 0
+    @State private var extraLapsAfter = 0
+    @State private var isLoadingLap = false
 
     private var tripId: String? { shownTripId ?? leg.tripId }
+
+    /// Where the loaded laps are remembered (see `LoadedLaps`).
+    private var lapsKey: String? {
+        leg.tripId.map { LoadedLaps.key(tripId: $0, station: leg.origin, near: leg.departure.planned) }
+    }
 
     private var runs: [Line.CoupledTrain] {
         guard let line = leg.line, let tripId = leg.tripId else { return [] }
@@ -535,7 +644,9 @@ struct LegTripSheet: View {
                     if let trip {
                         TripContent(trip: trip, highlight: leg.origin,
                                     boardingID: .constant(boardingID(in: trip)), exitID: .constant(exitID(in: trip)),
-                                    interactive: false, savedLeg: tripId == leg.tripId ? leg : nil)
+                                    interactive: false, savedLeg: tripId == leg.tripId ? leg : nil,
+                                    onLoadPreviousLap: { loadLap(before: 1) }, onLoadNextLap: { loadLap(after: 1) },
+                                    isLoadingLap: isLoadingLap)
                     }
                 }
                 .padding(.horizontal)
@@ -549,7 +660,13 @@ struct LegTripSheet: View {
                     Button("Fertig", systemImage: "xmark", role: .cancel) { dismiss() }
                 }
             }
+            .onDisappear { if let lapsKey { model.closeLoadedLaps(lapsKey) } }
             .task(id: tripId) {
+                if tripId == leg.tripId, let lapsKey, let own = leg.tripId {
+                    let remembered = model.openLoadedLaps(lapsKey, tripId: own)
+                    extraLapsBefore = remembered.before
+                    extraLapsAfter = remembered.after
+                }
                 if trip == nil, let tripId, let seen = model.liveTrips.value(for: tripId) { trip = seen }
                 await load()
                 guard let tripId else { return }
@@ -562,12 +679,30 @@ struct LegTripSheet: View {
         }
     }
 
+    /// Where the leg starts: the visit at its planned time, for a looping train that calls here every lap.
     private func boardingID(in trip: Trip) -> String? {
-        trip.stopovers.first { $0.station.isSamePlace(as: leg.origin) }?.id
+        let visits = trip.stopovers.filter { $0.station.isSamePlace(as: leg.origin) }
+        return (visits.first { $0.departure?.planned == leg.departure.planned } ?? visits.first)?.id
     }
 
     private func exitID(in trip: Trip) -> String? {
-        trip.stopovers.last { $0.station.isSamePlace(as: leg.destination) }?.id
+        let visits = trip.stopovers.filter { $0.station.isSamePlace(as: leg.destination) }
+        return (visits.last { $0.arrival?.planned == leg.arrival.planned } ?? visits.last)?.id
+    }
+
+    /// Adds the lap before / after the ones shown and loads the trip again with it.
+    private func loadLap(before: Int = 0, after: Int = 0) {
+        guard !isLoadingLap else { return }
+        extraLapsBefore += before
+        extraLapsAfter += after
+        if let lapsKey, let own = leg.tripId {
+            model.rememberLoadedLaps(.init(before: extraLapsBefore, after: extraLapsAfter), for: lapsKey, tripId: own)
+        }
+        isLoadingLap = true
+        Task {
+            await load()
+            isLoadingLap = false
+        }
     }
 
     /// Shows the stops of another of the coupled trains.
@@ -575,6 +710,8 @@ struct LegTripSheet: View {
         guard id != tripId else { return }
         error = nil
         showsSavedStops = false
+        extraLapsBefore = 0
+        extraLapsAfter = 0
         shownTripId = id == leg.tripId ? nil : id
         trip = model.liveTrips.value(for: id)
     }
@@ -587,7 +724,7 @@ struct LegTripSheet: View {
         do {
             // The leg's own run is looked up again if a feed import renumbered it (a saved journey's).
             var loaded = tripId == leg.tripId
-                ? try await model.provider.trip(for: leg)
+                ? try await model.provider.trip(for: leg, extraLapsBefore: extraLapsBefore, extraLapsAfter: extraLapsAfter)
                 : try await model.provider.trip(id: tripId, source: leg.source)
             guard tripId == self.tripId else { return }
             // The leg's own line knows the trains coupled to it, so the trainsets of both show.
@@ -633,12 +770,21 @@ struct LegTripSheet: View {
     private func insertZusatzhalte() async {
         guard var updated = trip else { return }
         let ownTrain = shownTripId == nil
+        var hasSleepingCars = false
         if let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: updated) {
-            updated.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: BahnDeClient.inserting(stops, into: updated.stopovers))
+            let keepingDelays = model.timetablesClient != nil
+            let inserted = BahnDeClient.inserting(stops, into: updated.stopovers)
+            updated.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: inserted, keepingDelays: keepingDelays)
+            // Shown right away; where bahn.de and DB Timetables disagree on a stop, bahn.expert is asked which is right.
+            if ownTrain, self.trip?.id == updated.id, shownTripId == nil { self.trip?.stopovers = updated.keepingAdditionalStops(of: leg).stopovers }
+            updated.stopovers = await BahnDeClient.applyingLiveTimes(from: stops, to: inserted, line: updated.line,
+                                                                     keepingDelays: keepingDelays, referee: model.provider.bahnExpert)
+            hasSleepingCars = (try? await bahnDe.hasSleepingCars(for: updated)) == true
         }
         if ownTrain { updated = updated.keepingAdditionalStops(of: leg) }
         guard self.trip?.id == updated.id, ownTrain == (shownTripId == nil) else { return }
         self.trip?.stopovers = updated.stopovers
+        if hasSleepingCars { self.trip?.line?.nightRail = true }
     }
 }
 

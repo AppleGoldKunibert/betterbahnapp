@@ -78,6 +78,21 @@ struct MPlace: Decodable {
         headsign == name ? stationName : headsign
     }
 
+    /// `headsign` as shown when it names this stop: like the stop itself, so a train's direction reads
+    /// like its stops ("Dresden-Neustadt", not DELFI's "Dresden Bahnhof Neustadt"); nil for another stop.
+    func displayName(ofHeadsign headsign: String) -> String? {
+        headsign == name || headsign == stationName ? toStation().displayName : nil
+    }
+
+    /// `headsign` as shown: like the first of `places` it names, else on its own
+    /// (`StationNames.displayName(forName:)`).
+    static func displayName(ofHeadsign headsign: String, namingOneOf places: [MPlace?]) -> String {
+        for place in places.compactMap({ $0 }) {
+            if let shown = place.displayName(ofHeadsign: headsign) { return shown }
+        }
+        return StationNames.displayName(forName: headsign)
+    }
+
     func toStation() -> Station {
         Station(
             id: parentId ?? stopId ?? "\(lat),\(lon)", name: stationName,
@@ -108,10 +123,12 @@ struct MLineInfo {
     var routeShortName: String?
     var tripShortName: String?
     var agencyName: String?
+    var routeColor: String?
 
     func toLine() -> Line {
         let name = trainNameInsteadOfLine ?? displayName ?? tripShortName ?? routeShortName ?? mode
-        let prefix = name.split(separator: " ").first.map { String($0).uppercased() } ?? ""
+        // Only the letters: DELFI writes the line number right after the category, "RE3 (3349)", "RB10".
+        let prefix = String(name.prefix { $0.isLetter }).uppercased()
         let product = MLineInfo.product(mode: mode, prefix: prefix)
         let digitsInName = name.split(separator: " ").last.map(String.init)?.filter(\.isNumber)
         var number = (digitsInName?.isEmpty == false ? digitsInName : tripShortName?.filter(\.isNumber))
@@ -129,7 +146,8 @@ struct MLineInfo {
             displayedName = "\(name) (\(tripNumber))"
             number = tripNumber
         }
-        return Line(name: displayedName, number: number, product: product, operatorName: agencyName, tripNumber: tripNumber)
+        return Line(name: displayedName, number: number, product: product, operatorName: agencyName, tripNumber: tripNumber,
+                    nightRail: mode == "NIGHT_RAIL" ? true : nil, feedColorHex: Line.hex(fromFeedColor: routeColor))
     }
 
     /// Long-distance train categories a Czech feed puts behind its line name.
@@ -180,7 +198,9 @@ struct MLineInfo {
     static func motisModes(for product: Product) -> [String] {
         switch product {
         case .highSpeed: return ["HIGHSPEED_RAIL"]
-        case .longDistance: return ["LONG_DISTANCE", "NIGHT_RAIL"]
+        // Feeds disagree on what a night train or an IR/FLX is, so all three groups ask for both modes
+        // and the client-side filter (`Line.filterProduct`) tells them apart.
+        case .longDistance, .nightTrain, .interregio: return ["LONG_DISTANCE", "NIGHT_RAIL"]
         case .regionalExpress: return ["REGIONAL_FAST_RAIL", "REGIONAL_RAIL"]
         case .regional: return ["REGIONAL_RAIL"]
         case .suburban: return ["SUBURBAN"]
@@ -211,6 +231,7 @@ struct MLeg: Decodable {
     var displayName: String?
     var tripShortName: String?
     var agencyName: String?
+    var routeColor: String?
     var intermediateStops: [MPlace]?
     var cancelled: Bool?
     var tripCancelled: Bool?
@@ -226,7 +247,7 @@ struct MLeg: Decodable {
 
     var lineInfo: MLineInfo {
         MLineInfo(mode: mode, displayName: displayName, routeShortName: routeShortName,
-                  tripShortName: tripShortName, agencyName: agencyName)
+                  tripShortName: tripShortName, agencyName: agencyName, routeColor: routeColor)
     }
 
     /// `headsign` as reported by the feed, corrected for a border-truncated source trip: a leg that
@@ -241,7 +262,8 @@ struct MLeg: Decodable {
         if let tripTo { headsign = tripTo.resolving(headsign) }
         let passesHeadsignAsIntermediateStop = (intermediateStops ?? [])
             .contains { Station.normalize($0.stationName) == Station.normalize(headsign) }
-        return Station.displayName(for: passesHeadsignAsIntermediateStop ? to.stationName : headsign)
+        if passesHeadsignAsIntermediateStop { return to.toStation().displayName }
+        return MPlace.displayName(ofHeadsign: headsign, namingOneOf: [to, tripTo])
     }
 
     func toLeg() -> Leg {
@@ -289,12 +311,13 @@ struct MStopTime: Decodable {
     var displayName: String?
     var tripShortName: String?
     var agencyName: String?
+    var routeColor: String?
     var cancelled: Bool?
     var tripCancelled: Bool?
 
     var lineInfo: MLineInfo {
         MLineInfo(mode: mode, displayName: displayName, routeShortName: routeShortName,
-                  tripShortName: tripShortName, agencyName: agencyName)
+                  tripShortName: tripShortName, agencyName: agencyName, routeColor: routeColor)
     }
 
     func toEntry(kind: BoardKind) -> BoardEntry? {
@@ -306,11 +329,11 @@ struct MStopTime: Decodable {
         let otherEnd = kind == .departures ? tripTo : tripFrom
         let line = lineInfo.toLine()
         let otherEndName = kind == .departures
-            ? (headsign.map { tripTo?.resolving($0) ?? $0 } ?? tripTo?.stationName)
-            : tripFrom?.stationName
+            ? (headsign.map { MPlace.displayName(ofHeadsign: $0, namingOneOf: [tripTo]) } ?? tripTo?.toStation().displayName)
+            : tripFrom?.toStation().displayName
         return BoardEntry(
             kind: kind, tripId: tripId, station: station, line: line,
-            otherEnd: otherEndName.map(Station.displayName(for:)),
+            otherEnd: otherEndName,
             time: time,
             platform: place.platform(isRail: lineInfo.isRail, realtime: realtime),
             cancelled: (cancelled ?? false) || (tripCancelled ?? false),
@@ -406,7 +429,7 @@ private enum ProductGuess {
         switch prefix {
         case "ICE", "TGV", "RJ", "RJX", "ECE", "EST", "THA": .highSpeed
         case "IC", "EC", "EN", "NJ", "FLX", "ES", "D", "IRE": .longDistance
-        case "RE", "RS", "MEX": .regionalExpress
+        case "RE", "RS", "MEX", "FEX": .regionalExpress
         case "RB", "ERB", "NWB", "HLB", "BRB", "WFB": .regional
         case "S": .suburban
         case "U": .subway

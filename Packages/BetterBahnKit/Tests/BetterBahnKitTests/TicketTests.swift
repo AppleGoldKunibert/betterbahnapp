@@ -86,6 +86,31 @@ import Testing
         #expect(!decoded.isReservationOnly)
     }
 
+    @Test func leavesOutWalksBetweenTrains() throws {
+        func section(_ from: (String, String), _ to: (String, String), _ dep: String, _ arr: String, _ vehicle: String) -> String {
+            """
+            {"startHalt":{"extId":"\(from.1)","name":"\(from.0)"},"zielHalt":{"extId":"\(to.1)","name":"\(to.0)"},
+             "abfahrt":{"sollzeit":"2026-10-20T\(dep):00"},"ankunft":{"sollzeit":"2026-10-20T\(arr):00"},\(vehicle)}
+            """
+        }
+        let muenchen = ("München Hbf", "8000261"), gesundbrunnen = ("Berlin Gesundbrunnen", "8011102")
+        let gesundbrunnenS = ("Berlin Gesundbrunnen (S)", "8089018"), bernau = ("Bernau (bei Berlin)", "8013470")
+        let sections = [
+            section(muenchen, gesundbrunnen, "08:02", "12:13", #""verkehrsmittel":{"name":"ICE 1000","nummer":"1000","typ":"PUBLICTRANSPORT"}"#),
+            // Both ways bahn.de marks a walk: on the vehicle, or on the section without one.
+            section(gesundbrunnen, gesundbrunnenS, "12:13", "12:20", #""verkehrsmittel":{"name":"Fußweg","typ":"WALK"}"#),
+            section(gesundbrunnenS, gesundbrunnenS, "12:20", "12:21", #""typ":"FUSSWEG""#),
+            section(gesundbrunnenS, bernau, "12:24", "12:51", #""verkehrsmittel":{"name":"S 2","nummer":"2","typ":"PUBLICTRANSPORT"}"#),
+        ]
+        let json = """
+        {"gesamtangebot":{"hinfahrt":{"angebote":[{"name":"Flexpreis","leistungsbuendelId":"X"}],
+         "verbindung":{"verbindungsAbschnitte":[\(sections.joined(separator: ","))]}}}}
+        """
+        let ticket = try #require(try DBOrder.tickets(from: Data(json.utf8), orderNumber: "1").first)
+        #expect(ticket.connection.map(\.trainName) == ["ICE 1000", "S 2"])
+        #expect(ticket.sharedConnection?.legs.count == 2)
+    }
+
     @Test func rejectsOtherJSON() {
         #expect(throws: DBOrder.ReadError.unreadable) {
             try DBOrder.tickets(from: Data("[1, 2]".utf8), orderNumber: "1")

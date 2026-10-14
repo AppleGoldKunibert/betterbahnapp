@@ -1,8 +1,15 @@
 import Foundation
 
+/// The vehicle groups of the "Verkehrsmittel" filters. The order is the order the chips show them in.
+///
+/// `nightTrain` and `interregio` only exist as filter groups: a `Line` of such a train keeps
+/// `product == .longDistance` (so saved journeys and everything that tells long-distance from regional
+/// trains keep working) and reports its group as `Line.filterProduct`.
 public enum Product: String, Codable, Sendable, CaseIterable, Hashable {
-    case highSpeed      // ICE, TGV, ...
+    case highSpeed      // ICE, TGV, RJX, ...
     case longDistance   // IC, EC, ...
+    case nightTrain     // Nightjet, EuroNight, ... (`Line.isNightTrain`)
+    case interregio     // IR, FLX
     case regionalExpress
     case regional
     case suburban
@@ -13,17 +20,45 @@ public enum Product: String, Codable, Sendable, CaseIterable, Hashable {
     case ferry
     case other
 
+    /// A value this version doesn't know (saved by a newer build, e.g. a branch build with more product
+    /// groups) reads as `.other`. Otherwise one unknown value made the whole saved list unreadable, and the
+    /// app started without any saved journey.
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = Product(rawValue: raw) ?? .other
+    }
+
     public var isTrain: Bool {
         switch self {
-        case .highSpeed, .longDistance, .regionalExpress, .regional, .suburban: true
+        case .highSpeed, .longDistance, .nightTrain, .interregio, .regionalExpress, .regional, .suburban: true
         default: false
         }
     }
 
+    /// ICE, IC/EC, night trains and IR/FLX: what "Nur Fernverkehr" selects.
+    public var isLongDistance: Bool {
+        switch self {
+        case .highSpeed, .longDistance, .nightTrain, .interregio: true
+        default: false
+        }
+    }
+
+    public static let longDistanceProducts: Set<Product> = Set(allCases.filter(\.isLongDistance))
+    /// Products of the departure board's "Nur Regionalverkehr" filter: RE and RB only, no S-Bahn.
+    public static let regionalProducts: Set<Product> = [.regionalExpress, .regional]
+
+    /// Searches and filters saved before night trains and IR/FLX had their own group: they meant all
+    /// of IC/EC's trains, so a selection with `.longDistance` gets both groups added.
+    public static func upgradingLegacySelection(_ products: Set<Product>) -> Set<Product> {
+        products.contains(.longDistance) ? products.union([.nightTrain, .interregio]) : products
+    }
+
     public var displayName: String {
         switch self {
-        case .highSpeed: "ICE / Hochgeschwindigkeit"
+        case .highSpeed: "Hochgeschwindigkeit"
         case .longDistance: "IC / EC"
+        case .nightTrain: "Nachtzug"
+        case .interregio: "IR / FLX"
         case .regionalExpress: "RE"
         case .regional: "RB"
         case .suburban: "S-Bahn"
@@ -52,12 +87,102 @@ public struct Line: Codable, Sendable, Hashable {
     /// The run's own train number where it differs from `number` (a regional "RE3" is line 3 but run
     /// 3307) – what DB's dispatching feed knows the train by.
     public var tripNumber: String?
+    /// Set when the feed classes the train as a night train (Transitous' `NIGHT_RAIL` mode). Not every
+    /// feed does (SNCB's "NJ", Snälltåget's "300"), so `isNightTrain` also goes by name and operator.
+    public var nightRail: Bool?
+    /// The color (0xRRGGBB) the feed gives the route (GTFS `route_color`, Transitous' `routeColor`), if any.
+    /// Only used for S-Bahn and U-Bahn lines, see `lineColorHex`.
+    public var feedColorHex: UInt32?
+
+    /// A night train (Nightjet, EuroNight, European Sleeper, Snälltåget, Alpen-Sylt Nachtexpress, …),
+    /// shown with a bed instead of the product's train symbol (#241).
+    public var isNightTrain: Bool {
+        if nightRail == true { return true }
+        // Only trains: city bus or tram lines can carry letters like "EN" too.
+        guard product.isTrain else { return false }
+        if Self.isNightTrainCategory(String(name.prefix { $0.isLetter })) { return true }
+        guard let op = operatorName?.lowercased() else { return false }
+        return Self.nightTrainOperators.contains { op.contains($0) }
+    }
+
+    /// The group of the product filters this line falls into: `product`, except that night trains and
+    /// IR/FLX are their own groups next to IC/EC.
+    public var filterProduct: Product {
+        guard product == .longDistance || product == .highSpeed else { return product }
+        // SNCB's feed has the Nightjet as a plain high-speed "NJ".
+        if isNightTrain { return .nightTrain }
+        guard product == .longDistance else { return product }
+        let category = String(name.prefix { $0.isLetter }).uppercased()
+        return Self.interregioCategories.contains(category) ? .interregio : .longDistance
+    }
+
+    /// Interregio and FlixTrain.
+    static let interregioCategories: Set<String> = ["IR", "FLX"]
+
+    /// Train categories that only run at night: Nightjet, EuroNight, DB's Urlaubs-Express.
+    static let nightTrainPrefixes: Set<String> = ["NJ", "EN", "UEX"]
+
+    /// Whether a train category ("NJ", "en") only runs night trains, for results that have no `Line`.
+    public static func isNightTrainCategory(_ category: String) -> Bool { nightTrainPrefixes.contains(category.uppercased()) }
+    /// Operators that (in and around Germany) only run night trains, as case-insensitive substrings.
+    static let nightTrainOperators = ["snälltåget", "snalltaget", "european sleeper", "nachtexpress", "urlaubs-express"]
 
     /// A line the feed didn't name ("?", e.g. an extra train DB added at short notice); a board names
     /// it after the other trains to its destination or bahn.de (`TransitousProvider.namingUnknownLines`).
     public var isUnknown: Bool {
         product == .other && name.trimmingCharacters(in: CharacterSet(charactersIn: "? ")).isEmpty
     }
+
+    /// The line's own color (0xRRGGBB) where it has one, otherwise nil for the product's color (#206, #291).
+    /// S-Bahn and U-Bahn Berlin have fixed tables (matched by operator, since S1–S9/U1–U9 exist in other
+    /// cities too); other S-/U-Bahn lines take the feed's route color (Transitous), unless white text
+    /// would be hard to read on it. bahn.de writes "S 41", Transitous "S41".
+    public var lineColorHex: UInt32? {
+        guard product == .suburban || product == .subway else { return nil }
+        let key = name.uppercased().filter { !$0.isWhitespace }
+        let op = operatorName?.lowercased() ?? ""
+        if product == .suburban, op.contains("s-bahn berlin"), let hex = Self.sBahnBerlinColors[key] { return hex }
+        if product == .subway, op.contains("berliner verkehrsbetriebe") || op.contains("bvg"),
+           let hex = Self.uBahnBerlinColors[key] { return hex }
+        guard let hex = feedColorHex, Self.hasContrastToWhite(hex) else { return nil }
+        return hex
+    }
+
+    /// Whether white text is readable on the color (WCAG contrast of at least 2.5 – badges are bold and big).
+    static func hasContrastToWhite(_ hex: UInt32) -> Bool {
+        func channel(_ shift: UInt32) -> Double {
+            let c = Double(hex >> shift & 0xFF) / 255
+            return c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+        }
+        let luminance = 0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0)
+        return 1.05 / (luminance + 0.05) >= 2.5
+    }
+
+    /// Parses a GTFS color ("00658e", with or without "#").
+    static func hex(fromFeedColor text: String?) -> UInt32? {
+        guard let text else { return nil }
+        let digits = text.trimmingCharacters(in: CharacterSet(charactersIn: "# \n"))
+        return digits.count == 6 ? UInt32(digits, radix: 16) : nil
+    }
+
+    /// BVG's U-Bahn Berlin line colors.
+    static let uBahnBerlinColors: [String: UInt32] = [
+        "U1": 0x7DAD4C, "U2": 0xDA421E, "U3": 0x007A5B, "U4": 0xF0D722, "U5": 0x7E5330,
+        "U6": 0x8C6DAB, "U7": 0x528DBA, "U8": 0x224F86, "U9": 0xF3791D,
+    ]
+
+    /// VBB's S-Bahn Berlin line colors.
+    static let sBahnBerlinColors: [String: UInt32] = [
+        "S1": 0xDA6BA2,
+        "S2": 0x007734, "S25": 0x007734, "S26": 0x007734,
+        "S3": 0x0066AD,
+        "S41": 0xAD5937, "S42": 0xCB6418,
+        "S45": 0xCD9C53, "S46": 0xCD9C53, "S47": 0xCD9C53,
+        "S5": 0xEB7405,
+        "S7": 0x816DA6, "S75": 0x816DA6,
+        "S8": 0x66AA22, "S85": 0x66AA22,
+        "S9": 0x992746,
+    ]
 
     /// Another train coupled to this one for the whole stretch ridden, under its own number.
     public struct CoupledTrain: Codable, Sendable, Hashable {
@@ -168,7 +293,10 @@ public struct Line: Codable, Sendable, Hashable {
     }
 
     public init(name: String, number: String?, product: Product, operatorName: String?, alternateName: String? = nil,
-                tripNumber: String? = nil, coupledTrains: [CoupledTrain]? = nil) {
+                tripNumber: String? = nil, coupledTrains: [CoupledTrain]? = nil, nightRail: Bool? = nil,
+                feedColorHex: UInt32? = nil) {
+        self.feedColorHex = feedColorHex
+        self.nightRail = nightRail
         self.coupledTrains = coupledTrains
         self.tripNumber = tripNumber
         self.name = name
@@ -204,19 +332,29 @@ public struct TimeInfo: Codable, Sendable, Hashable {
 public struct PlatformInfo: Codable, Sendable, Hashable {
     public var planned: String?
     public var actual: String?
+    /// Where the platform came from, when not from the train's own data (which may be live).
+    public var source: Source?
+
+    public enum Source: String, Codable, Sendable, Hashable {
+        /// The Czech national timetable (CZPTT, from Správa železnic), taken over for a train another
+        /// feed has no platforms for in Czechia: planned only, a change at short notice won't show.
+        case czechTimetable
+    }
 
     /// Blank values count as none: bahn.de reports `"gleis": ""` at stations it has no platform for
     /// (e.g. in Czechia), which showed as a "Gleis" badge without a number.
-    public init(planned: String?, actual: String?) {
+    public init(planned: String?, actual: String?, source: Source? = nil) {
         self.planned = Self.nonBlank(planned)
         self.actual = Self.nonBlank(actual)
+        self.source = source
     }
 
     /// Also drops the blank platforms journeys saved before kept.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.init(planned: try c.decodeIfPresent(String.self, forKey: .planned),
-                  actual: try c.decodeIfPresent(String.self, forKey: .actual))
+                  actual: try c.decodeIfPresent(String.self, forKey: .actual),
+                  source: try? c.decodeIfPresent(Source.self, forKey: .source))
     }
 
     private static func nonBlank(_ value: String?) -> String? {
@@ -247,10 +385,14 @@ public struct Stopover: Codable, Sendable, Hashable, Identifiable {
     /// An unscheduled stop the train additionally picked up today ("Zusatzhalt"), not part of its
     /// regular timetable — only `BahnDeClient.journeyStops` knows about these, see `inserting(_:into:)`.
     public var isAdditional: Bool
+    /// A stop the user added by hand because the train halted somewhere no source knows of (see
+    /// `Stopover.manual(at:time:)`). Kept apart from `isAdditional`, which bahn.de's lookup replaces
+    /// on every refresh.
+    public var isManual: Bool
 
     public init(station: Station, arrival: TimeInfo?, departure: TimeInfo?,
                 arrivalPlatform: PlatformInfo?, departurePlatform: PlatformInfo?, cancelled: Bool,
-                access: StopAccess = .normal, isAdditional: Bool = false) {
+                access: StopAccess = .normal, isAdditional: Bool = false, isManual: Bool = false) {
         self.station = station
         self.arrival = arrival
         self.departure = departure
@@ -260,6 +402,7 @@ public struct Stopover: Codable, Sendable, Hashable, Identifiable {
         self.departureCancelled = cancelled
         self.access = access
         self.isAdditional = isAdditional
+        self.isManual = isManual
     }
 
     /// The whole stop is out: every side it actually has (arrival and/or departure) is cancelled.
@@ -277,11 +420,11 @@ public struct Stopover: Codable, Sendable, Hashable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case station, arrival, departure, arrivalPlatform, departurePlatform, cancelled, arrivalCancelled,
-             departureCancelled, access, isAdditional
+             departureCancelled, access, isAdditional, isManual
     }
 
-    /// Custom-decoded so journeys cached to disk before `access`/`isAdditional`/the per-side
-    /// cancellation existed still load, defaulting to `.normal`/`false`/the old single `cancelled`.
+    /// Custom-decoded so journeys cached to disk before `access`/`isAdditional`/`isManual`/the per-side
+    /// cancellation existed still load, defaulting to `.normal`/`false`/`false`/the old single `cancelled`.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         station = try c.decode(Station.self, forKey: .station)
@@ -294,6 +437,7 @@ public struct Stopover: Codable, Sendable, Hashable, Identifiable {
         departureCancelled = try c.decodeIfPresent(Bool.self, forKey: .departureCancelled) ?? cancelled
         access = try c.decodeIfPresent(StopAccess.self, forKey: .access) ?? .normal
         isAdditional = try c.decodeIfPresent(Bool.self, forKey: .isAdditional) ?? false
+        isManual = try c.decodeIfPresent(Bool.self, forKey: .isManual) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -309,6 +453,7 @@ public struct Stopover: Codable, Sendable, Hashable, Identifiable {
         try c.encode(departureCancelled, forKey: .departureCancelled)
         try c.encode(access, forKey: .access)
         try c.encode(isAdditional, forKey: .isAdditional)
+        try c.encode(isManual, forKey: .isManual)
     }
 }
 
@@ -318,6 +463,48 @@ extension Array where Element == Journey {
     public func removingDuplicateIDs() -> [Journey] {
         var seen = Set<String>()
         return filter { seen.insert($0.id).inserted }
+    }
+
+    /// Drops journeys taking the very same trains at the same times as another one, only from another
+    /// feed: Transitous routes RJ 385 Berlin → Praha over DB's copy ("ICE 385", named "RJ 385" by bahn.de)
+    /// and over Rejseplanen's, and once their stops are filled in from each other they read alike. The
+    /// copy with more live data, then more stops and platforms, stays, in the place of the first.
+    public func removingSameTrainDuplicates() -> [Journey] {
+        var result: [Journey] = []
+        for journey in self {
+            if let index = result.firstIndex(where: { $0.isSameRide(as: journey) }) {
+                if journey.completeness > result[index].completeness { result[index] = journey }
+            } else {
+                result.append(journey)
+            }
+        }
+        return result
+    }
+}
+
+extension Journey {
+    /// The same trains (by number) between the same places at the same planned times, walks aside.
+    func isSameRide(as other: Journey) -> Bool {
+        let legs = transitLegs, otherLegs = other.transitLegs
+        guard !legs.isEmpty, legs.count == otherLegs.count else { return false }
+        return zip(legs, otherLegs).allSatisfy { a, b in
+            guard let number = a.line?.number, number == b.line?.number, a.line?.product.isTrain == b.line?.product.isTrain
+            else { return false }
+            return a.departure.planned == b.departure.planned && a.arrival.planned == b.arrival.planned
+                && a.origin.isSamePlace(as: b.origin) && a.destination.isSamePlace(as: b.destination)
+        }
+    }
+
+    /// How much a journey knows: live times first, then stops, then platforms.
+    var completeness: (Int, Int, Int) {
+        let legs = transitLegs
+        let live = legs.filter { $0.departure.actual != nil || $0.arrival.actual != nil }.count
+        let stops = legs.reduce(0) { $0 + $1.stopovers.count }
+        let platforms = legs.reduce(0) { count, leg in
+            count + (leg.departurePlatform?.best != nil ? 1 : 0) + (leg.arrivalPlatform?.best != nil ? 1 : 0)
+                + leg.stopovers.filter { ($0.departurePlatform ?? $0.arrivalPlatform)?.best != nil }.count
+        }
+        return (live, stops, platforms)
     }
 }
 
@@ -482,6 +669,10 @@ public struct Trip: Codable, Sendable, Hashable {
     public var source: DataSource
     /// Track geometry of the whole run, if known.
     public var geometry: [Coordinate]?
+    /// Set on a trip cut from a looping train's block (`lap(at:near:)`): whether laps before / after the
+    /// ones shown exist. Not stored.
+    public var hasPreviousLap = false
+    public var hasNextLap = false
 
     public init(id: String, line: Line?, direction: String?, stopovers: [Stopover],
                 cancelled: Bool, remarks: [String], messages: [TrainMessage] = [], source: DataSource,

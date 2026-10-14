@@ -248,7 +248,7 @@ struct ProductBadge: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            Image(systemName: state.product.symbolName)
+            Image(systemName: state.product.symbolName(nightTrain: state.isNightTrain))
             Text(state.lineName).lineLimit(1).fixedSize()
         }
         .font((compact ? Font.caption : Font.subheadline).weight(.bold))

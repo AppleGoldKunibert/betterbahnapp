@@ -59,9 +59,10 @@ public struct StationCalls: Sendable {
     public func isDetour(_ journey: Journey) -> Bool {
         let legs = journey.transitLegs
         guard legs.count > 1, let start = journey.departure?.planned, let end = journey.arrival?.planned else { return false }
-        let during = start...end
-        if legs.dropFirst().contains(where: { $0.tripId.flatMap { atOrigin[$0] }.map(during.contains) ?? false }) { return true }
-        return legs.dropLast().contains { $0.tripId.flatMap { atDestination[$0] }.map(during.contains) ?? false }
+        // Feed data can have an arrival before the departure; `start...end` would then trap.
+        func during(_ time: Date) -> Bool { time >= start && time <= end }
+        if legs.dropFirst().contains(where: { $0.tripId.flatMap { atOrigin[$0] }.map(during) ?? false }) { return true }
+        return legs.dropLast().contains { $0.tripId.flatMap { atDestination[$0] }.map(during) ?? false }
     }
 }
 
@@ -95,7 +96,7 @@ public extension TrainPicker {
                                                 minTransferMinutes: Int = 5) async -> [Journey] {
         let candidates = calls.departuresAtOrigin
             .filter { $0.access == .exitOnly && !$0.cancelled && $0.line.product.isTrain
-                && query.products.contains($0.line.product)
+                && query.products.contains($0.line.filterProduct)
                 && $0.time.best >= query.date && $0.time.planned <= end }
             .sorted { $0.time.planned < $1.time.planned }
         var seen = Set<String>()
