@@ -76,6 +76,7 @@ Fixed #15
 
 Only reference an issue when the change really fixes it; never guess issue numbers. If the user
 mentioned a number, use it; otherwise check the repo's GitHub issues and ask when unsure.
+When there is no relevant issue ask the question with claudes ask user skill if you should create an Issue for this. (Dont ask for small things like an 1 line fix or an claude.md change only for important stuff like a bug fix or an new feature or a change to existing logic that really changes things. Automaticly assign the person whose github account youre using.
 
 If the user doesn't find any bugs and tells you to fix them, ask whether you may commit before
 continuing with the prompt; if they say no, continue working as usual.
