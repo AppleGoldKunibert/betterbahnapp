@@ -200,7 +200,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   one (`looseNameKey`: without a trailing "Bahnhof"/"St."/"stasjon", "C"/"Central"/"Centraal"/"Centralstation" alike,
   oe/ø/ö alike: DB's "Utrecht C", "Aalborg", "Broenderslev" are the feeds' "Utrecht Centraal", "Aalborg St.",
   "Brønderslev"); a match by position always wins, then the same name before a similar one. `Ril100.preload()` loads
-  the list off the main thread when the picker appears.
+  the list off the main thread when the picker appears (also with the codes off, as a typed code needs it), and the
+  picker's rows get their codes from `Ril100.codes(for:)` off the main thread too: on the first search after launch
+  the main thread waited for the list (#301).
   For a typed code the plain search for its letters gets `extraQueryDeadline` like the code's own lookup, so a slow
   answer can't run into `CombinedProvider`'s 2.5 s and take the code's station with it ("xszh" found nothing).
 - `Transit/CombinedProvider.swift` – what the app uses: primary `TransitousProvider`, optional

@@ -862,6 +862,16 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         let ofOst = match("ofOst", "Offenbach Ost", 50.10, 8.78, "DE", ["SUBURBAN"], 0.00223, town: "Offenbach am Main")
         #expect(ranked("ost", [ofOst, ffmOst], near: frankfurt, town: "Frankfurt").first == "ffmOst")
 
+        // The geocoder names Berlin's "Berlin (Ostbahnhof)", München's just "Ostbahnhof" (#306).
+        let berlin = Coordinate(latitude: 52.52, longitude: 13.405)
+        let muenchenOst = match("muenchenOst", "Ostbahnhof", 48.127, 11.605, "DE", ["HIGHSPEED_RAIL", "REGIONAL_RAIL"],
+                                0.0074, town: "München")
+        let berlinOst = match("berlinOst", "Berlin (Ostbahnhof)", 52.510, 13.435, "DE", ["HIGHSPEED_RAIL", "REGIONAL_RAIL"],
+                              0.0050, town: "Berlin")
+        #expect(ranked("ostbahnhof", [muenchenOst, berlinOst], near: berlin, town: "Berlin").first == "berlinOst")
+        #expect(ranked("ostbahnhof", [berlinOst, muenchenOst], near: Coordinate(latitude: 48.137, longitude: 11.576),
+                       town: "München").first == "muenchenOst")
+
         // Trams too: "neumarkt" in Köln.
         let cologne = Coordinate(latitude: 50.938, longitude: 6.960)
         let neumarkt = match("neumarkt", "Köln Neumarkt", 50.936, 6.947, "DE", ["TRAM", "BUS"], 0.00037, town: "Köln")
@@ -2169,6 +2179,17 @@ private final class TwinTrainProtocol: URLProtocol, @unchecked Sendable {
         #expect(Ril100.code(for: station("g", "Frankfurt (Main) Hbf", 50.12, 8.70)) == nil)
         let bls = Ril100.entry(forCode: "bls")!
         #expect(Ril100.matches(station("h", "Berlin Hbf", 52.5251, 13.3692), bls))
+    }
+
+    /// The picker looks up its rows' codes together, off the main thread (#301): by station ID, and
+    /// none for a stop that isn't a station.
+    @Test func looksUpCodesOfSeveralStations() async {
+        let codes = await Ril100.codes(for: [
+            station("a", "Frankfurt (Main) Hauptbahnhof", 50.1069, 8.6625),
+            station("b", "Zürich HB", 47.3779, 8.5403),
+            station("c", "Frankfurt, Platz der Republik", 50.1095, 8.6660),
+        ])
+        #expect(codes == ["a": "FF", "b": "XSZH"])
     }
 
     /// Codes of stations abroad start with X (west) or Z (east) and the country: XA Austria, XS Switzerland.

@@ -229,6 +229,15 @@ public enum Ril100 {
         entry(for: station, in: all)?.code
     }
 
+    /// `code(for:)` of each station, by its ID, worked out off the calling thread: the first lookup
+    /// waits for the list to load and each goes through all of it, which held up the picker's main
+    /// thread for half a second on the first search after launch (#301).
+    public static func codes(for stations: [Station]) async -> [String: String] {
+        await Task.detached(priority: .userInitiated) {
+            stations.reduce(into: [:]) { codes, station in codes[station.id] = code(for: station) }
+        }.value
+    }
+
     static func entry(for station: Station, in entries: [Entry]) -> Entry? {
         let keys = StopKeys(station.name)
         // By position first; abroad the same name before a similar one, then the shortest code.
