@@ -276,8 +276,10 @@ public struct TrainStatisticsQuery: Sendable, Hashable {
     /// The query for `line`'s train at the stops `evas`; nil for trains the server doesn't collect
     /// (S-Bahn, buses, trains without a number) or without any stop.
     public init?(line: Line?, evas: [String]) {
+        // A regional train is known by its run number; its `number` is the line's ("RE 5" → 5).
+        let regional = line?.product == .regional || line?.product == .regionalExpress
         guard let line, line.product.hasTrainStatistics,
-              let number = line.tripNumber ?? line.number, !number.isEmpty,
+              let number = regional ? line.tripNumber : (line.tripNumber ?? line.number), !number.isEmpty,
               case let category = String(line.name.prefix { $0.isLetter }), !category.isEmpty else { return nil }
         var unique: [String] = []
         for eva in evas where !unique.contains(eva) { unique.append(eva) }

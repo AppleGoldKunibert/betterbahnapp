@@ -328,3 +328,22 @@ test("rate limits train statistics per app install", async () => {
     assert.equal((await askStats(env, [])).status, 429);
     assert.deepEqual(keys, ["key-1"]);
 });
+
+test("finds a regional train under bahn.de's own category, by run number and stop", async () => {
+    const env = { DB: new FakeD1(), TOKEN_SECRET: secret };
+    // Stored as "NRE 3185"; the app knows it as "RE" with the run number 3185.
+    addRun(env.DB, "2026-10-01", [120, 4, 122, 4, "7", null, 0], { category: "NRE", number: "3185" });
+    addRun(env.DB, "2026-10-02", [120, 6, 122, 6, "7", "8", 0], { category: "DRE", number: "3185" });
+    // Another regional train with that number that doesn't stop at Fulda, and a long-distance one that does.
+    addRun(env.DB, "2026-10-03", [120, 9, 122, 9, "7", null, 0], { category: "NRB", number: "3185" });
+    env.DB.db.prepare("UPDATE runs SET stops = ? WHERE key = ?").run(JSON.stringify([["8000999", null, null, 0, 0, "1", null, 0]]), "2026-10-03|NRB|3185");
+    addRun(env.DB, "2026-10-04", [120, 30, 122, 30, "7", null, 0], { category: "ICE", number: "3185" });
+
+    const [train] = (await (await askStats(env, [{ category: "RE", number: "3185", evas: [FULDA] }])).json()).trains;
+    assert.equal(train.runs, 2);
+    assert.deepEqual(train.stops[FULDA].arrival.sort(), [4, 6]);
+
+    // An ICE is only found as an ICE.
+    const [ice] = (await (await askStats(env, [{ category: "ICE", number: "3185", evas: [FULDA] }])).json()).trains;
+    assert.deepEqual(ice.stops[FULDA].arrival, [30]);
+});

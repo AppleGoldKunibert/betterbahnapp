@@ -45,7 +45,10 @@ CREATE TABLE IF NOT EXISTS runs (
 CREATE INDEX IF NOT EXISTS runs_due ON runs (state, next_check);
 CREATE INDEX IF NOT EXISTS runs_day ON runs (service_day);
 -- A train's recent runs for `POST /train-stats` (#316). Written once per run, when its schedule is known.
-CREATE INDEX IF NOT EXISTS runs_train ON runs (category, number, service_day);
+-- By number alone: regional trains are stored under bahn.de's own categories ("NRE", "DRB" …), which the
+-- app doesn't know them by ("RE"), see `trainStatistics` in worker.mjs.
+DROP INDEX IF EXISTS runs_train;
+CREATE INDEX IF NOT EXISTS runs_number ON runs (number, service_day);
 
 -- Station names for the EVA numbers in runs.stops, written once per station.
 CREATE TABLE IF NOT EXISTS stations (

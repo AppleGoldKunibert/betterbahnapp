@@ -99,6 +99,9 @@ import Testing
         let re = Line(name: "RE 5", number: "5", product: .regionalExpress, operatorName: nil, tripNumber: "4530")
         #expect(TrainStatisticsQuery(line: re, evas: ["8000115"])?.number == "4530")
         #expect(TrainStatisticsQuery(line: re, evas: ["8000115"])?.category == "RE")
+        // Without the run number only the line's is known, which would match another train.
+        let unnumbered = Line(name: "RE 5", number: "5", product: .regionalExpress, operatorName: nil)
+        #expect(TrainStatisticsQuery(line: unnumbered, evas: ["8000115"]) == nil)
 
         let sBahn = Line(name: "S 1", number: "1", product: .suburban, operatorName: nil)
         #expect(TrainStatisticsQuery(line: sBahn, evas: ["8000115"]) == nil)

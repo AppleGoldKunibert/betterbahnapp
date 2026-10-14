@@ -121,7 +121,11 @@ const EVA_PATTERN = /^\d{1,9}$/;
 const TRAIN_PATTERN = /^[A-Za-z0-9]{1,8}$/;
 // The last days that count, and how many runs of one train that can be.
 const DEFAULT_DAYS = 30;
-const MAX_RUNS = 120;
+const MAX_RUNS = 300;
+// Long-distance categories, which bahn.de and the app name alike. Everything else is regional: bahn.de
+// stores a regional train under its own category ("NRE", "DRB", "NRB" for RE/RB of various operators),
+// the app knows it as "RE 5" or "RB 27", so those match by run number and stop instead.
+const LONG_DISTANCE = new Set(["ICE", "IC", "EC", "ECE", "EN", "NJ", "RJ", "RJX", "TGV", "FLX", "IR", "D", "EUR", "ES", "THA", "ICD", "UEX"]);
 const MAX_FORMATIONS = 4;
 const MAX_SAMPLE_VEHICLES = 16;
 
@@ -146,11 +150,11 @@ async function handleTrainStats(request, env, now) {
     const days = Number(env.STATS_DAYS) > 0 ? Number(env.STATS_DAYS) : DEFAULT_DAYS;
     const since = new Date(now - days * 86400_000).toISOString().slice(0, 10);
     const select = env.DB.prepare(
-        "SELECT cancelled, formation, stops FROM runs WHERE state = 'done' AND category = ? AND number = ? AND service_day >= ? " +
+        "SELECT category, cancelled, formation, stops FROM runs WHERE state = 'done' AND number = ? AND service_day >= ? " +
         "ORDER BY service_day DESC LIMIT ?",
     );
     const answers = await Promise.all(queries.map(async query => {
-        const { results } = await select.bind(query.category, query.number, since, MAX_RUNS).all();
+        const { results } = await select.bind(query.number, since, MAX_RUNS).all();
         return trainStatistics(results ?? [], query, days);
     }));
     return json(200, { trains: answers });
@@ -164,7 +168,9 @@ async function handleTrainStats(request, env, now) {
 /// - per stop: runs that had the stop, how many cancelled it, the arrival and departure delays in
 ///   minutes (cancelled stops have none) and the platform moves `{ from: planned, to: actual, n }`.
 export function trainStatistics(runs, query, days = DEFAULT_DAYS) {
-    const parsed = runs.map(run => ({ cancelled: run.cancelled === 1, formation: parseJSON(run.formation), stops: parseJSON(run.stops) ?? [] }));
+    const parsed = runs
+        .map(run => ({ category: run.category, cancelled: run.cancelled === 1, formation: parseJSON(run.formation), stops: parseJSON(run.stops) ?? [] }))
+        .filter(run => isTrain(run, query));
     const stops = {};
     for (const eva of query.evas) {
         const stop = stopStatistics(parsed, eva);
@@ -179,6 +185,14 @@ export function trainStatistics(runs, query, days = DEFAULT_DAYS) {
         ...formationStatistics(parsed, query.number),
         stops,
     };
+}
+
+/// Whether `run` is the train asked for: the same category, or both regional and calling at one of the
+/// stops asked for (a number alone is not unique across the regional operators).
+function isTrain(run, query) {
+    if (run.category === undefined || run.category === query.category) return true;
+    return !LONG_DISTANCE.has(run.category) && !LONG_DISTANCE.has(query.category)
+        && run.stops.some(row => query.evas.includes(row[0]));
 }
 
 function stopStatistics(runs, eva) {
