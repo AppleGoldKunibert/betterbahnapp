@@ -9,7 +9,9 @@ let package = Package(
         .library(name: "BetterBahnKit", targets: ["BetterBahnKit"]),
     ],
     targets: [
-        .target(name: "BetterBahnKit", resources: [.copy("Resources/StationHints.json"), .copy("Resources/Ril100.json")]),
+        .target(name: "BetterBahnKit", resources: [
+            .copy("Resources/StationHints.json"), .copy("Resources/Ril100.json"), .copy("Resources/StationNames.json"),
+        ]),
         .testTarget(
             name: "BetterBahnKitTests",
             dependencies: ["BetterBahnKit"],

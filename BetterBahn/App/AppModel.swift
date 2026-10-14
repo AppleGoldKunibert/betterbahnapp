@@ -104,6 +104,8 @@ final class AppModel {
     }
 
     init() {
+        // The list of station names every stop is shown under, read before the first screen needs it.
+        Task { await StationNames.preload() }
         provider = CombinedProvider(vagonweb: VagonwebClient(browserLoader: { url in try await VagonwebBrowser.shared.html(at: url) }))
         // When bahn.de blocks our Worker, the phone asks bahn.de itself in a hidden web view.
         Task {

@@ -296,6 +296,8 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
     @Test func displayNameHandlesDBsBracketsWithoutSpace() {
         #expect(Station.displayName(for: "Bernau(b Berlin)") == "Bernau (bei Berlin)")
         #expect(Station.displayName(for: "Frankfurt(Oder)") == "Frankfurt (Oder)")
+        #expect(Station.displayName(for: "Frankfurt(Main)Hbf") == "Frankfurt (Main) Hbf")
+        #expect(Station.displayName(for: "Mülheim(Ruhr)Styrum") == "Mülheim (Ruhr) Styrum")
     }
 
     /// With the user's location, train stations are grouped into distance bands (50–100 km before
@@ -1849,12 +1851,17 @@ private final class CzechTimetableProtocol: URLProtocol, @unchecked Sendable {
     @Test func legGetsStopsBetweenItsEnds() throws {
         let leg = try berlinPraha()
         let filled = TransitousProvider.fillingMissingStops(in: leg, from: try trips().delfi.stopovers)
-        #expect(filled.stopovers.map(\.station.displayName) == [
-            "Berlin Hbf", "Berlin Südkreuz", "Dresden Bahnhof Neustadt", "Dresden Hbf",
+        #expect(filled.stopovers.map(\.station.name) == [
+            "S+U Berlin Hauptbahnhof", "S Südkreuz Bhf (Berlin)", "Dresden Bahnhof Neustadt", "Dresden Hauptbahnhof",
             "Bad Schandau Nationalparkbahnhof", "Decin hl.n.", "Usti nad Labem hl.n.", "Praha-Holesovice",
         ])
+        // Shown under DB's names (#205).
+        #expect(filled.stopovers.map(\.station.displayName) == [
+            "Berlin Hbf", "Berlin Südkreuz", "Dresden-Neustadt", "Dresden Hbf",
+            "Bad Schandau", "Děčín hl.n.", "Ústí nad Labem hl.n.", "Praha-Holešovice",
+        ])
         #expect(filled.origin.displayName == "Berlin Hbf")
-        #expect(filled.destination.displayName == "Praha-Holesovice")
+        #expect(filled.destination.displayName == "Praha-Holešovice")
         #expect(filled.origin.id == leg.origin.id)
         #expect(filled.departurePlatform?.best == "3")
         #expect(filled.arrivalPlatform == nil)
@@ -1992,6 +1999,142 @@ private final class TwinTrainProtocol: URLProtocol, @unchecked Sendable {
     @Test func stripsProductPrefixAndReordersCityStop() {
         #expect(Station.displayName(for: "S+U Berlin Hauptbahnhof") == "Berlin Hbf")
         #expect(Station.displayName(for: "S Spandau Bhf (Berlin)") == "Berlin-Spandau")
+    }
+
+    /// Main stations in Czechia and Slovakia read the way bahn.de writes them.
+    @Test func shortensCzechAndSlovakMainStations() {
+        #expect(Station.displayName(for: "Děčín hlavní nádraží") == "Děčín hl.n.")
+        #expect(Station.displayName(for: "Bratislava hlavná stanica") == "Bratislava hl.st.")
+        #expect(Station.displayName(for: "Praha,Hlavní nádraží") == "Praha,Hlavní nádraží")
+    }
+}
+
+// MARK: - Station names
+
+@Suite struct StationNamesTests {
+    func stop(_ id: String, _ name: String, _ lat: Double, _ lon: Double) -> Station {
+        Station(id: id, name: name, coordinate: Coordinate(latitude: lat, longitude: lon), evaNumber: nil, source: .transitous)
+    }
+
+    /// Berlin Hbf → Praha with RJ 177 / ICE 385 (#205): every stop shows DB's name, the ones in Czechia
+    /// with their accents, whichever feed it comes from.
+    @Test func journeyToPragueShowsDBsNames() {
+        let stops: [(Station, String)] = [
+            (stop("de-DELFI_de:11000:900003201", "S+U Berlin Hauptbahnhof", 52.5251, 13.3694), "Berlin Hbf"),
+            (stop("de-VBB_de:11000:900058101", "S Südkreuz Bhf (Berlin)", 52.4757, 13.3652), "Berlin Südkreuz"),
+            (stop("de-DELFI_de:14612:16", "Dresden Bahnhof Neustadt", 51.0661, 13.7402), "Dresden-Neustadt"),
+            (stop("de-DELFI_de:14628:3620:1:Gleis2", "Bad Schandau Nationalparkbahnhof", 50.9193, 14.1377), "Bad Schandau"),
+            (stop("de-DELFI_000005400003", "Decin hl.n.", 50.7734, 14.2012), "Děčín hl.n."),
+            (stop("dk-rejseplanen_000005455659", "Decín hl.n.", 50.7742, 14.2014), "Děčín hl.n."),
+            (stop("cz-CZPTT_czptt:stop:CZ:55659", "Děčín hlavní nádraží", 50.7735, 14.2011), "Děčín hl.n."),
+            (stop("de-DELFI_000005400019", "Usti nad Labem hl.n.", 50.6596, 14.0447), "Ústí nad Labem hl.n."),
+            (stop("cz-CZPTT_czptt:stop:CZ:53179", "Ústí nad Labem hlavní nádraží", 50.6592, 14.0441), "Ústí nad Labem hl.n."),
+            (stop("de-DELFI_000005400201", "Praha-Holesovice", 50.1102, 14.44), "Praha-Holešovice"),
+            (stop("de-DELFI_000005400022", "Kolin(CZ)", 50.0265, 15.2135), "Kolín"),
+        ]
+        for (station, shown) in stops {
+            #expect(station.displayName == shown, "\(station.name)")
+        }
+    }
+
+    /// The name DB shows passengers, where DB InfraGO's own list has another ("Barmbek", "Celle Pbf").
+    @Test func passengerNamesAsOnBahnDe() {
+        #expect(stop("de-DELFI_de:02000:70950", "Barmbek", 53.5872, 10.0458).displayName == "Hamburg-Barmbek")
+        #expect(stop("de-DELFI_de:03351:50", "Celle Bahnhof", 52.6211, 10.0626).displayName == "Celle")
+    }
+
+    /// A stop's ID and name stay the feed's, so everything matched by them works as before.
+    @Test func onlyTheShownNameChanges() {
+        let neustadt = stop("de-DELFI_de:14612:16", "Dresden Bahnhof Neustadt", 51.0661, 13.7402)
+        #expect(neustadt.name == "Dresden Bahnhof Neustadt")
+        #expect(neustadt.id == "de-DELFI_de:14612:16")
+        #expect(Station.displayName(for: neustadt.name) == "Dresden Bahnhof Neustadt")
+    }
+
+    /// DELFI writes some stop numbers with leading zeros, OpenStation without.
+    @Test func readsTheStopAreaFromTheStopID() {
+        #expect(StationNames.dhid(in: "de-DELFI_de:14612:16") == "de:14612:16")
+        #expect(StationNames.dhid(in: "de-DELFI_de:14628:3620:5:Gleis3") == "de:14628:3620")
+        #expect(StationNames.dhid(in: "at-Railway-Current-Reference-Data-2026_de:11000:900003200:1:51") == "de:11000:900003200")
+        #expect(StationNames.dhid(in: "de-DELFI_de:08135:0620") == "de:08135:620")
+        #expect(StationNames.dhid(in: "de-DELFI_000005400003") == nil)
+        #expect(StationNames.dhid(in: "cz-CZPTT_czptt:stop:DE:10533") == nil)
+    }
+
+    /// Stops of feeds without stop areas are matched by position and name; one named more than the
+    /// station isn't it.
+    @Test func feedsWithoutStopAreasByPositionAndName() {
+        #expect(stop("eu-flixbus_38c4c04e", "Hamburg Central Station (FlixTrain)", 53.553, 10.0066).displayName == "Hamburg Hbf")
+        #expect(stop("eu-european-sleeper_8003004", "Berlin Ostbf", 52.5104, 13.4349).displayName == "Berlin Ostbahnhof")
+        #expect(stop("fr-horaires-sncf_FR::LMO:7195ca90", "Woerth (Rhein)", 49.0457, 8.2732).displayName == "Wörth (Rhein)")
+        #expect(stop("cz-CZPTT_czptt:stop:DE:10533", "Bad Schandau", 50.9193, 14.1377).displayName == "Bad Schandau")
+        #expect(stop("de-KVV_de:08121:1114", "Heilbronn Hbf/Willy-Brandt-Platz", 49.1427, 9.2089).displayName
+            == "Heilbronn Hbf/Willy-Brandt-Platz")
+        #expect(stop("de-DELFI_de:09162:6", "Hauptbahnhof (U, Tram)", 48.1412, 11.5605).displayName == "Hbf (U, Tram)")
+        #expect(stop("de-DELFI_000010975601", "Nordhausen Nord", 51.4941, 10.7876).displayName == "Nordhausen Nord")
+    }
+
+    /// Other railways' names for German stations, from their feeds: another language, Danish "St.", a
+    /// short "…bf" (#205, "Berlin Ostbf").
+    @Test func otherRailwaysNamesOfGermanStations() {
+        #expect(stop("fr-horaires-sncf_FR::LMO:719d92c0", "Munich", 48.1401, 11.5587).displayName == "München Hbf")
+        #expect(stop("fr-horaires-sncf_FR::LMU:71d62ef0", "Sarrebruck", 49.241, 6.991).displayName == "Saarbrücken Hbf")
+        #expect(stop("be-sncb_8015199", "Aix-la-Chapelle Ouest", 50.7808, 6.0705).displayName == "Aachen West")
+        #expect(stop("dk-rejseplanen_000008024643", "Neumünster St.", 54.0756, 9.9797).displayName == "Neumünster")
+        // Only where that feed has it: Munich elsewhere is another place.
+        #expect(stop("fr-horaires-sncf_1", "Munich", 48.2, 11.6).displayName == "Munich")
+    }
+
+    /// German feeds' spellings: "…bahnhof" for DB's "… Ost", a town or river in brackets DB leaves out.
+    /// A tram stop or another railway's station next to a DB station keeps its name.
+    @Test func germanFeedsSpellings() {
+        #expect(stop("de-VBN_490800283002", "Hildesheim Ostbahnhof", 52.1466, 9.9622).displayName == "Hildesheim Ost")
+        #expect(stop("de-VBN_000004990089", "Stade(Niederelbe)", 53.5963, 9.4764).displayName == "Stade")
+        #expect(stop("de-VBN_490800022600", "Lehrte(b Hannover)", 52.3767, 9.9746).displayName == "Lehrte")
+        #expect(stop("de-KVV_de:08212:51", "Karlsruhe Entenfang", 49.0106, 8.3584).displayName == "Karlsruhe Entenfang")
+        // Across the Rhine from Laufenburg (Baden); the border point next to Kehl.
+        #expect(stop("ch-opentransportdataswiss27_ch:1:sloid:322:0:1", "Laufenburg", 47.5598, 8.0615).displayName == "Laufenburg")
+        #expect(stop("de-DELFI_000008000008", "Kehl(Gr)", 48.5756, 7.8011).displayName == "Kehl (Gr)")
+        #expect(stop("de-DELFI_000000000001_G", "Benndorf (Mansfelder Land), Bahnhof", 51.5755, 11.492).displayName
+            == "Benndorf (Mansfelder Land)")
+    }
+
+    /// bahn.de's stations by their EVA number.
+    @Test func bahnDeStationsByEVANumber() {
+        #expect(station("8010089", "Dresden-Neustadt").displayName == "Dresden-Neustadt")
+        #expect(station("8000105", "Frankfurt(Main)Hbf").displayName == "Frankfurt (Main) Hbf")
+    }
+
+    /// A stop abroad only gets another railway's accents nearby: Polish Kolin isn't Kolín.
+    @Test func accentsAbroadOnlyNearby() {
+        #expect(stop("pl-Polish-Trains_1", "Kolin", 53.246, 15.123).displayName == "Kolin")
+        #expect(StationNames.displayName(forName: "Praha-Holesovice") == "Praha-Holešovice")
+        #expect(StationNames.displayName(forName: "Kolin") == "Kolin")
+        #expect(StationNames.displayName(forName: "Frankfurt(Main)Hbf", evaNumber: "8000105") == "Frankfurt (Main) Hbf")
+    }
+
+    /// A train's direction reads like the stop it names.
+    @Test func headsignsLikeTheirStop() throws {
+        let json = """
+        {"stopTimes": [
+          {"place": {"name": "S+U Berlin Hauptbahnhof", "stopId": "de-DELFI_de:11000:900003200:2:52",
+             "parentId": "de-DELFI_de:11000:900003201", "lat": 52.525, "lon": 13.369,
+             "scheduledDeparture": "2026-10-14T07:16:00Z"},
+           "mode": "HIGHSPEED_RAIL", "tripId": "ice175", "displayName": "ICE 175", "tripShortName": "175",
+           "headsign": "Dresden Bahnhof Neustadt",
+           "tripTo": {"name": "Dresden Bahnhof Neustadt", "stopId": "de-DELFI_de:14612:16:13:Gleis7",
+             "parentId": "de-DELFI_de:14612:16", "lat": 51.0661, "lon": 13.7402}},
+          {"place": {"name": "S+U Berlin Hauptbahnhof", "stopId": "de-DELFI_de:11000:900003200:2:52",
+             "parentId": "de-DELFI_de:11000:900003201", "lat": 52.525, "lon": 13.369,
+             "scheduledDeparture": "2026-10-14T07:20:00Z"},
+           "mode": "HIGHSPEED_RAIL", "tripId": "rj177", "displayName": "RJ 177", "tripShortName": "177",
+           "headsign": "Praha-Holesovice"}
+        ]}
+        """
+        let stopTimes = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(json.utf8)).stopTimes
+        let entries = stopTimes.compactMap { $0.toEntry(kind: .departures) }
+        #expect(entries.map(\.otherEnd) == ["Dresden-Neustadt", "Praha-Holešovice"])
+        #expect(entries.first?.station.displayName == "Berlin Hbf")
     }
 }
 
