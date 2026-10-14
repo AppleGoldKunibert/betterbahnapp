@@ -180,6 +180,7 @@ struct JourneyReplanSheet: View {
             }
             .background { AppBackground() }
             .scrollDismissesKeyboard(.interactively)
+            .closesStationSearchOnOutsideTap($focused)
             .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

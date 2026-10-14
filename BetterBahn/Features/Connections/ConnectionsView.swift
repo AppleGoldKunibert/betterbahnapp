@@ -167,6 +167,7 @@ struct ConnectionsView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
+            .closesStationSearchOnOutsideTap($focused)
             .onAppear { onlyValidTicket = model.settings.ticketFilterByDefault }
             .task { await model.keepFollowedCheckinsFresh() }
             .onChange(of: model.journeyToOpen, initial: true) { _, entry in

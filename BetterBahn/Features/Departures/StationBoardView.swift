@@ -158,6 +158,7 @@ struct StationBoardView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
+            .closesStationSearchOnOutsideTap($stationFocused)
             .onAppear {
                 onlyValidTicket = model.settings.ticketFilterByDefault
                 resumeAfterAbsence()

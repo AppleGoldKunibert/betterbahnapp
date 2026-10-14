@@ -91,6 +91,10 @@ struct StationInput<Focus: Hashable>: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
+            // The whole row opens the search, not just the text line: icon, label and padding too.
+            // Simultaneous, so the text field and the clear button still get their own taps.
+            .contentShape(.rect)
+            .simultaneousGesture(TapGesture().onEnded { focus.wrappedValue = focusValue })
 
             if showsSuggestions {
                 suggestionList
@@ -99,6 +103,12 @@ struct StationInput<Focus: Hashable>: View {
             }
         }
         .preference(key: StationSuggestionsShownKey.self, value: showsSuggestions)
+        .background {
+            GeometryReader { geometry in
+                Color.clear.preference(key: StationInputAreasKey.self,
+                                       value: StationInputAreas(frames: [geometry.frame(in: .global)], anyFocused: isFocused))
+            }
+        }
         .animation(.snappy(duration: 0.25), value: showsSuggestions)
         .animation(.snappy(duration: 0.25), value: suggestions.map(\.id))
         .onAppear { query = station?.displayName ?? "" }
@@ -309,6 +319,45 @@ struct StationSuggestionsShownKey: PreferenceKey {
     static let defaultValue = false
     static func reduce(value: inout Bool, nextValue: () -> Bool) {
         value = value || nextValue()
+    }
+}
+
+/// Where the `StationInput`s are on screen (field row plus suggestions) and whether one has the
+/// focus, so a tap anywhere else can close the search (see `closesStationSearchOnOutsideTap`).
+nonisolated struct StationInputAreas: Equatable {
+    var frames: [CGRect] = []
+    var anyFocused = false
+}
+
+struct StationInputAreasKey: PreferenceKey {
+    static let defaultValue = StationInputAreas()
+    static func reduce(value: inout StationInputAreas, nextValue: () -> StationInputAreas) {
+        let next = nextValue()
+        value.frames += next.frames
+        value.anyFocused = value.anyFocused || next.anyFocused
+    }
+}
+
+extension View {
+    /// Closes an open station search when the user taps anywhere outside the station fields and
+    /// their suggestions. Taps on another station field are left to that field, which takes the focus.
+    func closesStationSearchOnOutsideTap<Focus: Hashable>(_ focus: FocusState<Focus?>.Binding) -> some View {
+        modifier(StationSearchOutsideTap(focus: focus))
+    }
+}
+
+private struct StationSearchOutsideTap<Focus: Hashable>: ViewModifier {
+    let focus: FocusState<Focus?>.Binding
+    @State private var areas = StationInputAreas()
+
+    func body(content: Content) -> some View {
+        content
+            .onPreferenceChange(StationInputAreasKey.self) { areas = $0 }
+            .simultaneousGesture(SpatialTapGesture(coordinateSpace: .global).onEnded { tap in
+                // Only a station field's focus: other text fields on the screen keep theirs.
+                guard areas.anyFocused, !areas.frames.contains(where: { $0.contains(tap.location) }) else { return }
+                focus.wrappedValue = nil
+            })
     }
 }
 
