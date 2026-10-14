@@ -73,6 +73,7 @@ struct TrainNumberSheet: View {
             }
             .background { AppBackground() }
             .scrollDismissesKeyboard(.interactively)
+            .closesStationSearchOnOutsideTap($focused)
             .navigationTitle("Bestimmter Zug")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
