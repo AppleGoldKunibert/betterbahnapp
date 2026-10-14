@@ -26,7 +26,7 @@ comments are English.
 | `Cloudflare/checkin-push/` | Worker (`betterbahn-push`, D1 database, cron every minute) for notifications about new check-ins of followed Träwelling users (#266): keeps its own read-only Träwelling login per device (from the app's authorization code, AES-GCM encrypted), looks at the dashboard every 2 min and sends APNs pushes (`followedStatusID`). `node --test Cloudflare/checkin-push/worker.test.mjs` (see its README for the APNs key setup). |
 | `Cloudflare/shared/` | `appattest.mjs`: App Attest verification and the signed tokens both Workers check (`X-BetterBahn-Token`); `node --test Cloudflare/shared/appattest.test.mjs`. |
 | `.github/workflows/` | GitHub Actions: `pr-build.yml` (macOS: Kit tests + unsigned app build on PRs touching code), `pr-secrets.yml` (Linux: gitleaks secret scan + guard against committing `DefaultCredentials.swift`), `sync-prod.yml` (merges prod into every other branch except `appstorerelease`). |
-| `scripts/` | `make-station-hints.py`: rebuilds BetterBahnKit's offline station list for search (see Transitous below). `make-ril100.py`: rebuilds the RIL100 code list (`Ril100.swift`), also from DB's XLSX of all operating points for the codes abroad (needs `openpyxl`). `searchsim/`: Linux package that copies the platform-neutral Kit sources in (`./sync.sh`), so `swift test` runs `BetterBahnKitTests.swift` without a Mac and `swift run SearchSim scenarios.txt` runs the real station search against live Transitous for ~1150 place/query scenarios (rerun after changing search ranking). |
+| `scripts/` | `make-station-hints.py`: rebuilds BetterBahnKit's offline station list for search (see Transitous below). `make-ril100.py`: rebuilds the RIL100 code list (`Ril100.swift`), also from DB's XLSX of all operating points for the codes abroad (needs `openpyxl`). `make-station-names.py`: rebuilds the station names shown (`StationNames.swift`) from DB InfraGO's OpenStation NeTEx, DB's RIS names via bahn.expert's station search and Transitous (run after `make-ril100.py`, it takes the positions from there; keeps the names it has, `--refresh` asks bahn.expert for all again, about an hour). `searchsim/`: Linux package that copies the platform-neutral Kit sources in (`./sync.sh`), so `swift test` runs `BetterBahnKitTests.swift` without a Mac and `swift run SearchSim scenarios.txt` runs the real station search against live Transitous for ~1150 place/query scenarios (rerun after changing search ranking). |
 | `docs/transit-providers.md` | Why Transitous is the primary data source and fallback options. |
 | `docs/app-review-notes.md` | App Store submission checklist (privacy URL, App Privacy, demo access) and review notes. |
 
@@ -146,6 +146,19 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 
 - `Models/` – `Journey` → `Leg` → `Stopover`, `Line`, `Product`, `TimeInfo` (planned/actual),
   `PlatformInfo`, `Trip`, `JourneyPage`; `Station` (+ `DataSource`, `Coordinate`); `BoardEntry`;
+  `StationNames` (#205): `Station.displayName` shows DB's name for German stations ("Dresden-Neustadt" for DELFI's
+  "Dresden Bahnhof Neustadt") and the national railway's with accents abroad ("Děčín hl.n." for "Decin hl.n."), from
+  `Resources/StationNames.json` (`scripts/make-station-names.py`: DB InfraGO's OpenStation, CC0, with DHID and EVA numbers
+  per station, positions from `Ril100.json`; the name is DB's RIS name from bahn.expert's `stopPlace/byTerm` by EVA, since
+  OpenStation's differ for about one in ten ("Barmbek" for "Hamburg-Barmbek", "Celle Pbf"), unless they only differ in
+  spaces; abroad the national feeds' stops in Transitous with accents).
+  Matched by the stop area's DHID in the stop ID (DELFI, VBB, ÖBB …; "de:08135:0620" = "de:08135:620"), a bahn.de
+  station's EVA number, else within 600 m under the same name (150 m under a part of it; "Hamburg Central Station
+  (FlixTrain)" is Hamburg Hbf, "Heilbronn Hbf/Willy-Brandt-Platz" stays); abroad by the name without accents
+  (`StationNames.folded`, "Kolin (CZ)" without its country mark) within 3 km. Only the shown name changes: `id`/`name`
+  and everything matched by them stay the feed's. Headsigns read like the stop they name (`MPlace.displayName(ofHeadsign:)`),
+  else `StationNames.displayName(forName:)` (also for the train search's ends). `Station.displayName(for:)` shortens "hlavní nádraží" to "hl.n." and
+  "hlavná stanica" to "hl.st."; `StationNames.preload()` loads the list at launch;
   `TrainMessage` (DB delay reasons/notices); `RideMatch`; `OperatorBrand` (feed agency name → EVU logo, #166: PNGs rendered from Wikimedia Commons SVGs in
   `BetterBahn/Assets.xcassets/Operators/Operator-<brand>`, shown by `OperatorLabel` on a transparent background, in dark mode on a light plate if `needsPlateInDarkMode`; unknown operators keep the building icon; DB S-Bahns with their own name ("S-Bahn Berlin GmbH", "DB Regio AG S-Bahn München") show the S-Bahn "S", other "DB Regio AG …" trains the DB Regio logo; `OperatorBrand.displayName` shortens names: "ODEG", "Transdev" for "S-Bahn Hannover (Transdev)"). International trains have several operators: bahn.de's journey details give each stop's railway (`adminID`, UIC code: 80 DB, 54 ČD, …; "BEF" attributes if present) (`BahnDeClient.trainOperators(for:)` → `[TrainOperator]`, narrowed to a leg's section), shown by `TrainOperatorsLabel` as logos side by side (`OperatorLogo`) and in the route at the stops where the train changes hands (`operatorStops(for:)`); the feed only ever names one.
 - `Models/TripLap.swift` – `Trip.lap(at:near:arriving:)`: Transitous' trip for a ring line (S41/S42) is the vehicle's whole day
