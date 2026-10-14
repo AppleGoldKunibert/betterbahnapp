@@ -330,6 +330,8 @@ public struct BahnDeClient: Sendable {
     /// - Returns: nil if bahn.de has no coach sequence for it (yet).
     /// - Throws: `TransitError.rateLimited` while bahn.de is blocking requests.
     public func coachSequence(_ request: FormationRequest) async throws -> CoachSequence? {
+        // A category bahn.de doesn't know would be refused with a 403 that pauses every request.
+        guard !Self.plannedOnlyCategories.contains(request.category.uppercased()) else { return nil }
         guard usesSharedCaches else { return try await fetchCoachSequence(request) }
         return try await Self.sequenceCache.value(for: Self.sequenceKey(request), maxAge: Self.formationMaxAge) {
             try await self.fetchCoachSequence(request)
@@ -541,10 +543,18 @@ public struct BahnDeClient: Sendable {
         return (category.isEmpty ? "RB" : category, number)
     }
 
-    /// The train to ask bahn.de's coach sequence for: long-distance trains, and DB Regio's RE/RB by
-    /// their run number.
+    /// Long-distance trains bahn.de has no coach sequence for (and refuses the category with a 403), but
+    /// vagonweb has a planned Wagenreihung: Nightjet, Euronight and the SBB's InterRegio.
+    static let plannedOnlyCategories: Set<String> = ["NJ", "EN", "IR"]
+
+    /// The train to ask the coach sequence for: long-distance trains, and DB Regio's RE/RB by their run
+    /// number. The planned-only ones (`plannedOnlyCategories`) are only asked of vagonweb, never of bahn.de.
     public static func sequenceReference(for line: Line?) -> (category: String, number: String)? {
         if let ref = trainReference(for: line) { return ref }
+        if let line, let number = line.number {
+            let category = String(line.name.prefix { $0.isLetter }).uppercased()
+            if plannedOnlyCategories.contains(category) { return (category, number) }
+        }
         guard let ref = regionalReference(for: line, products: [.regionalExpress, .regional]) else { return nil }
         return (regionalCategories.contains(ref.category) ? ref.category : "RB", ref.number)
     }

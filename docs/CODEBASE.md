@@ -238,6 +238,16 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `FormationRequest.stopsBefore` or the leg's trip). bahn.de's `sequenceStatus` ("DIFFERS_FROM_SCHEDULE") is set for
   nearly every train, so "Abweichende Wagenreihung" comes from `CoachSequence.deviations(fromPlan:)` (missing/extra
   coaches, class changes; order ignored) against vagonweb's plan.
+  vagonweb files a train under its railway's country (`zeme=DB`, `OBB`, `SBB`): `VagonwebClient.countries(for:)` tries them
+  in turn (Nightjet/Euronight: ÖBB first). `NJ`, `EN`, `IR` (`plannedCategories`, `BahnDeClient.plannedOnlyCategories`) only
+  get a planned Wagenreihung from vagonweb and are never asked of bahn.de (it answers an unknown category with a 403 that
+  pauses all requests). Where the composition changes on the way, vagonweb labels vehicles ("Zürich - Buchs", stacked in one
+  position for locomotives) and whole compositions ("for the section: Zürich - Innsbruck") with a `Section`; with the
+  request's `route` the section the stop is in is picked (`Section.covers`, `composition(…route:)`, `restricted(to:)`), and
+  coaches of a train running together with this one ("RJX 184") are left out. Sleeping/couchette cars and car carriers are
+  read from the class bar. `startsReversed` covers "Changes direction in Buchs SG, from Zürich until Buchs in reverse
+  order". The parser reads both vagonweb's own HTML and the quoted DOM a browser serializes. Not read: day restrictions on
+  single coaches ("runs on ⑥, ⑦ …"). SBB's formation service (opentransportdata.swiss, live, today only) is not used yet.
 - `Transit/BahnExpert/` – bahn.expert, as fallback for the train type (`TrainTypeLookup`) when bahn.de
   has no coach sequence and vagonweb has none either: it has DB's planned formation (`DB-plan`) for days
   ahead; bahn.de is only asked for departures within `BahnDeClient.formationLookahead` (12 h). Needs a
