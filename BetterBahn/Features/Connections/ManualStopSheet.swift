@@ -46,6 +46,7 @@ struct ManualStopSheet: View {
             }
             .background { AppBackground() }
             .scrollDismissesKeyboard(.interactively)
+            .closesStationSearchOnOutsideTap($focused)
             .navigationTitle("Halt hinzufügen")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
