@@ -1,6 +1,7 @@
 import BetterBahnKit
 import Foundation
 import SwiftUI
+import UIKit
 
 /// Generic stop-type suffixes ("Bhf", "Hbf", …) stripped when comparing station names, so "Bernau"
 /// and "Bernau Bhf" are recognized as needing to be told apart while "Bernau a. Chiemsee" – whose
@@ -19,6 +20,9 @@ struct StationInput<Focus: Hashable>: View {
     let focusValue: Focus
 
     @Environment(AppModel.self) private var model
+    @Environment(\.stationSearchArea) private var searchArea
+    /// This field's key in `searchArea`.
+    @State private var areaID = UUID()
     @State private var query = ""
     /// A shortcut ("b", "t", "l") was used once, so the tip explaining them isn't needed any more.
     @AppStorage("usedStationSearchShortcuts") private var usedShortcuts = false
@@ -60,10 +64,12 @@ struct StationInput<Focus: Hashable>: View {
                     .font(.title3)
                     .foregroundStyle(iconColor)
                     .frame(width: 24)
+                    .allowsHitTesting(false)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(label)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .allowsHitTesting(false)
                     TextField(placeholder, text: $query)
                         .font(.headline)
                         .focused(focus, equals: focusValue)
@@ -91,10 +97,13 @@ struct StationInput<Focus: Hashable>: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            // The whole row opens the search, not just the text line: icon, label and padding too.
-            // Simultaneous, so the text field and the clear button still get their own taps.
-            .contentShape(.rect)
-            .simultaneousGesture(TapGesture().onEnded { focus.wrappedValue = focusValue })
+            // The whole row opens the search, not just the text line: taps on the icon, the label
+            // and the padding land here. Behind the row, so the text field keeps its own taps.
+            .background {
+                Color.clear
+                    .contentShape(.rect)
+                    .onTapGesture { focus.wrappedValue = focusValue }
+            }
 
             if showsSuggestions {
                 suggestionList
@@ -103,11 +112,22 @@ struct StationInput<Focus: Hashable>: View {
             }
         }
         .preference(key: StationSuggestionsShownKey.self, value: showsSuggestions)
-        .background {
-            GeometryReader { geometry in
-                Color.clear.preference(key: StationInputAreasKey.self,
-                                       value: StationInputAreas(frames: [geometry.frame(in: .global)], anyFocused: isFocused))
+        .onGeometryChange(for: CGRect.self) { [space = searchArea?.coordinateSpace] proxy in
+            space.map { proxy.frame(in: .named($0)) } ?? .zero
+        } action: { frame in
+            searchArea?.frames[areaID] = frame
+        }
+        .onChange(of: isFocused, initial: true) { _, focused in
+            if focused {
+                searchArea?.focused.insert(areaID)
+                searchArea?.closedByOutsideTap = false
+            } else {
+                searchArea?.focused.remove(areaID)
             }
+        }
+        .onDisappear {
+            searchArea?.frames[areaID] = nil
+            searchArea?.focused.remove(areaID)
         }
         .animation(.snappy(duration: 0.25), value: showsSuggestions)
         .animation(.snappy(duration: 0.25), value: suggestions.map(\.id))
@@ -131,10 +151,15 @@ struct StationInput<Focus: Hashable>: View {
             // Focus lost without a pick: keep the list (and its rows) as they are for a moment, so a
             // finger still on a suggestion picks that one when lifted, then close.
             guard !isFocused, showsSuggestions else { return }
-            // Another field took the focus: that was a tap on it, not on a suggestion.
+            // Another field took the focus (a tap on it, not on a suggestion), or a tap outside the
+            // fields closed the search: both close right away.
             if focus.wrappedValue == nil {
-                try? await Task.sleep(for: Self.suggestionsLinger)
-                guard !Task.isCancelled, !isFocused else { return }
+                if searchArea?.closedByOutsideTap == true {
+                    searchArea?.closedByOutsideTap = false
+                } else {
+                    try? await Task.sleep(for: Self.suggestionsLinger)
+                    guard !Task.isCancelled, !isFocused else { return }
+                }
             }
             showsSuggestions = false
             if !submitPending { query = station?.displayName ?? "" }
@@ -322,19 +347,25 @@ struct StationSuggestionsShownKey: PreferenceKey {
     }
 }
 
-/// Where the `StationInput`s are on screen (field row plus suggestions) and whether one has the
-/// focus, so a tap anywhere else can close the search (see `closesStationSearchOnOutsideTap`).
-nonisolated struct StationInputAreas: Equatable {
-    var frames: [CGRect] = []
-    var anyFocused = false
+/// Where a screen's `StationInput`s are (field row plus suggestions) and which one has the focus,
+/// so a tap anywhere else can close the search (see `closesStationSearchOnOutsideTap`). A plain
+/// class: the frames change while scrolling and nothing needs to redraw for that.
+final class StationSearchArea {
+    let coordinateSpace = UUID()
+    var frames: [UUID: CGRect] = [:]
+    var focused: Set<UUID> = []
+    /// The focus was just taken by a tap outside, so the suggestions close without lingering.
+    var closedByOutsideTap = false
 }
 
-struct StationInputAreasKey: PreferenceKey {
-    static let defaultValue = StationInputAreas()
-    static func reduce(value: inout StationInputAreas, nextValue: () -> StationInputAreas) {
-        let next = nextValue()
-        value.frames += next.frames
-        value.anyFocused = value.anyFocused || next.anyFocused
+nonisolated private struct StationSearchAreaKey: EnvironmentKey {
+    static let defaultValue: StationSearchArea? = nil
+}
+
+extension EnvironmentValues {
+    nonisolated var stationSearchArea: StationSearchArea? {
+        get { self[StationSearchAreaKey.self] }
+        set { self[StationSearchAreaKey.self] = newValue }
     }
 }
 
@@ -348,16 +379,64 @@ extension View {
 
 private struct StationSearchOutsideTap<Focus: Hashable>: ViewModifier {
     let focus: FocusState<Focus?>.Binding
-    @State private var areas = StationInputAreas()
+    @State private var area = StationSearchArea()
 
     func body(content: Content) -> some View {
         content
-            .onPreferenceChange(StationInputAreasKey.self) { areas = $0 }
-            .simultaneousGesture(SpatialTapGesture(coordinateSpace: .global).onEnded { tap in
-                // Only a station field's focus: other text fields on the screen keep theirs.
-                guard areas.anyFocused, !areas.frames.contains(where: { $0.contains(tap.location) }) else { return }
-                focus.wrappedValue = nil
-            })
+            .environment(\.stationSearchArea, area)
+            .coordinateSpace(.named(area.coordinateSpace))
+            .background {
+                WindowTapObserver { location in
+                    // Only a station field's focus: other text fields on the screen keep theirs.
+                    guard !area.focused.isEmpty, !area.frames.values.contains(where: { $0.contains(location) }) else { return }
+                    area.closedByOutsideTap = true
+                    focus.wrappedValue = nil
+                }
+            }
+    }
+}
+
+/// Reports every tap in the window, in this view's coordinates, without taking it from anything:
+/// buttons, text fields and scrolling get their touches as before and without delay.
+private struct WindowTapObserver: UIViewRepresentable {
+    let onTap: (CGPoint) -> Void
+
+    func makeUIView(context: Context) -> ObserverView {
+        let view = ObserverView()
+        view.isUserInteractionEnabled = false
+        return view
+    }
+
+    func updateUIView(_ view: ObserverView, context: Context) {
+        view.onTap = onTap
+    }
+
+    final class ObserverView: UIView, UIGestureRecognizerDelegate {
+        var onTap: ((CGPoint) -> Void)?
+
+        private lazy var recognizer: UITapGestureRecognizer = {
+            let recognizer = UITapGestureRecognizer(target: self, action: #selector(tapped))
+            recognizer.cancelsTouchesInView = false
+            recognizer.delaysTouchesBegan = false
+            recognizer.delaysTouchesEnded = false
+            recognizer.delegate = self
+            return recognizer
+        }()
+
+        override func willMove(toWindow newWindow: UIWindow?) {
+            super.willMove(toWindow: newWindow)
+            window?.removeGestureRecognizer(recognizer)
+            newWindow?.addGestureRecognizer(recognizer)
+        }
+
+        @objc private func tapped(_ recognizer: UITapGestureRecognizer) {
+            onTap?(recognizer.location(in: self))
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            true
+        }
     }
 }
 
