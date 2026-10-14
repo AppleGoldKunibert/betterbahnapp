@@ -539,6 +539,17 @@ struct LegCard: View {
         [StatisticsStop(station: leg.origin, role: .departure, platform: leg.departurePlatform?.planned),
          StatisticsStop(station: leg.destination, role: .arrival, platform: leg.arrivalPlatform?.planned)]
     }
+
+    /// Likely platform changes at the stops still ahead (#316), shown below the Wagenreihung.
+    private var platformChangeHints: [(station: String, hint: PlatformChangeHint)] {
+        guard !leg.cancelled else { return [] }
+        let now = Date()
+        return statisticsStops.compactMap { stop in
+            let time = stop.role == .departure ? leg.departure : leg.arrival
+            guard time.best > now, let hint = statistics.platformChange(at: stop.station, planned: stop.platform) else { return nil }
+            return (stop.station.displayName, hint)
+        }
+    }
     private var intermediate: [Stopover] { Array(leg.stopovers.dropFirst().dropLast()) }
 
     var body: some View {
@@ -642,6 +653,17 @@ struct LegCard: View {
 
                     // Between the stops and "Mehr"; unfolds by itself around the departure.
                     CoachSequenceDisclosure(leg: leg, spacing: 14)
+
+                    let platformChanges = platformChangeHints
+                    if !platformChanges.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(Array(platformChanges.enumerated()), id: \.offset) { _, change in
+                                PlatformChangeLabel(hint: change.hint, station: change.station)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 14)
+                    }
                 }
 
                 if transferBroken {

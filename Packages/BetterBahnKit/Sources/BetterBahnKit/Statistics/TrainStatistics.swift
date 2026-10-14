@@ -312,7 +312,7 @@ extension Station {
 public struct TrainStatisticsClient: Sendable {
     /// The Worker takes at most this many trains and stops per train.
     static let maxTrains = 8
-    static let maxStops = 6
+    static let maxStops = 12
 
     let http: HTTPClient
     let auth: WorkerAuth?

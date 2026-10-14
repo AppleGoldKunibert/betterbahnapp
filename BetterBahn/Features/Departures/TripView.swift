@@ -304,9 +304,39 @@ struct TripContent: View {
     @State private var operatorStops: [String: [String]] = [:]
     /// What past runs of this train say at the stops that matter (#316).
     @State private var statistics = TrainStatisticsModel()
+    /// The platform changes of the stops ahead, shown at the stop 30 minutes before it and always at the next one.
+    @State private var platformStatistics = TrainStatisticsModel()
     @Environment(AppModel.self) private var model
 
     private var color: Color { trip.line?.color ?? .gray }
+
+    /// The time the train reaches the stop (leaves it, at the first one), which the platform hint is timed by.
+    private func hintTime(_ stop: Stopover, index: Int) -> Date? {
+        (index == 0 ? stop.departure : stop.arrival ?? stop.departure)?.best
+    }
+
+    /// The first stop the train hasn't reached yet.
+    private var nextStopIndex: Int? {
+        trip.stopovers.indices.first { index in hintTime(trip.stopovers[index], index: index).map { $0 > Date() } ?? false }
+    }
+
+    /// The upcoming stops the platform changes are looked up for: the next dozen.
+    private var platformHintStops: [StatisticsStop] {
+        guard let next = nextStopIndex else { return [] }
+        return trip.stopovers.indices.dropFirst(next).prefix(12).map { index in
+            let stop = trip.stopovers[index]
+            let platform = index == 0 ? stop.departurePlatform : stop.arrivalPlatform ?? stop.departurePlatform
+            return StatisticsStop(station: stop.station, role: index == 0 ? .departure : .arrival, platform: platform?.planned)
+        }
+    }
+
+    /// A likely platform change at this stop: 30 minutes before the train gets there, and always at the next stop.
+    private func platformChangeHint(at stop: Stopover, index: Int) -> PlatformChangeHint? {
+        guard let time = hintTime(stop, index: index), time > Date(),
+              index == nextStopIndex || time.timeIntervalSinceNow <= 30 * 60 else { return nil }
+        let platform = index == 0 ? stop.departurePlatform : stop.arrivalPlatform ?? stop.departurePlatform
+        return platformStatistics.platformChange(at: stop.station, planned: platform?.planned)
+    }
 
     /// Where the experience values apply: the stops picked to get on and off, else the station the train
     /// was opened from, else the whole run.
@@ -409,6 +439,10 @@ struct TripContent: View {
             guard let bahnDe = model.provider.bahnDe, let found = try? await bahnDe.operatorStops(for: trip) else { return }
             operatorStops = found
         }
+        .task(id: [trip.stopovers.first?.id ?? "", String(nextStopIndex ?? -1)]) {
+            await platformStatistics.load(line: trip.line, stops: platformHintStops, date: trip.stopovers.first?.departure?.planned ?? .now,
+                                          bahnDe: model.provider.bahnDe)
+        }
         .task(id: [boardingID ?? "", exitID ?? "", trip.stopovers.first?.id ?? ""]) {
             await statistics.load(line: trip.line, stops: statisticsStops, date: trip.stopovers.first?.departure?.planned ?? .now,
                                   bahnDe: model.provider.bahnDe)
@@ -498,6 +532,9 @@ struct TripContent: View {
                                     HStack(spacing: 6) {
                                         ForEach(operators, id: \.self) { OperatorLogo(name: $0) }
                                     }
+                                }
+                                if let hint = platformChangeHint(at: stop, index: index) {
+                                    PlatformChangeLabel(hint: hint)
                                 }
                             }
                             Spacer()

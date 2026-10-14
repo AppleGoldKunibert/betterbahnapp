@@ -24,7 +24,7 @@ in Germany and realtime data.
    format, with an example query).
 
 4. The app reads the data back (`POST /train-stats { trains: [{ category, number, evas: [...] }] }`,
-   same App Attest token, at most 8 trains with 6 stops each, 60 requests per minute per install):
+   same App Attest token, at most 8 trains with 12 stops each, 60 requests per minute per install):
    per train the finished runs of the last 30 days (`STATS_DAYS`) – cancelled runs, the vehicles that ran
    instead of the planned ones (only runs bahn.de marks as differing from the day's schedule) – and per stop the arrival and departure delays, cancellations and platform moves
    (planned → actual). The app shows them only from 5 runs on (#316).

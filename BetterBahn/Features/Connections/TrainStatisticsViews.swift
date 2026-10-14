@@ -49,19 +49,6 @@ struct TrainStatisticsRows {
             if let share = figures.cancelledShare, share >= 0.01, let text = Self.percent(share) {
                 add("xmark.octagon.fill", "Fällt in \(name) bei \(text) der Fahrten aus", tint: share >= 0.1 ? .heavyDelay : .slightDelay)
             }
-            if let outlook = figures.platformOutlook(planned: stop.platform) {
-                let planned = "Gl. \(stop.platform ?? "")"
-                if outlook.changeShare >= 0.01, let changed = Self.percent(outlook.changeShare) {
-                    let others = outlook.alternatives.prefix(3).compactMap { option in
-                        Self.percent(option.share).map { "Gl. \(option.platform) (\($0))" }
-                    }
-                    add("signpost.right.and.left.fill", "Gleiswechsel in \(name) bei \(changed) der Fahrten",
-                        detail: others.isEmpty ? nil : "Statt \(planned) meist \(others.joined(separator: ", "))",
-                        tint: outlook.changeShare >= 0.3 ? .heavyDelay : .slightDelay)
-                } else {
-                    add("signpost.right.fill", "Gleis in \(name) war bisher immer wie geplant", tint: .punctual)
-                }
-            }
         }
 
         // The whole run cancelled only matters when no stop said it already.
@@ -98,6 +85,34 @@ struct TrainStatisticsRows {
     static func transferWarning(line: Line?, place: String, outlook: TrainStatistics.Stop.TransferOutlook) -> String? {
         guard outlook.isRisky, let share = percent(outlook.lateShare) else { return nil }
         return "\(line?.name ?? "Der Zug") kommt \(place) bei \(share) der Fahrten zu spät für den Umstieg."
+    }
+}
+
+/// "Gleiswechsel in 40 % der Fälle (meist Gleis 18 (33 %) / Gleis 19 (20 %))": only above 10 % and with at
+/// most two platforms. Shown where the platform matters (below the Wagenreihung, 30 minutes before a stop).
+struct PlatformChangeHint: Hashable {
+    let text: String
+    let severe: Bool
+
+    init?(outlook: TrainStatistics.Stop.PlatformOutlook?) {
+        guard let outlook, outlook.changeShare > 0.1, let changed = TrainStatisticsRows.percent(outlook.changeShare) else { return nil }
+        let others = outlook.alternatives.prefix(2).compactMap { option in
+            TrainStatisticsRows.percent(option.share).map { "Gleis \(option.platform) (\($0))" }
+        }
+        text = "Gleiswechsel in \(changed) der Fälle" + (others.isEmpty ? "" : " (meist \(others.joined(separator: " / ")))")
+        severe = outlook.changeShare >= 0.3
+    }
+}
+
+struct PlatformChangeLabel: View {
+    let hint: PlatformChangeHint
+    /// The station, when several are listed together.
+    var station: String?
+
+    var body: some View {
+        Label(station.map { "\($0): \(hint.text)" } ?? hint.text, systemImage: "signpost.right.and.left.fill")
+            .font(.caption)
+            .foregroundStyle(hint.severe ? Color.heavyDelay : Color.slightDelay)
     }
 }
 
@@ -149,11 +164,18 @@ struct TransferWarning: View {
 @Observable
 final class TrainStatisticsModel {
     private(set) var rows: TrainStatisticsRows?
+    private(set) var lookup: TrainStatisticsLookup?
+
+    /// How likely the train uses another platform than `planned` at `station`, if that is worth saying.
+    func platformChange(at station: Station, planned: String?) -> PlatformChangeHint? {
+        PlatformChangeHint(outlook: lookup?.stop(at: station)?.platformOutlook(planned: planned))
+    }
 
     func load(line: Line?, stops: [StatisticsStop], date: Date, bahnDe: BahnDeClient?) async {
         var resolve: TrainStatisticsStore.EVAResolver?
         if let bahnDe { resolve = { station in try? await bahnDe.evaNumber(for: station) } }
         let lookup = await TrainStatisticsStore.shared.lookup(line: line, at: stops.map(\.station), on: date, resolve: resolve)
+        self.lookup = lookup
         rows = TrainStatisticsRows(lookup: lookup, stops: stops)
     }
 }

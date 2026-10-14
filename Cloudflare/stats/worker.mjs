@@ -205,7 +205,7 @@ export function boardURL(eva, time) {
 // MARK: - Train statistics
 
 export const MAX_TRAINS = 8;
-const MAX_STOPS_PER_TRAIN = 6;
+const MAX_STOPS_PER_TRAIN = 12;
 const EVA_PATTERN = /^\d{1,9}$/;
 const TRAIN_PATTERN = /^[A-Za-z0-9]{1,8}$/;
 // The last days that count, and how many runs of one train that can be.

@@ -317,7 +317,7 @@ test("refuses train statistics without a token, with malformed trains or too man
     assert.equal((await askStats(env, Array(9).fill({ category: "ICE", number: "1095", evas: [] }))).status, 400);
     assert.equal((await askStats(env, [{ category: "ICE; DROP", number: "1095", evas: [] }])).status, 400);
     assert.equal((await askStats(env, [{ category: "ICE", number: "1095", evas: ["x"] }])).status, 400);
-    assert.equal((await askStats(env, [{ category: "ICE", number: "1095", evas: Array(7).fill("8000115") }])).status, 400);
+    assert.equal((await askStats(env, [{ category: "ICE", number: "1095", evas: Array(13).fill("8000115") }])).status, 400);
     const get = await handleRequest(new Request("https://betterbahn-stats.example/train-stats"), env, seenAt);
     assert.equal(get.status, 405);
 });
