@@ -7,6 +7,9 @@
 // Wagenreihung around departure and its final realtime state after arrival, stored in D1 (schema.sql).
 // Runs older than a year are downloaded and deleted with backup.sh.
 //
+// Long-distance trains are also found by the Worker itself (`seedLongDistance`): every few minutes it
+// reads the departure boards of a few big stations, so the statistics don't depend on what app users look at.
+//
 // The same data answers the app (`POST /train-stats`): per train number and stop, how late the train
 // was, how often it was cancelled, which platforms it used and which vehicles ran it (#316).
 
@@ -71,6 +74,12 @@ async function handleSightings(request, env, now) {
     }
     if (!Array.isArray(ids) || ids.length > MAX_SIGHTINGS) return json(400, { error: "invalid_sightings" });
 
+    return json(202, { accepted: await recordRuns(env, ids, now) });
+}
+
+/// Stores the runs of these bahn.de journey IDs that aren't known yet (no S-Bahn, buses or malformed IDs);
+/// returns how many runs the IDs were.
+async function recordRuns(env, ids, now) {
     const runs = new Map();
     for (const id of ids) {
         if (!isJourneyId(id)) continue;
@@ -84,7 +93,7 @@ async function handleSightings(request, env, now) {
         const insert = env.DB.prepare("INSERT OR IGNORE INTO runs (key, journey_id, state, next_check, first_seen) VALUES (?, ?, 'new', ?, ?)");
         await env.DB.batch([...runs].map(([key, id]) => insert.bind(key, id, seconds, seconds)));
     }
-    return json(202, { accepted: runs.size });
+    return runs.size;
 }
 
 export function isJourneyId(id) {
@@ -111,6 +120,59 @@ function json(status, body, extra = {}) {
         status,
         headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...extra },
     });
+}
+
+// MARK: - Seeding
+
+// Big stations where long-distance trains meet, read in turns so each cron invocation stays within the
+// free plan (a board is one bahn.de request and one JSON to parse). EVA numbers; `SEED_STATIONS` replaces them.
+export const SEED_STATIONS = [
+    "8002549", "8011160", "8000105", "8000207", "8000261", "8000152", "8000284", "8000096", // Hamburg, Berlin, Frankfurt, Köln, München, Hannover, Nürnberg, Stuttgart
+    "8010205", "8000080", "8000085", "8000244", "8003200", "8000115", "8000260", "8010101", // Leipzig, Dortmund, Düsseldorf, Mannheim, Kassel-Wilhelmshöhe, Fulda, Würzburg, Erfurt
+    "8000050", "8000191", // Bremen, Karlsruhe
+];
+const DEFAULT_SEED_PER_RUN = 3;
+/// The boards start this long from now, so a train is known well before its Wagenreihung is due.
+const SEED_AHEAD = 20 * MINUTE;
+/// bahn.de's product filters for its boards: ICE, and IC/EC.
+const SEED_PRODUCTS = ["ICE", "EC_IC"];
+/// Cron expression of `seedLongDistance` (wrangler.toml).
+export const SEED_CRON = "*/5 * * * *";
+
+/// Reads the long-distance departures of the next few stations in turn and stores their runs like app
+/// sightings. Every `SEED_PER_RUN` (env, default 3; 0 switches seeding off) stations per call, five
+/// minutes apart, so each station is read about every half hour. Returns how many runs were found.
+export async function seedLongDistance(env, now = Date.now(), deps = {}) {
+    const fetchUpstream = deps.fetch ?? fetch;
+    const stations = (env.SEED_STATIONS ?? SEED_STATIONS.join(",")).split(",").map(eva => eva.trim()).filter(eva => EVA_PATTERN.test(eva));
+    const perRun = env.SEED_PER_RUN === undefined ? DEFAULT_SEED_PER_RUN : Number(env.SEED_PER_RUN);
+    if (stations.length === 0 || !(perRun > 0)) return 0;
+
+    const slot = Math.floor(now / (5 * MINUTE * 1000));
+    const slots = Math.ceil(stations.length / perRun);
+    const turn = stations.slice((slot % slots) * perRun, (slot % slots) * perRun + perRun);
+
+    const ids = new Set();
+    for (const eva of turn) {
+        try {
+            const response = await fetchUpstream(boardURL(eva, now + SEED_AHEAD * 1000), { headers: upstreamHeaders() });
+            if (!response.ok) continue;
+            for (const entry of (await response.json())?.entries ?? []) {
+                if (typeof entry?.journeyId === "string") ids.add(entry.journeyId);
+            }
+        } catch {
+            // A station that fails is read again next time.
+        }
+    }
+    return ids.size > 0 ? recordRuns(env, [...ids].slice(0, MAX_SIGHTINGS), now) : 0;
+}
+
+/// bahn.de's departure board of a station from `time` on, long-distance trains only.
+export function boardURL(eva, time) {
+    const local = new Date(time).toLocaleString("sv-SE", { timeZone: "Europe/Berlin" });
+    const [day, clock] = local.split(" ");
+    return `${UPSTREAM}reiseloesung/abfahrten?datum=${day}&zeit=${clock.slice(0, 5)}&ortExtId=${eva}&ortId=A=1@L=${eva}@&mitVias=false`
+        + SEED_PRODUCTS.map(product => `&verkehrmittel[]=${product}`).join("");
 }
 
 // MARK: - Train statistics
@@ -510,6 +572,7 @@ export default {
         return handleRequest(request, env);
     },
     scheduled(event, env, ctx) {
-        ctx.waitUntil(processDueRuns(env, event.scheduledTime));
+        // The five-minute cron also fires the every-minute one: two invocations, each with its own limits.
+        ctx.waitUntil(event.cron === SEED_CRON ? seedLongDistance(env, event.scheduledTime) : processDueRuns(env, event.scheduledTime));
     },
 };

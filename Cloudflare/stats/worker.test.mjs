@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { signToken } from "../shared/appattest.mjs";
-import { berlinToUnix, handleRequest, journeyFields, parseJourney, processDueRuns, runKey, trainStatistics } from "./worker.mjs";
+import { SEED_STATIONS, berlinToUnix, boardURL, handleRequest, journeyFields, parseJourney, processDueRuns, runKey, seedLongDistance, trainStatistics } from "./worker.mjs";
 
 const secret = "test-secret";
 const schema = readFileSync(new URL("./schema.sql", import.meta.url), "utf8");
@@ -346,4 +346,49 @@ test("finds a regional train under bahn.de's own category, by run number and sto
     // An ICE is only found as an ICE.
     const [ice] = (await (await askStats(env, [{ category: "ICE", number: "3185", evas: [FULDA] }])).json()).trains;
     assert.deepEqual(ice.stops[FULDA].arrival, [30]);
+});
+
+// MARK: - Seeding long-distance trains from the boards
+
+test("reads long-distance departure boards in turns and stores their runs", async () => {
+    const env = { DB: new FakeD1(), SEED_STATIONS: "8000001, 8000002, 8000003, 8000004", SEED_PER_RUN: "2" };
+    const urls = [];
+    const boards = {
+        8000001: { entries: [{ journeyId: ICE_ID }, { journeyId: S_ID }, { journeyId: 42 }] },
+        8000002: { entries: [{ journeyId: ICE_ID }] },
+    };
+    const fetch = async url => {
+        urls.push(url);
+        const eva = new URL(url).searchParams.get("ortExtId");
+        return boards[eva] ? new Response(JSON.stringify(boards[eva])) : new Response("", { status: 403 });
+    };
+
+    // 2026-10-06 12:00 Berlin: the first two stations; the boards start 20 minutes later.
+    const noon = berlinToUnix("2026-10-06T12:00") * 1000;
+    assert.equal(await seedLongDistance(env, noon, { fetch }), 1, "the same train on two boards is one run, S-Bahn is left out");
+    assert.equal(env.DB.rows().length, 1);
+    assert.equal(env.DB.rows()[0].state, "new");
+    const params = new URL(urls[0]).searchParams;
+    assert.deepEqual([params.get("datum"), params.get("zeit"), params.get("ortExtId")], ["2026-10-06", "12:20", "8000001"]);
+    assert.deepEqual(params.getAll("verkehrmittel[]"), ["ICE", "EC_IC"]);
+    assert.equal(urls.length, 2);
+
+    // Five minutes later the next two; a station bahn.de refuses is skipped.
+    urls.length = 0;
+    await seedLongDistance(env, noon + 5 * 60 * 1000, { fetch });
+    assert.deepEqual(urls.map(url => new URL(url).searchParams.get("ortExtId")), ["8000003", "8000004"]);
+    // Then the first two again.
+    urls.length = 0;
+    await seedLongDistance(env, noon + 10 * 60 * 1000, { fetch });
+    assert.deepEqual(urls.map(url => new URL(url).searchParams.get("ortExtId")), ["8000001", "8000002"]);
+});
+
+test("seeding can be switched off, and a failing station doesn't stop the others", async () => {
+    const env = { DB: new FakeD1(), SEED_PER_RUN: "0" };
+    const fetch = async () => { throw new Error("offline"); };
+    assert.equal(await seedLongDistance(env, Date.now(), { fetch }), 0);
+    assert.equal(await seedLongDistance({ DB: env.DB, SEED_STATIONS: "8000001,8000002", SEED_PER_RUN: "2" }, Date.now(), { fetch }), 0);
+    assert.equal(env.DB.rows().length, 0);
+    assert.ok(SEED_STATIONS.every(eva => /^\d{7}$/.test(eva)));
+    assert.match(boardURL("8000105", Date.parse("2026-12-06T17:30:00Z")), /datum=2026-12-06&zeit=18:30&ortExtId=8000105&ortId=A=1@L=8000105@/);
 });

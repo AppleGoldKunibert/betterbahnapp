@@ -9,6 +9,9 @@ in Germany and realtime data.
    stops) to `POST /sightings { journeyIds: [...] }` (App Attest token, at most 100 per request,
    30 requests per minute per install). No user ID, no location. Users can switch this off in
    Settings → "Zugdaten für Statistik teilen".
+   Long-distance trains are also found by the Worker itself: every five minutes it reads the ICE/IC/EC
+   departure boards of 3 of 18 big stations in turn (`SEED_PER_RUN`, `SEED_STATIONS`; "0" switches it off)
+   and stores their runs the same way, so the data doesn't depend on what app users look at.
 2. Every minute the cron trigger looks at the due runs (`BATCH`, default 8) and asks bahn.de itself:
    - right away: the run's schedule (`reiseloesung/fahrt`). Trains without a German stop are dropped.
    - 10 minutes before departure: the Wagenreihung at the first stop.
