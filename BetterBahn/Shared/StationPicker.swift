@@ -32,6 +32,8 @@ struct StationInput<Focus: Hashable>: View {
     /// keyboard) before the finger is lifted, and if the list collapsed or changed right away, lifting
     /// it would tap whatever slid underneath – often a different station.
     @State private var showsSuggestions = false
+    /// RIL100 codes of the suggestions (by `Station.id`), looked up off the main thread.
+    @State private var codes: [String: String] = [:]
 
     /// How long the suggestions stay after focus is lost without a pick.
     static var suggestionsLinger: Duration { .milliseconds(600) }
@@ -51,6 +53,11 @@ struct StationInput<Focus: Hashable>: View {
             seen.append(s)
         }
         return Array(seen.prefix(5))
+    }
+
+    /// The suggestions whose RIL100 codes are shown; nil with the codes off.
+    private var codeLookup: [String]? {
+        model.settings.ril100Enabled ? suggestions.map(\.id) : nil
     }
 
     var body: some View {
@@ -103,8 +110,16 @@ struct StationInput<Focus: Hashable>: View {
         .animation(.snappy(duration: 0.25), value: suggestions.map(\.id))
         .onAppear { query = station?.displayName ?? "" }
         .task {
-            // The RIL100 list is large: load it before the first row asks for a code.
-            if model.settings.ril100Enabled { await Ril100.preload() }
+            // The RIL100 list is large: load it before a typed code (searched with the codes off too)
+            // or the first row needs it.
+            await Ril100.preload()
+        }
+        .task(id: codeLookup) {
+            // Off the main thread: the first lookup after launch waits for the list to load (#301).
+            guard codeLookup != nil else { codes = [:]; return }
+            let found = await Ril100.codes(for: suggestions)
+            guard !Task.isCancelled else { return }
+            codes = found
         }
         .onChange(of: station) { _, new in
             if !showsSuggestions { query = new?.displayName ?? "" }
@@ -180,7 +195,7 @@ struct StationInput<Focus: Hashable>: View {
                             .font(.subheadline)
                             .lineLimit(1)
                         Spacer()
-                        if model.settings.ril100Enabled, let code = Ril100.code(for: suggestion) {
+                        if model.settings.ril100Enabled, let code = codes[suggestion.id] {
                             Text(code)
                                 .font(.caption.monospaced())
                                 .foregroundStyle(.secondary)

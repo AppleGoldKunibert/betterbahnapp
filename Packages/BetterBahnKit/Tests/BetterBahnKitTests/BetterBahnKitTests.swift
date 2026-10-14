@@ -2028,6 +2028,17 @@ private final class TwinTrainProtocol: URLProtocol, @unchecked Sendable {
         #expect(Ril100.matches(station("h", "Berlin Hbf", 52.5251, 13.3692), bls))
     }
 
+    /// The picker looks up its rows' codes together, off the main thread (#301): by station ID, and
+    /// none for a stop that isn't a station.
+    @Test func looksUpCodesOfSeveralStations() async {
+        let codes = await Ril100.codes(for: [
+            station("a", "Frankfurt (Main) Hauptbahnhof", 50.1069, 8.6625),
+            station("b", "Zürich HB", 47.3779, 8.5403),
+            station("c", "Frankfurt, Platz der Republik", 50.1095, 8.6660),
+        ])
+        #expect(codes == ["a": "FF", "b": "XSZH"])
+    }
+
     /// Codes of stations abroad start with X (west) or Z (east) and the country: XA Austria, XS Switzerland.
     /// They can be typed like the German ones.
     @Test func findsStationsAbroadByCode() {
