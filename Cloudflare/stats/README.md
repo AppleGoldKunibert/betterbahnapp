@@ -20,7 +20,7 @@ in Germany and realtime data.
 4. The app reads the data back (`POST /train-stats { trains: [{ category, number, evas: [...] }] }`,
    same App Attest token, at most 8 trains with 6 stops each, 60 requests per minute per install):
    per train the finished runs of the last 30 days (`STATS_DAYS`) – cancelled runs, the vehicles that ran
-   it – and per stop the arrival and departure delays, cancellations and platform moves
+   instead of the planned ones (only runs bahn.de marks as differing from the day's schedule) – and per stop the arrival and departure delays, cancellations and platform moves
    (planned → actual). The app shows them only from 5 runs on (#316).
 
 Size: a finished run takes well under 1 KB, so the free plan's 5 GB hold roughly 10,000–25,000 runs a

@@ -1,7 +1,7 @@
 import Foundation
 
 /// What the statistics server (`Cloudflare/stats`, `POST /train-stats`) knows about one train from its
-/// finished runs of the last days: delays, cancellations, platform moves and the vehicles that ran it
+/// finished runs of the last days: delays, cancellations, platform moves and the vehicles that ran instead of the planned ones
 /// (#316). Every figure is an experience value, shown only from `minimumRuns` runs on.
 public struct TrainStatistics: Sendable, Hashable, Decodable {
     /// Fewer runs say too little to show anything.
@@ -16,18 +16,24 @@ public struct TrainStatistics: Sendable, Hashable, Decodable {
     public var runs: Int
     /// Runs that were cancelled altogether.
     public var cancelledRuns: Int
-    /// The vehicles that ran the train, by series, most common first.
+    /// Runs with a Wagenreihung that bahn.de compared with the day's schedule, and those that differed.
+    public var formationRuns: Int
+    public var unplannedRuns: Int
+    /// The vehicles that ran in those, by series, most common first. A series planned for some days
+    /// doesn't show up here: only a run that differs from its own day's schedule counts.
     public var vehicles: [VehicleShare]
     /// Per EVA number of a stop that was asked for.
     public var stops: [String: Stop]
 
     public init(category: String, number: String, days: Int = 30, runs: Int, cancelledRuns: Int = 0,
-                vehicles: [VehicleShare] = [], stops: [String: Stop] = [:]) {
+                formationRuns: Int = 0, unplannedRuns: Int = 0, vehicles: [VehicleShare] = [], stops: [String: Stop] = [:]) {
         self.category = category
         self.number = number
         self.days = days
         self.runs = runs
         self.cancelledRuns = cancelledRuns
+        self.formationRuns = formationRuns
+        self.unplannedRuns = unplannedRuns
         self.vehicles = vehicles
         self.stops = stops
     }
@@ -82,22 +88,33 @@ public struct TrainStatistics: Sendable, Hashable, Decodable {
         runs >= Self.minimumRuns ? Double(cancelledRuns) / Double(runs) : nil
     }
 
-    /// The series the train runs with, only when it varies (otherwise there is nothing to warn about).
-    public var varyingVehicles: [VehicleShare]? {
-        guard vehicles.count > 1, vehicles.reduce(0, { $0 + $1.runs }) >= Self.minimumRuns else { return nil }
-        return vehicles
+    /// How often another vehicle than the planned one ran, and which.
+    public struct UnplannedVehicles: Sendable, Hashable {
+        /// The share of runs that differed from their day's schedule.
+        public var share: Double
+        /// The series that ran then, most common first.
+        public var vehicles: [Option]
+
+        public struct Option: Sendable, Hashable {
+            public var name: String
+            /// The share of the runs that differed.
+            public var share: Double
+        }
     }
 
-    /// The share of `vehicles[index]` among the runs with a known series.
-    public func share(of vehicle: VehicleShare) -> Double {
-        let total = vehicles.reduce(0) { $0 + $1.runs }
-        return total > 0 ? Double(vehicle.runs) / Double(total) : 0
+    /// Nil without enough runs, or when the planned vehicle always ran.
+    public var unplannedVehicles: UnplannedVehicles? {
+        guard formationRuns >= Self.minimumRuns, unplannedRuns > 0 else { return nil }
+        let named = vehicles.reduce(0) { $0 + $1.runs }
+        guard named > 0 else { return nil }
+        return UnplannedVehicles(share: Double(unplannedRuns) / Double(formationRuns),
+                                 vehicles: vehicles.map { .init(name: $0.name, share: Double($0.runs) / Double(named)) })
     }
 
     // MARK: - Decoding
 
     private enum CodingKeys: String, CodingKey {
-        case category, number, days, runs, cancelled, formations, stops
+        case category, number, days, runs, cancelled, formationRuns, unplannedRuns, unplannedFormations, stops
     }
 
     /// One kind of vehicle in bahn.de's Wagenreihung shape: the app names its series with the rules it
@@ -115,11 +132,13 @@ public struct TrainStatistics: Sendable, Hashable, Decodable {
         runs = try c.decode(Int.self, forKey: .runs)
         cancelledRuns = try c.decode(Int.self, forKey: .cancelled)
         stops = try c.decodeIfPresent([String: Stop].self, forKey: .stops) ?? [:]
+        formationRuns = try c.decodeIfPresent(Int.self, forKey: .formationRuns) ?? 0
+        unplannedRuns = try c.decodeIfPresent(Int.self, forKey: .unplannedRuns) ?? 0
 
         var runsBySeries: [String: Int] = [:]
         var order: [String] = []
         let wanted = Int(number)
-        for formation in try c.decodeIfPresent([Formation].self, forKey: .formations) ?? [] {
+        for formation in try c.decodeIfPresent([Formation].self, forKey: .unplannedFormations) ?? [] {
             let sequence = BahnDeClient.SequenceResponse(groups: formation.groups)
             let units = BahnDeClient.formation(from: sequence, category: category, number: wanted).units
             var names: [String] = []

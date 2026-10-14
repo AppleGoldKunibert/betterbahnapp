@@ -70,11 +70,12 @@ struct TrainStatisticsRows {
             add("xmark.octagon.fill", "Fällt bei \(text) der Fahrten aus", tint: share >= 0.1 ? .heavyDelay : .slightDelay)
         }
 
-        if let vehicles = lookup.statistics.varyingVehicles {
-            let shares = vehicles.prefix(3).compactMap { vehicle in
-                Self.percent(lookup.statistics.share(of: vehicle)).map { "\(vehicle.name) (\($0))" }
+        if let unplanned = lookup.statistics.unplannedVehicles, let share = Self.percent(unplanned.share) {
+            let vehicles = unplanned.vehicles.prefix(3).compactMap { vehicle in
+                Self.percent(vehicle.share).map { "\(vehicle.name) (\($0))" }
             }
-            if shares.count > 1 { add("tram.fill", "Fahrzeug: \(shares.joined(separator: ", "))") }
+            add("tram.fill", "Anderes Fahrzeug als geplant bei \(share) der Fahrten",
+                detail: vehicles.isEmpty ? nil : "Dann meist \(vehicles.joined(separator: ", "))")
         }
 
         guard !rows.isEmpty else { return nil }

@@ -241,10 +241,10 @@ const ICE1 = { name: "ICE0160", category: "ICE", number: 1095, destination: "Ber
     vehicles: [{ type: "I4010", id: "938054010021" }, { type: "I8010", id: "938058010034" }] };
 
 /// A finished run of ICE 1095 on `day`; `stop` is its row at Fulda (see schema.sql for the format).
-function addRun(db, day, stop, { cancelled = 0, formation = null, category = "ICE", number = "1095" } = {}) {
+function addRun(db, day, stop, { cancelled = 0, formation = null, status = "MATCHES_SCHEDULE", category = "ICE", number = "1095" } = {}) {
     db.db.prepare("INSERT INTO runs (key, journey_id, state, next_check, first_seen, service_day, category, number, cancelled, formation, stops) " +
         "VALUES (?, 'x', 'done', 0, 0, ?, ?, ?, ?, ?, ?)")
-        .run(`${day}|${category}|${number}`, day, category, number, cancelled, formation ? JSON.stringify({ status: "MATCHES_SCHEDULE", groups: [formation] }) : null,
+        .run(`${day}|${category}|${number}`, day, category, number, cancelled, formation ? JSON.stringify({ status, groups: [formation] }) : null,
             JSON.stringify([["8000261", null, null, 0, 1, "19", null, 0], [FULDA, ...stop], ["8000105", 253, 4, null, null, "8", null, 0]]));
 }
 
@@ -259,8 +259,9 @@ test("answers a train's delays, cancellations, platform moves and vehicles per s
     // [arrival, arrivalDelay, departure, departureDelay, platform, changedPlatform, flags]
     addRun(env.DB, "2026-10-01", [120, 0, 122, 1, "7", null, 0], { formation: ICE4 });
     addRun(env.DB, "2026-10-02", [120, 12, 122, 12, "7", "8", 0], { formation: ICE4 });
-    addRun(env.DB, "2026-10-03", [120, 3, 122, 3, "7", null, 0], { formation: ICE1 });
-    addRun(env.DB, "2026-10-04", [120, null, 122, null, "7", null, 1], { formation: ICE4 });
+    // ICE 1 instead of the planned vehicle on one day; planned ICE 1 on another doesn't count.
+    addRun(env.DB, "2026-10-03", [120, 3, 122, 3, "7", null, 0], { formation: ICE1, status: "DIFFERS_FROM_SCHEDULE" });
+    addRun(env.DB, "2026-10-04", [120, null, 122, null, "7", null, 1], { formation: ICE1 });
     addRun(env.DB, "2026-10-05", [120, null, 122, null, "7", null, 1], { cancelled: 1 });
     // Too old, another train and another day's other number don't count.
     addRun(env.DB, "2026-08-01", [120, 50, 122, 50, "7", null, 0]);
@@ -284,22 +285,26 @@ test("answers a train's delays, cancellations, platform moves and vehicles per s
     assert.equal(train.stops["9999999"], undefined, "a stop the train never had is left out");
 
     assert.equal(train.formationRuns, 4);
-    assert.deepEqual(train.formations.map(f => f.n), [3, 1]);
+    assert.equal(train.unplannedRuns, 1);
+    assert.deepEqual(train.unplannedFormations.map(f => f.n), [1]);
     // In bahn.de's Wagenreihung shape, so the app names the series with its own rules.
-    assert.deepEqual(train.formations[0].groups[0], {
-        name: "ICE9465", transport: { category: "ICE", number: 1095 },
-        vehicles: [{ vehicleID: "938058120011", type: { constructionType: "I0812" } }, { vehicleID: "938054120029", type: { constructionType: "I1412" } }],
+    assert.deepEqual(train.unplannedFormations[0].groups[0], {
+        name: "ICE0160", transport: { category: "ICE", number: 1095 },
+        vehicles: [{ vehicleID: "938054010021", type: { constructionType: "I4010" } }, { vehicleID: "938058010034", type: { constructionType: "I8010" } }],
     });
 });
 
-test("treats trainsets of one series as one kind of vehicle and picks a coupled train's own half", () => {
+test("counts only vehicles bahn.de marks as differing from the day's schedule, one kind per series, and a coupled train's own half", () => {
     const otherHalf = { ...ICE4, name: "ICE9999", number: 940 };
-    const run = group => ({ cancelled: 0, formation: JSON.stringify({ groups: group }), stops: "[]" });
+    const run = (group, status = "DIFFERS_FROM_SCHEDULE") => ({ cancelled: 0, formation: JSON.stringify({ status, groups: group }), stops: "[]" });
     const answer = trainStatistics([
-        run([{ ...ICE4, name: "ICE9465" }]), run([{ ...ICE4, name: "ICE9470" }]), run([otherHalf, ICE1]), run(null),
+        run([{ ...ICE4, name: "ICE9465" }]), run([{ ...ICE4, name: "ICE9470" }]), run([otherHalf, ICE1]),
+        run([ICE1], "MATCHES_SCHEDULE"), run([ICE1], "UNKNOWN"), run(null),
     ], { category: "ICE", number: "1095", evas: [] });
-    assert.equal(answer.formationRuns, 3);
-    assert.deepEqual(answer.formations.map(f => [f.n, f.groups.length, f.groups[0].name]), [[2, 1, "ICE9465"], [1, 1, "ICE0160"]]);
+    // Four runs have a known status; the unknown one and the one without vehicles are left out.
+    assert.equal(answer.formationRuns, 4);
+    assert.equal(answer.unplannedRuns, 3);
+    assert.deepEqual(answer.unplannedFormations.map(f => [f.n, f.groups.length, f.groups[0].name]), [[2, 1, "ICE9465"], [1, 1, "ICE0160"]]);
 });
 
 test("refuses train statistics without a token, with malformed trains or too many", async () => {

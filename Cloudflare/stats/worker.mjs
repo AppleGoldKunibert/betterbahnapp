@@ -158,7 +158,9 @@ async function handleTrainStats(request, env, now) {
 
 /// What the finished `runs` of one train say about it, and about its stops `query.evas`:
 /// - `runs`/`cancelled`: finished runs, and those cancelled altogether;
-/// - `formations`: the vehicles that ran it (most common first, in bahn.de's Wagenreihung shape);
+/// - `formationRuns`/`unplannedRuns`: runs with a Wagenreihung that bahn.de says matches or differs from
+///   the day's schedule, and those that differ; `unplannedFormations`: the vehicles that ran then (in
+///   bahn.de's Wagenreihung shape), so a train that is planned with another series on some days is no deviation;
 /// - per stop: runs that had the stop, how many cancelled it, the arrival and departure delays in
 ///   minutes (cancelled stops have none) and the platform moves `{ from: planned, to: actual, n }`.
 export function trainStatistics(runs, query, days = DEFAULT_DAYS) {
@@ -204,21 +206,27 @@ function stopStatistics(runs, eva) {
     return stop;
 }
 
-/// The vehicles that ran the train, one entry per distinct kind (series and coach types), with one
-/// example in bahn.de's Wagenreihung shape so the app names the series itself.
+/// The vehicles that replaced the planned ones: bahn.de compares each run's Wagenreihung with the day's
+/// schedule (`status`), so only runs it marks as differing count, one entry per distinct kind (series and
+/// coach types) with one example in bahn.de's Wagenreihung shape so the app names the series itself.
 function formationStatistics(runs, number) {
     const kinds = new Map();
     let counted = 0;
+    let unplanned = 0;
     for (const run of runs) {
-        const groups = ownGroups(run.formation?.groups, number);
+        const status = run.formation?.status;
+        if (status !== "MATCHES_SCHEDULE" && status !== "DIFFERS_FROM_SCHEDULE") continue;
+        const groups = ownGroups(run.formation.groups, number);
         if (groups.length === 0) continue;
         counted++;
+        if (status === "MATCHES_SCHEDULE") continue;
+        unplanned++;
         const signature = groups.map(groupSignature).join("|");
         const kind = kinds.get(signature) ?? { n: 0, groups };
         kind.n++;
         kinds.set(signature, kind);
     }
-    const formations = [...kinds.values()].sort((a, b) => b.n - a.n).slice(0, MAX_FORMATIONS).map(({ n, groups }) => ({
+    const unplannedFormations = [...kinds.values()].sort((a, b) => b.n - a.n).slice(0, MAX_FORMATIONS).map(({ n, groups }) => ({
         n,
         groups: groups.map(group => ({
             name: group.name ?? null,
@@ -227,7 +235,7 @@ function formationStatistics(runs, number) {
                 .map(vehicle => ({ vehicleID: vehicle.id ?? null, type: { constructionType: vehicle.type ?? null } })),
         })),
     }));
-    return { formationRuns: counted, formations };
+    return { formationRuns: counted, unplannedRuns: unplanned, unplannedFormations };
 }
 
 /// The groups running as this train: coupled trains list the other half's trainset too.

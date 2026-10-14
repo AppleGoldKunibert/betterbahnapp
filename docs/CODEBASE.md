@@ -386,7 +386,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   session) and reports them in batches to `Cloudflare/stats`, while Settings → "Zugdaten für Statistik teilen"
   (`AppSettings.shareTrainStatistics`, default on, per device) is on.
 - `Statistics/TrainStatistics.swift` – reads that data back (#316, `POST /train-stats`): `TrainStatistics` (a train's
-  runs of the last 30 days: per stop the arrival/departure delays, cancellations and platform moves; vehicles named by
+  runs of the last 30 days: per stop the arrival/departure delays, cancellations and platform moves; vehicles that ran instead of the planned ones (only runs bahn.de marks as differing from the day's schedule), named by
   `BahnDeClient.formation(from:)`), `TrainStatisticsClient`, and `TrainStatisticsStore` (cache per train and day, also
   off with the same setting; looks up EVA numbers Transitous stations lack via `BahnDeClient.evaNumber(for:)`).
   Everything is shown only from `TrainStatistics.minimumRuns` (5) runs. Views: `TrainStatisticsViews.swift` –
