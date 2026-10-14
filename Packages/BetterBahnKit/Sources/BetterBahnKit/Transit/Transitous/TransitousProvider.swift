@@ -488,14 +488,24 @@ public struct TransitousProvider: TransitProvider {
     /// True if `match` is a station of `town` (the user's, `NearbyTowns`) called what was typed after
     /// the town's name, a qualifier in brackets and "Bf"/"Bahnhof"/"S" are left out: "Essen Süd S" for
     /// "süd" in Essen (not Essen-Kray Süd), "Frankfurt (Main) Ostbahnhof" for "ost", "Hannover-
-    /// Nordstadt" for "nordstadt", "Dresden Flughafen" for "flughafen".
+    /// Nordstadt" for "nordstadt", "Dresden Flughafen" for "flughafen". When only the town is left
+    /// outside the brackets, the brackets hold the station's name: the geocoder's "Berlin (Ostbahnhof)"
+    /// for "ostbahnhof" in Berlin (#306), which München's stop called just "Ostbahnhof" beat otherwise.
     static func isLocalName(_ match: MGeocodeMatch, in town: String, query: String) -> Bool {
         let townWords = searchWords(town)
         guard let first = townWords.first, let ownTown = match.town,
               searchWords(ownTown).first.map({ !$0.isDisjoint(with: first) }) == true else { return false }
         let allTownWords = Set(townWords.flatMap { $0 })
+        func isTown(_ text: String) -> Bool {
+            let words = searchWords(text)
+            return !words.isEmpty && words.allSatisfy { !$0.isDisjoint(with: allTownWords) }
+        }
         func stationWords(_ text: String) -> [Set<String>] {
-            let withoutBrackets = text.replacingOccurrences(of: "\\([^)]*\\)", with: " ", options: .regularExpression)
+            var withoutBrackets = text.replacingOccurrences(of: "\\([^)]*\\)", with: " ", options: .regularExpression)
+            if isTown(withoutBrackets), let bracket = text.range(of: "\\([^)]*\\)", options: .regularExpression) {
+                let inside = String(text[bracket].dropFirst().dropLast())
+                if !isTown(inside) { withoutBrackets = inside }
+            }
             var words = searchWords(withoutBrackets).map { $0.union($0.compactMap(stationStem)) }
             let lines: Set<Set<String>> = [["s"], ["u"]]
             while let word = words.first, words.count > 1, !word.isDisjoint(with: allTownWords) || lines.contains(word) {
