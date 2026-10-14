@@ -4,7 +4,8 @@ import Synchronization
 /// The names stations are shown under (#205): DB's own for German stations ("Dresden-Neustadt" for DELFI's
 /// "Dresden Bahnhof Neustadt"), the national railway's with its accents for stations abroad ("Děčín hl.n." for
 /// "Decin hl.n."). From the offline list `Resources/StationNames.json` built by `scripts/make-station-names.py`
-/// from DB InfraGO's OpenStation data (Deutsche Bahn AG, CC0) and the national railways' stops in Transitous.
+/// from DB InfraGO's OpenStation data (Deutsche Bahn AG, CC0), DB's passenger names and the train stops of
+/// all feeds in Transitous.
 /// `Station.displayName` asks here, so journeys, boards, trips, saved journeys and widgets all agree; a
 /// station's ID and `name`, and so everything matched by them, stay as the feed has them.
 public enum StationNames {
@@ -13,7 +14,14 @@ public enum StationNames {
         let name: String
         /// Where the station's RIL100 codes lie; empty for the few without one in `Ril100.json`.
         let points: [Coordinate]
-        let words: Set<String>
+        let words: NameWords
+    }
+
+    /// A train stop of another railway's feed that is this German station under another name, e.g.
+    /// SNCF's "Munich" or European Sleeper's "Berlin Ostbf", where it lies.
+    struct Alias: Sendable {
+        let coordinate: Coordinate
+        let station: Int
     }
 
     struct StationAbroad: Sendable {
@@ -30,6 +38,8 @@ public enum StationNames {
         var cells: [Int: [Int]] = [:]
         /// Stations abroad by `abroadKey`.
         var abroad: [String: [StationAbroad]] = [:]
+        /// Other railways' names of German stations by `aliasKey`.
+        var aliases: [String: [Alias]] = [:]
     }
 
     private struct File: Decodable {
@@ -56,8 +66,20 @@ public enum StationNames {
             }
         }
 
+        struct AliasRow: Decodable {
+            let name: String, coordinate: Coordinate, station: Int
+
+            init(from decoder: any Decoder) throws {
+                var row = try decoder.unkeyedContainer()
+                name = try row.decode(String.self)
+                coordinate = Coordinate(latitude: try row.decode(Double.self), longitude: try row.decode(Double.self))
+                station = try row.decode(Int.self)
+            }
+        }
+
         let germany: [German]
         let abroad: [Abroad]
+        let aliases: [AliasRow]?
     }
 
     static let index: Index = {
@@ -65,11 +87,13 @@ public enum StationNames {
               let data = try? Data(contentsOf: url),
               let file = try? JSONDecoder().decode(File.self, from: data) else { return Index() }
         return makeIndex(germany: file.germany.map { ($0.dhid, $0.name, $0.evas, $0.points) },
-                         abroad: file.abroad.map { ($0.name, $0.coordinate) })
+                         abroad: file.abroad.map { ($0.name, $0.coordinate) },
+                         aliases: (file.aliases ?? []).map { ($0.name, $0.coordinate, $0.station) })
     }()
 
     static func makeIndex(germany: [(dhid: String, name: String, evas: [String], points: [Coordinate])],
-                          abroad: [(name: String, coordinate: Coordinate)]) -> Index {
+                          abroad: [(name: String, coordinate: Coordinate)],
+                          aliases: [(name: String, coordinate: Coordinate, station: Int)] = []) -> Index {
         var index = Index()
         for station in germany {
             let number = index.stations.count
@@ -82,6 +106,9 @@ public enum StationNames {
             let key = abroadKey(station.name)
             guard !key.isEmpty else { continue }
             index.abroad[key, default: []].append(StationAbroad(name: station.name, coordinate: station.coordinate))
+        }
+        for alias in aliases where index.stations.indices.contains(alias.station) {
+            index.aliases[aliasKey(alias.name), default: []].append(Alias(coordinate: alias.coordinate, station: alias.station))
         }
         return index
     }
@@ -127,32 +154,52 @@ public enum StationNames {
     /// `Ril100.json`) and still be it.
     static let matchRadius: Double = 600
 
+    /// How far a stop may be from the station when only the names' brackets differ ("Stade(Niederelbe)" for
+    /// "Stade"): further away it can be the twin town across the border, SBB's Laufenburg for Laufenburg (Baden).
+    static let coreMatchRadius: Double = 300
+
     /// How far a stop named with only a part of the station's name may be from it ("Mergelstetten" for
     /// "Heidenheim-Mergelstetten"): such a stop further away is more likely a bus stop named after it.
     static let partialMatchRadius: Double = 150
 
+    /// How far a stop may be from where another railway's feed has the station under that name.
+    static let aliasRadius: Double = 150
+
     /// DB's station for `station`: by the DHID in its ID (DELFI's and most German feeds' stop areas,
-    /// "de-DELFI_de:14612:16" is Dresden-Neustadt), by its EVA number (bahn.de's), else nearby under the
-    /// same name (PKP's "S+U Lichtenberg Bhf (Berlin)" is Berlin-Lichtenberg, FlixTrain's "Hamburg Central
-    /// Station (FlixTrain)" Hamburg Hbf) or close by under a part of it. A stop named more than the
-    /// station ("Hauptbahnhof (U, Tram)", "Heilbronn Hbf/Willy-Brandt-Platz") isn't it.
+    /// "de-DELFI_de:14612:16" is Dresden-Neustadt), by its EVA number (bahn.de's), by another railway's
+    /// name for it at that place (SNCF's "Munich", `Alias`), else nearby under the same name (PKP's "S+U
+    /// Lichtenberg Bhf (Berlin)" is Berlin-Lichtenberg, VBN's "Stade(Niederelbe)" Stade, "Hildesheim
+    /// Ostbahnhof" Hildesheim Ost) or close by under a part of it. A stop named more than the station
+    /// ("Hauptbahnhof (U, Tram)", "Heilbronn Hbf/Willy-Brandt-Platz") isn't it.
     static func germanStation(for station: Station, in index: Index) -> Int? {
         if let dhid = dhid(in: station.id), let number = index.byDHID[dhid] { return number }
         if let eva = station.evaNumber, let number = index.byEVA[eva] { return number }
         guard let coordinate = station.coordinate else { return nil }
+        if let alias = index.aliases[aliasKey(station.name)]?
+            .map({ ($0.station, $0.coordinate.distance(to: coordinate)) })
+            .filter({ $0.1 < aliasRadius }).min(by: { $0.1 < $1.1 }) {
+            return alias.0
+        }
         let center = cell(of: coordinate)
         let nearby = Set((-1...1).flatMap { dy in (-1...1).flatMap { dx in index.cells[center + dy * cellRow + dx] ?? [] } })
         guard !nearby.isEmpty else { return nil }
         let words = nameWords(station.name)
-        guard !words.isEmpty else { return nil }
+        guard !words.all.isEmpty else { return nil }
         return nearby.compactMap { number -> (number: Int, distance: Double)? in
-            let candidate = index.stations[number]
-            guard words.isSubset(of: candidate.words),
-                  let distance = candidate.points.map(coordinate.distance(to:)).min(),
-                  distance < (words == candidate.words ? matchRadius : partialMatchRadius) else { return nil }
+            let candidate = index.stations[number].words
+            let radius = words.all == candidate.all ? matchRadius
+                : !words.core.isEmpty && words.core == candidate.core ? coreMatchRadius
+                : words.all.isSubset(of: candidate.all) ? partialMatchRadius : 0
+            guard let distance = index.stations[number].points.map(coordinate.distance(to:)).min(),
+                  distance < radius else { return nil }
             return (number, distance)
         }
         .min { ($0.distance, $0.number) < ($1.distance, $1.number) }?.number
+    }
+
+    /// A feed's name as `Alias`es are looked up: `folded`, only letters and digits.
+    static func aliasKey(_ name: String) -> String {
+        folded(name).filter { $0.isLetter || $0.isNumber }
     }
 
     /// The stop area's DHID in a stop ID, as `scripts/make-station-names.py` writes it: "de:14612:16" in
@@ -175,14 +222,39 @@ public enum StationNames {
         "bahnhof", "bf", "bhf", "station", "central", "gare", "flixtrain", "hp",
     ]
 
+    /// The words of a name as compared with a station's.
+    struct NameWords: Sendable, Equatable {
+        /// Every word, also those in brackets.
+        let all: Set<String>
+        /// The words outside brackets ("Stade(Niederelbe)" → stade), unless the brackets say the stop is
+        /// something else than the station ("Hauptbahnhof (U, Tram)", "Kehl (Gr)"): then all of them.
+        let core: Set<String>
+    }
+
+    /// Bracketed words saying a stop is something else than the station: another mode's or a border point.
+    private static let ownStopWords: Set<String> = [
+        "u", "s", "tram", "bus", "zob", "strab", "hsb", "ubahn", "sbahn", "stadtbahn", "gr", "grenze",
+    ]
+
     /// The words of a name as shown, for comparing a stop with a station: umlauts spelt out or not
-    /// ("Woerth" is "Wörth"), without `stationWords`. "Frankfurt (Main) Hauptbahnhof" → frankfurt, main,
-    /// hbf; "S+U Lichtenberg Bhf (Berlin)" → berlin, lichtenberg; "Hauptbahnhof (U, Tram)" keeps u, tram.
-    static func nameWords(_ name: String) -> Set<String> {
+    /// ("Woerth" is "Wörth"), without `stationWords`, and "…bahnhof" or "…bf" as what it is short of,
+    /// since DB names a town's "Ostbahnhof" "… Ost" ("Hildesheim Ost") and European Sleeper writes
+    /// "Berlin Ostbf". "Frankfurt (Main) Hauptbahnhof" → frankfurt, main, hbf; "S+U Lichtenberg Bhf
+    /// (Berlin)" → berlin, lichtenberg; "Hauptbahnhof (U, Tram)" keeps u, tram.
+    static func nameWords(_ name: String) -> NameWords {
         // FlixTrain's "Dortmund Central Station (FlixTrain)" is Dortmund Hbf.
         let shown = folded(Station.displayName(for: name)).replacingOccurrences(of: "central station", with: "hbf")
-        let words = shown.split { !$0.isLetter && !$0.isNumber }.map(String.init)
-        return Set(words.filter { !stationWords.contains($0) })
+        let all = words(in: shown)
+        let core = words(in: shown.replacingOccurrences(of: #"\([^)]*\)"#, with: " ", options: .regularExpression))
+        return NameWords(all: all, core: all.subtracting(core).isDisjoint(with: ownStopWords) ? core : all)
+    }
+
+    private static func words(in text: String) -> Set<String> {
+        Set(text.split { !$0.isLetter && !$0.isNumber }.map { word -> String in
+            if word.count > 7, word.hasSuffix("bahnhof") { return String(word.dropLast(7)) }
+            if word.count > 3, word.hasSuffix("bf") { return String(word.dropLast(2)) }
+            return String(word)
+        }.map { $0 == "haupt" ? "hbf" : $0 }.filter { !$0.isEmpty && !stationWords.contains($0) })
     }
 
     /// Lower case without accents, "ß" as "ss" and "ö"/"oe", "ä"/"ae", "ü"/"ue", "å"/"aa" alike: "Wörth"

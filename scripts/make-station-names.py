@@ -10,6 +10,12 @@ name comes from DB's RIS as bahn.expert's station search has it, found by EVA nu
 unofficial, and asking it for every station takes about an hour: names already in StationNames.json are
 kept (by EVA numbers), so a rerun only asks for new stations; --refresh asks for all again.
 
+Other railways' feeds in Transitous name German stations their own way, without a stop area (DHID) in the
+stop ID: SNCF's "Munich", European Sleeper's "Berlin Ostbf", Rejseplanen's "Neumünster St.". Their train
+stops within ALIAS_RADIUS of a DB station are kept as aliases (name and position → station). Only train
+stops, so a bus stop by the station isn't one; and none of the German feeds', whose train stops near a
+station can be a tram or museum railway's ("Karlsruhe Entenfang", "Benndorf").
+
 Abroad: the national railways' names with their accents ("Děčín hlavní nádraží"), as Transitous has them
 from their own feeds; DELFI and others write them without ("Decin hl.n."). Only names with letters outside
 ASCII are kept, none at a German station, and those without accents that are the same as one with them
@@ -19,6 +25,7 @@ ASCII are kept, none at a German station, and those without accents that are the
     python3 scripts/make-station-names.py netex.xml [--refresh]
 """
 import json
+import math
 import re
 import sys
 import time
@@ -54,6 +61,10 @@ ABROAD = [
     ("dk-rejseplanen_", "", (54.5, 8.0, 57.8, 15.3)),
     ("se-Trafiklab_", "", (55.3, 10.9, 60.5, 19.0)),
 ]
+# Germany's rough borders (south, west, north, east), for the other railways' train stops in it.
+GERMANY = (47.2, 5.8, 55.1, 15.1)
+# How far (metres) another railway's train stop may be from a DB station's position to be that station.
+ALIAS_RADIUS = 300
 # A stop abroad this close (degrees, about 1 km) to a German station is that station, under another name.
 NEAR_GERMAN_STATION = 0.01
 # Stops of one name this close (about 500 m) are one station.
@@ -163,10 +174,10 @@ def collect(lat1, lon1, lat2, lon2, found):
     print(f"{lat1:.2f},{lon1:.2f}: {len(found)} train stops", flush=True)
 
 
-def abroad_stations(german_points):
-    """(name, lat, lon) of the national railways' stations whose names have accents."""
+def train_stops():
+    """Every train stop Transitous has in Germany and the countries in ABROAD, by stop ID."""
     found = {}
-    for south, west, north, east in sorted({box for _, _, box in ABROAD}):
+    for south, west, north, east in sorted({box for _, _, box in ABROAD} | {GERMANY}):
         lat = south
         while lat < north:
             lon = west
@@ -174,6 +185,43 @@ def abroad_stations(german_points):
                 collect(lat, lon, min(lat + 1, north), min(lon + 1, east), found)
                 lon += 1
             lat += 1
+    return found
+
+
+def distance(a, b):
+    """Metres between two (lat, lon) points."""
+    dlat, dlon = math.radians(b[0] - a[0]), math.radians(b[1] - a[1])
+    h = math.sin(dlat / 2) ** 2 + math.cos(math.radians(a[0])) * math.cos(math.radians(b[0])) * math.sin(dlon / 2) ** 2
+    return 2 * 6_371_000 * math.atan2(math.sqrt(h), math.sqrt(1 - h))
+
+
+def aliases(found, germany):
+    """(name, lat, lon, station) for other railways' train stops at a DB station (index into germany)
+    whose name isn't the station's."""
+    grid = {}
+    for number, row in enumerate(germany):
+        for point in zip(row[3][0::2], row[3][1::2]):
+            grid.setdefault((round(point[0] * 100), round(point[1] * 100)), []).append((number, point))
+    kept = {}
+    for stop_id, stop in sorted(found.items()):
+        name = " ".join(stop["name"].split())
+        position = (stop["lat"], stop["lon"])
+        if stop_id.startswith("de-") or BORDER_POINT.search(name):
+            continue
+        cell = (round(position[0] * 100), round(position[1] * 100))
+        near = [(distance(position, point), number) for dy in (-1, 0, 1) for dx in (-1, 0, 1)
+                for number, point in grid.get((cell[0] + dy, cell[1] + dx), [])]
+        best = min(near, default=None)
+        if best is None or best[0] >= ALIAS_RADIUS or name == germany[best[1]][1]:
+            continue
+        row = (name, round(position[0], 4), round(position[1], 4), best[1])
+        if not any(k[0] == name and k[3] == best[1] and distance(position, k[1:3]) < 100 for k in kept.values()):
+            kept[row] = row
+    return sorted(kept)
+
+
+def abroad_stations(found, german_points):
+    """(name, lat, lon) of the national railways' stations whose names have accents."""
     grid = {}
     for lat, lon in german_points:
         grid.setdefault((round(lat * 100), round(lon * 100)), []).append((lat, lon))
@@ -235,14 +283,16 @@ def main(netex_path, refresh=False):
         keys.add(dhid)
         germany.append([dhid, name, evas, [x for point in points for x in point]])
     germany.sort(key=lambda row: (row[0] or "~", row[1]))
-    abroad = abroad_stations([p for row in germany for p in zip(row[3][0::2], row[3][1::2])])
+    found = train_stops()
+    other_names = aliases(found, germany)
+    abroad = abroad_stations(found, [p for row in germany for p in zip(row[3][0::2], row[3][1::2])])
     with open(OUT, "w", encoding="utf-8") as file:
-        file.write('{"germany":[\n')
-        file.write(",\n".join(json.dumps(row, ensure_ascii=False, separators=(",", ":")) for row in germany))
-        file.write('\n],"abroad":[\n')
-        file.write(",\n".join(json.dumps(list(row), ensure_ascii=False, separators=(",", ":")) for row in abroad))
-        file.write("\n]}\n")
-    print(f"{len(germany)} German and {len(abroad)} stations abroad -> {OUT}")
+        for key, rows in [("germany", germany), ("aliases", other_names), ("abroad", abroad)]:
+            file.write(('{"' if key == "germany" else '],"') + key + '":[\n')
+            file.write(",\n".join(json.dumps(list(row), ensure_ascii=False, separators=(",", ":")) for row in rows))
+            file.write("\n")
+        file.write("]}\n")
+    print(f"{len(germany)} German stations, {len(other_names)} other names of them, {len(abroad)} stations abroad -> {OUT}")
 
 
 if __name__ == "__main__":

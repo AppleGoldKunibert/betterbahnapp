@@ -2065,12 +2065,38 @@ private final class TwinTrainProtocol: URLProtocol, @unchecked Sendable {
     /// station isn't it.
     @Test func feedsWithoutStopAreasByPositionAndName() {
         #expect(stop("eu-flixbus_38c4c04e", "Hamburg Central Station (FlixTrain)", 53.553, 10.0066).displayName == "Hamburg Hbf")
+        #expect(stop("eu-european-sleeper_8003004", "Berlin Ostbf", 52.5104, 13.4349).displayName == "Berlin Ostbahnhof")
         #expect(stop("fr-horaires-sncf_FR::LMO:7195ca90", "Woerth (Rhein)", 49.0457, 8.2732).displayName == "Wörth (Rhein)")
         #expect(stop("cz-CZPTT_czptt:stop:DE:10533", "Bad Schandau", 50.9193, 14.1377).displayName == "Bad Schandau")
         #expect(stop("de-KVV_de:08121:1114", "Heilbronn Hbf/Willy-Brandt-Platz", 49.1427, 9.2089).displayName
             == "Heilbronn Hbf/Willy-Brandt-Platz")
         #expect(stop("de-DELFI_de:09162:6", "Hauptbahnhof (U, Tram)", 48.1412, 11.5605).displayName == "Hbf (U, Tram)")
         #expect(stop("de-DELFI_000010975601", "Nordhausen Nord", 51.4941, 10.7876).displayName == "Nordhausen Nord")
+    }
+
+    /// Other railways' names for German stations, from their feeds: another language, Danish "St.", a
+    /// short "…bf" (#205, "Berlin Ostbf").
+    @Test func otherRailwaysNamesOfGermanStations() {
+        #expect(stop("fr-horaires-sncf_FR::LMO:719d92c0", "Munich", 48.1401, 11.5587).displayName == "München Hbf")
+        #expect(stop("fr-horaires-sncf_FR::LMU:71d62ef0", "Sarrebruck", 49.241, 6.991).displayName == "Saarbrücken Hbf")
+        #expect(stop("be-sncb_8015199", "Aix-la-Chapelle Ouest", 50.7808, 6.0705).displayName == "Aachen West")
+        #expect(stop("dk-rejseplanen_000008024643", "Neumünster St.", 54.0756, 9.9797).displayName == "Neumünster")
+        // Only where that feed has it: Munich elsewhere is another place.
+        #expect(stop("fr-horaires-sncf_1", "Munich", 48.2, 11.6).displayName == "Munich")
+    }
+
+    /// German feeds' spellings: "…bahnhof" for DB's "… Ost", a town or river in brackets DB leaves out.
+    /// A tram stop or another railway's station next to a DB station keeps its name.
+    @Test func germanFeedsSpellings() {
+        #expect(stop("de-VBN_490800283002", "Hildesheim Ostbahnhof", 52.1466, 9.9622).displayName == "Hildesheim Ost")
+        #expect(stop("de-VBN_000004990089", "Stade(Niederelbe)", 53.5963, 9.4764).displayName == "Stade")
+        #expect(stop("de-VBN_490800022600", "Lehrte(b Hannover)", 52.3767, 9.9746).displayName == "Lehrte")
+        #expect(stop("de-KVV_de:08212:51", "Karlsruhe Entenfang", 49.0106, 8.3584).displayName == "Karlsruhe Entenfang")
+        // Across the Rhine from Laufenburg (Baden); the border point next to Kehl.
+        #expect(stop("ch-opentransportdataswiss27_ch:1:sloid:322:0:1", "Laufenburg", 47.5598, 8.0615).displayName == "Laufenburg")
+        #expect(stop("de-DELFI_000008000008", "Kehl(Gr)", 48.5756, 7.8011).displayName == "Kehl (Gr)")
+        #expect(stop("de-DELFI_000000000001_G", "Benndorf (Mansfelder Land), Bahnhof", 51.5755, 11.492).displayName
+            == "Benndorf (Mansfelder Land)")
     }
 
     /// bahn.de's stations by their EVA number.

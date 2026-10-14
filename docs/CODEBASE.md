@@ -153,8 +153,14 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   OpenStation's differ for about one in ten ("Barmbek" for "Hamburg-Barmbek", "Celle Pbf"), unless they only differ in
   spaces; abroad the national feeds' stops in Transitous with accents).
   Matched by the stop area's DHID in the stop ID (DELFI, VBB, ÖBB …; "de:08135:0620" = "de:08135:620"), a bahn.de
-  station's EVA number, else within 600 m under the same name (150 m under a part of it; "Hamburg Central Station
-  (FlixTrain)" is Hamburg Hbf, "Heilbronn Hbf/Willy-Brandt-Platz" stays); abroad by the name without accents
+  station's EVA number, another railway's name for it at that place (`aliases` in the JSON: every non-German feed's
+  train stop within 300 m of a DB station, e.g. SNCF's "Munich", European Sleeper's "Berlin Ostbf", Rejseplanen's
+  "Neumünster St."; matched by name within 150 m), else within 600 m under the same name (`nameWords`: "…bahnhof"/"…bf"
+  as their stem, so "Hildesheim Ostbahnhof" is DB's "Hildesheim Ost"), 300 m with only the brackets differing unless
+  they name a mode or border point ("Stade(Niederelbe)" is Stade; "Hauptbahnhof (U, Tram)", "Kehl (Gr)" and SBB's
+  Laufenburg across the Rhine stay) or 150 m under a part of it ("Hamburg Central
+  Station (FlixTrain)" is Hamburg Hbf, "Heilbronn Hbf/Willy-Brandt-Platz" stays). German feeds' stops get no aliases:
+  their train stops next to a DB station can be a tram's or museum railway's ("Karlsruhe Entenfang"). Abroad by the name without accents
   (`StationNames.folded`, "Kolin (CZ)" without its country mark) within 3 km. Only the shown name changes: `id`/`name`
   and everything matched by them stay the feed's. Headsigns read like the stop they name (`MPlace.displayName(ofHeadsign:)`),
   else `StationNames.displayName(forName:)` (also for the train search's ends). `Station.displayName(for:)` shortens "hlavní nádraží" to "hl.n." and
