@@ -267,8 +267,8 @@ Stuttgart | reichenbach | Reichenbach (Fils) | 1
 Görlitz | reichenbach | Reichenbach (Oberlausitz) | 1
 Prenzlau | seehausen | Seehausen (Uckermark) | 1
 Lindau | wangen | Wangen (Allgäu) | 1
-Frankfurt | friedberg | Friedberg (Hessen) | 1
-- | friedberg | Friedberg (Hessen) | 1
+Frankfurt | friedberg | Friedberg (Hess) | 1
+- | friedberg | Friedberg (Hess) | 1
 Schwerin | schönberg | Schönberg (Meckl) | 1
 Augsburg | neuburg | Neuburg (Donau) | 1
 München | neuburg | Neuburg (Donau) | 1
@@ -439,8 +439,8 @@ Freiburg | rheinfelden | Rheinfelden (Baden); =Rheinfelden | 3
 Basel | rheinfelden | Rheinfelden | 1
 Freiburg | laufenburg | Laufenburg (Baden); =Laufenburg | 2
 # Kirchheim
-Stuttgart | kirchheim | Kirchheim (T) | 1
-- | kirchheim | Kirchheim (T) | 3
+Stuttgart | kirchheim | Kirchheim (Teck) | 1
+- | kirchheim | Kirchheim (Teck) | 3
 # Lichtenberg
 München | lichtenberg | Lichtenberg | 2
 # Bergen
@@ -617,7 +617,7 @@ Saarbrücken | thionville | Thionville | 1
 Strasbourg | strasbourg | =Strasbourg | 1
 
 # ===== City stations typed by local short name / first letters while in that city
-Berlin | ostbahnhof | Ostbahnhof | 1
+Berlin | ostbahnhof | Berlin Ostbahnhof | 2
 Berlin | jungfernheide | Jungfernheide | 1
 Berlin | jungf | Jungfernheide | 1
 Berlin | gesu | Gesundbrunnen | 2
@@ -1193,7 +1193,7 @@ Köln | gera | Gera Hbf | 1
 Berlin | wittenberg | Lutherstadt Wittenberg Hbf | 1
 Berlin | gießen | Gießen | 1
 Berlin | zwickau | Zwickau | 1
-Berlin | ludwigshafen | Ludwigshafen (Rhein) Hbf | 1
+Berlin | ludwigshafen | Ludwigshafen (Rh) Hbf | 1
 Köln | hamm | Hamm (Westf) | 1
 München | ulm | Ulm Hbf | 1
 - | ulm | Ulm Hbf | 1
