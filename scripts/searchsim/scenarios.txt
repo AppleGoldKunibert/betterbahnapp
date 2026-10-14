@@ -617,7 +617,7 @@ Saarbrücken | thionville | Thionville | 1
 Strasbourg | strasbourg | =Strasbourg | 1
 
 # ===== City stations typed by local short name / first letters while in that city
-Berlin | ostbahnhof | Ostbahnhof | 1
+Berlin | ostbahnhof | Berlin | 1
 Berlin | jungfernheide | Jungfernheide | 1
 Berlin | jungf | Jungfernheide | 1
 Berlin | gesu | Gesundbrunnen | 2

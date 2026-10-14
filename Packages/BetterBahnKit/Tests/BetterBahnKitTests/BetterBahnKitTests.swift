@@ -860,6 +860,16 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         let ofOst = match("ofOst", "Offenbach Ost", 50.10, 8.78, "DE", ["SUBURBAN"], 0.00223, town: "Offenbach am Main")
         #expect(ranked("ost", [ofOst, ffmOst], near: frankfurt, town: "Frankfurt").first == "ffmOst")
 
+        // The geocoder names Berlin's "Berlin (Ostbahnhof)", München's just "Ostbahnhof" (#306).
+        let berlin = Coordinate(latitude: 52.52, longitude: 13.405)
+        let muenchenOst = match("muenchenOst", "Ostbahnhof", 48.127, 11.605, "DE", ["HIGHSPEED_RAIL", "REGIONAL_RAIL"],
+                                0.0074, town: "München")
+        let berlinOst = match("berlinOst", "Berlin (Ostbahnhof)", 52.510, 13.435, "DE", ["HIGHSPEED_RAIL", "REGIONAL_RAIL"],
+                              0.0050, town: "Berlin")
+        #expect(ranked("ostbahnhof", [muenchenOst, berlinOst], near: berlin, town: "Berlin").first == "berlinOst")
+        #expect(ranked("ostbahnhof", [berlinOst, muenchenOst], near: Coordinate(latitude: 48.137, longitude: 11.576),
+                       town: "München").first == "muenchenOst")
+
         // Trams too: "neumarkt" in Köln.
         let cologne = Coordinate(latitude: 50.938, longitude: 6.960)
         let neumarkt = match("neumarkt", "Köln Neumarkt", 50.936, 6.947, "DE", ["TRAM", "BUS"], 0.00037, town: "Köln")
