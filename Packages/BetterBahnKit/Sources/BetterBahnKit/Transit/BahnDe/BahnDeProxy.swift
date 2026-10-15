@@ -8,7 +8,7 @@ import Foundation
 public struct BahnDeProxy: Sendable {
     /// Where the server runs: an Oracle Cloud VM in Frankfurt behind Caddy (see Server/bahnde-proxy/README.md).
     /// nil makes the app ask only the Worker.
-    public static let baseURL: URL? = URL(string: "https://138-2-157-89.sslip.io")
+    public static let baseURL: URL? = URL(string: "https://92-5-144-111.sslip.io")
 
     /// The app's proxy, nil while there is no server.
     public static let shared: BahnDeProxy? = baseURL.map { BahnDeProxy(baseURL: $0) }
