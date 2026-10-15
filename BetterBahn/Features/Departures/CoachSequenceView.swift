@@ -5,7 +5,8 @@ import SwiftUI
 /// minutes before the departure until 15 minutes after it (`CoachSequence.unfoldsByItself`), else
 /// with a tap. Shown once bahn.de has a coach sequence for the train (the same request
 /// `TrainFormationLabel` makes, so it is only sent once), or else vagonweb.cz has the planned one
-/// ("Plan-Wagenreihung").
+/// ("Plan-Wagenreihung"). While our bahn.de server doesn't answer, it says the current one is missing:
+/// "Plan-Wagenreihung · Aktuelle nicht verfügbar", or without a plan "Aktuelle Wagenreihung nicht verfügbar".
 struct CoachSequenceDisclosure: View {
     /// bahn.de's request, only for departures within `BahnDeClient.formationLookahead`.
     let request: BahnDeClient.FormationRequest?
@@ -41,8 +42,15 @@ struct CoachSequenceDisclosure: View {
 
     @Environment(AppModel.self) private var model
     @State private var sequence: CoachSequence?
+    /// Our bahn.de server didn't answer, so the current Wagenreihung is missing.
+    @State private var liveMissing = false
     /// Opened or closed by hand; nil follows the departure time.
     @State private var expanded: Bool?
+
+    private func title(of sequence: CoachSequence) -> String {
+        if sequence.source == .bahnDe { return "Wagenreihung" }
+        return liveMissing ? "Plan-Wagenreihung · Aktuelle nicht verfügbar" : "Plan-Wagenreihung"
+    }
 
     var body: some View {
         // A ZStack rather than Group: `.task` never fires on a view that is empty.
@@ -51,7 +59,7 @@ struct CoachSequenceDisclosure: View {
                 TimelineView(.everyMinute) { context in
                     let open = expanded ?? CoachSequence.unfoldsByItself(departure: departure, now: context.date)
                     VStack(alignment: .leading, spacing: 12) {
-                        CoachSequenceToggle(title: sequence.source == .bahnDe ? "Wagenreihung" : "Plan-Wagenreihung", open: open) {
+                        CoachSequenceToggle(title: title(of: sequence), open: open) {
                             withAnimation(.snappy) { expanded = !open }
                         }
                         if open {
@@ -62,15 +70,33 @@ struct CoachSequenceDisclosure: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, spacing)
                 }
+            } else if liveMissing {
+                Label("Aktuelle Wagenreihung nicht verfügbar", systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, spacing)
             }
         }
         .task(id: plannedRequest) {
             sequence = nil
-            if let request, let live = try? await model.coachSequence(for: request), !live.coaches.isEmpty {
-                sequence = live
-            } else if let plannedRequest {
+            liveMissing = false
+            var missing = false
+            if let request {
+                do {
+                    if let live = try await model.coachSequence(for: request), !live.coaches.isEmpty {
+                        sequence = live
+                        return
+                    }
+                } catch TransitError.rateLimited {
+                    missing = true
+                } catch {}
+            }
+            if let plannedRequest {
                 sequence = await model.plannedCoachSequence(for: plannedRequest)
             }
+            // Only once the plan has answered, so the notice doesn't flash before it.
+            liveMissing = missing
         }
     }
 }

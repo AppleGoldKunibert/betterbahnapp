@@ -221,8 +221,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   and DB's live times (`ezZeit`) for every train on boards (not subway, tram, bus; RE/RB, S-Bahn and other brands by run number or name) (`correctingFromBoard`, `applyingLiveTimes`), which
   beat DELFI's forecasts in Transitous; the journey details' live times likewise win on legs and trains (`applyingLiveTimes(from:to:)`, RJ 383 had no delay at Bad Schandau otherwise), but not over a delay or early time DB Timetables already put on a stop (`keepingDelays`: bahn.de showed +7 for RE 3 3354 at Gesundbrunnen where DB had +19), and never turning a time that is 2+ minutes early into "on time" (`turnsEarlyIntoOnTime`: bahn.de shows early trains as ±0, on boards too). Responses are
   cached; when the server fails it is left alone (`BahnDeProxy.gate`: 10 min after a 403/429/452, 2 min when down) and
-  every request throws `rateLimited`, which `TrainFormationLabel` shows as "Aktuelle Wagenreihung nicht verfügbar" (also
-  above vagonweb's plan). There is no other way to bahn.de: the Worker and the phone's hidden browser were refused (#342).
+  every request throws `rateLimited`, which `CoachSequenceDisclosure` shows as "Plan-Wagenreihung · Aktuelle nicht
+  verfügbar" above vagonweb's plan, or "Aktuelle Wagenreihung nicht verfügbar" without one (the Tz under the train's name
+  stays, from bahn.expert). There is no other way to bahn.de: the Worker and the phone's hidden browser were refused (#342).
   The journey details' train attribute `RP` ("Reservierungspflicht") says a reservation is mandatory (`requiresReservation(for:)`, also for other
   railways' trains like SJ's D 301 or a Nightjet via `lookupReference`; shares the `journeyCourse` cache).
 - `Transit/Vagonweb/` – vagonweb.cz (used with their permission, #95): scheduled train compositions for the
