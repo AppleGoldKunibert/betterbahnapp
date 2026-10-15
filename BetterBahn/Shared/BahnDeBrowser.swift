@@ -8,8 +8,9 @@ import WebKit
 /// through, like bahn.de in Safari. The page starts loading as soon as the Worker is blocked (`prepare`)
 /// and is reused for at most half an hour; each request is a `fetch` inside it, so bahn.de sees the
 /// cookies its page set. The first request waits until bahn.de's bot protection has checked the page
-/// (`checked(_:)`): since October 2026 bahn.de refuses API requests from anything but a checked browser. It is let go once the Worker answers again (`release`) or after 5 minutes
-/// without a request, so it doesn't sit in memory and wake up for nothing.
+/// (`checked(_:)`): since October 2026 bahn.de refuses API requests from anything but a checked browser.
+/// It is let go once the Worker answers again (`release`) or after 5 minutes without a request, so it
+/// doesn't sit in memory and wake up for nothing.
 @MainActor
 final class BahnDeBrowser {
     static let shared = BahnDeBrowser()
