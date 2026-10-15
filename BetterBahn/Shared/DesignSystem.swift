@@ -361,11 +361,12 @@ struct TrainFormationLabel: View {
             formation = remembered
             blocked = false
             var found: TrainFormation?
+            var bahnDeBlocked = false
             if let request {
                 do {
                     found = try await model.formation(for: request)
                 } catch TransitError.rateLimited {
-                    blocked = remembered == nil
+                    bahnDeBlocked = true
                 } catch {}
             }
             if found?.unitDescription == nil, let fallback = await model.trainType(for: line, on: date)?.formation,
@@ -375,8 +376,13 @@ struct TrainFormationLabel: View {
             if let found, found.unitDescription != nil || found.isIC1 {
                 // An IC 1 has no Tz: hide (and forget) one remembered by an older version.
                 formation = found
-                blocked = false
                 if let leg { model.rememberFormation(found, for: leg) }
+                return
+            }
+            // Only once every fallback has answered (no flash while vagonweb loads), and not when
+            // vagonweb's plan can still show the Wagenreihung (e.g. a train to Denmark).
+            if bahnDeBlocked, remembered == nil, let request {
+                blocked = await model.plannedCoachSequence(for: request, direction: false) == nil
             }
         }
     }

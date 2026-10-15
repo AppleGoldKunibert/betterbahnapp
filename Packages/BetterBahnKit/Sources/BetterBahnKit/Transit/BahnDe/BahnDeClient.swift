@@ -85,7 +85,9 @@ extension Leg {
 /// (`WorkerAuth`). Responses are cached, and a 403/429 (passed through by the Worker) pauses every
 /// bahn.de request through the Worker for `BahnDeGate.cooldown` instead of retrying. Meanwhile the app
 /// asks bahn.de from the phone itself, in a hidden browser (`BahnDeBrowserFallback`), so one block of
-/// the shared Worker doesn't take bahn.de's data away from every user.
+/// the shared Worker doesn't take bahn.de's data away from every user. Since October 2026 bahn.de also
+/// refuses every handshake that isn't a browser's, the Worker's included: our own server with a browser's
+/// TLS fingerprint (`BahnDeProxy`, #342) is asked first, the Worker only while it fails.
 public struct BahnDeClient: Sendable {
     public static let baseURL = URL(string: "https://betterbahn2.betterbahn.workers.dev/web/api")!
     /// Deutsche Bahn's administration ID.
@@ -102,14 +104,17 @@ public struct BahnDeClient: Sendable {
     let auth: WorkerAuth?
     /// Asks bahn.de from the phone when the Worker is blocked; none in widgets and tests.
     let browser: BahnDeBrowserFallback?
+    /// Our own server with a browser's TLS fingerprint, asked before the Worker (#342); none in tests.
+    let proxy: BahnDeProxy?
 
-    /// `auth` and `browser` default to the shared ones on the app's real session and none on others (tests).
+    /// `auth`, `browser` and `proxy` default to the shared ones on the app's real session and none on others (tests).
     public init(http: HTTPClient = HTTPClient(timeout: 8), gate: BahnDeGate = .shared, auth: WorkerAuth? = nil,
-                browser: BahnDeBrowserFallback? = nil) {
+                browser: BahnDeBrowserFallback? = nil, proxy: BahnDeProxy? = nil) {
         self.http = http
         self.gate = gate
         self.auth = http.workerAuth(auth)
         self.browser = browser ?? (http.session === URLSession.shared ? .shared : nil)
+        self.proxy = proxy ?? (http.session === URLSession.shared ? .shared : nil)
     }
 
     /// Caches are only shared on the app's real session; a client on a custom session (tests,
@@ -266,9 +271,9 @@ public struct BahnDeClient: Sendable {
         }
     }
 
-    /// bahn.de only has the coach sequence for departures in the coming hours (late in the evening it
-    /// already had the next morning's), so later ones aren't asked for at all and go to bahn.expert.
-    public static let formationLookahead: TimeInterval = 12 * 3600
+    /// bahn.de only has the coach sequence for departures in the coming hours (at night it already had
+    /// the next evening's, 18 hours ahead), so later ones aren't asked for at all and go to bahn.expert.
+    public static let formationLookahead: TimeInterval = 24 * 3600
 
     /// The request for `line`'s formation at the first of `stops` where it still departs, if that
     /// departure is soon enough for bahn.de to know the coach sequence (see `formationLookahead`).
@@ -378,7 +383,13 @@ public struct BahnDeClient: Sendable {
         } catch {
             var reason = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
             // Usually not this request's fault: an earlier answer paused every bahn.de request.
-            if case TransitError.rateLimited = error, let block = await gate.blockDescription { reason += " (\(block))" }
+            if case TransitError.rateLimited = error {
+                if let block = await gate.blockDescription { reason += " (\(block))" }
+                // The Worker's pause sends requests to the phone's browser: say why that failed too.
+                let browserState = await browser?.stateDescription ?? "keiner"
+                reason += " · Browser: \(browserState)"
+                if let proxy { reason += " · Server: \(await proxy.gate.blockDescription ?? "nicht gesperrt")" }
+            }
             await Self.sequenceNotes.set("\(reason) · \(asked)", for: key)
             throw error
         }
@@ -606,6 +617,23 @@ public struct BahnDeClient: Sendable {
     /// GET through the Worker and its shared cooldown: while bahn.de is blocking the Worker, nothing is
     /// sent there at all and the phone's browser asks instead, if the app has one.
     func get<T: Decodable>(_ url: URL, as type: T.Type) async throws -> T {
+        if let proxy, let proxied = proxy.url(for: url), await !proxy.gate.isBlocked {
+            do {
+                let value = try await http.get(proxied, as: type, headers: Self.headers(), auth: auth)
+                await browser?.workerAnswered()
+                return value
+            } catch let error as TransitError where error.isBahnDeAnswer {
+                // bahn.de's own answer (404 etc.): the Worker would get the same.
+                throw error
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let error as URLError where error.code == .cancelled {
+                throw error
+            } catch {
+                // Down, paused or refused by bahn.de: the Worker and the browser take over for a while.
+                await proxy.gate.pause(after: error, url: url)
+            }
+        }
         if await gate.isBlocked {
             return try await viaBrowser(url, as: type)
         }
@@ -679,6 +707,14 @@ public actor BahnDeBrowserFallback {
         self.release = release
     }
 
+    /// For the Wagenreihung's note: "keiner" without a browser, its own pause, else "nicht gesperrt".
+    var stateDescription: String {
+        get async {
+            guard load != nil else { return "keiner" }
+            return await gate.blockDescription ?? "nicht gesperrt"
+        }
+    }
+
     /// The Worker was blocked: get the page ready, once.
     func workerBlocked() async {
         guard load != nil, !isActive else { return }
@@ -738,6 +774,20 @@ public actor BahnDeGate {
         if isBlocked { throw TransitError.rateLimited }
     }
 
+    /// How long the proxy is left alone after it failed without being blocked (down, offline, paused).
+    static let failurePause: TimeInterval = 2 * 60
+
+    /// Any failure: a block pauses for `cooldown` (as `report`), anything else for `failurePause`.
+    func pause(after error: Error, url: URL? = nil) {
+        if let error = error as? TransitError, error.isBlocked {
+            report(error, url: url)
+            return
+        }
+        blockedUntil = Date.now.addingTimeInterval(Self.failurePause)
+        let time = Date.now.formatted(Date.FormatStyle(timeZone: BahnDeClient.berlin).hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+        blockReason = "\((error as? LocalizedError)?.errorDescription ?? String(describing: error)) um \(time)"
+    }
+
     func report(_ error: TransitError, url: URL? = nil) {
         guard error.isBlocked else { return }
         blockedUntil = Date.now.addingTimeInterval(Self.cooldown)
@@ -761,7 +811,17 @@ extension TransitError {
     var isBlocked: Bool {
         switch self {
         case .rateLimited: true
-        case .http(let status, _): status == 403
+        // 452 is what bahn.de answers since October 2026 instead of 403.
+        case .http(let status, _): status == 403 || status == 452
+        default: false
+        }
+    }
+
+    /// bahn.de's own answer to the request (not found, invalid), which another way of asking wouldn't change.
+    var isBahnDeAnswer: Bool {
+        switch self {
+        case .http(let status, _): (400..<500).contains(status) && !isBlocked && status != 401
+        case .decoding: true
         default: false
         }
     }
