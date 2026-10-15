@@ -159,9 +159,11 @@ public struct BahnDeClient: Sendable {
 
     static let trainProducts: Set<String> = ["ICE", "EC_IC", "IR", "REGIONAL", "SBAHN"]
 
-    /// EVA number for a station from any source (nearest match by name).
+    /// EVA number for a station from any source: the feed's, the offline station list's, else bahn.de's
+    /// search (nearest match by name), which keeps a screen full of stops from asking bahn.de for each.
     public func evaNumber(for station: Station) async throws -> String? {
         if let eva = station.evaNumber { return eva }
+        if let eva = StationNames.evaNumber(for: station) { return eva }
         return Self.bestEVA(for: station, among: try await candidates(station.name))
     }
 

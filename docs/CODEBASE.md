@@ -165,7 +165,10 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   (`StationNames.folded`, "Kolin (CZ)" without its country mark) within 3 km. Only the shown name changes: `id`/`name`
   and everything matched by them stay the feed's. Headsigns read like the stop they name (`MPlace.displayName(ofHeadsign:)`),
   else `StationNames.displayName(forName:)` (also for the train search's ends). `Station.displayName(for:)` shortens "hlavní nádraží" to "hl.n." and
-  "hlavná stanica" to "hl.st."; `StationNames.preload()` loads the list at launch;
+  "hlavná stanica" to "hl.st."; `StationNames.preload()` loads the list at launch. `StationNames.evaNumber(for:)` gives a
+  German station's EVA number from the same list (only for stations with a single one, not Berlin Hbf's levels), which
+  `BahnDeClient.evaNumber(for:)` uses before bahn.de's search, so statistics, Timetables and the Wagenreihung don't
+  ask bahn.de once per stop;
   `TrainMessage` (DB delay reasons/notices); `RideMatch`; `OperatorBrand` (feed agency name → EVU logo, #166: PNGs rendered from Wikimedia Commons SVGs in
   `BetterBahn/Assets.xcassets/Operators/Operator-<brand>`, shown by `OperatorLabel` on a transparent background, in dark mode on a light plate if `needsPlateInDarkMode`; unknown operators keep the building icon; DB S-Bahns with their own name ("S-Bahn Berlin GmbH", "DB Regio AG S-Bahn München") show the S-Bahn "S", other "DB Regio AG …" trains the DB Regio logo; `OperatorBrand.displayName` shortens names: "ODEG", "Transdev" for "S-Bahn Hannover (Transdev)"). International trains have several operators: bahn.de's journey details give each stop's railway (`adminID`, UIC code: 80 DB, 54 ČD, …; "BEF" attributes if present) (`BahnDeClient.trainOperators(for:)` → `[TrainOperator]`, narrowed to a leg's section), shown by `TrainOperatorsLabel` as logos side by side (`OperatorLogo`) and in the route at the stops where the train changes hands (`operatorStops(for:)`); the feed only ever names one.
 - `Models/TripLap.swift` – `Trip.lap(at:near:arriving:)`: Transitous' trip for a ring line (S41/S42) is the vehicle's whole day
