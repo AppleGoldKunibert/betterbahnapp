@@ -266,9 +266,9 @@ public struct BahnDeClient: Sendable {
         }
     }
 
-    /// bahn.de only has the coach sequence for departures in the coming hours (late in the evening it
-    /// already had the next morning's), so later ones aren't asked for at all and go to bahn.expert.
-    public static let formationLookahead: TimeInterval = 12 * 3600
+    /// bahn.de only has the coach sequence for departures in the coming hours (at night it already had
+    /// the next evening's, 18 hours ahead), so later ones aren't asked for at all and go to bahn.expert.
+    public static let formationLookahead: TimeInterval = 24 * 3600
 
     /// The request for `line`'s formation at the first of `stops` where it still departs, if that
     /// departure is soon enough for bahn.de to know the coach sequence (see `formationLookahead`).

@@ -240,7 +240,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   coaches, class changes; order ignored) against vagonweb's plan.
 - `Transit/BahnExpert/` – bahn.expert, as fallback for the train type (`TrainTypeLookup`) when bahn.de
   has no coach sequence and vagonweb has none either: it has DB's planned formation (`DB-plan`) for days
-  ahead; bahn.de is only asked for departures within `BahnDeClient.formationLookahead` (12 h). Needs a
+  ahead; bahn.de is only asked for departures within `BahnDeClient.formationLookahead` (24 h). Needs a
   `Referer` and a non-curl User-Agent (else an empty 206).
   Also tells whether a connecting train waits (`TransferDisposition`, "Anschluss wartet (nicht)" in `TransferRow`):
   `disposition(from:to:)` finds the arriving train (`journey/find`, no administration so ODEG etc. match), its
