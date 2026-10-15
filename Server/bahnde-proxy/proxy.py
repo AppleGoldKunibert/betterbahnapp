@@ -10,12 +10,16 @@ bahn.de tolerates this as long as the traffic stays small, so the server keeps i
 - answers are cached (seconds for live data, a day for stations), and identical requests running at the
   same time share one upstream request;
 - each app install may make `RATE_LIMIT` requests a minute;
-- after bahn.de refused a request (403, 429, 452), nothing goes there for `BLOCK_PAUSE` seconds: the app
-  gets 503 and asks the Worker instead.
+- at most `MAX_PARALLEL` requests go to bahn.de at the same time; a burst of parallel requests got the
+  server refused (403) while single ones from the same address went through;
+- after bahn.de refused a request (403, 429, 452), the server starts a new session (bahn.de's bot cookies
+  of the old one may be flagged) and nothing goes there for a while: `FIRST_PAUSE` seconds, doubling with
+  each refusal soon after the last one up to `BLOCK_PAUSE`. Meanwhile the app gets 503 and says the live
+  data is missing.
 
 Environment: TOKEN_SECRET (required, same as in the Workers), PORT (8080), IMPERSONATE (safari),
-BLOCK_PAUSE (600), RATE_LIMIT (120), ALLOW_UNATTESTED ("true" lets requests without a token through,
-for testing only).
+FIRST_PAUSE (60), BLOCK_PAUSE (600), MAX_PARALLEL (4), RATE_LIMIT (120), ALLOW_UNATTESTED ("true" lets
+requests without a token through, for testing only).
 """
 
 import asyncio
@@ -55,6 +59,8 @@ BLOCK_STATUSES = {403, 429, 452}
 MAX_CACHE_ENTRIES = 5000
 MAX_QUERY_LENGTH = 2000
 UPSTREAM_TIMEOUT = 10
+# A refusal within this many seconds after the last pause ended doubles the next pause.
+STRIKE_WINDOW = 1800
 
 log = logging.getLogger("bahnde-proxy")
 
@@ -107,18 +113,26 @@ class Answer:
 
 @dataclass
 class Proxy:
-    """The proxy's state; `fetch(url) -> Answer` asks bahn.de (replaced in tests)."""
+    """The proxy's state; `fetch(url) -> Answer` asks bahn.de (replaced in tests), `fetch.reset()`, when
+    there, starts a new session."""
 
     fetch: object
     secret: str
     allow_unattested: bool = False
+    first_pause: float = 60
     block_pause: float = 600
+    max_parallel: int = 4
     rate_limit: int = 120
     clock: object = time.monotonic
     cache: OrderedDict = field(default_factory=OrderedDict)
     running: dict = field(default_factory=dict)
     paused_until: float = 0
+    last_pause: float = 0
     requests: dict = field(default_factory=dict)
+    slots: asyncio.Semaphore = None
+
+    def __post_init__(self):
+        self.slots = asyncio.Semaphore(self.max_parallel)
 
     def authorized(self, request):
         """The key the request is rate limited by, or None when it isn't allowed."""
@@ -173,13 +187,28 @@ class Proxy:
             self.running.pop(url, None)
 
     async def _ask(self, url, ttl):
-        answer = await self.fetch(url)
+        async with self.slots:
+            if self.paused:
+                # Refused while this request waited for a slot.
+                return paused_answer()
+            answer = await self.fetch(url)
         if 200 <= answer.status < 300:
             self.store(url, answer, ttl)
-        elif answer.status in BLOCK_STATUSES:
-            self.paused_until = self.clock() + self.block_pause
-            log.warning("bahn.de answered %s, pausing for %ss", answer.status, int(self.block_pause))
+        elif answer.status in BLOCK_STATUSES and not self.paused:
+            # Requests already running when bahn.de refused come back refused too; one pause covers them.
+            self.block(answer.status, url)
         return answer
+
+    def block(self, status, url):
+        now = self.clock()
+        recent = self.last_pause and now - self.paused_until < STRIKE_WINDOW
+        self.last_pause = min(self.last_pause * 2, self.block_pause) if recent else min(self.first_pause, self.block_pause)
+        self.paused_until = now + self.last_pause
+        reset = getattr(self.fetch, "reset", None)
+        if reset:
+            reset()
+        path = url[len(UPSTREAM):].split("?")[0]
+        log.warning("bahn.de answered %s to %s, new session, pausing for %ss", status, path, int(self.last_pause))
 
     @property
     def paused(self):
@@ -209,7 +238,7 @@ class Proxy:
 
         hit = self.cached(url)
         if hit is None and self.paused:
-            # The app asks the Worker instead; nothing goes to bahn.de until the pause is over.
+            # The app says the live data is missing; nothing goes to bahn.de until the pause is over.
             return json_response(503, {"error": "paused"}, {"Retry-After": str(int(self.paused_until - self.clock()) + 1)})
         try:
             answer, from_cache = (hit, True) if hit is not None else await self.upstream(url, ttl)
@@ -224,6 +253,10 @@ class Proxy:
         })
 
 
+def paused_answer():
+    return Answer(503, json.dumps({"error": "paused"}).encode())
+
+
 def json_response(status, body, extra=None):
     return web.Response(status=status, text=json.dumps(body), headers={
         "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", **(extra or {})})
@@ -232,15 +265,26 @@ def json_response(status, body, extra=None):
 # MARK: - bahn.de with a browser's handshake
 
 
-def browser_fetch(impersonate):
+class BrowserFetch:
     """`fetch` asking bahn.de with curl_cffi, which makes the TLS/HTTP2 handshake of the browser
-    `impersonate` and sends its User-Agent; the other headers are those bahn.de's own page sends."""
-    from curl_cffi.requests import AsyncSession
+    `impersonate` and sends its User-Agent; the other headers are those bahn.de's own page sends.
+    `reset()` drops the session and its cookies; the next request starts a new one."""
 
-    session = AsyncSession(impersonate=impersonate, timeout=UPSTREAM_TIMEOUT)
+    def __init__(self, impersonate):
+        self.impersonate = impersonate
+        self.session = None
 
-    async def fetch(url):
-        response = await session.get(url, headers={
+    def reset(self):
+        old, self.session = self.session, None
+        if old is not None:
+            asyncio.ensure_future(old.close())
+
+    async def __call__(self, url):
+        from curl_cffi.requests import AsyncSession
+
+        if self.session is None:
+            self.session = AsyncSession(impersonate=self.impersonate, timeout=UPSTREAM_TIMEOUT)
+        response = await self.session.get(url, headers={
             "Accept": "application/json",
             "Accept-Language": "de",
             "Referer": "https://www.bahn.de/buchung/fahrplan/suche",
@@ -248,8 +292,6 @@ def browser_fetch(impersonate):
         })
         return Answer(response.status_code, response.content,
                       response.headers.get("Content-Type") or "application/json; charset=utf-8")
-
-    return fetch
 
 
 def make_app(proxy):
@@ -267,10 +309,12 @@ def main():
     if not secret and not allow_unattested:
         raise SystemExit("TOKEN_SECRET is missing (the same value as in the Cloudflare Workers).")
     proxy = Proxy(
-        fetch=browser_fetch(os.environ.get("IMPERSONATE", "safari")),
+        fetch=BrowserFetch(os.environ.get("IMPERSONATE", "safari")),
         secret=secret,
         allow_unattested=allow_unattested,
+        first_pause=float(os.environ.get("FIRST_PAUSE", "60")),
         block_pause=float(os.environ.get("BLOCK_PAUSE", "600")),
+        max_parallel=int(os.environ.get("MAX_PARALLEL", "4")),
         rate_limit=int(os.environ.get("RATE_LIMIT", "120")),
     )
     web.run_app(make_app(proxy), port=int(os.environ.get("PORT", "8080")), access_log=None)

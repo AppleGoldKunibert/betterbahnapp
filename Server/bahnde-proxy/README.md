@@ -11,7 +11,10 @@ bahn.de tolerates this as long as the traffic stays small, as bahn.expert has do
 it small:
 - **Cache:** answers are cached (30 s for live data, a day for stations) and identical requests share one call.
 - **Rate limit:** at most `RATE_LIMIT` requests a minute per app install.
-- **Pause:** after bahn.de refused a request, nothing goes there for `BLOCK_PAUSE` seconds.
+- **One at a time:** at most `MAX_PARALLEL` requests go to bahn.de at once. A burst of 17 parallel requests got the
+  server refused (403) on 2026-10-15, while single requests from the same address went through.
+- **Pause:** after bahn.de refused a request, the server starts a new session (fresh cookies) and nothing goes
+  there for `FIRST_PAUSE` seconds; each refusal soon after the last pause doubles it, up to `BLOCK_PAUSE`.
 
 It mirrors the Worker: the same `/web/api/…` paths (GET only, the list in `proxy.py`) and the same App Attest
 tokens (`X-BetterBahn-Token`, signed with `TOKEN_SECRET`). The app asks it first (`BahnDeProxy` in
@@ -23,7 +26,9 @@ as before. The server keeps no logs of who asked.
 | `TOKEN_SECRET` | — | Required. The same value as in `betterbahn2`, `betterbahn`, `betterbahn-pass`. |
 | `PORT` | `8080` | |
 | `IMPERSONATE` | `safari` | curl_cffi browser target. If bahn.de starts refusing it, try `safari_ios`, `firefox` or `chrome`. |
-| `BLOCK_PAUSE` | `600` | Seconds without bahn.de requests after a 403/429/452. |
+| `FIRST_PAUSE` | `60` | Seconds without bahn.de requests after a 403/429/452. |
+| `BLOCK_PAUSE` | `600` | The longest pause, reached when refusals keep coming. |
+| `MAX_PARALLEL` | `4` | Requests going to bahn.de at the same time. |
 | `RATE_LIMIT` | `120` | Requests per minute per app install. |
 | `ALLOW_UNATTESTED` | — | `true` lets requests without a token through. Only for a quick test, never in production. |
 

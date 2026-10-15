@@ -23,12 +23,23 @@ class FakeBahnDe:
         self.status = status
         self.delay = delay
         self.urls = []
+        self.resets = 0
+        self.running = 0
+        self.most_running = 0
+
+    def reset(self):
+        self.resets += 1
 
     async def __call__(self, url):
         self.urls.append(url)
-        if self.delay:
-            await asyncio.sleep(self.delay)
-        return proxy.Answer(self.status, f'{{"url": "{url}"}}'.encode())
+        self.running += 1
+        self.most_running = max(self.most_running, self.running)
+        try:
+            if self.delay:
+                await asyncio.sleep(self.delay)
+            return proxy.Answer(self.status, f'{{"url": "{url}"}}'.encode())
+        finally:
+            self.running -= 1
 
 
 class Clock:
@@ -98,18 +109,45 @@ class ProxyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([a.status for a in answers], [200] * 5)
         self.assertEqual(len(self.bahn_de.urls), 1)
 
-    async def test_a_block_pauses_bahn_de_and_isnt_cached(self):
-        await self.start(FakeBahnDe(status=452), block_pause=600)
+    async def test_a_block_pauses_bahn_de_starts_a_new_session_and_isnt_cached(self):
+        await self.start(FakeBahnDe(status=452))
         first = await self.get(ORTE)
         self.assertEqual(first.status, 452)
         self.assertEqual(first.headers["Cache-Control"], "no-store")
+        self.assertEqual(self.bahn_de.resets, 1)
         paused = await self.get("/web/api/reiseloesung/abfahrten?ortExtId=8011160")
         self.assertEqual(paused.status, 503)
         self.assertEqual(len(self.bahn_de.urls), 1, "nothing goes to bahn.de while paused")
         self.assertTrue((await (await self.client.get("/health")).json())["paused"])
-        self.clock.now += 601
+        self.clock.now += 61
         self.bahn_de.status = 200
         self.assertEqual((await self.get(ORTE)).status, 200)
+
+    async def test_refusals_soon_after_a_pause_pause_longer_up_to_the_limit(self):
+        await self.start(FakeBahnDe(status=403), first_pause=60, block_pause=200)
+        pauses = []
+        for _ in range(4):
+            await self.get(ORTE)
+            pauses.append(self.proxy.paused_until - self.clock.now)
+            self.clock.now = self.proxy.paused_until + 1
+        self.assertEqual(pauses, [60, 120, 200, 200])
+        self.clock.now += proxy.STRIKE_WINDOW
+        await self.get(ORTE)
+        self.assertEqual(self.proxy.paused_until - self.clock.now, 60, "a refusal long after starts over")
+
+    async def test_only_a_few_requests_go_to_bahn_de_at_once(self):
+        await self.start(FakeBahnDe(delay=0.02), max_parallel=2)
+        answers = await asyncio.gather(*(self.get(f"{ORTE}&n={n}") for n in range(8)))
+        self.assertEqual([a.status for a in answers], [200] * 8)
+        self.assertEqual(self.bahn_de.most_running, 2)
+
+    async def test_a_refused_burst_pauses_once_and_holds_back_the_waiting_requests(self):
+        await self.start(FakeBahnDe(status=403, delay=0.02), max_parallel=2)
+        answers = await asyncio.gather(*(self.get(f"{ORTE}&n={n}") for n in range(8)))
+        self.assertEqual(sorted(a.status for a in answers), [403, 403] + [503] * 6)
+        self.assertEqual(len(self.bahn_de.urls), 2, "the waiting requests never went out")
+        self.assertEqual(self.bahn_de.resets, 1)
+        self.assertEqual(self.proxy.paused_until - self.clock.now, 60)
 
     async def test_a_cached_answer_is_still_served_while_paused(self):
         await self.start()
