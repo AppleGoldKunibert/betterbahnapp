@@ -11,7 +11,7 @@ bahn.de tolerates this as long as the traffic stays small, so the server keeps i
   same time share one upstream request;
 - each app install may make `RATE_LIMIT` requests a minute;
 - after bahn.de refused a request (403, 429, 452), nothing goes there for `BLOCK_PAUSE` seconds: the app
-  gets 503 and asks the Worker instead.
+  gets 503 and says the live data is missing.
 
 Environment: TOKEN_SECRET (required, same as in the Workers), PORT (8080), IMPERSONATE (safari),
 BLOCK_PAUSE (600), RATE_LIMIT (120), ALLOW_UNATTESTED ("true" lets requests without a token through,
@@ -209,7 +209,7 @@ class Proxy:
 
         hit = self.cached(url)
         if hit is None and self.paused:
-            # The app asks the Worker instead; nothing goes to bahn.de until the pause is over.
+            # The app says the live data is missing; nothing goes to bahn.de until the pause is over.
             return json_response(503, {"error": "paused"}, {"Retry-After": str(int(self.paused_until - self.clock()) + 1)})
         try:
             answer, from_cache = (hit, True) if hit is not None else await self.upstream(url, ttl)

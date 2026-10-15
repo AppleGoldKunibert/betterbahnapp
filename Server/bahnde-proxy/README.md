@@ -50,8 +50,8 @@ reportedly isn't affected, and Always Free resources stay free there.
 
 **Free container hosting** (e.g. Koyeb, Render): create a web service from this folder (`Server/bahnde-proxy`,
 Dockerfile), set `TOKEN_SECRET` as a secret and pick a region in Germany or nearby (Frankfurt). The host gives you
-an HTTPS address. Free services that sleep when idle make the first request after a pause slow; the app then uses
-the Worker for two minutes. Their addresses are shared cloud ranges, which Akamai may treat more strictly than a
+an HTTPS address. Free services that sleep when idle make the first request after a pause slow; the app then shows
+no live data for two minutes. Their addresses are shared cloud ranges, which Akamai may treat more strictly than a
 home connection.
 
 **Home server or VPS:**
