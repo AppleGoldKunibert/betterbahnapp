@@ -6,9 +6,13 @@ import Synchronization
 /// (#336). Every figure is an experience value, shown only from `minimumRuns` runs on.
 public struct TrainStatistics: Sendable, Hashable, Decodable {
     /// Fewer runs say too little to show anything; 1 in `testMode`.
-    public static var minimumRuns: Int { testMode.load(ordering: .relaxed) ? 1 : 5 }
+    public static var minimumRuns: Int { testMode ? 1 : 5 }
     /// Shows figures from a single run on, to check what the server answers (the app turns it on in debug builds).
-    public static let testMode = Atomic<Bool>(false)
+    public static var testMode: Bool {
+        get { testModeFlag.load(ordering: .relaxed) }
+        set { testModeFlag.store(newValue, ordering: .relaxed) }
+    }
+    private static let testModeFlag = Atomic<Bool>(false)
     /// A train counts as on time up to this many minutes late.
     public static let onTimeMinutes = 5
 

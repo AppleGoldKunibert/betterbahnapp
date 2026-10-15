@@ -58,7 +58,7 @@ struct TrainStatisticsRows {
         }
 
         #if DEBUG
-        if TrainStatistics.testMode.load(ordering: .relaxed) { rows += Self.testRows(lookup: lookup, stops: stops, from: rows.count) }
+        if TrainStatistics.testMode { rows += Self.testRows(lookup: lookup, stops: stops, from: rows.count) }
         #endif
 
         guard !rows.isEmpty else { return nil }

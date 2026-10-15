@@ -51,8 +51,8 @@ import Testing
     @Test func testModeShowsFiguresFromASingleRun() {
         let stop = TrainStatistics.Stop(runs: 1, arrival: [4])
         #expect(stop.arrivalSummary() == nil)
-        TrainStatistics.testMode.store(true, ordering: .relaxed)
-        defer { TrainStatistics.testMode.store(false, ordering: .relaxed) }
+        TrainStatistics.testMode = true
+        defer { TrainStatistics.testMode = false }
         #expect(stop.arrivalSummary()?.average == 4)
         #expect(TrainStatistics(category: "ICE", number: "1", runs: 1).cancelledShare == 0)
     }

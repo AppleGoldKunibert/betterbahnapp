@@ -10,7 +10,7 @@ struct BetterBahnApp: App {
     init() {
         #if DEBUG
         // Train statistics from one run on, with their raw values (TrainStatisticsRows).
-        TrainStatistics.testMode.store(true, ordering: .relaxed)
+        TrainStatistics.testMode = true
         #endif
         let model = AppModel()
         _model = State(initialValue: model)
