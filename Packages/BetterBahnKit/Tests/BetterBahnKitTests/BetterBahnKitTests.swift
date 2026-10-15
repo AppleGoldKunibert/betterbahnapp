@@ -3751,6 +3751,29 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(calls.value.withLock { $0 } == 1)
         #expect(await browser.gate.isBlocked)
     }
+
+    /// When the Worker and the phone's browser are both blocked, the Wagenreihung's note names both pauses.
+    @Test func blockedSequenceNoteNamesBrowser() async throws {
+        let browser = BahnDeBrowserFallback { _ in (403, Data(#"{"code":"OPS_BLOCKED"}"#.utf8)) }
+        let gate = BahnDeGate()
+        await gate.report(.rateLimited)
+        let bahnDe = BahnDeClient(http: HTTPClient(session: .shared), gate: gate, browser: browser)
+        let request = BahnDeClient.FormationRequest(
+            category: "ICE", number: "646",
+            station: Station(id: "8000152", name: "Hannover Hbf", coordinate: nil, evaNumber: "8000152", source: .bahnDe),
+            plannedDeparture: Date(timeIntervalSince1970: 1_800_000_000))
+
+        await #expect(throws: TransitError.rateLimited) { try await bahnDe.coachSequence(request) }
+        let note = try #require(await bahnDe.coachSequenceNote(for: request))
+        #expect(note.contains("Browser: Pause bis "))
+        #expect(note.contains("(…/vehicle-sequence)"))
+
+        let withoutBrowser = BahnDeClient(http: HTTPClient(session: .shared), gate: gate, browser: BahnDeBrowserFallback())
+        var other = request
+        other.number = "647"
+        await #expect(throws: TransitError.rateLimited) { try await withoutBrowser.coachSequence(other) }
+        #expect(await withoutBrowser.coachSequenceNote(for: other)?.contains("Browser: keiner") == true)
+    }
 }
 
 /// A value a test's closures record into (a `Mutex` itself can't be captured).

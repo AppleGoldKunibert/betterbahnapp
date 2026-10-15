@@ -378,7 +378,12 @@ public struct BahnDeClient: Sendable {
         } catch {
             var reason = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
             // Usually not this request's fault: an earlier answer paused every bahn.de request.
-            if case TransitError.rateLimited = error, let block = await gate.blockDescription { reason += " (\(block))" }
+            if case TransitError.rateLimited = error {
+                if let block = await gate.blockDescription { reason += " (\(block))" }
+                // The Worker's pause sends requests to the phone's browser: say why that failed too.
+                let browserState = await browser?.stateDescription ?? "keiner"
+                reason += " · Browser: \(browserState)"
+            }
             await Self.sequenceNotes.set("\(reason) · \(asked)", for: key)
             throw error
         }
@@ -677,6 +682,14 @@ public actor BahnDeBrowserFallback {
         self.load = load
         self.prepare = prepare
         self.release = release
+    }
+
+    /// For the Wagenreihung's note: "keiner" without a browser, its own pause, else "nicht gesperrt".
+    var stateDescription: String {
+        get async {
+            guard load != nil else { return "keiner" }
+            return await gate.blockDescription ?? "nicht gesperrt"
+        }
     }
 
     /// The Worker was blocked: get the page ready, once.
