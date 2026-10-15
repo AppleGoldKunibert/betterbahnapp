@@ -19,6 +19,14 @@ public enum TicketType: String, Codable, Sendable, CaseIterable, Hashable {
         case .bahnCard100: "BC100"
         }
     }
+
+    /// Short name with its article in the dative, e.g. "dem D-Ticket" (for "Mit …").
+    public var dativeShortName: String {
+        switch self {
+        case .deutschlandticket: "dem D-Ticket"
+        case .bahnCard100: "der BC100"
+        }
+    }
 }
 
 /// Decides whether a train can be used with the chosen ticket.
