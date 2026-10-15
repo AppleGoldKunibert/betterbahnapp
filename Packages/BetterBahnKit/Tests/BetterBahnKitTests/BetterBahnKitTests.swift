@@ -3844,6 +3844,85 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
     }
 }
 
+/// Our own bahn.de server (#342) is asked before the Worker, and the Worker takes over while it fails.
+@Suite struct BahnDeProxyTests {
+    private func client(proxyHost: String) -> (BahnDeClient, BahnDeProxy, URLSession) {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [ProxyRoutingProtocol.self]
+        let session = URLSession(configuration: config)
+        let proxy = BahnDeProxy(baseURL: URL(string: "https://\(proxyHost)")!)
+        return (BahnDeClient(http: HTTPClient(session: session), gate: BahnDeGate(), browser: BahnDeBrowserFallback(), proxy: proxy),
+                proxy, session)
+    }
+
+    @Test func mapsWorkerRequestsOntoTheServer() {
+        let proxy = BahnDeProxy(baseURL: URL(string: "https://proxy.example:8443")!)
+        let url = BahnDeClient.baseURL.appending(path: "reiseloesung/orte").appending(queryItems: [.init(name: "suchbegriff", value: "Köln Hbf")])
+        #expect(proxy.url(for: url)?.absoluteString == "https://proxy.example:8443/web/api/reiseloesung/orte?suchbegriff=K%C3%B6ln%20Hbf")
+        #expect(proxy.url(for: URL(string: "https://betterbahn2.betterbahn.workers.dev/timetables/v1/station/8000105")!) == nil)
+    }
+
+    @Test func asksTheServerBeforeTheWorker() async throws {
+        ProxyRoutingProtocol.answers.withLock { $0["proxy-ok.test"] = 200 }
+        let (bahnDe, proxy, session) = client(proxyHost: "proxy-ok.test")
+        defer { session.invalidateAndCancel() }
+
+        #expect(try await bahnDe.searchStations("ServerFirst").map(\.id) == ["8000105"])
+        #expect(ProxyRoutingProtocol.count(host: "proxy-ok.test") == 1)
+        #expect(ProxyRoutingProtocol.count(query: "ServerFirst", host: "betterbahn2.betterbahn.workers.dev") == 0)
+        #expect(await !proxy.gate.isBlocked)
+    }
+
+    @Test func theWorkerTakesOverWhileTheServerFails() async throws {
+        ProxyRoutingProtocol.answers.withLock { $0["proxy-down.test"] = 503 }
+        let (bahnDe, proxy, session) = client(proxyHost: "proxy-down.test")
+        defer { session.invalidateAndCancel() }
+
+        #expect(try await bahnDe.searchStations("ServerDown").map(\.id) == ["8000105"])
+        #expect(await proxy.gate.isBlocked)
+        #expect(try await bahnDe.searchStations("ServerDown").map(\.id) == ["8000105"])
+        // The server was asked once, then left alone; the Worker answered both times.
+        #expect(ProxyRoutingProtocol.count(host: "proxy-down.test") == 1)
+        #expect(ProxyRoutingProtocol.count(query: "ServerDown", host: "betterbahn2.betterbahn.workers.dev") == 2)
+    }
+
+    @Test func bahnDesOwnAnswersAndBlocksAreTold() {
+        #expect(TransitError.http(status: 452, body: nil).isBlocked)
+        #expect(!TransitError.http(status: 452, body: nil).isBahnDeAnswer)
+        #expect(TransitError.http(status: 404, body: nil).isBahnDeAnswer)
+        #expect(!TransitError.http(status: 401, body: nil).isBahnDeAnswer)
+        #expect(!TransitError.rateLimited.isBahnDeAnswer)
+    }
+}
+
+/// The Worker answers a station search; a test's server answers with the status in `answers` (by host).
+private final class ProxyRoutingProtocol: URLProtocol, @unchecked Sendable {
+    static let answers = Mutex<[String: Int]>([:])
+    static let requests = Mutex<[URL]>([])
+
+    static func count(query: String? = nil, host: String) -> Int {
+        requests.withLock { urls in
+            urls.filter { $0.host() == host && (query.map { q in $0.absoluteString.contains(q) } ?? true) }.count
+        }
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let url = request.url!
+        Self.requests.withLock { $0.append(url) }
+        let status = Self.answers.withLock { $0[url.host() ?? ""] } ?? 200
+        let body = status == 200
+            ? #"[{"extId":"8000105","name":"Frankfurt(Main)Hbf","type":"ST","products":["ICE"]}]"#
+            : #"{"error":"paused"}"#
+        let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
 /// A value a test's closures record into (a `Mutex` itself can't be captured).
 private final class Recorded<Value: Sendable>: Sendable {
     let value: Mutex<Value>

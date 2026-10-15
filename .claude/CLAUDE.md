@@ -17,6 +17,7 @@ and comments are English.
 | `Packages/BetterBahnKit/` | Local SwiftPM package with all models, networking (Transitous, bahn.de, DB Timetables, vagonweb, bahn.expert, bahn.jetzt, Träwelling) and logic. Tests live here. |
 | `Config/` | xcconfigs, Info.plists, entitlements. |
 | `Cloudflare/` | Workers: `betterbahn` (OAuth bounce, privacy policy, support page, short links), `bahnde-proxy` (`betterbahn2`), `pass-signer`, `stats`, `checkin-push`, `shared` (App Attest). |
+| `Server/` | `bahnde-proxy`: Docker server asking bahn.de with a browser's TLS fingerprint (the app asks it before `betterbahn2`). |
 | `scripts/` | Rebuilds offline data (station hints, RIL100 codes); `searchsim/` runs Kit tests on Linux. |
 | `docs/` | This project map, App Store notes, data sources. |
 | `.github/workflows/` | CI: `pr-build.yml` (Kit tests + app build on macOS), `pr-secrets.yml`, `sync-prod.yml`. |
