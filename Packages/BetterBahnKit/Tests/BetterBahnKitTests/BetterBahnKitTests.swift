@@ -3697,9 +3697,10 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
                      (station: station("3", "Later"), departure: Optional(at(60)))]
         #expect(BahnDeClient.formationRequest(line: line, stops: stops, now: now)?.station.name == "Next")
         #expect(BahnDeClient.formationRequest(line: line, stops: [(station: station("4", "Tonight"), departure: at(8 * 60))], now: now)?.station.name == "Tonight")
-        #expect(BahnDeClient.formationRequest(line: line, stops: [(station: station("5", "Tomorrow"), departure: at(13 * 60))], now: now) == nil)
+        #expect(BahnDeClient.formationRequest(line: line, stops: [(station: station("4", "Tomorrow morning"), departure: at(18 * 60))], now: now)?.station.name == "Tomorrow morning")
+        #expect(BahnDeClient.formationRequest(line: line, stops: [(station: station("5", "Tomorrow"), departure: at(25 * 60))], now: now) == nil)
         // vagonweb's planned Wagenreihung has no lookahead.
-        #expect(BahnDeClient.formationRequest(line: line, stops: [(station: station("5", "Tomorrow"), departure: at(13 * 60))], now: now, lookahead: nil)?.station.name == "Tomorrow")
+        #expect(BahnDeClient.formationRequest(line: line, stops: [(station: station("5", "Tomorrow"), departure: at(25 * 60))], now: now, lookahead: nil)?.station.name == "Tomorrow")
         let regional = Line(name: "RE 5", number: "5", product: .regional, operatorName: nil)
         #expect(BahnDeClient.formationRequest(line: regional, stops: stops, now: now) == nil)
     }
@@ -3817,6 +3818,29 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         await #expect(throws: TransitError.rateLimited) { try await bahnDe.searchStations("Frankfurt") }
         #expect(calls.value.withLock { $0 } == 1)
         #expect(await browser.gate.isBlocked)
+    }
+
+    /// When the Worker and the phone's browser are both blocked, the Wagenreihung's note names both pauses.
+    @Test func blockedSequenceNoteNamesBrowser() async throws {
+        let browser = BahnDeBrowserFallback { _ in (403, Data(#"{"code":"OPS_BLOCKED"}"#.utf8)) }
+        let gate = BahnDeGate()
+        await gate.report(.rateLimited)
+        let bahnDe = BahnDeClient(http: HTTPClient(session: .shared), gate: gate, browser: browser)
+        let request = BahnDeClient.FormationRequest(
+            category: "ICE", number: "646",
+            station: Station(id: "8000152", name: "Hannover Hbf", coordinate: nil, evaNumber: "8000152", source: .bahnDe),
+            plannedDeparture: Date(timeIntervalSince1970: 1_800_000_000))
+
+        await #expect(throws: TransitError.rateLimited) { try await bahnDe.coachSequence(request) }
+        let note = try #require(await bahnDe.coachSequenceNote(for: request))
+        #expect(note.contains("Browser: Pause bis "))
+        #expect(note.contains("(…/vehicle-sequence)"))
+
+        let withoutBrowser = BahnDeClient(http: HTTPClient(session: .shared), gate: gate, browser: BahnDeBrowserFallback())
+        var other = request
+        other.number = "647"
+        await #expect(throws: TransitError.rateLimited) { try await withoutBrowser.coachSequence(other) }
+        #expect(await withoutBrowser.coachSequenceNote(for: other)?.contains("Browser: keiner") == true)
     }
 }
 
