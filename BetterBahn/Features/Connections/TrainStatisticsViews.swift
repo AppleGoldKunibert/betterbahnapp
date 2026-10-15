@@ -16,8 +16,8 @@ struct StatisticsStop: Hashable {
     var platform: String?
 }
 
-/// What past runs say about a train, as short lines: delays, cancellations, platform changes and
-/// vehicles. Only what has enough runs behind it (`TrainStatistics.minimumRuns`) shows up.
+/// What past runs say about a train, as short lines: delays, cancellations and platform changes.
+/// Only what has enough runs behind it (`TrainStatistics.minimumRuns`) shows up.
 struct TrainStatisticsRows {
     struct Row: Identifiable {
         let id: Int
@@ -55,14 +55,6 @@ struct TrainStatisticsRows {
         if !rows.contains(where: { $0.systemImage == "xmark.octagon.fill" }),
            let share = lookup.statistics.cancelledShare, let text = Self.percent(share), share >= 0.01 {
             add("xmark.octagon.fill", "Fällt bei \(text) der Fahrten aus", tint: share >= 0.1 ? .heavyDelay : .slightDelay)
-        }
-
-        if let unplanned = lookup.statistics.unplannedVehicles, let share = Self.percent(unplanned.share) {
-            let vehicles = unplanned.vehicles.prefix(3).compactMap { vehicle in
-                Self.percent(vehicle.share).map { "\(vehicle.name) (\($0))" }
-            }
-            add("tram.fill", "Anderes Fahrzeug als geplant bei \(share) der Fahrten",
-                detail: vehicles.isEmpty ? nil : "Dann meist \(vehicles.joined(separator: ", "))")
         }
 
         guard !rows.isEmpty else { return nil }

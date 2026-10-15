@@ -1454,17 +1454,13 @@ final class AppSettings {
     }
     var trainSearchFilter: TrainSearchFilter { TrainSearchFilter(kinds: trainSearchKinds, countries: trainSearchCountries) }
 
-    /// Reports the regional and long-distance trains the app shows to BetterBahn's statistics server
-    /// (`TrainSightings`, #169) and shows what it knows about them in return (`TrainStatisticsStore`, #316).
-    /// On by default, per device.
-    var shareTrainStatistics: Bool {
+    /// Shows what BetterBahn's statistics server knows about a train: delays, cancellations and platforms
+    /// of the last 30 days (`TrainStatisticsStore`, #316). The app reports nothing (#336). On by default, per device.
+    var showTrainStatistics: Bool {
         didSet {
-            UserDefaults.standard.set(shareTrainStatistics, forKey: "shareTrainStatistics")
-            let enabled = shareTrainStatistics
-            Task {
-                await TrainSightings.shared.setEnabled(enabled)
-                await TrainStatisticsStore.shared.setEnabled(enabled)
-            }
+            UserDefaults.standard.set(showTrainStatistics, forKey: "showTrainStatistics")
+            let enabled = showTrainStatistics
+            Task { await TrainStatisticsStore.shared.setEnabled(enabled) }
         }
     }
 
@@ -1525,12 +1521,11 @@ final class AppSettings {
         ticketType = defaults.string(forKey: "ticketType").flatMap(TicketType.init) ?? .deutschlandticket
         liveActivitiesEnabled = defaults.object(forKey: "liveActivitiesEnabled") as? Bool ?? true
         trainPositionRefresh = defaults.string(forKey: "trainPositionRefresh").flatMap(TrainPositionRefresh.init) ?? .automatic
-        let shareTrainStatistics = defaults.object(forKey: "shareTrainStatistics") as? Bool ?? true
-        self.shareTrainStatistics = shareTrainStatistics
-        Task {
-            await TrainSightings.shared.setEnabled(shareTrainStatistics)
-            await TrainStatisticsStore.shared.setEnabled(shareTrainStatistics)
-        }
+        // A new key: switching off sharing (#169) said nothing about wanting to see the statistics.
+        let showTrainStatistics = defaults.object(forKey: "showTrainStatistics") as? Bool ?? true
+        self.showTrainStatistics = showTrainStatistics
+        defaults.removeObject(forKey: "shareTrainStatistics")
+        Task { await TrainStatisticsStore.shared.setEnabled(showTrainStatistics) }
         expertMode = defaults.bool(forKey: "expertMode")
         expertTraewelling = defaults.bool(forKey: "expertTraewelling")
         expertEditJourney = defaults.bool(forKey: "expertEditJourney")
