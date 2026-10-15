@@ -378,7 +378,9 @@ public actor TrainStatisticsStore {
     private func evaNumbers(of stations: [Station], resolve: EVAResolver?) async -> [String: String] {
         var evas: [String: String] = [:]
         for station in stations {
-            if let eva = station.statisticsEVA ?? resolved[station.id] {
+            // The offline list's main station first: the server files every level under it, and it needs no
+            // bahn.de request (which fails while bahn.de is refusing ours).
+            if let eva = station.statisticsEVA ?? StationNames.mainEvaNumber(for: station) ?? resolved[station.id] {
                 evas[station.id] = eva
             } else if let resolve, let eva = await resolve(station), !eva.isEmpty, eva.allSatisfy(\.isNumber) {
                 resolved[station.id] = eva

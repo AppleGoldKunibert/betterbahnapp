@@ -2063,6 +2063,14 @@ private final class TwinTrainProtocol: URLProtocol, @unchecked Sendable {
         #expect(StationNames.evaNumber(for: stop("cz-CZPTT_czptt:stop:CZ:55659", "Děčín hlavní nádraží", 50.7735, 14.2011)) == nil)
     }
 
+    /// The statistics take the main station's number even of a station with several levels: the server files
+    /// the lower levels under it.
+    @Test func mainEvaNumberAlsoForStationsWithSeveralLevels() {
+        #expect(StationNames.mainEvaNumber(for: stop("de-DELFI_de:11000:900003201", "S+U Berlin Hauptbahnhof", 52.5251, 13.3694)) == "8011160")
+        #expect(StationNames.mainEvaNumber(for: stop("de-DELFI_de:14612:16", "Dresden Bahnhof Neustadt", 51.0661, 13.7402)) == "8010089")
+        #expect(StationNames.mainEvaNumber(for: stop("cz-CZPTT_czptt:stop:CZ:55659", "Děčín hlavní nádraží", 50.7735, 14.2011)) == nil)
+    }
+
     /// Statistics, Timetables and the Wagenreihung look a stop's EVA number up through `BahnDeClient`:
     /// a station in the offline list never asks bahn.de, so a screen full of stops sends no burst.
     @Test func bahnDeIsNotAskedForAStationInTheOfflineList() async throws {

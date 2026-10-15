@@ -142,6 +142,13 @@ public enum StationNames {
         evaNumber(for: station, in: index)
     }
 
+    /// The main station's EVA number of `station` from the offline list, also of one with several levels
+    /// (Berlin Hbf's "8011160", not its lower level's "8098160"): for what files every level under the main
+    /// station, like the train statistics.
+    public static func mainEvaNumber(for station: Station) -> String? {
+        germanStation(for: station, in: index).flatMap { index.stations[$0].evas.first }
+    }
+
     static func evaNumber(for station: Station, in index: Index) -> String? {
         guard let number = germanStation(for: station, in: index) else { return nil }
         let evas = index.stations[number].evas
