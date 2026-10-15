@@ -34,7 +34,18 @@ struct JourneyResultsView: View {
 
     /// Only routes that fulfil every train requirement are shown once one is set.
     private var visibleJourneys: [Journey] {
-        requirements.isEmpty ? journeys : (plan?.journeys ?? []).removingDuplicateIDs()
+        guard requirements.isEmpty else { return (plan?.journeys ?? []).removingDuplicateIDs() }
+        return ticketJourneys.isEmpty ? journeys : ticketJourneys
+    }
+
+    /// With the ticket filter on, the connections the ticket covers; all of them without it.
+    private var ticketJourneys: [Journey] {
+        search.onlyValidTicket ? journeys.filter(model.ticketFilter.isValid) : journeys
+    }
+
+    /// The ticket covers none of the connections, they only cross a border: shown with a warning.
+    private var showsBorderFallback: Bool {
+        requirements.isEmpty && search.onlyValidTicket && ticketJourneys.isEmpty && !journeys.isEmpty
     }
 
     /// Fastest connection without any train requirement, for comparison.
@@ -94,6 +105,10 @@ struct JourneyResultsView: View {
                     }
                 }
 
+                if showsBorderFallback {
+                    warningBanner("Diese Verbindungen führen ins Ausland. Mit \(model.settings.ticketType.dativeShortName) kommst du nur bis zur Grenze.")
+                }
+
                 if requirements.isEmpty, earlierCursor != nil {
                     pageButton("Frühere Verbindungen", systemImage: "chevron.up") {
                         await load(cursor: earlierCursor, prepend: true)
@@ -122,8 +137,8 @@ struct JourneyResultsView: View {
                 }
 
                 VStack(spacing: 8) {
-                    if hiddenCount > 0, requirements.isEmpty {
-                        InfoChip(text: "\(hiddenCount) nicht mit \(model.settings.ticketType.shortName) nutzbar", systemImage: "eye.slash.fill")
+                    if hiddenCount + journeys.count - visibleJourneys.count > 0, requirements.isEmpty {
+                        InfoChip(text: "\(hiddenCount + journeys.count - visibleJourneys.count) nicht mit \(model.settings.ticketType.shortName) nutzbar", systemImage: "eye.slash.fill")
                     }
                     if source == .transitous {
                         SourceNotice()
@@ -471,7 +486,8 @@ struct JourneyResultsView: View {
             if search.onlyValidTicket {
                 let filter = model.ticketFilter
                 let before = result.count
-                result = result.filter(filter.isValid)
+                // Connections that only cross a border stay in the list; the view hides them while others fit.
+                result = result.filter { filter.isValid($0) || filter.crossesBorder($0) }
                 hiddenCount += before - result.count
             }
             source = page?.source ?? model.provider.source

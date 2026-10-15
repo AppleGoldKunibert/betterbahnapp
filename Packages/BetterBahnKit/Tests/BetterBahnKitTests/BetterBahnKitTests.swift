@@ -2455,6 +2455,74 @@ private final class Ril100GeocodeProtocol: URLProtocol, @unchecked Sendable {
         #expect(!filter.isValid(Line(name: "IC 2013", number: "2013", product: .regional, operatorName: nil)))
     }
 
+    func leg(_ line: Line, from: Station, to: Station) -> Leg {
+        Leg(origin: from, destination: to, departure: TimeInfo(planned: .now, actual: nil),
+            arrival: TimeInfo(planned: .now.addingTimeInterval(3600), actual: nil), departurePlatform: nil,
+            arrivalPlatform: nil, tripId: "t", line: line, direction: nil, isWalking: false, cancelled: false,
+            stopovers: [], remarks: [], source: .transitous)
+    }
+
+    @Test func ticketsStopAtTheBorder() {
+        let dresden = station("8010085", "Dresden Hbf")
+        let praha = Station(id: "cz-CZPTT_czptt:stop:CZ:57076", name: "Praha hl.n.", coordinate: nil, evaNumber: nil, source: .transitous)
+        let decin = Station(id: "000005400003", name: "Děčín hl.n.", coordinate: nil, evaNumber: nil, source: .transitous)
+        let wien = Station(id: "at:43:1", name: "Wien Hbf", coordinate: nil, evaNumber: nil, source: .transitous)
+        let salzburg = station("8100002", "Salzburg Hbf")
+        let kufstein = Station(id: "8100108", name: "Kufstein", coordinate: nil, evaNumber: nil, source: .transitous)
+        let rosenheim = station("8000314", "Rosenheim")
+        let czechR = Line(name: "R 20", number: "20", product: .regional, operatorName: "České dráhy")
+        let rex = Line(name: "REX 1", number: "1", product: .regionalExpress, operatorName: "ÖBB")
+        let dTicket = TicketFilter.deutschlandticket
+        let bc100 = TicketFilter.bahnCard100(.default)
+        for filter in [dTicket, bc100] {
+            #expect(!filter.isValid(leg(czechR, from: dresden, to: praha)))
+            #expect(!filter.isValid(leg(czechR, from: decin, to: dresden)))
+            #expect(!filter.isValid(leg(rex, from: rosenheim, to: wien)))
+            #expect(filter.isValid(leg(rex, from: rosenheim, to: salzburg)))
+            #expect(filter.isValid(leg(rex, from: kufstein, to: rosenheim)))
+            #expect(filter.isValid(leg(regio, from: dresden, to: rosenheim)))
+        }
+        // Official D-Ticket stops abroad, but not Basel SBB or Strasbourg.
+        let venlo = Station(id: "8400597", name: "Venlo", coordinate: nil, evaNumber: nil, source: .transitous)
+        let baselSBB = Station(id: "8500010", name: "Basel SBB", coordinate: nil, evaNumber: nil, source: .transitous)
+        let strasbourg = Station(id: "8700011", name: "Strasbourg-Ville", coordinate: nil, evaNumber: nil, source: .transitous)
+        let duesseldorf = station("8000085", "Düsseldorf Hbf")
+        #expect(dTicket.isValid(leg(regio, from: duesseldorf, to: venlo)))
+        #expect(!dTicket.isValid(leg(regio, from: duesseldorf, to: baselSBB)))
+        #expect(!dTicket.isValid(leg(regio, from: rosenheim, to: strasbourg)))
+        #expect(bc100.isValid(leg(regio, from: duesseldorf, to: venlo)))
+        #expect(!bc100.isValid(leg(regio, from: duesseldorf, to: baselSBB)))
+    }
+
+    @Test func journeyAbroadOnlyFallsShortAtTheBorder() {
+        let berlin = station("8011160", "Berlin Hbf")
+        let hamburg = station("8002549", "Hamburg Hbf")
+        let kopenhagen = Station(id: "8600626", name: "København H", coordinate: nil, evaNumber: nil, source: .transitous)
+        let ec = Line(name: "EC 391", number: "391", product: .longDistance, operatorName: "DSB")
+        let flix = Line(name: "FLX 30", number: "30", product: .longDistance, operatorName: "FlixTrain")
+        func journey(_ legs: [Leg]) -> Journey {
+            Journey(legs: legs, source: .transitous)
+        }
+        let abroad = journey([leg(ice, from: berlin, to: hamburg), leg(ec, from: hamburg, to: kopenhagen)])
+        let bc100 = TicketFilter.bahnCard100(.default)
+        #expect(!bc100.isValid(abroad))
+        #expect(bc100.crossesBorder(abroad))
+        // Wrong train as well as abroad: the border is not the only problem.
+        #expect(!bc100.crossesBorder(journey([leg(flix, from: berlin, to: kopenhagen)])))
+        // Inside Germany nothing crosses a border.
+        #expect(!bc100.crossesBorder(journey([leg(ice, from: berlin, to: hamburg)])))
+    }
+
+    @Test func boardAbroadIsNotCovered() {
+        let praha = Station(id: "cz-CZPTT_czptt:stop:CZ:57076", name: "Praha hl.n.", coordinate: nil, evaNumber: nil, source: .transitous)
+        let czechR = Line(name: "R 20", number: "20", product: .regional, operatorName: nil)
+        var abroad = entry(czechR)
+        abroad.station = praha
+        #expect(!TicketFilter.deutschlandticket.isValid(abroad))
+        #expect(!TicketFilter.bahnCard100(.default).isValid(abroad))
+        #expect(TicketFilter.deutschlandticket.isValid(entry(regio)))
+    }
+
     func entry(_ line: Line, kind: BoardKind = .departures, otherEnd: String = "Berlin Hbf", terminal: Bool? = false) -> BoardEntry {
         BoardEntry(kind: kind, tripId: UUID().uuidString, station: station("8000207", "Köln Hbf"), line: line,
                    otherEnd: otherEnd, time: TimeInfo(planned: .now, actual: nil),
