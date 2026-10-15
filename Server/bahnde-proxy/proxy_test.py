@@ -171,5 +171,50 @@ class ProxyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.get(ORTE)).status, 502)
 
 
+class FakeSession:
+    """curl_cffi session stand-in: records each GET with its headers."""
+
+    def __init__(self, log):
+        self.log = log
+        self.closed = False
+
+    async def get(self, url, headers=None):
+        self.log.append((self, url, headers or {}))
+        await asyncio.sleep(0.01)
+        return type("Response", (), {"status_code": 200, "content": b"{}", "headers": {}})()
+
+    async def close(self):
+        self.closed = True
+
+
+class BrowserFetchTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.log = []
+        self.clock = Clock()
+        self.fetch = proxy.BrowserFetch("safari", make_session=lambda: FakeSession(self.log), clock=self.clock)
+
+    async def test_a_new_session_opens_the_page_first_then_asks_like_the_page(self):
+        await asyncio.gather(self.fetch(proxy.UPSTREAM + "a"), self.fetch(proxy.UPSTREAM + "b"))
+        urls = [url for _, url, _ in self.log]
+        self.assertEqual(urls[0], proxy.PAGE)
+        self.assertEqual(urls.count(proxy.PAGE), 1, "requests during the start share its page load")
+        self.assertEqual(sorted(urls[1:]), [proxy.UPSTREAM + "a", proxy.UPSTREAM + "b"])
+        headers = self.log[1][2]
+        self.assertEqual(headers["Sec-Fetch-Mode"], "cors")
+        self.assertEqual(headers["Sec-Fetch-Site"], "same-origin")
+
+    async def test_reset_and_age_start_a_new_session(self):
+        await self.fetch(proxy.UPSTREAM + "a")
+        first = self.log[0][0]
+        self.fetch.reset()
+        await self.fetch(proxy.UPSTREAM + "b")
+        second = self.log[-1][0]
+        self.assertIsNot(first, second)
+        self.clock.now += proxy.SESSION_MAX_AGE + 1
+        await self.fetch(proxy.UPSTREAM + "c")
+        self.assertIsNot(self.log[-1][0], second)
+        self.assertEqual([url for _, url, _ in self.log].count(proxy.PAGE), 3)
+
+
 if __name__ == "__main__":
     unittest.main()

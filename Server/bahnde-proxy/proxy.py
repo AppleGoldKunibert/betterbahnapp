@@ -61,6 +61,9 @@ MAX_QUERY_LENGTH = 2000
 UPSTREAM_TIMEOUT = 10
 # A refusal within this many seconds after the last pause ended doubles the next pause.
 STRIKE_WINDOW = 1800
+# bahn.de's search page, which a session loads first, and how long a session is kept (its cookies expire).
+PAGE = "https://www.bahn.de/buchung/fahrplan/suche"
+SESSION_MAX_AGE = 3600
 
 log = logging.getLogger("bahnde-proxy")
 
@@ -267,27 +270,61 @@ def json_response(status, body, extra=None):
 
 class BrowserFetch:
     """`fetch` asking bahn.de with curl_cffi, which makes the TLS/HTTP2 handshake of the browser
-    `impersonate` and sends its User-Agent; the other headers are those bahn.de's own page sends.
-    `reset()` drops the session and its cookies; the next request starts a new one."""
+    `impersonate` and sends its User-Agent. Like bahn.de's own page: a new session first loads the search
+    page (which sets bahn.de's cookies), then asks the API with the headers of the page's background
+    requests. Sessions are renewed after `SESSION_MAX_AGE`; `reset()` drops the session and its cookies at
+    once, so the next request starts a new one. `make_session` is replaced in tests."""
 
-    def __init__(self, impersonate):
+    def __init__(self, impersonate, make_session=None, clock=time.monotonic):
         self.impersonate = impersonate
+        self.make_session = make_session or self._curl_session
+        self.clock = clock
         self.session = None
+        self.started = 0
+        self.starting = None
+
+    def _curl_session(self):
+        from curl_cffi.requests import AsyncSession
+
+        return AsyncSession(impersonate=self.impersonate, timeout=UPSTREAM_TIMEOUT)
 
     def reset(self):
         old, self.session = self.session, None
         if old is not None:
             asyncio.ensure_future(old.close())
 
-    async def __call__(self, url):
-        from curl_cffi.requests import AsyncSession
+    async def _session(self):
+        if self.session is not None and self.clock() - self.started > SESSION_MAX_AGE:
+            self.reset()
+        if self.session is not None:
+            return self.session
+        # Requests arriving while a session starts share its page load.
+        if self.starting is None:
+            self.starting = asyncio.ensure_future(self._start())
+        try:
+            return await asyncio.shield(self.starting)
+        finally:
+            self.starting = None
 
-        if self.session is None:
-            self.session = AsyncSession(impersonate=self.impersonate, timeout=UPSTREAM_TIMEOUT)
-        response = await self.session.get(url, headers={
+    async def _start(self):
+        session = self.make_session()
+        try:
+            # The page a visitor opens first; its answer sets bahn.de's cookies (bm_sz, ak_bmsc, _abck).
+            await session.get(PAGE)
+        except Exception as error:  # noqa: BLE001 - the API request itself still decides
+            log.warning("bahn.de page unreachable: %s", type(error).__name__)
+        self.session, self.started = session, self.clock()
+        return session
+
+    async def __call__(self, url):
+        session = await self._session()
+        response = await session.get(url, headers={
             "Accept": "application/json",
             "Accept-Language": "de",
-            "Referer": "https://www.bahn.de/buchung/fahrplan/suche",
+            "Referer": PAGE,
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Dest": "empty",
             "x-correlation-id": f"{uuid.uuid4()}_{uuid.uuid4()}",
         })
         return Answer(response.status_code, response.content,

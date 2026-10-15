@@ -13,6 +13,9 @@ it small:
 - **Rate limit:** at most `RATE_LIMIT` requests a minute per app install.
 - **One at a time:** at most `MAX_PARALLEL` requests go to bahn.de at once. A burst of 17 parallel requests got the
   server refused (403) on 2026-10-15, while single requests from the same address went through.
+- **Like bahn.de's page:** a new session first loads the search page (which sets bahn.de's cookies), then asks the API
+  with the headers of the page's background requests. Sessions are renewed every hour. Measured 2026-10-16 from a home
+  connection: Safari this way 200 for departures and Wagenreihung, from the Oracle VM 403 (a data center address).
 - **Pause:** after bahn.de refused a request, the server starts a new session (fresh cookies) and nothing goes
   there for `FIRST_PAUSE` seconds; each refusal soon after the last pause doubles it, up to `BLOCK_PAUSE`.
 
