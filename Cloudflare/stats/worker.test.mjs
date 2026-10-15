@@ -195,10 +195,10 @@ test("drops trains without realtime, without a stop in Germany, or unknown to ba
     }
 });
 
-test("goes on without a Wagenreihung when bahn.de refuses it", async () => {
+test("goes on without a Wagenreihung when bahn.de fails to give it", async () => {
     const env = { DB: new FakeD1(), ALLOW_UNATTESTED: "true" };
     await report(env, [ICE_ID]);
-    const bahnDe = fakeBahnDe({ "reiseloesung/fahrt": { body: journey() }, "vehicle-sequence": { status: 429, body: {} } });
+    const bahnDe = fakeBahnDe({ "reiseloesung/fahrt": { body: journey() }, "vehicle-sequence": { status: 503, body: {} } });
     await processDueRuns(env, Date.parse("2026-10-06T13:00:00Z"), bahnDe);
     await processDueRuns(env, berlinToUnix("2026-10-06T17:46") * 1000, bahnDe);
     const [run] = env.DB.rows();
@@ -209,15 +209,59 @@ test("goes on without a Wagenreihung when bahn.de refuses it", async () => {
 test("retries when bahn.de fails and gives up after five attempts", async () => {
     const env = { DB: new FakeD1(), ALLOW_UNATTESTED: "true" };
     await report(env, [ICE_ID]);
-    const blocked = fakeBahnDe({ "reiseloesung/fahrt": { status: 403, body: {} } });
+    const failing = fakeBahnDe({ "reiseloesung/fahrt": { status: 502, body: {} } });
     let now = Date.parse("2026-10-06T13:00:00Z");
     for (let attempt = 1; attempt < 5; attempt++) {
-        await processDueRuns(env, now, blocked);
+        await processDueRuns(env, now, failing);
         assert.equal(env.DB.rows()[0].attempts, attempt);
         now += 10 * 60 * 1000;
     }
-    await processDueRuns(env, now, blocked);
+    await processDueRuns(env, now, failing);
     assert.equal(env.DB.rows().length, 0);
+});
+
+test("pauses every bahn.de request after a block, without costing the runs", async () => {
+    const env = { DB: new FakeD1(), ALLOW_UNATTESTED: "true" };
+    await report(env, [ICE_ID]);
+    const other = ICE_ID.replace("#ZE#1095#", "#ZE#1097#");
+    await report(env, [other]);
+    const blocked = fakeBahnDe({ "reiseloesung/fahrt": { status: 403, body: { code: "OPS_BLOCKED" } } });
+    let now = Date.parse("2026-10-06T13:00:00Z");
+    await processDueRuns(env, now, blocked);
+    // Stopped at the first block: one request, and neither run lost an attempt.
+    assert.equal(blocked.calls.length, 1);
+    assert.deepEqual(env.DB.rows().map(run => [run.state, run.attempts]), [["new", 0], ["new", 0]]);
+
+    // Nothing goes to bahn.de during the pause, neither runs nor boards.
+    const working = fakeBahnDe({ "reiseloesung/fahrt": { body: journey() }, "reiseloesung/abfahrten": { body: { entries: [] } } });
+    now += 29 * 60 * 1000;
+    assert.equal(await processDueRuns(env, now, working), 0);
+    assert.equal(await seedLongDistance({ ...env, SEED_STATIONS: "8000001" }, now, working), 0);
+    assert.equal(working.calls.length, 0);
+
+    // Afterwards it goes on.
+    now += 2 * 60 * 1000;
+    await processDueRuns(env, now, working);
+    assert.deepEqual(env.DB.rows().map(run => run.state), ["planned", "planned"]);
+});
+
+test("a blocked Wagenreihung pauses too instead of going on without it", async () => {
+    const env = { DB: new FakeD1(), ALLOW_UNATTESTED: "true" };
+    await report(env, [ICE_ID]);
+    const bahnDe = fakeBahnDe({ "reiseloesung/fahrt": { body: journey() }, "vehicle-sequence": { status: 429, body: {} } });
+    await processDueRuns(env, Date.parse("2026-10-06T13:00:00Z"), bahnDe);
+    await processDueRuns(env, berlinToUnix("2026-10-06T17:46") * 1000, bahnDe);
+    assert.equal(env.DB.rows()[0].state, "planned");
+});
+
+test("a blocked board stops the seeding round and pauses", async () => {
+    const env = { DB: new FakeD1(), SEED_STATIONS: "8000001,8000002", SEED_PER_RUN: "2" };
+    const bahnDe = fakeBahnDe({ "reiseloesung/abfahrten": { status: 403, body: {} } });
+    const now = Date.parse("2026-10-06T13:00:00Z");
+    assert.equal(await seedLongDistance(env, now, bahnDe), 0);
+    assert.equal(bahnDe.calls.length, 1);
+    assert.equal(await processDueRuns(env, now + 60 * 1000, bahnDe), 0);
+    assert.equal(bahnDe.calls.length, 1);
 });
 
 test("a cancelled train is kept with its cancellation", () => {
@@ -360,7 +404,7 @@ test("reads long-distance departure boards in turns and stores their runs", asyn
     const fetch = async url => {
         urls.push(url);
         const eva = new URL(url).searchParams.get("ortExtId");
-        return boards[eva] ? new Response(JSON.stringify(boards[eva])) : new Response("", { status: 403 });
+        return boards[eva] ? new Response(JSON.stringify(boards[eva])) : new Response("", { status: 404 });
     };
 
     // 2026-10-06 12:00 Berlin: the first two stations; the boards start 20 minutes later.
@@ -373,7 +417,7 @@ test("reads long-distance departure boards in turns and stores their runs", asyn
     assert.deepEqual(params.getAll("verkehrmittel[]"), ["ICE", "EC_IC"]);
     assert.equal(urls.length, 2);
 
-    // Five minutes later the next two; a station bahn.de refuses is skipped.
+    // Five minutes later the next two; a station bahn.de has no board for is skipped.
     urls.length = 0;
     await seedLongDistance(env, noon + 5 * 60 * 1000, { fetch });
     assert.deepEqual(urls.map(url => new URL(url).searchParams.get("ortExtId")), ["8000003", "8000004"]);
