@@ -5,18 +5,10 @@ import Testing
 
 /// The figures of `Cloudflare/stats` (`POST /train-stats`) as the app reads them (#316).
 @Suite(.serialized) struct TrainStatisticsTests {
-    /// What the Worker answers for ICE 1095: 12 runs, one cancelled, 11 with a Wagenreihung compared to the
-    /// day's schedule, 3 of them with other vehicles than planned (ICE 1 twice, ICE 4 once), the arrival
-    /// delays and platform moves at Fulda.
+    /// What the Worker answers for ICE 1095: 12 runs, one cancelled, the arrival delays and platform moves at Fulda.
     static let response = #"""
     {"trains":[{
-      "category":"ICE","number":"1095","days":30,"runs":12,"cancelled":1,"formationRuns":11,"unplannedRuns":3,
-      "unplannedFormations":[
-        {"n":1,"groups":[{"name":"ICE9465","transport":{"category":"ICE","number":1095},
-          "vehicles":[{"vehicleID":"938058120011","type":{"constructionType":"I0812"}},{"vehicleID":"938054120029","type":{"constructionType":"I1412"}}]}]},
-        {"n":2,"groups":[{"name":"ICE0160","transport":{"category":"ICE","number":1095},
-          "vehicles":[{"vehicleID":"938054010021","type":{"constructionType":"I4010"}},{"vehicleID":"938058010034","type":{"constructionType":"I8010"}}]}]}
-      ],
+      "category":"ICE","number":"1095","days":30,"runs":12,"cancelled":1,
       "stops":{
         "8000115":{"runs":12,"cancelled":2,"arrival":[0,1,2,3,5,6,8,12,20,-1],"departure":[1,1,2],
           "platforms":[{"from":"7","to":"7","n":6},{"from":"7","to":"8","n":2},{"from":"7","to":"9","n":1},{"from":"4","to":"4","n":1}]}
@@ -29,26 +21,11 @@ import Testing
         return try #require(decoded["trains"]?.first)
     }
 
-    @Test func namesTheVehiclesThatReplacedThePlannedOnes() throws {
+    @Test func readsRunsAndCancellations() throws {
         let train = try decoded()
-        // ICE 1 twice, ICE 4 once; the 8 runs that matched their schedule (whatever series) don't appear.
-        #expect(train.vehicles == [.init(name: "ICE 1", runs: 2), .init(name: "ICE 4", runs: 1)])
-        let unplanned = try #require(train.unplannedVehicles)
-        #expect(abs(unplanned.share - 3.0 / 11.0) < 0.001)
-        #expect(unplanned.vehicles.map(\.name) == ["ICE 1", "ICE 4"])
-        #expect(abs(unplanned.vehicles[0].share - 2.0 / 3.0) < 0.001)
         #expect(train.runs == 12)
         #expect(train.cancelledRuns == 1)
         #expect(abs(try #require(train.cancelledShare) - 1.0 / 12.0) < 0.001)
-    }
-
-    @Test func saysNothingWhenThePlannedVehicleAlwaysRanOrTooFewRunsAreKnown() {
-        // A series that is planned on some days isn't a deviation: no run differed.
-        let always = TrainStatistics(category: "ICE", number: "1", runs: 20, formationRuns: 20, unplannedRuns: 0)
-        #expect(always.unplannedVehicles == nil)
-        let few = TrainStatistics(category: "ICE", number: "1", runs: 20, formationRuns: 4, unplannedRuns: 2,
-                                  vehicles: [.init(name: "ICE 1", runs: 2)])
-        #expect(few.unplannedVehicles == nil)
     }
 
     @Test func summarisesDelaysAtAStop() throws {

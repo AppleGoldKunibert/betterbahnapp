@@ -129,7 +129,6 @@ struct RootView: View {
                 model.stopRefreshing()
                 model.scheduleLiveActivityBackgroundCheck()
                 model.updateWidgets(force: true)
-                Task { await TrainSightings.shared.flush() }
             }
         }
         // A followed user's check-in notification was tapped (#266): its list is on the Verbindungen tab.
