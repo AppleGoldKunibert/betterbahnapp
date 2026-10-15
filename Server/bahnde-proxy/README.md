@@ -32,6 +32,21 @@ as before. The server keeps no logs of who asked.
 It is a plain Docker image (`Dockerfile`) and needs HTTPS in front of it. Once it runs, put its address into
 `BahnDeProxy.baseURL` (BetterBahnKit) and ship an app build. Check it with `curl https://<address>/health`.
 
+**Where it runs now: Oracle Cloud "Always Free"** (since 2026-10-15). A `VM.Standard.A1.Flex` (1 OCPU, 6 GB,
+Ubuntu 24.04, region Frankfurt) with Docker and Caddy in front, at `https://138-2-157-89.sslip.io` (`BahnDeProxy.baseURL`).
+bahn.de answered 200 from its address. Setting it up again:
+1. Create the instance (any availability domain with A1 capacity, else `VM.Standard.E2.1.Micro`), a new VCN with a
+   public subnet, then "Connect public subnet to internet" and an ephemeral (or reserved) public IP on the VNIC.
+2. In the instance's network security group, allow TCP 80 and 443 from `0.0.0.0/0`.
+3. On the VM: install Docker (`curl -fsSL https://get.docker.com | sudo sh`), clone the repo, put `TOKEN_SECRET=…` into
+   `Server/bahnde-proxy/.env`, `docker compose up -d --build`.
+4. `sudo iptables -I INPUT -p tcp --dport 80 -j ACCEPT`, the same for 443, `sudo netfilter-persistent save`,
+   `sudo apt-get install -y caddy`, and `/etc/caddy/Caddyfile`: `<ip-with-dashes>.sslip.io { reverse_proxy localhost:8080 }`.
+5. Updates: `git pull && docker compose up -d --build` in this folder.
+
+Oracle may reclaim idle Always Free VMs (CPU, network and memory below 20 % over 7 days); a Pay As You Go account
+reportedly isn't affected, and Always Free resources stay free there.
+
 **Free container hosting** (e.g. Koyeb, Render): create a web service from this folder (`Server/bahnde-proxy`,
 Dockerfile), set `TOKEN_SECRET` as a secret and pick a region in Germany or nearby (Frankfurt). The host gives you
 an HTTPS address. Free services that sleep when idle make the first request after a pause slow; the app then uses

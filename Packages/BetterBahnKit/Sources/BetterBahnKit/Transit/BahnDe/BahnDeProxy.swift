@@ -6,8 +6,9 @@ import Foundation
 /// token, so `BahnDeClient` asks it first and falls back to the Worker (and the phone's hidden browser)
 /// while it is down or refused, see `gate`.
 public struct BahnDeProxy: Sendable {
-    /// Where the server runs; nil until it is deployed, then the app asks only the Worker.
-    public static let baseURL: URL? = nil
+    /// Where the server runs: an Oracle Cloud VM in Frankfurt behind Caddy (see Server/bahnde-proxy/README.md).
+    /// nil makes the app ask only the Worker.
+    public static let baseURL: URL? = URL(string: "https://138-2-157-89.sslip.io")
 
     /// The app's proxy, nil while there is no server.
     public static let shared: BahnDeProxy? = baseURL.map { BahnDeProxy(baseURL: $0) }
