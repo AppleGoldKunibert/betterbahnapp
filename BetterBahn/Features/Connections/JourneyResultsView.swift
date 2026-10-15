@@ -106,7 +106,7 @@ struct JourneyResultsView: View {
                 }
 
                 if showsBorderFallback {
-                    warningBanner("Diese Verbindungen führen ins Ausland. Dein \(model.settings.ticketType.shortName) gilt nur bis zur Grenze.")
+                    warningBanner("Diese Verbindungen führen ins Ausland. Mit \(model.settings.ticketType.shortName) kommst du nur bis zur Grenze.")
                 }
 
                 if requirements.isEmpty, earlierCursor != nil {
