@@ -68,6 +68,14 @@ public enum TicketFilter: Sendable, Hashable {
         }
     }
     public func isValid(_ journey: Journey) -> Bool { journey.legs.allSatisfy(isValid) }
+
+    /// Whether the ticket only falls short because the journey starts or ends a leg abroad: every
+    /// train is fine, the border is the only problem. Shown with a warning when nothing else is left.
+    public func crossesBorder(_ journey: Journey) -> Bool {
+        journey.legs.allSatisfy { $0.isWalking || isValid($0.line) }
+            && journey.legs.contains { CrossBorder.runsAbroad($0, covered: CrossBorder.deutschlandticketStops) }
+    }
+
     public func isValid(_ entry: BoardEntry) -> Bool {
         switch self {
         case .bahnCard100(let rules): rules.isValid(entry)

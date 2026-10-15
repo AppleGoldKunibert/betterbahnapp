@@ -2494,6 +2494,25 @@ private final class Ril100GeocodeProtocol: URLProtocol, @unchecked Sendable {
         #expect(!bc100.isValid(leg(regio, from: duesseldorf, to: baselSBB)))
     }
 
+    @Test func journeyAbroadOnlyFallsShortAtTheBorder() {
+        let berlin = station("8011160", "Berlin Hbf")
+        let hamburg = station("8002549", "Hamburg Hbf")
+        let kopenhagen = Station(id: "8600626", name: "København H", coordinate: nil, evaNumber: nil, source: .transitous)
+        let ec = Line(name: "EC 391", number: "391", product: .longDistance, operatorName: "DSB")
+        let flix = Line(name: "FLX 30", number: "30", product: .longDistance, operatorName: "FlixTrain")
+        func journey(_ legs: [Leg]) -> Journey {
+            Journey(legs: legs, source: .transitous)
+        }
+        let abroad = journey([leg(ice, from: berlin, to: hamburg), leg(ec, from: hamburg, to: kopenhagen)])
+        let bc100 = TicketFilter.bahnCard100(.default)
+        #expect(!bc100.isValid(abroad))
+        #expect(bc100.crossesBorder(abroad))
+        // Wrong train as well as abroad: the border is not the only problem.
+        #expect(!bc100.crossesBorder(journey([leg(flix, from: berlin, to: kopenhagen)])))
+        // Inside Germany nothing crosses a border.
+        #expect(!bc100.crossesBorder(journey([leg(ice, from: berlin, to: hamburg)])))
+    }
+
     @Test func boardAbroadIsNotCovered() {
         let praha = Station(id: "cz-CZPTT_czptt:stop:CZ:57076", name: "Praha hl.n.", coordinate: nil, evaNumber: nil, source: .transitous)
         let czechR = Line(name: "R 20", number: "20", product: .regional, operatorName: nil)
