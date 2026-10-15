@@ -315,7 +315,8 @@ struct TrainOperatorsLabel: View {
 
 /// Triebzug numbers and names of a train (e.g. "Tz 9457 „Bundesrepublik Deutschland“"). bahn.de's
 /// coach sequence first (it only has one in the coming hours); bahn.expert as fallback, which
-/// has the Tz once its data is live. Says so when bahn.de is refusing requests and nothing else helped.
+/// has the Tz once its data is live. Says so when our bahn.de server doesn't answer and nothing else had the
+/// vehicles, also when vagonweb's plan is shown below: then that is only the plan.
 /// A saved journey's leg remembers what was found, so it still shows once neither source answers.
 struct TrainFormationLabel: View {
     let request: BahnDeClient.FormationRequest?
@@ -351,7 +352,7 @@ struct TrainFormationLabel: View {
                     .foregroundStyle(.secondary)
                     .fullTextPopup(units, lines: 2)
             } else if blocked {
-                Label("Wagenreihung gerade nicht abrufbar", systemImage: "exclamationmark.triangle")
+                Label("Aktuelle Wagenreihung nicht verfügbar", systemImage: "exclamationmark.triangle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -379,11 +380,8 @@ struct TrainFormationLabel: View {
                 if let leg { model.rememberFormation(found, for: leg) }
                 return
             }
-            // Only once every fallback has answered (no flash while vagonweb loads), and not when
-            // vagonweb's plan can still show the Wagenreihung (e.g. a train to Denmark).
-            if bahnDeBlocked, remembered == nil, let request {
-                blocked = await model.plannedCoachSequence(for: request, direction: false) == nil
-            }
+            // Only once every fallback has answered, so it doesn't flash while bahn.expert loads.
+            blocked = bahnDeBlocked && remembered == nil
         }
     }
 }

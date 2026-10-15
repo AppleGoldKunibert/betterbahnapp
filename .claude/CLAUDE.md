@@ -136,13 +136,14 @@ Do not run iOS Simulator tests yourself; only try building.
     `POST https://bahn.expert/api/orpc/<procedure>` with `Referer: https://bahn.expert/` and a browser
     User-Agent (see `BahnExpertClient`); `journey/find` then `journey/detailsByJourneyId` give DB's own times
     per stop and are the reference for what the real delay was.
-  - bahn.de (`www.bahn.de/web/api/...`) answers `403 OPS_BLOCKED` from the cloud session, also with a browser
-    User-Agent. On a Mac it works with **curl** and a Safari User-Agent plus `Origin: https://www.bahn.de`,
-    `Referer: https://www.bahn.de/buchung/fahrplan/suche` and `Accept-Language: de-DE`; the same headers from
-    Python's `urllib` got a 403, so the block is not about the User-Agent alone (likely the TLS fingerprint).
-  - So when bahn.de data is needed, don't try it from the cloud session: give the user a complete curl command
-    (parse the saved JSON with `python3`, no network in Python) and ask them to paste the output.
-  - The app itself reaches bahn.de through the `betterbahn2` Worker, and falls back to a hidden WebKit page.
+  - bahn.de (`www.bahn.de/web/api/...`) answers `403`/`452 OPS_BLOCKED` to anything whose TLS handshake isn't a
+    browser's (measured 2026-10-15): the cloud session, plain curl on a Mac, Cloudflare Workers. On a Mac,
+    `curl_cffi` with `impersonate="safari"` gets through (`python3 -m venv /tmp/cffi && /tmp/cffi/bin/pip install
+    curl_cffi`).
+  - So when bahn.de data is needed, don't try it from the cloud session: give the user a complete `curl_cffi`
+    command and ask them to paste the output.
+  - The app itself reaches bahn.de only through our server `Server/bahnde-proxy` (browser TLS fingerprint, Oracle VM);
+    `betterbahn2` is refused by bahn.de since October 2026 and only serves App Attest and DB Timetables now.
 - The repo is public: never commit secrets or internal operational details (billing, Actions minutes etc.).
 
 ## Attribution

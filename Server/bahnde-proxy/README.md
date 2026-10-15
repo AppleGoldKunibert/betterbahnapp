@@ -15,8 +15,8 @@ it small:
 
 It mirrors the Worker: the same `/web/api/…` paths (GET only, the list in `proxy.py`) and the same App Attest
 tokens (`X-BetterBahn-Token`, signed with `TOKEN_SECRET`). The app asks it first (`BahnDeProxy` in
-BetterBahnKit). While it is down, paused or refused, the app uses `betterbahn2` and the phone's hidden browser
-as before. The server keeps no logs of who asked.
+BetterBahnKit), and only it: while it is down, paused or refused, the app shows "Aktuelle Wagenreihung nicht
+verfügbar" instead of asking `betterbahn2`, which bahn.de refuses anyway. The server keeps no logs of who asked.
 
 | Variable | Default | |
 | --- | --- | --- |

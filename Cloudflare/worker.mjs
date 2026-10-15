@@ -89,17 +89,14 @@ aber nicht mit Daten über dich:</p>
 <li><a href="https://www.vagonweb.cz">vagonweb.cz</a> (geplante Wagenreihungen und Zugtypen), <a href="https://bahn.expert">bahn.expert</a> (Zugtypen) und <a href="https://bahn.jetzt">bahn.jetzt</a> (Zugpositionen auf der Karte)</li>
 <li><a href="https://www.openrailwaymap.org">OpenRailwayMap</a> (Kartenkacheln mit Daten von <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>) und Apple Karten</li>
 <li>bahn.de und die Timetables-Schnittstelle der Deutschen Bahn – diese Anfragen laufen über den Server von
-BetterBahn (siehe unten), daher sieht die Deutsche Bahn nicht deine IP-Adresse, sondern die des Servers.
-Weist bahn.de den Server gerade ab, fragt die App bahn.de für eine Weile direkt von deinem Gerät aus, in einer
-unsichtbaren Webansicht: Dann sieht die Deutsche Bahn deine IP-Adresse, und bahn.de kann Cookies auf deinem Gerät
-speichern, wie beim Besuch von bahn.de im Browser. Es gelten die
+BetterBahn (siehe unten), daher sieht die Deutsche Bahn nicht deine IP-Adresse, sondern die des Servers. Es gelten die
 <a href="https://www.bahn.de/datenschutz">Datenschutzhinweise der Deutschen Bahn</a>.</li>
 </ul>
 
 <h2>Server von BetterBahn</h2>
 <p>BetterBahn betreibt kleine Server-Funktionen bei Cloudflare, Inc. (Auftragsverarbeiter). Sie</p>
 <ul>
-<li>leiten Fahrplananfragen an bahn.de und die Timetables-Schnittstelle weiter und speichern die Antworten
+<li>leiten Fahrplananfragen an die Timetables-Schnittstelle der Deutschen Bahn weiter und speichern die Antworten
 kurz zwischen (Sekunden bis höchstens einen Tag), damit nicht jede Anfrage erneut gestellt wird,</li>
 <li>signieren Apple-Wallet-Pässe: Wenn du „Zu Apple Wallet hinzufügen“ tippst, werden die Daten des Passes
 (Barcode des Tickets, Namen der Reisenden, Verbindung, Sitzplätze, Auftragsnummer; bei Zeitkarten auch das
@@ -111,7 +108,7 @@ Geburtsdatum aus dem Barcode) an den Server geschickt, dort signiert und sofort 
 </ul>
 <p>Abgesehen von geteilten Reisen und den Check-in-Meldungen wird dabei nichts gespeichert oder protokolliert. Cloudflare verarbeitet zur Absicherung des Dienstes
 IP-Adressen; Details stehen in der <a href="https://www.cloudflare.com/privacypolicy/">Datenschutzerklärung von Cloudflare</a>.</p>
-<p>Anfragen an bahn.de stellt die App zuerst über einen eigenen kleinen Server bei Oracle Cloud Infrastructure
+<p>Anfragen an bahn.de stellt die App über einen eigenen kleinen Server bei Oracle Cloud Infrastructure
 (Oracle, Auftragsverarbeiter; Rechenzentrum in Frankfurt am Main). Er leitet sie an bahn.de weiter und speichert
 die Antworten ebenso kurz zwischen; auch dort wird nichts über dich gespeichert oder protokolliert. Details stehen in
 der <a href="https://www.oracle.com/legal/privacy/">Datenschutzerklärung von Oracle</a>.</p>
