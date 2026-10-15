@@ -1,0 +1,86 @@
+# Imports the train statistics (#336) once a day: yesterday's DB Timetables data from piebro/deutsche-bahn-data
+# (Hugging Face) into the D1 database of `betterbahn-stats`, plus older missing days of the last 30 while the
+# day's write budget lasts (see Cloudflare/stats/README.md). Needs the repository secrets CLOUDFLARE_API_TOKEN
+# (D1 edit) and CLOUDFLARE_ACCOUNT_ID.
+name: Train statistics import
+
+on:
+  schedule:
+    # 13:17 UTC: the dataset has the next morning's changes by then (fetched every six hours).
+    - cron: '17 13 * * *'
+  workflow_dispatch:
+    inputs:
+      day:
+        description: 'Import just this day (YYYY-MM-DD); empty for yesterday and missing days'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: train-stats-import
+  cancel-in-progress: false
+
+env:
+  WRANGLER: wrangler@4.139.0
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: Cloudflare/stats
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Tests
+        run: |
+          python3 -m unittest importer_test.py
+          node --test worker.test.mjs
+
+      - name: Check secrets
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error::Repository secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are missing (see Cloudflare/stats/README.md)."
+            exit 1
+          fi
+
+      - name: Days already imported
+        run: |
+          npx --yes "$WRANGLER" d1 execute betterbahn-stats --remote --file=schema.sql
+          npx --yes "$WRANGLER" d1 execute betterbahn-stats --remote --json --command "SELECT day, rows FROM train_import" > imported.json
+
+      - name: Build SQL
+        env:
+          DAY: ${{ inputs.day }}
+        run: |
+          pip install --quiet pyarrow==25.0.1
+          if [ -n "$DAY" ]; then
+            python3 importer.py --imported imported.json --sql import.sql --raw "$RUNNER_TEMP/raw" --day "$DAY"
+          else
+            python3 importer.py --imported imported.json --sql import.sql --raw "$RUNNER_TEMP/raw"
+          fi
+          ls -la import.sql
+
+      - name: Write to D1
+        run: |
+          if grep -q '[A-Z]' import.sql; then
+            npx --yes "$WRANGLER" d1 execute betterbahn-stats --remote --file=import.sql
+          else
+            echo "Nothing to import."
+          fi
