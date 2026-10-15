@@ -149,9 +149,10 @@ export const SEED_CRON = "*/5 * * * *";
 /// call, five minutes apart. `SEED_STATIONS` (comma-separated EVA numbers) reads just these instead.
 /// Returns how many runs were found.
 export async function seedLongDistance(env, now = Date.now(), deps = {}) {
-    const fetchUpstream = deps.fetch ?? fetch;
+    const fetchUpstream = guarded(deps.fetch ?? fetch);
     const perRun = env.SEED_PER_RUN === undefined ? DEFAULT_SEED_PER_RUN : Number(env.SEED_PER_RUN);
     if (!(perRun > 0)) return 0;
+    if (await pausedUntil(env) > Math.floor(now / 1000)) return 0;
     const turn = env.SEED_STATIONS === undefined ? await dueSeedStations(env, perRun, now, Number(env.SEED_POOL) > 0 ? Number(env.SEED_POOL) : DEFAULT_SEED_POOL) : fixedSeedStations(env.SEED_STATIONS, perRun, now);
 
     const ids = new Set();
@@ -162,8 +163,12 @@ export async function seedLongDistance(env, now = Date.now(), deps = {}) {
             for (const entry of (await response.json())?.entries ?? []) {
                 if (typeof entry?.journeyId === "string") ids.add(entry.journeyId);
             }
-        } catch {
-            // A station that fails is read again next time.
+        } catch (error) {
+            // Blocked: no more boards until the pause is over. Any other failing station is read again next time.
+            if (error instanceof BahnDeBlocked) {
+                await pauseBahnDe(env, now, error).run();
+                break;
+            }
         }
     }
     let found = 0;
@@ -368,8 +373,9 @@ function parseJSON(text) {
 
 /// Looks at the runs that are due: oldest first, at most `BATCH` (env) per invocation.
 export async function processDueRuns(env, now = Date.now(), deps = {}) {
-    const fetchUpstream = deps.fetch ?? fetch;
+    const fetchUpstream = guarded(deps.fetch ?? fetch);
     const seconds = Math.floor(now / 1000);
+    if (await pausedUntil(env) > seconds) return 0;
     const batch = Number(env.BATCH) > 0 ? Number(env.BATCH) : DEFAULT_BATCH;
     const { results } = await env.DB.prepare(
         "SELECT key, journey_id, state, attempts, first_seen, service_day, category, number, origin_eva, planned_departure, planned_arrival " +
@@ -381,7 +387,12 @@ export async function processDueRuns(env, now = Date.now(), deps = {}) {
         let update;
         try {
             update = await step(run, seconds, fetchUpstream);
-        } catch {
+        } catch (error) {
+            // Blocked: stop right here. Not the run's fault, so it and the rest just wait for the pause to end.
+            if (error instanceof BahnDeBlocked) {
+                statements.push(pauseBahnDe(env, now, error));
+                break;
+            }
             update = retry(run, seconds);
         }
         statements.push(...[update(env.DB)].flat());
@@ -393,8 +404,11 @@ export async function processDueRuns(env, now = Date.now(), deps = {}) {
 /// What to do with `run` now; returns a function building its D1 statement.
 async function step(run, now, fetchUpstream) {
     if (run.state === "planned") {
-        // A missing Wagenreihung (bahn.de blocked or down) doesn't cost the run; it goes on without one.
-        const formation = await fetchFormation(run, fetchUpstream).catch(() => null);
+        // A missing Wagenreihung (bahn.de down) doesn't cost the run; it goes on without one.
+        const formation = await fetchFormation(run, fetchUpstream).catch(error => {
+            if (error instanceof BahnDeBlocked) throw error;
+            return null;
+        });
         const arrival = berlinToUnix(run.planned_arrival);
         return db => db.prepare("UPDATE runs SET state = 'formed', formation = ?, attempts = 0, next_check = ? WHERE key = ?")
             .bind(formation ? JSON.stringify(formation) : null, Math.max(now, arrival + AFTER_ARRIVAL), run.key);
@@ -452,10 +466,46 @@ function drop(run) {
     return db => db.prepare("DELETE FROM runs WHERE key = ?").bind(run.key);
 }
 
-/// bahn.de failed (blocked, offline, 5xx): again in 10 minutes, at most 5 times.
+/// bahn.de failed (offline, 5xx): again in 10 minutes, at most 5 times. A block pauses everything instead.
 function retry(run, now) {
     if (run.attempts + 1 >= MAX_ATTEMPTS) return drop(run);
     return db => db.prepare("UPDATE runs SET attempts = attempts + 1, next_check = ? WHERE key = ?").bind(now + 10 * MINUTE, run.key);
+}
+
+// MARK: - Pause after a block
+
+/// How long nothing goes to bahn.de after it refused us (403 OPS_BLOCKED, 429). bahn.de sees Cloudflare's
+/// addresses, which the app's bahn.de proxy (betterbahn2) uses too: going on would get the app blocked as well.
+export const BLOCK_PAUSE = 30 * MINUTE;
+
+class BahnDeBlocked extends Error {}
+
+/// `fetchUpstream` that throws `BahnDeBlocked` when bahn.de refuses the request.
+function guarded(fetchUpstream) {
+    return async (url, init) => {
+        const response = await fetchUpstream(url, init);
+        if (response.status === 403 || response.status === 429) throw new BahnDeBlocked(`bahn.de ${response.status} for ${new URL(url).pathname}`);
+        return response;
+    };
+}
+
+/// Unix seconds until which bahn.de is left alone; 0 when it isn't. Creates the table on first use, so an
+/// existing database needs no migration.
+async function pausedUntil(env) {
+    try {
+        const { results } = await env.DB.prepare("SELECT until FROM bahnde_pause WHERE id = 1").all();
+        return results?.[0]?.until ?? 0;
+    } catch {
+        await env.DB.prepare("CREATE TABLE IF NOT EXISTS bahnde_pause (id INTEGER PRIMARY KEY CHECK (id = 1), until INTEGER NOT NULL)").run();
+        return 0;
+    }
+}
+
+/// The statement that pauses bahn.de requests for `BLOCK_PAUSE` from `now` (milliseconds).
+function pauseBahnDe(env, now, error) {
+    const until = Math.floor(now / 1000) + BLOCK_PAUSE;
+    console.warn(`${error.message}: no bahn.de requests until ${new Date(until * 1000).toISOString()}`);
+    return env.DB.prepare("INSERT INTO bahnde_pause (id, until) VALUES (1, ?) ON CONFLICT (id) DO UPDATE SET until = excluded.until").bind(until);
 }
 
 // MARK: - bahn.de

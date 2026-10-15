@@ -13,13 +13,16 @@ in Germany and realtime data.
    departure boards of `SEED_PER_RUN` stations and stores their runs the same way. It starts with 18 big
    stations and counts every German stop of the long-distance trains it follows (`seed_stations`); the
    `SEED_POOL` busiest stations are read in turns, those read longest ago first. Nearly every long-distance
-   train stops at one of them, so nearly all are found. `wrangler.toml` has the free plan's values (5 and
-   40); Workers Paid can read more (30 and a bigger pool). `SEED_PER_RUN = "0"` switches it off.
-2. Every minute the cron trigger looks at the due runs (`BATCH`, default 8) and asks bahn.de itself:
+   train stops at one of them, so nearly all are found. `wrangler.toml` has 3 and 40; Workers Paid can read more (30 and a bigger pool). `SEED_PER_RUN = "0"` switches it off.
+2. Every minute the cron trigger looks at the due runs (`BATCH`, 6 in `wrangler.toml`) and asks bahn.de itself:
    - right away: the run's schedule (`reiseloesung/fahrt`). Trains without a German stop are dropped.
    - 10 minutes before departure: the Wagenreihung at the first stop.
    - 30 minutes after arrival at the terminus (later while it runs late): the final realtime state.
      Runs without any realtime data are dropped.
+   When bahn.de refuses a request (403 `OPS_BLOCKED`, 429), the Worker stops at once and sends nothing
+   to bahn.de for 30 minutes (`bahnde_pause`, created by the Worker itself), neither runs nor boards; the
+   runs just wait, a block costs them no attempt. bahn.de sees Cloudflare's addresses, which the app's
+   bahn.de proxy (`betterbahn2`) uses too, so going on would get the app blocked as well (#334).
 3. Everything lands in D1, one row per run (`schema.sql` describes the columns and the compact stop
    format, with an example query).
 
@@ -30,8 +33,9 @@ in Germany and realtime data.
    (planned → actual). The app shows them only from 5 runs on (#316).
 
 Size: a finished run takes well under 1 KB, so the free plan's 5 GB hold roughly 10,000–25,000 runs a
-day for a year. The free plan's CPU limit allows about `BATCH` = 8 runs a minute, i.e. roughly 4,000
-trains a day (three looks each), which is more than all long-distance trains (~1,000–1,500 a day). Above that, switch to Workers Paid (5 $/month) and raise `BATCH`.
+day for a year. `BATCH` = 6 runs a minute are roughly 2,900 trains a day (three looks each), still more than all
+long-distance trains (~1,000–1,500 a day). The free plan's CPU limit would allow about 8, but every bahn.de
+request from Cloudflare also counts against the app's proxy, so keep it low.
 
 ## Setup (once)
 

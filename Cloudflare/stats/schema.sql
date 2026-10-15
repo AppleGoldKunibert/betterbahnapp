@@ -65,3 +65,10 @@ CREATE TABLE IF NOT EXISTS seed_stations (
     trains INTEGER NOT NULL DEFAULT 0,
     last_read INTEGER NOT NULL DEFAULT 0
 );
+
+-- After bahn.de refused a request (403/429), no request goes there until `until` (Unix seconds), so the
+-- Worker doesn't get the app's bahn.de proxy blocked too. One row; the Worker creates the table itself if missing.
+CREATE TABLE IF NOT EXISTS bahnde_pause (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    until INTEGER NOT NULL
+);
