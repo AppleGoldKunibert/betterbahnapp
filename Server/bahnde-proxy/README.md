@@ -33,10 +33,11 @@ It is a plain Docker image (`Dockerfile`) and needs HTTPS in front of it. Once i
 `BahnDeProxy.baseURL` (BetterBahnKit) and ship an app build. Check it with `curl https://<address>/health`.
 
 **Where it runs now: Oracle Cloud "Always Free"** (since 2026-10-15). A `VM.Standard.A1.Flex` (1 OCPU, 6 GB,
-Ubuntu 24.04, region Frankfurt) with Docker and Caddy in front, at `https://138-2-157-89.sslip.io` (`BahnDeProxy.baseURL`).
+Ubuntu 24.04, region Frankfurt) with Docker and Caddy in front, at `https://92-5-144-111.sslip.io` (`BahnDeProxy.baseURL`).
 bahn.de answered 200 from its address. Setting it up again:
 1. Create the instance (any availability domain with A1 capacity, else `VM.Standard.E2.1.Micro`), a new VCN with a
-   public subnet, then "Connect public subnet to internet" and an ephemeral (or reserved) public IP on the VNIC.
+   public subnet, then "Connect public subnet to internet" and a reserved public IP on the VNIC (Networking → IP management → Reserved public IPs; it survives recreating the VM,
+   an ephemeral one doesn't). The app has the address built in, so a new IP needs an app update.
 2. In the instance's network security group, allow TCP 80 and 443 from `0.0.0.0/0`.
 3. On the VM: install Docker (`curl -fsSL https://get.docker.com | sudo sh`), clone the repo, put `TOKEN_SECRET=…` into
    `Server/bahnde-proxy/.env`, `docker compose up -d --build`.
