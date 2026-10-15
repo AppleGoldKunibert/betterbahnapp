@@ -7,7 +7,8 @@ import WebKit
 /// our shared Worker (`BahnDeBrowserFallback`): a real browser engine on the phone's own connection gets
 /// through, like bahn.de in Safari. The page starts loading as soon as the Worker is blocked (`prepare`)
 /// and is reused for at most half an hour; each request is a `fetch` inside it, so bahn.de sees the
-/// cookies its page set. It is let go once the Worker answers again (`release`) or after 5 minutes
+/// cookies its page set. The first request waits until bahn.de's bot protection has checked the page
+/// (`checked(_:)`): since October 2026 bahn.de refuses API requests from anything but a checked browser. It is let go once the Worker answers again (`release`) or after 5 minutes
 /// without a request, so it doesn't sit in memory and wake up for nothing.
 @MainActor
 final class BahnDeBrowser {
@@ -49,8 +50,13 @@ final class BahnDeBrowser {
             throw TransitError.decoding("Keine Antwort aus der Webansicht")
         }
         Self.log.info("Web view: \(status) for \(url.path(), privacy: .public)")
-        // Blocked: a fresh page next time, in case its cookies are what bahn.de refuses.
-        if status == 403 { self.page = nil }
+        // Blocked: a fresh page next time, in case its cookies are what bahn.de refuses. Whether bahn.de's
+        // browser check had passed goes into the answer, so the Wagenreihung's debug note can tell.
+        if status == 403 {
+            self.page = nil
+            let checked = (try? await page.callJavaScript(Self.checkedScript) as? Bool) == true
+            return (status, Data(((checked ? "[Browser geprüft] " : "[Browser ungeprüft] ") + text).utf8))
+        }
         return (status, Data(text.utf8))
     }
 
@@ -90,17 +96,40 @@ final class BahnDeBrowser {
         let deadline = Date.now.addingTimeInterval(20)
         while Date.now < deadline {
             try await Task.sleep(for: .milliseconds(300))
-            if (try? await page.callJavaScript(readyScript) as? Bool) == true { return page }
+            if (try? await page.callJavaScript(readyScript) as? Bool) == true { return await checked(page) }
         }
         log.error("bahn.de did not load in the web view")
         throw TransitError.timeout
     }
+
+    /// The page once bahn.de's bot protection has checked it: its script marks the `_abck` cookie with `~0~`
+    /// after a moment, and bahn.de refuses API requests from browsers it hasn't checked (403 OPS_BLOCKED).
+    /// Waits at most `checkTime`; an unchecked page is still used, a request may get through anyway.
+    private static func checked(_ page: WebPage) async -> WebPage {
+        let deadline = Date.now.addingTimeInterval(checkTime)
+        while Date.now < deadline {
+            if (try? await page.callJavaScript(checkedScript) as? Bool) == true {
+                log.info("bahn.de checked the web view")
+                return page
+            }
+            try? await Task.sleep(for: .milliseconds(300))
+        }
+        log.error("bahn.de did not check the web view in time")
+        return page
+    }
+
+    private static let checkTime: TimeInterval = 15
 
     static let log = Logger(subsystem: "de.goldkunibert.BetterBahn", category: "bahnde")
 
     /// bahn.de's own page has loaded (not an error page elsewhere).
     private static let readyScript = """
         return document.readyState === 'complete' && location.hostname === 'www.bahn.de';
+        """
+
+    /// bahn.de's bot protection has checked this browser (its `_abck` cookie carries `~0~`).
+    private static let checkedScript = """
+        return /(^|; )_abck=[^;]*~0~/.test(document.cookie);
         """
 
     /// The API request inside the page, as bahn.de's own scripts make it.
