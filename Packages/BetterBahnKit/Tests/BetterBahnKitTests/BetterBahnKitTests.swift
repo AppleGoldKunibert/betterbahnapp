@@ -3842,6 +3842,24 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         await #expect(throws: TransitError.rateLimited) { try await withoutBrowser.coachSequence(other) }
         #expect(await withoutBrowser.coachSequenceNote(for: other)?.contains("Browser: keiner") == true)
     }
+
+    @Test func failingBrowserNoteNamesTheWorkersBlock() async throws {
+        let browser = BahnDeBrowserFallback { _ in
+            throw NSError(domain: "WKErrorDomain", code: 4, userInfo: ["WKJavaScriptExceptionMessage": "TypeError: Load failed"])
+        }
+        let gate = BahnDeGate()
+        await gate.report(.http(status: 403, body: #"{"code":"OPS_BLOCKED"}"#))
+        let bahnDe = BahnDeClient(http: HTTPClient(session: .shared), gate: gate, browser: browser)
+        let request = BahnDeClient.FormationRequest(
+            category: "ICE", number: "1105",
+            station: Station(id: "8011113", name: "Berlin Südkreuz", coordinate: nil, evaNumber: "8011113", source: .bahnDe),
+            plannedDeparture: Date(timeIntervalSince1970: 1_800_000_000))
+
+        await #expect(throws: (any Error).self) { try await bahnDe.coachSequence(request) }
+        let note = try #require(await bahnDe.coachSequenceNote(for: request))
+        #expect(note.hasPrefix("Browser: TypeError: Load failed · Worker: Pause bis "))
+        #expect(note.contains("403"))
+    }
 }
 
 /// A value a test's closures record into (a `Mutex` itself can't be captured).

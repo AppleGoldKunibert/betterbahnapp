@@ -376,17 +376,27 @@ public struct BahnDeClient: Sendable {
             await Self.sequenceNotes.set("keine Wagenreihung an EVA \(candidates.joined(separator: " / ")) (404) · \(asked)", for: key)
             return nil
         } catch {
-            var reason = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+            var reason = Self.describe(error)
             // Usually not this request's fault: an earlier answer paused every bahn.de request.
             if case TransitError.rateLimited = error {
                 if let block = await gate.blockDescription { reason += " (\(block))" }
                 // The Worker's pause sends requests to the phone's browser: say why that failed too.
                 let browserState = await browser?.stateDescription ?? "keiner"
                 reason += " · Browser: \(browserState)"
+            } else if let block = await gate.blockDescription {
+                // The Worker was skipped (blocked) and the phone's browser failed: say both.
+                reason = "Browser: \(reason) · Worker: \(block)"
             }
             await Self.sequenceNotes.set("\(reason) · \(asked)", for: key)
             throw error
         }
+    }
+
+    /// An error for the Wagenreihung's note: a script error in the hidden browser by its message
+    /// ("TypeError: Load failed"), anything else by its description.
+    static func describe(_ error: Error) -> String {
+        if let message = (error as NSError).userInfo["WKJavaScriptExceptionMessage"] as? String { return message }
+        return (error as? LocalizedError)?.errorDescription ?? String(describing: error)
     }
 
     /// "2 Gruppen, Züge IC 1189, RB 5410": what an answer without usable coaches had.
