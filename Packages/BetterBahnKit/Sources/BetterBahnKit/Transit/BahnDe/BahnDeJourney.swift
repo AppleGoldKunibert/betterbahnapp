@@ -163,8 +163,11 @@ extension BahnDeClient {
     }
 
     /// `journeyStops(for:)` together with the rest of bahn.de's journey details, same request and cache.
-    func journeyCourse(for leg: Leg, maxAge: TimeInterval = BahnDeClient.journeyStopsMaxAge) async throws -> JourneyCourse? {
-        try await journeyCourse(line: leg.line, station: leg.origin, plannedDeparture: leg.departure.planned, maxAge: maxAge)
+    /// - Parameter includingOtherRailways: also for Nightjet, Euronight and the like (`lookupReference`).
+    func journeyCourse(for leg: Leg, maxAge: TimeInterval = BahnDeClient.journeyStopsMaxAge,
+                       includingOtherRailways: Bool = false) async throws -> JourneyCourse? {
+        try await journeyCourse(line: leg.line, station: leg.origin, plannedDeparture: leg.departure.planned, maxAge: maxAge,
+                                includingOtherRailways: includingOtherRailways)
     }
 
     /// Whether bahn.de lists sleeping or couchette cars for `trip`'s train (`JourneyDetails.hasSleepingCars`);

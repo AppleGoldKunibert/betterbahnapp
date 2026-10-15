@@ -4365,6 +4365,42 @@ private final class TrainSearchProtocol: URLProtocol, @unchecked Sendable {
         #expect(BahnDeClient.fillingMissingPlatforms(in: leg, from: later).departurePlatform?.best == nil)
     }
 
+    /// A Nightjet (NJ 403 Frankfurt–Zürich) has no platforms in Transitous' feed. bahn.de lists it on its board
+    /// too, so its platforms are looked up, though nothing else (no Zusatzhalte, no times) is taken from it.
+    @Test func asksBahnDeForTheMissingPlatformsOfANightjet() throws {
+        let now = try #require(JSONDecoding.parseISODate("2026-10-15T00:00:00Z"))
+        func at(_ minutes: Double) -> TimeInfo { TimeInfo(planned: now.addingTimeInterval(minutes * 60), actual: nil) }
+        let frankfurt = Station(id: "f", name: "Frankfurt (Main) Hbf", coordinate: nil, evaNumber: nil, source: .transitous)
+        let zurich = Station(id: "z", name: "Zürich HB", coordinate: nil, evaNumber: nil, source: .transitous)
+        func leg(_ name: String, platform: PlatformInfo?) -> Leg {
+            Leg(origin: frankfurt, destination: zurich, departure: at(60), arrival: at(380),
+                departurePlatform: platform, arrivalPlatform: platform,
+                tripId: "t", line: Line(name: name, number: String(name.dropFirst(3)), product: .longDistance, operatorName: nil),
+                direction: nil, isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+        }
+        let nightjet = Line(name: "NJ 403", number: "403", product: .longDistance, operatorName: nil)
+        #expect(BahnDeClient.takesOnlyPlatforms(nightjet))
+        #expect(BahnDeClient.takesOnlyPlatforms(Line(name: "EN 40465", number: "40465", product: .longDistance, operatorName: nil)))
+        // DB's own long-distance trains are handled in full, regional ones are neither.
+        #expect(!BahnDeClient.takesOnlyPlatforms(Line(name: "ICE 599", number: "599", product: .highSpeed, operatorName: nil)))
+        #expect(!BahnDeClient.takesOnlyPlatforms(Line(name: "RJX 161", number: "161", product: .highSpeed, operatorName: nil)))
+        #expect(!BahnDeClient.takesOnlyPlatforms(Line(name: "RE 5", number: "5", product: .regionalExpress, operatorName: nil)))
+        #expect(!BahnDeClient.takesOnlyPlatforms(nil))
+
+        let missing = PlatformInfo(planned: nil, actual: nil)
+        #expect(JourneyRefresher.needsPlatforms(leg("NJ 403", platform: missing), now: now))
+        #expect(!JourneyRefresher.needsPlatforms(leg("NJ 403", platform: PlatformInfo(planned: "19", actual: nil)), now: now))
+        // Still nothing for a train bahn.de isn't asked about at all.
+        #expect(!JourneyRefresher.needsPlatforms(leg("FLX 20", platform: missing), now: now))
+
+        // bahn.de's stops fill the platforms the same way as for a DB train.
+        let stops = [JourneyStop(evaNumber: "8000105", name: "Frankfurt (Main) Hbf", departure: at(60),
+                                 departurePlatform: PlatformInfo(planned: "19", actual: nil)),
+                     JourneyStop(evaNumber: "8503000", name: "Zürich HB", arrival: at(380), arrivalPlatform: PlatformInfo(planned: "13", actual: nil))]
+        let filled = BahnDeClient.fillingMissingPlatforms(in: leg("NJ 403", platform: missing), from: stops)
+        #expect(filled.departurePlatform?.best == "19" && filled.arrivalPlatform?.best == "13")
+    }
+
     @Test func findsJourneyIdOnBoard() throws {
         let json = #"""
         {"entries": [

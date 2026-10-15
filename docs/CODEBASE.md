@@ -247,7 +247,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   coaches of a train running together with this one ("RJX 184") are left out. Sleeping/couchette cars and car carriers are
   read from the class bar. `startsReversed` covers "Changes direction in Buchs SG, from Zürich until Buchs in reverse
   order". The parser reads both vagonweb's own HTML and the quoted DOM a browser serializes. Not read: day restrictions on
-  single coaches ("runs on ⑥, ⑦ …"). SBB's formation service (opentransportdata.swiss, live, today only) is not used yet.
+  single coaches ("runs on ⑥, ⑦ …"). Legs of those trains also get their missing platforms from bahn.de's journey
+  details (`BahnDeClient.takesOnlyPlatforms`, in `JourneyRefresher.refresh`), but no Zusatzhalte and no live times. SBB's formation service (opentransportdata.swiss, live, today only) is not used yet.
 - `Transit/BahnExpert/` – bahn.expert, as fallback for the train type (`TrainTypeLookup`) when bahn.de
   has no coach sequence and vagonweb has none either: it has DB's planned formation (`DB-plan`) for days
   ahead; bahn.de is only asked for departures within `BahnDeClient.formationLookahead` (12 h). Needs a
