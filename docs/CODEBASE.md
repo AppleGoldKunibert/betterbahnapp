@@ -369,8 +369,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   Aztec's internal encoding, the ISO-8859-1 string is the message), `WalletPassPayload` + `WalletPassClient`,
   `UICBarcode` (UIC "#UT" barcode → FCB 3 via a minimal unaligned-PER reader: issuing date, travellers, first
   open ticket/pass and its validity; the issuer's signature is checked by the pass signer, which answers 422 →
-  `WalletPassError.unverifiedBarcode`), `TravelPass` ("Zeitkarte" read from such a barcode, only its bytes are kept; a Deutschland-Ticket valid
-  longer than a month counts as a BahnCard 100's; `WalletPassPayload(pass:)` shows the validity as from → until). Passes are stored like tickets (`TicketStore`, `passes.json`).
+  `WalletPassError.unverifiedBarcode`), `TravelPass` ("Zeitkarte" read from such a barcode, only its bytes are kept; `WalletPassPayload(pass:)` shows the validity as from → until). Passes are stored like tickets (`TicketStore`, `passes.json`).
   bahn.de's bot protection blocks the order API outside its page in a real browser (403), so there is no direct client.
 - `Sharing/` – `JourneyShareLink` (betterbahn://share encoding, payload limits, short-link IDs),
   `ShortShareLinkClient` (`/share` on the `betterbahn` Worker, long link as fallback), `DBShare` + `DBShareImporter`

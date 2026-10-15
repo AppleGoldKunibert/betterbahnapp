@@ -29,10 +29,6 @@ public struct TravelPass: Codable, Sendable, Hashable, Identifiable {
         }
     }
 
-    /// DB issues the Deutschland-Ticket of a BahnCard 100 for several months at once; a subscription's
-    /// is valid one calendar month (plus 3 hours into the next).
-    static let monthlyValidity: TimeInterval = 35 * 24 * 60 * 60
-
     public var id: UUID
     /// The tariff, e.g. "Deutschland-Ticket".
     public var name: String
@@ -63,23 +59,6 @@ public struct TravelPass: Codable, Sendable, Hashable, Identifiable {
         // Only the bytes: the cut-out image would carry parts of the screenshot around the code.
         self.barcode = DBTicket.Barcode(payload: payload, image: nil)
         self.addedAt = addedAt
-    }
-
-    public var isDeutschlandTicket: Bool {
-        name.localizedCaseInsensitiveContains("Deutschland")
-    }
-
-    /// A Deutschland-Ticket valid for longer than a month belongs to a BahnCard 100 – the barcode
-    /// itself doesn't say so.
-    public var isBahnCard100: Bool {
-        guard isDeutschlandTicket, let validFrom, let validUntil else { return false }
-        return validUntil.timeIntervalSince(validFrom) > Self.monthlyValidity
-    }
-
-    /// "BahnCard 100" or "Abo" for a Deutschland-Ticket; nil otherwise.
-    public var kindDescription: String? {
-        guard isDeutschlandTicket else { return nil }
-        return isBahnCard100 ? "BahnCard 100" : "Abo"
     }
 
     /// "2. Klasse"
