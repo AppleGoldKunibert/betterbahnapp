@@ -20,7 +20,7 @@ features or data flows change (and update the privacy policy in `Cloudflare/work
   declare it (e.g. "Other User Content", not linked, not tracking). Second exception: the train
   statistics (`Cloudflare/stats`, Settings → "Zugdaten für Statistik teilen", on by default) report the
   bahn.de IDs of trains the app showed and keep those trains' data for a year, without any device or
-  install ID – likely "Usage Data → Product Interaction", not linked to the user, not tracking (or
+  install ID (the app also asks that server for a train's figures by train number and stops, nothing is kept) – likely "Usage Data → Product Interaction", not linked to the user, not tracking (or
   "Other Data"). Third exception: the check-in notifications (`Cloudflare/checkin-push`, Settings →
   Träwelling "Check-ins von Gefolgten melden", off by default) keep the Träwelling user ID, a read-only
   Träwelling login, the APNs device token and seen status IDs until turned off – likely "Identifiers →

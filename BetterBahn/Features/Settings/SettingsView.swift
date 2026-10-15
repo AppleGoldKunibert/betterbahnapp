@@ -147,7 +147,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Statistik")
                 } footer: {
-                    Text("Hilft uns, Statistiken zu Verspätungen und Ausfällen zu sammeln. Dabei wird nichts über dich gespeichert.")
+                    Text("Hilft uns, Statistiken zu Verspätungen und Ausfällen zu sammeln, und zeigt dir Erfahrungswerte zu Zügen. Dabei wird nichts über dich gespeichert.")
                 }
 
                 Section {

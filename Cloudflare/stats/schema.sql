@@ -44,9 +44,24 @@ CREATE TABLE IF NOT EXISTS runs (
 -- Every index costs an extra written row per update, so only what the Worker and backup.sh need.
 CREATE INDEX IF NOT EXISTS runs_due ON runs (state, next_check);
 CREATE INDEX IF NOT EXISTS runs_day ON runs (service_day);
+-- A train's recent runs for `POST /train-stats` (#316). Written once per run, when its schedule is known.
+-- By number alone: regional trains are stored under bahn.de's own categories ("NRE", "DRB" …), which the
+-- app doesn't know them by ("RE"), see `trainStatistics` in worker.mjs.
+DROP INDEX IF EXISTS runs_train;
+CREATE INDEX IF NOT EXISTS runs_number ON runs (number, service_day);
 
 -- Station names for the EVA numbers in runs.stops, written once per station.
 CREATE TABLE IF NOT EXISTS stations (
     eva TEXT PRIMARY KEY,
     name TEXT NOT NULL
+);
+
+-- Stations long-distance trains stop at, for the seeding (`seedLongDistance` in worker.mjs): the big ones
+-- from the code, and every German stop of the long-distance trains followed so far, with the number of
+-- those runs (`trains`: the busiest stations are read). `last_read`: Unix seconds of the last departure
+-- board read, 0 for none yet. (Created in an earlier form without `trains`? DROP TABLE seed_stations first.)
+CREATE TABLE IF NOT EXISTS seed_stations (
+    eva TEXT PRIMARY KEY,
+    trains INTEGER NOT NULL DEFAULT 0,
+    last_read INTEGER NOT NULL DEFAULT 0
 );

@@ -6,6 +6,13 @@
 // location. A cron trigger then asks bahn.de about each run itself: its schedule right away, its
 // Wagenreihung around departure and its final realtime state after arrival, stored in D1 (schema.sql).
 // Runs older than a year are downloaded and deleted with backup.sh.
+//
+// Long-distance trains are also found by the Worker itself (`seedLongDistance`): every few minutes it
+// reads the departure boards of the stations long-distance trains stop at (learned from the trains it
+// has followed), so the statistics don't depend on what app users look at.
+//
+// The same data answers the app (`POST /train-stats`): per train number and stop, how late the train
+// was, how often it was cancelled, which platforms it used and which vehicles ran it (#316).
 
 import { TOKEN_HEADER, unauthorized, verifyToken } from "../shared/appattest.mjs";
 import { upstreamHeaders } from "../bahnde-proxy/worker.mjs";
@@ -35,21 +42,31 @@ const GIVE_UP_AFTER = 12 * 3600;
 export async function handleRequest(request, env = {}, now = Date.now()) {
     const url = new URL(request.url);
     if (url.pathname === "/health") return json(200, { ok: true });
-    if (url.pathname !== "/sightings") return json(404, { error: "not_found" });
+    if (url.pathname !== "/sightings" && url.pathname !== "/train-stats") return json(404, { error: "not_found" });
     if (request.method !== "POST") return json(405, { error: "method_not_allowed" }, { Allow: "POST" });
     if (!env.DB) return json(503, { error: "not_configured" });
 
-    // Only the genuine app: an App Attest token from the bahn.de proxy (same TOKEN_SECRET), or no
-    // token while ALLOW_UNATTESTED is "true" (see ../shared/appattest.mjs).
+    const refused = await refuse(request, env, now, url.pathname === "/sightings" ? env.SIGHTINGS_LIMITER : env.STATS_LIMITER);
+    if (refused) return refused;
+    return url.pathname === "/sightings" ? handleSightings(request, env, now) : handleTrainStats(request, env, now);
+}
+
+/// Only the genuine app: an App Attest token from the bahn.de proxy (same TOKEN_SECRET), or no token
+/// while ALLOW_UNATTESTED is "true" (see ../shared/appattest.mjs). A response when the request is
+/// refused (unauthorised, rate limited), otherwise null.
+async function refuse(request, env, now, limiter) {
     const token = request.headers.get(TOKEN_HEADER);
     const claims = token && env.TOKEN_SECRET ? await verifyToken(token, "a", env.TOKEN_SECRET, now) : null;
     if (token ? !claims : env.ALLOW_UNATTESTED !== "true") return unauthorized();
-    if (env.SIGHTINGS_LIMITER) {
+    if (limiter) {
         const key = claims?.kid ?? request.headers.get("CF-Connecting-IP") ?? "unknown";
-        const { success } = await env.SIGHTINGS_LIMITER.limit({ key: String(key) });
+        const { success } = await limiter.limit({ key: String(key) });
         if (!success) return json(429, { error: "rate_limited" });
     }
+    return null;
+}
 
+async function handleSightings(request, env, now) {
     let ids;
     try {
         ids = (await request.json())?.journeyIds;
@@ -58,6 +75,12 @@ export async function handleRequest(request, env = {}, now = Date.now()) {
     }
     if (!Array.isArray(ids) || ids.length > MAX_SIGHTINGS) return json(400, { error: "invalid_sightings" });
 
+    return json(202, { accepted: await recordRuns(env, ids, now) });
+}
+
+/// Stores the runs of these bahn.de journey IDs that aren't known yet (no S-Bahn, buses or malformed IDs);
+/// returns how many runs the IDs were.
+async function recordRuns(env, ids, now) {
     const runs = new Map();
     for (const id of ids) {
         if (!isJourneyId(id)) continue;
@@ -71,7 +94,7 @@ export async function handleRequest(request, env = {}, now = Date.now()) {
         const insert = env.DB.prepare("INSERT OR IGNORE INTO runs (key, journey_id, state, next_check, first_seen) VALUES (?, ?, 'new', ?, ?)");
         await env.DB.batch([...runs].map(([key, id]) => insert.bind(key, id, seconds, seconds)));
     }
-    return json(202, { accepted: runs.size });
+    return runs.size;
 }
 
 export function isJourneyId(id) {
@@ -98,6 +121,247 @@ function json(status, body, extra = {}) {
         status,
         headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...extra },
     });
+}
+
+// MARK: - Seeding
+
+// Big stations where long-distance trains meet, read in turns so each cron invocation stays within the
+// free plan (a board is one bahn.de request and one JSON to parse). EVA numbers; `SEED_STATIONS` replaces them.
+export const SEED_STATIONS = [
+    "8002549", "8011160", "8000105", "8000207", "8000261", "8000152", "8000284", "8000096", // Hamburg, Berlin, Frankfurt, Köln, München, Hannover, Nürnberg, Stuttgart
+    "8010205", "8000080", "8000085", "8000244", "8003200", "8000115", "8000260", "8010101", // Leipzig, Dortmund, Düsseldorf, Mannheim, Kassel-Wilhelmshöhe, Fulda, Würzburg, Erfurt
+    "8000050", "8000191", // Bremen, Karlsruhe
+];
+const DEFAULT_SEED_PER_RUN = 3;
+// Only the busiest stations are read: nearly every long-distance train stops at one of them.
+const DEFAULT_SEED_POOL = 40;
+/// The boards start this long from now, so a train is known well before its Wagenreihung is due.
+const SEED_AHEAD = 20 * MINUTE;
+/// bahn.de's product filters for its boards: ICE, and IC/EC.
+const SEED_PRODUCTS = ["ICE", "EC_IC"];
+/// Cron expression of `seedLongDistance` (wrangler.toml).
+export const SEED_CRON = "*/5 * * * *";
+
+/// Reads the long-distance departures of the busiest stations, those read longest ago first, and stores
+/// their runs like app sightings. The stations are the big ones above plus every German stop of the
+/// long-distance trains followed so far (`seed_stations`, counted per run); the `SEED_POOL` (env,
+/// default 40) busiest of them are read in turns, `SEED_PER_RUN` (default 3; 0 switches seeding off) per
+/// call, five minutes apart. `SEED_STATIONS` (comma-separated EVA numbers) reads just these instead.
+/// Returns how many runs were found.
+export async function seedLongDistance(env, now = Date.now(), deps = {}) {
+    const fetchUpstream = deps.fetch ?? fetch;
+    const perRun = env.SEED_PER_RUN === undefined ? DEFAULT_SEED_PER_RUN : Number(env.SEED_PER_RUN);
+    if (!(perRun > 0)) return 0;
+    const turn = env.SEED_STATIONS === undefined ? await dueSeedStations(env, perRun, now, Number(env.SEED_POOL) > 0 ? Number(env.SEED_POOL) : DEFAULT_SEED_POOL) : fixedSeedStations(env.SEED_STATIONS, perRun, now);
+
+    const ids = new Set();
+    for (const eva of turn) {
+        try {
+            const response = await fetchUpstream(boardURL(eva, now + SEED_AHEAD * 1000), { headers: upstreamHeaders() });
+            if (!response.ok) continue;
+            for (const entry of (await response.json())?.entries ?? []) {
+                if (typeof entry?.journeyId === "string") ids.add(entry.journeyId);
+            }
+        } catch {
+            // A station that fails is read again next time.
+        }
+    }
+    let found = 0;
+    const all = [...ids];
+    for (let start = 0; start < all.length; start += MAX_SIGHTINGS) found += await recordRuns(env, all.slice(start, start + MAX_SIGHTINGS), now);
+    return found;
+}
+
+/// `perRun` of the stations, a different group each time.
+function fixedSeedStations(list, perRun, now) {
+    const stations = list.split(",").map(eva => eva.trim()).filter(eva => EVA_PATTERN.test(eva));
+    const slots = Math.ceil(stations.length / perRun);
+    const slot = Math.floor(now / (5 * MINUTE * 1000)) % Math.max(slots, 1);
+    return stations.slice(slot * perRun, slot * perRun + perRun);
+}
+
+/// Of the `pool` busiest stations, the `perRun` read longest ago, marked as read now.
+async function dueSeedStations(env, perRun, now, pool) {
+    await env.DB.prepare("INSERT OR IGNORE INTO seed_stations (eva) SELECT value FROM json_each(?)").bind(JSON.stringify(SEED_STATIONS)).run();
+    const { results } = await env.DB.prepare(
+        "SELECT eva FROM (SELECT eva, last_read FROM seed_stations ORDER BY trains DESC, eva LIMIT ?) ORDER BY last_read, eva LIMIT ?",
+    ).bind(pool, perRun).all();
+    const evas = (results ?? []).map(row => row.eva);
+    if (evas.length > 0) {
+        await env.DB.prepare("UPDATE seed_stations SET last_read = ? WHERE eva IN (SELECT value FROM json_each(?))")
+            .bind(Math.floor(now / 1000), JSON.stringify(evas)).run();
+    }
+    return evas;
+}
+
+/// bahn.de's departure board of a station from `time` on, long-distance trains only.
+export function boardURL(eva, time) {
+    const local = new Date(time).toLocaleString("sv-SE", { timeZone: "Europe/Berlin" });
+    const [day, clock] = local.split(" ");
+    return `${UPSTREAM}reiseloesung/abfahrten?datum=${day}&zeit=${clock.slice(0, 5)}&ortExtId=${eva}&ortId=A=1@L=${eva}@&mitVias=false`
+        + SEED_PRODUCTS.map(product => `&verkehrmittel[]=${product}`).join("");
+}
+
+// MARK: - Train statistics
+
+export const MAX_TRAINS = 8;
+const MAX_STOPS_PER_TRAIN = 12;
+const EVA_PATTERN = /^\d{1,9}$/;
+const TRAIN_PATTERN = /^[A-Za-z0-9]{1,8}$/;
+// The last days that count, and how many runs of one train that can be.
+const DEFAULT_DAYS = 30;
+const MAX_RUNS = 300;
+// Long-distance categories, which bahn.de and the app name alike. Everything else is regional: bahn.de
+// stores a regional train under its own category ("NRE", "DRB", "NRB" for RE/RB of various operators),
+// the app knows it as "RE 5" or "RB 27", so those match by run number and stop instead.
+const LONG_DISTANCE = new Set(["ICE", "IC", "EC", "ECE", "EN", "NJ", "RJ", "RJX", "TGV", "FLX", "IR", "D", "EUR", "ES", "THA", "ICD", "UEX"]);
+const MAX_FORMATIONS = 4;
+const MAX_SAMPLE_VEHICLES = 16;
+
+async function handleTrainStats(request, env, now) {
+    let trains;
+    try {
+        trains = (await request.json())?.trains;
+    } catch {
+        return json(400, { error: "invalid_json" });
+    }
+    if (!Array.isArray(trains) || trains.length > MAX_TRAINS) return json(400, { error: "invalid_trains" });
+    const queries = [];
+    for (const train of trains) {
+        const evas = Array.isArray(train?.evas) ? train.evas : [];
+        if (!TRAIN_PATTERN.test(train?.category ?? "") || !TRAIN_PATTERN.test(String(train?.number ?? ""))
+            || evas.length > MAX_STOPS_PER_TRAIN || !evas.every(eva => EVA_PATTERN.test(String(eva)))) {
+            return json(400, { error: "invalid_trains" });
+        }
+        queries.push({ category: train.category.toUpperCase(), number: String(train.number), evas: evas.map(String) });
+    }
+
+    const days = Number(env.STATS_DAYS) > 0 ? Number(env.STATS_DAYS) : DEFAULT_DAYS;
+    const since = new Date(now - days * 86400_000).toISOString().slice(0, 10);
+    const select = env.DB.prepare(
+        "SELECT category, cancelled, formation, stops FROM runs WHERE state = 'done' AND number = ? AND service_day >= ? " +
+        "ORDER BY service_day DESC LIMIT ?",
+    );
+    const answers = await Promise.all(queries.map(async query => {
+        const { results } = await select.bind(query.number, since, MAX_RUNS).all();
+        return trainStatistics(results ?? [], query, days);
+    }));
+    return json(200, { trains: answers });
+}
+
+/// What the finished `runs` of one train say about it, and about its stops `query.evas`:
+/// - `runs`/`cancelled`: finished runs, and those cancelled altogether;
+/// - `formationRuns`/`unplannedRuns`: runs with a Wagenreihung that bahn.de says matches or differs from
+///   the day's schedule, and those that differ; `unplannedFormations`: the vehicles that ran then (in
+///   bahn.de's Wagenreihung shape), so a train that is planned with another series on some days is no deviation;
+/// - per stop: runs that had the stop, how many cancelled it, the arrival and departure delays in
+///   minutes (cancelled stops have none) and the platform moves `{ from: planned, to: actual, n }`.
+export function trainStatistics(runs, query, days = DEFAULT_DAYS) {
+    const parsed = runs
+        .map(run => ({ category: run.category, cancelled: run.cancelled === 1, formation: parseJSON(run.formation), stops: parseJSON(run.stops) ?? [] }))
+        .filter(run => isTrain(run, query));
+    const stops = {};
+    for (const eva of query.evas) {
+        const stop = stopStatistics(parsed, eva);
+        if (stop.runs > 0) stops[eva] = stop;
+    }
+    return {
+        category: query.category,
+        number: query.number,
+        days,
+        runs: parsed.length,
+        cancelled: parsed.filter(run => run.cancelled).length,
+        ...formationStatistics(parsed, query.number),
+        stops,
+    };
+}
+
+/// Whether `run` is the train asked for: the same category, or both regional and calling at one of the
+/// stops asked for (a number alone is not unique across the regional operators).
+function isTrain(run, query) {
+    if (run.category === undefined || run.category === query.category) return true;
+    return !LONG_DISTANCE.has(run.category) && !LONG_DISTANCE.has(query.category)
+        && run.stops.some(row => query.evas.includes(row[0]));
+}
+
+function stopStatistics(runs, eva) {
+    const stop = { runs: 0, cancelled: 0, arrival: [], departure: [], platforms: [] };
+    const moves = new Map();
+    for (const run of runs) {
+        // [eva, arrival, arrivalDelay, departure, departureDelay, platform, changedPlatform, flags] (see schema.sql)
+        const row = run.stops.find(candidate => candidate[0] === eva);
+        if (!row) continue;
+        stop.runs++;
+        if (run.cancelled || (row[7] ?? 0) & 1) {
+            stop.cancelled++;
+            continue;
+        }
+        if (Number.isInteger(row[2])) stop.arrival.push(row[2]);
+        if (Number.isInteger(row[4])) stop.departure.push(row[4]);
+        if (row[5]) {
+            const to = row[6] ?? row[5];
+            const move = moves.get(`${row[5]}\t${to}`) ?? { from: row[5], to, n: 0 };
+            move.n++;
+            moves.set(`${row[5]}\t${to}`, move);
+        }
+    }
+    stop.platforms = [...moves.values()].sort((a, b) => b.n - a.n);
+    return stop;
+}
+
+/// The vehicles that replaced the planned ones: bahn.de compares each run's Wagenreihung with the day's
+/// schedule (`status`), so only runs it marks as differing count, one entry per distinct kind (series and
+/// coach types) with one example in bahn.de's Wagenreihung shape so the app names the series itself.
+function formationStatistics(runs, number) {
+    const kinds = new Map();
+    let counted = 0;
+    let unplanned = 0;
+    for (const run of runs) {
+        const status = run.formation?.status;
+        if (status !== "MATCHES_SCHEDULE" && status !== "DIFFERS_FROM_SCHEDULE") continue;
+        const groups = ownGroups(run.formation.groups, number);
+        if (groups.length === 0) continue;
+        counted++;
+        if (status === "MATCHES_SCHEDULE") continue;
+        unplanned++;
+        const signature = groups.map(groupSignature).join("|");
+        const kind = kinds.get(signature) ?? { n: 0, groups };
+        kind.n++;
+        kinds.set(signature, kind);
+    }
+    const unplannedFormations = [...kinds.values()].sort((a, b) => b.n - a.n).slice(0, MAX_FORMATIONS).map(({ n, groups }) => ({
+        n,
+        groups: groups.map(group => ({
+            name: group.name ?? null,
+            transport: { category: group.category ?? null, number: Number.isInteger(group.number) ? group.number : null },
+            vehicles: (group.vehicles ?? []).slice(0, MAX_SAMPLE_VEHICLES)
+                .map(vehicle => ({ vehicleID: vehicle.id ?? null, type: { constructionType: vehicle.type ?? null } })),
+        })),
+    }));
+    return { formationRuns: counted, unplannedRuns: unplanned, unplannedFormations };
+}
+
+/// The groups running as this train: coupled trains list the other half's trainset too.
+function ownGroups(groups, number) {
+    const list = (Array.isArray(groups) ? groups : []).filter(group => (group?.vehicles ?? []).length > 0);
+    const own = list.filter(group => String(group.number) === number);
+    return own.length > 0 ? own : list;
+}
+
+/// The trainset's name without its Tz ("ICE9465" → "ICE"), the coach types and the UIC series digits.
+function groupSignature(group) {
+    const vehicles = group.vehicles ?? [];
+    const types = [...new Set(vehicles.map(vehicle => vehicle.type ?? ""))].sort();
+    const series = [...new Set(vehicles.map(vehicle => String(vehicle.id ?? "").replace(/\D/g, "").slice(5, 8)))].sort();
+    return `${(group.name ?? "").replace(/\d+$/, "")}:${types.join(",")}:${series.join(",")}`;
+}
+
+function parseJSON(text) {
+    try {
+        return text ? JSON.parse(text) : null;
+    } catch {
+        return null;
+    }
 }
 
 // MARK: - Cron
@@ -149,13 +413,21 @@ async function step(run, now, fetchUpstream) {
         // The Wagenreihung is asked for at the first stop, 10 minutes before departure. A train
         // already gone by more than a quarter of an hour skips it: bahn.de no longer has it there.
         const askFormation = departure - now > -15 * MINUTE;
-        return db => db.prepare(
-            "UPDATE runs SET state = ?, attempts = 0, next_check = ?, service_day = ?, name = ?, category = ?, number = ?, line = ?, " +
-            "origin_eva = ?, destination_eva = ?, planned_departure = ?, planned_arrival = ? WHERE key = ?",
-        ).bind(askFormation ? "planned" : "formed",
-            askFormation ? Math.max(now, departure - 10 * MINUTE) : Math.max(now, arrival + AFTER_ARRIVAL),
-            parsed.plannedDeparture.slice(0, 10), parsed.name, parsed.category, parsed.number, parsed.line,
-            parsed.originEva, parsed.destinationEva, parsed.plannedDeparture, parsed.plannedArrival, run.key);
+        // Where a long-distance train stops, long-distance trains can be found: the seeding reads these stations.
+        const seedEvas = LONG_DISTANCE.has(parsed.category.toUpperCase())
+            ? parsed.stops.map(stop => stop.eva).filter(eva => eva.startsWith("80")) : [];
+        return db => [
+            db.prepare(
+                "UPDATE runs SET state = ?, attempts = 0, next_check = ?, service_day = ?, name = ?, category = ?, number = ?, line = ?, " +
+                "origin_eva = ?, destination_eva = ?, planned_departure = ?, planned_arrival = ? WHERE key = ?",
+            ).bind(askFormation ? "planned" : "formed",
+                askFormation ? Math.max(now, departure - 10 * MINUTE) : Math.max(now, arrival + AFTER_ARRIVAL),
+                parsed.plannedDeparture.slice(0, 10), parsed.name, parsed.category, parsed.number, parsed.line,
+                parsed.originEva, parsed.destinationEva, parsed.plannedDeparture, parsed.plannedArrival, run.key),
+            ...(seedEvas.length > 0
+                ? [db.prepare("INSERT INTO seed_stations (eva, trains) SELECT value, 1 FROM json_each(?) WHERE true " +
+                "ON CONFLICT (eva) DO UPDATE SET trains = trains + 1").bind(JSON.stringify(seedEvas))] : []),
+        ];
     }
 
     // state "formed": the final look. Still running late → again half an hour after it's now expected.
@@ -335,6 +607,7 @@ export default {
         return handleRequest(request, env);
     },
     scheduled(event, env, ctx) {
-        ctx.waitUntil(processDueRuns(env, event.scheduledTime));
+        // The five-minute cron also fires the every-minute one: two invocations, each with its own limits.
+        ctx.waitUntil(event.cron === SEED_CRON ? seedLongDistance(env, event.scheduledTime) : processDueRuns(env, event.scheduledTime));
     },
 };

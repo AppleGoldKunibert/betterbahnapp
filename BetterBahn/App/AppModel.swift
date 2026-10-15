@@ -1455,12 +1455,16 @@ final class AppSettings {
     var trainSearchFilter: TrainSearchFilter { TrainSearchFilter(kinds: trainSearchKinds, countries: trainSearchCountries) }
 
     /// Reports the regional and long-distance trains the app shows to BetterBahn's statistics server
-    /// (`TrainSightings`, #169). On by default, per device.
+    /// (`TrainSightings`, #169) and shows what it knows about them in return (`TrainStatisticsStore`, #316).
+    /// On by default, per device.
     var shareTrainStatistics: Bool {
         didSet {
             UserDefaults.standard.set(shareTrainStatistics, forKey: "shareTrainStatistics")
             let enabled = shareTrainStatistics
-            Task { await TrainSightings.shared.setEnabled(enabled) }
+            Task {
+                await TrainSightings.shared.setEnabled(enabled)
+                await TrainStatisticsStore.shared.setEnabled(enabled)
+            }
         }
     }
 
@@ -1523,7 +1527,10 @@ final class AppSettings {
         trainPositionRefresh = defaults.string(forKey: "trainPositionRefresh").flatMap(TrainPositionRefresh.init) ?? .automatic
         let shareTrainStatistics = defaults.object(forKey: "shareTrainStatistics") as? Bool ?? true
         self.shareTrainStatistics = shareTrainStatistics
-        Task { await TrainSightings.shared.setEnabled(shareTrainStatistics) }
+        Task {
+            await TrainSightings.shared.setEnabled(shareTrainStatistics)
+            await TrainStatisticsStore.shared.setEnabled(shareTrainStatistics)
+        }
         expertMode = defaults.bool(forKey: "expertMode")
         expertTraewelling = defaults.bool(forKey: "expertTraewelling")
         expertEditJourney = defaults.bool(forKey: "expertEditJourney")

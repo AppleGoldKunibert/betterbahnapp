@@ -130,6 +130,10 @@ Statistiken über Pünktlichkeit, Gleiswechsel und Fahrzeuge zu erstellen. Gespe
 wann wo gefahren ist, nicht wer ihn angesehen hat: keine Kennung deines Geräts oder deiner App-Installation,
 kein Standort, nichts über dich. Die Zugdaten bleiben ein Jahr auf dem Server und werden danach gelöscht oder
 offline archiviert.</p>
+<p>Unabhängig von der App liest der Server außerdem selbst die Abfahrten der Fernzüge an großen Bahnhöfen und
+speichert deren Fahrten auf dieselbe Weise.</p>
+<p>Mit derselben Einstellung zeigt dir die App Erfahrungswerte zu einem Zug (Verspätungen, Ausfälle, Gleiswechsel,
+Fahrzeuge). Dafür fragt sie den Server nach Zugnummer und Halten dieses Zuges; dabei wird nichts gespeichert.</p>
 
 <h2>Tickets abrufen</h2>
 <p>Zum Abrufen eines Tickets öffnet die App die Auftragssuche von bahn.de. Auftragsnummer und Nachname gehen nur
