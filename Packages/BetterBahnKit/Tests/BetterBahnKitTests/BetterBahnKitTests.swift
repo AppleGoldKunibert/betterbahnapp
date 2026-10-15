@@ -2053,6 +2053,28 @@ private final class TwinTrainProtocol: URLProtocol, @unchecked Sendable {
         #expect(stop("de-DELFI_de:03351:50", "Celle Bahnhof", 52.6211, 10.0626).displayName == "Celle")
     }
 
+    /// A German station's EVA number comes from the offline list, not bahn.de's search; one with several
+    /// levels (Berlin Hbf, Südkreuz) has none there, as the stop may be on either.
+    @Test func evaNumbersFromTheOfflineList() {
+        #expect(StationNames.evaNumber(for: stop("de-DELFI_de:14612:16:1:Gleis3", "Dresden Bahnhof Neustadt", 51.0661, 13.7402)) == "8010089")
+        #expect(StationNames.evaNumber(for: stop("de-DELFI_de:03351:50", "Celle Bahnhof", 52.6211, 10.0626)) == "8000064")
+        #expect(StationNames.evaNumber(for: stop("de-DELFI_de:11000:900003201", "S+U Berlin Hauptbahnhof", 52.5251, 13.3694)) == nil)
+        #expect(StationNames.evaNumber(for: stop("de-VBB_de:11000:900058101", "S Südkreuz Bhf (Berlin)", 52.4757, 13.3652)) == nil)
+        #expect(StationNames.evaNumber(for: stop("cz-CZPTT_czptt:stop:CZ:55659", "Děčín hlavní nádraží", 50.7735, 14.2011)) == nil)
+    }
+
+    /// Statistics, Timetables and the Wagenreihung look a stop's EVA number up through `BahnDeClient`:
+    /// a station in the offline list never asks bahn.de, so a screen full of stops sends no burst.
+    @Test func bahnDeIsNotAskedForAStationInTheOfflineList() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [NoNetworkProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let bahnDe = BahnDeClient(http: HTTPClient(session: session))
+        let eva = try await bahnDe.evaNumber(for: stop("de-DELFI_de:14612:16", "Dresden Bahnhof Neustadt", 51.0661, 13.7402))
+        #expect(eva == "8010089")
+    }
+
     /// A stop's ID and name stay the feed's, so everything matched by them works as before.
     @Test func onlyTheShownNameChanges() {
         let neustadt = stop("de-DELFI_de:14612:16", "Dresden Bahnhof Neustadt", 51.0661, 13.7402)
@@ -6941,4 +6963,12 @@ private final class LowerLevelSequenceProtocol: URLProtocol, @unchecked Sendable
         client?.urlProtocol(self, didLoad: body)
         client?.urlProtocolDidFinishLoading(self)
     }
+}
+
+/// Fails every request: for tests that must not reach the network.
+private final class NoNetworkProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() { client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet)) }
+    override func stopLoading() {}
 }
