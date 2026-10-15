@@ -3902,7 +3902,7 @@ private final class ProxyRoutingProtocol: URLProtocol, @unchecked Sendable {
 
     static func count(query: String? = nil, host: String) -> Int {
         requests.withLock { urls in
-            urls.filter { $0.host() == host && (query.map { q in $0.absoluteString.contains(q) } ?? true) }.count
+            urls.filter { url in url.host() == host && (query.map { url.absoluteString.contains($0) } ?? true) }.count
         }
     }
 
