@@ -103,10 +103,14 @@ struct TrainStatisticsRows {
         Int((share * 100).rounded()) > 0 ? percentText(share) : nil
     }
 
-    /// The text for a transfer the incoming train often misses: "ICE 578 kommt in Fulda bei 33 % der Fahrten zu spät für den Umstieg."
-    static func transferWarning(line: Line?, place: String, outlook: TrainStatistics.Stop.TransferOutlook) -> String? {
-        guard outlook.isRisky, let share = percent(outlook.lateShare) else { return nil }
-        return "\(line?.name ?? "Der Zug") kommt \(place) bei \(share) der Fahrten zu spät für den Umstieg."
+    /// The text for a transfer the incoming train often misses, as how often it works: "Klappt 7 von 10 Mal"
+    /// at the transfer itself, "Umstieg in Fulda klappt 7 von 10 Mal" with the transfer's `station`.
+    static func transferWarning(station: String? = nil, outlook: TrainStatistics.Stop.TransferOutlook) -> String? {
+        guard outlook.isRisky else { return nil }
+        let works = Int(((1 - outlook.lateShare) * 10).rounded())
+        let often = works > 0 ? "\(works) von 10 Mal" : "fast nie"
+        guard let station else { return "Klappt \(often)" }
+        return "Umstieg in \(station) klappt \(often)"
     }
 }
 
@@ -214,7 +218,7 @@ extension TrainStatisticsModel {
         var warnings: [String: String] = [:]
         for transfer in transfers {
             guard let outlook = outlooks[transfer.id],
-                  let text = TrainStatisticsRows.transferWarning(line: transfer.line, place: here ? "hier" : "in \(transfer.station.displayName)", outlook: outlook)
+                  let text = TrainStatisticsRows.transferWarning(station: here ? nil : transfer.station.displayName, outlook: outlook)
             else { continue }
             warnings[transfer.id] = text
         }
