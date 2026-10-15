@@ -79,15 +79,11 @@ extension Leg {
 /// Endpoints of bahn.de's web API: station search, departure boards, journey details and coach
 /// sequences — the same ones Travel::Status::DE::DBRIS uses (https://github.com/derf/Travel-Status-DE-DBRIS).
 ///
-/// bahn.de's bot protection blocks Apple's URL loading stack whatever headers are sent, so requests
-/// go through our Cloudflare Worker (`Cloudflare/bahnde-proxy`), which mirrors bahn.de's `/web/api/…`
-/// paths and sends the DBRIS browser headers itself. Requests carry the app's App Attest token
-/// (`WorkerAuth`). Responses are cached, and a 403/429 (passed through by the Worker) pauses every
-/// bahn.de request through the Worker for `BahnDeGate.cooldown` instead of retrying. Meanwhile the app
-/// asks bahn.de from the phone itself, in a hidden browser (`BahnDeBrowserFallback`), so one block of
-/// the shared Worker doesn't take bahn.de's data away from every user. Since October 2026 bahn.de also
-/// refuses every handshake that isn't a browser's, the Worker's included: our own server with a browser's
-/// TLS fingerprint (`BahnDeProxy`, #342) is asked first, the Worker only while it fails.
+/// bahn.de's bot protection (Akamai) refuses every request whose TLS handshake isn't a browser's, so the
+/// app asks only our own server (`BahnDeProxy`, `Server/bahnde-proxy`, #342), which asks with a browser's
+/// handshake and mirrors bahn.de's `/web/api/…` paths (the URLs are built on the Worker's `baseURL` and
+/// mapped onto the server). Requests carry the app's App Attest token (`WorkerAuth`). While the server
+/// fails, it is left alone for a while (`BahnDeProxy.gate`) and requests throw `rateLimited`.
 public struct BahnDeClient: Sendable {
     public static let baseURL = URL(string: "https://betterbahn2.betterbahn.workers.dev/web/api")!
     /// Deutsche Bahn's administration ID.
@@ -102,18 +98,15 @@ public struct BahnDeClient: Sendable {
     let http: HTTPClient
     let gate: BahnDeGate
     let auth: WorkerAuth?
-    /// Asks bahn.de from the phone when the Worker is blocked; none in widgets and tests.
-    let browser: BahnDeBrowserFallback?
-    /// Our own server with a browser's TLS fingerprint, asked before the Worker (#342); none in tests.
+    /// Our own server with a browser's TLS fingerprint (#342), the app's only way to bahn.de; none in tests.
     let proxy: BahnDeProxy?
 
-    /// `auth`, `browser` and `proxy` default to the shared ones on the app's real session and none on others (tests).
+    /// `auth` and `proxy` default to the shared ones on the app's real session and none on others (tests).
     public init(http: HTTPClient = HTTPClient(timeout: 8), gate: BahnDeGate = .shared, auth: WorkerAuth? = nil,
-                browser: BahnDeBrowserFallback? = nil, proxy: BahnDeProxy? = nil) {
+                proxy: BahnDeProxy? = nil) {
         self.http = http
         self.gate = gate
         self.auth = http.workerAuth(auth)
-        self.browser = browser ?? (http.session === URLSession.shared ? .shared : nil)
         self.proxy = proxy ?? (http.session === URLSession.shared ? .shared : nil)
     }
 
@@ -384,11 +377,8 @@ public struct BahnDeClient: Sendable {
             var reason = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
             // Usually not this request's fault: an earlier answer paused every bahn.de request.
             if case TransitError.rateLimited = error {
-                if let block = await gate.blockDescription { reason += " (\(block))" }
-                // The Worker's pause sends requests to the phone's browser: say why that failed too.
-                let browserState = await browser?.stateDescription ?? "keiner"
-                reason += " · Browser: \(browserState)"
-                if let proxy { reason += " · Server: \(await proxy.gate.blockDescription ?? "nicht gesperrt")" }
+                let block = await (proxy?.gate ?? gate).blockDescription
+                if let block { reason += " (\(block))" }
             }
             await Self.sequenceNotes.set("\(reason) · \(asked)", for: key)
             throw error
@@ -614,135 +604,32 @@ public struct BahnDeClient: Sendable {
         ]
     }
 
-    /// GET through the Worker and its shared cooldown: while bahn.de is blocking the Worker, nothing is
-    /// sent there at all and the phone's browser asks instead, if the app has one.
+    /// GET from bahn.de. The app asks only our server (`BahnDeProxy`): bahn.de refuses every other way in since
+    /// October 2026, the Worker's included. While the server fails (down, paused, refused) it is left alone for
+    /// a while and every request throws `rateLimited`, so the app says the live data isn't available.
+    /// Without a server (tests) the request goes to `url` itself, with `gate`'s cooldown after a block.
     func get<T: Decodable>(_ url: URL, as type: T.Type) async throws -> T {
-        if let proxy, let proxied = proxy.url(for: url), await !proxy.gate.isBlocked {
+        if let proxy, let proxied = proxy.url(for: url) {
+            if await proxy.gate.isBlocked { throw TransitError.rateLimited }
             do {
-                let value = try await http.get(proxied, as: type, headers: Self.headers(), auth: auth)
-                await browser?.workerAnswered()
-                return value
+                return try await http.get(proxied, as: type, headers: Self.headers(), auth: auth)
             } catch let error as TransitError where error.isBahnDeAnswer {
-                // bahn.de's own answer (404 etc.): the Worker would get the same.
+                // bahn.de's own answer (404 etc.).
                 throw error
             } catch is CancellationError {
                 throw CancellationError()
             } catch let error as URLError where error.code == .cancelled {
                 throw error
             } catch {
-                // Down, paused or refused by bahn.de: the Worker and the browser take over for a while.
                 await proxy.gate.pause(after: error, url: url)
+                throw TransitError.rateLimited
             }
         }
-        if await gate.isBlocked {
-            return try await viaBrowser(url, as: type)
-        }
+        if await gate.isBlocked { throw TransitError.rateLimited }
         do {
-            let value = try await http.get(url, as: type, headers: Self.headers(), auth: auth)
-            // The Worker gets through again: the browser's page isn't needed any more.
-            await browser?.workerAnswered()
-            return value
+            return try await http.get(url, as: type, headers: Self.headers(), auth: auth)
         } catch let error as TransitError {
             await gate.report(error)
-            guard error.isBlocked else { throw error }
-            await browser?.workerBlocked()
-            return try await viaBrowser(url, as: type)
-        }
-    }
-
-    /// The same request from the phone's hidden browser on bahn.de (`BahnDeBrowserFallback`), which has
-    /// a cooldown of its own. Throws `rateLimited` without one (widgets, tests) or while it is blocked too.
-    private func viaBrowser<T: Decodable>(_ url: URL, as type: T.Type) async throws -> T {
-        guard let browser, let direct = Self.directURL(for: url) else { throw TransitError.rateLimited }
-        let data = try await browser.fetch(direct)
-        do {
-            return try JSONDecoding.decoder.decode(T.self, from: data)
-        } catch {
-            throw TransitError.decoding(String(describing: error))
-        }
-    }
-
-    /// bahn.de's own address for a request to the Worker, which mirrors its `/web/api/…` paths.
-    static func directURL(for url: URL) -> URL? {
-        guard url.host() == baseURL.host(), url.path().hasPrefix("/web/api/"),
-              var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
-        components.scheme = "https"
-        components.host = "www.bahn.de"
-        components.port = nil
-        return components.url
-    }
-}
-
-/// The app's hidden browser on bahn.de (set once at launch, `use(_:)`): bahn.de's bot protection lets a
-/// real browser engine through where it blocks Apple's URL loading stack, so when the shared Worker is
-/// blocked, each phone can still ask for itself, with its own IP address. Has a cooldown of its own for
-/// when bahn.de blocks the phone too. Widgets set none.
-public actor BahnDeBrowserFallback {
-    public static let shared = BahnDeBrowserFallback()
-
-    /// Loads a `https://www.bahn.de/web/api/…` URL in the browser: the HTTP status and the body.
-    public typealias Fetch = @Sendable (URL) async throws -> (status: Int, body: Data)
-
-    /// Something for the browser to do without waiting for it: start loading its page, or let it go.
-    public typealias Hook = @Sendable () async -> Void
-
-    private var load: Fetch?
-    private var prepare: Hook?
-    private var release: Hook?
-    /// Whether the browser may hold a page (prepared or used since the Worker last answered).
-    private(set) var isActive = false
-    let gate = BahnDeGate()
-
-    public init(_ load: Fetch? = nil, prepare: Hook? = nil, release: Hook? = nil) {
-        self.load = load
-        self.prepare = prepare
-        self.release = release
-    }
-
-    /// `prepare` starts loading the browser's page in the background as soon as the Worker is blocked,
-    /// so the first requests don't wait for it; `release` drops the page once the Worker answers again.
-    public func use(_ load: @escaping Fetch, prepare: Hook? = nil, release: Hook? = nil) {
-        self.load = load
-        self.prepare = prepare
-        self.release = release
-    }
-
-    /// For the Wagenreihung's note: "keiner" without a browser, its own pause, else "nicht gesperrt".
-    var stateDescription: String {
-        get async {
-            guard load != nil else { return "keiner" }
-            return await gate.blockDescription ?? "nicht gesperrt"
-        }
-    }
-
-    /// The Worker was blocked: get the page ready, once.
-    func workerBlocked() async {
-        guard load != nil, !isActive else { return }
-        isActive = true
-        await prepare?()
-    }
-
-    /// The Worker answered: let the page go if the browser has one.
-    func workerAnswered() async {
-        guard isActive else { return }
-        isActive = false
-        await release?()
-    }
-
-    /// The body of a successful answer; a 404 etc. as `TransitError.http`, a block as `rateLimited`.
-    func fetch(_ url: URL) async throws -> Data {
-        guard let load else { throw TransitError.rateLimited }
-        try await gate.check()
-        isActive = true
-        do {
-            let (status, body) = try await load(url)
-            switch status {
-            case 200..<300: return body
-            case 429: throw TransitError.rateLimited
-            default: throw TransitError.http(status: status, body: String(data: body, encoding: .utf8))
-            }
-        } catch let error as TransitError {
-            await gate.report(error, url: url)
             throw error.isBlocked ? TransitError.rateLimited : error
         }
     }

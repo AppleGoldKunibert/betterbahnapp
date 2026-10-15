@@ -15,8 +15,8 @@ it small:
 
 It mirrors the Worker: the same `/web/api/…` paths (GET only, the list in `proxy.py`) and the same App Attest
 tokens (`X-BetterBahn-Token`, signed with `TOKEN_SECRET`). The app asks it first (`BahnDeProxy` in
-BetterBahnKit). While it is down, paused or refused, the app uses `betterbahn2` and the phone's hidden browser
-as before. The server keeps no logs of who asked.
+BetterBahnKit), and only it: while it is down, paused or refused, the app shows "Aktuelle Wagenreihung nicht
+verfügbar" instead of asking `betterbahn2`, which bahn.de refuses anyway. The server keeps no logs of who asked.
 
 | Variable | Default | |
 | --- | --- | --- |
@@ -50,8 +50,8 @@ reportedly isn't affected, and Always Free resources stay free there.
 
 **Free container hosting** (e.g. Koyeb, Render): create a web service from this folder (`Server/bahnde-proxy`,
 Dockerfile), set `TOKEN_SECRET` as a secret and pick a region in Germany or nearby (Frankfurt). The host gives you
-an HTTPS address. Free services that sleep when idle make the first request after a pause slow; the app then uses
-the Worker for two minutes. Their addresses are shared cloud ranges, which Akamai may treat more strictly than a
+an HTTPS address. Free services that sleep when idle make the first request after a pause slow; the app then shows
+no live data for two minutes. Their addresses are shared cloud ranges, which Akamai may treat more strictly than a
 home connection.
 
 **Home server or VPS:**

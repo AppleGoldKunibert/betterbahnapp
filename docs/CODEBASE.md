@@ -84,7 +84,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `CoachSequence.unfoldsByItself`) or by tap. Tapping a stop's platform in `TripContent` unfolds that stop's below it.
   `CoachSequencePanel` holds the content: notes (why bahn.de had none when it falls back to vagonweb's plan: a grey "bahn.de: …" line, only in
   debug builds, from Kit `BahnDeClient.coachSequenceNote(for:)`: no EVA, 404, an answer without the train's coaches, or the error;
-  for the 10-min `BahnDeGate` pause also what started it, `blockDescription`, and the phone browser's own state, `BahnDeBrowserFallback.stateDescription`), one `TrainCard` per series (Kit `TrainFormation.partsBySeries`: coupled
+  for the server's pause also what started it, `BahnDeGate.blockDescription`), one `TrainCard` per series (Kit `TrainFormation.partsBySeries`: coupled
   trainsets of one series share one, "2× ICE 4") with type, "BR …", each Tz with its Taufname and the series' side view
   running off the box's edge (#167): `Assets.xcassets/Trains/Train-<BR>` (401, 402, 403, 407, 408, 411, 412; cut from DB's
   Fahrzeuglexikon PDFs, © DB AG: "Quelle: Deutsche Bahn" next to it, named under bahn.de in Datenquellen), picked by Kit
@@ -139,7 +139,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   (Datenquellen: every service with its attribution/license links; keep it current when adding a source), `BC100RulesView`, quick tags.
 - `Shared/DesignSystem.swift` – reusable UI pieces (`Card`, `SectionHeader`, `LineBadge`, `TimeStack`,
   `DelayPill`, `PlatformBadge`, `InfoChip`, `OperatorLabel`, `Color.brand`, …). Reuse these instead of new styling.
-- `Shared/StationPicker.swift` (`StationInput`, `TimeSelector`), `LocationService`, `PreviewData`, `VagonwebBrowser`, `BahnDeBrowser`.
+- `Shared/StationPicker.swift` (`StationInput`, `TimeSelector`), `LocationService`, `PreviewData`, `VagonwebBrowser`.
 - `Shared/DebugScreens.swift` (DEBUG only) – launch args: `-debugScreen <name>`,
   `-seedDemoTrips YES`, `-seedStressTrips <count>`.
 
@@ -208,7 +208,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   answer can't run into `CombinedProvider`'s 2.5 s and take the code's station with it ("xszh" found nothing).
 - `Transit/CombinedProvider.swift` – what the app uses: primary `TransitousProvider`, optional
   fallback (none configured), cooldown health check, `BahnDeClient`, `VagonwebClient`, `BahnExpertClient`, `BahnJetztClient`.
-- `Transit/BahnDe/` – bahn.de web API via our server `Server/bahnde-proxy` (`BahnDeProxy`, #342), else the `Cloudflare/bahnde-proxy` Worker, else the phone's hidden browser (same endpoints/headers as Travel::Status::DE::DBRIS):
+- `Transit/BahnDe/` – bahn.de web API only via our server `Server/bahnde-proxy` (`BahnDeProxy`, #342; URLs are built on the Worker's `baseURL` and mapped onto it) (same endpoints/headers as Travel::Status::DE::DBRIS):
   station-search fallback, coach sequence → series/Tz/Taufname (`TrainModel`, `TrainsetNames`) and the
   full Wagenreihung (`CoachSequence`: coaches, classes, amenities, sectors, direction; also DB Regio RE/RB via
   `sequenceReference`),
@@ -217,13 +217,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   own train names for boards (departures and arrivals) and journey legs (`correctingTrainNames`, e.g. "RJ 171" that Transitous calls "ICE 171"),
   and DB's live times (`ezZeit`) for every train on boards (not subway, tram, bus; RE/RB, S-Bahn and other brands by run number or name) (`correctingFromBoard`, `applyingLiveTimes`), which
   beat DELFI's forecasts in Transitous; the journey details' live times likewise win on legs and trains (`applyingLiveTimes(from:to:)`, RJ 383 had no delay at Bad Schandau otherwise), but not over a delay or early time DB Timetables already put on a stop (`keepingDelays`: bahn.de showed +7 for RE 3 3354 at Gesundbrunnen where DB had +19), and never turning a time that is 2+ minutes early into "on time" (`turnsEarlyIntoOnTime`: bahn.de shows early trains as ±0, on boards too). Responses are
-  cached; a 403/429 pauses all bahn.de requests through the Worker for 10 min (`BahnDeGate`). Then (and on that first
-  blocked answer) the app asks bahn.de from the phone instead: `BahnDeBrowserFallback` (set at launch in `AppModel.init`,
-  none in widgets/tests) loads the same `/web/api/…` path at www.bahn.de through `BahnDeBrowser` (hidden `WebPage` on
-  bahn.de's timetable search, requests are `fetch` calls inside it), with a 10-min cooldown of its own. The page starts
-  loading on the Worker's first blocked answer (`prepare`) and is dropped once the Worker answers again (`release`), after
-  5 min without a request, or reloaded after 30 min.
-  The privacy policy (`Cloudflare/worker.mjs`) says so: the user's IP and bahn.de's cookies then reach DB.
+  cached; when the server fails it is left alone (`BahnDeProxy.gate`: 10 min after a 403/429/452, 2 min when down) and
+  every request throws `rateLimited`, which `TrainFormationLabel` shows as "Aktuelle Wagenreihung nicht verfügbar" (also
+  above vagonweb's plan). There is no other way to bahn.de: the Worker and the phone's hidden browser were refused (#342).
   The journey details' train attribute `RP` ("Reservierungspflicht") says a reservation is mandatory (`requiresReservation(for:)`, also for other
   railways' trains like SJ's D 301 or a Nightjet via `lookupReference`; shares the `journeyCourse` cache).
 - `Transit/Vagonweb/` – vagonweb.cz (used with their permission, #95): scheduled train compositions for the
