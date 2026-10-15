@@ -55,8 +55,7 @@ final class BahnDeBrowser {
         // browser check had passed goes into the answer, so the Wagenreihung's debug note can tell.
         if status == 403 {
             self.page = nil
-            let checked = (try? await page.callJavaScript(Self.checkedScript) as? Bool) == true
-            return (status, Data(((checked ? "[Browser geprüft] " : "[Browser ungeprüft] ") + text).utf8))
+            return (status, Data(("[Browser \(await Self.checkState().text)] " + text).utf8))
         }
         return (status, Data(text.utf8))
     }
@@ -92,7 +91,10 @@ final class BahnDeBrowser {
 
     private static func load() async throws -> WebPage {
         log.info("Loading bahn.de in the web view")
-        let page = WebPage()
+        // The shared cookie store, which `checkState()` reads.
+        var configuration = WebPage.Configuration()
+        configuration.websiteDataStore = .default()
+        let page = WebPage(configuration: configuration)
         page.load(URLRequest(url: startURL))
         let deadline = Date.now.addingTimeInterval(20)
         while Date.now < deadline {
@@ -109,7 +111,7 @@ final class BahnDeBrowser {
     private static func checked(_ page: WebPage) async -> WebPage {
         let deadline = Date.now.addingTimeInterval(checkTime)
         while Date.now < deadline {
-            if (try? await page.callJavaScript(checkedScript) as? Bool) == true {
+            if await checkState() == .checked {
                 log.info("bahn.de checked the web view")
                 return page
             }
@@ -128,10 +130,25 @@ final class BahnDeBrowser {
         return document.readyState === 'complete' && location.hostname === 'www.bahn.de';
         """
 
-    /// bahn.de's bot protection has checked this browser (its `_abck` cookie carries `~0~`).
-    private static let checkedScript = """
-        return /(^|; )_abck=[^;]*~0~/.test(document.cookie);
-        """
+    /// How far bahn.de's bot protection got with the web views: its `_abck` cookie carries `~0~` once it
+    /// has checked them. Read from the cookie store, which also has the cookies scripts can't see.
+    enum CheckState {
+        case checked, unchecked, missing
+
+        var text: String {
+            switch self {
+            case .checked: "geprüft"
+            case .unchecked: "ungeprüft"
+            case .missing: "ohne _abck"
+            }
+        }
+    }
+
+    static func checkState() async -> CheckState {
+        let cookies = await WKWebsiteDataStore.default().httpCookieStore.allCookies()
+        guard let abck = cookies.first(where: { $0.name == "_abck" && $0.domain.hasSuffix("bahn.de") }) else { return .missing }
+        return abck.value.contains("~0~") ? .checked : .unchecked
+    }
 
     /// The API request inside the page, as bahn.de's own scripts make it.
     private static let fetchScript = """
