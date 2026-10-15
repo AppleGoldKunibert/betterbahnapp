@@ -23,7 +23,7 @@ extension Station {
 
 /// Where a Deutschlandticket or BahnCard 100 stops being valid: at the border.
 enum CrossBorder {
-    /// Stops abroad the Deutschlandticket officially reaches, by name (bus-und-bahn.de/deutschlandticket/grenzverkehr).
+    /// Stops abroad the Deutschlandticket officially reaches, by name; the BahnCard 100 includes the Deutschlandticket, so it reaches the same (bus-und-bahn.de/deutschlandticket/grenzverkehr).
     /// Not Basel SBB and not Strasbourg. Basel Bad Bf is DB's own and counts as German anyway.
     static let deutschlandticketStops: [String] = [
         "Venlo", "Arnhem", "Enschede", "Hengelo", "Vaals", "Kerkrade",
@@ -34,9 +34,6 @@ enum CrossBorder {
         "Hrádek nad Nisou", "Hradek nad Nisou", "Vejprty", "Varnsdorf",
         "Tønder", "Tonder", "Kelmis",
     ]
-
-    /// Border stations the BahnCard 100 reaches (tariff-wise German border stations).
-    static let bahnCard100Stops: [String] = ["Salzburg Hbf", "Kufstein", "Basel Bad", "Schaffhausen"]
 
     private static func fold(_ name: String) -> String {
         Station.normalize(name.folding(options: .diacriticInsensitive, locale: nil))

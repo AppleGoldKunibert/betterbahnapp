@@ -2490,7 +2490,8 @@ private final class Ril100GeocodeProtocol: URLProtocol, @unchecked Sendable {
         #expect(dTicket.isValid(leg(regio, from: duesseldorf, to: venlo)))
         #expect(!dTicket.isValid(leg(regio, from: duesseldorf, to: baselSBB)))
         #expect(!dTicket.isValid(leg(regio, from: rosenheim, to: strasbourg)))
-        #expect(!bc100.isValid(leg(regio, from: duesseldorf, to: venlo)))
+        #expect(bc100.isValid(leg(regio, from: duesseldorf, to: venlo)))
+        #expect(!bc100.isValid(leg(regio, from: duesseldorf, to: baselSBB)))
     }
 
     @Test func boardAbroadIsNotCovered() {
