@@ -384,7 +384,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   runs of the last 30 days: per stop the arrival/departure delays, cancellations and platform moves),
   `TrainStatisticsClient`, and `TrainStatisticsStore` (cache per train and day, off while Settings → "Zugstatistik anzeigen"
   (`AppSettings.showTrainStatistics`, default on, per device) is off; looks up EVA numbers Transitous stations lack via `BahnDeClient.evaNumber(for:)`).
-  Everything is shown only from `TrainStatistics.minimumRuns` (5) runs. Views: `TrainStatisticsViews.swift` –
+  Everything is shown only from `TrainStatistics.minimumRuns` (5) runs; debug builds turn on `TrainStatistics.testMode`
+  (from 1 run on, plus grey ladybug rows with the train asked for, each stop's EVA number and the raw delays and platforms). Views: `TrainStatisticsViews.swift` –
   "Erfahrungswerte" in `LegCard` "Mehr" and `TripContent`, and a warning for tight transfers (`Journey.tightTransfers`,
   `TrainStatistics.Stop.transferOutlook`) in `TransferRow` and, for search results, `JourneyCard`.
 - `Support/LoadingDeadline.swift` – waits up to 4 s for live data before a screen shows a journey or train

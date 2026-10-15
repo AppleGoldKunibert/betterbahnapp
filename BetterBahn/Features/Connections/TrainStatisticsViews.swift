@@ -57,10 +57,40 @@ struct TrainStatisticsRows {
             add("xmark.octagon.fill", "Fällt bei \(text) der Fahrten aus", tint: share >= 0.1 ? .heavyDelay : .slightDelay)
         }
 
+        #if DEBUG
+        if TrainStatistics.testMode.load(ordering: .relaxed) { rows += Self.testRows(lookup: lookup, stops: stops, from: rows.count) }
+        #endif
+
         guard !rows.isEmpty else { return nil }
         self.rows = rows
         self.subtitle = "Letzte \(lookup.statistics.days) Tage · \(lookup.statistics.runs) Fahrten"
     }
+
+    #if DEBUG
+    /// Test mode (debug builds): what the app asked for and the raw values the server answered, per stop.
+    static func testRows(lookup: TrainStatisticsLookup, stops: [StatisticsStop], from id: Int) -> [Row] {
+        let statistics = lookup.statistics
+        var rows = [Row(id: id, systemImage: "ladybug.fill",
+                        text: "Test: \(statistics.category) \(statistics.number), \(statistics.runs) Fahrten, \(statistics.cancelledRuns) ganz ausgefallen")]
+        for stop in stops {
+            let name = stop.station.displayName
+            guard let eva = lookup.eva(of: stop.station) else {
+                rows.append(Row(id: id + rows.count, systemImage: "ladybug", text: "\(name): keine EVA-Nummer"))
+                continue
+            }
+            guard let figures = lookup.stop(at: stop.station) else {
+                rows.append(Row(id: id + rows.count, systemImage: "ladybug", text: "\(name) (\(eva)): keine Daten"))
+                continue
+            }
+            let delays = { (values: [Int]) in values.isEmpty ? "–" : values.map { $0 >= 0 ? "+\($0)" : "\($0)" }.joined(separator: " ") }
+            let platforms = figures.platforms.map { "\($0.from)→\($0.to) ×\($0.n)" }.joined(separator: ", ")
+            rows.append(Row(id: id + rows.count, systemImage: "ladybug",
+                            text: "\(name) (\(eva)): \(figures.runs) Fahrten, \(figures.cancelled) ausgefallen",
+                            detail: "An \(delays(figures.arrival)) · Ab \(delays(figures.departure))" + (platforms.isEmpty ? "" : " · Gleis \(platforms)")))
+        }
+        return rows
+    }
+    #endif
 
     /// "+6 min", "-1 min".
     static func minutes(_ value: Int) -> String { value >= 0 ? "+\(value) min" : "\(value) min" }
