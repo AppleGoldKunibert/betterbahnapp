@@ -133,6 +133,11 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   sign-up (`FollowedCheckinPushSubscription`, persisted) is kept current by `syncFollowedCheckinPush()` on every start (device
   token; a 404 = Träwelling ended the Worker's login → setting off, `followedCheckinPushEnded`) and ended on turning off or logout.
   Tapping one opens it in the list (`followedCheckinToOpen`).
+- `Features/PassengerRights/PassengerRightsViews.swift` – Fahrgastrechte (#311): `PassengerRightsBadge` under a saved journey in the lists
+  and `PassengerRightsCard` in its details ("Anspruch auf 25/50 % Entschädigung", "Antrag vorbereiten" → `PassengerRightsRequestSheet`: the
+  fields of DB's form with copy buttons and a link to bahn.de). `AppModel.passengerRightsClaim(for:)` feeds the Kit's `PassengerRights`
+  with the stored journey, its earlier plans, the tickets and the BahnCard 100 setting; `notifyPassengerRights` sends one notification per
+  level once the journey has arrived (from `refresh` and when a finished journey is opened), and keeps the worst claim seen in `SavedJourney.recordedClaim`. Never shows amounts.
 - `Features/Sharing/` – preview of shared journeys and imported DB shares; `JourneyShareButton` (in `JourneyDetailView`)
   uploads for a short link, falls back to the long link, and opens `UIActivityViewController`.
 - `Features/Settings/` – settings (incl. privacy policy link and "not affiliated with DB" note), `DataSourcesView`
@@ -372,6 +377,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   open ticket/pass and its validity; the issuer's signature is checked by the pass signer, which answers 422 →
   `WalletPassError.unverifiedBarcode`), `TravelPass` ("Zeitkarte" read from such a barcode, only its bytes are kept; `WalletPassPayload(pass:)` shows the validity as from → until). Passes are stored like tickets (`TicketStore`, `passes.json`).
   bahn.de's bot protection blocks the order API outside its page in a real browser (403), so there is no direct client.
+- `Tickets/PassengerRights.swift` – `PassengerRights.claim(for:earlierPlans:hasTicket:hasBahnCard100:)` (#311): delay at the destination against
+  the arrival of the plan as first booked (`previousVersions`, so a cancellation or missed connection counts), 25 % from 60 min, 50 % from 120.
+  Only with a ticket, a BahnCard 100 or a long-distance train (not for local trains with just a Deutschland-Ticket); `requestFields` is what DB's form asks for.
 - `Sharing/` – `JourneyShareLink` (betterbahn://share encoding, payload limits, short-link IDs),
   `ShortShareLinkClient` (`/share` on the `betterbahn` Worker, long link as fallback), `DBShare` + `DBShareImporter`
   (parse DB Navigator/bahn.de shared text, resolve via `betterbahn://import`).

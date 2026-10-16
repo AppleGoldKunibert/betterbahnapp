@@ -81,6 +81,9 @@ struct SavedJourneyRow: View {
                         .foregroundStyle(Color.heavyDelay)
                         .padding(.horizontal, 6)
                 }
+                if let claim = model.passengerRightsClaim(for: entry) {
+                    PassengerRightsBadge(claim: claim)
+                }
             }
         }
         .buttonStyle(.plain)

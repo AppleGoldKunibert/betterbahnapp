@@ -1115,6 +1115,7 @@ final class AppModel {
         // The notifications above await too, so check again before storing.
         guard let storeIndex = stillSavedIndex(of: entry) else { return }
         if updated != savedJourneys[storeIndex] { savedJourneys[storeIndex] = updated }
+        await notifyPassengerRights(for: entry.id)
     }
 
     /// Where `entry` is saved, provided it still holds the journey it had when it was handed to a
@@ -1289,6 +1290,9 @@ nonisolated struct SavedJourney: Codable, Hashable, Identifiable {
     /// Trainsets (Tz, Taufname) seen on the legs' trains, keyed by `Leg.formationKey`, kept and
     /// synced so they stay known after the journey (optional so older saved data still decodes).
     var formations: [String: TrainFormation]?
+    /// The Fahrgastrechte claim seen when the journey arrived (#311), kept so it stays after the live
+    /// data is gone (optional so older saved data still decodes).
+    var recordedClaim: PassengerRightsClaim?
 
     var issues: [ConnectionIssue] { journey.currentIssues() }
 
