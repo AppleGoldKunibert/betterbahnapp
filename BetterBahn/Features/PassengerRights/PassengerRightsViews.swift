@@ -11,9 +11,12 @@ extension AppModel {
         let stored = savedJourneys.first { $0.id == entry.id } ?? entry
         let ticketsOfJourney = tickets(for: stored).filter { !$0.ticket.isReservationOnly }
         let departure = stored.journey.departure?.planned ?? .now
-        let hasBahnCard100 = travelPasses.contains { pass in
-            pass.isBahnCard100 && (pass.validFrom ?? .distantPast) <= departure && departure <= (pass.validUntil ?? .distantFuture)
-        }
+        let hasBahnCard100 = travelPasses.contains(where: { (pass: TravelPass) -> Bool in
+            guard pass.isBahnCard100 else { return false }
+            let from = pass.validFrom ?? Date.distantPast
+            let until = pass.validUntil ?? Date.distantFuture
+            return from <= departure && departure <= until
+        })
         return PassengerRights.claim(for: stored.journey, earlierPlans: (stored.previousVersions ?? []).map(\.journey),
                                      hasTicket: !ticketsOfJourney.isEmpty, hasBahnCard100: hasBahnCard100)
     }
