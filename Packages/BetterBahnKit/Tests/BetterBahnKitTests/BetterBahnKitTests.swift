@@ -2543,6 +2543,24 @@ private final class Ril100GeocodeProtocol: URLProtocol, @unchecked Sendable {
         #expect(!bc100.crossesBorder(journey([leg(ice, from: berlin, to: hamburg)])))
     }
 
+    @Test func operatorListAppliesOnlyInGermany() {
+        let berlin = station("8011160", "Berlin Hbf")
+        let brussels = Station(id: "8814001", name: "Bruxelles-Midi", coordinate: nil, evaNumber: nil, source: .transitous)
+        let london = Station(id: "7015400", name: "London St Pancras International", coordinate: nil, evaNumber: nil, source: .transitous)
+        let wien = Station(id: "at:43:1", name: "Wien Hbf", coordinate: nil, evaNumber: nil, source: .transitous)
+        let eurostar = Line(name: "Eurostar 9013", number: "9013", product: .highSpeed, operatorName: "Eurostar International Limited")
+        let flixAbroad = Line(name: "FLX 1298", number: "1298", product: .longDistance, operatorName: "FlixTrain")
+        let bc100 = TicketFilter.bahnCard100(.default)
+        // The ICE to Brussels is only valid up to the border; the Eurostar after it isn't blacklisted abroad.
+        let toLondon = Journey(legs: [leg(ice, from: berlin, to: brussels), leg(eurostar, from: brussels, to: london)],
+                               source: .transitous)
+        #expect(!bc100.isValid(toLondon))
+        #expect(bc100.crossesBorder(toLondon))
+        // Inside Germany the operator list still applies, so a FlixTrain from Berlin to Vienna is out.
+        #expect(!bc100.isValid(leg(flixAbroad, from: berlin, to: wien)))
+        #expect(!bc100.crossesBorder(Journey(legs: [leg(flixAbroad, from: berlin, to: wien)], source: .transitous)))
+    }
+
     @Test func boardAbroadIsNotCovered() {
         let praha = Station(id: "cz-CZPTT_czptt:stop:CZ:57076", name: "Praha hl.n.", coordinate: nil, evaNumber: nil, source: .transitous)
         let czechR = Line(name: "R 20", number: "20", product: .regional, operatorName: nil)

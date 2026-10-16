@@ -67,20 +67,35 @@ public enum TicketFilter: Sendable, Hashable {
         }
     }
 
-    /// Valid if the train is and the ride stays in Germany (see `CrossBorder`).
-    public func isValid(_ leg: Leg) -> Bool {
-        switch self {
-        case .bahnCard100(let rules): rules.isValid(leg)
-        case .deutschlandticket:
-            leg.isWalking || (isValid(leg.line) && !CrossBorder.runsAbroad(leg, covered: CrossBorder.deutschlandticketStops))
+    /// Per leg, whether the train itself is valid (ignoring where the ride goes). With the BahnCard 100
+    /// the operator list stops applying from the first station abroad on, so a foreign operator's
+    /// train there counts.
+    private func trainsValid(_ legs: [Leg]) -> [Bool] {
+        var abroad = false
+        return legs.map { leg in
+            if !abroad, CrossBorder.isAbroad(leg.origin, covered: []) { abroad = true }
+            switch self {
+            case .bahnCard100(let rules): return rules.isValid(leg.line, abroad: abroad)
+            case .deutschlandticket: return isValid(leg.line)
+            }
         }
     }
-    public func isValid(_ journey: Journey) -> Bool { journey.legs.allSatisfy(isValid) }
+
+    /// Valid if the train is and the ride stays in Germany (see `CrossBorder`).
+    public func isValid(_ leg: Leg) -> Bool {
+        trainsValid([leg])[0] && (leg.isWalking || !CrossBorder.runsAbroad(leg, covered: CrossBorder.deutschlandticketStops))
+    }
+
+    public func isValid(_ journey: Journey) -> Bool {
+        zip(journey.legs, trainsValid(journey.legs)).allSatisfy { leg, trainValid in
+            trainValid && (leg.isWalking || !CrossBorder.runsAbroad(leg, covered: CrossBorder.deutschlandticketStops))
+        }
+    }
 
     /// Whether the ticket only falls short because the journey starts or ends a leg abroad: every
     /// train is fine, the border is the only problem. Shown with a warning when nothing else is left.
     public func crossesBorder(_ journey: Journey) -> Bool {
-        journey.legs.allSatisfy { $0.isWalking || isValid($0.line) }
+        trainsValid(journey.legs).allSatisfy { $0 }
             && journey.legs.contains { CrossBorder.runsAbroad($0, covered: CrossBorder.deutschlandticketStops) }
     }
 

@@ -26,10 +26,11 @@ public struct BC100Rules: Codable, Sendable, Hashable {
         excludedProducts: [.coach]
     )
 
-    public func isValid(_ line: Line?) -> Bool {
+    /// `abroad`: the ride is already outside Germany, where the operator list doesn't apply.
+    public func isValid(_ line: Line?, abroad: Bool = false) -> Bool {
         guard let line else { return true } // walking
         if excludedProducts.contains(line.product) { return false }
-        if let op = line.operatorName?.lowercased(),
+        if !abroad, let op = line.operatorName?.lowercased(),
            excludedOperators.contains(where: { op.contains($0.lowercased()) }) {
             return false
         }
@@ -38,8 +39,5 @@ public struct BC100Rules: Codable, Sendable, Hashable {
         return !excludedLinePrefixes.contains { $0.uppercased() == prefix || $0.uppercased() == letters }
     }
 
-    /// Valid if the train is and the ride stays in Germany (see `CrossBorder`).
-    public func isValid(_ leg: Leg) -> Bool { leg.isWalking || (isValid(leg.line) && !CrossBorder.runsAbroad(leg, covered: CrossBorder.deutschlandticketStops)) }
-    public func isValid(_ journey: Journey) -> Bool { journey.legs.allSatisfy(isValid) }
     public func isValid(_ entry: BoardEntry) -> Bool { isValid(entry.line) && !CrossBorder.isAbroad(entry.station, covered: CrossBorder.deutschlandticketStops) }
 }

@@ -136,6 +136,15 @@ struct JourneyResultsView: View {
                     }
                 }
 
+                // Inside the list, not as an overlay: it would sit on top of the chip below.
+                if !isLoading, !isPlanning, visibleJourneys.isEmpty, error == nil, planError == nil {
+                    ContentUnavailableView("Keine Verbindungen", systemImage: "tram.fill",
+                                           description: Text(requirements.isEmpty
+                                                             ? "Versuch eine andere Uhrzeit oder weniger Filter."
+                                                             : "Mit diesen Zügen haben wir keine Verbindung gefunden."))
+                        .padding(.top, 40)
+                }
+
                 VStack(spacing: 8) {
                     if hiddenCount + journeys.count - visibleJourneys.count > 0, requirements.isEmpty {
                         InfoChip(text: "\(hiddenCount + journeys.count - visibleJourneys.count) nicht mit \(model.settings.ticketType.shortName) nutzbar", systemImage: "eye.slash.fill")
@@ -154,11 +163,6 @@ struct JourneyResultsView: View {
         .overlay {
             if isLoading, journeys.isEmpty {
                 ProgressView("Suche Verbindungen …")
-            } else if !isLoading, !isPlanning, visibleJourneys.isEmpty, error == nil, planError == nil {
-                ContentUnavailableView("Keine Verbindungen", systemImage: "tram.fill",
-                                       description: Text(requirements.isEmpty
-                                                         ? "Versuch eine andere Uhrzeit oder weniger Filter."
-                                                         : "Mit diesen Zügen haben wir keine Verbindung gefunden."))
             }
         }
         .navigationTitle("Verbindungen")
