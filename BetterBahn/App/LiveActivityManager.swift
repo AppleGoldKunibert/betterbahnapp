@@ -60,14 +60,16 @@ final class LiveActivityManager {
     /// Lights up the running activity with an alert (the exit reminder, #313), keeping its content.
     /// Returns false when no activity is running to show it.
     func alert(title: String, body: String) async -> Bool {
-        let running = Activity<TripActivityAttributes>.activities
-            .filter { $0.attributes.journeyID == activeJourneyID && $0.activityState == .active }
-        let alert = AlertConfiguration(title: LocalizedStringResource(stringLiteral: title),
-                                       body: LocalizedStringResource(stringLiteral: body), sound: .default)
-        for activity in running {
+        guard let journeyID = activeJourneyID else { return false }
+        var alerted = false
+        for activity in Activity<TripActivityAttributes>.activities
+        where activity.attributes.journeyID == journeyID && activity.activityState == .active {
+            let alert = AlertConfiguration(title: LocalizedStringResource(stringLiteral: title),
+                                           body: LocalizedStringResource(stringLiteral: body), sound: .default)
             await activity.update(activity.content, alertConfiguration: alert)
+            alerted = true
         }
-        return !running.isEmpty
+        return alerted
     }
 
     func endAll() async {
