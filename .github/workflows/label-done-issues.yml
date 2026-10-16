@@ -1,4 +1,4 @@
-# Puts the label "Tag ready" on the issues a PR fixes once that PR is merged into indevelopment,
+# Puts the label "ready" on the issues a PR fixes once that PR is merged into indevelopment,
 # so the issue list shows which features are already done. The issues are read from the PR body
 # ("Fixed #15", "Closes #15", …), because GitHub's closing keywords only work on the default branch
 # (prod), not on indevelopment.
@@ -19,11 +19,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Apply "Tag ready" to fixed issues
+      - name: Apply "ready" to fixed issues
         uses: actions/github-script@v7
         with:
           script: |
-            const label = "Tag ready";
+            const label = "ready";
             const { owner, repo } = context.repo;
             const body = context.payload.pull_request.body ?? "";
 
