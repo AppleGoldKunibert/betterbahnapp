@@ -55,8 +55,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         model?.didRegisterForPush(deviceToken: nil)
     }
 
+    /// Exit reminders (#313) also show while the app is open; the others don't, as before.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                            withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler(notification.request.identifier.hasPrefix(AppModel.exitReminderPrefix) ? [.banner, .list, .sound] : [])
+    }
+
     /// A followed user's check-in notification (#266) opens that check-in; the others just open the app.
-    /// Without `willPresent` notifications still don't show while the app is open, as before.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                             withCompletionHandler completionHandler: @escaping () -> Void) {
         let statusID = FollowedCheckinNotifier.statusID(in: response.notification.request.content.userInfo)
