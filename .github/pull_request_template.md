@@ -1,21 +1,19 @@
 ## Overview
 
-<!-- What this PR does and why, in 1–3 sentences. -->
+<!-- What this PR does and why, in a short paragraph. Name the cause if it is a fix. -->
 
 ## Changes
 
-<!-- One line per changed file: what changed in it. -->
+<!-- One bullet per changed file or behaviour: what changed in it. -->
 
 - `path/to/File.swift`: …
 
-## Testing
+<!-- Testing has no heading: add bullets such as "Tests: …" or the edge cases you tested, starting from the "What to test" section of the change summary. -->
 
-<!-- Edge cases you tested. Start from the "What to test" section of the change summary. -->
-
-- [ ] …
+- Tests: …
 
 ## Issues
 
-<!-- One keyword per issue, each on its own line, e.g. "Fixed #15". The "Tag ready" workflow reads these lines. -->
+<!-- One line per issue, e.g. "Fixed #15". The "Tag ready" workflow reads these lines. -->
 
 Fixed #
