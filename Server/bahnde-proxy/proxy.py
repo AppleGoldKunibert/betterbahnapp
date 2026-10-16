@@ -10,12 +10,16 @@ bahn.de tolerates this as long as the traffic stays small, so the server keeps i
 - answers are cached (seconds for live data, a day for stations), and identical requests running at the
   same time share one upstream request;
 - each app install may make `RATE_LIMIT` requests a minute;
-- after bahn.de refused a request (403, 429, 452), nothing goes there for `BLOCK_PAUSE` seconds: the app
-  gets 503 and asks the Worker instead.
+- at most `MAX_PARALLEL` requests go to bahn.de at the same time; a burst of parallel requests got the
+  server refused (403) while single ones from the same address went through;
+- after bahn.de refused a request (403, 429, 452), the server starts a new session (bahn.de's bot cookies
+  of the old one may be flagged) and nothing goes there for a while: `FIRST_PAUSE` seconds, doubling with
+  each refusal soon after the last one up to `BLOCK_PAUSE`. Meanwhile the app gets 503 and says the live
+  data is missing.
 
 Environment: TOKEN_SECRET (required, same as in the Workers), PORT (8080), IMPERSONATE (safari),
-BLOCK_PAUSE (600), RATE_LIMIT (120), ALLOW_UNATTESTED ("true" lets requests without a token through,
-for testing only).
+FIRST_PAUSE (60), BLOCK_PAUSE (600), MAX_PARALLEL (4), RATE_LIMIT (120), ALLOW_UNATTESTED ("true" lets
+requests without a token through, for testing only).
 """
 
 import asyncio
@@ -55,6 +59,14 @@ BLOCK_STATUSES = {403, 429, 452}
 MAX_CACHE_ENTRIES = 5000
 MAX_QUERY_LENGTH = 2000
 UPSTREAM_TIMEOUT = 10
+# A refusal within this many seconds after the last pause ended doubles the next pause.
+STRIKE_WINDOW = 1800
+# bahn.de's search page, which a session loads first, and how long a session is kept (its cookies expire).
+PAGE = "https://www.bahn.de/buchung/fahrplan/suche"
+SESSION_MAX_AGE = 3600
+# What DB's RIS API team asks clients to accept. With the browser's "gzip, deflate, br" bahn.de held every
+# answer back for 1-3 s (measured 2026-10-16: a coach sequence in 3.3 s, with "gzip, br" in 0.23 s).
+ACCEPT_ENCODING = "gzip, br"
 
 log = logging.getLogger("bahnde-proxy")
 
@@ -107,18 +119,26 @@ class Answer:
 
 @dataclass
 class Proxy:
-    """The proxy's state; `fetch(url) -> Answer` asks bahn.de (replaced in tests)."""
+    """The proxy's state; `fetch(url) -> Answer` asks bahn.de (replaced in tests), `fetch.reset()`, when
+    there, starts a new session."""
 
     fetch: object
     secret: str
     allow_unattested: bool = False
+    first_pause: float = 60
     block_pause: float = 600
+    max_parallel: int = 4
     rate_limit: int = 120
     clock: object = time.monotonic
     cache: OrderedDict = field(default_factory=OrderedDict)
     running: dict = field(default_factory=dict)
     paused_until: float = 0
+    last_pause: float = 0
     requests: dict = field(default_factory=dict)
+    slots: asyncio.Semaphore = None
+
+    def __post_init__(self):
+        self.slots = asyncio.Semaphore(self.max_parallel)
 
     def authorized(self, request):
         """The key the request is rate limited by, or None when it isn't allowed."""
@@ -173,13 +193,28 @@ class Proxy:
             self.running.pop(url, None)
 
     async def _ask(self, url, ttl):
-        answer = await self.fetch(url)
+        async with self.slots:
+            if self.paused:
+                # Refused while this request waited for a slot.
+                return paused_answer()
+            answer = await self.fetch(url)
         if 200 <= answer.status < 300:
             self.store(url, answer, ttl)
-        elif answer.status in BLOCK_STATUSES:
-            self.paused_until = self.clock() + self.block_pause
-            log.warning("bahn.de answered %s, pausing for %ss", answer.status, int(self.block_pause))
+        elif answer.status in BLOCK_STATUSES and not self.paused:
+            # Requests already running when bahn.de refused come back refused too; one pause covers them.
+            self.block(answer.status, url)
         return answer
+
+    def block(self, status, url):
+        now = self.clock()
+        recent = self.last_pause and now - self.paused_until < STRIKE_WINDOW
+        self.last_pause = min(self.last_pause * 2, self.block_pause) if recent else min(self.first_pause, self.block_pause)
+        self.paused_until = now + self.last_pause
+        reset = getattr(self.fetch, "reset", None)
+        if reset:
+            reset()
+        path = url[len(UPSTREAM):].split("?")[0]
+        log.warning("bahn.de answered %s to %s, new session, pausing for %ss", status, path, int(self.last_pause))
 
     @property
     def paused(self):
@@ -209,7 +244,7 @@ class Proxy:
 
         hit = self.cached(url)
         if hit is None and self.paused:
-            # The app asks the Worker instead; nothing goes to bahn.de until the pause is over.
+            # The app says the live data is missing; nothing goes to bahn.de until the pause is over.
             return json_response(503, {"error": "paused"}, {"Retry-After": str(int(self.paused_until - self.clock()) + 1)})
         try:
             answer, from_cache = (hit, True) if hit is not None else await self.upstream(url, ttl)
@@ -224,6 +259,10 @@ class Proxy:
         })
 
 
+def paused_answer():
+    return Answer(503, json.dumps({"error": "paused"}).encode())
+
+
 def json_response(status, body, extra=None):
     return web.Response(status=status, text=json.dumps(body), headers={
         "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", **(extra or {})})
@@ -232,24 +271,85 @@ def json_response(status, body, extra=None):
 # MARK: - bahn.de with a browser's handshake
 
 
-def browser_fetch(impersonate):
+def timings(response):
+    """Where a request's time went (curl's own clock, cumulative): name lookup, connect, TLS, first byte.
+    Zero for steps a reused connection skipped."""
+    infos = {getattr(key, "name", str(key)): value for key, value in (getattr(response, "infos", None) or {}).items()}
+    steps = [("dns", "NAMELOOKUP_TIME"), ("connect", "CONNECT_TIME"), ("tls", "APPCONNECT_TIME"),
+             ("first byte", "STARTTRANSFER_TIME")]
+    parts = [f"{label} {infos[key] * 1000:.0f}" for label, key in steps if key in infos]
+    return f" ({', '.join(parts)} ms)" if parts else ""
+
+
+class BrowserFetch:
     """`fetch` asking bahn.de with curl_cffi, which makes the TLS/HTTP2 handshake of the browser
-    `impersonate` and sends its User-Agent; the other headers are those bahn.de's own page sends."""
-    from curl_cffi.requests import AsyncSession
+    `impersonate` and sends its User-Agent. Like bahn.de's own page: a new session first loads the search
+    page (which sets bahn.de's cookies), then asks the API with the headers of the page's background
+    requests. Sessions are renewed after `SESSION_MAX_AGE`; `reset()` drops the session and its cookies at
+    once, so the next request starts a new one. `make_session` is replaced in tests."""
 
-    session = AsyncSession(impersonate=impersonate, timeout=UPSTREAM_TIMEOUT)
+    def __init__(self, impersonate, make_session=None, clock=time.monotonic):
+        self.impersonate = impersonate
+        self.make_session = make_session or self._curl_session
+        self.clock = clock
+        self.session = None
+        self.started = 0
+        self.starting = None
 
-    async def fetch(url):
+    def _curl_session(self):
+        from curl_cffi.const import CurlInfo
+        from curl_cffi.requests import AsyncSession
+
+        return AsyncSession(impersonate=self.impersonate, timeout=UPSTREAM_TIMEOUT, curl_infos=[
+            CurlInfo.NAMELOOKUP_TIME, CurlInfo.CONNECT_TIME, CurlInfo.APPCONNECT_TIME, CurlInfo.STARTTRANSFER_TIME])
+
+    def reset(self):
+        old, self.session = self.session, None
+        if old is not None:
+            asyncio.ensure_future(old.close())
+
+    async def _session(self):
+        if self.session is not None and self.clock() - self.started > SESSION_MAX_AGE:
+            self.reset()
+        if self.session is not None:
+            return self.session
+        # Requests arriving while a session starts share its page load.
+        if self.starting is None:
+            self.starting = asyncio.ensure_future(self._start())
+        try:
+            return await asyncio.shield(self.starting)
+        finally:
+            self.starting = None
+
+    async def _start(self):
+        session = self.make_session()
+        began = time.perf_counter()
+        try:
+            # The page a visitor opens first; its answer sets bahn.de's cookies (bm_sz, ak_bmsc, _abck).
+            await session.get(PAGE, headers={"Accept-Encoding": ACCEPT_ENCODING})
+            log.info("bahn.de page loaded in %d ms", (time.perf_counter() - began) * 1000)
+        except Exception as error:  # noqa: BLE001 - the API request itself still decides
+            log.warning("bahn.de page unreachable: %s", type(error).__name__)
+        self.session, self.started = session, self.clock()
+        return session
+
+    async def __call__(self, url):
+        session = await self._session()
+        began = time.perf_counter()
         response = await session.get(url, headers={
             "Accept": "application/json",
+            "Accept-Encoding": ACCEPT_ENCODING,
             "Accept-Language": "de",
-            "Referer": "https://www.bahn.de/buchung/fahrplan/suche",
+            "Referer": PAGE,
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Dest": "empty",
             "x-correlation-id": f"{uuid.uuid4()}_{uuid.uuid4()}",
         })
+        log.info("bahn.de %s %s in %d ms%s", response.status_code, url[len(UPSTREAM):].split("?")[0],
+                 (time.perf_counter() - began) * 1000, timings(response))
         return Answer(response.status_code, response.content,
                       response.headers.get("Content-Type") or "application/json; charset=utf-8")
-
-    return fetch
 
 
 def make_app(proxy):
@@ -267,10 +367,12 @@ def main():
     if not secret and not allow_unattested:
         raise SystemExit("TOKEN_SECRET is missing (the same value as in the Cloudflare Workers).")
     proxy = Proxy(
-        fetch=browser_fetch(os.environ.get("IMPERSONATE", "safari")),
+        fetch=BrowserFetch(os.environ.get("IMPERSONATE", "safari")),
         secret=secret,
         allow_unattested=allow_unattested,
+        first_pause=float(os.environ.get("FIRST_PAUSE", "60")),
         block_pause=float(os.environ.get("BLOCK_PAUSE", "600")),
+        max_parallel=int(os.environ.get("MAX_PARALLEL", "4")),
         rate_limit=int(os.environ.get("RATE_LIMIT", "120")),
     )
     web.run_app(make_app(proxy), port=int(os.environ.get("PORT", "8080")), access_log=None)

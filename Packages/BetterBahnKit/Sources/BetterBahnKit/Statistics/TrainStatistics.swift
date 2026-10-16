@@ -1,11 +1,18 @@
 import Foundation
+import Synchronization
 
 /// What the statistics server (`Cloudflare/stats`, `POST /train-stats`) knows about one train from its
 /// runs of the last days: delays, cancellations and platform moves (#316), from DB's open timetable data
 /// (#336). Every figure is an experience value, shown only from `minimumRuns` runs on.
 public struct TrainStatistics: Sendable, Hashable, Decodable {
-    /// Fewer runs say too little to show anything.
-    public static let minimumRuns = 5
+    /// Fewer runs say too little to show anything; 1 in `testMode`.
+    public static var minimumRuns: Int { testMode ? 1 : 5 }
+    /// Shows figures from a single run on, to check what the server answers (the app turns it on in debug builds).
+    public static var testMode: Bool {
+        get { testModeFlag.load(ordering: .relaxed) }
+        set { testModeFlag.store(newValue, ordering: .relaxed) }
+    }
+    private static let testModeFlag = Atomic<Bool>(false)
     /// A train counts as on time up to this many minutes late.
     public static let onTimeMinutes = 5
 
@@ -295,6 +302,9 @@ public struct TrainStatisticsLookup: Sendable, Hashable {
     public func stop(at station: Station) -> TrainStatistics.Stop? {
         evas[station.id].flatMap { statistics.stops[$0] }
     }
+
+    /// The EVA number `station` was asked for by; nil when it had none.
+    public func eva(of station: Station) -> String? { evas[station.id] }
 }
 
 // MARK: - Cache
@@ -368,7 +378,9 @@ public actor TrainStatisticsStore {
     private func evaNumbers(of stations: [Station], resolve: EVAResolver?) async -> [String: String] {
         var evas: [String: String] = [:]
         for station in stations {
-            if let eva = station.statisticsEVA ?? resolved[station.id] {
+            // The offline list's main station first: the server files every level under it, and it needs no
+            // bahn.de request (which fails while bahn.de is refusing ours).
+            if let eva = station.statisticsEVA ?? StationNames.mainEvaNumber(for: station) ?? resolved[station.id] {
                 evas[station.id] = eva
             } else if let resolve, let eva = await resolve(station), !eva.isEmpty, eva.allSatisfy(\.isNumber) {
                 resolved[station.id] = eva

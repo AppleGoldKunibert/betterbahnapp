@@ -11,19 +11,29 @@ bahn.de tolerates this as long as the traffic stays small, as bahn.expert has do
 it small:
 - **Cache:** answers are cached (30 s for live data, a day for stations) and identical requests share one call.
 - **Rate limit:** at most `RATE_LIMIT` requests a minute per app install.
-- **Pause:** after bahn.de refused a request, nothing goes there for `BLOCK_PAUSE` seconds.
+- **One at a time:** at most `MAX_PARALLEL` requests go to bahn.de at once. A burst of 17 parallel requests got the
+  server refused (403) on 2026-10-15, while single requests from the same address went through.
+- **Like bahn.de's page:** a new session first loads the search page (which sets bahn.de's cookies), then asks the API
+  with the headers of the page's background requests. Sessions are renewed every hour. Measured 2026-10-16 from a home
+  connection: Safari this way 200 for departures and Wagenreihung, from the Oracle VM 403 (a data center address).
+- **`Accept-Encoding: gzip, br`**, as DB's RIS API team asks: with the browser's `gzip, deflate, br` bahn.de held each
+  answer back for 1–3 s (2026-10-16: the same coach sequence in 3.3 s, with `gzip, br` in 0.23 s).
+- **Pause:** after bahn.de refused a request, the server starts a new session (fresh cookies) and nothing goes
+  there for `FIRST_PAUSE` seconds; each refusal soon after the last pause doubles it, up to `BLOCK_PAUSE`.
 
 It mirrors the Worker: the same `/web/api/…` paths (GET only, the list in `proxy.py`) and the same App Attest
 tokens (`X-BetterBahn-Token`, signed with `TOKEN_SECRET`). The app asks it first (`BahnDeProxy` in
-BetterBahnKit). While it is down, paused or refused, the app uses `betterbahn2` and the phone's hidden browser
-as before. The server keeps no logs of who asked.
+BetterBahnKit), and only it: while it is down, paused or refused, the app shows "Aktuelle Wagenreihung nicht
+verfügbar" instead of asking `betterbahn2`, which bahn.de refuses anyway. The server keeps no logs of who asked.
 
 | Variable | Default | |
 | --- | --- | --- |
 | `TOKEN_SECRET` | — | Required. The same value as in `betterbahn2`, `betterbahn`, `betterbahn-pass`. |
 | `PORT` | `8080` | |
 | `IMPERSONATE` | `safari` | curl_cffi browser target. If bahn.de starts refusing it, try `safari_ios`, `firefox` or `chrome`. |
-| `BLOCK_PAUSE` | `600` | Seconds without bahn.de requests after a 403/429/452. |
+| `FIRST_PAUSE` | `60` | Seconds without bahn.de requests after a 403/429/452. |
+| `BLOCK_PAUSE` | `600` | The longest pause, reached when refusals keep coming. |
+| `MAX_PARALLEL` | `4` | Requests going to bahn.de at the same time. |
 | `RATE_LIMIT` | `120` | Requests per minute per app install. |
 | `ALLOW_UNATTESTED` | — | `true` lets requests without a token through. Only for a quick test, never in production. |
 
@@ -32,9 +42,10 @@ as before. The server keeps no logs of who asked.
 It is a plain Docker image (`Dockerfile`) and needs HTTPS in front of it. Once it runs, put its address into
 `BahnDeProxy.baseURL` (BetterBahnKit) and ship an app build. Check it with `curl https://<address>/health`.
 
-**Where it runs now: Oracle Cloud "Always Free"** (since 2026-10-15). A `VM.Standard.A1.Flex` (1 OCPU, 6 GB,
-Ubuntu 24.04, region Frankfurt) with Docker and Caddy in front, at `https://92-5-144-111.sslip.io` (`BahnDeProxy.baseURL`).
-bahn.de answered 200 from its address. Setting it up again:
+**Oracle Cloud "Always Free"** (2026-10-15, given up the next day): bahn.de refused its addresses, reserved and
+ephemeral alike, with `OPS_BLOCKED` for departures and coach sequences (only `orte` went through), even after a
+night without requests. A `VM.Standard.A1.Flex` (1 OCPU, 6 GB, Ubuntu 24.04, region Frankfurt) with Docker and
+Caddy in front. Setting it up:
 1. Create the instance (any availability domain with A1 capacity, else `VM.Standard.E2.1.Micro`), a new VCN with a
    public subnet, then "Connect public subnet to internet" and a reserved public IP on the VNIC (Networking → IP management → Reserved public IPs; it survives recreating the VM,
    an ephemeral one doesn't). The app has the address built in, so a new IP needs an app update.
@@ -50,9 +61,20 @@ reportedly isn't affected, and Always Free resources stay free there.
 
 **Free container hosting** (e.g. Koyeb, Render): create a web service from this folder (`Server/bahnde-proxy`,
 Dockerfile), set `TOKEN_SECRET` as a secret and pick a region in Germany or nearby (Frankfurt). The host gives you
-an HTTPS address. Free services that sleep when idle make the first request after a pause slow; the app then uses
-the Worker for two minutes. Their addresses are shared cloud ranges, which Akamai may treat more strictly than a
+an HTTPS address. Free services that sleep when idle make the first request after a pause slow; the app then shows
+no live data for two minutes. Their addresses are shared cloud ranges, which Akamai may treat more strictly than a
 home connection.
+
+**Where it runs now: a game-server panel** (Pterodactyl, a "Python" server without Docker or root), at
+`https://bahnde-proxy.tail6eed6b.ts.net` (`BahnDeProxy.baseURL`). The small host's
+address got 200 from bahn.de where Oracle's were refused (2026-10-16). `panel_start.py` brings HTTPS with
+Tailscale Funnel and starts the proxy:
+1. Upload only `panel_boot.py` and a `.env` next to it with `TOKEN_SECRET=…` and `BRANCH=<branch>`. On every
+   start it downloads the server code of that branch from GitHub, installs the requirements and runs
+   `panel_start.py`.
+2. Startup: Python 3.12 or 3.13 image if there is a choice, app file `panel_boot.py`, no requirements file.
+3. Start it and open the Tailscale links in the console (sign in, enable Funnel). It then prints the
+   `https://<name>.<tailnet>.ts.net` address; put it into `BahnDeProxy.baseURL`. Updates: restart the server.
 
 **Home server or VPS:**
 

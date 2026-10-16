@@ -2053,6 +2053,36 @@ private final class TwinTrainProtocol: URLProtocol, @unchecked Sendable {
         #expect(stop("de-DELFI_de:03351:50", "Celle Bahnhof", 52.6211, 10.0626).displayName == "Celle")
     }
 
+    /// A German station's EVA number comes from the offline list, not bahn.de's search; one with several
+    /// levels (Berlin Hbf, Südkreuz) has none there, as the stop may be on either.
+    @Test func evaNumbersFromTheOfflineList() {
+        #expect(StationNames.evaNumber(for: stop("de-DELFI_de:14612:16:1:Gleis3", "Dresden Bahnhof Neustadt", 51.0661, 13.7402)) == "8010089")
+        #expect(StationNames.evaNumber(for: stop("de-DELFI_de:03351:50", "Celle Bahnhof", 52.6211, 10.0626)) == "8000064")
+        #expect(StationNames.evaNumber(for: stop("de-DELFI_de:11000:900003201", "S+U Berlin Hauptbahnhof", 52.5251, 13.3694)) == nil)
+        #expect(StationNames.evaNumber(for: stop("de-VBB_de:11000:900058101", "S Südkreuz Bhf (Berlin)", 52.4757, 13.3652)) == nil)
+        #expect(StationNames.evaNumber(for: stop("cz-CZPTT_czptt:stop:CZ:55659", "Děčín hlavní nádraží", 50.7735, 14.2011)) == nil)
+    }
+
+    /// The statistics take the main station's number even of a station with several levels: the server files
+    /// the lower levels under it.
+    @Test func mainEvaNumberAlsoForStationsWithSeveralLevels() {
+        #expect(StationNames.mainEvaNumber(for: stop("de-DELFI_de:11000:900003201", "S+U Berlin Hauptbahnhof", 52.5251, 13.3694)) == "8011160")
+        #expect(StationNames.mainEvaNumber(for: stop("de-DELFI_de:14612:16", "Dresden Bahnhof Neustadt", 51.0661, 13.7402)) == "8010089")
+        #expect(StationNames.mainEvaNumber(for: stop("cz-CZPTT_czptt:stop:CZ:55659", "Děčín hlavní nádraží", 50.7735, 14.2011)) == nil)
+    }
+
+    /// Statistics, Timetables and the Wagenreihung look a stop's EVA number up through `BahnDeClient`:
+    /// a station in the offline list never asks bahn.de, so a screen full of stops sends no burst.
+    @Test func bahnDeIsNotAskedForAStationInTheOfflineList() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [NoNetworkProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let bahnDe = BahnDeClient(http: HTTPClient(session: session))
+        let eva = try await bahnDe.evaNumber(for: stop("de-DELFI_de:14612:16", "Dresden Bahnhof Neustadt", 51.0661, 13.7402))
+        #expect(eva == "8010089")
+    }
+
     /// A stop's ID and name stay the feed's, so everything matched by them works as before.
     @Test func onlyTheShownNameChanges() {
         let neustadt = stop("de-DELFI_de:14612:16", "Dresden Bahnhof Neustadt", 51.0661, 13.7402)
@@ -3742,116 +3772,16 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         await #expect(throws: TransitError.rateLimited) { try await bahnDe.formation(request) }
         #expect(BlockedProtocol.requests.withLock { $0 } == 1)
     }
-
-    /// Requests to the Worker map onto bahn.de's own `/web/api/…` addresses for the phone's browser.
-    @Test func directURLMirrorsWorkerPath() {
-        let url = BahnDeClient.baseURL.appending(path: "reiseloesung/orte").appending(queryItems: [.init(name: "suchbegriff", value: "Köln Hbf")])
-        #expect(BahnDeClient.directURL(for: url)?.absoluteString == "https://www.bahn.de/web/api/reiseloesung/orte?suchbegriff=K%C3%B6ln%20Hbf")
-        #expect(BahnDeClient.directURL(for: URL(string: "https://example.com/web/api/reiseloesung/orte")!) == nil)
-        #expect(BahnDeClient.directURL(for: URL(string: "https://betterbahn2.betterbahn.workers.dev/timetables/v1/station/8000105")!) == nil)
-    }
-
-    /// When the Worker is blocked, the phone's browser asks bahn.de instead, also while the Worker pauses.
-    @Test func blockedWorkerFallsBackToBrowser() async throws {
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [ForbiddenProtocol.self]
-        let session = URLSession(configuration: config)
-        defer { session.invalidateAndCancel() }
-        let loaded = Recorded<[String]>([])
-        let browser = BahnDeBrowserFallback { url in
-            loaded.value.withLock { $0.append(url.absoluteString) }
-            return (200, Data(#"[{"extId":"8000105","name":"Frankfurt(Main)Hbf","type":"ST","products":["ICE"]}]"#.utf8))
-        }
-        let gate = BahnDeGate()
-        let bahnDe = BahnDeClient(http: HTTPClient(session: session), gate: gate, browser: browser)
-
-        #expect(try await bahnDe.searchStations("Frankfurt").map(\.id) == ["8000105"])
-        #expect(await gate.isBlocked)
-        #expect(try await bahnDe.searchStations("Frankfurt").map(\.id) == ["8000105"])
-        // The Worker was asked once; then only the browser, at bahn.de's own address.
-        #expect(ForbiddenProtocol.requests.withLock { $0 } == 1)
-        #expect(loaded.value.withLock { $0.count } == 2)
-        #expect(loaded.value.withLock { $0.allSatisfy { $0.hasPrefix("https://www.bahn.de/web/api/reiseloesung/orte?") } })
-    }
-
-    /// A blocked Worker gets the browser's page loading right away; once the Worker answers again, the page goes.
-    @Test func browserPageFollowsWorkerState() async throws {
-        let prepared = Recorded(0)
-        let released = Recorded(0)
-        let browser = BahnDeBrowserFallback({ _ in
-            (200, Data(#"[{"extId":"8000105","name":"Frankfurt(Main)Hbf","type":"ST"}]"#.utf8))
-        }, prepare: { prepared.value.withLock { $0 += 1 } }, release: { released.value.withLock { $0 += 1 } })
-
-        let blockedConfig = URLSessionConfiguration.ephemeral
-        blockedConfig.protocolClasses = [RefusingProtocol.self]
-        let blockedSession = URLSession(configuration: blockedConfig)
-        defer { blockedSession.invalidateAndCancel() }
-        let blocked = BahnDeClient(http: HTTPClient(session: blockedSession), gate: BahnDeGate(), browser: browser)
-        _ = try await blocked.searchStations("Frankfurt")
-        _ = try await blocked.searchStations("Frankfurt")
-        #expect(prepared.value.withLock { $0 } == 1)
-        #expect(await browser.isActive)
-
-        let workingConfig = URLSessionConfiguration.ephemeral
-        workingConfig.protocolClasses = [StationsProtocol.self]
-        let workingSession = URLSession(configuration: workingConfig)
-        defer { workingSession.invalidateAndCancel() }
-        let working = BahnDeClient(http: HTTPClient(session: workingSession), gate: BahnDeGate(), browser: browser)
-        _ = try await working.searchStations("Frankfurt")
-        _ = try await working.searchStations("Frankfurt")
-        #expect(released.value.withLock { $0 } == 1)
-        #expect(await !browser.isActive)
-    }
-
-    /// When bahn.de blocks the phone too, its browser pauses as well instead of asking again.
-    @Test func blockedBrowserPausesToo() async throws {
-        let calls = Recorded(0)
-        let browser = BahnDeBrowserFallback { _ in
-            calls.value.withLock { $0 += 1 }
-            return (403, Data(#"{"code":"OPS_BLOCKED"}"#.utf8))
-        }
-        let gate = BahnDeGate()
-        await gate.report(.rateLimited)
-        let bahnDe = BahnDeClient(http: HTTPClient(session: .shared), gate: gate, browser: browser)
-
-        await #expect(throws: TransitError.rateLimited) { try await bahnDe.searchStations("Frankfurt") }
-        await #expect(throws: TransitError.rateLimited) { try await bahnDe.searchStations("Frankfurt") }
-        #expect(calls.value.withLock { $0 } == 1)
-        #expect(await browser.gate.isBlocked)
-    }
-
-    /// When the Worker and the phone's browser are both blocked, the Wagenreihung's note names both pauses.
-    @Test func blockedSequenceNoteNamesBrowser() async throws {
-        let browser = BahnDeBrowserFallback { _ in (403, Data(#"{"code":"OPS_BLOCKED"}"#.utf8)) }
-        let gate = BahnDeGate()
-        await gate.report(.rateLimited)
-        let bahnDe = BahnDeClient(http: HTTPClient(session: .shared), gate: gate, browser: browser)
-        let request = BahnDeClient.FormationRequest(
-            category: "ICE", number: "646",
-            station: Station(id: "8000152", name: "Hannover Hbf", coordinate: nil, evaNumber: "8000152", source: .bahnDe),
-            plannedDeparture: Date(timeIntervalSince1970: 1_800_000_000))
-
-        await #expect(throws: TransitError.rateLimited) { try await bahnDe.coachSequence(request) }
-        let note = try #require(await bahnDe.coachSequenceNote(for: request))
-        #expect(note.contains("Browser: Pause bis "))
-        #expect(note.contains("(…/vehicle-sequence)"))
-
-        let withoutBrowser = BahnDeClient(http: HTTPClient(session: .shared), gate: gate, browser: BahnDeBrowserFallback())
-        var other = request
-        other.number = "647"
-        await #expect(throws: TransitError.rateLimited) { try await withoutBrowser.coachSequence(other) }
-        #expect(await withoutBrowser.coachSequenceNote(for: other)?.contains("Browser: keiner") == true)
-    }
 }
 
-/// Our own bahn.de server (#342) is asked before the Worker, and the Worker takes over while it fails.
+/// Our own bahn.de server (#342) is the app's only way to bahn.de; while it fails, requests say so.
 @Suite struct BahnDeProxyTests {
     private func client(proxyHost: String) -> (BahnDeClient, BahnDeProxy, URLSession) {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [ProxyRoutingProtocol.self]
         let session = URLSession(configuration: config)
         let proxy = BahnDeProxy(baseURL: URL(string: "https://\(proxyHost)")!)
-        return (BahnDeClient(http: HTTPClient(session: session), gate: BahnDeGate(), browser: BahnDeBrowserFallback(), proxy: proxy),
+        return (BahnDeClient(http: HTTPClient(session: session), gate: BahnDeGate(), proxy: proxy),
                 proxy, session)
     }
 
@@ -3862,7 +3792,7 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(proxy.url(for: URL(string: "https://betterbahn2.betterbahn.workers.dev/timetables/v1/station/8000105")!) == nil)
     }
 
-    @Test func asksTheServerBeforeTheWorker() async throws {
+    @Test func asksOnlyTheServer() async throws {
         ProxyRoutingProtocol.answers.withLock { $0["proxy-ok.test"] = 200 }
         let (bahnDe, proxy, session) = client(proxyHost: "proxy-ok.test")
         defer { session.invalidateAndCancel() }
@@ -3873,17 +3803,17 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(await !proxy.gate.isBlocked)
     }
 
-    @Test func theWorkerTakesOverWhileTheServerFails() async throws {
+    @Test func aFailingServerIsLeftAloneAndSaysSo() async throws {
         ProxyRoutingProtocol.answers.withLock { $0["proxy-down.test"] = 503 }
         let (bahnDe, proxy, session) = client(proxyHost: "proxy-down.test")
         defer { session.invalidateAndCancel() }
 
-        #expect(try await bahnDe.searchStations("ServerDown").map(\.id) == ["8000105"])
+        await #expect(throws: TransitError.rateLimited) { try await bahnDe.searchStations("ServerDown") }
         #expect(await proxy.gate.isBlocked)
-        #expect(try await bahnDe.searchStations("ServerDown").map(\.id) == ["8000105"])
-        // The server was asked once, then left alone; the Worker answered both times.
+        await #expect(throws: TransitError.rateLimited) { try await bahnDe.searchStations("ServerDown") }
+        // The server was asked once, then left alone; the Worker never.
         #expect(ProxyRoutingProtocol.count(host: "proxy-down.test") == 1)
-        #expect(ProxyRoutingProtocol.count(query: "ServerDown", host: "betterbahn2.betterbahn.workers.dev") == 2)
+        #expect(ProxyRoutingProtocol.count(query: "ServerDown", host: "betterbahn2.betterbahn.workers.dev") == 0)
     }
 
     @Test func bahnDesOwnAnswersAndBlocksAreTold() {
@@ -3918,53 +3848,6 @@ private final class ProxyRoutingProtocol: URLProtocol, @unchecked Sendable {
         let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(body.utf8))
-        client?.urlProtocolDidFinishLoading(self)
-    }
-    override func stopLoading() {}
-}
-
-/// A value a test's closures record into (a `Mutex` itself can't be captured).
-private final class Recorded<Value: Sendable>: Sendable {
-    let value: Mutex<Value>
-    init(_ value: Value) { self.value = Mutex(value) }
-}
-
-/// The Worker answering bahn.de's block, counted apart from `BlockedProtocol` (tests run in parallel).
-private final class ForbiddenProtocol: URLProtocol, @unchecked Sendable {
-    static let requests = Mutex(0)
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
-        Self.requests.withLock { $0 += 1 }
-        let response = HTTPURLResponse(url: request.url!, statusCode: 403, httpVersion: nil, headerFields: nil)!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data(#"{"status":"ERROR","code":"OPS_BLOCKED"}"#.utf8))
-        client?.urlProtocolDidFinishLoading(self)
-    }
-    override func stopLoading() {}
-}
-
-/// The Worker blocked, uncounted (`ForbiddenProtocol` counts for another test).
-private final class RefusingProtocol: URLProtocol, @unchecked Sendable {
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
-        let response = HTTPURLResponse(url: request.url!, statusCode: 403, httpVersion: nil, headerFields: nil)!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data(#"{"status":"ERROR","code":"OPS_BLOCKED"}"#.utf8))
-        client?.urlProtocolDidFinishLoading(self)
-    }
-    override func stopLoading() {}
-}
-
-/// The Worker answering a station search.
-private final class StationsProtocol: URLProtocol, @unchecked Sendable {
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
-        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data(#"[{"extId":"8000105","name":"Frankfurt(Main)Hbf","type":"ST"}]"#.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
@@ -7088,4 +6971,12 @@ private final class LowerLevelSequenceProtocol: URLProtocol, @unchecked Sendable
         client?.urlProtocol(self, didLoad: body)
         client?.urlProtocolDidFinishLoading(self)
     }
+}
+
+/// Fails every request: for tests that must not reach the network.
+private final class NoNetworkProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() { client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet)) }
+    override func stopLoading() {}
 }

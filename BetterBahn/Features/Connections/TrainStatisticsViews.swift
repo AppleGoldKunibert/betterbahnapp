@@ -57,10 +57,40 @@ struct TrainStatisticsRows {
             add("xmark.octagon.fill", "Fällt bei \(text) der Fahrten aus", tint: share >= 0.1 ? .heavyDelay : .slightDelay)
         }
 
+        #if DEBUG
+        if TrainStatistics.testMode { rows += Self.testRows(lookup: lookup, stops: stops, from: rows.count) }
+        #endif
+
         guard !rows.isEmpty else { return nil }
         self.rows = rows
         self.subtitle = "Letzte \(lookup.statistics.days) Tage · \(lookup.statistics.runs) Fahrten"
     }
+
+    #if DEBUG
+    /// Test mode (debug builds): what the app asked for and the raw values the server answered, per stop.
+    static func testRows(lookup: TrainStatisticsLookup, stops: [StatisticsStop], from id: Int) -> [Row] {
+        let statistics = lookup.statistics
+        var rows = [Row(id: id, systemImage: "ladybug.fill",
+                        text: "Test: \(statistics.category) \(statistics.number), \(statistics.runs) Fahrten, \(statistics.cancelledRuns) ganz ausgefallen")]
+        for stop in stops {
+            let name = stop.station.displayName
+            guard let eva = lookup.eva(of: stop.station) else {
+                rows.append(Row(id: id + rows.count, systemImage: "ladybug", text: "\(name): keine EVA-Nummer"))
+                continue
+            }
+            guard let figures = lookup.stop(at: stop.station) else {
+                rows.append(Row(id: id + rows.count, systemImage: "ladybug", text: "\(name) (\(eva)): keine Daten"))
+                continue
+            }
+            let delays = { (values: [Int]) in values.isEmpty ? "–" : values.map { $0 >= 0 ? "+\($0)" : "\($0)" }.joined(separator: " ") }
+            let platforms = figures.platforms.map { "\($0.from)→\($0.to) ×\($0.n)" }.joined(separator: ", ")
+            rows.append(Row(id: id + rows.count, systemImage: "ladybug",
+                            text: "\(name) (\(eva)): \(figures.runs) Fahrten, \(figures.cancelled) ausgefallen",
+                            detail: "An \(delays(figures.arrival)) · Ab \(delays(figures.departure))" + (platforms.isEmpty ? "" : " · Gleis \(platforms)")))
+        }
+        return rows
+    }
+    #endif
 
     /// "+6 min", "-1 min".
     static func minutes(_ value: Int) -> String { value >= 0 ? "+\(value) min" : "\(value) min" }
@@ -73,10 +103,14 @@ struct TrainStatisticsRows {
         Int((share * 100).rounded()) > 0 ? percentText(share) : nil
     }
 
-    /// The text for a transfer the incoming train often misses: "ICE 578 kommt in Fulda bei 33 % der Fahrten zu spät für den Umstieg."
-    static func transferWarning(line: Line?, place: String, outlook: TrainStatistics.Stop.TransferOutlook) -> String? {
-        guard outlook.isRisky, let share = percent(outlook.lateShare) else { return nil }
-        return "\(line?.name ?? "Der Zug") kommt \(place) bei \(share) der Fahrten zu spät für den Umstieg."
+    /// The text for a transfer the incoming train often misses, as how often it works: "Klappt 7 von 10 Mal"
+    /// at the transfer itself, "Umstieg in Fulda klappt 7 von 10 Mal" with the transfer's `station`.
+    static func transferWarning(station: String? = nil, outlook: TrainStatistics.Stop.TransferOutlook) -> String? {
+        guard outlook.isRisky else { return nil }
+        let works = Int(((1 - outlook.lateShare) * 10).rounded())
+        let often = works > 0 ? "\(works) von 10 Mal" : "fast nie"
+        guard let station else { return "Klappt \(often)" }
+        return "Umstieg in \(station) klappt \(often)"
     }
 }
 
@@ -184,7 +218,7 @@ extension TrainStatisticsModel {
         var warnings: [String: String] = [:]
         for transfer in transfers {
             guard let outlook = outlooks[transfer.id],
-                  let text = TrainStatisticsRows.transferWarning(line: transfer.line, place: here ? "hier" : "in \(transfer.station.displayName)", outlook: outlook)
+                  let text = TrainStatisticsRows.transferWarning(station: here ? nil : transfer.station.displayName, outlook: outlook)
             else { continue }
             warnings[transfer.id] = text
         }

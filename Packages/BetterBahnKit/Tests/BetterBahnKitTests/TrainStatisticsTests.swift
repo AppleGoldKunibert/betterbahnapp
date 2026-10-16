@@ -48,6 +48,15 @@ import Testing
         #expect(TrainStatistics.Stop(runs: 3, arrival: [1, 2, 30]).arrivalLateShare(atLeast: 5) == nil)
     }
 
+    @Test func testModeShowsFiguresFromASingleRun() {
+        let stop = TrainStatistics.Stop(runs: 1, arrival: [4])
+        #expect(stop.arrivalSummary() == nil)
+        TrainStatistics.testMode = true
+        defer { TrainStatistics.testMode = false }
+        #expect(stop.arrivalSummary()?.average == 4)
+        #expect(TrainStatistics(category: "ICE", number: "1", runs: 1).cancelledShare == 0)
+    }
+
     @Test func givesTheChanceOfACancelledStop() throws {
         let stop = try #require(try decoded().stops["8000115"])
         #expect(abs(try #require(stop.cancelledShare) - 2.0 / 12.0) < 0.001)
