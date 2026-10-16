@@ -307,7 +307,7 @@ struct StationInput<Focus: Hashable>: View {
     /// (e.g. "Bernau a. Chiemsee") are left alone.
     private func rowLabel(for suggestion: Station) -> Text {
         if isTyping, let flag = model.settings.stationFlagMode.flag(for: suggestion, home: Locale.current.region?.identifier) {
-            return Text("\(flag) ") + nameLabel(for: suggestion)
+            return Text("\(flag) \(nameLabel(for: suggestion))")
         }
         return nameLabel(for: suggestion)
     }
