@@ -15,9 +15,12 @@ struct CoachSequenceDisclosure: View {
     let departure: Date?
     /// Space above the row, only while it is shown (a stack's spacing would stay when it isn't).
     var spacing: CGFloat = 0
+    /// The seat reserved on this train; its coach is highlighted in the Wagenreihung.
+    var reservation: SeatReservation?
 
-    init(leg: Leg, spacing: CGFloat = 0) {
+    init(leg: Leg, reservation: SeatReservation? = nil, spacing: CGFloat = 0) {
         self.spacing = spacing
+        self.reservation = reservation
         request = BahnDeClient.formationRequest(for: leg)
         plannedRequest = BahnDeClient.formationRequest(for: leg, lookahead: nil)
         departure = leg.departure.best
@@ -55,7 +58,7 @@ struct CoachSequenceDisclosure: View {
                             withAnimation(.snappy) { expanded = !open }
                         }
                         if open {
-                            CoachSequencePanel(request: shown, sequence: sequence)
+                            CoachSequencePanel(request: shown, sequence: sequence, reservation: reservation)
                                 .transition(.fold)
                         }
                     }
@@ -104,10 +107,13 @@ struct CoachSequenceToggle: View {
 struct CoachSequencePanel: View {
     let request: BahnDeClient.FormationRequest
     @State private var sequence: CoachSequence?
+    /// The seat reserved on this train, whose coach is highlighted.
+    let reservation: SeatReservation?
 
     /// - Parameter sequence: already loaded by the caller; fetched here otherwise (e.g. from a stop's platform).
-    init(request: BahnDeClient.FormationRequest, sequence: CoachSequence? = nil) {
+    init(request: BahnDeClient.FormationRequest, sequence: CoachSequence? = nil, reservation: SeatReservation? = nil) {
         self.request = request
+        self.reservation = reservation
         _sequence = State(initialValue: sequence)
     }
 
@@ -127,7 +133,12 @@ struct CoachSequencePanel: View {
                     ForEach(Array(sequence.formation.partsBySeries.enumerated()), id: \.offset) { _, part in
                         TrainCard(formation: part)
                     }
-                    CoachSequenceDiagram(sequence: sequence)
+                    CoachSequenceDiagram(sequence: sequence, highlightedCoachID: reservation.flatMap { reservation in
+                        switch sequence.position(ofCoach: reservation.coach, train: reservation.trainName) {
+                        case .sectors(_, let id), .noSectors(let id): id
+                        case .coachMissing: nil
+                        }
+                    })
                     legend(sequence)
                 }
             } else if loading {
@@ -304,6 +315,8 @@ private struct TrainCard: View {
 /// while scrolling until the part ends at the coupling point.
 private struct CoachSequenceDiagram: View {
     let sequence: CoachSequence
+    /// The coach of the reserved seat, marked with a frame.
+    var highlightedCoachID: Int?
 
     private static let pointsPerMeter: CGFloat = 3
     /// Coach length used when bahn.de gave no positions.
@@ -395,6 +408,7 @@ private struct CoachSequenceDiagram: View {
                             let group = item.coach.group
                             let nose = hasTrainsets || !item.coach.isPassengerCoach
                             CoachTile(coach: item.coach,
+                                      highlighted: item.coach.id == highlightedCoachID,
                                       leadingNose: nose && (index == 0 || placed[index - 1].coach.group != group),
                                       trailingNose: nose && (index == placed.count - 1 || placed[index + 1].coach.group != group))
                                 .frame(width: max(x(item.end) - x(item.start) - 3, 36))
@@ -518,6 +532,7 @@ nonisolated private struct DividerLine: Shape {
 /// trainset are rounded like a nose.
 private struct CoachTile: View {
     let coach: CoachSequence.Coach
+    var highlighted = false
     var leadingNose = false
     var trailingNose = false
 
@@ -593,7 +608,7 @@ private struct CoachTile: View {
     }
 
     private var accessibilityText: String {
-        var parts = [coach.number.map { "Wagen \($0)" }, coach.title == "Wagen" ? nil : coach.title, coach.closed ? "Geschlossen" : nil].compactMap(\.self)
+        var parts = [highlighted ? "Dein Wagen" : nil, coach.number.map { "Wagen \($0)" }, coach.title == "Wagen" ? nil : coach.title, coach.closed ? "Geschlossen" : nil].compactMap(\.self)
         parts += coach.amenities.map(\.title)
         if let bikes = coach.bikeSpaces, coach.amenities.contains(.bikeSpace) { parts.append("\(bikes) Fahrradstellplätze") }
         return parts.joined(separator: ", ")
@@ -615,7 +630,7 @@ private struct CoachTile: View {
         return outline
             .fill(fill.opacity(coach.isPassengerCoach ? 0.22 : 0.45))
             .overlay {
-                outline.strokeBorder(fill.opacity(0.6), lineWidth: 1)
+                outline.strokeBorder(highlighted ? Color.brand : fill.opacity(0.6), lineWidth: highlighted ? 3 : 1)
             }
             .overlay {
                 if let number = coach.number {

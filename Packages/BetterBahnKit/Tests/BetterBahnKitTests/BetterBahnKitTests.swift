@@ -3315,6 +3315,34 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(sequence.groups.map(\.unit) == [nil])
     }
 
+    /// #312: a reserved coach is looked up within the part that runs as the reserved train, and
+    /// reported with the platform sectors it stands in.
+    @Test func findsTheSectorsOfAReservedCoach() throws {
+        let json = #"""
+        {"platform": {"name": "7", "start": 0, "end": 400, "sectors": [
+            {"name": "A", "start": 0, "end": 100}, {"name": "B", "start": 100, "end": 200},
+            {"name": "C", "start": 200, "end": 300}, {"name": "D", "start": 300, "end": 400}]},
+         "groups": [
+            {"name": "ICE0101", "transport": {"category": "ICE", "number": 940},
+             "vehicles": [
+                {"wagonIdentificationNumber": 11, "type": {"category": "PASSENGERCARRIAGE_FIRST_CLASS"}, "platformPosition": {"start": 10, "end": 36}},
+                {"wagonIdentificationNumber": 12, "type": {"category": "PASSENGERCARRIAGE_ECONOMY_CLASS"}, "platformPosition": {"start": 90, "end": 116}}]},
+            {"name": "ICE0102", "transport": {"category": "ICE", "number": 942},
+             "vehicles": [
+                {"wagonIdentificationNumber": 12, "type": {"category": "PASSENGERCARRIAGE_ECONOMY_CLASS"}, "platformPosition": {"start": 250, "end": 276}}]}
+        ]}
+        """#
+        let response = try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data(json.utf8))
+        let sequence = BahnDeClient.coachSequence(from: response, category: "ICE", number: 940, coupledNumbers: [942])
+        // Coach 12 exists in both parts; the reserved train decides.
+        #expect(sequence.position(ofCoach: "12", train: "ICE 940") == .sectors(["A", "B"], coachID: 1))
+        #expect(sequence.position(ofCoach: "12", train: "ICE 942") == .sectors(["C"], coachID: 2))
+        #expect(sequence.position(ofCoach: "11", train: "ICE 940") == .sectors(["A"], coachID: 0))
+        #expect(sequence.position(ofCoach: "13", train: "ICE 940") == .coachMissing)
+        // A coach of the other part isn't the reserved one.
+        #expect(sequence.position(ofCoach: "11", train: "ICE 942") == .coachMissing)
+    }
+
     /// A group without vehicles (or other missing fields) must not lose the whole formation.
     @Test func toleratesMissingFields() throws {
         let json = #"""
