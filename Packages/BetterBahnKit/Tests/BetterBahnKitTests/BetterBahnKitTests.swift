@@ -2559,6 +2559,10 @@ private final class Ril100GeocodeProtocol: URLProtocol, @unchecked Sendable {
         // Inside Germany the operator list still applies, so a FlixTrain from Berlin to Vienna is out.
         #expect(!bc100.isValid(leg(flixAbroad, from: berlin, to: wien)))
         #expect(!bc100.crossesBorder(Journey(legs: [leg(flixAbroad, from: berlin, to: wien)], source: .transitous)))
+        // Vienna to Budapest is entirely abroad; Berlin to Brussels touches Germany.
+        let budapest = Station(id: "5500001", name: "Budapest Keleti", coordinate: nil, evaNumber: nil, source: .transitous)
+        #expect(bc100.isEntirelyAbroad(Journey(legs: [leg(flixAbroad, from: wien, to: budapest)], source: .transitous)))
+        #expect(!bc100.isEntirelyAbroad(toLondon))
     }
 
     @Test func boardAbroadIsNotCovered() {

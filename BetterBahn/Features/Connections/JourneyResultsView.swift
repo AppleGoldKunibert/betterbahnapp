@@ -48,6 +48,18 @@ struct JourneyResultsView: View {
         requirements.isEmpty && search.onlyValidTicket && ticketJourneys.isEmpty && !journeys.isEmpty
     }
 
+    /// The warning when the ticket covers none of the connections: they are abroad entirely, or only reach the border.
+    private var borderFallbackText: String {
+        let filter = model.ticketFilter
+        guard journeys.allSatisfy(filter.isEntirelyAbroad) else {
+            return "Diese Verbindungen führen ins Ausland. Mit \(model.settings.ticketType.dativeShortName) kommst du nur bis zur Grenze."
+        }
+        switch model.settings.ticketType {
+        case .bahnCard100: return "Auf der kompletten Strecke gilt deine BahnCard 100 nicht!"
+        case .deutschlandticket: return "Auf der kompletten Strecke gilt dein Deutschlandticket nicht!"
+        }
+    }
+
     /// Fastest connection without any train requirement, for comparison.
     private var baselineDuration: TimeInterval? {
         journeys.filter { !$0.isCancelled }.compactMap(\.duration).min()
@@ -106,7 +118,7 @@ struct JourneyResultsView: View {
                 }
 
                 if showsBorderFallback {
-                    warningBanner("Diese Verbindungen führen ins Ausland. Mit \(model.settings.ticketType.dativeShortName) kommst du nur bis zur Grenze.")
+                    warningBanner(borderFallbackText)
                 }
 
                 if requirements.isEmpty, earlierCursor != nil {

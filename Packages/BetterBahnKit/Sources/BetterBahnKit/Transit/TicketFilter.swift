@@ -99,6 +99,14 @@ public enum TicketFilter: Sendable, Hashable {
             && journey.legs.contains { CrossBorder.runsAbroad($0, covered: CrossBorder.deutschlandticketStops) }
     }
 
+    /// Whether every leg of `journey` runs entirely outside Germany, so the ticket covers none of it.
+    public func isEntirelyAbroad(_ journey: Journey) -> Bool {
+        journey.legs.allSatisfy { leg in
+            leg.isWalking || (CrossBorder.isAbroad(leg.origin, covered: CrossBorder.deutschlandticketStops)
+                && CrossBorder.isAbroad(leg.destination, covered: CrossBorder.deutschlandticketStops))
+        }
+    }
+
     public func isValid(_ entry: BoardEntry) -> Bool {
         switch self {
         case .bahnCard100(let rules): rules.isValid(entry)
