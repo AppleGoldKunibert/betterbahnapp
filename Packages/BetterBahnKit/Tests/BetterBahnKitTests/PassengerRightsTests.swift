@@ -7,7 +7,7 @@ struct PassengerRightsTests {
     let now = Date(timeIntervalSince1970: 1_790_000_000)
 
     func leg(_ name: String, product: Product, to: String = "berlin", delay: TimeInterval, cancelled: Bool = false,
-             arrivesIn arrives: TimeInterval = -3600) -> Leg {
+             arrivesIn arrives: TimeInterval = -4 * 3600) -> Leg {
         let departure = now.addingTimeInterval(arrives - 3600), arrival = now.addingTimeInterval(arrives)
         return Leg(origin: station("hamburg", "hamburg", source: .transitous), destination: station(to, to, source: .transitous),
                    departure: TimeInfo(planned: departure, actual: departure),
@@ -61,10 +61,10 @@ struct PassengerRightsTests {
     @Test func replacedPlanIsMeasuredAgainstTheBookedOne() {
         let booked = journey(delay: 0)
         // The replacement arrives on time by its own plan, but 65 minutes after the booked one.
-        var replacement = Journey(legs: [leg("ICE 2", product: .highSpeed, delay: 0, arrivesIn: -3600 + 65 * 60)], source: .transitous)
+        var replacement = Journey(legs: [leg("ICE 2", product: .highSpeed, delay: 0, arrivesIn: -4 * 3600 + 65 * 60)], source: .transitous)
         replacement.legs[0].arrival.actual = replacement.legs[0].arrival.planned
         let claim = PassengerRights.claim(for: replacement, earlierPlans: [booked], hasTicket: true, hasBahnCard100: false,
-                                          now: now.addingTimeInterval(3600))
+                                          now: now)
         #expect(claim?.cause == .replanned)
         #expect(claim?.compensation == .quarter)
         #expect(claim?.delayMinutes == 65)
