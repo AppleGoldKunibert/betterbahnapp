@@ -136,6 +136,9 @@ struct JourneyDetailView: View {
     private var plan: some View {
         VStack(spacing: 16) {
             summaryCard
+            if let entry = model.savedEntry(for: journey), let claim = model.passengerRightsClaim(for: entry) {
+                PassengerRightsCard(entry: entry, claim: claim)
+            }
             if !readOnly { issuesCard }
             ForEach(Array(journey.legs.enumerated()), id: \.element.id) { index, leg in
                 if !leg.isWalking {
@@ -228,6 +231,7 @@ struct JourneyDetailView: View {
         guard refreshed != journey else { return }
         model.updateSavedJourneyData(id: entry.id, journey: refreshed)
         withAnimation { journey = refreshed }
+        await model.notifyPassengerRights(for: entry.id)
     }
 
     private var recentlyFinishedEntry: SavedJourney? {

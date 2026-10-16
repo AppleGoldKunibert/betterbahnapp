@@ -1116,6 +1116,7 @@ final class AppModel {
                 .union(newPlatforms.map(\.id)).union(newDispositions.compactMap(\.notificationID)))
         }
         if updated != savedJourneys[index] { savedJourneys[index] = updated }
+        await notifyPassengerRights(for: entry.id)
     }
 
     /// Past journeys; once their live data is gone (`SavedJourney.liveDataLifetime`) shown as planned,
