@@ -23,11 +23,14 @@ public struct StationSearch: Sendable, Hashable {
     public var modes: Set<Mode>
     /// Nearest first, ignoring the usual ranking.
     public var byDistance: Bool
+    /// ISO code from a flag typed at the start or end ("Wien 🇦🇹"): only stations in that country.
+    public var country: String?
 
-    public init(text: String, modes: Set<Mode> = [], byDistance: Bool = false) {
+    public init(text: String, modes: Set<Mode> = [], byDistance: Bool = false, country: String? = nil) {
         self.text = text
         self.modes = modes
         self.byDistance = byDistance
+        self.country = country
     }
 
     /// Splits off the shortcuts. A lone letter only counts once a space follows it, so the "B" typed
@@ -36,7 +39,12 @@ public struct StationSearch: Sendable, Hashable {
         var words = input.split(whereSeparator: \.isWhitespace).map(String.init)
         var modes: Set<Mode> = []
         var byDistance = false
+        var country: String?
         func take(_ word: String) -> Bool {
+            if let code = TrainSearchCountry.code(forFlag: word) {
+                country = code
+                return true
+            }
             switch word.lowercased() {
             case "b": modes.insert(.bus)
             case "t": modes.insert(.tram)
@@ -49,10 +57,16 @@ public struct StationSearch: Sendable, Hashable {
             while let first = words.first, take(first) { words.removeFirst() }
             while let last = words.last, take(last) { words.removeLast() }
         }
-        self.init(text: words.joined(separator: " "), modes: modes, byDistance: byDistance)
+        self.init(text: words.joined(separator: " "), modes: modes, byDistance: byDistance, country: country)
     }
 
-    public var hasShortcuts: Bool { !modes.isEmpty || byDistance }
+    public var hasShortcuts: Bool { !modes.isEmpty || byDistance || country != nil }
+
+    /// With a `country`, only the `stations` there (those of unknown country stay); otherwise unchanged.
+    public func filtered(_ stations: [Station]) -> [Station] {
+        guard let country else { return stations }
+        return stations.filter { $0.countryCode.map { $0 == country } ?? true }
+    }
 
     /// With `byDistance` and a known `location`, `stations` nearest first (stations without a
     /// position last); otherwise unchanged.
