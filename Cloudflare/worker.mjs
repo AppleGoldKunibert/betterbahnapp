@@ -108,10 +108,12 @@ Geburtsdatum aus dem Barcode) an den Server geschickt, dort signiert und sofort 
 </ul>
 <p>Abgesehen von geteilten Reisen und den Check-in-Meldungen wird dabei nichts gespeichert oder protokolliert. Cloudflare verarbeitet zur Absicherung des Dienstes
 IP-Adressen; Details stehen in der <a href="https://www.cloudflare.com/privacypolicy/">Datenschutzerklärung von Cloudflare</a>.</p>
-<p>Anfragen an bahn.de stellt die App über einen eigenen kleinen Server bei Oracle Cloud Infrastructure
-(Oracle, Auftragsverarbeiter; Rechenzentrum in Frankfurt am Main). Er leitet sie an bahn.de weiter und speichert
-die Antworten ebenso kurz zwischen; auch dort wird nichts über dich gespeichert oder protokolliert. Details stehen in
-der <a href="https://www.oracle.com/legal/privacy/">Datenschutzerklärung von Oracle</a>.</p>
+<p>Anfragen an bahn.de stellt die App über einen eigenen kleinen Server beim Hoster Infynix (Auftragsverarbeiter;
+Server in Deutschland). Er leitet sie an bahn.de weiter und speichert die Antworten ebenso kurz zwischen; auch dort
+wird nichts über dich gespeichert oder protokolliert. Die Verbindung zu diesem Server läuft verschlüsselt über
+Tailscale (Tailscale Inc., USA, Auftragsverarbeiter); Tailscale sieht dabei deine IP-Adresse, aber nicht den Inhalt.
+Details stehen in der <a href="https://infynix.de/legal/#privacy">Datenschutzerklärung von Infynix</a> und der
+<a href="https://tailscale.com/privacy-policy">Datenschutzerklärung von Tailscale</a>.</p>
 <p>Damit nur die echte App diese Funktionen nutzen kann, prüft die App ihre Echtheit mit Apples App Attest.
 Der Server erhält dabei eine zufällige Schlüsselkennung dieser App-Installation, aber keine Angaben über dich.</p>
 
