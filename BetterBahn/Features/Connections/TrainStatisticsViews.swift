@@ -114,16 +114,19 @@ struct TrainStatisticsRows {
     }
 }
 
-/// "Gleiswechsel in 40 % der Fälle (meist Gleis 18 (33 %) / Gleis 19 (20 %))": only above 10 % and with at
-/// most two platforms. Shown where the platform matters (below the Wagenreihung, 30 minutes before a stop).
+/// "Gleiswechsel in 30 % der Fälle (meist Gleis 18 (67 %) / Gleis 19 (33 %))": only above 10 % and with at
+/// most two platforms, each with its share of the changes. "meist Gleis 18" without a share when every
+/// change went there. Shown where the platform matters (below the Wagenreihung, 30 minutes before a stop).
 struct PlatformChangeHint: Hashable {
     let text: String
     let severe: Bool
 
     init?(outlook: TrainStatistics.Stop.PlatformOutlook?) {
         guard let outlook, outlook.changeShare > 0.1, let changed = TrainStatisticsRows.percent(outlook.changeShare) else { return nil }
-        let others = outlook.alternatives.prefix(2).compactMap { option in
-            TrainStatisticsRows.percent(option.share).map { "Gleis \(option.platform) (\($0))" }
+        let onlyOne = outlook.alternatives.count == 1
+        let others = outlook.alternatives.prefix(2).compactMap { option -> String? in
+            if onlyOne { return "Gleis \(option.platform)" }
+            return TrainStatisticsRows.percent(option.shareOfChanges).map { "Gleis \(option.platform) (\($0))" }
         }
         text = "Gleiswechsel in \(changed) der Fälle" + (others.isEmpty ? "" : " (meist \(others.joined(separator: " / ")))")
         severe = outlook.changeShare >= 0.3

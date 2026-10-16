@@ -124,10 +124,12 @@ extension TrainStatistics.Stop {
         runs >= TrainStatistics.minimumRuns ? Double(cancelled) / Double(runs) : nil
     }
 
-    /// A platform the train used instead of the planned one, with its share of the runs planned there.
+    /// A platform the train used instead of the planned one, with its share of the runs planned there and
+    /// of the runs that changed platform (1 when every change went there).
     public struct PlatformOption: Sendable, Hashable {
         public var platform: String
         public var share: Double
+        public var shareOfChanges: Double
     }
 
     /// What happened to the runs planned for `planned`: how often the train used another platform, and
@@ -144,10 +146,11 @@ extension TrainStatistics.Stop {
         let total = moves.reduce(0) { $0 + $1.n }
         guard total >= TrainStatistics.minimumRuns else { return nil }
         let changed = moves.filter { $0.to != planned }
-        let alternatives = changed.sorted { $0.n != $1.n ? $0.n > $1.n : $0.to < $1.to }
-            .map { PlatformOption(platform: $0.to, share: Double($0.n) / Double(total)) }
-        return PlatformOutlook(runs: total, changeShare: Double(changed.reduce(0) { $0 + $1.n }) / Double(total),
-                               alternatives: alternatives)
+        let changedTotal = changed.reduce(0) { $0 + $1.n }
+        let alternatives = changed.filter { $0.n > 0 }.sorted { $0.n != $1.n ? $0.n > $1.n : $0.to < $1.to }
+            .map { PlatformOption(platform: $0.to, share: Double($0.n) / Double(total),
+                                  shareOfChanges: Double($0.n) / Double(changedTotal)) }
+        return PlatformOutlook(runs: total, changeShare: Double(changedTotal) / Double(total), alternatives: alternatives)
     }
 }
 

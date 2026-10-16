@@ -71,6 +71,9 @@ import Testing
         #expect(abs(outlook.changeShare - 3.0 / 9.0) < 0.001)
         #expect(outlook.alternatives.map(\.platform) == ["8", "9"])
         #expect(abs(outlook.alternatives[0].share - 2.0 / 9.0) < 0.001)
+        // Of the 3 changes, 2 went to Gl. 8 and 1 to Gl. 9.
+        #expect(abs(outlook.alternatives[0].shareOfChanges - 2.0 / 3.0) < 0.001)
+        #expect(abs(outlook.alternatives[1].shareOfChanges - 1.0 / 3.0) < 0.001)
         // One run planned for Gl. 4 is too few; no platform means no answer.
         #expect(stop.platformOutlook(planned: "4") == nil)
         #expect(stop.platformOutlook(planned: nil) == nil)
