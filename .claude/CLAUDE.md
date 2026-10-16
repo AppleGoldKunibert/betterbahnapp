@@ -142,7 +142,7 @@ Do not run iOS Simulator tests yourself; only try building.
     curl_cffi`).
   - So when bahn.de data is needed, don't try it from the cloud session: give the user a complete `curl_cffi`
     command and ask them to paste the output.
-  - The app itself reaches bahn.de only through our server `Server/bahnde-proxy` (browser TLS fingerprint, Oracle VM);
+  - The app itself reaches bahn.de only through our server `Server/bahnde-proxy` (browser TLS fingerprint, a game-server host behind Tailscale Funnel; bahn.de refuses Oracle Cloud's addresses);
     `betterbahn2` is refused by bahn.de since October 2026 and only serves App Attest and DB Timetables now.
 - The repo is public: never commit secrets or internal operational details (billing, Actions minutes etc.).
 

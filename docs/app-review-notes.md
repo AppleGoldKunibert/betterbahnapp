@@ -5,7 +5,7 @@ features or data flows change (and update the privacy policy in `Cloudflare/work
 
 ## Before submitting
 
-- **bahn.de server** (`Server/bahnde-proxy`, Oracle VM, `BahnDeProxy.baseURL`) running with the same `TOKEN_SECRET`.
+- **bahn.de server** (`Server/bahnde-proxy`, game-server host behind Tailscale Funnel, `BahnDeProxy.baseURL`) running with the same `TOKEN_SECRET`.
 - **Workers deployed** with `TOKEN_SECRET` (same value in `betterbahn2`, `betterbahn-pass` and
   `betterbahn-stats`, whose D1 database is set up as in `Cloudflare/stats/README.md`, and
   `betterbahn-push` with its APNs key, as in `Cloudflare/checkin-push/README.md`),

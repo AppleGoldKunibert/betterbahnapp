@@ -6,9 +6,10 @@ import Foundation
 /// token. `BahnDeClient` asks only this server; while it is down or refused it is left alone for a while
 /// (`gate`) and the app says the live data isn't available.
 public struct BahnDeProxy: Sendable {
-    /// Where the server runs: an Oracle Cloud VM in Frankfurt behind Caddy (see Server/bahnde-proxy/README.md).
+    /// Where the server runs: a small game-server host, reached over HTTPS through Tailscale Funnel
+    /// (`panel_boot.py`, see Server/bahnde-proxy/README.md). bahn.de refuses Oracle Cloud's addresses.
     /// nil sends bahn.de requests to the Worker's address itself, which bahn.de refuses since October 2026.
-    public static let baseURL: URL? = URL(string: "https://92-5-144-111.sslip.io")
+    public static let baseURL: URL? = URL(string: "https://bahnde-proxy.tail6eed6b.ts.net")
 
     /// The app's proxy, nil while there is no server.
     public static let shared: BahnDeProxy? = baseURL.map { BahnDeProxy(baseURL: $0) }

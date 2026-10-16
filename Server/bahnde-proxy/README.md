@@ -40,9 +40,10 @@ verfügbar" instead of asking `betterbahn2`, which bahn.de refuses anyway. The s
 It is a plain Docker image (`Dockerfile`) and needs HTTPS in front of it. Once it runs, put its address into
 `BahnDeProxy.baseURL` (BetterBahnKit) and ship an app build. Check it with `curl https://<address>/health`.
 
-**Where it runs now: Oracle Cloud "Always Free"** (since 2026-10-15). A `VM.Standard.A1.Flex` (1 OCPU, 6 GB,
-Ubuntu 24.04, region Frankfurt) with Docker and Caddy in front, at `https://92-5-144-111.sslip.io` (`BahnDeProxy.baseURL`).
-bahn.de answered 200 from its address. Setting it up again:
+**Oracle Cloud "Always Free"** (2026-10-15, given up the next day): bahn.de refused its addresses, reserved and
+ephemeral alike, with `OPS_BLOCKED` for departures and coach sequences (only `orte` went through), even after a
+night without requests. A `VM.Standard.A1.Flex` (1 OCPU, 6 GB, Ubuntu 24.04, region Frankfurt) with Docker and
+Caddy in front. Setting it up:
 1. Create the instance (any availability domain with A1 capacity, else `VM.Standard.E2.1.Micro`), a new VCN with a
    public subnet, then "Connect public subnet to internet" and a reserved public IP on the VNIC (Networking → IP management → Reserved public IPs; it survives recreating the VM,
    an ephemeral one doesn't). The app has the address built in, so a new IP needs an app update.
@@ -62,7 +63,8 @@ an HTTPS address. Free services that sleep when idle make the first request afte
 no live data for two minutes. Their addresses are shared cloud ranges, which Akamai may treat more strictly than a
 home connection.
 
-**Game-server panel** (Pterodactyl and the like, a "Python" server without Docker or root): a small host's
+**Where it runs now: a game-server panel** (Pterodactyl, a "Python" server without Docker or root), at
+`https://bahnde-proxy.tail6eed6b.ts.net` (`BahnDeProxy.baseURL`). The small host's
 address got 200 from bahn.de where Oracle's were refused (2026-10-16). `panel_start.py` brings HTTPS with
 Tailscale Funnel and starts the proxy:
 1. Upload only `panel_boot.py` and a `.env` next to it with `TOKEN_SECRET=…` and `BRANCH=<branch>`. On every
