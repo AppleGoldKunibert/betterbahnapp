@@ -3,8 +3,9 @@ import Foundation
 extension Station {
     /// ISO country code ("DE", "CZ") when the stop ID or EVA number tells: a 7-digit EVA/UIC number
     /// ("8000207", "000005400003" in DELFI, "cz:0:5455659:1:1" in ÖBB's), an IFOPT prefix ("at:43:1")
-    /// or a CZPTT stop. `nil` if the feed gives none of these.
+    /// or a CZPTT stop; the source's own `country` comes first. `nil` if the feed gives none of these.
     var countryCode: String? {
+        if let country { return country.uppercased() }
         if let code = TrainSearchCountry.code(eva: evaNumber) { return code }
         if id.hasPrefix(TransitousProvider.czechTimetableFeed) { return "CZ" }
         let local = id.split(separator: "_", maxSplits: 1).last ?? Substring(id)

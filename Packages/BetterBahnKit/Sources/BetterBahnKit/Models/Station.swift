@@ -55,11 +55,6 @@ public struct Station: Codable, Sendable, Hashable, Identifiable {
         self.country = country
     }
 
-    /// The country's ISO code: the source's, else the one in the EVA number.
-    public var countryCode: String? {
-        country?.uppercased() ?? TrainSearchCountry.code(eva: evaNumber ?? (id.count == 7 ? id : nil))
-    }
-
     /// The country's flag emoji, nil if unknown.
     public var flag: String? { countryCode.flatMap(TrainSearchCountry.flag(forCode:)) }
 
