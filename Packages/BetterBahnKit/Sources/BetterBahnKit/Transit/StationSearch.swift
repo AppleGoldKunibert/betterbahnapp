@@ -34,7 +34,8 @@ public struct StationSearch: Sendable, Hashable {
     }
 
     /// Splits off the shortcuts. A lone letter only counts once a space follows it, so the "B" typed
-    /// as the start of "Berlin" doesn't flash up as a bus filter.
+    /// as the start of "Berlin" or the end of "München Terminal B" doesn't turn into a bus filter. A
+    /// flag can't be part of a name and counts right away.
     public init(parsing input: String) {
         var words = input.split(whereSeparator: \.isWhitespace).map(String.init)
         var modes: Set<Mode> = []
@@ -55,7 +56,10 @@ public struct StationSearch: Sendable, Hashable {
         }
         if words.count > 1 || input.last?.isWhitespace == true {
             while let first = words.first, take(first) { words.removeFirst() }
-            while let last = words.last, take(last) { words.removeLast() }
+            let endsWithSpace = input.last?.isWhitespace == true
+            while let last = words.last, endsWithSpace || TrainSearchCountry.code(forFlag: last) != nil, take(last) {
+                words.removeLast()
+            }
         }
         self.init(text: words.joined(separator: " "), modes: modes, byDistance: byDistance, country: country)
     }

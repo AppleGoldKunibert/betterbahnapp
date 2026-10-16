@@ -10,7 +10,7 @@ struct StationSearchTests {
         #expect(front.modes == [.bus])
         #expect(!front.byDistance)
 
-        let back = StationSearch(parsing: "Alexanderplatz T")
+        let back = StationSearch(parsing: "Alexanderplatz T ")
         #expect(back.text == "Alexanderplatz")
         #expect(back.modes == [.tram])
 
@@ -27,7 +27,7 @@ struct StationSearchTests {
 
     /// Names with single letters or words starting with them are left alone.
     @Test func namesAreNotMistakenForShortcuts() {
-        for name in ["Bad Tölz", "Berlin S", "Bonn", "Bernau b Berlin", "Lübeck", "S Südkreuz"] {
+        for name in ["Bad Tölz", "München Terminal B", "Alexanderplatz t", "Berlin S", "Bonn", "Bernau b Berlin", "Lübeck", "S Südkreuz"] {
             let search = StationSearch(parsing: name)
             #expect(search.text == name)
             #expect(!search.hasShortcuts)
