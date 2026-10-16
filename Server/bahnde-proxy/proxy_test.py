@@ -202,6 +202,8 @@ class BrowserFetchTests(unittest.IsolatedAsyncioTestCase):
         headers = self.log[1][2]
         self.assertEqual(headers["Sec-Fetch-Mode"], "cors")
         self.assertEqual(headers["Sec-Fetch-Site"], "same-origin")
+        self.assertEqual(headers["Accept-Encoding"], "gzip, br")
+        self.assertEqual(self.log[0][2]["Accept-Encoding"], "gzip, br")
 
     async def test_reset_and_age_start_a_new_session(self):
         await self.fetch(proxy.UPSTREAM + "a")

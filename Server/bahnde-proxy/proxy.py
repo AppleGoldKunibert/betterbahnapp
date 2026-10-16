@@ -64,6 +64,8 @@ STRIKE_WINDOW = 1800
 # bahn.de's search page, which a session loads first, and how long a session is kept (its cookies expire).
 PAGE = "https://www.bahn.de/buchung/fahrplan/suche"
 SESSION_MAX_AGE = 3600
+# What DB's RIS API team asks clients to accept (instead of the browser's "gzip, deflate, br").
+ACCEPT_ENCODING = "gzip, br"
 
 log = logging.getLogger("bahnde-proxy")
 
@@ -323,7 +325,7 @@ class BrowserFetch:
         began = time.perf_counter()
         try:
             # The page a visitor opens first; its answer sets bahn.de's cookies (bm_sz, ak_bmsc, _abck).
-            await session.get(PAGE)
+            await session.get(PAGE, headers={"Accept-Encoding": ACCEPT_ENCODING})
             log.info("bahn.de page loaded in %d ms", (time.perf_counter() - began) * 1000)
         except Exception as error:  # noqa: BLE001 - the API request itself still decides
             log.warning("bahn.de page unreachable: %s", type(error).__name__)
@@ -335,6 +337,7 @@ class BrowserFetch:
         began = time.perf_counter()
         response = await session.get(url, headers={
             "Accept": "application/json",
+            "Accept-Encoding": ACCEPT_ENCODING,
             "Accept-Language": "de",
             "Referer": PAGE,
             "Sec-Fetch-Site": "same-origin",
