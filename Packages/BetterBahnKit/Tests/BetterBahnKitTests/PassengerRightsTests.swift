@@ -83,6 +83,7 @@ struct PassengerRightsTests {
         #expect(text.contains("Von: \(late.legs[0].origin.displayName)"))
         #expect(text.contains("Nach: \(late.legs[0].destination.displayName)"))
         #expect(text.contains("ICE 1"))
+        #expect(text.contains("Geplante Abfahrt: "))
         #expect(text.contains("Verspätung am Ziel: 75 Minuten"))
         #expect(text.contains("Auftragsnummer: ABC123"))
     }

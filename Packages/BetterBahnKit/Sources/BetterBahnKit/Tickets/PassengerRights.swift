@@ -121,6 +121,7 @@ public enum PassengerRights {
             fields.append(RequestField(label: "Von", value: first.origin.displayName))
             fields.append(RequestField(label: "Nach", value: last.destination.displayName))
         }
+        if let departure = journey.departure?.planned { fields.append(RequestField(label: "Geplante Abfahrt", value: time(departure))) }
         let trains = journey.transitLegs.map { leg in
             let name = leg.line?.displayName ?? "Zug"
             return "\(name): \(leg.origin.displayName) \(time(leg.departure.planned)) → \(leg.destination.displayName) \(time(leg.arrival.planned))"
