@@ -1,5 +1,5 @@
 # Rebuilds the offline station lists (Ril100.json, StationNames.json, StationHints.json) once a month
-# and opens a PR into prod on a branch named monthyupdate-<month>/<year> (e.g. monthyupdate-08/26).
+# and opens a PR into prod on a branch named monthlyupdate-<month>/<year> (e.g. monthlyupdate-08/26).
 # Nothing is merged automatically: the PR is meant to be reviewed for odd changes first. Runs only
 # when something changed, and stops without a PR when a list came out empty or much smaller
 # (scripts/check-data-update.py). A PR opened with the default token doesn't start the other
@@ -41,7 +41,7 @@ jobs:
       - name: Pick the branch name
         id: branch
         run: |
-          branch="monthyupdate-$(date -u +%m)/$(date -u +%y)"
+          branch="monthlyupdate-$(date -u +%m)/$(date -u +%y)"
           echo "name=$branch" >> "$GITHUB_OUTPUT"
           if git ls-remote --exit-code --heads origin "$branch" > /dev/null; then
             echo "::notice::Branch $branch already exists, nothing to do. Delete it to run again."
