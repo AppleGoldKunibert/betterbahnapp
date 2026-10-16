@@ -268,6 +268,16 @@ def json_response(status, body, extra=None):
 # MARK: - bahn.de with a browser's handshake
 
 
+def timings(response):
+    """Where a request's time went (curl's own clock, cumulative): name lookup, connect, TLS, first byte.
+    Zero for steps a reused connection skipped."""
+    infos = {getattr(key, "name", str(key)): value for key, value in (getattr(response, "infos", None) or {}).items()}
+    steps = [("dns", "NAMELOOKUP_TIME"), ("connect", "CONNECT_TIME"), ("tls", "APPCONNECT_TIME"),
+             ("first byte", "STARTTRANSFER_TIME")]
+    parts = [f"{label} {infos[key] * 1000:.0f}" for label, key in steps if key in infos]
+    return f" ({', '.join(parts)} ms)" if parts else ""
+
+
 class BrowserFetch:
     """`fetch` asking bahn.de with curl_cffi, which makes the TLS/HTTP2 handshake of the browser
     `impersonate` and sends its User-Agent. Like bahn.de's own page: a new session first loads the search
@@ -284,9 +294,11 @@ class BrowserFetch:
         self.starting = None
 
     def _curl_session(self):
+        from curl_cffi.const import CurlInfo
         from curl_cffi.requests import AsyncSession
 
-        return AsyncSession(impersonate=self.impersonate, timeout=UPSTREAM_TIMEOUT)
+        return AsyncSession(impersonate=self.impersonate, timeout=UPSTREAM_TIMEOUT, curl_infos=[
+            CurlInfo.NAMELOOKUP_TIME, CurlInfo.CONNECT_TIME, CurlInfo.APPCONNECT_TIME, CurlInfo.STARTTRANSFER_TIME])
 
     def reset(self):
         old, self.session = self.session, None
@@ -330,8 +342,8 @@ class BrowserFetch:
             "Sec-Fetch-Dest": "empty",
             "x-correlation-id": f"{uuid.uuid4()}_{uuid.uuid4()}",
         })
-        log.info("bahn.de %s %s in %d ms", response.status_code, url[len(UPSTREAM):].split("?")[0],
-                 (time.perf_counter() - began) * 1000)
+        log.info("bahn.de %s %s in %d ms%s", response.status_code, url[len(UPSTREAM):].split("?")[0],
+                 (time.perf_counter() - began) * 1000, timings(response))
         return Answer(response.status_code, response.content,
                       response.headers.get("Content-Type") or "application/json; charset=utf-8")
 
