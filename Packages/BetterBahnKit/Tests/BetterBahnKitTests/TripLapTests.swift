@@ -173,10 +173,11 @@ import Testing
         #expect(candidate.trip.hasPreviousLap && candidate.trip.hasNextLap)
 
         let wider = try #require(candidate.addingLaps(after: 1, target: beusselstrasse))
-        #expect(minutes(wider.trip.stopovers.last!) == 240)
+        // The block's last lap, cut at its end.
+        #expect(minutes(wider.trip.stopovers.last!) == 210 && !wider.trip.hasNextLap)
         #expect(wider.boarding.map(minutes) == 120)
         let widest = try #require(wider.addingLaps(before: 1, target: beusselstrasse))
-        #expect(minutes(widest.trip.stopovers.first!) == 60 && minutes(widest.trip.stopovers.last!) == 240)
+        #expect(minutes(widest.trip.stopovers.first!) == 60 && minutes(widest.trip.stopovers.last!) == 210)
         #expect(widest.boarding.map(minutes) == 120 && widest.exit.map(minutes) == 140)
     }
 
