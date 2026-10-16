@@ -107,12 +107,6 @@ final class AppModel {
         // The list of station names every stop is shown under, read before the first screen needs it.
         Task { await StationNames.preload() }
         provider = CombinedProvider(vagonweb: VagonwebClient(browserLoader: { url in try await VagonwebBrowser.shared.html(at: url) }))
-        // When bahn.de blocks our Worker, the phone asks bahn.de itself in a hidden web view.
-        Task {
-            await BahnDeBrowserFallback.shared.use({ url in try await BahnDeBrowser.shared.fetch(url) },
-                                                   prepare: { await BahnDeBrowser.shared.prepare() },
-                                                   release: { await BahnDeBrowser.shared.release() })
-        }
         traewelling = TraewellingClient(config: TraewellingConfig())
         // Older versions stored everything in UserDefaults; move the raw bytes into files once
         // (re-encoding everything on every launch is what used to slow the start down).
@@ -1083,7 +1077,10 @@ final class AppModel {
     /// Fetches realtime data for one saved journey, stores it and sends notifications for new issues.
     private func refresh(_ entry: SavedJourney, using refresher: JourneyRefresher) async {
         let refreshed = await refresher.refresh(entry.journey)
-        guard let index = savedJourneys.firstIndex(where: { $0.id == entry.id }) else { return }
+        // The refresh takes seconds; if the user replanned meanwhile (same entry ID, new journey),
+        // this result belongs to the old plan and must neither overwrite nor notify. The next
+        // refresh picks up the new plan.
+        guard let index = stillSavedIndex(of: entry) else { return }
         var updated = savedJourneys[index]
         let previous = updated.journey
         updated.journey = refreshed
@@ -1115,8 +1112,16 @@ final class AppModel {
             updated.notifiedIssues = Array(known.union(newIssues.map(\.id)).union(newReasons.map(\.id))
                 .union(newPlatforms.map(\.id)).union(newDispositions.compactMap(\.notificationID)))
         }
-        if updated != savedJourneys[index] { savedJourneys[index] = updated }
+        // The notifications above await too, so check again before storing.
+        guard let storeIndex = stillSavedIndex(of: entry) else { return }
+        if updated != savedJourneys[storeIndex] { savedJourneys[storeIndex] = updated }
         await notifyPassengerRights(for: entry.id)
+    }
+
+    /// Where `entry` is saved, provided it still holds the journey it had when it was handed to a
+    /// refresh (`replaceSaved` keeps the entry ID but swaps the journey).
+    private func stillSavedIndex(of entry: SavedJourney) -> Int? {
+        savedJourneys.firstIndex { $0.id == entry.id && $0.journey.id == entry.journey.id }
     }
 
     /// Past journeys; once their live data is gone (`SavedJourney.liveDataLifetime`) shown as planned,
@@ -1455,17 +1460,13 @@ final class AppSettings {
     }
     var trainSearchFilter: TrainSearchFilter { TrainSearchFilter(kinds: trainSearchKinds, countries: trainSearchCountries) }
 
-    /// Reports the regional and long-distance trains the app shows to BetterBahn's statistics server
-    /// (`TrainSightings`, #169) and shows what it knows about them in return (`TrainStatisticsStore`, #316).
-    /// On by default, per device.
-    var shareTrainStatistics: Bool {
+    /// Shows what BetterBahn's statistics server knows about a train: delays, cancellations and platforms
+    /// of the last 30 days (`TrainStatisticsStore`, #316). The app reports nothing (#336). On by default, per device.
+    var showTrainStatistics: Bool {
         didSet {
-            UserDefaults.standard.set(shareTrainStatistics, forKey: "shareTrainStatistics")
-            let enabled = shareTrainStatistics
-            Task {
-                await TrainSightings.shared.setEnabled(enabled)
-                await TrainStatisticsStore.shared.setEnabled(enabled)
-            }
+            UserDefaults.standard.set(showTrainStatistics, forKey: "showTrainStatistics")
+            let enabled = showTrainStatistics
+            Task { await TrainStatisticsStore.shared.setEnabled(enabled) }
         }
     }
 
@@ -1526,12 +1527,11 @@ final class AppSettings {
         ticketType = defaults.string(forKey: "ticketType").flatMap(TicketType.init) ?? .deutschlandticket
         liveActivitiesEnabled = defaults.object(forKey: "liveActivitiesEnabled") as? Bool ?? true
         trainPositionRefresh = defaults.string(forKey: "trainPositionRefresh").flatMap(TrainPositionRefresh.init) ?? .automatic
-        let shareTrainStatistics = defaults.object(forKey: "shareTrainStatistics") as? Bool ?? true
-        self.shareTrainStatistics = shareTrainStatistics
-        Task {
-            await TrainSightings.shared.setEnabled(shareTrainStatistics)
-            await TrainStatisticsStore.shared.setEnabled(shareTrainStatistics)
-        }
+        // A new key: switching off sharing (#169) said nothing about wanting to see the statistics.
+        let showTrainStatistics = defaults.object(forKey: "showTrainStatistics") as? Bool ?? true
+        self.showTrainStatistics = showTrainStatistics
+        defaults.removeObject(forKey: "shareTrainStatistics")
+        Task { await TrainStatisticsStore.shared.setEnabled(showTrainStatistics) }
         expertMode = defaults.bool(forKey: "expertMode")
         expertTraewelling = defaults.bool(forKey: "expertTraewelling")
         expertEditJourney = defaults.bool(forKey: "expertEditJourney")

@@ -17,9 +17,10 @@ and comments are English.
 | `Packages/BetterBahnKit/` | Local SwiftPM package with all models, networking (Transitous, bahn.de, DB Timetables, vagonweb, bahn.expert, bahn.jetzt, Träwelling) and logic. Tests live here. |
 | `Config/` | xcconfigs, Info.plists, entitlements. |
 | `Cloudflare/` | Workers: `betterbahn` (OAuth bounce, privacy policy, support page, short links), `bahnde-proxy` (`betterbahn2`), `pass-signer`, `stats`, `checkin-push`, `shared` (App Attest). |
+| `Server/` | `bahnde-proxy`: Docker server asking bahn.de with a browser's TLS fingerprint (the app asks it before `betterbahn2`). |
 | `scripts/` | Rebuilds offline data (station hints, RIL100 codes); `searchsim/` runs Kit tests on Linux. |
 | `docs/` | This project map, App Store notes, data sources. |
-| `.github/workflows/` | CI: `pr-build.yml` (Kit tests + app build on macOS), `pr-secrets.yml`, `sync-prod.yml`. |
+| `.github/workflows/` | CI: `pr-build.yml` (Kit tests + app build on macOS), `pr-secrets.yml`, `sync-prod.yml`, `monthly-data-update.yml` (monthly PR into `prod` with rebuilt station data). |
 
 - Kit tests: `Packages/BetterBahnKit/swift-test.sh --package-path Packages/BetterBahnKit` (`--filter <Name>` for a subset).
 - App build: `xcodebuild -project BetterBahn.xcodeproj -scheme BetterBahn -destination 'generic/platform=iOS Simulator' build -quiet`.
@@ -135,13 +136,15 @@ Do not run iOS Simulator tests yourself; only try building.
     `POST https://bahn.expert/api/orpc/<procedure>` with `Referer: https://bahn.expert/` and a browser
     User-Agent (see `BahnExpertClient`); `journey/find` then `journey/detailsByJourneyId` give DB's own times
     per stop and are the reference for what the real delay was.
-  - bahn.de (`www.bahn.de/web/api/...`) answers `403 OPS_BLOCKED` from the cloud session, also with a browser
-    User-Agent. On a Mac it works with **curl** and a Safari User-Agent plus `Origin: https://www.bahn.de`,
-    `Referer: https://www.bahn.de/buchung/fahrplan/suche` and `Accept-Language: de-DE`; the same headers from
-    Python's `urllib` got a 403, so the block is not about the User-Agent alone (likely the TLS fingerprint).
-  - So when bahn.de data is needed, don't try it from the cloud session: give the user a complete curl command
-    (parse the saved JSON with `python3`, no network in Python) and ask them to paste the output.
-  - The app itself reaches bahn.de through the `betterbahn2` Worker, and falls back to a hidden WebKit page.
+  - bahn.de (`www.bahn.de/web/api/...`) answers `403`/`452 OPS_BLOCKED` to anything whose TLS handshake isn't a
+    browser's (measured 2026-10-15): the cloud session, plain curl on a Mac, Cloudflare Workers. On a Mac,
+    `curl_cffi` with `impersonate="safari"` gets through; send `Accept-Encoding: gzip, br` (as DB asks), else bahn.de holds
+    each answer back for 1-3 s (`python3 -m venv /tmp/cffi && /tmp/cffi/bin/pip install
+    curl_cffi`).
+  - So when bahn.de data is needed, don't try it from the cloud session: give the user a complete `curl_cffi`
+    command and ask them to paste the output.
+  - The app itself reaches bahn.de only through our server `Server/bahnde-proxy` (browser TLS fingerprint, a game-server host behind Tailscale Funnel; bahn.de refuses Oracle Cloud's addresses);
+    `betterbahn2` is refused by bahn.de since October 2026 and only serves App Attest and DB Timetables now.
 - The repo is public: never commit secrets or internal operational details (billing, Actions minutes etc.).
 
 ## Attribution

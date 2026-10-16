@@ -1,11 +1,18 @@
 import Foundation
+import Synchronization
 
 /// What the statistics server (`Cloudflare/stats`, `POST /train-stats`) knows about one train from its
-/// finished runs of the last days: delays, cancellations, platform moves and the vehicles that ran instead of the planned ones
-/// (#316). Every figure is an experience value, shown only from `minimumRuns` runs on.
+/// runs of the last days: delays, cancellations and platform moves (#316), from DB's open timetable data
+/// (#336). Every figure is an experience value, shown only from `minimumRuns` runs on.
 public struct TrainStatistics: Sendable, Hashable, Decodable {
-    /// Fewer runs say too little to show anything.
-    public static let minimumRuns = 5
+    /// Fewer runs say too little to show anything; 1 in `testMode`.
+    public static var minimumRuns: Int { testMode ? 1 : 5 }
+    /// Shows figures from a single run on, to check what the server answers (the app turns it on in debug builds).
+    public static var testMode: Bool {
+        get { testModeFlag.load(ordering: .relaxed) }
+        set { testModeFlag.store(newValue, ordering: .relaxed) }
+    }
+    private static let testModeFlag = Atomic<Bool>(false)
     /// A train counts as on time up to this many minutes late.
     public static let onTimeMinutes = 5
 
@@ -16,37 +23,16 @@ public struct TrainStatistics: Sendable, Hashable, Decodable {
     public var runs: Int
     /// Runs that were cancelled altogether.
     public var cancelledRuns: Int
-    /// Runs with a Wagenreihung that bahn.de compared with the day's schedule, and those that differed.
-    public var formationRuns: Int
-    public var unplannedRuns: Int
-    /// The vehicles that ran in those, by series, most common first. A series planned for some days
-    /// doesn't show up here: only a run that differs from its own day's schedule counts.
-    public var vehicles: [VehicleShare]
     /// Per EVA number of a stop that was asked for.
     public var stops: [String: Stop]
 
-    public init(category: String, number: String, days: Int = 30, runs: Int, cancelledRuns: Int = 0,
-                formationRuns: Int = 0, unplannedRuns: Int = 0, vehicles: [VehicleShare] = [], stops: [String: Stop] = [:]) {
+    public init(category: String, number: String, days: Int = 30, runs: Int, cancelledRuns: Int = 0, stops: [String: Stop] = [:]) {
         self.category = category
         self.number = number
         self.days = days
         self.runs = runs
         self.cancelledRuns = cancelledRuns
-        self.formationRuns = formationRuns
-        self.unplannedRuns = unplannedRuns
-        self.vehicles = vehicles
         self.stops = stops
-    }
-
-    /// Runs that ran with this series ("ICE 4").
-    public struct VehicleShare: Sendable, Hashable {
-        public var name: String
-        public var runs: Int
-
-        public init(name: String, runs: Int) {
-            self.name = name
-            self.runs = runs
-        }
     }
 
     /// One planned platform and the one the train really used, with the runs that did.
@@ -88,40 +74,10 @@ public struct TrainStatistics: Sendable, Hashable, Decodable {
         runs >= Self.minimumRuns ? Double(cancelledRuns) / Double(runs) : nil
     }
 
-    /// How often another vehicle than the planned one ran, and which.
-    public struct UnplannedVehicles: Sendable, Hashable {
-        /// The share of runs that differed from their day's schedule.
-        public var share: Double
-        /// The series that ran then, most common first.
-        public var vehicles: [Option]
-
-        public struct Option: Sendable, Hashable {
-            public var name: String
-            /// The share of the runs that differed.
-            public var share: Double
-        }
-    }
-
-    /// Nil without enough runs, or when the planned vehicle always ran.
-    public var unplannedVehicles: UnplannedVehicles? {
-        guard formationRuns >= Self.minimumRuns, unplannedRuns > 0 else { return nil }
-        let named = vehicles.reduce(0) { $0 + $1.runs }
-        guard named > 0 else { return nil }
-        return UnplannedVehicles(share: Double(unplannedRuns) / Double(formationRuns),
-                                 vehicles: vehicles.map { .init(name: $0.name, share: Double($0.runs) / Double(named)) })
-    }
-
     // MARK: - Decoding
 
     private enum CodingKeys: String, CodingKey {
-        case category, number, days, runs, cancelled, formationRuns, unplannedRuns, unplannedFormations, stops
-    }
-
-    /// One kind of vehicle in bahn.de's Wagenreihung shape: the app names its series with the rules it
-    /// uses for a live Wagenreihung.
-    private struct Formation: Decodable {
-        var n: Int
-        var groups: [BahnDeClient.SequenceResponse.Group]?
+        case category, number, days, runs, cancelled, stops
     }
 
     public init(from decoder: Decoder) throws {
@@ -132,25 +88,6 @@ public struct TrainStatistics: Sendable, Hashable, Decodable {
         runs = try c.decode(Int.self, forKey: .runs)
         cancelledRuns = try c.decode(Int.self, forKey: .cancelled)
         stops = try c.decodeIfPresent([String: Stop].self, forKey: .stops) ?? [:]
-        formationRuns = try c.decodeIfPresent(Int.self, forKey: .formationRuns) ?? 0
-        unplannedRuns = try c.decodeIfPresent(Int.self, forKey: .unplannedRuns) ?? 0
-
-        var runsBySeries: [String: Int] = [:]
-        var order: [String] = []
-        let wanted = Int(number)
-        for formation in try c.decodeIfPresent([Formation].self, forKey: .unplannedFormations) ?? [] {
-            let sequence = BahnDeClient.SequenceResponse(groups: formation.groups)
-            let units = BahnDeClient.formation(from: sequence, category: category, number: wanted).units
-            var names: [String] = []
-            for name in units.compactMap({ TrainModel.name($0.model, unit: $0.number) }) where !names.contains(name) {
-                names.append(name)
-            }
-            guard !names.isEmpty else { continue }
-            let series = names.joined(separator: " + ")
-            if runsBySeries[series] == nil { order.append(series) }
-            runsBySeries[series, default: 0] += formation.n
-        }
-        vehicles = order.map { VehicleShare(name: $0, runs: runsBySeries[$0]!) }.sorted { $0.runs > $1.runs }
     }
 }
 
@@ -292,7 +229,7 @@ public struct TrainStatisticsQuery: Sendable, Hashable {
 }
 
 extension Product {
-    /// Regional and long-distance trains are what `Cloudflare/stats` collects.
+    /// Regional and long-distance trains are what `Cloudflare/stats` has figures for.
     var hasTrainStatistics: Bool {
         switch self {
         case .highSpeed, .longDistance, .nightTrain, .interregio, .regionalExpress, .regional: true
@@ -302,7 +239,7 @@ extension Product {
 }
 
 extension Station {
-    /// The EVA number as bahn.de's runs know it.
+    /// The EVA number as the statistics know it.
     var statisticsEVA: String? {
         if let eva = evaNumber, !eva.isEmpty, eva.allSatisfy(\.isNumber) { return eva }
         return id.allSatisfy(\.isNumber) && !id.isEmpty ? id : nil
@@ -310,6 +247,7 @@ extension Station {
 }
 
 public struct TrainStatisticsClient: Sendable {
+    public static let baseURL = URL(string: "https://betterbahn-stats.betterbahn.workers.dev")!
     /// The Worker takes at most this many trains and stops per train.
     static let maxTrains = 8
     static let maxStops = 12
@@ -318,7 +256,7 @@ public struct TrainStatisticsClient: Sendable {
     let auth: WorkerAuth?
     let baseURL: URL
 
-    public init(http: HTTPClient = HTTPClient(timeout: 15), auth: WorkerAuth? = nil, baseURL: URL = TrainSightings.baseURL) {
+    public init(http: HTTPClient = HTTPClient(timeout: 15), auth: WorkerAuth? = nil, baseURL: URL = TrainStatisticsClient.baseURL) {
         self.http = http
         self.auth = auth
         self.baseURL = baseURL
@@ -364,13 +302,16 @@ public struct TrainStatisticsLookup: Sendable, Hashable {
     public func stop(at station: Station) -> TrainStatistics.Stop? {
         evas[station.id].flatMap { statistics.stops[$0] }
     }
+
+    /// The EVA number `station` was asked for by; nil when it had none.
+    public func eva(of station: Station) -> String? { evas[station.id] }
 }
 
 // MARK: - Cache
 
 /// Looks the figures up once per train and day and keeps them: a journey with a few trains costs one
-/// request, and showing it again costs none. Off (nothing asked, nothing shown) while the user doesn't
-/// share train data, see `TrainSightings`.
+/// request, and showing it again costs none. Off (nothing asked, nothing shown) while the user has
+/// switched the statistics off ("Zugstatistik anzeigen").
 public actor TrainStatisticsStore {
     public static let shared = TrainStatisticsStore()
     /// After a failed lookup the Worker isn't asked again for a train this long.
@@ -437,7 +378,9 @@ public actor TrainStatisticsStore {
     private func evaNumbers(of stations: [Station], resolve: EVAResolver?) async -> [String: String] {
         var evas: [String: String] = [:]
         for station in stations {
-            if let eva = station.statisticsEVA ?? resolved[station.id] {
+            // The offline list's main station first: the server files every level under it, and it needs no
+            // bahn.de request (which fails while bahn.de is refusing ours).
+            if let eva = station.statisticsEVA ?? StationNames.mainEvaNumber(for: station) ?? resolved[station.id] {
                 evas[station.id] = eva
             } else if let resolve, let eva = await resolve(station), !eva.isEmpty, eva.allSatisfy(\.isNumber) {
                 resolved[station.id] = eva

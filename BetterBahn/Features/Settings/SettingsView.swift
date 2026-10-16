@@ -140,14 +140,14 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Toggle(isOn: $settings.shareTrainStatistics) {
-                        IconLabel(title: "Zugdaten für Statistik teilen", systemImage: "chart.bar.fill", color: .teal)
+                    Toggle(isOn: $settings.showTrainStatistics) {
+                        IconLabel(title: "Zugstatistik anzeigen", systemImage: "chart.bar.fill", color: .teal)
                     }
                     .tint(.brand)
                 } header: {
                     Text("Statistik")
                 } footer: {
-                    Text("Hilft uns, Statistiken zu Verspätungen und Ausfällen zu sammeln, und zeigt dir Erfahrungswerte zu Zügen. Dabei wird nichts über dich gespeichert.")
+                    Text("Zeigt dir, wie pünktlich ein Zug in den letzten 30 Tagen war und wie oft er ausfiel oder das Gleis wechselte.")
                 }
 
                 Section {
