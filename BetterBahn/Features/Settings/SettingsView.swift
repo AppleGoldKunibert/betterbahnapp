@@ -90,6 +90,20 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Picker(selection: $settings.stationFlagMode) {
+                        Text("Aus").tag(StationFlagMode.off)
+                        Text("Nur Ausland").tag(StationFlagMode.foreignOnly)
+                        Text("An").tag(StationFlagMode.always)
+                    } label: {
+                        IconLabel(title: "Flagge", systemImage: "flag.fill", color: .brand)
+                    }
+                } header: {
+                    Text("Bahnhofssuche")
+                } footer: {
+                    Text("Zeigt in der Suche die Flagge vor dem Bahnhof, auf Wunsch nur bei Bahnhöfen im Ausland. Mit einer Flagge hinter dem Namen siehst du nur Bahnhöfe aus diesem Land.")
+                }
+
+                Section {
                     Picker(selection: $settings.trainPositionRefresh) {
                         ForEach(TrainPositionRefresh.allCases, id: \.self) { Text($0.displayName).tag($0) }
                     } label: {
