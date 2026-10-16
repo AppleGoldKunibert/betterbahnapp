@@ -4,8 +4,8 @@ import Foundation
 /// reached its destination 60 or more minutes late: 25 % of the fare from 60 minutes, 50 % from 120.
 /// Only percentages are shown, never amounts: they depend on the fare, and passes like the
 /// Deutschland-Ticket have flat rates.
-public struct PassengerRightsClaim: Sendable, Hashable {
-    public enum Compensation: Int, Sendable {
+public struct PassengerRightsClaim: Codable, Sendable, Hashable {
+    public enum Compensation: Int, Codable, Sendable {
         case quarter = 25
         case half = 50
 
@@ -13,9 +13,11 @@ public struct PassengerRightsClaim: Sendable, Hashable {
     }
 
     /// Why the arrival was late.
-    public enum Cause: Sendable {
+    public enum Cause: String, Codable, Sendable {
         /// The planned trains ran, but late.
         case delay
+        /// A delay made the user miss a connection, which led to the late arrival.
+        case missedConnection
         /// A cancellation or missed connection: the plan was replaced and the new one arrived late.
         case replanned
     }
@@ -86,8 +88,11 @@ public enum PassengerRights {
             .contains { $0.transitLegs.contains { $0.line?.product.isLongDistance == true } }
         guard hasTicket || hasBahnCard100 || longDistance else { return nil }
 
+        // The plan as booked had a transfer its delays broke: that is why the arrival is late.
+        let cause: PassengerRightsClaim.Cause = !baseline.brokenTransferIndices.isEmpty ? .missedConnection
+            : original == nil ? .delay : .replanned
         return PassengerRightsClaim(delayMinutes: minutes, compensation: compensation,
-                                    cause: original == nil ? .delay : .replanned,
+                                    cause: cause,
                                     plannedArrival: planned, actualArrival: actual,
                                     isFlatRate: hasBahnCard100)
     }

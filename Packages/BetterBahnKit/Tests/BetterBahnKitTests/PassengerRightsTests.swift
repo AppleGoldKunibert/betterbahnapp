@@ -86,4 +86,18 @@ struct PassengerRightsTests {
         #expect(text.contains("Verspätung am Ziel: 75 Minuten"))
         #expect(text.contains("Auftragsnummer: ABC123"))
     }
+
+    @Test func missedConnectionIsMarked() {
+        // ICE 1 arrives 70 minutes late in Köln, after ICE 2 left.
+        let booked = Journey(legs: [
+            leg("ICE 1", product: .highSpeed, to: "koeln", delay: 70, arrivesIn: -5 * 3600),
+            leg("ICE 2", product: .highSpeed, delay: 0, arrivesIn: -4 * 3600),
+        ], source: .transitous)
+        #expect(!booked.brokenTransferIndices.isEmpty)
+        var replacement = Journey(legs: [leg("ICE 3", product: .highSpeed, delay: 0, arrivesIn: -4 * 3600 + 65 * 60)], source: .transitous)
+        replacement.legs[0].arrival.actual = replacement.legs[0].arrival.planned
+        let claim = PassengerRights.claim(for: replacement, earlierPlans: [booked], hasTicket: true, hasBahnCard100: false, now: now)
+        #expect(claim?.cause == .missedConnection)
+        #expect(claim?.delayMinutes == 65)
+    }
 }

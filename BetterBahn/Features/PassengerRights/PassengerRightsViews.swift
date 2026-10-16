@@ -9,6 +9,14 @@ extension AppModel {
     /// journey, since past journeys are shown without the delays once their live data is old.
     func passengerRightsClaim(for entry: SavedJourney) -> PassengerRightsClaim? {
         let stored = savedJourneys.first { $0.id == entry.id } ?? entry
+        let computed = liveClaim(for: stored)
+        // The worst delay seen wins; the recorded one is all that is left once the live data is gone.
+        guard let recorded = stored.recordedClaim else { return computed }
+        guard let computed else { return recorded }
+        return computed.delayMinutes > recorded.delayMinutes ? computed : recorded
+    }
+
+    private func liveClaim(for stored: SavedJourney) -> PassengerRightsClaim? {
         let ticketsOfJourney = tickets(for: stored).filter { !$0.ticket.isReservationOnly }
         let departure = stored.journey.departure?.planned ?? .now
         let hasBahnCard100 = travelPasses.contains(where: { (pass: TravelPass) -> Bool in
@@ -30,11 +38,13 @@ extension AppModel {
         return numbers
     }
 
-    /// Tells the user once per level (25 %, 50 %) that a journey that just arrived gives a claim.
+    /// Keeps the claim of a journey that has arrived (see `SavedJourney.recordedClaim`), and tells the
+    /// user once per level (25 %, 50 %).
     func notifyPassengerRights(for id: UUID) async {
-        guard settings.connectionWarnings,
-              let index = savedJourneys.firstIndex(where: { $0.id == id }),
+        guard let index = savedJourneys.firstIndex(where: { $0.id == id }),
               let claim = passengerRightsClaim(for: savedJourneys[index]) else { return }
+        if savedJourneys[index].recordedClaim != claim { savedJourneys[index].recordedClaim = claim }
+        guard settings.connectionWarnings else { return }
         var known = savedJourneys[index].notifiedIssues ?? []
         guard !known.contains(claim.notificationID) else { return }
         known.append(claim.notificationID)
@@ -64,7 +74,8 @@ extension PassengerRightsClaim {
     var explanation: String {
         switch cause {
         case .delay: "Du bist \(delayMinutes) Minuten später angekommen als geplant."
-        case .replanned: "Wegen Ausfall oder verpasstem Anschluss kamst du \(delayMinutes) Minuten später an als geplant."
+        case .missedConnection: "Du hast wegen einer Verspätung einen Anschluss verpasst und kamst \(delayMinutes) Minuten später an als geplant."
+        case .replanned: "Wegen eines Ausfalls kamst du \(delayMinutes) Minuten später an als geplant."
         }
     }
 }
