@@ -308,9 +308,11 @@ class BrowserFetch:
 
     async def _start(self):
         session = self.make_session()
+        began = time.perf_counter()
         try:
             # The page a visitor opens first; its answer sets bahn.de's cookies (bm_sz, ak_bmsc, _abck).
             await session.get(PAGE)
+            log.info("bahn.de page loaded in %d ms", (time.perf_counter() - began) * 1000)
         except Exception as error:  # noqa: BLE001 - the API request itself still decides
             log.warning("bahn.de page unreachable: %s", type(error).__name__)
         self.session, self.started = session, self.clock()
@@ -318,6 +320,7 @@ class BrowserFetch:
 
     async def __call__(self, url):
         session = await self._session()
+        began = time.perf_counter()
         response = await session.get(url, headers={
             "Accept": "application/json",
             "Accept-Language": "de",
@@ -327,6 +330,8 @@ class BrowserFetch:
             "Sec-Fetch-Dest": "empty",
             "x-correlation-id": f"{uuid.uuid4()}_{uuid.uuid4()}",
         })
+        log.info("bahn.de %s %s in %d ms", response.status_code, url[len(UPSTREAM):].split("?")[0],
+                 (time.perf_counter() - began) * 1000)
         return Answer(response.status_code, response.content,
                       response.headers.get("Content-Type") or "application/json; charset=utf-8")
 
