@@ -41,6 +41,9 @@ struct TrainNumberSheet: View {
     @State private var showsManualEntry = false
     @State private var boardingStation: Station?
     @State private var exitStation: Station?
+    /// Opens to full height once a train is picked, so its stops and the button fit (#355).
+    @State private var detent: PresentationDetent = .medium
+    @State private var scrollPosition = ScrollPosition(edge: .top)
     @FocusState private var focused: Field?
 
     private enum Field: Hashable { case train, boardingStation, exitStation }
@@ -71,6 +74,7 @@ struct TrainNumberSheet: View {
                 }
                 .padding()
             }
+            .scrollPosition($scrollPosition)
             .background { AppBackground() }
             .scrollDismissesKeyboard(.interactively)
             .closesStationSearchOnOutsideTap($focused)
@@ -94,7 +98,7 @@ struct TrainNumberSheet: View {
             // Searches while typing, a moment after the last key.
             .task(id: trimmed) { await searchTrains() }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.medium, .large], selection: $detent)
     }
 
     // MARK: Searching
@@ -409,7 +413,14 @@ struct TrainNumberSheet: View {
         addButton(candidate)
 
         TripContent(trip: candidate.trip, highlight: candidate.boarding?.station,
-                    boardingID: $boardingID, exitID: $exitID)
+                    boardingID: $boardingID, exitID: $exitID,
+                    onLoadPreviousLap: { addLaps(before: 1) }, onLoadNextLap: { addLaps(after: 1) })
+    }
+
+    /// A ring train shows only the lap from its boarding stop; these add the laps around it.
+    private func addLaps(before: Int = 0, after: Int = 0) {
+        guard let wider = picked?.addingLaps(before: before, after: after, target: search.to) else { return }
+        withAnimation(.snappy) { picked = wider }
     }
 
     private func addButton(_ candidate: TrainCandidate) -> some View {
@@ -444,6 +455,8 @@ struct TrainNumberSheet: View {
         focused = nil
         boardingID = candidate.boarding?.id
         exitID = candidate.exit?.id
+        detent = .large
+        scrollPosition.scrollTo(edge: .top)
         withAnimation(.snappy) { picked = candidate }
     }
 
@@ -452,7 +465,8 @@ struct TrainNumberSheet: View {
         guard let boarding = trip.stopovers.first(where: { $0.id == boardingID }) else { return }
         let exit = trip.stopovers.first { $0.id == exitID }
         onAdd(TrainRequirement(trainName: trip.line?.name ?? trimmed, boarding: boarding.station,
-                               exit: exit?.station, tripId: trip.id, tripSource: trip.source))
+                               exit: exit?.station, tripId: trip.id, tripSource: trip.source,
+                               departure: boarding.departure?.planned))
         dismiss()
     }
 

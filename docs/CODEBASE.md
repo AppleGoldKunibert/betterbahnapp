@@ -179,7 +179,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 - `Models/TripLap.swift` – `Trip.lap(at:near:arriving:)`: Transitous' trip for a ring line (S41/S42) is the vehicle's whole day
   (the S42: 490 stops, each station ~19 times, under the block's number), so stops looked up by station landed on the first lap
   ("ab 17:50" showed "ab 3:50"). Cuts out the one lap from the board's departure (or to its arrival); applied in
-  `TripView.load()` and `CombinedProvider.trip(for:)`. Needs a station visited ≥ 3 times, so turn-round trains keep all stops.
+  `TripView.load()`, `CombinedProvider.trip(for:)` and the train picked under "Zug vorgeben" (`TrainCandidateFinder.candidate`,
+  more laps via `TrainCandidate.addingLaps`); `TrainRoutePlanner` rides the visit at `TrainRequirement.departure` (#355). Needs a station visited ≥ 3 times, so turn-round trains keep all stops.
   A lap runs from one visit of that station to the next; `extraBefore`/`extraAfter` add laps and `Trip.hasPreviousLap`/`hasNextLap`
   (not stored) tell `TripContent` to show "Vorherige / Nächste Runde laden" at the top / bottom of the stops (`TripView`, `LegTripSheet`
   count the extra laps and reload; works for any looping train, not just the Ringbahn). `Support/LoadedLaps.swift` remembers the
