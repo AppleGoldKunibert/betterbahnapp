@@ -64,7 +64,8 @@ STRIKE_WINDOW = 1800
 # bahn.de's search page, which a session loads first, and how long a session is kept (its cookies expire).
 PAGE = "https://www.bahn.de/buchung/fahrplan/suche"
 SESSION_MAX_AGE = 3600
-# What DB's RIS API team asks clients to accept (instead of the browser's "gzip, deflate, br").
+# What DB's RIS API team asks clients to accept. With the browser's "gzip, deflate, br" bahn.de held every
+# answer back for 1-3 s (measured 2026-10-16: a coach sequence in 3.3 s, with "gzip, br" in 0.23 s).
 ACCEPT_ENCODING = "gzip, br"
 
 log = logging.getLogger("bahnde-proxy")

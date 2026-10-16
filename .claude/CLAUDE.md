@@ -138,7 +138,8 @@ Do not run iOS Simulator tests yourself; only try building.
     per stop and are the reference for what the real delay was.
   - bahn.de (`www.bahn.de/web/api/...`) answers `403`/`452 OPS_BLOCKED` to anything whose TLS handshake isn't a
     browser's (measured 2026-10-15): the cloud session, plain curl on a Mac, Cloudflare Workers. On a Mac,
-    `curl_cffi` with `impersonate="safari"` gets through (`python3 -m venv /tmp/cffi && /tmp/cffi/bin/pip install
+    `curl_cffi` with `impersonate="safari"` gets through; send `Accept-Encoding: gzip, br` (as DB asks), else bahn.de holds
+    each answer back for 1-3 s (`python3 -m venv /tmp/cffi && /tmp/cffi/bin/pip install
     curl_cffi`).
   - So when bahn.de data is needed, don't try it from the cloud session: give the user a complete `curl_cffi`
     command and ask them to paste the output.

@@ -16,6 +16,8 @@ it small:
 - **Like bahn.de's page:** a new session first loads the search page (which sets bahn.de's cookies), then asks the API
   with the headers of the page's background requests. Sessions are renewed every hour. Measured 2026-10-16 from a home
   connection: Safari this way 200 for departures and Wagenreihung, from the Oracle VM 403 (a data center address).
+- **`Accept-Encoding: gzip, br`**, as DB's RIS API team asks: with the browser's `gzip, deflate, br` bahn.de held each
+  answer back for 1–3 s (2026-10-16: the same coach sequence in 3.3 s, with `gzip, br` in 0.23 s).
 - **Pause:** after bahn.de refused a request, the server starts a new session (fresh cookies) and nothing goes
   there for `FIRST_PAUSE` seconds; each refusal soon after the last pause doubles it, up to `BLOCK_PAUSE`.
 
