@@ -136,7 +136,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 - `Features/PassengerRights/PassengerRightsViews.swift` – Fahrgastrechte (#311): `PassengerRightsBadge` under a saved journey in the lists
   and `PassengerRightsCard` in its details ("Anspruch auf 25/50 % Entschädigung", "Antrag vorbereiten" → `PassengerRightsRequestSheet`: the
   fields of DB's form with copy buttons and a link to bahn.de). `AppModel.passengerRightsClaim(for:)` feeds the Kit's `PassengerRights`
-  with the stored journey, its earlier plans, the tickets and BahnCard 100 passes; `notifyPassengerRights` sends one notification per
+  with the stored journey, its earlier plans, the tickets and the BahnCard 100 setting; `notifyPassengerRights` sends one notification per
   level once the journey has arrived (from `refresh` and when a finished journey is opened), and keeps the worst claim seen in `SavedJourney.recordedClaim`. Never shows amounts.
 - `Features/Sharing/` – preview of shared journeys and imported DB shares; `JourneyShareButton` (in `JourneyDetailView`)
   uploads for a short link, falls back to the long link, and opens `UIActivityViewController`.

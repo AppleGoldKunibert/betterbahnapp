@@ -18,13 +18,8 @@ extension AppModel {
 
     private func liveClaim(for stored: SavedJourney) -> PassengerRightsClaim? {
         let ticketsOfJourney = tickets(for: stored).filter { !$0.ticket.isReservationOnly }
-        let departure = stored.journey.departure?.planned ?? .now
-        let hasBahnCard100 = travelPasses.contains(where: { (pass: TravelPass) -> Bool in
-            guard pass.isBahnCard100 else { return false }
-            let from = pass.validFrom ?? Date.distantPast
-            let until = pass.validUntil ?? Date.distantFuture
-            return from <= departure && departure <= until
-        })
+        // A pass barcode doesn't say whether it belongs to a BahnCard 100 (#322), so go by the ticket picked in the settings.
+        let hasBahnCard100 = settings.ticketType == .bahnCard100
         return PassengerRights.claim(for: stored.journey, earlierPlans: (stored.previousVersions ?? []).map(\.journey),
                                      hasTicket: !ticketsOfJourney.isEmpty, hasBahnCard100: hasBahnCard100)
     }
