@@ -20,7 +20,7 @@ and comments are English.
 | `Server/` | `bahnde-proxy`: Docker server asking bahn.de with a browser's TLS fingerprint (the app asks it before `betterbahn2`). |
 | `scripts/` | Rebuilds offline data (station hints, RIL100 codes); `searchsim/` runs Kit tests on Linux. |
 | `docs/` | This project map, App Store notes, data sources. |
-| `.github/workflows/` | CI: `pr-build.yml` (Kit tests + app build on macOS), `pr-secrets.yml`, `sync-prod.yml`. |
+| `.github/workflows/` | CI: `pr-build.yml` (Kit tests + app build on macOS), `pr-secrets.yml`, `sync-prod.yml`, `monthly-data-update.yml` (monthly PR into `prod` with rebuilt station data). |
 
 - Kit tests: `Packages/BetterBahnKit/swift-test.sh --package-path Packages/BetterBahnKit` (`--filter <Name>` for a subset).
 - App build: `xcodebuild -project BetterBahn.xcodeproj -scheme BetterBahn -destination 'generic/platform=iOS Simulator' build -quiet`.
