@@ -57,6 +57,25 @@ import Testing
         #expect(TrainStatistics(category: "ICE", number: "1", runs: 1).cancelledShare == 0)
     }
 
+    @Test func debugstatsLaunchArgumentKeepsTestModeOn() throws {
+        let suite = "TrainStatisticsTests.debugstats"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            TrainStatistics.testMode = false
+        }
+
+        TrainStatistics.enableTestModeIfRequested(arguments: ["BetterBahn"], defaults: defaults)
+        #expect(!TrainStatistics.testMode)
+        TrainStatistics.enableTestModeIfRequested(arguments: ["BetterBahn", "-debugstats"], defaults: defaults)
+        #expect(TrainStatistics.testMode)
+        // Later launches without the argument keep it on.
+        TrainStatistics.testMode = false
+        TrainStatistics.enableTestModeIfRequested(arguments: ["BetterBahn"], defaults: defaults)
+        #expect(TrainStatistics.testMode)
+    }
+
     @Test func givesTheChanceOfACancelledStop() throws {
         let stop = try #require(try decoded().stops["8000115"])
         #expect(abs(try #require(stop.cancelledShare) - 2.0 / 12.0) < 0.001)

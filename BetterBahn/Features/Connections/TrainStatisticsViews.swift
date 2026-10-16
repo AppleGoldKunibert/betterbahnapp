@@ -57,17 +57,14 @@ struct TrainStatisticsRows {
             add("xmark.octagon.fill", "Fällt bei \(text) der Fahrten aus", tint: share >= 0.1 ? .heavyDelay : .slightDelay)
         }
 
-        #if DEBUG
         if TrainStatistics.testMode { rows += Self.testRows(lookup: lookup, stops: stops, from: rows.count) }
-        #endif
 
         guard !rows.isEmpty else { return nil }
         self.rows = rows
         self.subtitle = "Letzte \(lookup.statistics.days) Tage · \(lookup.statistics.runs) Fahrten"
     }
 
-    #if DEBUG
-    /// Test mode (debug builds): what the app asked for and the raw values the server answered, per stop.
+    /// Test mode (launch argument `-debugstats`): what the app asked for and the raw values the server answered, per stop.
     static func testRows(lookup: TrainStatisticsLookup, stops: [StatisticsStop], from id: Int) -> [Row] {
         let statistics = lookup.statistics
         var rows = [Row(id: id, systemImage: "ladybug.fill",
@@ -90,7 +87,6 @@ struct TrainStatisticsRows {
         }
         return rows
     }
-    #endif
 
     /// "+6 min", "-1 min".
     static func minutes(_ value: Int) -> String { value >= 0 ? "+\(value) min" : "\(value) min" }
