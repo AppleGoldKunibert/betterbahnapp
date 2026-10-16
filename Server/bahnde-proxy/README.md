@@ -62,6 +62,16 @@ an HTTPS address. Free services that sleep when idle make the first request afte
 no live data for two minutes. Their addresses are shared cloud ranges, which Akamai may treat more strictly than a
 home connection.
 
+**Game-server panel** (Pterodactyl and the like, a "Python" server without Docker or root): a small host's
+address got 200 from bahn.de where Oracle's were refused (2026-10-16). `panel_start.py` brings HTTPS with
+Tailscale Funnel and starts the proxy:
+1. Startup: Python 3.12 or 3.13 image if there is a choice, git repo of this project (or upload `proxy.py`,
+   `panel_start.py` and `requirements.txt`), app file `Server/bahnde-proxy/panel_start.py`, requirements file
+   `Server/bahnde-proxy/requirements.txt`.
+2. File manager: `Server/bahnde-proxy/.env` with `TOKEN_SECRET=…`.
+3. Start it and open the Tailscale links in the console (sign in, enable Funnel). It then prints the
+   `https://<name>.<tailnet>.ts.net` address; put it into `BahnDeProxy.baseURL`.
+
 **Home server or VPS:**
 
 ```sh
