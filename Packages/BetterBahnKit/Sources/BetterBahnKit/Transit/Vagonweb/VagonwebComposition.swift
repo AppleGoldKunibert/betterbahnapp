@@ -57,6 +57,8 @@ public struct VagonwebComposition: Sendable, Hashable {
         public var carCarrier = false
         /// Where the vehicle runs when that is only part of the train's run.
         public var section: Section?
+        /// The days it runs on when its note says ("runs on ⑥, ⑦ …"), read completely or not at all.
+        var restriction: DayRestriction?
 
         /// A driving vehicle at the end of a trainset ("…f": Bpmzf, Apmzf, Bpmbdzf).
         var hasCab: Bool { typeCode?.hasSuffix("f") == true }
@@ -100,6 +102,27 @@ public struct VagonwebComposition: Sendable, Hashable {
             (coach.section?.covers(route: route) ?? true) && !coach.notes.contains { coupledTrains.contains($0) }
         }
         guard kept.contains(where: \.hasSeats) else { return self }
+        var composition = self
+        composition.coaches = kept
+        return composition
+    }
+
+    /// The operating day (month, day and weekday, 1 = Monday) of a train leaving at `departure`: the one it started on,
+    /// which for a stop in the first hours after midnight is the day before.
+    static func operatingDay(of departure: Date) -> (month: Int, day: Int, weekday: Int) {
+        var date = departure
+        if calendar.component(.hour, from: date) < 4 { date = date.addingTimeInterval(-6 * 3600) }
+        let parts = calendar.dateComponents([.month, .day, .weekday], from: date)
+        // Calendar counts Sunday as 1.
+        return (parts.month ?? 1, parts.day ?? 1, ((parts.weekday ?? 1) + 5) % 7 + 1)
+    }
+
+    /// The composition for the day of a train leaving at `departure`: without the coaches whose note says they
+    /// don't run then (`DayRestriction`). Itself when that would leave no passenger coach.
+    public func operating(on departure: Date) -> VagonwebComposition {
+        let day = Self.operatingDay(of: departure)
+        let kept = coaches.filter { $0.restriction?.runs(month: day.month, day: day.day, weekday: day.weekday) ?? true }
+        guard kept.count < coaches.count, kept.contains(where: \.hasSeats) else { return self }
         var composition = self
         composition.coaches = kept
         return composition
@@ -265,7 +288,8 @@ extension VagonwebComposition {
             sleeper: hasClass("tab-luzk"),
             couchette: hasClass("tab-lehat"),
             carCarrier: hasClass("tab-sluz"),
-            section: section)
+            section: section,
+            restriction: notes.lazy.compactMap { DayRestriction(note: $0) }.first)
     }
 }
 

@@ -99,6 +99,7 @@ public struct VagonwebClient: Sendable {
               var composition = try await composition(category: request.category, number: request.number, on: request.plannedDeparture, route: route)
         else { return nil }
         if let route { composition = composition.restricted(to: route) }
+        composition = composition.operating(on: request.plannedDeparture)
         var sequence = composition.coachSequence(trainName: "\(request.category.uppercased()) \(request.number)")
         let candidates = composition.reversalStations + Self.terminusStations
         if let route, let reversals = Self.reversals(at: request.station.name, route: route, in: candidates) {

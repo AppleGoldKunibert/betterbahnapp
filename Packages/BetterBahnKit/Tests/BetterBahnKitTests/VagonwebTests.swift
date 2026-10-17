@@ -335,7 +335,11 @@ private func berlinDate(_ year: Int, _ month: Int, _ day: Int, hour: Int = 12) -
         #expect(!kinds.contains(.other))
         let atInnsbruck = try #require(try await client.coachSequence(
             for: request("NJ", "465", at: "Innsbruck Hbf", on: date), route: ["Zürich HB", "Buchs SG", "Feldkirch", "Innsbruck Hbf"]))
-        #expect(atInnsbruck.coaches.filter { $0.kind == .other }.count == 2)
+        // The second car transporter only runs until 2 February.
+        #expect(atInnsbruck.coaches.filter { $0.kind == .other }.count == 1)
+        let winter = try #require(try await client.coachSequence(
+            for: request("NJ", "465", at: "Innsbruck Hbf", on: berlinDate(2026, 2, 1)), route: ["Zürich HB", "Buchs SG", "Feldkirch", "Innsbruck Hbf"]))
+        #expect(winter.coaches.filter { $0.kind == .other }.count == 2)
         // The HŽPP coaches for Zagreb are only there up to Schwarzach-St.Veit, the Zürich–Graz ones all the way.
         #expect(atInnsbruck.coaches.contains { $0.number == "318" } && atInnsbruck.coaches.contains { $0.number == "314" })
         let atVillach = try #require(try await client.coachSequence(
@@ -369,6 +373,75 @@ private func berlinDate(_ year: Int, _ month: Int, _ day: Int, hour: Int = 12) -
         #expect(try await BahnDeClient().coachSequence(req) == nil)
         #expect(BahnDeClient.sequenceReference(for: Line(name: "FLX 20", number: "20", product: .regionalExpress, operatorName: nil)) == nil
                 || BahnDeClient.sequenceReference(for: Line(name: "FLX 20", number: "20", product: .regionalExpress, operatorName: nil))?.category != "FLX")
+    }
+
+    // MARK: Days a coach runs on
+
+    /// EC 163's coaches 302 and 303: "runs on ⑥, ⑦ until 13.6. and from 17.10., on 24., 25., 26., 31.12., 1., 2., 5., 6.1., …".
+    @Test func readsTheDaysACoachRunsOn() throws {
+        let note = "runs on ⑥ , ⑦ until 13.6. and from 17.10., on 24., 25., 26., 31.12., 1., 2., 5., 6.1., 6.4., 1., 14., 15., 25.5., 4., 5.6., 26.10., 7., 8.12."
+        let restriction = try #require(DayRestriction(note: note))
+        #expect(restriction.weekdays == [6, 7])
+        // Friday 16.10. is before the new period starts, Saturday 17.10. is in it, a Sunday in June after the 13th is not.
+        #expect(!restriction.runs(month: 10, day: 16, weekday: 5))
+        #expect(restriction.runs(month: 10, day: 17, weekday: 6))
+        #expect(restriction.runs(month: 6, day: 13, weekday: 6))
+        #expect(!restriction.runs(month: 6, day: 14, weekday: 7))
+        #expect(restriction.runs(month: 3, day: 7, weekday: 6))
+        #expect(!restriction.runs(month: 3, day: 9, weekday: 1))
+        // The holidays listed run whatever the weekday: the month of a bare "24." is the next one named (12).
+        #expect(restriction.runs(month: 12, day: 24, weekday: 4))
+        #expect(restriction.runs(month: 1, day: 6, weekday: 3))
+        #expect(restriction.runs(month: 5, day: 14, weekday: 4))
+        #expect(restriction.runs(month: 10, day: 26, weekday: 1) && restriction.runs(month: 12, day: 8, weekday: 2))
+        #expect(!restriction.runs(month: 12, day: 23, weekday: 3))
+
+        let until = try #require(DayRestriction(note: "runs until 02.02."))
+        #expect(until.runs(month: 2, day: 2, weekday: 1) && until.runs(month: 12, day: 20, weekday: 1))
+        #expect(!until.runs(month: 2, day: 3, weekday: 2) && !until.runs(month: 10, day: 1, weekday: 4))
+        #expect(DayRestriction(note: "runs from 17.10.")?.runs(month: 11, day: 1, weekday: 7) == true)
+        #expect(DayRestriction(note: "runs on ⑤, ⑦")?.runs(month: 4, day: 3, weekday: 5) == true)
+        #expect(DayRestriction(note: "runs on ⑤, ⑦")?.runs(month: 4, day: 4, weekday: 6) == false)
+        #expect(DayRestriction(note: "runs on 24., 25.12.")?.runs(month: 12, day: 25, weekday: 5) == true)
+        #expect(DayRestriction(note: "runs on 24., 25.12.")?.runs(month: 12, day: 26, weekday: 6) == false)
+    }
+
+    @Test func leavesNotesItDoesNotUnderstandAlone() {
+        for note in ["quiet zone", "service is provided by DoN boardservice", "seats 103-106 for service", "runs Mon-Fri",
+                     "runs on ⑧", "runs on ⑥, ⑦ except 24.12.", "runs on ⑥, not on 3.4.", "runs on 24.", "runs on ⑥, on 24., 25.",
+                     "runs until 32.13.", "runs together with RJX 184", "Fahrtrichtung wechselt", "8.4", ""] {
+            #expect(DayRestriction(note: note) == nil, "\(note)")
+        }
+    }
+
+    @Test func leavesOutCoachesThatDoNotRunThatDay() async throws {
+        let html = try vagonwebPage("vagonweb-ec163")
+        let client = VagonwebClient(http: HTTPClient(session: VagonwebStubProtocol.session(category: "EC", country: "SBB", number: "163", html: html)))
+        let numbers = { (day: Date) async throws -> [String] in
+            let sequence = try await client.coachSequence(for: request("EC", "163", at: "Zürich HB", on: day), route: ["Zürich HB"])
+            return try #require(sequence).coaches.compactMap(\.number)
+        }
+        // Friday 16 October: 302 and 303 run on Saturdays and Sundays from 17 October.
+        let friday = try await numbers(berlinDate(2026, 10, 16, hour: 8))
+        #expect(!friday.contains("302") && !friday.contains("303") && friday.contains("304") && friday.contains("312"))
+        let saturday = try await numbers(berlinDate(2026, 10, 17, hour: 8))
+        #expect(saturday.contains("302") && saturday.contains("303") && saturday.contains("304") && saturday.contains("312"))
+        // Christmas Eve 2025 is a Wednesday (and in the timetable year 2026), but listed.
+        let christmasEve = try await numbers(berlinDate(2025, 12, 24, hour: 8))
+        #expect(christmasEve.contains("302") && christmasEve.contains("303"))
+        // The plain composition keeps every coach: only a train's day cuts it down.
+        let composition = try #require(VagonwebComposition.scheduled(fromHTML: html).first)
+        #expect(composition.coaches.compactMap(\.number).count == 11)
+        #expect(composition.operating(on: berlinDate(2026, 10, 16, hour: 8)).coaches.compactMap(\.number).count == 9)
+    }
+
+    @Test func aTrainAfterMidnightCountsForTheDayItStartedOn() {
+        // 0:54 on Saturday 17 October is still the operating day of Friday the 16th.
+        let night = VagonwebComposition.operatingDay(of: berlinDate(2026, 10, 17, hour: 0))
+        #expect(night.day == 16 && night.weekday == 5)
+        let morning = VagonwebComposition.operatingDay(of: berlinDate(2026, 10, 17, hour: 6))
+        #expect(morning.day == 17 && morning.weekday == 6)
+        #expect(VagonwebComposition.operatingDay(of: berlinDate(2026, 10, 18, hour: 12)).weekday == 7)
     }
 
     @Test func stationNamesWithBahnhofMatch() {

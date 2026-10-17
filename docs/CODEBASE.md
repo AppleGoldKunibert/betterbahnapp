@@ -228,7 +228,9 @@ in `project.pbxproj`: new files join their target automatically.
   for NJ/EN). `NJ`, `EN`, `IR` (`plannedCategories`, `BahnDeClient.plannedOnlyCategories`) are never asked of bahn.de (an
   unknown category's 403 pauses everything). Sections where the composition changes: `Section.covers`,
   `composition(…route:)`, `restricted(to:)`, `startsReversed`; trains running together ("RJX 184") left out. Parser
-  reads vagonweb's HTML and a browser's serialized DOM; day restrictions per coach not read. Those trains' legs get
+  reads vagonweb's HTML and a browser's serialized DOM. Coach notes like "runs on ⑥, ⑦ until 13.6. and from 17.10., on 24., 25.12. …"
+  are read when the whole note fits (`DayRestriction`), and `VagonwebComposition.operating(on:)` drops the coach on other
+  days (a stop before 4:00 counts for the day before); any other wording is no restriction. Those trains' legs get
   only platforms from bahn.de (`BahnDeClient.takesOnlyPlatforms`).
 - `Transit/BahnExpert/` – train type fallback (`TrainTypeLookup`, `DB-plan`) when bahn.de and vagonweb have none;
   bahn.de is only asked within `BahnDeClient.formationLookahead` (24 h). Needs `Referer` + non-curl UA (else empty
