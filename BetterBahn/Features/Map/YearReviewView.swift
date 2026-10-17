@@ -2,8 +2,8 @@ import BetterBahnKit
 import SwiftUI
 
 /// The year in review ("Jahresrückblick", #319): one fact per card, swiped through like a story,
-/// each card shareable as an image. Opened from the map and, in December and January, from a banner
-/// on the Verbindungen tab. Everything is computed on the device.
+/// each card shareable as an image. Opened only from the banner on the Verbindungen tab (December and
+/// January); earlier years are picked in the view. Everything is computed on the device.
 struct YearReviewView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -94,7 +94,7 @@ struct YearReviewView: View {
     private func loadYears() async {
         let found = await model.yearReviewYears()
         years = found.contains(year) ? found : (found.isEmpty ? [year] : found)
-        // Opened for a year without rides (e.g. the map in early January): show the latest one with rides.
+        // Opened for a year without rides: show the latest one with rides.
         if !found.isEmpty, !found.contains(year) { year = found[0] }
     }
 

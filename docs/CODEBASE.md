@@ -99,8 +99,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   journey/check in), the Wagenreihung and "Auf Karte zeigen" (only while bahn.jetzt has a position).
 - `Features/Map/` – `TravelMapView` heatmap of past trips (no banner when empty) (`TravelMapHeatmap`, `RailwayTileOverlay`: OpenRailwayMap tiles, 512 px, cached on disk 7 days, 10 min pause after 403/429, #171;
   a ride both saved and checked in on Träwelling is drawn from the check-in, saved journeys only add unchecked legs – `RideMatch.uncovered`),
-  `YearReviewView` (#319, "Jahresrückblick": the sparkles button on the map, and `YearReviewBanner` on Verbindungen in December/January
-  until closed, `dismissedYearReview`): swipeable 9:16 cards from Kit `YearReview` over the map's rides of a calendar year
+  `YearReviewView` (#319, "Jahresrückblick": only via `YearReviewBanner` on Verbindungen in December/January
+  until closed, `dismissedYearReview`; not from the map): swipeable 9:16 cards from Kit `YearReview` over the map's rides of a calendar year
   (`AppModel.yearReview(for:)`, same `TravelMapSelection` and cached heatmap), km from the cached track geometry, series/Tz from
   `rememberedFormation`; the visible card is shared as an image (`ImageRenderer`), the heatmap card is drawn with `Canvas`.
   `LiveTrainMapView` (one train's live position on its route, opened from `LiveTrainIconTile`, the train icon on
