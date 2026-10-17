@@ -225,8 +225,8 @@ in `project.pbxproj`: new files join their target automatically.
   each seat number's box as fractions of the drawing (lower coach numbers on the left on every sheet).
   `CoachSequence.Group.seatMapSheet` per trainset from its UIC numbers (`TrainModel.detectSubtype`) and coach count
   (`SeatMap.sheet`: ICE 1 with 12 or, modernised, 9 middle coaches; ICE 4 with 7, 12 or 13; all BR 403 on the Redesign
-  sheet); `CoachSequence.seatMap(for:)` by coach number. DB's sheets print two numbers twice (401.LDV Wagen 6 "43",
-  408 Wagen 24 "75"), kept as they are.
+  sheet); `CoachSequence.seatMap(for:)` by coach number. Misprints on DB's sheets are fixed in the
+  script's `CORRECTIONS` (408 Wagen 24: 76–78 printed as 75–77; 401.LDV Wagen 6: 42 printed as 43).
 - `Transit/Vagonweb/` – vagonweb.cz (with permission, #95): planned compositions for the timetable year from the train's
   HTML (`VagonwebComposition.scheduled`, fixtures `vagonweb-ice*.html`), used when bahn.de has none: `AppModel.trainType`
   and "Plan-Wagenreihung" (`CoachSequence.source == .vagonweb`). Cloudflare bot check → hidden `WebPage`

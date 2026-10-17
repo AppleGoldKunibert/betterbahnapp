@@ -3729,7 +3729,10 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
             let coaches = SeatMap.sheets[sheet] ?? []
             #expect(!coaches.isEmpty, "\(sheet)")
             #expect(coaches.allSatisfy { $0.seats.allSatisfy { Int($0.number).map { $0 >= 11 } ?? false } }, "\(sheet)")
+            #expect(coaches.allSatisfy { Set($0.seats.map(\.number)).count == $0.seats.count }, "\(sheet)")
         }
+        // DB's ICE 3neo sheet misprints coach 24's 76–78 as 75–77.
+        #expect(SeatMap.coach("24", sheet: "408")?.seat("78") != nil)
         // As many seats as DB's sheets list.
         #expect(SeatMap.sheets["403"]?.reduce(0) { $0 + $1.seats.count } == 450)
         #expect(SeatMap.sheets["411.S2"]?.reduce(0) { $0 + $1.seats.count } == 376)

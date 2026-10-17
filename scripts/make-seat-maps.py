@@ -36,6 +36,16 @@ OUT_ASSETS = ROOT / "BetterBahn/Assets.xcassets/SeatMaps"
 BASE_URL = "https://bahn.expert/WRSheets/"
 # The ICE sheets bahn.expert has (IC2.TRE left out: only ICEs get a seat map).
 SHEETS = ["401", "401.LDV", "402", "403", "407", "408", "411.S1", "411.S2", "412", "412.7", "412.13"]
+# Misprints on DB's sheets, fixed by the seat's place in the coach (fractions of its drawing, as in
+# SeatMaps.json): (sheet, coach, x, y) → the right number. The neighbouring columns count on in fours.
+CORRECTIONS = {
+    # ICE 3neo Wagen 24: the column printed 77, 76, 75, 75 is 78, 77, 76, 75 (checked in the coach).
+    ("408", "24", 0.3338, 0.1393): "78",
+    ("408", "24", 0.3338, 0.2911): "77",
+    ("408", "24", 0.3338, 0.6067): "76",
+    # ICE 1 modernised Wagen 6: 44, 43, 43, 41 is 44, 43, 42, 41.
+    ("401.LDV", "6", 0.3213, 0.6303): "42",
+}
 # Detection resolution and the height of a coach image in pixels.
 DETECT_SCALE = 2.0
 IMAGE_HEIGHT = 320
@@ -219,6 +229,16 @@ def strip_numbers(image, seats, scale, box):
         patch[mask] = background.astype(np.uint8)
 
 
+def corrected(sheet, coach, seat, box):
+    """`seat` with the number from CORRECTIONS where DB misprinted it."""
+    x = (seat[0] - box[0]) / (box[2] - box[0])
+    y = (seat[1] - box[1]) / (box[3] - box[1])
+    for (fix_sheet, fix_coach, fix_x, fix_y), number in CORRECTIONS.items():
+        if (fix_sheet, fix_coach) == (sheet, coach) and abs(x - fix_x) < 0.003 and abs(y - fix_y) < 0.003:
+            return seat[:4] + (number,)
+    return seat
+
+
 def coach_image(pdf, page, box, seats):
     scale = IMAGE_HEIGHT / (box[3] - box[1])
     image = render(pdf, page, scale, box).copy()
@@ -290,6 +310,7 @@ def main():
                     images[digest] = name
                     write_asset(name, data)
                 w, h = box[2] - box[0], box[3] - box[1]
+                seats = [corrected(sheet, label["numbers"][0], seat, box) for seat in seats]
                 coaches.append({
                     "numbers": label["numbers"],
                     "title": label["title"],
