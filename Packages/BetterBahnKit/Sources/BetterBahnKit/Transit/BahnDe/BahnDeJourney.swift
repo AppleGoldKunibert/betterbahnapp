@@ -163,8 +163,11 @@ extension BahnDeClient {
     }
 
     /// `journeyStops(for:)` together with the rest of bahn.de's journey details, same request and cache.
-    func journeyCourse(for leg: Leg, maxAge: TimeInterval = BahnDeClient.journeyStopsMaxAge) async throws -> JourneyCourse? {
-        try await journeyCourse(line: leg.line, station: leg.origin, plannedDeparture: leg.departure.planned, maxAge: maxAge)
+    /// - Parameter includingOtherRailways: also for Nightjet, Euronight and the like (`lookupReference`).
+    func journeyCourse(for leg: Leg, maxAge: TimeInterval = BahnDeClient.journeyStopsMaxAge,
+                       includingOtherRailways: Bool = false) async throws -> JourneyCourse? {
+        try await journeyCourse(line: leg.line, station: leg.origin, plannedDeparture: leg.departure.planned, maxAge: maxAge,
+                                includingOtherRailways: includingOtherRailways)
     }
 
     /// Whether bahn.de lists sleeping or couchette cars for `trip`'s train (`JourneyDetails.hasSleepingCars`);
@@ -306,7 +309,6 @@ extension BahnDeClient {
         guard let id = Self.journeyId(in: board, for: line, plannedDeparture: plannedDeparture) else {
             throw TransitError.notFound(line.name)
         }
-        reportSightings(board.entries.filter { $0.journeyId == id })
         return id
     }
 
@@ -394,7 +396,6 @@ extension BahnDeClient {
             guard let latest = page.entries.compactMap({ $0.zeit.flatMap(Self.parseBerlinTime) }).max(), latest < last else { break }
             start = latest.addingTimeInterval(60)
         }
-        reportSightings(trains.compactMap { Self.boardMatch(for: $0, in: board) })
         return Self.applyingLiveTimes(Self.correctingTrainNames(entries, using: board, kind: kind), using: board, kind: kind)
     }
 
@@ -582,7 +583,6 @@ extension BahnDeClient {
         let fetch: @Sendable () async throws -> String? = {
             guard let eva = try await self.evaNumber(for: station) else { return nil }
             let board = try await self.get(Self.boardURL(eva: eva, at: plannedDeparture), as: Board.self)
-            self.reportSightings([Self.boardEntry(for: line, plannedDeparture: plannedDeparture, in: board.entries)].compactMap { $0 })
             // "" for "same name" so that answer is cached too.
             return Self.bahnDeName(for: line, plannedDeparture: plannedDeparture, in: board.entries) ?? ""
         }
@@ -790,28 +790,48 @@ extension BahnDeClient {
     /// journey details. DB's feed in Transitous has none at all at some stations (e.g. Hamburg Hbf and
     /// Hamburg-Altona) and DB Timetables only knows the next hours, while bahn.de has them days ahead.
     /// A stop is matched by its planned time and place, so a station passed twice can't mix them up.
-    public static func fillingMissingPlatforms(in leg: Leg, from stops: [JourneyStop]) -> Leg {
+    /// - Parameters:
+    ///   - matchingByTimeAlone: take a stop planned at the very same minute as the one, whatever it is
+    ///     called. For bahn.expert's stops, which name stations differently from Transitous ("Kirchberg in Tirol" /
+    ///     "Kirchberg i. T. Bahnhof", "Buchs SG" / "Buchs Bahnhof"): one run can't be at two stops at once.
+    ///   - overwriting: also replace a platform the leg has. For a Nightjet, whose ÖBB feed has odd ones
+    ///     ("87" at Köln Hbf, where DB has 5 or 6) that DB's own data should win over.
+    public static func fillingMissingPlatforms(in leg: Leg, from stops: [JourneyStop], matchingByTimeAlone: Bool = false,
+                                               overwriting: Bool = false) -> Leg {
         var leg = leg
-        if leg.departurePlatform?.best == nil,
-           let stop = stop(in: stops, at: leg.origin, planned: leg.departure.planned, side: \.departure) {
-            leg.departurePlatform = stop.departurePlatform
+        if overwriting || leg.departurePlatform?.best == nil,
+           let stop = stop(in: stops, at: leg.origin, planned: leg.departure.planned, side: \.departure, byTimeAlone: matchingByTimeAlone),
+           let platform = stop.departurePlatform {
+            leg.departurePlatform = platform
         }
-        if leg.arrivalPlatform?.best == nil,
-           let stop = stop(in: stops, at: leg.destination, planned: leg.arrival.planned, side: \.arrival) {
-            leg.arrivalPlatform = stop.arrivalPlatform
+        if overwriting || leg.arrivalPlatform?.best == nil,
+           let stop = stop(in: stops, at: leg.destination, planned: leg.arrival.planned, side: \.arrival, byTimeAlone: matchingByTimeAlone),
+           let platform = stop.arrivalPlatform {
+            leg.arrivalPlatform = platform
         }
-        for index in leg.stopovers.indices {
-            let stopover = leg.stopovers[index]
-            if stopover.arrivalPlatform?.best == nil, let planned = stopover.arrival?.planned,
-               let stop = stop(in: stops, at: stopover.station, planned: planned, side: \.arrival) {
-                leg.stopovers[index].arrivalPlatform = stop.arrivalPlatform
-            }
-            if stopover.departurePlatform?.best == nil, let planned = stopover.departure?.planned,
-               let stop = stop(in: stops, at: stopover.station, planned: planned, side: \.departure) {
-                leg.stopovers[index].departurePlatform = stop.departurePlatform
-            }
-        }
+        leg.stopovers = fillingMissingPlatforms(in: leg.stopovers, from: stops, matchingByTimeAlone: matchingByTimeAlone,
+                                                overwriting: overwriting)
         return leg
+    }
+
+    /// `stopovers` (a leg's or trip's) with every platform they lack taken from `stops`, matched like `fillingMissingPlatforms(in:from:)`.
+    public static func fillingMissingPlatforms(in stopovers: [Stopover], from stops: [JourneyStop],
+                                               matchingByTimeAlone: Bool = false, overwriting: Bool = false) -> [Stopover] {
+        var stopovers = stopovers
+        for index in stopovers.indices {
+            let stopover = stopovers[index]
+            if overwriting || stopover.arrivalPlatform?.best == nil, let planned = stopover.arrival?.planned,
+               let stop = stop(in: stops, at: stopover.station, planned: planned, side: \.arrival, byTimeAlone: matchingByTimeAlone),
+               let platform = stop.arrivalPlatform {
+                stopovers[index].arrivalPlatform = platform
+            }
+            if overwriting || stopover.departurePlatform?.best == nil, let planned = stopover.departure?.planned,
+               let stop = stop(in: stops, at: stopover.station, planned: planned, side: \.departure, byTimeAlone: matchingByTimeAlone),
+               let platform = stop.departurePlatform {
+                stopovers[index].departurePlatform = platform
+            }
+        }
+        return stopovers
     }
 
     /// `leg` with DB's live times from bahn.de's journey details wherever bahn.de has one (`echtzeit`),
@@ -945,9 +965,10 @@ extension BahnDeClient {
     /// name stations differently ("S Spandau Bhf (Berlin)" / "Berlin-Spandau"), so being within 1 km
     /// counts as the same place too – at the very same planned time that can only be this stop.
     private static func stop(in stops: [JourneyStop], at station: Station, planned: Date,
-                             side: KeyPath<JourneyStop, TimeInfo?>) -> JourneyStop? {
+                             side: KeyPath<JourneyStop, TimeInfo?>, byTimeAlone: Bool = false) -> JourneyStop? {
         stops.first { stop in
             guard let time = stop[keyPath: side], abs(time.planned.timeIntervalSince(planned)) < 60 else { return false }
+            if byTimeAlone { return true }
             if matches(stop, station) || Station.normalize(stop.name) == Station.normalize(station.displayName) { return true }
             guard let a = stop.coordinate, let b = station.coordinate else { return false }
             return a.distance(to: b) < 1_000

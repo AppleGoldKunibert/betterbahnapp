@@ -5,7 +5,8 @@ import SwiftUI
 /// minutes before the departure until 15 minutes after it (`CoachSequence.unfoldsByItself`), else
 /// with a tap. Shown once bahn.de has a coach sequence for the train (the same request
 /// `TrainFormationLabel` makes, so it is only sent once), or else vagonweb.cz has the planned one
-/// ("Plan-Wagenreihung").
+/// ("Plan-Wagenreihung"). While our bahn.de server doesn't answer, it says the current one is missing:
+/// "Plan-Wagenreihung · Aktuelle nicht verfügbar", or without a plan "Aktuelle Wagenreihung nicht verfügbar".
 struct CoachSequenceDisclosure: View {
     /// bahn.de's request, only for departures within `BahnDeClient.formationLookahead`.
     let request: BahnDeClient.FormationRequest?
@@ -15,7 +16,7 @@ struct CoachSequenceDisclosure: View {
     let departure: Date?
     /// Space above the row, only while it is shown (a stack's spacing would stay when it isn't).
     var spacing: CGFloat = 0
-    /// The leg's seat reservation, highlighted in the seat map.
+    /// The seat reserved on this train; its coach is highlighted in the Wagenreihung and the seat in the seat map.
     var reservation: SeatReservation?
 
     init(leg: Leg, reservation: SeatReservation? = nil, spacing: CGFloat = 0) {
@@ -44,8 +45,15 @@ struct CoachSequenceDisclosure: View {
 
     @Environment(AppModel.self) private var model
     @State private var sequence: CoachSequence?
+    /// Our bahn.de server didn't answer, so the current Wagenreihung is missing.
+    @State private var liveMissing = false
     /// Opened or closed by hand; nil follows the departure time.
     @State private var expanded: Bool?
+
+    private func title(of sequence: CoachSequence) -> String {
+        if sequence.source == .bahnDe { return "Wagenreihung" }
+        return liveMissing ? "Plan-Wagenreihung · Aktuelle nicht verfügbar" : "Plan-Wagenreihung"
+    }
 
     var body: some View {
         // A ZStack rather than Group: `.task` never fires on a view that is empty.
@@ -54,7 +62,7 @@ struct CoachSequenceDisclosure: View {
                 TimelineView(.everyMinute) { context in
                     let open = expanded ?? CoachSequence.unfoldsByItself(departure: departure, now: context.date)
                     VStack(alignment: .leading, spacing: 12) {
-                        CoachSequenceToggle(title: sequence.source == .bahnDe ? "Wagenreihung" : "Plan-Wagenreihung", open: open) {
+                        CoachSequenceToggle(title: title(of: sequence), open: open) {
                             withAnimation(.snappy) { expanded = !open }
                         }
                         if open {
@@ -65,15 +73,33 @@ struct CoachSequenceDisclosure: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, spacing)
                 }
+            } else if liveMissing {
+                Label("Aktuelle Wagenreihung nicht verfügbar", systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, spacing)
             }
         }
         .task(id: plannedRequest) {
             sequence = nil
-            if let request, let live = try? await model.coachSequence(for: request), !live.coaches.isEmpty {
-                sequence = live
-            } else if let plannedRequest {
+            liveMissing = false
+            var missing = false
+            if let request {
+                do {
+                    if let live = try await model.coachSequence(for: request), !live.coaches.isEmpty {
+                        sequence = live
+                        return
+                    }
+                } catch TransitError.rateLimited {
+                    missing = true
+                } catch {}
+            }
+            if let plannedRequest {
                 sequence = await model.plannedCoachSequence(for: plannedRequest)
             }
+            // Only once the plan has answered, so the notice doesn't flash before it.
+            liveMissing = missing
         }
     }
 }
@@ -106,9 +132,9 @@ struct CoachSequenceToggle: View {
 /// number, class and amenities, and the direction the train leaves in.
 struct CoachSequencePanel: View {
     let request: BahnDeClient.FormationRequest
-    /// Highlighted in the seat map.
-    var reservation: SeatReservation?
     @State private var sequence: CoachSequence?
+    /// The seat reserved on this train: its coach is highlighted, the seat in the seat map.
+    let reservation: SeatReservation?
 
     /// - Parameter sequence: already loaded by the caller; fetched here otherwise (e.g. from a stop's platform).
     init(request: BahnDeClient.FormationRequest, sequence: CoachSequence? = nil, reservation: SeatReservation? = nil) {
@@ -122,6 +148,11 @@ struct CoachSequencePanel: View {
     @State private var blocked = false
     /// What bahn.de's sequence has differently from vagonweb's plan (`CoachSequence.deviations(fromPlan:)`).
     @State private var deviations: [String] = []
+    #if DEBUG
+    /// Why bahn.de had no Wagenreihung when vagonweb's plan is shown instead (`BahnDeClient.coachSequenceNote(for:)`),
+    /// only in debug builds to find out why a train shows the plan.
+    @State private var bahnDeNote: String?
+    #endif
 
     private var station: Station { request.station }
 
@@ -133,7 +164,12 @@ struct CoachSequencePanel: View {
                     ForEach(Array(sequence.formation.partsBySeries.enumerated()), id: \.offset) { _, part in
                         TrainCard(formation: part)
                     }
-                    CoachSequenceDiagram(sequence: sequence, reservation: reservation)
+                    CoachSequenceDiagram(sequence: sequence, reservation: reservation, highlightedCoachID: reservation.flatMap { reservation in
+                        switch sequence.position(ofCoach: reservation.coach, train: reservation.trainName) {
+                        case .sectors(_, let id), .noSectors(let id): id
+                        case .coachMissing: nil
+                        }
+                    })
                     legend(sequence)
                 }
             } else if loading {
@@ -162,6 +198,11 @@ struct CoachSequencePanel: View {
                 }
                 loading = false
             }
+            #if DEBUG
+            if sequence?.source != .bahnDe {
+                bahnDeNote = await model.provider.bahnDe?.coachSequenceNote(for: request)
+            }
+            #endif
             // bahn.de flags nearly every train as differing, so compare with the plan here.
             if let sequence, sequence.source == .bahnDe, !sequence.coaches.isEmpty,
                let plan = await model.plannedCoachSequence(for: request, direction: false) {
@@ -178,6 +219,14 @@ struct CoachSequencePanel: View {
             if case .vagonweb(let from, let until) = sequence.source {
                 plannedNote(sequence, from: from, until: until)
             }
+            #if DEBUG
+            if let bahnDeNote {
+                Text("bahn.de: \(bahnDeNote)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .textSelection(.enabled)
+            }
+            #endif
             if !deviations.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     InfoChip(text: "Abweichende Wagenreihung", systemImage: "exclamationmark.triangle.fill", tint: .slightDelay)
@@ -269,6 +318,11 @@ private struct TrainCard: View {
                                 .lineLimit(2)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
+                        if let livery = unit.livery {
+                            Label("Sonderlackierung: \(livery)", systemImage: "paintpalette")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
@@ -310,7 +364,10 @@ private struct TrainCard: View {
 /// while scrolling until the part ends at the coupling point. Tapping an ICE's coach opens the seat map.
 private struct CoachSequenceDiagram: View {
     let sequence: CoachSequence
+    /// Highlighted in the seat map.
     var reservation: SeatReservation?
+    /// The coach of the reserved seat, marked with a frame.
+    var highlightedCoachID: Int?
 
     private static let pointsPerMeter: CGFloat = 3
     /// Coach length used when bahn.de gave no positions.
@@ -404,6 +461,7 @@ private struct CoachSequenceDiagram: View {
                             let group = item.coach.group
                             let nose = hasTrainsets || !item.coach.isPassengerCoach
                             let tile = CoachTile(coach: item.coach,
+                                                 highlighted: item.coach.id == highlightedCoachID,
                                                  leadingNose: nose && (index == 0 || placed[index - 1].coach.group != group),
                                                  trailingNose: nose && (index == placed.count - 1 || placed[index + 1].coach.group != group))
                             Group {
@@ -545,6 +603,7 @@ nonisolated private struct DividerLine: Shape {
 /// trainset are rounded like a nose.
 private struct CoachTile: View {
     let coach: CoachSequence.Coach
+    var highlighted = false
     var leadingNose = false
     var trailingNose = false
 
@@ -620,7 +679,7 @@ private struct CoachTile: View {
     }
 
     private var accessibilityText: String {
-        var parts = [coach.number.map { "Wagen \($0)" }, coach.title == "Wagen" ? nil : coach.title, coach.closed ? "Geschlossen" : nil].compactMap(\.self)
+        var parts = [highlighted ? "Dein Wagen" : nil, coach.number.map { "Wagen \($0)" }, coach.title == "Wagen" ? nil : coach.title, coach.closed ? "Geschlossen" : nil].compactMap(\.self)
         parts += coach.amenities.map(\.title)
         if let bikes = coach.bikeSpaces, coach.amenities.contains(.bikeSpace) { parts.append("\(bikes) Fahrradstellplätze") }
         return parts.joined(separator: ", ")
@@ -642,7 +701,7 @@ private struct CoachTile: View {
         return outline
             .fill(fill.opacity(coach.isPassengerCoach ? 0.22 : 0.45))
             .overlay {
-                outline.strokeBorder(fill.opacity(0.6), lineWidth: 1)
+                outline.strokeBorder(highlighted ? Color.brand : fill.opacity(0.6), lineWidth: highlighted ? 3 : 1)
             }
             .overlay {
                 if let number = coach.number {

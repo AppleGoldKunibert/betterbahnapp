@@ -3,39 +3,22 @@ main = "worker.mjs"
 compatibility_date = "2026-09-01"
 workers_dev = true
 
-# Train statistics (#169). Create the database once with
-# `npx wrangler d1 create betterbahn-stats`, put its id here and load schema.sql (see README.md).
+# Train statistics (#316). Created once with `npx wrangler d1 create betterbahn-stats` and schema.sql
+# (see README.md); filled once a day by importer.py (.github/workflows/train-stats-import.yml).
 [[d1_databases]]
 binding = "DB"
 database_name = "betterbahn-stats"
 database_id = "8e54043e-cfd7-48fd-be13-d26497af6b43"
 
-# Every minute: look at the runs that are due (schedule, Wagenreihung, final state).
-# Every five minutes: find long-distance trains on the boards of big stations (seedLongDistance).
+# No cron any more (#336): an empty list removes the old ones on deploy.
 [triggers]
-crons = ["* * * * *", "*/5 * * * *"]
+crons = []
 
-# Per app install (App Attest key): 30 reports per minute. namespace_id is any number unique within the account.
-[[ratelimits]]
-name = "SIGHTINGS_LIMITER"
-namespace_id = "1301"
-simple = { limit = 30, period = 60 }
-
-# Per app install: 60 train-statistics lookups per minute (#316).
+# Per app install: 60 train-statistics lookups per minute. namespace_id is any number unique within the account.
 [[ratelimits]]
 name = "STATS_LIMITER"
 namespace_id = "1302"
 simple = { limit = 60, period = 60 }
 
-[vars]
-# Free plan values (50 requests and 10 ms CPU per invocation). Workers Paid ($5/month) can take
-# BATCH = "20", SEED_PER_RUN = "30" and a bigger SEED_POOL to read more stations more often.
-# Runs per cron invocation (one bahn.de request each).
-BATCH = "8"
-# Departure boards read per five-minute round (see seedLongDistance); "0" switches seeding off. If the logs
-# (`npx wrangler tail`) show "Exceeded CPU", lower it. SEED_POOL: how many of the busiest stations are read
-# in turns (40 ≈ every station each 40 minutes). SEED_STATIONS (EVA numbers, comma-separated) reads just these.
-SEED_PER_RUN = "5"
-SEED_POOL = "40"
 # Secrets (`npx wrangler secret put …`): TOKEN_SECRET (same value as in betterbahn2, betterbahn and betterbahn-pass).
-# ALLOW_UNATTESTED = "true" lets apps without App Attest (Simulator) report trains.
+# ALLOW_UNATTESTED = "true" lets apps without App Attest (Simulator) ask.

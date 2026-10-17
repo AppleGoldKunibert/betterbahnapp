@@ -1,0 +1,65 @@
+# Puts the label "ready" on the issues a PR fixes once that PR is merged into indevelopment,
+# so the issue list shows which features are already done. The issues are read from the PR body
+# ("Fixed #15", "Closes #15", …), because GitHub's closing keywords only work on the default branch
+# (prod), not on indevelopment.
+name: Label done issues
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [indevelopment]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  label:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Apply "ready" to fixed issues
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const label = "ready";
+            const { owner, repo } = context.repo;
+            const body = context.payload.pull_request.body ?? "";
+
+            const pattern = /\b(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?)\s*:?\s+#(\d+)/gi;
+            const numbers = [...new Set([...body.matchAll(pattern)].map((m) => Number(m[1])))];
+
+            if (numbers.length === 0) {
+              core.info("The PR body references no issue, nothing to label.");
+              return;
+            }
+
+            try {
+              await github.rest.issues.createLabel({
+                owner,
+                repo,
+                name: label,
+                color: "0E8A16",
+                description: "Feature is merged into indevelopment",
+              });
+            } catch (error) {
+              if (error.status !== 422) throw error; // 422: the label already exists
+            }
+
+            let failed = false;
+            for (const issue_number of numbers) {
+              try {
+                const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number });
+                if (issue.pull_request) {
+                  core.info(`#${issue_number} is a pull request, skipped.`);
+                  continue;
+                }
+                await github.rest.issues.addLabels({ owner, repo, issue_number, labels: [label] });
+                core.info(`Labeled #${issue_number} "${label}".`);
+              } catch (error) {
+                failed = true;
+                core.warning(`Could not label #${issue_number}: ${error.message}`);
+              }
+            }
+            if (failed) core.setFailed("At least one referenced issue could not be labeled.");
