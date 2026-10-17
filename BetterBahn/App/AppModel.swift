@@ -18,14 +18,21 @@ final class AppModel {
         didSet {
             Storage.save(favoriteStations, key: "favoriteStations")
             favoriteStationsCloud.localChange(from: oldValue, to: favoriteStations)
+            updateWidgetStations()
         }
     }
     var recentSearches: [RecentSearch] {
         didSet {
             Storage.save(recentSearches, key: "recentSearches")
             recentSearchesCloud.localChange(from: oldValue, to: recentSearches)
+            updateWidgetStations()
         }
     }
+    /// A station whose board the Abfahrten tab shows next: set when the departure board widget is tapped
+    /// (`BoardWidgetLink`), cleared by `StationBoardView` once shown.
+    var boardStationToOpen: Station?
+    /// A search the Verbindungen tab runs next: the widget's commuter route, cleared by `ConnectionsView`.
+    var searchToOpen: ConnectionSearch?
     /// Journeys the user saved. The next upcoming one is shown as Live Activity.
     var savedJourneys: [SavedJourney] {
         didSet {
@@ -123,6 +130,7 @@ final class AppModel {
         tickets = TicketStore.load()
         travelPasses = TicketStore.loadPasses()
         manualLiveActivityJourneyID = UserDefaults.standard.string(forKey: "manualLiveActivityJourneyID").flatMap(UUID.init)
+        updateWidgetStations()
         // The check-in history can run to thousands of trips, so it's decoded off the main thread
         // instead of blocking the launch.
         traewellingTripsLoadTask = Task { [weak self] in
@@ -682,6 +690,7 @@ final class AppModel {
     }
     /// What the widgets were last given, so they're only reloaded when something changed.
     @ObservationIgnored var lastWidgetSnapshot: WidgetSnapshot?
+    @ObservationIgnored var lastWidgetStations: WidgetStations?
 
     /// Fetches the position of each train leg of an unfinished saved journey that is underway
     /// (plus 10 minutes either side, since departures and arrivals shift). All legs share one

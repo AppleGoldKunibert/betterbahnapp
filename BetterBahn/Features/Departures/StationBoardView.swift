@@ -164,6 +164,16 @@ struct StationBoardView: View {
                 resumeAfterAbsence()
             }
             .onDisappear { if path.isEmpty { leftAt = .now } }
+            // The departure board widget was tapped (#314): its station's departures from now.
+            .onChange(of: model.boardStationToOpen, initial: true) { _, opened in
+                guard let opened else { return }
+                kind = .departures
+                useNow = true
+                date = .now
+                path = []
+                withAnimation { station = opened }
+                model.boardStationToOpen = nil
+            }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .background {
                     if path.isEmpty { leftAt = .now }

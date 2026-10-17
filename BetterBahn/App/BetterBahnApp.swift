@@ -151,6 +151,22 @@ struct RootView: View {
         }
         #endif
         .onOpenURL { url in
+            // The departure board widget was tapped: its station's board, or its route in the search (#314).
+            if let target = BoardWidgetLink.target(from: url) {
+                incomingSharedJourney = nil
+                incomingDBShare = nil
+                linkedTrainMap = nil
+                switch target {
+                case .board(let station):
+                    selectedTab = .departures
+                    model.boardStationToOpen = station
+                case .route(let from, let to):
+                    selectedTab = .connections
+                    model.searchToOpen = ConnectionSearch(from: from, to: to, date: .now, isArrival: false,
+                                                          onlyValidTicket: model.settings.ticketFilterByDefault)
+                }
+                return
+            }
             // A live widget was tapped: show its train on the live map.
             if let target = TrainMapLink.target(from: url) {
                 if let entry = model.savedJourneys.first(where: { $0.journey.id == target.journeyID }),

@@ -9,5 +9,6 @@ struct BetterBahnWidgetsBundle: WidgetBundle {
         CurrentTrainWidget()
         LiveSpeedWidget()
         LivePositionWidget()
+        StationBoardWidget()
     }
 }

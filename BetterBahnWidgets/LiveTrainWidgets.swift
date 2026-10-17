@@ -329,7 +329,7 @@ struct LivePositionView: View {
 
 // MARK: Pieces
 
-private struct RefreshButton: View {
+struct RefreshButton: View {
     var body: some View {
         Button(intent: RefreshLiveWidgetIntent()) {
             Image(systemName: "arrow.clockwise").font(.caption2.weight(.bold))
