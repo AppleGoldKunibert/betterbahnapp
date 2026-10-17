@@ -12,7 +12,11 @@ public struct TrainFormation: Codable, Sendable, Hashable {
 
         /// The trainset's special livery ("Sonderlackierung"), e.g. "Railbow"; nil for the standard paint.
         public var livery: String? {
-            number.flatMap(Int.init).flatMap { TrainsetLiveries.byUnit[$0] }
+            // TEMPORARY test hook (launch argument -regenbogen): remove before merge.
+            if ProcessInfo.processInfo.arguments.contains("-regenbogen"), model?.hasPrefix("ICE") ?? (number != nil) {
+                return "Railbow"
+            }
+            return number.flatMap(Int.init).flatMap { TrainsetLiveries.byUnit[$0] }
         }
 
         public init(model: String?, number: String?, name: String? = nil) {
