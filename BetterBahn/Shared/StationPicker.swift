@@ -51,7 +51,7 @@ struct StationInput<Focus: Hashable>: View {
     private var isTyping: Bool { search.text.count >= 2 }
 
     private var suggestions: [Station] {
-        if isTyping { return Array(results.prefix(5)) }
+        if isTyping { return Array(search.filtered(results).prefix(5)) }
         var seen: [Station] = []
         for s in model.favoriteStations + model.recentStations where !seen.contains(where: { $0.isSamePlace(as: s) }) {
             seen.append(s)
@@ -279,6 +279,9 @@ struct StationInput<Focus: Hashable>: View {
                     InfoChip(text: "Nach Entfernung", systemImage: "location.fill", tint: .brand)
                 }
             }
+            if let country = search.country {
+                InfoChip(text: "\(TrainSearchCountry.flag(forCode: country) ?? "") nur dieses Land", systemImage: "flag.fill", tint: .brand)
+            }
             Spacer()
         }
         .padding(.horizontal, 16)
@@ -303,6 +306,13 @@ struct StationInput<Focus: Hashable>: View {
     /// own timetables disambiguate same-named stations. Stations whose name is already distinct
     /// (e.g. "Bernau a. Chiemsee") are left alone.
     private func rowLabel(for suggestion: Station) -> Text {
+        if isTyping, let flag = model.settings.stationFlagMode.flag(for: suggestion, home: Locale.current.region?.identifier) {
+            return Text("\(flag) \(nameLabel(for: suggestion))")
+        }
+        return nameLabel(for: suggestion)
+    }
+
+    private func nameLabel(for suggestion: Station) -> Text {
         let query = search.text
         let displayName = suggestion.displayName
         guard let region = suggestion.region, needsRegion(suggestion) else {

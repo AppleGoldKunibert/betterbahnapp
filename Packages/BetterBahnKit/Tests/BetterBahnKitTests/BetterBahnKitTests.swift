@@ -2053,6 +2053,36 @@ private final class TwinTrainProtocol: URLProtocol, @unchecked Sendable {
         #expect(stop("de-DELFI_de:03351:50", "Celle Bahnhof", 52.6211, 10.0626).displayName == "Celle")
     }
 
+    /// A German station's EVA number comes from the offline list, not bahn.de's search; one with several
+    /// levels (Berlin Hbf, Südkreuz) has none there, as the stop may be on either.
+    @Test func evaNumbersFromTheOfflineList() {
+        #expect(StationNames.evaNumber(for: stop("de-DELFI_de:14612:16:1:Gleis3", "Dresden Bahnhof Neustadt", 51.0661, 13.7402)) == "8010089")
+        #expect(StationNames.evaNumber(for: stop("de-DELFI_de:03351:50", "Celle Bahnhof", 52.6211, 10.0626)) == "8000064")
+        #expect(StationNames.evaNumber(for: stop("de-DELFI_de:11000:900003201", "S+U Berlin Hauptbahnhof", 52.5251, 13.3694)) == nil)
+        #expect(StationNames.evaNumber(for: stop("de-VBB_de:11000:900058101", "S Südkreuz Bhf (Berlin)", 52.4757, 13.3652)) == nil)
+        #expect(StationNames.evaNumber(for: stop("cz-CZPTT_czptt:stop:CZ:55659", "Děčín hlavní nádraží", 50.7735, 14.2011)) == nil)
+    }
+
+    /// The statistics take the main station's number even of a station with several levels: the server files
+    /// the lower levels under it.
+    @Test func mainEvaNumberAlsoForStationsWithSeveralLevels() {
+        #expect(StationNames.mainEvaNumber(for: stop("de-DELFI_de:11000:900003201", "S+U Berlin Hauptbahnhof", 52.5251, 13.3694)) == "8011160")
+        #expect(StationNames.mainEvaNumber(for: stop("de-DELFI_de:14612:16", "Dresden Bahnhof Neustadt", 51.0661, 13.7402)) == "8010089")
+        #expect(StationNames.mainEvaNumber(for: stop("cz-CZPTT_czptt:stop:CZ:55659", "Děčín hlavní nádraží", 50.7735, 14.2011)) == nil)
+    }
+
+    /// Statistics, Timetables and the Wagenreihung look a stop's EVA number up through `BahnDeClient`:
+    /// a station in the offline list never asks bahn.de, so a screen full of stops sends no burst.
+    @Test func bahnDeIsNotAskedForAStationInTheOfflineList() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [NoNetworkProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let bahnDe = BahnDeClient(http: HTTPClient(session: session))
+        let eva = try await bahnDe.evaNumber(for: stop("de-DELFI_de:14612:16", "Dresden Bahnhof Neustadt", 51.0661, 13.7402))
+        #expect(eva == "8010089")
+    }
+
     /// A stop's ID and name stay the feed's, so everything matched by them works as before.
     @Test func onlyTheShownNameChanges() {
         let neustadt = stop("de-DELFI_de:14612:16", "Dresden Bahnhof Neustadt", 51.0661, 13.7402)
@@ -2453,6 +2483,107 @@ private final class Ril100GeocodeProtocol: URLProtocol, @unchecked Sendable {
         #expect(!filter.isValid(flix))
         #expect(!filter.isValid(coach))
         #expect(!filter.isValid(Line(name: "IC 2013", number: "2013", product: .regional, operatorName: nil)))
+    }
+
+    func leg(_ line: Line, from: Station, to: Station) -> Leg {
+        Leg(origin: from, destination: to, departure: TimeInfo(planned: .now, actual: nil),
+            arrival: TimeInfo(planned: .now.addingTimeInterval(3600), actual: nil), departurePlatform: nil,
+            arrivalPlatform: nil, tripId: "t", line: line, direction: nil, isWalking: false, cancelled: false,
+            stopovers: [], remarks: [], source: .transitous)
+    }
+
+    @Test func ticketsStopAtTheBorder() {
+        let dresden = station("8010085", "Dresden Hbf")
+        let praha = Station(id: "cz-CZPTT_czptt:stop:CZ:57076", name: "Praha hl.n.", coordinate: nil, evaNumber: nil, source: .transitous)
+        let decin = Station(id: "000005400003", name: "Děčín hl.n.", coordinate: nil, evaNumber: nil, source: .transitous)
+        let wien = Station(id: "at:43:1", name: "Wien Hbf", coordinate: nil, evaNumber: nil, source: .transitous)
+        let salzburg = station("8100002", "Salzburg Hbf")
+        let kufstein = Station(id: "8100108", name: "Kufstein", coordinate: nil, evaNumber: nil, source: .transitous)
+        let rosenheim = station("8000314", "Rosenheim")
+        let czechR = Line(name: "R 20", number: "20", product: .regional, operatorName: "České dráhy")
+        let rex = Line(name: "REX 1", number: "1", product: .regionalExpress, operatorName: "ÖBB")
+        let dTicket = TicketFilter.deutschlandticket
+        let bc100 = TicketFilter.bahnCard100(.default)
+        for filter in [dTicket, bc100] {
+            #expect(!filter.isValid(leg(czechR, from: dresden, to: praha)))
+            #expect(!filter.isValid(leg(czechR, from: decin, to: dresden)))
+            #expect(!filter.isValid(leg(rex, from: rosenheim, to: wien)))
+            #expect(filter.isValid(leg(rex, from: rosenheim, to: salzburg)))
+            #expect(filter.isValid(leg(rex, from: kufstein, to: rosenheim)))
+            #expect(filter.isValid(leg(regio, from: dresden, to: rosenheim)))
+        }
+        // Official D-Ticket stops abroad, but not Basel SBB or Strasbourg.
+        let venlo = Station(id: "8400597", name: "Venlo", coordinate: nil, evaNumber: nil, source: .transitous)
+        let baselSBB = Station(id: "8500010", name: "Basel SBB", coordinate: nil, evaNumber: nil, source: .transitous)
+        let strasbourg = Station(id: "8700011", name: "Strasbourg-Ville", coordinate: nil, evaNumber: nil, source: .transitous)
+        let duesseldorf = station("8000085", "Düsseldorf Hbf")
+        #expect(dTicket.isValid(leg(regio, from: duesseldorf, to: venlo)))
+        #expect(!dTicket.isValid(leg(regio, from: duesseldorf, to: baselSBB)))
+        #expect(!dTicket.isValid(leg(regio, from: rosenheim, to: strasbourg)))
+        #expect(bc100.isValid(leg(regio, from: duesseldorf, to: venlo)))
+        #expect(!bc100.isValid(leg(regio, from: duesseldorf, to: baselSBB)))
+    }
+
+    @Test func journeyAbroadOnlyFallsShortAtTheBorder() {
+        let berlin = station("8011160", "Berlin Hbf")
+        let hamburg = station("8002549", "Hamburg Hbf")
+        let kopenhagen = Station(id: "8600626", name: "København H", coordinate: nil, evaNumber: nil, source: .transitous)
+        let ec = Line(name: "EC 391", number: "391", product: .longDistance, operatorName: "DSB")
+        let flix = Line(name: "FLX 30", number: "30", product: .longDistance, operatorName: "FlixTrain")
+        func journey(_ legs: [Leg]) -> Journey {
+            Journey(legs: legs, source: .transitous)
+        }
+        let abroad = journey([leg(ice, from: berlin, to: hamburg), leg(ec, from: hamburg, to: kopenhagen)])
+        let bc100 = TicketFilter.bahnCard100(.default)
+        #expect(!bc100.isValid(abroad))
+        #expect(bc100.crossesBorder(abroad))
+        // Wrong train as well as abroad: the border is not the only problem.
+        #expect(!bc100.crossesBorder(journey([leg(flix, from: berlin, to: kopenhagen)])))
+        // Inside Germany nothing crosses a border.
+        #expect(!bc100.crossesBorder(journey([leg(ice, from: berlin, to: hamburg)])))
+    }
+
+    @Test func operatorListAppliesOnlyInGermany() {
+        let berlin = station("8011160", "Berlin Hbf")
+        // IDs as Transitous gives them for the Eurostar: no country in them.
+        let brussels = Station(id: "fr-eurostar-gtfs-plan-de-transport-et-temps-reel_bruxelles_midi_1", name: "Bruxelles-Midi", coordinate: nil, evaNumber: nil, source: .transitous)
+        let london = Station(id: "gb-great-britain_910GSTPX", name: "St-Pancras-International", coordinate: nil, evaNumber: nil, source: .transitous)
+        let wien = Station(id: "at:43:1", name: "Wien Hbf", coordinate: nil, evaNumber: nil, source: .transitous)
+        // Named as Transitous gives it: the "EST" prefix is on the BC100 list for the European Sleeper.
+        let eurostar = Line(name: "EST 9157", number: "9157", product: .highSpeed, operatorName: "Eurostar")
+        let flixAbroad = Line(name: "FLX 1298", number: "1298", product: .longDistance, operatorName: "FlixTrain")
+        let bc100 = TicketFilter.bahnCard100(.default)
+        // The ICE to Brussels is only valid up to the border; the Eurostar after it isn't blacklisted abroad.
+        let toLondon = Journey(legs: [leg(ice, from: berlin, to: brussels), leg(eurostar, from: brussels, to: london)],
+                               source: .transitous)
+        #expect(!bc100.isValid(toLondon))
+        #expect(bc100.crossesBorder(toLondon))
+        // Inside Germany the operator list still applies, so a FlixTrain from Berlin to Vienna is out.
+        #expect(!bc100.isValid(leg(flixAbroad, from: berlin, to: wien)))
+        #expect(!bc100.isValid(leg(eurostar, from: berlin, to: brussels)))
+        #expect(!bc100.crossesBorder(Journey(legs: [leg(flixAbroad, from: berlin, to: wien)], source: .transitous)))
+        // Vienna to Budapest is entirely abroad; Berlin to Brussels touches Germany.
+        let budapest = Station(id: "5500001", name: "Budapest Keleti", coordinate: nil, evaNumber: nil, source: .transitous)
+        #expect(bc100.isEntirelyAbroad(Journey(legs: [leg(flixAbroad, from: wien, to: budapest)], source: .transitous)))
+        #expect(!bc100.isEntirelyAbroad(toLondon))
+        // Transitous names feeds after their country: Vienna is abroad, Köln Hbf via the Eurostar feed is not.
+        let wienHbf = Station(id: "at-Railway-Current-Reference-Data-2026_Pat:49:1349", name: "Wien Hbf", coordinate: nil, evaNumber: nil, source: .transitous)
+        let koeln = Station(id: "fr-eurostar-gtfs-plan-de-transport-et-temps-reel_koln_hbf", name: "Köln Hbf", coordinate: nil, evaNumber: nil, source: .transitous)
+        #expect(CrossBorder.isAbroad(wienHbf, covered: []))
+        // The Nightjet's stop in Vienna comes from DELFI, but its ID says "at:".
+        let wienNightjet = Station(id: "de-DELFI_at:49:1349", name: "Wien Hauptbahnhof", coordinate: nil, evaNumber: nil, source: .transitous)
+        #expect(CrossBorder.isAbroad(wienNightjet, covered: []))
+        #expect(!CrossBorder.isAbroad(koeln, covered: []))
+    }
+
+    @Test func boardAbroadIsNotCovered() {
+        let praha = Station(id: "cz-CZPTT_czptt:stop:CZ:57076", name: "Praha hl.n.", coordinate: nil, evaNumber: nil, source: .transitous)
+        let czechR = Line(name: "R 20", number: "20", product: .regional, operatorName: nil)
+        var abroad = entry(czechR)
+        abroad.station = praha
+        #expect(!TicketFilter.deutschlandticket.isValid(abroad))
+        #expect(!TicketFilter.bahnCard100(.default).isValid(abroad))
+        #expect(TicketFilter.deutschlandticket.isValid(entry(regio)))
     }
 
     func entry(_ line: Line, kind: BoardKind = .departures, otherEnd: String = "Berlin Hbf", terminal: Bool? = false) -> BoardEntry {
@@ -3315,6 +3446,34 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(sequence.groups.map(\.unit) == [nil])
     }
 
+    /// #312: a reserved coach is looked up within the part that runs as the reserved train, and
+    /// reported with the platform sectors it stands in.
+    @Test func findsTheSectorsOfAReservedCoach() throws {
+        let json = #"""
+        {"platform": {"name": "7", "start": 0, "end": 400, "sectors": [
+            {"name": "A", "start": 0, "end": 100}, {"name": "B", "start": 100, "end": 200},
+            {"name": "C", "start": 200, "end": 300}, {"name": "D", "start": 300, "end": 400}]},
+         "groups": [
+            {"name": "ICE0101", "transport": {"category": "ICE", "number": 940},
+             "vehicles": [
+                {"wagonIdentificationNumber": 11, "type": {"category": "PASSENGERCARRIAGE_FIRST_CLASS"}, "platformPosition": {"start": 10, "end": 36}},
+                {"wagonIdentificationNumber": 12, "type": {"category": "PASSENGERCARRIAGE_ECONOMY_CLASS"}, "platformPosition": {"start": 90, "end": 116}}]},
+            {"name": "ICE0102", "transport": {"category": "ICE", "number": 942},
+             "vehicles": [
+                {"wagonIdentificationNumber": 12, "type": {"category": "PASSENGERCARRIAGE_ECONOMY_CLASS"}, "platformPosition": {"start": 250, "end": 276}}]}
+        ]}
+        """#
+        let response = try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data(json.utf8))
+        let sequence = BahnDeClient.coachSequence(from: response, category: "ICE", number: 940, coupledNumbers: [942])
+        // Coach 12 exists in both parts; the reserved train decides.
+        #expect(sequence.position(ofCoach: "12", train: "ICE 940") == .sectors(["A", "B"], coachID: 1))
+        #expect(sequence.position(ofCoach: "12", train: "ICE 942") == .sectors(["C"], coachID: 2))
+        #expect(sequence.position(ofCoach: "11", train: "ICE 940") == .sectors(["A"], coachID: 0))
+        #expect(sequence.position(ofCoach: "13", train: "ICE 940") == .coachMissing)
+        // A coach of the other part isn't the reserved one.
+        #expect(sequence.position(ofCoach: "11", train: "ICE 942") == .coachMissing)
+    }
+
     /// A group without vehicles (or other missing fields) must not lose the whole formation.
     @Test func toleratesMissingFields() throws {
         let json = #"""
@@ -3629,9 +3788,10 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
                      (station: station("3", "Later"), departure: Optional(at(60)))]
         #expect(BahnDeClient.formationRequest(line: line, stops: stops, now: now)?.station.name == "Next")
         #expect(BahnDeClient.formationRequest(line: line, stops: [(station: station("4", "Tonight"), departure: at(8 * 60))], now: now)?.station.name == "Tonight")
-        #expect(BahnDeClient.formationRequest(line: line, stops: [(station: station("5", "Tomorrow"), departure: at(13 * 60))], now: now) == nil)
+        #expect(BahnDeClient.formationRequest(line: line, stops: [(station: station("4", "Tomorrow morning"), departure: at(18 * 60))], now: now)?.station.name == "Tomorrow morning")
+        #expect(BahnDeClient.formationRequest(line: line, stops: [(station: station("5", "Tomorrow"), departure: at(25 * 60))], now: now) == nil)
         // vagonweb's planned Wagenreihung has no lookahead.
-        #expect(BahnDeClient.formationRequest(line: line, stops: [(station: station("5", "Tomorrow"), departure: at(13 * 60))], now: now, lookahead: nil)?.station.name == "Tomorrow")
+        #expect(BahnDeClient.formationRequest(line: line, stops: [(station: station("5", "Tomorrow"), departure: at(25 * 60))], now: now, lookahead: nil)?.station.name == "Tomorrow")
         let regional = Line(name: "RE 5", number: "5", product: .regional, operatorName: nil)
         #expect(BahnDeClient.formationRequest(line: regional, stops: stops, now: now) == nil)
     }
@@ -3673,127 +3833,82 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         await #expect(throws: TransitError.rateLimited) { try await bahnDe.formation(request) }
         #expect(BlockedProtocol.requests.withLock { $0 } == 1)
     }
+}
 
-    /// Requests to the Worker map onto bahn.de's own `/web/api/…` addresses for the phone's browser.
-    @Test func directURLMirrorsWorkerPath() {
-        let url = BahnDeClient.baseURL.appending(path: "reiseloesung/orte").appending(queryItems: [.init(name: "suchbegriff", value: "Köln Hbf")])
-        #expect(BahnDeClient.directURL(for: url)?.absoluteString == "https://www.bahn.de/web/api/reiseloesung/orte?suchbegriff=K%C3%B6ln%20Hbf")
-        #expect(BahnDeClient.directURL(for: URL(string: "https://example.com/web/api/reiseloesung/orte")!) == nil)
-        #expect(BahnDeClient.directURL(for: URL(string: "https://betterbahn2.betterbahn.workers.dev/timetables/v1/station/8000105")!) == nil)
-    }
-
-    /// When the Worker is blocked, the phone's browser asks bahn.de instead, also while the Worker pauses.
-    @Test func blockedWorkerFallsBackToBrowser() async throws {
+/// Our own bahn.de server (#342) is the app's only way to bahn.de; while it fails, requests say so.
+@Suite struct BahnDeProxyTests {
+    private func client(proxyHost: String) -> (BahnDeClient, BahnDeProxy, URLSession) {
         let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [ForbiddenProtocol.self]
+        config.protocolClasses = [ProxyRoutingProtocol.self]
         let session = URLSession(configuration: config)
+        let proxy = BahnDeProxy(baseURL: URL(string: "https://\(proxyHost)")!)
+        return (BahnDeClient(http: HTTPClient(session: session), gate: BahnDeGate(), proxy: proxy),
+                proxy, session)
+    }
+
+    @Test func mapsWorkerRequestsOntoTheServer() {
+        let proxy = BahnDeProxy(baseURL: URL(string: "https://proxy.example:8443")!)
+        let url = BahnDeClient.baseURL.appending(path: "reiseloesung/orte").appending(queryItems: [.init(name: "suchbegriff", value: "Köln Hbf")])
+        #expect(proxy.url(for: url)?.absoluteString == "https://proxy.example:8443/web/api/reiseloesung/orte?suchbegriff=K%C3%B6ln%20Hbf")
+        #expect(proxy.url(for: URL(string: "https://betterbahn2.betterbahn.workers.dev/timetables/v1/station/8000105")!) == nil)
+    }
+
+    @Test func asksOnlyTheServer() async throws {
+        ProxyRoutingProtocol.answers.withLock { $0["proxy-ok.test"] = 200 }
+        let (bahnDe, proxy, session) = client(proxyHost: "proxy-ok.test")
         defer { session.invalidateAndCancel() }
-        let loaded = Recorded<[String]>([])
-        let browser = BahnDeBrowserFallback { url in
-            loaded.value.withLock { $0.append(url.absoluteString) }
-            return (200, Data(#"[{"extId":"8000105","name":"Frankfurt(Main)Hbf","type":"ST","products":["ICE"]}]"#.utf8))
+
+        #expect(try await bahnDe.searchStations("ServerFirst").map(\.id) == ["8000105"])
+        #expect(ProxyRoutingProtocol.count(host: "proxy-ok.test") == 1)
+        #expect(ProxyRoutingProtocol.count(query: "ServerFirst", host: "betterbahn2.betterbahn.workers.dev") == 0)
+        #expect(await !proxy.gate.isBlocked)
+    }
+
+    @Test func aFailingServerIsLeftAloneAndSaysSo() async throws {
+        ProxyRoutingProtocol.answers.withLock { $0["proxy-down.test"] = 503 }
+        let (bahnDe, proxy, session) = client(proxyHost: "proxy-down.test")
+        defer { session.invalidateAndCancel() }
+
+        await #expect(throws: TransitError.rateLimited) { try await bahnDe.searchStations("ServerDown") }
+        #expect(await proxy.gate.isBlocked)
+        await #expect(throws: TransitError.rateLimited) { try await bahnDe.searchStations("ServerDown") }
+        // The server was asked once, then left alone; the Worker never.
+        #expect(ProxyRoutingProtocol.count(host: "proxy-down.test") == 1)
+        #expect(ProxyRoutingProtocol.count(query: "ServerDown", host: "betterbahn2.betterbahn.workers.dev") == 0)
+    }
+
+    @Test func bahnDesOwnAnswersAndBlocksAreTold() {
+        #expect(TransitError.http(status: 452, body: nil).isBlocked)
+        #expect(!TransitError.http(status: 452, body: nil).isBahnDeAnswer)
+        #expect(TransitError.http(status: 404, body: nil).isBahnDeAnswer)
+        #expect(!TransitError.http(status: 401, body: nil).isBahnDeAnswer)
+        #expect(!TransitError.rateLimited.isBahnDeAnswer)
+    }
+}
+
+/// The Worker answers a station search; a test's server answers with the status in `answers` (by host).
+private final class ProxyRoutingProtocol: URLProtocol, @unchecked Sendable {
+    static let answers = Mutex<[String: Int]>([:])
+    static let requests = Mutex<[URL]>([])
+
+    static func count(query: String? = nil, host: String) -> Int {
+        requests.withLock { urls in
+            urls.filter { url in url.host() == host && (query.map { url.absoluteString.contains($0) } ?? true) }.count
         }
-        let gate = BahnDeGate()
-        let bahnDe = BahnDeClient(http: HTTPClient(session: session), gate: gate, browser: browser)
-
-        #expect(try await bahnDe.searchStations("Frankfurt").map(\.id) == ["8000105"])
-        #expect(await gate.isBlocked)
-        #expect(try await bahnDe.searchStations("Frankfurt").map(\.id) == ["8000105"])
-        // The Worker was asked once; then only the browser, at bahn.de's own address.
-        #expect(ForbiddenProtocol.requests.withLock { $0 } == 1)
-        #expect(loaded.value.withLock { $0.count } == 2)
-        #expect(loaded.value.withLock { $0.allSatisfy { $0.hasPrefix("https://www.bahn.de/web/api/reiseloesung/orte?") } })
     }
 
-    /// A blocked Worker gets the browser's page loading right away; once the Worker answers again, the page goes.
-    @Test func browserPageFollowsWorkerState() async throws {
-        let prepared = Recorded(0)
-        let released = Recorded(0)
-        let browser = BahnDeBrowserFallback({ _ in
-            (200, Data(#"[{"extId":"8000105","name":"Frankfurt(Main)Hbf","type":"ST"}]"#.utf8))
-        }, prepare: { prepared.value.withLock { $0 += 1 } }, release: { released.value.withLock { $0 += 1 } })
-
-        let blockedConfig = URLSessionConfiguration.ephemeral
-        blockedConfig.protocolClasses = [RefusingProtocol.self]
-        let blockedSession = URLSession(configuration: blockedConfig)
-        defer { blockedSession.invalidateAndCancel() }
-        let blocked = BahnDeClient(http: HTTPClient(session: blockedSession), gate: BahnDeGate(), browser: browser)
-        _ = try await blocked.searchStations("Frankfurt")
-        _ = try await blocked.searchStations("Frankfurt")
-        #expect(prepared.value.withLock { $0 } == 1)
-        #expect(await browser.isActive)
-
-        let workingConfig = URLSessionConfiguration.ephemeral
-        workingConfig.protocolClasses = [StationsProtocol.self]
-        let workingSession = URLSession(configuration: workingConfig)
-        defer { workingSession.invalidateAndCancel() }
-        let working = BahnDeClient(http: HTTPClient(session: workingSession), gate: BahnDeGate(), browser: browser)
-        _ = try await working.searchStations("Frankfurt")
-        _ = try await working.searchStations("Frankfurt")
-        #expect(released.value.withLock { $0 } == 1)
-        #expect(await !browser.isActive)
-    }
-
-    /// When bahn.de blocks the phone too, its browser pauses as well instead of asking again.
-    @Test func blockedBrowserPausesToo() async throws {
-        let calls = Recorded(0)
-        let browser = BahnDeBrowserFallback { _ in
-            calls.value.withLock { $0 += 1 }
-            return (403, Data(#"{"code":"OPS_BLOCKED"}"#.utf8))
-        }
-        let gate = BahnDeGate()
-        await gate.report(.rateLimited)
-        let bahnDe = BahnDeClient(http: HTTPClient(session: .shared), gate: gate, browser: browser)
-
-        await #expect(throws: TransitError.rateLimited) { try await bahnDe.searchStations("Frankfurt") }
-        await #expect(throws: TransitError.rateLimited) { try await bahnDe.searchStations("Frankfurt") }
-        #expect(calls.value.withLock { $0 } == 1)
-        #expect(await browser.gate.isBlocked)
-    }
-}
-
-/// A value a test's closures record into (a `Mutex` itself can't be captured).
-private final class Recorded<Value: Sendable>: Sendable {
-    let value: Mutex<Value>
-    init(_ value: Value) { self.value = Mutex(value) }
-}
-
-/// The Worker answering bahn.de's block, counted apart from `BlockedProtocol` (tests run in parallel).
-private final class ForbiddenProtocol: URLProtocol, @unchecked Sendable {
-    static let requests = Mutex(0)
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
-        Self.requests.withLock { $0 += 1 }
-        let response = HTTPURLResponse(url: request.url!, statusCode: 403, httpVersion: nil, headerFields: nil)!
+        let url = request.url!
+        Self.requests.withLock { $0.append(url) }
+        let status = Self.answers.withLock { $0[url.host() ?? ""] } ?? 200
+        let body = status == 200
+            ? #"[{"extId":"8000105","name":"Frankfurt(Main)Hbf","type":"ST","products":["ICE"]}]"#
+            : #"{"error":"paused"}"#
+        let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data(#"{"status":"ERROR","code":"OPS_BLOCKED"}"#.utf8))
-        client?.urlProtocolDidFinishLoading(self)
-    }
-    override func stopLoading() {}
-}
-
-/// The Worker blocked, uncounted (`ForbiddenProtocol` counts for another test).
-private final class RefusingProtocol: URLProtocol, @unchecked Sendable {
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
-        let response = HTTPURLResponse(url: request.url!, statusCode: 403, httpVersion: nil, headerFields: nil)!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data(#"{"status":"ERROR","code":"OPS_BLOCKED"}"#.utf8))
-        client?.urlProtocolDidFinishLoading(self)
-    }
-    override func stopLoading() {}
-}
-
-/// The Worker answering a station search.
-private final class StationsProtocol: URLProtocol, @unchecked Sendable {
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
-        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data(#"[{"extId":"8000105","name":"Frankfurt(Main)Hbf","type":"ST"}]"#.utf8))
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
@@ -7037,4 +7152,12 @@ private final class LowerLevelSequenceProtocol: URLProtocol, @unchecked Sendable
         client?.urlProtocol(self, didLoad: body)
         client?.urlProtocolDidFinishLoading(self)
     }
+}
+
+/// Fails every request: for tests that must not reach the network.
+private final class NoNetworkProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() { client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet)) }
+    override func stopLoading() {}
 }

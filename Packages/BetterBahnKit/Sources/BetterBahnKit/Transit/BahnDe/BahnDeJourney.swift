@@ -309,7 +309,6 @@ extension BahnDeClient {
         guard let id = Self.journeyId(in: board, for: line, plannedDeparture: plannedDeparture) else {
             throw TransitError.notFound(line.name)
         }
-        reportSightings(board.entries.filter { $0.journeyId == id })
         return id
     }
 
@@ -397,7 +396,6 @@ extension BahnDeClient {
             guard let latest = page.entries.compactMap({ $0.zeit.flatMap(Self.parseBerlinTime) }).max(), latest < last else { break }
             start = latest.addingTimeInterval(60)
         }
-        reportSightings(trains.compactMap { Self.boardMatch(for: $0, in: board) })
         return Self.applyingLiveTimes(Self.correctingTrainNames(entries, using: board, kind: kind), using: board, kind: kind)
     }
 
@@ -585,7 +583,6 @@ extension BahnDeClient {
         let fetch: @Sendable () async throws -> String? = {
             guard let eva = try await self.evaNumber(for: station) else { return nil }
             let board = try await self.get(Self.boardURL(eva: eva, at: plannedDeparture), as: Board.self)
-            self.reportSightings([Self.boardEntry(for: line, plannedDeparture: plannedDeparture, in: board.entries)].compactMap { $0 })
             // "" for "same name" so that answer is cached too.
             return Self.bahnDeName(for: line, plannedDeparture: plannedDeparture, in: board.entries) ?? ""
         }

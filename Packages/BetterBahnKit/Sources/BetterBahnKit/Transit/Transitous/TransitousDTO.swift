@@ -415,7 +415,7 @@ struct MGeocodeMatch: Decodable {
 
     func toStation() -> Station {
         Station(id: id, name: fullName, coordinate: Coordinate(latitude: lat, longitude: lon), evaNumber: nil,
-                source: .transitous, region: region)
+                source: .transitous, region: region, country: country)
     }
 }
 

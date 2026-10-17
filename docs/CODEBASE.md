@@ -21,12 +21,13 @@ comments are English.
 | `Config/` | xcconfigs + Info.plists. `Signing.xcconfig` holds team ID; optional gitignored `Local.xcconfig` overrides it. |
 | `Cloudflare/` | Worker (`betterbahn`, `wrangler.toml`) that bounces the Träwelling OAuth callback to `betterbahn://oauth`, serves the privacy policy at `/datenschutz` (linked in Settings) and the support page at `/support`, and stores shared journeys for short links (`/share`, `/s/<id>` + `apple-app-site-association`, KV with 30-day TTL, App Attest + rate limit; see its README). |
 | `Cloudflare/bahnde-proxy/` | Separate Worker (`betterbahn2`) proxying bahn.de's web API (`/web/api/…` paths), because bahn.de blocks Apple's URL loading stack, and DB Timetables (`/timetables/v1/…`, API key as Worker secret). Also hands out the App Attest tokens (`/auth/…`). See its README. `BahnDeClient.baseURL`, `TimetablesClient.baseURL` point at it. |
+| `Server/bahnde-proxy/` | Small Docker server (Python, curl_cffi) asking bahn.de's web API with a browser's TLS fingerprint, which Akamai has demanded since October 2026 and Workers can't make (#342): the Worker's `/web/api/…` paths and App Attest tokens, cache, rate limit, pause after a block. The app asks it first (`BahnDeProxy.baseURL`; runs on a small game-server host behind Tailscale Funnel, `panel_boot.py`; bahn.de refuses Oracle Cloud). `python3 -m unittest Server/bahnde-proxy/proxy_test.py`; see its README. |
 | `Cloudflare/pass-signer/` | Worker (`betterbahn-pass`) that signs Apple Wallet passes for DB tickets with the Pass Type ID certificate (secrets), since that can't ship in the app. Needs an App Attest token, and only signs UIC (`#UT`) barcodes whose issuer signature verifies against UIC's public key list (`uicsignature.mjs`). `npm install && npm test` (see its README). |
-| `Cloudflare/stats/` | Worker (`betterbahn-stats`, D1 database) for train statistics (#169): the app reports bahn.de journey IDs of regional/long-distance trains it showed (`POST /sightings`), a cron trigger asks bahn.de for each run's schedule, its Wagenreihung at departure and its final realtime state after arrival, stored one row per run (`schema.sql`, compact stops). `backup.sh` downloads runs older than a year, then deletes them. `node --test Cloudflare/stats/worker.test.mjs` (see its README). |
+| `Cloudflare/stats/` | Worker (`betterbahn-stats`, D1 database) answering the app's `POST /train-stats` (#316): per train number and stop the delays, cancellations and platform moves of the last 30 days, one row per train number and day (`schema.sql`, table `train_days`). Filled once a day by `importer.py` from piebro/deutsche-bahn-data (DB Timetables of every German station, CC BY 4.0; GitHub Action `train-stats-import.yml`, within the D1 free plan's daily writes), so nothing asks bahn.de and the app reports nothing (#336). `node --test Cloudflare/stats/worker.test.mjs`, `python3 -m unittest Cloudflare/stats/importer_test.py` (see its README). |
 | `Cloudflare/checkin-push/` | Worker (`betterbahn-push`, D1 database, cron every minute) for notifications about new check-ins of followed Träwelling users (#266): keeps its own read-only Träwelling login per device (from the app's authorization code, AES-GCM encrypted), looks at the dashboard every 2 min and sends APNs pushes (`followedStatusID`). `node --test Cloudflare/checkin-push/worker.test.mjs` (see its README for the APNs key setup). |
 | `Cloudflare/shared/` | `appattest.mjs`: App Attest verification and the signed tokens both Workers check (`X-BetterBahn-Token`); `node --test Cloudflare/shared/appattest.test.mjs`. |
-| `.github/workflows/` | GitHub Actions: `pr-build.yml` (macOS: Kit tests + unsigned app build on PRs touching code), `pr-secrets.yml` (Linux: gitleaks secret scan + guard against committing `DefaultCredentials.swift`), `sync-prod.yml` (merges prod into every other branch except `appstorerelease`). |
-| `scripts/` | `make-station-hints.py`: rebuilds BetterBahnKit's offline station list for search (see Transitous below). `make-ril100.py`: rebuilds the RIL100 code list (`Ril100.swift`), also from DB's XLSX of all operating points for the codes abroad (needs `openpyxl`). `make-station-names.py`: rebuilds the station names shown (`StationNames.swift`) from DB InfraGO's OpenStation NeTEx, DB's RIS names via bahn.expert's station search and Transitous (run after `make-ril100.py`, it takes the positions from there; keeps the names it has, `--refresh` asks bahn.expert for all again, about an hour). `searchsim/`: Linux package that copies the platform-neutral Kit sources in (`./sync.sh`), so `swift test` runs `BetterBahnKitTests.swift` without a Mac and `swift run SearchSim scenarios.txt` runs the real station search against live Transitous for ~1150 place/query scenarios (rerun after changing search ranking). |
+| `.github/workflows/` | GitHub Actions: `pr-build.yml` (macOS: Kit tests + unsigned app build on PRs touching code), `pr-secrets.yml` (Linux: gitleaks secret scan + guard against committing `DefaultCredentials.swift`), `sync-prod.yml` (merges prod into every other branch except `appstorerelease`), `train-stats-import.yml` (daily: train statistics into D1, see `Cloudflare/stats/README.md`), `monthly-data-update.yml` (1st of the month: rebuilds the three offline station lists with the scripts below and opens a PR into prod on `monthlyupdate-<MM>/<YY>`; `scripts/check-data-update.py` stops it when a list came out empty or 10 % smaller; the PR gets no CI by itself, push an empty commit). |
+| `scripts/` | `make-station-hints.py`: rebuilds BetterBahnKit's offline station list for search (see Transitous below). `make-ril100.py`: rebuilds the RIL100 code list (`Ril100.swift`), also from DB's XLSX of all operating points for the codes abroad (needs `openpyxl`). `make-station-names.py`: rebuilds the station names shown (`StationNames.swift`) from DB InfraGO's OpenStation NeTEx, DB's RIS names via bahn.expert's station search and Transitous (run after `make-ril100.py`, it takes the positions from there; keeps the names it has, `--refresh` asks bahn.expert for all again, about an hour). `check-data-update.py`: sanity check of the rebuilt lists for the monthly workflow. `searchsim/`: Linux package that copies the platform-neutral Kit sources in (`./sync.sh`), so `swift test` runs `BetterBahnKitTests.swift` without a Mac and `swift run SearchSim scenarios.txt` runs the real station search against live Transitous for ~1150 place/query scenarios (rerun after changing search ranking). |
 | `docs/transit-providers.md` | Why Transitous is the primary data source and fallback options. |
 | `docs/app-review-notes.md` | App Store submission checklist (privacy URL, App Privacy, demo access) and review notes. |
 
@@ -81,9 +82,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `LegCard` between the stops and "Mehr", in `TripContent`'s header; the train search has its own row) shows once bahn.de has a
   sequence, else vagonweb's planned one, and opens by itself from 30 min before to 15 min after the departure (Kit
   `CoachSequence.unfoldsByItself`) or by tap. Tapping a stop's platform in `TripContent` unfolds that stop's below it.
-  `CoachSequencePanel` holds the content: notes (why bahn.de had none when it falls back to vagonweb's plan is only kept in
-  Kit `BahnDeClient.coachSequenceNote(for:)`, not shown: no EVA, 404, an answer without the train's coaches, or the error;
-  for the 10-min `BahnDeGate` pause also what started it, `blockDescription`), one `TrainCard` per series (Kit `TrainFormation.partsBySeries`: coupled
+  `CoachSequencePanel` holds the content: notes (why bahn.de had none when it falls back to vagonweb's plan: a grey "bahn.de: …" line, only in
+  debug builds, from Kit `BahnDeClient.coachSequenceNote(for:)`: no EVA, 404, an answer without the train's coaches, or the error;
+  for the server's pause also what started it, `BahnDeGate.blockDescription`), one `TrainCard` per series (Kit `TrainFormation.partsBySeries`: coupled
   trainsets of one series share one, "2× ICE 4") with type, "BR …", each Tz with its Taufname and the series' side view
   running off the box's edge (#167): `Assets.xcassets/Trains/Train-<BR>` (401, 402, 403, 407, 408, 411, 412; cut from DB's
   Fahrzeuglexikon PDFs, © DB AG: "Quelle: Deutsche Bahn" next to it, named under bahn.de in Datenquellen), picked by Kit
@@ -132,13 +133,18 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   sign-up (`FollowedCheckinPushSubscription`, persisted) is kept current by `syncFollowedCheckinPush()` on every start (device
   token; a 404 = Träwelling ended the Worker's login → setting off, `followedCheckinPushEnded`) and ended on turning off or logout.
   Tapping one opens it in the list (`followedCheckinToOpen`).
+- `Features/PassengerRights/PassengerRightsViews.swift` – Fahrgastrechte (#311): `PassengerRightsBadge` under a saved journey in the lists
+  and `PassengerRightsCard` in its details ("Anspruch auf 25/50 % Entschädigung", "Antrag vorbereiten" → `PassengerRightsRequestSheet`: the
+  fields of DB's form with copy buttons and a link to bahn.de). `AppModel.passengerRightsClaim(for:)` feeds the Kit's `PassengerRights`
+  with the stored journey, its earlier plans, the tickets and the BahnCard 100 setting; `notifyPassengerRights` sends one notification per
+  level once the journey has arrived (from `refresh` and when a finished journey is opened), and keeps the worst claim seen in `SavedJourney.recordedClaim`. Never shows amounts.
 - `Features/Sharing/` – preview of shared journeys and imported DB shares; `JourneyShareButton` (in `JourneyDetailView`)
   uploads for a short link, falls back to the long link, and opens `UIActivityViewController`.
 - `Features/Settings/` – settings (incl. privacy policy link and "not affiliated with DB" note), `DataSourcesView`
   (Datenquellen: every service with its attribution/license links; keep it current when adding a source), `BC100RulesView`, quick tags.
 - `Shared/DesignSystem.swift` – reusable UI pieces (`Card`, `SectionHeader`, `LineBadge`, `TimeStack`,
   `DelayPill`, `PlatformBadge`, `InfoChip`, `OperatorLabel`, `Color.brand`, …). Reuse these instead of new styling.
-- `Shared/StationPicker.swift` (`StationInput`, `TimeSelector`), `LocationService`, `PreviewData`, `VagonwebBrowser`, `BahnDeBrowser`.
+- `Shared/StationPicker.swift` (`StationInput`, `TimeSelector`), `LocationService`, `PreviewData`, `VagonwebBrowser`.
 - `Shared/DebugScreens.swift` (DEBUG only) – launch args: `-debugScreen <name>`,
   `-seedDemoTrips YES`, `-seedStressTrips <count>`.
 
@@ -164,13 +170,17 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   (`StationNames.folded`, "Kolin (CZ)" without its country mark) within 3 km. Only the shown name changes: `id`/`name`
   and everything matched by them stay the feed's. Headsigns read like the stop they name (`MPlace.displayName(ofHeadsign:)`),
   else `StationNames.displayName(forName:)` (also for the train search's ends). `Station.displayName(for:)` shortens "hlavní nádraží" to "hl.n." and
-  "hlavná stanica" to "hl.st."; `StationNames.preload()` loads the list at launch;
+  "hlavná stanica" to "hl.st."; `StationNames.preload()` loads the list at launch. `StationNames.evaNumber(for:)` gives a
+  German station's EVA number from the same list (only for stations with a single one, not Berlin Hbf's levels), which
+  `BahnDeClient.evaNumber(for:)` uses before bahn.de's search, so statistics, Timetables and the Wagenreihung don't
+  ask bahn.de once per stop;
   `TrainMessage` (DB delay reasons/notices); `RideMatch`; `OperatorBrand` (feed agency name → EVU logo, #166: PNGs rendered from Wikimedia Commons SVGs in
   `BetterBahn/Assets.xcassets/Operators/Operator-<brand>`, shown by `OperatorLabel` on a transparent background, in dark mode on a light plate if `needsPlateInDarkMode`; unknown operators keep the building icon; DB S-Bahns with their own name ("S-Bahn Berlin GmbH", "DB Regio AG S-Bahn München") show the S-Bahn "S", other "DB Regio AG …" trains the DB Regio logo; `OperatorBrand.displayName` shortens names: "ODEG", "Transdev" for "S-Bahn Hannover (Transdev)"). International trains have several operators: bahn.de's journey details give each stop's railway (`adminID`, UIC code: 80 DB, 54 ČD, …; "BEF" attributes if present) (`BahnDeClient.trainOperators(for:)` → `[TrainOperator]`, narrowed to a leg's section), shown by `TrainOperatorsLabel` as logos side by side (`OperatorLogo`) and in the route at the stops where the train changes hands (`operatorStops(for:)`); the feed only ever names one.
 - `Models/TripLap.swift` – `Trip.lap(at:near:arriving:)`: Transitous' trip for a ring line (S41/S42) is the vehicle's whole day
   (the S42: 490 stops, each station ~19 times, under the block's number), so stops looked up by station landed on the first lap
   ("ab 17:50" showed "ab 3:50"). Cuts out the one lap from the board's departure (or to its arrival); applied in
-  `TripView.load()` and `CombinedProvider.trip(for:)`. Needs a station visited ≥ 3 times, so turn-round trains keep all stops.
+  `TripView.load()`, `CombinedProvider.trip(for:)` and the train picked under "Zug vorgeben" (`TrainCandidateFinder.candidate`,
+  more laps via `TrainCandidate.addingLaps`); `TrainRoutePlanner` rides the visit at `TrainRequirement.departure` (#355). Needs a station visited ≥ 3 times, so turn-round trains keep all stops.
   A lap runs from one visit of that station to the next; `extraBefore`/`extraAfter` add laps and `Trip.hasPreviousLap`/`hasNextLap`
   (not stored) tell `TripContent` to show "Vorherige / Nächste Runde laden" at the top / bottom of the stops (`TripView`, `LegTripSheet`
   count the extra laps and reload; works for any looping train, not just the Ringbahn). `Support/LoadedLaps.swift` remembers the
@@ -207,7 +217,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   answer can't run into `CombinedProvider`'s 2.5 s and take the code's station with it ("xszh" found nothing).
 - `Transit/CombinedProvider.swift` – what the app uses: primary `TransitousProvider`, optional
   fallback (none configured), cooldown health check, `BahnDeClient`, `VagonwebClient`, `BahnExpertClient`, `BahnJetztClient`.
-- `Transit/BahnDe/` – bahn.de web API via the `Cloudflare/bahnde-proxy` Worker (same endpoints/headers as Travel::Status::DE::DBRIS):
+- `Transit/BahnDe/` – bahn.de web API only via our server `Server/bahnde-proxy` (`BahnDeProxy`, #342; URLs are built on the Worker's `baseURL` and mapped onto it) (same endpoints/headers as Travel::Status::DE::DBRIS):
   station-search fallback, coach sequence → series/Tz/Taufname (`TrainModel`, `TrainsetNames`) and the
   full Wagenreihung (`CoachSequence`: coaches, classes, amenities, sectors, direction; also DB Regio RE/RB via
   `sequenceReference`),
@@ -216,13 +226,10 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   own train names for boards (departures and arrivals) and journey legs (`correctingTrainNames`, e.g. "RJ 171" that Transitous calls "ICE 171"),
   and DB's live times (`ezZeit`) for every train on boards (not subway, tram, bus; RE/RB, S-Bahn and other brands by run number or name) (`correctingFromBoard`, `applyingLiveTimes`), which
   beat DELFI's forecasts in Transitous; the journey details' live times likewise win on legs and trains (`applyingLiveTimes(from:to:)`, RJ 383 had no delay at Bad Schandau otherwise), but not over a delay or early time DB Timetables already put on a stop (`keepingDelays`: bahn.de showed +7 for RE 3 3354 at Gesundbrunnen where DB had +19), and never turning a time that is 2+ minutes early into "on time" (`turnsEarlyIntoOnTime`: bahn.de shows early trains as ±0, on boards too). Responses are
-  cached; a 403/429 pauses all bahn.de requests through the Worker for 10 min (`BahnDeGate`). Then (and on that first
-  blocked answer) the app asks bahn.de from the phone instead: `BahnDeBrowserFallback` (set at launch in `AppModel.init`,
-  none in widgets/tests) loads the same `/web/api/…` path at www.bahn.de through `BahnDeBrowser` (hidden `WebPage` on
-  bahn.de's timetable search, requests are `fetch` calls inside it), with a 10-min cooldown of its own. The page starts
-  loading on the Worker's first blocked answer (`prepare`) and is dropped once the Worker answers again (`release`), after
-  5 min without a request, or reloaded after 30 min.
-  The privacy policy (`Cloudflare/worker.mjs`) says so: the user's IP and bahn.de's cookies then reach DB.
+  cached; when the server fails it is left alone (`BahnDeProxy.gate`: 10 min after a 403/429/452, 2 min when down) and
+  every request throws `rateLimited`, which `CoachSequenceDisclosure` shows as "Plan-Wagenreihung · Aktuelle nicht
+  verfügbar" above vagonweb's plan, or "Aktuelle Wagenreihung nicht verfügbar" without one (the Tz under the train's name
+  stays, from bahn.expert). There is no other way to bahn.de: the Worker and the phone's hidden browser were refused (#342).
   The journey details' train attribute `RP` ("Reservierungspflicht") says a reservation is mandatory (`requiresReservation(for:)`, also for other
   railways' trains like SJ's D 301 or a Nightjet via `lookupReference`; shares the `journeyCourse` cache).
 - `Transit/Vagonweb/` – vagonweb.cz (used with their permission, #95): scheduled train compositions for the
@@ -251,7 +258,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   details (`BahnDeClient.takesOnlyPlatforms`, in `JourneyRefresher.refresh`), but no Zusatzhalte and no live times. SBB's formation service (opentransportdata.swiss, live, today only) is not used yet.
 - `Transit/BahnExpert/` – bahn.expert, as fallback for the train type (`TrainTypeLookup`) when bahn.de
   has no coach sequence and vagonweb has none either: it has DB's planned formation (`DB-plan`) for days
-  ahead; bahn.de is only asked for departures within `BahnDeClient.formationLookahead` (12 h). Needs a
+  ahead; bahn.de is only asked for departures within `BahnDeClient.formationLookahead` (24 h). Needs a
   `Referer` and a non-curl User-Agent (else an empty 206).
   Also fills the platforms bahn.de and Transitous lack (`ExpertPlatforms.swift`, `BahnExpertClient.fillingMissingPlatforms`):
   at the SBB's and ÖBB's stations of EC/RJ(X) trains of those railways and for Nightjet, Euronight and InterRegio, on legs
@@ -343,7 +350,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   only the picked run's trip is loaded (`candidate(for:)`, from the boarding station's board, else `TrainNumberSearch.run`).
   Lines ("RE 3") and other trains come from the boards of up to 4 route stations (`routeCandidates`:
   `departuresForTrainLookup`, trains only, loaded in parallel, `prefetch`ed when the sheet opens, never cached when
-  failed; `boardExtras` leaves out runs already listed by number). A picked run is pinned in
+  failed; `boardExtras` leaves out runs already listed by number). `catchable`: the list only shows trains leaving at
+  most 2 min before the traveller is at that station; from the search's origin also the 2 latest of the 30 min before, and
+  `TrainRoutePlanner.plan(pickedEarlier:)` then starts the route earlier. A picked run is pinned in
   `TrainRequirement.tripId`, so the planner loads it instead of searching boards.
 - Logic: `JourneyReplanner` (`continuations` come `fastestFirst`: by live arrival, without routes another one beats
   leaving no earlier, arriving no later with no more changes), `ConnectionCheck` (`ConnectionIssue`, `JourneyRefresher`), `PlatformChange`
@@ -385,9 +394,11 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   Aztec's internal encoding, the ISO-8859-1 string is the message), `WalletPassPayload` + `WalletPassClient`,
   `UICBarcode` (UIC "#UT" barcode → FCB 3 via a minimal unaligned-PER reader: issuing date, travellers, first
   open ticket/pass and its validity; the issuer's signature is checked by the pass signer, which answers 422 →
-  `WalletPassError.unverifiedBarcode`), `TravelPass` ("Zeitkarte" read from such a barcode, only its bytes are kept; a Deutschland-Ticket valid
-  longer than a month counts as a BahnCard 100's; `WalletPassPayload(pass:)` shows the validity as from → until). Passes are stored like tickets (`TicketStore`, `passes.json`).
+  `WalletPassError.unverifiedBarcode`), `TravelPass` ("Zeitkarte" read from such a barcode, only its bytes are kept; `WalletPassPayload(pass:)` shows the validity as from → until). Passes are stored like tickets (`TicketStore`, `passes.json`).
   bahn.de's bot protection blocks the order API outside its page in a real browser (403), so there is no direct client.
+- `Tickets/PassengerRights.swift` – `PassengerRights.claim(for:earlierPlans:hasTicket:hasBahnCard100:)` (#311): delay at the destination against
+  the arrival of the plan as first booked (`previousVersions`, so a cancellation or missed connection counts), 25 % from 60 min, 50 % from 120.
+  Only with a ticket, a BahnCard 100 or a long-distance train (not for local trains with just a Deutschland-Ticket); `requestFields` is what DB's form asks for.
 - `Sharing/` – `JourneyShareLink` (betterbahn://share encoding, payload limits, short-link IDs),
   `ShortShareLinkClient` (`/share` on the `betterbahn` Worker, long link as fallback), `DBShare` + `DBShareImporter`
   (parse DB Navigator/bahn.de shared text, resolve via `betterbahn://import`).
@@ -397,10 +408,14 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   "2d 3h 49m" instead of a running timer, with a timeline entry every minute), `TrainMapLink` (`betterbahn://map`).
 - `Geometry/` – polyline decode, `RouteGeometryService`, `SegmentHeatmap`.
 - `Support/HTTPClient.swift` – shared HTTP + `TransitError`, `JSONDecoding`. Every request sends `identifyingUserAgent` (app version + `/support` contact, as Transitous/OpenRailwayMap/Träwelling ask); only `BahnDeClient` sends browser agents. `ProductStyle` colors and symbols (views color a line with `Line.color`: the product's color, or the line's own where `Line.lineColorHex` knows one: tables for S-Bahn Berlin (VBB colors, #206) and U-Bahn Berlin (BVG), matched by operator + line name, otherwise the feed's `routeColor` for S-/U-Bahn (`Line.feedColorHex`, from Transitous' leg/stoptime `routeColor`; dropped when white text would be unreadable on it; bahn.de-only results have none, #291); widgets/Live Activity still use the product color): night trains (`Line.isNightTrain`: Transitous' `NIGHT_RAIL` mode as `Line.nightRail`, NJ/EN/UEx, night-only operators like Snälltåget or European Sleeper; bahn.de's "Liegewagen"/"Schlafwagen" train attributes wherever its `fahrt` is loaded anyway, `JourneyDetails.hasSleepingCars`; #241) get a bed via `Line.symbolName`, carried into the widgets and the Live Activity as `isNightTrain`. The "Verkehrsmittel" filters (`ProductChips`, board filter) have the long-distance groups "Hochgeschwindigkeit" (ICE, RJX, TGV), "IC / EC", "Nachtzug" and "IR / FLX" (`Product.highSpeed/.longDistance/.nightTrain/.interregio`, same color); the last two exist only as filter groups: `Line.product` stays `.longDistance`, filters compare `Line.filterProduct`. Searches saved earlier (`ConnectionSearch`, `ViaWaypoint`, marker `hasProductGroups`) get both groups added when they had IC/EC (`Product.upgradingLegacySelection`).
-- `Statistics/TrainSightings.swift` – collects the bahn.de journey IDs of trains the app showed (hooked into
-  `BahnDeClient`: `correctingFromBoard`, `correctingTrainNames`, `findJourneyId`; no S-Bahn/bus, only on the real
-  session) and reports them in batches to `Cloudflare/stats`, while Settings → "Zugdaten für Statistik teilen"
-  (`AppSettings.shareTrainStatistics`, default on, per device) is on.
+- `Statistics/TrainStatistics.swift` – train statistics from `Cloudflare/stats` (#316, `POST /train-stats`): `TrainStatistics` (a train's
+  runs of the last 30 days: per stop the arrival/departure delays, cancellations and platform moves),
+  `TrainStatisticsClient`, and `TrainStatisticsStore` (cache per train and day, off while Settings → "Zugstatistik anzeigen"
+  (`AppSettings.showTrainStatistics`, default on, per device) is off; looks up EVA numbers Transitous stations lack via `BahnDeClient.evaNumber(for:)`).
+  Everything is shown only from `TrainStatistics.minimumRuns` (5) runs; launching once with `-debugstats` turns on `TrainStatistics.testMode` until the app is deleted (`enableTestModeIfRequested`)
+  (from 1 run on, plus grey ladybug rows with the train asked for, each stop's EVA number and the raw delays and platforms). Views: `TrainStatisticsViews.swift` –
+  "Erfahrungswerte" in `LegCard` "Mehr" and `TripContent`, and a warning for tight transfers (`Journey.tightTransfers`,
+  `TrainStatistics.Stop.transferOutlook`) in `TransferRow` and, for search results, `JourneyCard`.
 - `Support/LoadingDeadline.swift` – waits up to 4 s for live data before a screen shows a journey or train
   run never loaded live before (journey detail, `TripView`, `LegTripSheet`), so it doesn't show the timetable
   first and jump to the delays. `Support/LiveDataCache.swift` – what was seen live (`AppModel.liveJourneys`,
@@ -435,4 +450,4 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
 - German, plain user-facing wording; DB-style station names (e.g. "Frankfurt (Oder)", "Bernau (bei Berlin)").
 - Commit titles: short imperative sentence ("Show …", "Stop …", "Keep …"), add `(fixes #N)` only
   when an issue is really fixed. No Claude co-author trailer.
-- Main branch is `prod`; branches and PR targets (`prod-features` / `prod-bugs` / `prod-other`): see `.claude/CLAUDE.md`.
+- Main branch is `prod`; PRs target `indevelopment` (the integration branch): see `.claude/CLAUDE.md`.

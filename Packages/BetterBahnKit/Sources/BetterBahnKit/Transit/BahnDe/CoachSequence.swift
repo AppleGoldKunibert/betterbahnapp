@@ -118,6 +118,47 @@ public struct CoachSequence: Sendable, Hashable {
     }
 }
 
+// MARK: - Reserved seat
+
+extension CoachSequence {
+    /// Where a reserved coach stops on the platform.
+    public enum SeatPosition: Sendable, Hashable {
+        /// The coach and the platform sectors it stands in (`coach.id` for highlighting it).
+        case sectors([String], coachID: Int)
+        /// The sequence has the coach but no platform positions (vagonweb's plan).
+        case noSectors(coachID: Int)
+        /// No such coach in the sequence, e.g. after a changed formation.
+        case coachMissing
+    }
+
+    /// The coach of a seat reservation ("Wagen 12" of "ICE 940") and the sectors it stops in. Coach
+    /// numbers can repeat across coupled trains, so only the part that runs as the reserved train counts.
+    public func position(ofCoach number: String, train trainName: String) -> SeatPosition {
+        let wanted = number.trimmingCharacters(in: .whitespaces)
+        let reservedNumber = Self.trainNumber(in: trainName)
+        let named = groups.indices.filter { index in
+            reservedNumber != nil && groups[index].trainName.flatMap(Self.trainNumber) == reservedNumber
+        }
+        let parts = named.isEmpty ? groups.indices.filter { groups[$0].isRequestedTrain } : named
+        guard let coach = coaches.first(where: { $0.number == wanted && (parts.isEmpty || parts.contains($0.group)) })
+        else { return .coachMissing }
+
+        var names: [String] = []
+        if let start = coach.start, let end = coach.end, !sectors.isEmpty {
+            let low = min(start, end), high = max(start, end)
+            // A sector counts once a good part of the coach stands in it.
+            names = sectors.filter { min($0.end, high) - max($0.start, low) > (high - low) * 0.25 }.map(\.name)
+        }
+        if names.isEmpty, let sector = coach.sector, !sector.isEmpty { names = [sector] }
+        return names.isEmpty ? .noSectors(coachID: coach.id) : .sectors(names, coachID: coach.id)
+    }
+
+    /// "940" from "ICE 940" or "EUROSTAR 9149".
+    static func trainNumber(in name: String) -> String? {
+        name.split(separator: " ").last { $0.allSatisfy(\.isNumber) }.map(String.init)
+    }
+}
+
 // MARK: - Compared with the plan
 
 extension CoachSequence {
