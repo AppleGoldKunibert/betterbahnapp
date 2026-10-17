@@ -116,12 +116,12 @@ public final class CombinedProvider: TransitProvider {
             try Task.checkCancellation()
             guard let bahnDe, search.modes.isEmpty else { throw error }
             let stations = try await Self.withDeadline(.milliseconds(2500)) { try await bahnDe.searchStations(search.text) }
-            return search.ordered(stations, near: location)
+            return search.ordered(search.filtered(stations), near: location)
         }
         try Task.checkCancellation()
         guard let bahnDe else { return [] }
         let stations = try await Self.withDeadline(.milliseconds(2500)) { try await bahnDe.searchStations(search.text) }
-        return search.ordered(stations, near: location)
+        return search.ordered(search.filtered(stations), near: location)
     }
 
     static func isShortQuery(_ query: String) -> Bool {

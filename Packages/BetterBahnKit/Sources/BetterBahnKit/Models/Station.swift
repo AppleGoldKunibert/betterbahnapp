@@ -41,15 +41,22 @@ public struct Station: Codable, Sendable, Hashable, Identifiable {
     /// District/state, e.g. "Bernau am Chiemsee, Bayern" for a station whose own name is just
     /// "Bernau" – tells apart same-named stations in different parts of the country.
     public var region: String?
+    /// ISO 3166 code of the country, "DE", if the source says.
+    public var country: String?
 
-    public init(id: String, name: String, coordinate: Coordinate?, evaNumber: String?, source: DataSource, region: String? = nil) {
+    public init(id: String, name: String, coordinate: Coordinate?, evaNumber: String?, source: DataSource, region: String? = nil,
+                country: String? = nil) {
         self.id = id
         self.name = name
         self.coordinate = coordinate
         self.evaNumber = evaNumber
         self.source = source
         self.region = region
+        self.country = country
     }
+
+    /// The country's flag emoji, nil if unknown.
+    public var flag: String? { countryCode.flatMap(TrainSearchCountry.flag(forCode:)) }
 
     /// Loose equality across sources: same EVA, or same-ish name within 400 m.
     public func isSamePlace(as other: Station) -> Bool {

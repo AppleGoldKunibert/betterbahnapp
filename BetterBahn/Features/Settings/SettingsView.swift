@@ -90,6 +90,20 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Picker(selection: $settings.stationFlagMode) {
+                        Text("Aus").tag(StationFlagMode.off)
+                        Text("Nur Ausland").tag(StationFlagMode.foreignOnly)
+                        Text("An").tag(StationFlagMode.always)
+                    } label: {
+                        IconLabel(title: "Flagge", systemImage: "flag.fill", color: .brand)
+                    }
+                } header: {
+                    Text("Bahnhofssuche")
+                } footer: {
+                    Text("Zeigt in der Suche die Flagge vor dem Bahnhof, auf Wunsch nur bei Bahnhöfen im Ausland. Mit einer Flagge hinter dem Namen siehst du nur Bahnhöfe aus diesem Land.")
+                }
+
+                Section {
                     Picker(selection: $settings.trainPositionRefresh) {
                         ForEach(TrainPositionRefresh.allCases, id: \.self) { Text($0.displayName).tag($0) }
                     } label: {
@@ -140,14 +154,14 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Toggle(isOn: $settings.shareTrainStatistics) {
-                        IconLabel(title: "Zugdaten für Statistik teilen", systemImage: "chart.bar.fill", color: .teal)
+                    Toggle(isOn: $settings.showTrainStatistics) {
+                        IconLabel(title: "Zugstatistik anzeigen", systemImage: "chart.bar.fill", color: .teal)
                     }
                     .tint(.brand)
                 } header: {
                     Text("Statistik")
                 } footer: {
-                    Text("Hilft uns, Statistiken zu Verspätungen und Ausfällen zu sammeln. Dabei wird nichts über dich gespeichert.")
+                    Text("Zeigt dir, wie pünktlich ein Zug in den letzten 30 Tagen war und wie oft er ausfiel oder das Gleis wechselte.")
                 }
 
                 Section {

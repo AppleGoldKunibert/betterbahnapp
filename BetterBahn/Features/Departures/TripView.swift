@@ -221,17 +221,22 @@ struct TripView: View {
     /// picked up today) at all — Transitous and DB Timetables above only ever overlay onto stops already there.
     /// Their live times also beat both where bahn.de has one (`BahnDeClient.applyingLiveTimes`).
     private func insertZusatzhalte() async {
-        guard let trip, let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: trip),
-              self.trip?.id == trip.id else { return }
-        let keepingDelays = model.timetablesClient != nil
-        let inserted = BahnDeClient.inserting(stops, into: trip.stopovers)
-        self.trip?.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: inserted, keepingDelays: keepingDelays)
-        // Where bahn.de and DB Timetables disagree on a stop, bahn.expert is asked which is right; shown once it answers.
-        let refereed = await BahnDeClient.applyingLiveTimes(from: stops, to: inserted, line: trip.line, keepingDelays: keepingDelays,
-                                                            referee: model.provider.bahnExpert)
-        guard self.trip?.id == trip.id else { return }
-        self.trip?.stopovers = refereed
-        if (try? await bahnDe.hasSleepingCars(for: trip)) == true, self.trip?.id == trip.id { self.trip?.line?.nightRail = true }
+        guard let trip else { return }
+        if let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: trip), self.trip?.id == trip.id {
+            let keepingDelays = model.timetablesClient != nil
+            let inserted = BahnDeClient.inserting(stops, into: trip.stopovers)
+            self.trip?.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: inserted, keepingDelays: keepingDelays)
+            // Where bahn.de and DB Timetables disagree on a stop, bahn.expert is asked which is right; shown once it answers.
+            let refereed = await BahnDeClient.applyingLiveTimes(from: stops, to: inserted, line: trip.line, keepingDelays: keepingDelays,
+                                                                referee: model.provider.bahnExpert)
+            guard self.trip?.id == trip.id else { return }
+            self.trip?.stopovers = refereed
+            if (try? await bahnDe.hasSleepingCars(for: trip)) == true, self.trip?.id == trip.id { self.trip?.line?.nightRail = true }
+        }
+        // Platforms bahn.de lacks, e.g. in Switzerland and Austria or for a Nightjet, from bahn.expert.
+        guard let expert = model.provider.bahnExpert, let current = self.trip, current.id == trip.id else { return }
+        let filled = await expert.fillingMissingPlatforms(in: current.stopovers, line: current.line)
+        if self.trip?.id == trip.id { self.trip?.stopovers = filled }
     }
 }
 
@@ -302,9 +307,60 @@ struct TripContent: View {
     /// Where a train run by several railways changes hands (stopover ID → operators), e.g. DB at the
     /// start and at Bad Schandau, ČD at Děčín; empty for one railway throughout.
     @State private var operatorStops: [String: [String]] = [:]
+    /// What past runs of this train say at the stops that matter (#316).
+    @State private var statistics = TrainStatisticsModel()
+    /// The platform changes of the stops ahead, shown at the stop 30 minutes before it and always at the next one.
+    @State private var platformStatistics = TrainStatisticsModel()
     @Environment(AppModel.self) private var model
 
     private var color: Color { trip.line?.color ?? .gray }
+
+    /// The time the train reaches the stop (leaves it, at the first one), which the platform hint is timed by.
+    private func hintTime(_ stop: Stopover, index: Int) -> Date? {
+        (index == 0 ? stop.departure : stop.arrival ?? stop.departure)?.best
+    }
+
+    /// The first stop the train hasn't reached yet.
+    private var nextStopIndex: Int? {
+        trip.stopovers.indices.first { index in hintTime(trip.stopovers[index], index: index).map { $0 > Date() } ?? false }
+    }
+
+    /// The upcoming stops the platform changes are looked up for: the next dozen.
+    private var platformHintStops: [StatisticsStop] {
+        guard let next = nextStopIndex else { return [] }
+        return trip.stopovers.indices.dropFirst(next).prefix(12).map { index in
+            let stop = trip.stopovers[index]
+            let platform = index == 0 ? stop.departurePlatform : stop.arrivalPlatform ?? stop.departurePlatform
+            return StatisticsStop(station: stop.station, role: index == 0 ? .departure : .arrival, platform: platform?.planned)
+        }
+    }
+
+    /// A likely platform change at this stop: 30 minutes before the train gets there, and always at the next stop.
+    private func platformChangeHint(at stop: Stopover, index: Int) -> PlatformChangeHint? {
+        guard let time = hintTime(stop, index: index), time > Date(),
+              index == nextStopIndex || time.timeIntervalSinceNow <= 30 * 60 else { return nil }
+        let platform = index == 0 ? stop.departurePlatform : stop.arrivalPlatform ?? stop.departurePlatform
+        return platformStatistics.platformChange(at: stop.station, planned: platform?.planned)
+    }
+
+    /// Where the experience values apply: the stops picked to get on and off, else the station the train
+    /// was opened from, else the whole run.
+    private var statisticsStops: [StatisticsStop] {
+        func stop(_ stopover: Stopover, _ role: StatisticsStop.Role) -> StatisticsStop {
+            let platform = role == .departure ? stopover.departurePlatform : stopover.arrivalPlatform
+            return StatisticsStop(station: stopover.station, role: role, platform: platform?.planned)
+        }
+        var stops: [StatisticsStop] = []
+        if let index = boardingIndex { stops.append(stop(trip.stopovers[index], .departure)) }
+        if let index = exitIndex { stops.append(stop(trip.stopovers[index], .arrival)) }
+        if stops.isEmpty, let highlight, let index = trip.stopovers.firstIndex(where: { $0.station.isSamePlace(as: highlight) }) {
+            stops.append(stop(trip.stopovers[index], index == 0 ? .departure : .arrival))
+        }
+        if stops.isEmpty, let first = trip.stopovers.first, let last = trip.stopovers.last {
+            stops = [stop(first, .departure), stop(last, .arrival)]
+        }
+        return stops
+    }
 
     var body: some View {
         VStack(spacing: 16) {
@@ -333,6 +389,10 @@ struct TripContent: View {
                     }
                     // At the next stop; any other stop's unfolds below it with a tap on its platform.
                     CoachSequenceDisclosure(trip: trip, spacing: 14)
+
+                    if let rows = statistics.rows {
+                        TrainStatisticsSection(content: rows).padding(.top, 14)
+                    }
                 }
             }
 
@@ -383,6 +443,14 @@ struct TripContent: View {
         .task(id: trip.stopovers.map(\.id)) {
             guard let bahnDe = model.provider.bahnDe, let found = try? await bahnDe.operatorStops(for: trip) else { return }
             operatorStops = found
+        }
+        .task(id: [trip.stopovers.first?.id ?? "", String(nextStopIndex ?? -1)]) {
+            await platformStatistics.load(line: trip.line, stops: platformHintStops, date: trip.stopovers.first?.departure?.planned ?? .now,
+                                          bahnDe: model.provider.bahnDe)
+        }
+        .task(id: [boardingID ?? "", exitID ?? "", trip.stopovers.first?.id ?? ""]) {
+            await statistics.load(line: trip.line, stops: statisticsStops, date: trip.stopovers.first?.departure?.planned ?? .now,
+                                  bahnDe: model.provider.bahnDe)
         }
     }
 
@@ -469,6 +537,9 @@ struct TripContent: View {
                                     HStack(spacing: 6) {
                                         ForEach(operators, id: \.self) { OperatorLogo(name: $0) }
                                     }
+                                }
+                                if let hint = platformChangeHint(at: stop, index: index) {
+                                    PlatformChangeLabel(hint: hint)
                                 }
                             }
                             Spacer()
@@ -782,6 +853,10 @@ struct LegTripSheet: View {
             hasSleepingCars = (try? await bahnDe.hasSleepingCars(for: updated)) == true
         }
         if ownTrain { updated = updated.keepingAdditionalStops(of: leg) }
+        // Platforms bahn.de lacks, e.g. in Switzerland and Austria or for a Nightjet, from bahn.expert.
+        if let expert = model.provider.bahnExpert {
+            updated.stopovers = await expert.fillingMissingPlatforms(in: updated.stopovers, line: updated.line)
+        }
         guard self.trip?.id == updated.id, ownTrain == (shownTripId == nil) else { return }
         self.trip?.stopovers = updated.stopovers
         if hasSleepingCars { self.trip?.line?.nightRail = true }

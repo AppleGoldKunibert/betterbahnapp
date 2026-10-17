@@ -8,6 +8,9 @@ struct BetterBahnApp: App {
     @State private var model: AppModel
 
     init() {
+        // Train statistics from one run on, with their raw values (TrainStatisticsRows): launch once with
+        // `-debugstats`, stays on until the app is deleted.
+        TrainStatistics.enableTestModeIfRequested()
         let model = AppModel()
         _model = State(initialValue: model)
         appDelegate.model = model
@@ -129,7 +132,6 @@ struct RootView: View {
                 model.stopRefreshing()
                 model.scheduleLiveActivityBackgroundCheck()
                 model.updateWidgets(force: true)
-                Task { await TrainSightings.shared.flush() }
             }
         }
         // A followed user's check-in notification was tapped (#266): its list is on the Verbindungen tab.
@@ -143,6 +145,7 @@ struct RootView: View {
         #if DEBUG
         .task {
             model.seedBrokenTripIfRequested()
+            model.seedLateTripsIfRequested()
             await model.seedStressTripsIfRequested()
             await model.seedDemoTripsIfRequested()
         }
