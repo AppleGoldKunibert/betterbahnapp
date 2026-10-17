@@ -652,7 +652,7 @@ struct LegCard: View {
                     }
 
                     // Between the stops and "Mehr"; unfolds by itself around the departure.
-                    CoachSequenceDisclosure(leg: leg, spacing: 14)
+                    CoachSequenceDisclosure(leg: leg, reservation: reservation, spacing: 14)
 
                     let platformChanges = platformChangeHints
                     if !platformChanges.isEmpty {

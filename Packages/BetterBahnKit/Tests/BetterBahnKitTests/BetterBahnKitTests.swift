@@ -3411,6 +3411,51 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(actual.deviations(fromPlan: renumbered).first == "7 statt 6 Wagen")
     }
 
+    /// DB's seat maps (#365): ICE 117's 7-car ICE 4 gets the "412.7" sheet and each coach its layout. It
+    /// stands with coach 27 on the left of the platform, so its coaches are shown turned round.
+    @Test func seatMapsForAnICE4() throws {
+        let response = try fixture("bahnde-vehicle-sequence", as: BahnDeClient.SequenceResponse.self)
+        let sequence = BahnDeClient.coachSequence(from: response, category: "ICE", number: 117)
+        #expect(sequence.groups.first?.seatMapSheet == "412.7")
+        let endCar = try #require(sequence.seatMap(for: sequence.coaches[0]))
+        #expect(endCar.numbers == ["21", "31"])
+        #expect(endCar.type == "Bpmdzf 7812.2")
+        #expect(endCar.seat("17") != nil)
+        #expect(endCar.seats.allSatisfy { (0...1).contains($0.x) && (0...1).contains($0.y) })
+        #expect(sequence.seatMap(for: sequence.coaches[5])?.title?.hasPrefix("Bordrestaurant") == true)
+
+        let leftToRight = sequence.coaches.sorted { $0.start! < $1.start! }.compactMap(\.number)
+        #expect(SeatMap.isTurned(numbersLeftToRight: leftToRight))
+        #expect(!SeatMap.isTurned(numbersLeftToRight: ["21", "22", "29"]))
+
+        // Not for vagonweb's plan.
+        var plan = sequence
+        plan.source = .vagonweb(validFrom: nil, validUntil: nil)
+        #expect(plan.seatMap(for: plan.coaches[0]) == nil)
+    }
+
+    @Test func seatMapSheets() {
+        let ice1 = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "11", "12", "14"]
+        #expect(SeatMap.sheet(subtype: "401", coachNumbers: ice1) == "401")
+        #expect(SeatMap.sheet(subtype: "401", coachNumbers: ["1", "2", "3", "4", "5", "6", "7", "11", "12"]) == "401.LDV")
+        #expect(SeatMap.sheet(subtype: "403.S1", coachNumbers: []) == "403")
+        #expect(SeatMap.sheet(subtype: "412", coachNumbers: ice1) == "412")
+        #expect(SeatMap.sheet(subtype: "412", coachNumbers: ice1 + ["10"]) == "412.13")
+        #expect(SeatMap.sheet(subtype: "406", coachNumbers: []) == nil)
+        #expect(SeatMap.sheet(subtype: "445", coachNumbers: []) == nil)
+        // Every sheet the app can pick has its coaches. Seats are numbered from 11 on: a smaller number would
+        // be a seat number the PDF split into digits (the ICE T's "7", "5" for 75).
+        for sheet in ["401", "401.LDV", "402", "403", "407", "408", "411.S1", "411.S2", "412", "412.7", "412.13"] {
+            let coaches = SeatMap.sheets[sheet] ?? []
+            #expect(!coaches.isEmpty, "\(sheet)")
+            #expect(coaches.allSatisfy { $0.seats.allSatisfy { Int($0.number).map { $0 >= 11 } ?? false } }, "\(sheet)")
+        }
+        // As many seats as DB's sheets list.
+        #expect(SeatMap.sheets["403"]?.reduce(0) { $0 + $1.seats.count } == 450)
+        #expect(SeatMap.sheets["411.S2"]?.reduce(0) { $0 + $1.seats.count } == 376)
+        #expect(SeatMap.coach("37", sheet: "403")?.type == "Bpmz 403.2")
+    }
+
     @Test func coachNumberList() {
         #expect(CoachSequence.numberList(["25"]) == "25")
         #expect(CoachSequence.numberList(["23", "21"]) == "21, 23")

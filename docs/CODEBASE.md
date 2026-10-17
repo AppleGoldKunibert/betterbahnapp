@@ -26,7 +26,7 @@ comments are English.
 | `Cloudflare/checkin-push/` | Worker (`betterbahn-push`, D1 database, cron every minute) for notifications about new check-ins of followed Träwelling users (#266): keeps its own read-only Träwelling login per device (from the app's authorization code, AES-GCM encrypted), looks at the dashboard every 2 min and sends APNs pushes (`followedStatusID`). `node --test Cloudflare/checkin-push/worker.test.mjs` (see its README for the APNs key setup). |
 | `Cloudflare/shared/` | `appattest.mjs`: App Attest verification and the signed tokens both Workers check (`X-BetterBahn-Token`); `node --test Cloudflare/shared/appattest.test.mjs`. |
 | `.github/workflows/` | GitHub Actions: `pr-build.yml` (macOS: Kit tests + unsigned app build on PRs touching code), `pr-secrets.yml` (Linux: gitleaks secret scan + guard against committing `DefaultCredentials.swift`), `sync-prod.yml` (merges prod into every other branch except `appstorerelease`). |
-| `scripts/` | `make-station-hints.py`: rebuilds BetterBahnKit's offline station list for search (see Transitous below). `make-ril100.py`: rebuilds the RIL100 code list (`Ril100.swift`), also from DB's XLSX of all operating points for the codes abroad (needs `openpyxl`). `make-station-names.py`: rebuilds the station names shown (`StationNames.swift`) from DB InfraGO's OpenStation NeTEx, DB's RIS names via bahn.expert's station search and Transitous (run after `make-ril100.py`, it takes the positions from there; keeps the names it has, `--refresh` asks bahn.expert for all again, about an hour). `searchsim/`: Linux package that copies the platform-neutral Kit sources in (`./sync.sh`), so `swift test` runs `BetterBahnKitTests.swift` without a Mac and `swift run SearchSim scenarios.txt` runs the real station search against live Transitous for ~1150 place/query scenarios (rerun after changing search ranking). |
+| `scripts/` | `make-station-hints.py`: rebuilds BetterBahnKit's offline station list for search (see Transitous below). `make-ril100.py`: rebuilds the RIL100 code list (`Ril100.swift`), also from DB's XLSX of all operating points for the codes abroad (needs `openpyxl`). `make-seat-maps.py`: rebuilds the ICE seat maps (images in `Assets.xcassets/SeatMaps/`, seat positions in `SeatMaps.json`) from DB's Wagenreihungspläne as bahn.expert links them (`/WRSheets/<sheet>.pdf`); needs poppler, Pillow and numpy. `make-station-names.py`: rebuilds the station names shown (`StationNames.swift`) from DB InfraGO's OpenStation NeTEx, DB's RIS names via bahn.expert's station search and Transitous (run after `make-ril100.py`, it takes the positions from there; keeps the names it has, `--refresh` asks bahn.expert for all again, about an hour). `searchsim/`: Linux package that copies the platform-neutral Kit sources in (`./sync.sh`), so `swift test` runs `BetterBahnKitTests.swift` without a Mac and `swift run SearchSim scenarios.txt` runs the real station search against live Transitous for ~1150 place/query scenarios (rerun after changing search ranking). |
 | `docs/transit-providers.md` | Why Transitous is the primary data source and fallback options. |
 | `docs/app-review-notes.md` | App Store submission checklist (privacy URL, App Privacy, demo access) and review notes. |
 
@@ -90,7 +90,11 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `TrainDrawing`. Then `CoachSequenceDiagram` lays the platform out horizontally (start left, scrolls sideways, opens at the
   train's front): sector bar, part labels (train for coupled/split trains, Tz, Taufname on up to 2 lines) that stay at the
   visible edge until the coupling point (`onScrollGeometryChange`), `CoachTile`s to scale (number, class, amenity icons,
-  rounded noses at trainset ends), "← Richtung".
+  rounded noses at trainset ends), "← Richtung". Tapping an ICE's coach (bahn.de's sequence only, not
+  vagonweb's plan) opens `SeatMapSheet` (`SeatMapView.swift`, #365): the train's coaches from above in the diagram's order, each
+  DB drawing (`Assets.xcassets/SeatMaps/Seats-<sheet>-<coach>`) turned round when the trainset stands with its higher coach
+  numbers on the left (`SeatMap.isTurned`), the seat numbers drawn on top so they stay upright; the leg's reservation
+  (`CoachSequenceDisclosure(leg:reservation:)` from `LegCard`) is highlighted and scrolled to.
 - `Features/TrainSearch/` – `TrainSearchOverlay` (#183): Spotlight-style bar over every tab (`AppModel.showsTrainSearch`, set
   by the train button on Verbindungen and the search button on the map, shown from `RootView`); searches while typing, the day
   behind a calendar button (graphical picker below the bar), filtered by Settings → Zugschnellsuche (`AppSettings.trainSearchKinds`:
@@ -225,6 +229,12 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   The privacy policy (`Cloudflare/worker.mjs`) says so: the user's IP and bahn.de's cookies then reach DB.
   The journey details' train attribute `RP` ("Reservierungspflicht") says a reservation is mandatory (`requiresReservation(for:)`, also for other
   railways' trains like SJ's D 301 or a Nightjet via `lookupReference`; shares the `journeyCourse` cache).
+- `Transit/BahnDe/SeatMap.swift` – DB's seat maps per ICE coach (#365, `Resources/SeatMaps.json` from `scripts/make-seat-maps.py`):
+  coach numbers, type and each seat number's box as fractions of the drawing. `CoachSequence.Group.seatMapSheet` is set per
+  trainset from its UIC numbers (`TrainModel.detectSubtype`) and coach count (`SeatMap.sheet`: ICE 1 with 12 or, modernised,
+  9 middle coaches; ICE 4 with 7, 12 or 13; every BR 403 uses the Redesign sheet); `CoachSequence.seatMap(for:)` finds a
+  coach's layout by its number. The sheets draw lower coach numbers on the left. Two seat numbers are printed twice on
+  DB's sheets (401.LDV Wagen 6 "43", 408 Wagen 24 "75") and kept as they are.
 - `Transit/Vagonweb/` – vagonweb.cz (used with their permission, #95): scheduled train compositions for the
   whole timetable year, read from the train's HTML page (`VagonwebComposition.scheduled`, fixtures
   `vagonweb-ice*.html`). Used when bahn.de has no coach sequence: the train type (`AppModel.trainType`) and the

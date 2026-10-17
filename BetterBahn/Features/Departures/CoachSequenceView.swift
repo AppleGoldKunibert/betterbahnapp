@@ -15,9 +15,12 @@ struct CoachSequenceDisclosure: View {
     let departure: Date?
     /// Space above the row, only while it is shown (a stack's spacing would stay when it isn't).
     var spacing: CGFloat = 0
+    /// The leg's seat reservation, highlighted in the seat map.
+    var reservation: SeatReservation?
 
-    init(leg: Leg, spacing: CGFloat = 0) {
+    init(leg: Leg, reservation: SeatReservation? = nil, spacing: CGFloat = 0) {
         self.spacing = spacing
+        self.reservation = reservation
         request = BahnDeClient.formationRequest(for: leg)
         plannedRequest = BahnDeClient.formationRequest(for: leg, lookahead: nil)
         departure = leg.departure.best
@@ -55,7 +58,7 @@ struct CoachSequenceDisclosure: View {
                             withAnimation(.snappy) { expanded = !open }
                         }
                         if open {
-                            CoachSequencePanel(request: shown, sequence: sequence)
+                            CoachSequencePanel(request: shown, sequence: sequence, reservation: reservation)
                                 .transition(.fold)
                         }
                     }
@@ -103,11 +106,14 @@ struct CoachSequenceToggle: View {
 /// number, class and amenities, and the direction the train leaves in.
 struct CoachSequencePanel: View {
     let request: BahnDeClient.FormationRequest
+    /// Highlighted in the seat map.
+    var reservation: SeatReservation?
     @State private var sequence: CoachSequence?
 
     /// - Parameter sequence: already loaded by the caller; fetched here otherwise (e.g. from a stop's platform).
-    init(request: BahnDeClient.FormationRequest, sequence: CoachSequence? = nil) {
+    init(request: BahnDeClient.FormationRequest, sequence: CoachSequence? = nil, reservation: SeatReservation? = nil) {
         self.request = request
+        self.reservation = reservation
         _sequence = State(initialValue: sequence)
     }
 
@@ -127,7 +133,7 @@ struct CoachSequencePanel: View {
                     ForEach(Array(sequence.formation.partsBySeries.enumerated()), id: \.offset) { _, part in
                         TrainCard(formation: part)
                     }
-                    CoachSequenceDiagram(sequence: sequence)
+                    CoachSequenceDiagram(sequence: sequence, reservation: reservation)
                     legend(sequence)
                 }
             } else if loading {
@@ -301,9 +307,10 @@ private struct TrainCard: View {
 
 /// The platform from its start (left) to its end, everything placed by its position in meters. Scrolls
 /// sideways and opens at the front of the train; each part's label (train, Tz, Taufname) stays in view
-/// while scrolling until the part ends at the coupling point.
+/// while scrolling until the part ends at the coupling point. Tapping an ICE's coach opens the seat map.
 private struct CoachSequenceDiagram: View {
     let sequence: CoachSequence
+    var reservation: SeatReservation?
 
     private static let pointsPerMeter: CGFloat = 3
     /// Coach length used when bahn.de gave no positions.
@@ -331,6 +338,8 @@ private struct CoachSequenceDiagram: View {
 
     /// How far the diagram is scrolled: the content's x at the visible leading edge.
     @State private var scrolled: CGFloat = 0
+    /// The tapped coach whose seat map is open.
+    @State private var seatMapCoach: CoachSequence.Coach?
 
     private var hasPositions: Bool { sequence.coaches.allSatisfy { $0.start != nil && $0.end != nil } }
 
@@ -394,11 +403,20 @@ private struct CoachSequenceDiagram: View {
                         ForEach(Array(placed.enumerated()), id: \.element.id) { index, item in
                             let group = item.coach.group
                             let nose = hasTrainsets || !item.coach.isPassengerCoach
-                            CoachTile(coach: item.coach,
-                                      leadingNose: nose && (index == 0 || placed[index - 1].coach.group != group),
-                                      trailingNose: nose && (index == placed.count - 1 || placed[index + 1].coach.group != group))
-                                .frame(width: max(x(item.end) - x(item.start) - 3, 36))
-                                .offset(x: x(item.start) + 1.5)
+                            let tile = CoachTile(coach: item.coach,
+                                                 leadingNose: nose && (index == 0 || placed[index - 1].coach.group != group),
+                                                 trailingNose: nose && (index == placed.count - 1 || placed[index + 1].coach.group != group))
+                            Group {
+                                if sequence.seatMap(for: item.coach) != nil {
+                                    Button { seatMapCoach = item.coach } label: { tile }
+                                        .buttonStyle(.plain)
+                                        .accessibilityHint("Zeigt den Sitzplan")
+                                } else {
+                                    tile
+                                }
+                            }
+                            .frame(width: max(x(item.end) - x(item.start) - 3, 36))
+                            .offset(x: x(item.start) + 1.5)
                         }
                         // A dashed line where one part of the train ends and the next begins.
                         ForEach(partBoundaries(placed), id: \.self) { meters in
@@ -423,9 +441,18 @@ private struct CoachSequenceDiagram: View {
                 directionLabel(towardsEnd: towardsEnd)
                     .padding(.horizontal, 12)
             }
+            if sequence.coaches.contains(where: { sequence.seatMap(for: $0) != nil }) {
+                Label("Tippe auf einen Wagen, um die Sitzplätze zu sehen.", systemImage: "hand.tap")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+            }
         }
         .padding(.vertical, 12)
         .insetPanel()
+        .sheet(item: $seatMapCoach) { coach in
+            SeatMapSheet(sequence: sequence, coaches: placed.map(\.coach), selected: coach, reservation: reservation)
+        }
     }
 
     /// Where one part of the train meets the next, in meters along the platform.
