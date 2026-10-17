@@ -252,9 +252,26 @@ public struct TrainNumberSearch: Sendable {
                   let entry = Self.entry(for: result, departing: planned, in: entries),
                   let trip = try? await provider.trip(id: entry.tripId, source: entry.source)
             else { continue }
-            return (entry, trip)
+            return Self.named(after: result, entry: entry, trip: trip)
         }
         throw TransitError.notFound("\(result.name) im Fahrplan")
+    }
+
+    /// `entry` and `trip` of a long-distance train under the name DB's search result gives it. For some
+    /// cross-border trains Transitous only has DB's GTFS entry, which brands them generically, e.g. the ČD
+    /// Railjet "RJ 171" Hamburg–Dresden as "ICE 171"; the result's name (bahn.expert) is DB's own.
+    static func named(after result: TrainSearchResult, entry: BoardEntry, trip: Trip) -> (entry: BoardEntry, trip: Trip) {
+        guard BahnDeClient.longDistanceCategories.contains(result.category.uppercased()),
+              BahnDeClient.trainReference(for: entry.line)?.number == String(result.number),
+              BahnDeClient.normalizedTrainName(entry.line.name) != BahnDeClient.normalizedTrainName(result.name) else {
+            return (entry, trip)
+        }
+        var entry = entry, trip = trip
+        entry.line = BahnDeClient.renamed(entry.line, to: result.name)
+        if let line = trip.line, BahnDeClient.trainReference(for: line)?.number == String(result.number) {
+            trip.line = BahnDeClient.renamed(line, to: result.name)
+        }
+        return (entry, trip)
     }
 
     /// bahn.de's station search knows the EVA numbers bahn.expert gives; the provider's is the fallback.

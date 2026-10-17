@@ -4280,6 +4280,34 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         #expect(TrainNumberSearch.entry(for: s2, departing: planned, in: [entries[0], sBahn]) == sBahn)
     }
 
+    /// RJ 171 Hamburg-Altona → Děčín (2026-10-17): the train search has DB's "RJ 171", Transitous' trip
+    /// calls it "ICE 171". The train's page shows DB's name in its title and in its header.
+    @Test func namesTheRunAfterTheSearchResult() {
+        let planned = Date(timeIntervalSince1970: 1_800_000_000)
+        let station = Station(id: "8002553", name: "Hamburg-Altona", coordinate: nil, evaNumber: "8002553", source: .transitous)
+        let ice = Line(name: "ICE 171", number: "171", product: .highSpeed, operatorName: nil)
+        let entry = BoardEntry(kind: .departures, tripId: "t", station: station, line: ice, otherEnd: "Děčín hl.n.",
+                               time: TimeInfo(planned: planned, actual: nil), platform: PlatformInfo(planned: "1", actual: nil),
+                               cancelled: false, terminatesOrOriginatesHere: true, remarks: [], source: .transitous)
+        let trip = Trip(id: "t", line: ice, direction: "Děčín hl.n.", stopovers: [], cancelled: false, remarks: [], source: .transitous)
+        let rj = TrainSearchResult(journeyId: "rj", category: "RJ", number: 171, line: nil, product: .highSpeed,
+                                   origin: "Hamburg-Altona", destination: "Děčín hl.n.", originEVA: nil, destinationEVA: nil)
+        let named = TrainNumberSearch.named(after: rj, entry: entry, trip: trip)
+        #expect(named.entry.line.name == "RJ 171")
+        #expect(named.trip.line?.name == "RJ 171")
+        #expect(named.trip.line?.alternateName == "ICE 171")
+        // Same name: untouched. Another train number or a regional train: never renamed.
+        let same = TrainSearchResult(journeyId: "i", category: "ICE", number: 171, line: nil, product: .highSpeed,
+                                     origin: "", destination: "", originEVA: nil, destinationEVA: nil)
+        #expect(TrainNumberSearch.named(after: same, entry: entry, trip: trip).trip == trip)
+        let other = TrainSearchResult(journeyId: "o", category: "RJ", number: 175, line: nil, product: .highSpeed,
+                                      origin: "", destination: "", originEVA: nil, destinationEVA: nil)
+        #expect(TrainNumberSearch.named(after: other, entry: entry, trip: trip).trip == trip)
+        let re = TrainSearchResult(journeyId: "r", category: "RE", number: 171, line: "RE1", product: .regionalExpress,
+                                   origin: "", destination: "", originEVA: nil, destinationEVA: nil)
+        #expect(TrainNumberSearch.named(after: re, entry: entry, trip: trip).trip == trip)
+    }
+
     static let found63 = """
     [
       {"journeyId":"r","train":{"category":"R","journeyNumber":63,"transportType":"REGIONAL_TRAIN"},
