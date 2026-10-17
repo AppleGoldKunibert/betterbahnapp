@@ -2570,6 +2570,9 @@ private final class Ril100GeocodeProtocol: URLProtocol, @unchecked Sendable {
         let wienHbf = Station(id: "at-Railway-Current-Reference-Data-2026_Pat:49:1349", name: "Wien Hbf", coordinate: nil, evaNumber: nil, source: .transitous)
         let koeln = Station(id: "fr-eurostar-gtfs-plan-de-transport-et-temps-reel_koln_hbf", name: "Köln Hbf", coordinate: nil, evaNumber: nil, source: .transitous)
         #expect(CrossBorder.isAbroad(wienHbf, covered: []))
+        // The Nightjet's stop in Vienna comes from DELFI, but its ID says "at:".
+        let wienNightjet = Station(id: "de-DELFI_at:49:1349", name: "Wien Hauptbahnhof", coordinate: nil, evaNumber: nil, source: .transitous)
+        #expect(CrossBorder.isAbroad(wienNightjet, covered: []))
         #expect(!CrossBorder.isAbroad(koeln, covered: []))
     }
 
