@@ -283,7 +283,7 @@ public struct TrainRoutePlanner: Sendable {
               let trip = try? await provider.trip(id: tripId, source: requirement.tripSource ?? provider.source) else { return nil }
         let name = trip.line?.name ?? requirement.trainName
         guard boardingIndex(in: trip, at: requirement.boarding, notBefore: notBefore, picked: requirement.departure) != nil else {
-            throw TransitError.notFound("\(name) ab \(requirement.boarding.displayName) – bis zur Abfahrt nicht erreichbar")
+            throw TransitError.invalidInput("\(name) ab \(requirement.boarding.displayName) fährt ab, bevor du dort sein kannst.")
         }
         return (name, trip)
     }
