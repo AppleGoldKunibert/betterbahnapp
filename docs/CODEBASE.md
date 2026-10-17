@@ -54,7 +54,8 @@ in `project.pbxproj`: new files join their target automatically.
 - `App/TicketStore.swift` – `SavedTicket` (`DBTicket` + its `SavedJourney.id`), only on this device in
   `Application Support/BetterBahn/Tickets/` (list + PDFs, file protection, **not** synced). `importTickets` matches
   a saved journey or imports the booking via `DBShareImporter.journey(from:)`.
-- `App/LiveActivityManager.swift` – ActivityKit wrapper; attributes in Kit `TripActivityAttributes`.
+- `App/LiveActivityManager.swift` – ActivityKit wrapper; attributes in Kit `TripActivityAttributes`; `alert` lights up the running activity.
+- `App/ExitReminders.swift` – exit reminders (#313, Settings → Meine Reisen, per journey `exitRemindersOff`): Kit `Journey.exitReminders` → time-sensitive notifications `exit|<entry>|<leg>`, rescheduled after every refresh, one per stop (per-device log `exitReminderDates`); while the Live Activity runs, its alert instead.
 - `App/WidgetSync.swift` – `updateWidgets()` (from `syncLiveActivity`, on position changes, forced on background)
   writes the `WidgetSnapshot` for `widgetJourney` (`liveJourneyCandidate`, else the next saved journey not switched
   off) and reloads widgets only on change.
@@ -259,7 +260,7 @@ in `project.pbxproj`: new files join their target automatically.
 
 ### Logic
 
-- `JourneyReplanner` (`continuations`, `fastestFirst`), `ConnectionCheck` (`ConnectionIssue`), `PlatformChange` (push,
+- `JourneyReplanner` (`continuations`, `fastestFirst`), `ConnectionCheck` (`ConnectionIssue`), `ExitReminder`, `PlatformChange` (push,
   ignores sectors/bus bays), `TrainRoutePlanner`, `ViaRoutePlanner` (vias without stay keep a through train as one
   leg), `TrainPicker` ("Anderer Zug": `replacing` + `MissedConnection` #226, `reroutes` "Andere Routenführung",
   `journeysIgnoringBoardingRules`, `journeysContinuingFromRestrictedTrains`, both added in `JourneyResultsView`),
