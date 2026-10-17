@@ -56,7 +56,7 @@ public extension TransitProvider {
     }
 
     func searchStations(_ search: StationSearch, near location: Coordinate?) async throws -> [Station] {
-        search.ordered(try await searchStations(search.text, near: location), near: location)
+        search.ordered(search.filtered(try await searchStations(search.text, near: location)), near: location)
     }
 
     func departures(at station: Station, date: Date = .now, duration: Int = 60, products: Set<Product> = Set(Product.allCases)) async throws -> [BoardEntry] {

@@ -125,8 +125,19 @@ public struct TrainSearchCountry: Sendable, Hashable, Identifiable {
     public var name: String
     public var id: String { code }
 
-    public var flag: String {
-        String(String.UnicodeScalarView(code.unicodeScalars.compactMap { Unicode.Scalar(127_397 + $0.value) }))
+    public var flag: String { Self.flag(forCode: code) ?? "" }
+
+    /// The flag emoji for an ISO code ("DE" -> 🇩🇪); nil unless it is two letters.
+    public static func flag(forCode code: String) -> String? {
+        guard code.count == 2, code.allSatisfy({ $0.isASCII && $0.isLetter }) else { return nil }
+        return String(String.UnicodeScalarView(code.uppercased().unicodeScalars.compactMap { Unicode.Scalar(127_397 + $0.value) }))
+    }
+
+    /// The ISO code of a flag emoji (🇩🇪 -> "DE"); nil if `text` is not exactly one flag.
+    public static func code(forFlag text: String) -> String? {
+        let scalars = Array(text.unicodeScalars)
+        guard scalars.count == 2, scalars.allSatisfy({ (127_462...127_487).contains($0.value) }) else { return nil }
+        return String(String.UnicodeScalarView(scalars.compactMap { Unicode.Scalar($0.value - 127_397) }))
     }
 
     /// Germany and the countries its trains run to, plus a few beyond.

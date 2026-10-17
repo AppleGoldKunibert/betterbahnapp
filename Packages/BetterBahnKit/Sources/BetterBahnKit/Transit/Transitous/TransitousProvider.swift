@@ -146,6 +146,7 @@ public struct TransitousProvider: TransitProvider {
     /// village without a station. "l" sorts by distance alone.
     static func applying(_ search: StationSearch, to merged: [MGeocodeMatch], near location: Coordinate?) -> [MGeocodeMatch] {
         var kept: [MGeocodeMatch]
+        let merged = search.country.map { code in merged.filter { $0.country?.uppercased() == code } } ?? merged
         if search.modes.isEmpty {
             kept = merged.filter { !isBusOnly($0) }
             if kept.isEmpty { kept = merged }

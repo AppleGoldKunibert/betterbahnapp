@@ -26,46 +26,83 @@ public struct VagonwebClient: Sendable {
 
     // MARK: Lookup
 
-    /// The scheduled composition of a DB train on `date`; nil if vagonweb has none for it.
+    /// vagonweb files a train under the country of the railway that registered it ("DB", "OBB", "SBB").
+    /// The countries to look under for a train of `category`, the likeliest first: Nightjets and
+    /// Euronights are ÖBB's, an IR is the SBB's, anything else is most often DB's.
+    static func countries(for category: String) -> [String] {
+        switch category.uppercased() {
+        case "NJ", "EN": ["OBB", "SBB", "DB"]
+        case "IR": ["SBB"]
+        default: ["DB", "OBB", "SBB"]
+        }
+    }
+
+    /// The categories the planned Wagenreihung is looked up for: DB's long-distance ones, which bahn.de
+    /// asks too, and the ones only vagonweb has (Nightjet, Euronight, the SBB's InterRegio).
+    static let plannedCategories: Set<String> = BahnDeClient.longDistanceCategories.union(["NJ", "EN", "IR"])
+
+    /// The scheduled composition of a train on `date`; nil if vagonweb has none for it.
     /// - Parameters:
     ///   - category: e.g. "ICE".
     ///   - number: e.g. "377".
-    public func composition(category: String, number: String, on date: Date) async throws -> VagonwebComposition? {
+    ///   - route: the train's stops from its first one up to the station asked for. vagonweb gives
+    ///     some trains one composition per section ("Zürich - Innsbruck", "Innsbruck - Wien"); the
+    ///     one for the section the station is in is taken. Without a route the first one is.
+    ///   - countries: where to look, in this order; the first with a composition wins.
+    public func composition(category: String, number: String, on date: Date, route: [String]? = nil,
+                            countries: [String]? = nil) async throws -> VagonwebComposition? {
         guard Int(number) != nil else { throw TransitError.invalidInput("Zugnummer ungültig.") }
-        let url = Self.trainURL(category: category, number: number, timetableYear: Self.timetableYear(of: date))
-        let compositions = try await compositions(at: url)
-        // A composition for the day if vagonweb has dated ones, else the one for the whole year.
-        return compositions.first { $0.validFrom != nil && $0.applies(on: date) }
-            ?? compositions.first { $0.validFrom == nil && $0.validUntil == nil }
+        for country in countries ?? Self.countries(for: category) {
+            let url = Self.trainURL(category: category, number: number, timetableYear: Self.timetableYear(of: date), country: country)
+            let found: [VagonwebComposition]
+            do {
+                found = try await compositions(at: url)
+            } catch TransitError.notFound {
+                continue
+            }
+            let compositions = found.filter { composition in
+                guard let route, let section = composition.section else { return true }
+                return section.covers(route: route)
+            }
+            // A composition for the day if vagonweb has dated ones, else the one for the whole year.
+            if let composition = compositions.first(where: { $0.validFrom != nil && $0.applies(on: date) })
+                ?? compositions.first(where: { $0.validFrom == nil && $0.validUntil == nil }) {
+                return composition
+            }
+        }
+        return nil
     }
 
     /// The train type ("ICE 4", "2× ICE 3" …) from the scheduled composition; nil if vagonweb has no
     /// composition or it isn't one of the ICE series.
     public func trainType(category: String, number: String, on date: Date) async throws -> TrainTypeLookup? {
-        guard let composition = try await composition(category: category, number: number, on: date) else { return nil }
+        // Only the ICE series are told apart, and those are DB's.
+        guard let composition = try await composition(category: category, number: number, on: date, countries: ["DB"]) else { return nil }
         let lookup = composition.trainType(category: category, number: number, date: BahnDeClient.berlinDay(date))
         return lookup.summary == nil ? nil : lookup
     }
 
     /// The planned Wagenreihung from the scheduled composition (no platform positions or sectors).
     public func coachSequence(category: String, number: String, on date: Date) async throws -> CoachSequence? {
-        guard let composition = try await composition(category: category, number: number, on: date) else { return nil }
+        guard let composition = try await composition(category: category, number: number, on: date, countries: ["DB"]) else { return nil }
         return composition.coachSequence(trainName: "\(category.uppercased()) \(number)")
     }
 
     /// The planned Wagenreihung for a long-distance train at a stop; nil for regional trains. vagonweb
     /// has the whole train as it leaves its first station, so it is turned round when the train
-    /// changed direction on the way (`reversals(at:route:in:)`).
+    /// changed direction on the way (`reversals(at:route:in:)`), and cut down to the vehicles of the
+    /// section the stop is in where the composition changes on the way (`restricted(to:)`).
     /// - Parameter route: the train's stops from its first one up to the request's station. Without
-    ///   it the direction stays unknown.
+    ///   it the direction stays unknown and the sections are not told apart.
     public func coachSequence(for request: BahnDeClient.FormationRequest, route: [String]? = nil) async throws -> CoachSequence? {
-        guard BahnDeClient.longDistanceCategories.contains(request.category.uppercased()),
-              let composition = try await composition(category: request.category, number: request.number, on: request.plannedDeparture)
+        guard Self.plannedCategories.contains(request.category.uppercased()),
+              var composition = try await composition(category: request.category, number: request.number, on: request.plannedDeparture, route: route)
         else { return nil }
+        if let route { composition = composition.restricted(to: route) }
         var sequence = composition.coachSequence(trainName: "\(request.category.uppercased()) \(request.number)")
         let candidates = composition.reversalStations + Self.terminusStations
         if let route, let reversals = Self.reversals(at: request.station.name, route: route, in: candidates) {
-            sequence = sequence.turned(after: reversals)
+            sequence = sequence.turned(after: reversals, startingReversed: composition.startsReversed)
             // vagonweb draws the front of the train first, which the diagram puts at the top.
             sequence.travelsTowardsPlatformEnd = false
         }
@@ -91,11 +128,13 @@ public struct VagonwebClient: Sendable {
     /// Station names reduced to compare vagonweb's with DB's and Transitous's: "Frankfurt(Main)Hbf",
     /// "Frankfurt (Main) Hauptbahnhof" and "Frankfurt (M) Hbf" all become "frankfurtmain".
     public static func stationKey(_ name: String) -> String {
+        // The canton the SBB adds to a name ("Buchs SG", "Buchs (SG)") isn't part of vagonweb's ("Buchs").
+        let name = name.replacing(#/\s+\(?[A-Z]{2}\)?$/#, with: "")
         var key = name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "de_DE"))
             .replacingOccurrences(of: "hauptbahnhof", with: "hbf")
             .replacingOccurrences(of: "(m)", with: "(main)")
         key = String(key.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) })
-        for suffix in ["hbf", "hb"] where key.hasSuffix(suffix) && key.count > suffix.count {
+        for suffix in ["hbf", "hb", "bahnhof"] where key.hasSuffix(suffix) && key.count > suffix.count {
             key.removeLast(suffix.count)
             break
         }
@@ -198,12 +237,13 @@ public struct VagonwebClient: Sendable {
 
     // MARK: Helpers
 
-    /// `https://www.vagonweb.cz/razeni/vlak.php?zeme=DB&kategorie=ICE&cislo=377&rok=2026&lang=en`.
+    /// `https://www.vagonweb.cz/razeni/vlak.php?zeme=DB&kategorie=ICE&cislo=377&rok=2026&lang=en`
+    /// (`zeme=OBB` for ÖBB's trains, `SBB` for the SBB's).
     /// English, so the page reads the same whatever language vagonweb would pick.
-    public static func trainURL(category: String, number: String, timetableYear: Int) -> URL {
+    public static func trainURL(category: String, number: String, timetableYear: Int, country: String = "DB") -> URL {
         var components = URLComponents(url: baseURL.appending(path: "razeni/vlak.php"), resolvingAgainstBaseURL: false)!
         components.queryItems = [
-            URLQueryItem(name: "zeme", value: "DB"),
+            URLQueryItem(name: "zeme", value: country),
             URLQueryItem(name: "kategorie", value: category.uppercased()),
             URLQueryItem(name: "cislo", value: number),
             URLQueryItem(name: "rok", value: String(timetableYear)),
@@ -260,7 +300,10 @@ extension VagonwebComposition {
                                               isRequestedTrain: true))
             for coach in unit {
                 let kind: CoachSequence.Coach.Kind =
-                    if !coach.hasSeats { baureihe == nil ? .locomotive : .powerCar }
+                    if coach.carCarrier { .other }
+                    else if coach.sleeper { .sleeper }
+                    else if coach.couchette { .couchette }
+                    else if !coach.hasSeats { baureihe == nil ? .locomotive : .powerCar }
                     else if coach.diningSeats != nil || coach.hasBar {
                         coach.firstClass || coach.secondClass ? .halfDiningCar : .diningCar
                     } else { .passenger }
