@@ -288,8 +288,12 @@ public final class CombinedProvider: TransitProvider {
         try await primary.trip(id: id)
     }
 
+    /// A DB train that its feed ends at the border comes with the trip carrying on there (see `TripContinuation.swift`).
     public func trip(id: String, source: DataSource) async throws -> Trip {
-        try await provider(for: source).trip(id: id)
+        let trip = try await provider(for: source).trip(id: id)
+        guard let transitous = primary as? TransitousProvider, trip.source == transitous.source,
+              TransitousProvider.mayEndAtBorder(trip) else { return trip }
+        return (try? await Self.withDeadline(.seconds(3)) { await transitous.joiningContinuation(of: trip) }) ?? trip
     }
 
     /// The run of a journey's leg. Transitous' trip IDs only last until the feed is next imported

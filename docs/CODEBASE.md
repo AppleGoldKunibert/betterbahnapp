@@ -330,6 +330,13 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   so one train's stops read alike. Same places as the Czech platforms, before them, so
   inserted Czech stops get theirs too; the journey view does both in its first step (`completingStopsAndPlatforms`),
   before the live refresh, which also waits for bahn.de.
+- `Transit/Transitous/TripContinuation.swift` – a DB train whose DELFI trip ends at a foreign stop (`mayEndAtBorder`; ICE 171
+  Hamburg-Altona → Děčín) gets the trip that carries on there under the same number (the Czech "RJ 171" to Praha, found on the
+  departures at that stop within 10 minutes) joined to it (`joining`): one stop at the border, arriving with the first trip and
+  leaving with the next, and the continuation's name when it is a long-distance brand of its own ("RJ 171", the first as
+  `alternateName`). `CombinedProvider.trip(id:source:)` does it (3 s deadline), so the train page and its reloads show the
+  whole run; the trip keeps its first ID. Journeys do the same with legs (`mergeThroughTrainLegs`). A Träwelling
+  check-in on such a run is still two statuses, one per Träwelling trip (`segments(for:)`).
 - `Transit/Timetables/` – official DB Timetables XML client (realtime overrides, messages), through the
   `bahnde-proxy` Worker, which holds the API key. The app only uses it where App Attest works. A train not
   found at a station's EVA is looked for at its other levels (`/station` `meta`, e.g. "Hamburg Hbf (S-Bahn)").

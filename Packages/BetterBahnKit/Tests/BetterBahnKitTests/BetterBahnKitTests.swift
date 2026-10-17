@@ -1239,6 +1239,78 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(merged.count == 2)
     }
 
+    /// ICE 171 Hamburg-Altona → Praha (2026-10-17): DB's trip ends at Děčín at 9:53, the Czech "RJ 171" leaves
+    /// there at 9:57 for Praha. The train's page shows one run, named as the Railjet.
+    @Test func joinsTheTripThatCarriesOnAtTheBorder() throws {
+        func date(_ value: String) -> Date { ISO8601DateFormatter().date(from: value)! }
+        func stop(_ id: String, _ name: String, arrival: String?, departure: String?, platform: String? = nil) -> Stopover {
+            Stopover(station: Station(id: id, name: name, coordinate: nil, evaNumber: nil, source: .transitous),
+                     arrival: arrival.map { TimeInfo(planned: date($0), actual: nil) },
+                     departure: departure.map { TimeInfo(planned: date($0), actual: nil) },
+                     arrivalPlatform: nil, departurePlatform: platform.map { PlatformInfo(planned: $0, actual: nil) }, cancelled: false)
+        }
+        let ice = Line(name: "ICE 171", number: "171", product: .highSpeed, operatorName: "DB Fernverkehr AG")
+        let rj = Line(name: "RJ 171", number: "171", product: .highSpeed, operatorName: "Ceske Drahy")
+        let first = Trip(id: "20261017_05:17_de-DELFI_3440687806", line: ice, direction: "Decin hl.n.", stopovers: [
+            stop("de-DELFI_de:02000:8002553", "Hamburg-Altona", arrival: nil, departure: "2026-10-17T03:17:00Z"),
+            stop("de-DELFI_de:11000:8011160", "Berlin Hbf", arrival: "2026-10-17T05:56:00Z", departure: "2026-10-17T05:59:00Z"),
+            stop("de-DELFI_000005400003", "Decin hl.n.", arrival: "2026-10-17T07:53:00Z", departure: nil),
+        ], cancelled: false, remarks: [], source: .transitous)
+        let next = Trip(id: "20261017_09:57_de-DELFI_3440674823", line: rj, direction: "Praha hl.n.", stopovers: [
+            stop("de-DELFI_000005400003", "Decin hl.n.", arrival: nil, departure: "2026-10-17T07:57:00Z", platform: "1"),
+            stop("de-DELFI_000005400007", "Usti nad Labem hl.n.", arrival: "2026-10-17T08:18:00Z", departure: "2026-10-17T08:20:00Z"),
+            stop("de-DELFI_000005400014", "Praha hl.n.", arrival: "2026-10-17T09:25:00Z", departure: nil),
+        ], cancelled: false, remarks: [], source: .transitous)
+
+        #expect(TransitousProvider.mayEndAtBorder(first))
+        // One ending at a German stop is whole already.
+        var german = first
+        german.stopovers = Array(first.stopovers.dropLast())
+        #expect(!TransitousProvider.mayEndAtBorder(german))
+
+        let joined = try #require(TransitousProvider.joining(first, with: next))
+        #expect(joined.id == first.id)
+        #expect(joined.stopovers.map(\.station.name) == ["Hamburg-Altona", "Berlin Hbf", "Decin hl.n.", "Usti nad Labem hl.n.", "Praha hl.n."])
+        // Děčín arrives with DB's trip and leaves with the Czech one.
+        let border = joined.stopovers[2]
+        #expect(border.arrival?.planned == date("2026-10-17T07:53:00Z"))
+        #expect(border.departure?.planned == date("2026-10-17T07:57:00Z"))
+        #expect(border.departurePlatform?.planned == "1")
+        #expect(joined.destination?.name == "Praha hl.n.")
+        #expect(joined.direction == "Praha hl.n.")
+        #expect(joined.line?.name == "RJ 171")
+        #expect(joined.line?.alternateName == "ICE 171")
+
+        // A trip that starts elsewhere is not the continuation.
+        let elsewhere = Trip(id: "x", line: rj, direction: nil, stopovers: Array(next.stopovers.dropFirst()), cancelled: false,
+                             remarks: [], source: .transitous)
+        #expect(TransitousProvider.joining(first, with: elsewhere) == nil)
+    }
+
+    /// Where the train carries on: the row of the same number leaving the border stop within ten minutes.
+    @Test func findsTheTripThatCarriesOnAtTheBorder() throws {
+        let json = """
+        {"stopTimes": [
+            {"place": {"name": "Decin hl.n.", "stopId": "de-DELFI_000005400003", "lat": 50.77, "lon": 14.2,
+                       "scheduledDeparture": "2026-10-17T07:57:00Z"},
+             "mode": "HIGHSPEED_RAIL", "headsign": "Praha hl.n.", "tripId": "rj171", "displayName": "RJ 171", "agencyName": "Ceske Drahy"},
+            {"place": {"name": "Decin hl.n.", "stopId": "de-DELFI_000005400003", "lat": 50.77, "lon": 14.2,
+                       "scheduledDeparture": "2026-10-17T09:57:00Z"},
+             "mode": "HIGHSPEED_RAIL", "headsign": "Praha hl.n.", "tripId": "rj171-later", "displayName": "RJ 171", "agencyName": "Ceske Drahy"},
+            {"place": {"name": "Decin hl.n.", "stopId": "de-DELFI_000005400003", "lat": 50.77, "lon": 14.2,
+                       "scheduledDeparture": "2026-10-17T07:58:00Z"},
+             "mode": "HIGHSPEED_RAIL", "headsign": "Wien Hbf", "tripId": "rj173", "displayName": "RJ 173", "agencyName": "Ceske Drahy"}
+        ]}
+        """
+        let stopTimes = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(json.utf8)).stopTimes
+        let arrival = ISO8601DateFormatter().date(from: "2026-10-17T07:53:00Z")!
+        let found = TransitousProvider.continuationCandidate(of: "ice171", number: "171", product: .highSpeed, arrivingAt: arrival, in: stopTimes)
+        #expect(found?.tripId == "rj171")
+        // Nothing carries on when the only RJ 171 leaves hours later.
+        #expect(TransitousProvider.continuationCandidate(of: "ice171", number: "171", product: .highSpeed, arrivingAt: arrival,
+                                                         in: Array(stopTimes[1...])) == nil)
+    }
+
     /// ICE 146 Berlin–Amsterdam at Berlin Hbf: DB's feed has it ending in Hengelo (with realtime),
     /// NS's feed starting in Berlin and ending in Amsterdam (without). Neither headsign goes beyond
     /// its own trip, but same number, time and track are the same train: one row, the live one.
