@@ -21,7 +21,7 @@ extension BahnExpertClient {
     }
 
     /// The run's stops as `JourneyStop`s with their planned times and platforms, so they can be laid
-    /// over a leg or trip like bahn.de's (`BahnDeClient.fillingMissingPlatforms`).
+    /// over a leg or trip like bahn.de's (`BahnDeClient.fillingMissingPlatforms`, by time alone: the names differ).
     static func journeyStops(from run: RunPlatforms) -> [JourneyStop] {
         run.stops.map { stop in
             func platform(_ event: RunPlatforms.Stop.Event?) -> PlatformInfo? {
@@ -104,7 +104,7 @@ extension BahnExpertClient {
     public func fillingMissingPlatforms(in leg: Leg) async -> Leg {
         guard BahnDeClient.lacksPlatforms(leg), let ref = Self.platformReference(for: leg.line) else { return leg }
         let stops = await ExpertPlatformsCache.shared.stops(category: ref.category, number: ref.number, at: leg.departure.planned, using: self)
-        return stops.isEmpty ? leg : BahnDeClient.fillingMissingPlatforms(in: leg, from: stops)
+        return stops.isEmpty ? leg : BahnDeClient.fillingMissingPlatforms(in: leg, from: stops, matchingByTimeAlone: true)
     }
 
     /// `stopovers` of a trip of `line` with the platforms they still lack from bahn.expert.
@@ -114,6 +114,6 @@ extension BahnExpertClient {
               let first = stopovers.lazy.compactMap({ $0.departure?.planned ?? $0.arrival?.planned }).first
         else { return stopovers }
         let stops = await ExpertPlatformsCache.shared.stops(category: ref.category, number: ref.number, at: first, using: self)
-        return stops.isEmpty ? stopovers : BahnDeClient.fillingMissingPlatforms(in: stopovers, from: stops)
+        return stops.isEmpty ? stopovers : BahnDeClient.fillingMissingPlatforms(in: stopovers, from: stops, matchingByTimeAlone: true)
     }
 }

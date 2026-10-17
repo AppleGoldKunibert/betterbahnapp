@@ -4412,12 +4412,14 @@ private final class TrainSearchProtocol: URLProtocol, @unchecked Sendable {
            "arrival": {"scheduledTime": "2026-10-17T09:43:00.000Z", "scheduledPlatform": "7", "platform": "7"},
            "departure": {"scheduledTime": "2026-10-17T10:20:00.000Z", "scheduledPlatform": "7", "platform": "8"}},
           {"stopPlace": {"evaNumber": "8100173", "name": "Wörgl Hbf"},
-           "arrival": {"scheduledTime": "2026-10-17T10:53:00.000Z", "scheduledPlatform": "1"}}
+           "arrival": {"scheduledTime": "2026-10-17T10:53:00.000Z", "scheduledPlatform": "1"}},
+          {"stopPlace": {"evaNumber": "8100028", "name": "Kirchberg in Tirol"},
+           "arrival": {"scheduledTime": "2026-10-17T11:11:00.000Z", "scheduledPlatform": "2"}}
         ]}
         """#
         let run = try JSONDecoding.decoder.decode(BahnExpertClient.RunPlatforms.self, from: Data(json.utf8))
         let stops = BahnExpertClient.journeyStops(from: run)
-        #expect(stops.count == 3)
+        #expect(stops.count == 4)
         #expect(stops[0].departurePlatform == nil)
         #expect(stops[1].arrivalPlatform?.best == "7" && stops[1].departurePlatform?.best == "8")
         // Planned only (bahn.expert has no live platform yet).
@@ -4434,13 +4436,22 @@ private final class TrainSearchProtocol: URLProtocol, @unchecked Sendable {
                          stopover("i", "Innsbruck Hbf", arrival: "2026-10-17T09:43:00Z", departure: "2026-10-17T10:20:00Z"),
                          // Platforms Transitous already has stay, whatever bahn.expert says.
                          stopover("w", "Wörgl Hbf", arrival: "2026-10-17T10:53:00Z", platform: "4")]
-        let filled = BahnDeClient.fillingMissingPlatforms(in: stopovers, from: stops)
+        let filled = BahnDeClient.fillingMissingPlatforms(in: stopovers, from: stops, matchingByTimeAlone: true)
         #expect(filled[0].departurePlatform?.best == nil)
         #expect(filled[1].arrivalPlatform?.best == "7" && filled[1].departurePlatform?.best == "8")
         #expect(filled[2].arrivalPlatform?.best == "4")
         // Another time at Innsbruck isn't this stop.
         let later = [stopover("i", "Innsbruck Hbf", arrival: "2026-10-17T12:43:00Z")]
-        #expect(BahnDeClient.fillingMissingPlatforms(in: later, from: stops)[0].arrivalPlatform?.best == nil)
+        #expect(BahnDeClient.fillingMissingPlatforms(in: later, from: stops, matchingByTimeAlone: true)[0].arrivalPlatform?.best == nil)
+
+        // Transitous calls stops differently ("Kirchberg i. T. Bahnhof", "Sargans Bahnhof"): the planned minute decides.
+        let renamed = [stopover("k", "Kirchberg i. T. Bahnhof", arrival: "2026-10-17T11:11:00Z"),
+                       stopover("w", "Wörgl Hauptbahnhof", arrival: "2026-10-17T10:53:00Z")]
+        let byTime = BahnDeClient.fillingMissingPlatforms(in: renamed, from: stops, matchingByTimeAlone: true)
+        #expect(byTime[0].arrivalPlatform?.best == "2" && byTime[1].arrivalPlatform?.best == "1")
+        // bahn.de's stops are matched by place as well: the other name doesn't fit there.
+        let byName = BahnDeClient.fillingMissingPlatforms(in: renamed, from: stops)
+        #expect(byName[0].arrivalPlatform?.best == nil)
     }
 
     @Test func asksBahnExpertForPlatformsOfOtherRailwaysTrainsOnly() {
