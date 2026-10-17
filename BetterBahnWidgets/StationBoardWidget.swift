@@ -93,11 +93,37 @@ struct StationBoardWidgetIntent: WidgetConfigurationIntent {
     @Parameter(title: "Bahnhof")
     var station: StationEntity?
 
+    /// The widget editor can't clear a station once picked, so the route is switched off with this.
+    @Parameter(title: "Nur zu einem Ziel", default: false)
+    var onlyToDestination: Bool
+
     @Parameter(title: "Ziel", description: "Nur Verbindungen zu diesem Bahnhof, z. B. zur Arbeit.")
     var destination: RouteDestinationEntity?
 
     @Parameter(title: "Verkehrsmittel", default: .all)
     var products: BoardWidgetProducts
+
+    static var parameterSummary: some ParameterSummary {
+        When(\.$onlyToDestination, .equalTo, true) {
+            Summary {
+                \.$station
+                \.$onlyToDestination
+                \.$destination
+                \.$products
+            }
+        } otherwise: {
+            Summary {
+                \.$station
+                \.$onlyToDestination
+                \.$products
+            }
+        }
+    }
+
+    /// The route's destination, when the route is on and one is picked.
+    var routeDestination: Station? {
+        onlyToDestination ? destination?.station : nil
+    }
 
     init() {}
 }
@@ -182,7 +208,7 @@ struct StationBoardProvider: AppIntentTimelineProvider {
 
     static func load(_ configuration: StationBoardWidgetIntent, now: Date) async -> StationBoardEntry {
         guard let station = configuration.station?.station else { return .empty(at: now) }
-        let destination = configuration.destination?.station
+        let destination = configuration.routeDestination
         let products = configuration.products.products
         let provider = TransitousProvider()
         do {
@@ -225,17 +251,19 @@ struct BoardWidgetView: View {
     let entry: StationBoardEntry
     @Environment(\.widgetFamily) private var family
 
-    private var rowLimit: Int {
+    /// Rows the family has room for; the Home Screen families try the first count and fall back to fewer
+    /// (`ViewThatFits`), since the widget's height differs between devices.
+    private var rowLimits: [Int] {
         switch family {
-        case .systemSmall: 3
-        case .systemLarge: 9
-        case .accessoryRectangular: 2
-        case .accessoryInline: 1
-        default: 4
+        case .systemSmall: [3, 2]
+        case .systemLarge: [10, 9, 8, 7]
+        case .accessoryRectangular: [2]
+        case .accessoryInline: [1]
+        default: [4, 3]
         }
     }
 
-    private var rows: [BoardWidgetRow] { BoardWidgetRows.visible(entry.rows, at: entry.date, limit: rowLimit) }
+    private var rows: [BoardWidgetRow] { BoardWidgetRows.visible(entry.rows, at: entry.date, limit: rowLimits[0]) }
 
     var body: some View {
         switch family {
@@ -256,14 +284,11 @@ struct BoardWidgetView: View {
                     Spacer(minLength: 0)
                     emptyMessage
                     Spacer(minLength: 0)
-                } else if family == .systemSmall {
-                    ForEach(rows) { row in
-                        SmallBoardRow(row: row, isRoute: entry.isRoute)
-                    }
-                    Spacer(minLength: 0)
                 } else {
-                    ForEach(rows) { row in
-                        WideBoardRow(row: row, isRoute: entry.isRoute)
+                    ViewThatFits(in: .vertical) {
+                        ForEach(rowLimits, id: \.self) { limit in
+                            rowList(Array(rows.prefix(limit)))
+                        }
                     }
                     Spacer(minLength: 0)
                 }
@@ -276,6 +301,18 @@ struct BoardWidgetView: View {
                 Text("Bahnhof wählen").font(.subheadline.weight(.semibold))
                 Text("Widget gedrückt halten und bearbeiten.").font(.caption2).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+            }
+        }
+    }
+
+    private func rowList(_ rows: [BoardWidgetRow]) -> some View {
+        VStack(alignment: .leading, spacing: family == .systemSmall ? 4 : 6) {
+            ForEach(rows) { row in
+                if family == .systemSmall {
+                    SmallBoardRow(row: row, isRoute: entry.isRoute)
+                } else {
+                    WideBoardRow(row: row, isRoute: entry.isRoute)
+                }
             }
         }
     }
@@ -393,16 +430,17 @@ private struct WideBoardRow: View {
             TrainBadge(name: row.lineName, product: row.product, nightTrain: row.isNightTrain)
             if isRoute, let arrival = row.arrival {
                 HStack(spacing: 4) {
-                    Text("an \(arrival.best.formatted(date: .omitted, time: .shortened))").monospacedDigit()
-                    Text(Self.transfersText(row.transfers)).foregroundStyle(.secondary)
+                    Text("an \(arrival.best.formatted(date: .omitted, time: .shortened))").monospacedDigit().fixedSize()
+                    Text(Self.transfersText(row.transfers)).foregroundStyle(.secondary).lineLimit(1)
                 }
-                .font(.caption.weight(.semibold)).lineLimit(1)
+                .font(.caption.weight(.semibold))
             } else {
                 Text(row.destination).font(.caption.weight(.semibold)).lineLimit(1)
             }
             Spacer(minLength: 2)
             if let platform = row.platform {
-                Text("Gl. \(platform)").font(.caption.weight(.semibold)).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
+                Text("Gl. \(platform)").font(.caption.weight(.semibold)).foregroundStyle(.secondary).monospacedDigit()
+                    .lineLimit(1).fixedSize()
             }
         }
     }
