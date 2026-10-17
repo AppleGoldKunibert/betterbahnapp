@@ -115,9 +115,9 @@ import Testing
         #expect(YearReview.countryCode(of: stop("Irgendwo", id: "12345", 0, 0)) == nil)
     }
 
-    @Test func featuredYearIsTheRunningOneOnlyInDecember() {
+    @Test func featuredYearInDecemberAndJanuary() {
         #expect(YearReview.featuredYear(on: date("2026-12-10T12:00:00Z"), calendar: calendar) == 2026)
         #expect(YearReview.featuredYear(on: date("2027-01-20T12:00:00Z"), calendar: calendar) == 2026)
-        #expect(YearReview.featuredYear(on: date("2026-10-17T12:00:00Z"), calendar: calendar) == 2025)
+        #expect(YearReview.featuredYear(on: date("2026-10-17T12:00:00Z"), calendar: calendar) == nil)
     }
 }

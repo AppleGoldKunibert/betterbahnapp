@@ -156,12 +156,16 @@ public struct YearReview: Sendable, Hashable {
         Set(legs.map { calendar.component(.year, from: $0.departure.planned) }).sorted(by: >)
     }
 
-    /// The year the review is offered for on `date`: the running one in December, the last full
-    /// year otherwise.
-    public static func featuredYear(on date: Date, calendar: Calendar = .current) -> Int {
+    /// The year the review is offered for on `date`: the running one in December, the one just
+    /// ended in January, nil otherwise.
+    public static func featuredYear(on date: Date, calendar: Calendar = .current) -> Int? {
         let components = calendar.dateComponents([.year, .month], from: date)
-        let year = components.year ?? 0
-        return components.month == 12 ? year : year - 1
+        guard let year = components.year else { return nil }
+        switch components.month {
+        case 12: return year
+        case 1: return year - 1
+        default: return nil
+        }
     }
 
     // MARK: Helpers
