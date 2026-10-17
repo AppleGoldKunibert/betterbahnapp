@@ -113,10 +113,28 @@ public struct TrainCandidate: Sendable, Hashable, Identifiable {
     public var exitIndex: Int?
     /// The name or number matches in full, not only its beginning.
     public var isExact: Bool
+    /// Set when `trip` is one lap of a looping train's whole day (`Trip.lap`), to add the laps around it.
+    var laps: Laps?
+
+    struct Laps: Sendable, Hashable {
+        var block: Trip
+        var station: Station
+        var time: Date
+        var before = 0
+        var after = 0
+    }
 
     public var id: String { trip.id + "|\(boardingIndex ?? -1)" }
     public var boarding: Stopover? { boardingIndex.map { trip.stopovers[$0] } }
     public var exit: Stopover? { exitIndex.map { trip.stopovers[$0] } }
+
+    /// The same run with `before` / `after` more laps of a looping train (see `Trip.hasPreviousLap` /
+    /// `hasNextLap`); nil when `trip` isn't one lap of it.
+    public func addingLaps(before: Int = 0, after: Int = 0, target: Station) -> TrainCandidate? {
+        guard let laps else { return nil }
+        return TrainCandidateFinder.candidate(laps.block, boardingAt: laps.station, near: laps.time, target: target,
+                                              exact: isExact, extraBefore: laps.before + before, extraAfter: laps.after + after)
+    }
 
     public init(trip: Trip, boardingIndex: Int?, exitIndex: Int?, isExact: Bool) {
         self.trip = trip
@@ -303,6 +321,31 @@ public actor TrainCandidateFinder {
         }.map(\.element)
     }
 
+    /// How long before the traveller is there a train may leave and still be offered, when the route can
+    /// start earlier for it (from the search's origin), and how many such trains.
+    public static let earlierWindow: TimeInterval = 30 * 60
+    public static let maxEarlier = 2
+
+    /// The trains that can be caught: leaving at most 2 minutes before the traveller is at their boarding
+    /// station (`departure` gives the train's departure and that time), with `allowsEarlier` also the
+    /// `maxEarlier` latest of the `earlierWindow` before, as the route then starts earlier. Ones without
+    /// a known departure stay.
+    public static func catchable<T>(_ trains: [T], allowsEarlier: Bool,
+                                    departure: (T) -> (train: Date, reached: Date)?) -> [T] {
+        var kept = Set<Int>()
+        var earlier: [(index: Int, time: Date)] = []
+        for (index, train) in trains.enumerated() {
+            guard let times = departure(train) else { kept.insert(index); continue }
+            if times.train >= times.reached.addingTimeInterval(-2 * 60) {
+                kept.insert(index)
+            } else if allowsEarlier, times.train >= times.reached.addingTimeInterval(-earlierWindow) {
+                earlier.append((index, times.train))
+            }
+        }
+        for train in earlier.sorted(by: { $0.time > $1.time }).prefix(maxEarlier) { kept.insert(train.index) }
+        return trains.indices.filter(kept.contains).map { trains[$0] }
+    }
+
     /// The boards' trains that aren't runs of `number` – those come from the train search already.
     /// Only the run's own number counts: an RE 3 running as 3300 is no run of "3".
     public static func boardExtras(_ route: [TrainCandidate], besides number: Int) -> [TrainCandidate] {
@@ -347,8 +390,14 @@ public actor TrainCandidateFinder {
         return trip.stopovers[(boardingIndex + 1)...].compactMap { $0.station.coordinate?.distance(to: goal) }.min()
     }
 
-    /// Where `trip` is boarded at `station` and left at `target`, when it calls there afterwards.
-    static func candidate(_ trip: Trip, boardingAt station: Station?, near time: Date?, target: Station, exact: Bool) -> TrainCandidate {
+    /// Where `trip` is boarded at `station` and left at `target`, when it calls there afterwards. A ring
+    /// line's trip (S41/S42) is the vehicle's whole day: only the lap from the boarding stop is kept.
+    static func candidate(_ block: Trip, boardingAt station: Station?, near time: Date?, target: Station, exact: Bool,
+                          extraBefore: Int = 0, extraAfter: Int = 0) -> TrainCandidate {
+        let lap = station.flatMap { station in
+            time.flatMap { block.lap(at: station, near: $0, extraBefore: extraBefore, extraAfter: extraAfter) }
+        }
+        let trip = lap ?? block
         let boarding = station.flatMap { station in
             trip.stopovers.indices.filter { trip.stopovers[$0].station.isSamePlace(as: station) && trip.stopovers[$0].departure != nil }
                 .min { a, b in
@@ -360,7 +409,11 @@ public actor TrainCandidateFinder {
         let exit = boarding.flatMap { index in
             trip.stopovers[(index + 1)...].firstIndex { $0.station.isSamePlace(as: target) && $0.arrival != nil && $0.access.allowsAlighting }
         }
-        return TrainCandidate(trip: trip, boardingIndex: boarding, exitIndex: exit, isExact: exact)
+        var candidate = TrainCandidate(trip: trip, boardingIndex: boarding, exitIndex: exit, isExact: exact)
+        if lap != nil, let station, let time {
+            candidate.laps = .init(block: block, station: station, time: time, before: extraBefore, after: extraAfter)
+        }
+        return candidate
     }
 
     /// The first `maxStations` of `stations`, each place once.
