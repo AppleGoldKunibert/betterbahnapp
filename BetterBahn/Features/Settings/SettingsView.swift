@@ -78,6 +78,22 @@ struct SettingsView: View {
                     .onChange(of: settings.connectionWarnings) { _, enabled in
                         if enabled { Task { await ConnectionNotifier.requestAuthorization() } }
                     }
+                    Toggle(isOn: $settings.exitReminders) {
+                        IconLabel(title: "Ans Aussteigen erinnern", systemImage: "bell.badge.fill", color: .red)
+                    }
+                    .tint(.brand)
+                    .onChange(of: settings.exitReminders) { _, enabled in
+                        if enabled { Task { await ConnectionNotifier.requestAuthorization() } }
+                        model.scheduleExitReminderSync()
+                    }
+                    if settings.exitReminders {
+                        Picker(selection: $settings.exitReminderLead) {
+                            ForEach(ExitReminderLead.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                        } label: {
+                            IconLabel(title: "Erinnerung", systemImage: "clock.fill", color: .red)
+                        }
+                        .onChange(of: settings.exitReminderLead) { model.scheduleExitReminderSync() }
+                    }
                     Toggle(isOn: $settings.liveActivitiesEnabled) {
                         IconLabel(title: "Live-Aktivitäten", systemImage: "bolt.badge.clock.fill", color: .indigo)
                     }
@@ -101,8 +117,8 @@ struct SettingsView: View {
                     Text("Meine Reisen")
                 } footer: {
                     Text(settings.liveActivitiesEnabled
-                         ? "Wir sagen dir Bescheid bei Ausfällen, Gleiswechseln und verpassten Anschlüssen. Über unseren Server zeigt die Live-Aktivität auch bei geschlossener App aktuelle Zeiten und Gleise. Er bekommt dafür deine Reise bis zur Ankunft."
-                         : "Wir sagen dir Bescheid bei Ausfällen, Gleiswechseln und verpassten Anschlüssen.")
+                         ? "Wir sagen dir Bescheid bei Ausfällen, Gleiswechseln und verpassten Anschlüssen – und kurz bevor du aussteigen musst. Über unseren Server zeigt die Live-Aktivität auch bei geschlossener App aktuelle Zeiten und Gleise. Er bekommt dafür deine Reise bis zur Ankunft."
+                         : "Wir sagen dir Bescheid bei Ausfällen, Gleiswechseln und verpassten Anschlüssen – und kurz bevor du aussteigen musst.")
                 }
 
                 Section {

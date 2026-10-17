@@ -34,6 +34,7 @@ final class AppModel {
             Storage.saveInBackground(savedJourneys, key: "savedJourneys")
             savedJourneysCloud.localChange(from: oldValue, to: savedJourneys)
             syncLiveActivity()
+            scheduleExitReminderSync()
         }
     }
     /// Tickets fetched from bahn.de, kept on this device only (see `TicketStore`).
@@ -51,6 +52,10 @@ final class AppModel {
     /// Laps of looping trains (Ringbahn) loaded by "Vorherige / Nächste Runde laden", kept on disk; unsaved
     /// trips forget them after 15 minutes without a look (see `LoadedLaps`).
     @ObservationIgnored private var loadedLaps = LoadedLaps()
+    /// What DB decided for transfers at the last refreshes (by the departing leg's `id`), for the exit reminders.
+    @ObservationIgnored var transferDispositions: [String: TransferDisposition] = [:]
+    @ObservationIgnored var exitReminderSync: Task<Void, Never>?
+    @ObservationIgnored var exitReminderGeneration = 0
     /// Saved journey to open on the Verbindungen tab (set when the Live Activity is tapped);
     /// `ConnectionsView` pushes it and clears this.
     var journeyToOpen: SavedJourney?
@@ -601,7 +606,7 @@ final class AppModel {
     /// can be picked up again when the route is re-planned from an earlier exit.
     func save(_ journey: Journey, search: ConnectionSearch? = nil) {
         guard !isSaved(journey) else { return }
-        if settings.connectionWarnings { Task { await ConnectionNotifier.requestAuthorization() } }
+        if settings.connectionWarnings || settings.exitReminders { Task { await ConnectionNotifier.requestAuthorization() } }
         // One assignment, so the list is persisted and synced once rather than twice.
         var updated = savedJourneys
         updated.append(SavedJourney(journey: journey, search: search))
@@ -1084,6 +1089,10 @@ final class AppModel {
         var updated = savedJourneys[index]
         let previous = updated.journey
         updated.journey = refreshed
+        // DB's dispatchers decided whether a connecting train waits (from bahn.expert); also named in the exit reminders.
+        let dispositions = settings.connectionWarnings || settings.exitReminders
+            ? await (provider.bahnExpert?.dispositions(in: refreshed) ?? []) : []
+        for update in dispositions { transferDispositions[update.departing.id] = update.disposition }
         if settings.connectionWarnings {
             let known = Set(updated.notifiedIssues ?? [])
             let newIssues = refreshed.connectionIssues().filter { !known.contains($0.id) }
@@ -1103,8 +1112,7 @@ final class AppModel {
             for change in newPlatforms {
                 await ConnectionNotifier.notify(change, journey: refreshed)
             }
-            // DB's dispatchers decided whether a connecting train waits (from bahn.expert).
-            let newDispositions = await (provider.bahnExpert?.dispositions(in: refreshed) ?? [])
+            let newDispositions = dispositions
                 .filter { $0.notificationID.map { !known.contains($0) } ?? false }
             for update in newDispositions {
                 await ConnectionNotifier.notify(update, journey: refreshed)
@@ -1115,6 +1123,7 @@ final class AppModel {
         // The notifications above await too, so check again before storing.
         guard let storeIndex = stillSavedIndex(of: entry) else { return }
         if updated != savedJourneys[storeIndex] { savedJourneys[storeIndex] = updated }
+        await scheduleExitReminderSync(after: .zero).value
         await notifyPassengerRights(for: entry.id)
     }
 
@@ -1345,6 +1354,8 @@ nonisolated struct SavedJourney: Codable, Hashable, Identifiable {
     /// The Fahrgastrechte claim seen when the journey arrived (#311), kept so it stays after the live
     /// data is gone (optional so older saved data still decodes).
     var recordedClaim: PassengerRightsClaim?
+    /// The exit reminders (#313) are switched off for this journey (optional so older saved data still decodes).
+    var exitRemindersOff: Bool?
 
     var issues: [ConnectionIssue] { journey.currentIssues() }
 
@@ -1462,6 +1473,19 @@ final class AppSettings {
     var connectionWarnings: Bool {
         didSet {
             UserDefaults.standard.set(connectionWarnings, forKey: "connectionWarnings")
+            uploadToCloud()
+        }
+    }
+    /// A notification shortly before arriving where the user gets off (#313); saved journeys can opt out.
+    var exitReminders: Bool {
+        didSet {
+            UserDefaults.standard.set(exitReminders, forKey: "exitReminders")
+            uploadToCloud()
+        }
+    }
+    var exitReminderLead: ExitReminderLead {
+        didSet {
+            UserDefaults.standard.set(exitReminderLead.rawValue, forKey: "exitReminderLead")
             uploadToCloud()
         }
     }
@@ -1615,6 +1639,8 @@ final class AppSettings {
         lastTraewellingSync = defaults.object(forKey: "lastTraewellingSync") as? Date
         traewellingImportNextPage = defaults.object(forKey: "traewellingImportNextPage") as? Int
         connectionWarnings = defaults.object(forKey: "connectionWarnings") as? Bool ?? true
+        exitReminders = defaults.object(forKey: "exitReminders") as? Bool ?? true
+        exitReminderLead = ExitReminderLead(rawValue: defaults.integer(forKey: "exitReminderLead")) ?? .five
         quickTags = Storage.load(key: "quickTags") ?? QuickTag.defaults
         trainSearchKinds = defaults.stringArray(forKey: "trainSearchKinds").map { Set($0.compactMap(TrainSearchKind.init)) }
             ?? TrainSearchKind.defaults
@@ -1644,6 +1670,8 @@ final class AppSettings {
         var expertRil100: Bool?
         var trainSearchKinds: [TrainSearchKind]?
         var trainSearchCountries: [String]?
+        var exitReminders: Bool?
+        var exitReminderLead: ExitReminderLead?
         var liveActivityServerUpdates: Bool?
     }
 
@@ -1660,7 +1688,8 @@ final class AppSettings {
         liveActivitiesEnabled: true, expertMode: false, expertTraewelling: false, expertEditJourney: false,
         expertTrainChoice: false, expertIgnoreBoardingRules: false, expertRil100: false,
         trainSearchKinds: TrainSearchKind.defaults.sorted(by: { $0.rawValue < $1.rawValue }),
-        trainSearchCountries: TrainSearchCountry.defaults.sorted(), liveActivityServerUpdates: true)
+        trainSearchCountries: TrainSearchCountry.defaults.sorted(), exitReminders: true, exitReminderLead: .five,
+        liveActivityServerUpdates: true)
 
     @ObservationIgnored private var isApplyingCloudValue = false
 
@@ -1673,7 +1702,8 @@ final class AppSettings {
                    expertTrainChoice: expertTrainChoice, expertIgnoreBoardingRules: expertIgnoreBoardingRules,
                    expertRil100: expertRil100,
                    trainSearchKinds: trainSearchKinds.sorted(by: { $0.rawValue < $1.rawValue }),
-                   trainSearchCountries: trainSearchCountries.sorted(), liveActivityServerUpdates: liveActivityServerUpdates)
+                   trainSearchCountries: trainSearchCountries.sorted(), exitReminders: exitReminders,
+                   exitReminderLead: exitReminderLead, liveActivityServerUpdates: liveActivityServerUpdates)
     }
 
     /// When the settings were last changed on this device or taken over from iCloud. Before
@@ -1722,6 +1752,8 @@ final class AppSettings {
         expertRil100 = value.expertRil100 ?? expertRil100
         trainSearchKinds = value.trainSearchKinds.map(Set.init) ?? trainSearchKinds
         trainSearchCountries = value.trainSearchCountries.map(Set.init) ?? trainSearchCountries
+        exitReminders = value.exitReminders ?? exitReminders
+        exitReminderLead = value.exitReminderLead ?? exitReminderLead
         liveActivityServerUpdates = value.liveActivityServerUpdates ?? liveActivityServerUpdates
     }
 }
