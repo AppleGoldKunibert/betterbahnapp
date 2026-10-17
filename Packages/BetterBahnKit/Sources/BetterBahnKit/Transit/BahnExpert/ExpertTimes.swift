@@ -23,6 +23,13 @@ public struct ExpertTimes: Sendable, Hashable {
     func actual(eva: String, planned: Date, side: Side) -> Date? {
         entries.first { $0.eva == eva && $0.side == side && abs($0.planned.timeIntervalSince(planned)) < 60 }?.actual
     }
+
+    /// The live time for `side` of the stop planned at `planned` (±1 min), by time alone: for a stop whose feed numbers
+    /// it differently from bahn.expert. Only when exactly one stop of the run is planned then.
+    func actual(planned: Date, side: Side) -> Date? {
+        let found = entries.filter { $0.side == side && abs($0.planned.timeIntervalSince(planned)) < 60 }
+        return found.count == 1 ? found[0].actual : nil
+    }
 }
 
 extension BahnExpertClient {
@@ -76,5 +83,38 @@ actor ExpertTimesCache {
         // A failed answer is remembered as well, so a bahn.expert outage isn't asked again on every refresh.
         entries[key] = Entry(date: now, times: times)
         return times
+    }
+}
+
+extension BahnExpertClient {
+    /// Whether `stop` is in Czechia and has a time without a live one: Transitous has no realtime from the Czech
+    /// railways, so DELFI's trip of the RJ 171 ends up without any past Děčín.
+    static func lacksCzechLiveTime(_ stop: Stopover) -> Bool {
+        TransitousProvider.isCzechStop(stop.station)
+            && ((stop.arrival != nil && stop.arrival?.actual == nil) || (stop.departure != nil && stop.departure?.actual == nil))
+    }
+
+    /// `stopovers` of a trip of `line` with bahn.expert's live times (DB gets them from the Czech railways) at the
+    /// Czech stops that have none; unchanged without such a stop or an answer from bahn.expert.
+    public func fillingCzechLiveTimes(in stopovers: [Stopover], line: Line?) async -> [Stopover] {
+        guard stopovers.contains(where: Self.lacksCzechLiveTime), let line, let number = line.dispatchNumber.flatMap({ Int($0) }),
+              let first = stopovers.lazy.compactMap({ $0.departure?.planned ?? $0.arrival?.planned }).first,
+              let times = await ExpertTimesCache.shared.times(category: TimetablesClient.category(from: line.name), number: number,
+                                                              day: BahnDeClient.berlinDay(first), using: self)
+        else { return stopovers }
+        return Self.fillingCzechLiveTimes(in: stopovers, from: times)
+    }
+
+    static func fillingCzechLiveTimes(in stopovers: [Stopover], from times: ExpertTimes) -> [Stopover] {
+        var stopovers = stopovers
+        for index in stopovers.indices where lacksCzechLiveTime(stopovers[index]) {
+            if let time = stopovers[index].arrival, time.actual == nil, let actual = times.actual(planned: time.planned, side: .arrival) {
+                stopovers[index].arrival?.actual = actual
+            }
+            if let time = stopovers[index].departure, time.actual == nil, let actual = times.actual(planned: time.planned, side: .departure) {
+                stopovers[index].departure?.actual = actual
+            }
+        }
+        return stopovers
     }
 }

@@ -203,7 +203,8 @@ in `project.pbxproj`: new files join their target automatically.
   brand ("RJ 171", the first as `alternateName`). Done in `CombinedProvider.trip(id:source:)` (3 s deadline), so the train
   page and reloads show the whole run; journeys do the same with legs (`mergeThroughTrainLegs`). A Träwelling check-in on
   such a run is still two statuses (`segments(for:)`). `TrainNumberSearch.named(after:)` gives a run found by number
-  DB's name from the search result.
+  DB's name from the search result. `CombinedProvider.trip(id:source:)` also fills a trip's Czech stops: CZPTT's planned
+  platforms (`fillingCzechPlatforms`) and bahn.expert's live times (`fillingCzechLiveTimes`; Transitous has none there).
 - `Transit/BahnDe/` – bahn.de web API only via `Server/bahnde-proxy` (`BahnDeProxy`, #342; URLs built on the Worker's
   `baseURL` and mapped onto it; endpoints as Travel::Status::DE::DBRIS): station-search fallback, `TrainModel`,
   `TrainsetNames`, `CoachSequence` (coaches, classes, amenities, sectors, direction; RE/RB via `sequenceReference`),

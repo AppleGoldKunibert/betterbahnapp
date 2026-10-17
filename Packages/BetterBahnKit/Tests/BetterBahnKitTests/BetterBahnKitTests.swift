@@ -1287,6 +1287,48 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(TransitousProvider.joining(first, with: elsewhere) == nil)
     }
 
+    /// RJ 171 (2026-10-17): DB's data has the delay in Czechia (Děčín +11, Praha +10), Transitous' trip of the Czech
+    /// railways has no live time at all. bahn.expert's fills the Czech stops, and only those.
+    @Test func fillsCzechLiveTimesFromBahnExpert() {
+        func date(_ value: String) -> Date { ISO8601DateFormatter().date(from: value)! }
+        func time(_ value: String, actual: String? = nil) -> TimeInfo { TimeInfo(planned: date(value), actual: actual.map(date)) }
+        func stop(_ id: String, arrival: TimeInfo?, departure: TimeInfo?) -> Stopover {
+            Stopover(station: Station(id: id, name: id, coordinate: nil, evaNumber: nil, source: .transitous),
+                     arrival: arrival, departure: departure, arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+        }
+        let stops = [
+            stop("de-DELFI_de:14612:8010022", arrival: time("2026-10-17T07:35:00Z"), departure: time("2026-10-17T07:37:00Z")),
+            stop("de-DELFI_000005400003", arrival: time("2026-10-17T07:53:00Z"), departure: time("2026-10-17T07:57:00Z")),
+            stop("de-DELFI_000005400019", arrival: time("2026-10-17T08:11:00Z"), departure: time("2026-10-17T08:13:00Z")),
+            stop("de-DELFI_000005400014", arrival: time("2026-10-17T09:25:00Z", actual: "2026-10-17T09:31:00Z"), departure: nil),
+        ]
+        func entry(_ eva: String, _ planned: String, _ actual: String, _ side: ExpertTimes.Side) -> ExpertTimes.Entry {
+            .init(eva: eva, planned: date(planned), actual: date(actual), side: side)
+        }
+        let times = ExpertTimes(entries: [
+            entry("8010022", "2026-10-17T07:35:00Z", "2026-10-17T07:47:00Z", .arrival),
+            entry("5400003", "2026-10-17T07:53:00Z", "2026-10-17T08:04:00Z", .arrival),
+            entry("5400003", "2026-10-17T07:57:00Z", "2026-10-17T08:07:00Z", .departure),
+            entry("5400019", "2026-10-17T08:11:00Z", "2026-10-17T08:21:00Z", .arrival),
+            entry("5400019", "2026-10-17T08:13:00Z", "2026-10-17T08:23:00Z", .departure),
+            entry("5400014", "2026-10-17T09:25:00Z", "2026-10-17T09:35:00Z", .arrival),
+        ])
+
+        let filled = BahnExpertClient.fillingCzechLiveTimes(in: stops, from: times)
+        // Czechia gets DB's times; a German stop is left to the sources that know it.
+        #expect(filled[0].arrival?.actual == nil)
+        #expect(filled[1].arrival?.actual == date("2026-10-17T08:04:00Z"))
+        #expect(filled[1].departure?.actual == date("2026-10-17T08:07:00Z"))
+        #expect(filled[2].departure?.actual == date("2026-10-17T08:23:00Z"))
+        // A live time the stop has stays.
+        #expect(filled[3].arrival?.actual == date("2026-10-17T09:31:00Z"))
+        // Two stops at one time on a side can't be told apart by time alone.
+        let twice = ExpertTimes(entries: [
+            entry("1", "2026-10-17T07:53:00Z", "2026-10-17T08:04:00Z", .arrival), entry("2", "2026-10-17T07:53:00Z", "2026-10-17T08:09:00Z", .arrival),
+        ])
+        #expect(BahnExpertClient.fillingCzechLiveTimes(in: stops, from: twice)[1].arrival?.actual == nil)
+    }
+
     /// Where the train carries on: the row of the same number leaving the border stop within ten minutes.
     @Test func findsTheTripThatCarriesOnAtTheBorder() throws {
         let json = """

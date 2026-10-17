@@ -288,12 +288,23 @@ public final class CombinedProvider: TransitProvider {
         try await primary.trip(id: id)
     }
 
-    /// A DB train that its feed ends at the border comes with the trip carrying on there (see `TripContinuation.swift`).
+    /// A DB train that its feed ends at the border comes with the trip carrying on there (see `TripContinuation.swift`),
+    /// and a train through Czechia with the platforms (CZPTT's, `CzechPlatforms.swift`) and live times (bahn.expert's) its
+    /// feed lacks there.
     public func trip(id: String, source: DataSource) async throws -> Trip {
-        let trip = try await provider(for: source).trip(id: id)
-        guard let transitous = primary as? TransitousProvider, trip.source == transitous.source,
-              TransitousProvider.mayEndAtBorder(trip) else { return trip }
-        return (try? await Self.withDeadline(.seconds(3)) { await transitous.joiningContinuation(of: trip) }) ?? trip
+        var trip = try await provider(for: source).trip(id: id)
+        guard let transitous = primary as? TransitousProvider, trip.source == transitous.source else { return trip }
+        if TransitousProvider.mayEndAtBorder(trip) {
+            let whole = trip
+            trip = (try? await Self.withDeadline(.seconds(3)) { await transitous.joiningContinuation(of: whole) }) ?? whole
+        }
+        guard trip.stopovers.contains(where: { TransitousProvider.isCzechStop($0.station) }) else { return trip }
+        let (whole, expert) = (trip, bahnExpert)
+        return (try? await Self.withDeadline(.seconds(4)) {
+            var trip = await transitous.fillingCzechPlatforms(in: whole)
+            if let expert { trip.stopovers = await expert.fillingCzechLiveTimes(in: trip.stopovers, line: trip.line) }
+            return trip
+        }) ?? whole
     }
 
     /// The run of a journey's leg. Transitous' trip IDs only last until the feed is next imported
