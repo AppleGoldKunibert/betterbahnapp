@@ -101,9 +101,8 @@ struct ConnectionsView: View {
     @State private var suggestionsShown = false
     @State private var path: [ConnectionsRoute] = []
     @State private var swapRotation = 0.0
-    /// The year the review banner offers (#319), and the last one closed or opened from it.
+    /// The year the review banner offers (#319); nil without any rides.
     @State private var reviewBannerYear: Int?
-    @AppStorage("dismissedYearReview") private var dismissedReviewYear = 0
 
     private static let startLegID = UUID()
     private static let productsRowID = "productsRow"
@@ -126,11 +125,9 @@ struct ConnectionsView: View {
                         searchButton
                         AddTicketButton()
                     }
-                    if let year = reviewBannerYear, year != dismissedReviewYear {
-                        YearReviewBanner(year: year) {
-                            withAnimation(.snappy) { dismissedReviewYear = year }
-                        }
-                        .transition(.fold)
+                    if let year = reviewBannerYear {
+                        YearReviewBanner(year: year)
+                            .transition(.fold)
                     }
                     UpcomingTripsSection()
                     if !model.recentSearches.isEmpty {

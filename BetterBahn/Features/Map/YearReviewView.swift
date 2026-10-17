@@ -2,8 +2,8 @@ import BetterBahnKit
 import SwiftUI
 
 /// The year in review ("Jahresrückblick", #319): one fact per card, swiped through like a story,
-/// each card shareable as an image. Opened only from the banner on the Verbindungen tab (December and
-/// January); earlier years are picked in the view. Everything is computed on the device.
+/// each card shareable as an image. Opened only from the banner on the Verbindungen tab, which shows
+/// all year; other years are picked in the view. Everything is computed on the device.
 struct YearReviewView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -402,42 +402,38 @@ private struct YearReviewHeatmap: View {
 
 // MARK: - Banner
 
-/// Offers the review on the Verbindungen tab in December (the running year) and January (the
-/// year just ended), until it's opened or closed.
+/// Offers the review on the Verbindungen tab all year: the running year in December, the last full
+/// year otherwise (see `AppModel.featuredYearReview`).
 struct YearReviewBanner: View {
     let year: Int
-    let onClose: () -> Void
     @State private var showsReview = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Button {
-                showsReview = true
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "sparkles")
-                        .font(.title2.weight(.semibold))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Dein Bahnjahr \(String(year))").font(.headline)
-                        Text("Kilometer, Lieblingszüge und mehr im Jahresrückblick.")
-                            .font(.subheadline)
-                            .opacity(0.85)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        Button {
+            showsReview = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "sparkles")
+                    .font(.title2.weight(.semibold))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Dein Bahnjahr \(String(year))").font(.headline)
+                    Text("Kilometer, Lieblingszüge und mehr im Jahresrückblick.")
+                        .font(.subheadline)
+                        .opacity(0.85)
                 }
-                .contentShape(.rect)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.right")
+                    .font(.subheadline.weight(.bold))
+                    .opacity(0.8)
             }
-            .buttonStyle(.plain)
-            Button("Ausblenden", systemImage: "xmark", action: onClose)
-                .labelStyle(.iconOnly)
-                .font(.subheadline.weight(.bold))
-                .buttonStyle(.plain)
+            .foregroundStyle(.white)
+            .padding(16)
+            .background(LinearGradient(colors: [.brand, .brandDeep], startPoint: .topLeading, endPoint: .bottomTrailing),
+                        in: .rect(cornerRadius: 22, style: .continuous))
+            .contentShape(.rect)
         }
-        .foregroundStyle(.white)
-        .padding(16)
-        .background(LinearGradient(colors: [.brand, .brandDeep], startPoint: .topLeading, endPoint: .bottomTrailing),
-                    in: .rect(cornerRadius: 22, style: .continuous))
-        .fullScreenCover(isPresented: $showsReview, onDismiss: onClose) { YearReviewView(year: year) }
+        .buttonStyle(.plain)
+        .fullScreenCover(isPresented: $showsReview) { YearReviewView(year: year) }
     }
 }
 
@@ -460,16 +456,20 @@ extension AppModel {
         return YearReview.years(of: travelledLegs(of: mapJourneys(for: all)).map(\.leg))
     }
 
-    /// The year the banner offers right now, if it has rides; cheap enough for every visit of the tab.
+    /// The year the banner offers right now: `YearReview.featuredYear`, else the running year when
+    /// only that one has rides so far; nil without any. Cheap enough for every visit of the tab.
     func featuredYearReview() async -> Int? {
-        guard let year = YearReview.featuredYear(on: .now) else { return nil }
         await loadTraewellingTrips()
         let calendar = Calendar.current
         let journeys = savedJourneys.map(\.journey) + (settings.traewellingEnabled ? traewellingTrips.map(\.journey) : [])
-        let hasRides = journeys.contains { journey in
-            journey.transitLegs.contains { calendar.component(.year, from: $0.departure.planned) == year && $0.arrival.best <= .now }
+        func hasRides(in year: Int) -> Bool {
+            journeys.contains { journey in
+                journey.transitLegs.contains { calendar.component(.year, from: $0.departure.planned) == year && $0.arrival.best <= .now }
+            }
         }
-        return hasRides ? year : nil
+        let featured = YearReview.featuredYear(on: .now)
+        let running = calendar.component(.year, from: .now)
+        return [featured, running].first(where: hasRides(in:))
     }
 
     /// The review of `year` and its heatmap. Loads the missing track geometry like the travel map
