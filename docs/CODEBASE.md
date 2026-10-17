@@ -79,7 +79,8 @@ in `project.pbxproj`: new files join their target automatically.
   (`AppModel.showsTrainSearch`, from the train button on Verbindungen and the map's search button), searches while
   typing, day behind a calendar button, filtered by `AppSettings.trainSearchKinds` (all but "Sonstiges" by default)
   and `trainSearchCountries` (Germany), both synced. `TrainSearchResultView`: "Zugdetails anzeigen" (`TripView`),
-  Wagenreihung, "Auf Karte zeigen" (only while bahn.jetzt has a position).
+  Wagenreihung (next stop; `CoachSequenceByStop` unfolds a list of the other stops, `BahnDeClient.formationStops(of:)`;
+  a train not running starts at its first stop), "Auf Karte zeigen" (only while bahn.jetzt has a position).
 - `Features/Map/` – `TravelMapView` heatmap of past trips (`TravelMapHeatmap`; `RailwayTileOverlay`: OpenRailwayMap,
   512 px, disk cache 7 days, 10-min pause after 403/429). A ride both saved and checked in is drawn from the check-in
   (`RideMatch.uncovered`). `YearReviewView` (#319, "Jahresrückblick", only via `YearReviewBanner` on Verbindungen in

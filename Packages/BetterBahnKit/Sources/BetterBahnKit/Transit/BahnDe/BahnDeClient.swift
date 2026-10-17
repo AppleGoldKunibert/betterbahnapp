@@ -306,6 +306,21 @@ public struct BahnDeClient: Sendable {
                          wholeRun: true, now: now, lookahead: lookahead)
     }
 
+    /// The request for `trip`'s formation at `stop`, whenever the train calls there (past or ahead): the stop must
+    /// have a time and a platform and not be cancelled, and the train a coach-sequence reference.
+    public static func formationRequest(for trip: Trip, at stop: Stopover) -> FormationRequest? {
+        guard let ref = sequenceReference(for: trip.line), !stop.cancelled,
+              let time = (stop.departure ?? stop.arrival)?.planned,
+              (stop.departurePlatform ?? stop.arrivalPlatform)?.best != nil else { return nil }
+        return FormationRequest(category: ref.category, number: ref.number, station: stop.station, plannedDeparture: time,
+                                stopsBefore: stopsBefore(stop.station, in: trip))
+    }
+
+    /// The stops of `trip` a Wagenreihung can be asked at, in order (see `formationRequest(for:at:)`).
+    public static func formationStops(of trip: Trip) -> [Stopover] {
+        trip.stopovers.filter { formationRequest(for: trip, at: $0) != nil }
+    }
+
     /// The names of `trip`'s stops before `station` (found by id, else by name), for a request made
     /// from a leg (`FormationRequest.stopsBefore`); nil when the station isn't one of its stops.
     public static func stopsBefore(_ station: Station, in trip: Trip) -> [String]? {
