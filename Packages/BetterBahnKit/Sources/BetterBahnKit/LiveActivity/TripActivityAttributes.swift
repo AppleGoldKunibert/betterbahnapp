@@ -1,9 +1,12 @@
 #if canImport(ActivityKit) && os(iOS)
 import ActivityKit
+#endif
 import Foundation
 
-/// Live Activity for a journey. Basic version – more details (transfers, push updates) later.
-public struct TripActivityAttributes: ActivityAttributes {
+/// Live Activity for a journey. Its state comes from `ContentState.from(_:)`, which the
+/// `betterbahn-live` Worker (`Cloudflare/live-activity`) repeats to push it while the app is closed
+/// (#315). Only the ActivityKit conformance is iOS-only, so the state is tested on macOS too.
+public struct TripActivityAttributes: Codable, Sendable {
     /// Details of the incoming train shown once a transfer is close (see `ContentState.transfer`).
     public struct TransferDetails: Codable, Hashable, Sendable {
         public var incomingLine: String
@@ -208,4 +211,7 @@ public extension TripActivityAttributes.ContentState {
         return (next?.arrival ?? leg.arrival).delayMinutes ?? 0
     }
 }
+
+#if canImport(ActivityKit) && os(iOS)
+extension TripActivityAttributes: ActivityAttributes {}
 #endif

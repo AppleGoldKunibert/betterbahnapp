@@ -122,6 +122,7 @@ struct RootView: View {
         .onChange(of: scenePhase, initial: true) { _, phase in
             if phase == .active {
                 model.cancelLiveActivityBackgroundCheck()
+                Task { await model.takeBackLiveActivity() }
                 model.syncLiveActivity()
                 model.startRefreshing()
                 Task { await model.syncTraewelling() }
@@ -132,6 +133,7 @@ struct RootView: View {
                 model.stopRefreshing()
                 model.scheduleLiveActivityBackgroundCheck()
                 model.updateWidgets(force: true)
+                withBackgroundTime("LiveActivityHandOver") { await model.handOverLiveActivity() }
             }
         }
         // A followed user's check-in notification was tapped (#266): its list is on the Verbindungen tab.
@@ -223,4 +225,24 @@ struct RootView: View {
 private struct LinkedTrainMap: Identifiable {
     let id = UUID()
     let route: LiveTrainRoute
+}
+
+/// Runs `work` although the app just went to the background: iOS gives it a few more seconds for that.
+private func withBackgroundTime(_ name: String, _ work: @escaping @MainActor () async -> Void) {
+    let assertion = BackgroundTimeAssertion()
+    assertion.id = UIApplication.shared.beginBackgroundTask(withName: name) { assertion.end() }
+    Task {
+        await work()
+        assertion.end()
+    }
+}
+
+private final class BackgroundTimeAssertion {
+    var id = UIBackgroundTaskIdentifier.invalid
+
+    func end() {
+        guard id != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(id)
+        id = .invalid
+    }
 }

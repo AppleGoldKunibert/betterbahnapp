@@ -1165,7 +1165,7 @@ final class AppModel {
         let candidate = liveJourneyCandidate
         // Switched off in the settings: `show(nil)` ends whatever is still running.
         let journey = settings.liveActivitiesEnabled ? candidate?.journey : nil
-        Task { await liveActivities.show(journey) }
+        Task { await liveActivities.show(journey, pushUpdates: settings.liveActivityServerUpdates) }
         updateWidgets()
     }
 
@@ -1218,12 +1218,64 @@ final class AppModel {
             await refreshLiveJourney()
             syncLiveActivity()
             scheduleLiveActivityBackgroundCheck()
+            // Our server goes on from what was just loaded (or lets go of an activity that has ended).
+            await handOverLiveActivity()
             task.setTaskCompleted(success: true)
         }
         // `@Sendable` keeps the closure nonisolated: a plain closure here would inherit MainActor and
         // crash on the assertion if iOS calls the expiration handler from another queue.
         let cancelWork: @Sendable () -> Void = { work.cancel() }
         task.expirationHandler = cancelWork
+    }
+
+    // MARK: Live Activity push updates (#315)
+
+    /// The Live Activity's sign-up at the `betterbahn-live` Worker, while the app is in the background.
+    @ObservationIgnored var liveActivityPush: LiveActivityPushRegistration? = Storage.load(key: "liveActivityPush") {
+        didSet { Storage.save(liveActivityPush, key: "liveActivityPush") }
+    }
+    /// Hand-overs and take-backs run one after the other, so opening the app right away can't overtake a hand-over.
+    @ObservationIgnored private var liveActivityPushQueue: Task<Void, Never>?
+
+    /// Hands the Live Activity to our server when the app goes to the background: it keeps the delays, platforms
+    /// and next stop current with push updates until the app is opened again (`LiveActivityPush`). Without an
+    /// activity to hand over (setting off, none running, no push token yet), an earlier sign-up ends.
+    func handOverLiveActivity() async {
+        await enqueueLiveActivityPush { [self] in
+            let entry = settings.liveActivitiesEnabled && settings.liveActivityServerUpdates ? liveJourneyCandidate : nil
+            guard let entry, let pushToken = liveActivities.pushToken(for: entry.journey.id) else {
+                await endLiveActivityPush()
+                return
+            }
+            if liveActivityPush.map({ $0.journeyID != entry.journey.id }) == true { await endLiveActivityPush() }
+            let registration = liveActivityPush ?? LiveActivityPushRegistration(journeyID: entry.journey.id)
+            liveActivityPush = registration
+            try? await LiveActivityPush().register(registration, pushToken: pushToken, sandbox: Self.pushUsesSandbox,
+                                                    journey: LiveActivityPushJourney(entry.journey))
+        }
+    }
+
+    /// Takes the Live Activity back when the app is open: from then on the app updates it itself.
+    func takeBackLiveActivity() async {
+        await enqueueLiveActivityPush { [self] in await endLiveActivityPush() }
+    }
+
+    private func endLiveActivityPush() async {
+        guard let registration = liveActivityPush else { return }
+        // Offline the sign-up is kept and ended next time; the server forgets it after the arrival anyway.
+        if (try? await LiveActivityPush().unregister(registration)) != nil, liveActivityPush == registration {
+            liveActivityPush = nil
+        }
+    }
+
+    private func enqueueLiveActivityPush(_ work: @escaping @MainActor () async -> Void) async {
+        let previous = liveActivityPushQueue
+        let task = Task {
+            await previous?.value
+            await work()
+        }
+        liveActivityPushQueue = task
+        await task.value
     }
 
     func rememberStation(_ station: Station) {
@@ -1441,6 +1493,14 @@ final class AppSettings {
         }
     }
 
+    /// Our server keeps the Live Activity current while the app is closed (#315); it gets the journey for that.
+    var liveActivityServerUpdates: Bool {
+        didSet {
+            UserDefaults.standard.set(liveActivityServerUpdates, forKey: "liveActivityServerUpdates")
+            uploadToCloud()
+        }
+    }
+
     /// How often maps refresh the positions of running trains. Stays on this device, since the
     /// data it costs depends on the device's connection.
     var trainPositionRefresh: TrainPositionRefresh {
@@ -1534,6 +1594,7 @@ final class AppSettings {
         ticketFilterByDefault = defaults.bool(forKey: "onlyBC100ByDefault")
         ticketType = defaults.string(forKey: "ticketType").flatMap(TicketType.init) ?? .deutschlandticket
         liveActivitiesEnabled = defaults.object(forKey: "liveActivitiesEnabled") as? Bool ?? true
+        liveActivityServerUpdates = defaults.object(forKey: "liveActivityServerUpdates") as? Bool ?? true
         trainPositionRefresh = defaults.string(forKey: "trainPositionRefresh").flatMap(TrainPositionRefresh.init) ?? .automatic
         stationFlagMode = defaults.string(forKey: "stationFlagMode").flatMap(StationFlagMode.init) ?? .foreignOnly
         // A new key: switching off sharing (#169) said nothing about wanting to see the statistics.
@@ -1583,6 +1644,7 @@ final class AppSettings {
         var expertRil100: Bool?
         var trainSearchKinds: [TrainSearchKind]?
         var trainSearchCountries: [String]?
+        var liveActivityServerUpdates: Bool?
     }
 
     /// What iCloud stores: the settings and when they were last changed.
@@ -1598,7 +1660,7 @@ final class AppSettings {
         liveActivitiesEnabled: true, expertMode: false, expertTraewelling: false, expertEditJourney: false,
         expertTrainChoice: false, expertIgnoreBoardingRules: false, expertRil100: false,
         trainSearchKinds: TrainSearchKind.defaults.sorted(by: { $0.rawValue < $1.rawValue }),
-        trainSearchCountries: TrainSearchCountry.defaults.sorted())
+        trainSearchCountries: TrainSearchCountry.defaults.sorted(), liveActivityServerUpdates: true)
 
     @ObservationIgnored private var isApplyingCloudValue = false
 
@@ -1611,7 +1673,7 @@ final class AppSettings {
                    expertTrainChoice: expertTrainChoice, expertIgnoreBoardingRules: expertIgnoreBoardingRules,
                    expertRil100: expertRil100,
                    trainSearchKinds: trainSearchKinds.sorted(by: { $0.rawValue < $1.rawValue }),
-                   trainSearchCountries: trainSearchCountries.sorted())
+                   trainSearchCountries: trainSearchCountries.sorted(), liveActivityServerUpdates: liveActivityServerUpdates)
     }
 
     /// When the settings were last changed on this device or taken over from iCloud. Before
@@ -1660,6 +1722,7 @@ final class AppSettings {
         expertRil100 = value.expertRil100 ?? expertRil100
         trainSearchKinds = value.trainSearchKinds.map(Set.init) ?? trainSearchKinds
         trainSearchCountries = value.trainSearchCountries.map(Set.init) ?? trainSearchCountries
+        liveActivityServerUpdates = value.liveActivityServerUpdates ?? liveActivityServerUpdates
     }
 }
 

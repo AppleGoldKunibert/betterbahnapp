@@ -59,7 +59,7 @@ ${PAGE_STYLE}
 <body>
 <main>
 <h1>Datenschutz</h1>
-<p class="muted">BetterBahn für iPhone · Stand: 8. Oktober 2026</p>
+<p class="muted">BetterBahn für iPhone · Stand: 17. Oktober 2026</p>
 
 <p>BetterBahn ist ein privates Projekt und steht in keiner Verbindung zur Deutschen Bahn AG. Die App hat
 keine Benutzerkonten, keine Werbung, kein Tracking und keine Analyse-Werkzeuge. Was du in der App speicherst,
@@ -104,9 +104,11 @@ Geburtsdatum aus dem Barcode) an den Server geschickt, dort signiert und sofort 
 <li>leiten die Anmeldung bei Träwelling an die App weiter,</li>
 <li>speichern Reisen, die du teilst (siehe „Reisen teilen“),</li>
 <li>beantworten Fragen der App nach der Zugstatistik (siehe „Zugstatistik“),</li>
-<li>melden neue Check-ins der Leute, denen du auf Träwelling folgst, wenn du das einschaltest (siehe „Mitteilungen“).</li>
+<li>melden neue Check-ins der Leute, denen du auf Träwelling folgst, wenn du das einschaltest (siehe „Mitteilungen“),</li>
+<li>halten deine Live-Aktivität aktuell, während die App geschlossen ist (siehe „Live-Aktivität“).</li>
 </ul>
-<p>Abgesehen von geteilten Reisen und den Check-in-Meldungen wird dabei nichts gespeichert oder protokolliert. Cloudflare verarbeitet zur Absicherung des Dienstes
+<p>Abgesehen von geteilten Reisen, den Check-in-Meldungen und der Reise für die Live-Aktivität wird dabei nichts
+gespeichert oder protokolliert. Cloudflare verarbeitet zur Absicherung des Dienstes
 IP-Adressen; Details stehen in der <a href="https://www.cloudflare.com/privacypolicy/">Datenschutzerklärung von Cloudflare</a>.</p>
 <p>Anfragen an bahn.de stellt die App über einen eigenen kleinen Server beim Hoster Infynix (Auftragsverarbeiter;
 Server in Deutschland). Er leitet sie an bahn.de weiter und speichert die Antworten ebenso kurz zwischen; auch dort
@@ -164,6 +166,16 @@ gemeldet hat. Alle 2 Minuten fragt er bei Träwelling die Check-ins der Leute ab
 über Apples Push-Dienst (APNs) eine Mitteilung mit Name, Zug und Strecke eines neuen Check-ins. Schaltest du es
 aus oder meldest dich in der App bei Träwelling ab, löscht der Server diese Daten und beendet seine Anmeldung.
 Das passiert auch, wenn Träwelling die Anmeldung beendet oder die App gelöscht wurde.</p>
+
+<h2>Live-Aktivität</h2>
+<p>Solange „Live-Aktivität über Server aktualisieren“ in den Einstellungen eingeschaltet ist (Standard), übergibt
+die App die Live-Aktivität deiner laufenden Reise an den Server von BetterBahn, wenn du die App verlässt. Dafür
+schickt sie die Reise (Züge, Bahnhöfe, Zeiten, Gleise) und die Push-Kennung, die Apple dieser einen
+Live-Aktivität gibt. Der Server fragt bei der Deutschen Bahn (IRIS, die Datenquelle hinter der
+Timetables-Schnittstelle) die aktuellen Zeiten, Gleise und Ausfälle dieser Züge ab und schickt die neue Anzeige
+über Apples Push-Dienst (APNs) an die Live-Aktivität. Namen, dein Standort oder andere Angaben über dich sind
+nicht dabei. Öffnest du die App wieder, ist die Reise angekommen oder schaltest du es aus, löscht der Server
+diese Daten, spätestens 30 Minuten nach der Ankunft.</p>
 
 <h2>Rechtsgrundlage und deine Rechte</h2>
 <p>Die Verarbeitung dient dazu, die Funktionen bereitzustellen, die du in der App nutzt (Art. 6 Abs. 1 lit. b
