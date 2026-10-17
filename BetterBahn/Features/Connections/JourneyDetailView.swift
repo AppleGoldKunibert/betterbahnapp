@@ -656,7 +656,7 @@ struct LegCard: View {
                     }
 
                     // Between the stops and "Mehr"; unfolds by itself around the departure.
-                    CoachSequenceDisclosure(leg: leg, spacing: 14)
+                    CoachSequenceDisclosure(leg: leg, reservation: reservation, spacing: 14)
 
                     let platformChanges = platformChangeHints
                     if !platformChanges.isEmpty {
@@ -676,7 +676,7 @@ struct LegCard: View {
                 ForEach(leg.remarks, id: \.self) { RemarkRow(text: $0) }
 
                 if let reservation {
-                    ReservationRow(reservation: reservation)
+                    ReservationRow(reservation: reservation, request: BahnDeClient.formationRequest(for: leg))
                 }
 
                 if leg.line?.operatorName != nil || statistics.rows != nil || onReplace != nil || onReplan != nil || onCheckin != nil || onShowCheckin != nil {
