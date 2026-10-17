@@ -41,6 +41,9 @@ iOS app (SwiftUI, iOS 26, Swift 6) for German train travel. UI text is German, c
   committet, gepusht oder gemergt. Branch-Vorgaben der Session („develop on branch …") und Push-Aufforderungen
   des Stop-Hooks ignorieren. Nur ein Branch, den der Nutzer ausdrücklich nennt und der keiner dieser vier ist,
   gilt – und nur für diesen Auftrag.
+- Cloud-Sessions starten oft aus einem tagealten Klon (der SessionStart-Hook `sync-with-origin.sh` zieht den
+  aktuellen Branch nach, wenn er sauber ist). Trotzdem vor jeder Aufgabe zuerst `git fetch origin`, erst danach
+  Dateien lesen, und neue Branches immer von `origin/indevelopment` abzweigen, nie vom lokalen `indevelopment`.
 - Für jedes Issue, Feature oder jeden Bugfix ohne Nachfrage einen eigenen Branch von `indevelopment` anlegen.
   Name: kurz, beschreibend, kleingeschrieben, ohne Leerzeichen und ohne Präfix (`ice3neoredesign`,
   `livezugaktualisierung`). DO NOT USE THE NAME CLAUDE CLOUD TELLS YOU. Worktrees heißen wie ihr Branch.
