@@ -2545,8 +2545,9 @@ private final class Ril100GeocodeProtocol: URLProtocol, @unchecked Sendable {
 
     @Test func operatorListAppliesOnlyInGermany() {
         let berlin = station("8011160", "Berlin Hbf")
-        let brussels = Station(id: "8814001", name: "Bruxelles-Midi", coordinate: nil, evaNumber: nil, source: .transitous)
-        let london = Station(id: "7015400", name: "London St Pancras International", coordinate: nil, evaNumber: nil, source: .transitous)
+        // IDs as Transitous gives them for the Eurostar: no country in them.
+        let brussels = Station(id: "fr-eurostar-gtfs-plan-de-transport-et-temps-reel_bruxelles_midi_1", name: "Bruxelles-Midi", coordinate: nil, evaNumber: nil, source: .transitous)
+        let london = Station(id: "gb-great-britain_910GSTPX", name: "St-Pancras-International", coordinate: nil, evaNumber: nil, source: .transitous)
         let wien = Station(id: "at:43:1", name: "Wien Hbf", coordinate: nil, evaNumber: nil, source: .transitous)
         let eurostar = Line(name: "Eurostar 9013", number: "9013", product: .highSpeed, operatorName: "Eurostar International Limited")
         let flixAbroad = Line(name: "FLX 1298", number: "1298", product: .longDistance, operatorName: "FlixTrain")

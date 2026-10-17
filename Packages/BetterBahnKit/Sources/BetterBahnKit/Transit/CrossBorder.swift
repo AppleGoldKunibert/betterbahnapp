@@ -39,11 +39,18 @@ enum CrossBorder {
         Station.normalize(name.folding(options: .diacriticInsensitive, locale: nil))
     }
 
+    /// Big stations abroad on international trains. Transitous' Eurostar stops carry no country in their
+    /// ID, so `countryCode` can't tell them; matched by name, folded as `fold` does.
+    static let foreignStationNames: [String] = [
+        "bruxelles", "brussel", "brussels", "paris", "london", "pancras", "amsterdam", "lille", "rotterdam", "calais",
+        "ebbsfleet", "ashford international",
+    ]
+
     /// Whether `station` is known to be outside Germany and not one of `covered` (matched by name start).
     static func isAbroad(_ station: Station, covered: [String]) -> Bool {
-        guard let code = station.countryCode, code != "DE" else { return false }
         let name = fold(station.name)
-        return !covered.contains { name.hasPrefix(fold($0)) }
+        let abroad = station.countryCode.map { $0 != "DE" } ?? foreignStationNames.contains { name.contains($0) }
+        return abroad && !covered.contains { name.hasPrefix(fold($0)) }
     }
 
     /// Whether a ride starts or ends abroad, so the ticket does not cover all of it.
