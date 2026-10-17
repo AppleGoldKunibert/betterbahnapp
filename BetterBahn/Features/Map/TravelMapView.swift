@@ -20,6 +20,7 @@ struct TravelMapView: View {
     @State private var includeSaved = true
     @State private var includeTraewelling = true
     @State private var legendExpanded = true
+    @State private var showsYearReview = false
 
     struct Stats {
         /// Train rides (legs), not journeys: a check-in is one ride, so a saved journey counts
@@ -51,6 +52,9 @@ struct TravelMapView: View {
                 .task { await model.syncTraewelling() }
                 .task { await model.followTrainPositions() }
                 .sheet(isPresented: $showRangeSheet) { rangeSheet }
+                .fullScreenCover(isPresented: $showsYearReview) {
+                    YearReviewView(year: YearReview.featuredYear(on: .now) ?? Calendar.current.component(.year, from: .now))
+                }
         }
     }
 
@@ -131,6 +135,16 @@ struct TravelMapView: View {
                     sourceToggle("Träwelling", icon: "checkmark.seal.fill", isOn: $includeTraewelling)
                 }
                 Spacer(minLength: 0)
+                Button {
+                    showsYearReview = true
+                } label: {
+                    Image(systemName: "sparkles")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(width: 34, height: 34)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(.regular, in: .circle)
+                .accessibilityLabel("Jahresrückblick")
                 Button {
                     model.showsTrainSearch = true
                 } label: {

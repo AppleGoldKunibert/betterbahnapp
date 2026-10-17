@@ -101,6 +101,9 @@ struct ConnectionsView: View {
     @State private var suggestionsShown = false
     @State private var path: [ConnectionsRoute] = []
     @State private var swapRotation = 0.0
+    /// The year the review banner offers (#319), and the last one closed or opened from it.
+    @State private var reviewBannerYear: Int?
+    @AppStorage("dismissedYearReview") private var dismissedReviewYear = 0
 
     private static let startLegID = UUID()
     private static let productsRowID = "productsRow"
@@ -122,6 +125,12 @@ struct ConnectionsView: View {
                     HStack(spacing: 10) {
                         searchButton
                         AddTicketButton()
+                    }
+                    if let year = reviewBannerYear, year != dismissedReviewYear {
+                        YearReviewBanner(year: year) {
+                            withAnimation(.snappy) { dismissedReviewYear = year }
+                        }
+                        .transition(.fold)
                     }
                     UpcomingTripsSection()
                     if !model.recentSearches.isEmpty {
@@ -170,6 +179,7 @@ struct ConnectionsView: View {
             .closesStationSearchOnOutsideTap($focused)
             .onAppear { onlyValidTicket = model.settings.ticketFilterByDefault }
             .task { await model.keepFollowedCheckinsFresh() }
+            .task { reviewBannerYear = await model.featuredYearReview() }
             .onChange(of: model.journeyToOpen, initial: true) { _, entry in
                 guard let entry else { return }
                 path = [.journey(entry.route())]
