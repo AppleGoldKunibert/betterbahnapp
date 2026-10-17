@@ -99,6 +99,10 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   journey/check in), the Wagenreihung and "Auf Karte zeigen" (only while bahn.jetzt has a position).
 - `Features/Map/` – `TravelMapView` heatmap of past trips (no banner when empty) (`TravelMapHeatmap`, `RailwayTileOverlay`: OpenRailwayMap tiles, 512 px, cached on disk 7 days, 10 min pause after 403/429, #171;
   a ride both saved and checked in on Träwelling is drawn from the check-in, saved journeys only add unchecked legs – `RideMatch.uncovered`),
+  `YearReviewView` (#319, "Jahresrückblick": only via `YearReviewBanner` on Verbindungen, shown all through December
+  (the running year) and January (the year just ended), no close button; not from the map): swipeable 9:16 cards from Kit `YearReview` over the map's rides of a calendar year
+  (`AppModel.yearReview(for:)`, same `TravelMapSelection` and cached heatmap), km from the cached track geometry, series/Tz from
+  `rememberedFormation`; the visible card is shared as an image (`ImageRenderer`), the heatmap card is drawn with `Canvas`.
   `LiveTrainMapView` (one train's live position on its route, opened from `LiveTrainIconTile`, the train icon on
   legs and trips bahn.jetzt has; draws the track from `AppModel.geometry(for:)`, never straight lines between stops). `JourneyMapView` shows the journey's running trains too.
 - `Features/Tickets/` – `TicketLookupView` (native form; bahn.de's "Auftragssuche" runs in a hidden SwiftUI `WebView`,
@@ -165,7 +169,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   and everything matched by them stay the feed's. Headsigns read like the stop they name (`MPlace.displayName(ofHeadsign:)`),
   else `StationNames.displayName(forName:)` (also for the train search's ends). `Station.displayName(for:)` shortens "hlavní nádraží" to "hl.n." and
   "hlavná stanica" to "hl.st."; `StationNames.preload()` loads the list at launch;
-  `TrainMessage` (DB delay reasons/notices); `RideMatch`; `OperatorBrand` (feed agency name → EVU logo, #166: PNGs rendered from Wikimedia Commons SVGs in
+  `TrainMessage` (DB delay reasons/notices); `RideMatch`; `YearReview` (yearly stats: km, hours, delay/punctuality <6 min, series, stations, routes, countries from EVA/IFOPT); `OperatorBrand` (feed agency name → EVU logo, #166: PNGs rendered from Wikimedia Commons SVGs in
   `BetterBahn/Assets.xcassets/Operators/Operator-<brand>`, shown by `OperatorLabel` on a transparent background, in dark mode on a light plate if `needsPlateInDarkMode`; unknown operators keep the building icon; DB S-Bahns with their own name ("S-Bahn Berlin GmbH", "DB Regio AG S-Bahn München") show the S-Bahn "S", other "DB Regio AG …" trains the DB Regio logo; `OperatorBrand.displayName` shortens names: "ODEG", "Transdev" for "S-Bahn Hannover (Transdev)"). International trains have several operators: bahn.de's journey details give each stop's railway (`adminID`, UIC code: 80 DB, 54 ČD, …; "BEF" attributes if present) (`BahnDeClient.trainOperators(for:)` → `[TrainOperator]`, narrowed to a leg's section), shown by `TrainOperatorsLabel` as logos side by side (`OperatorLogo`) and in the route at the stops where the train changes hands (`operatorStops(for:)`); the feed only ever names one.
 - `Models/TripLap.swift` – `Trip.lap(at:near:arriving:)`: Transitous' trip for a ring line (S41/S42) is the vehicle's whole day
   (the S42: 490 stops, each station ~19 times, under the block's number), so stops looked up by station landed on the first lap
