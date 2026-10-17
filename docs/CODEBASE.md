@@ -334,7 +334,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   only the picked run's trip is loaded (`candidate(for:)`, from the boarding station's board, else `TrainNumberSearch.run`).
   Lines ("RE 3") and other trains come from the boards of up to 4 route stations (`routeCandidates`:
   `departuresForTrainLookup`, trains only, loaded in parallel, `prefetch`ed when the sheet opens, never cached when
-  failed; `boardExtras` leaves out runs already listed by number). A picked run is pinned in
+  failed; `boardExtras` leaves out runs already listed by number). `catchable`: the list only shows trains leaving at
+  most 2 min before the traveller is at that station; from the search's origin also the 2 latest of the 30 min before, and
+  `TrainRoutePlanner.plan(pickedEarlier:)` then starts the route earlier. A picked run is pinned in
   `TrainRequirement.tripId`, so the planner loads it instead of searching boards.
 - Logic: `JourneyReplanner` (`continuations` come `fastestFirst`: by live arrival, without routes another one beats
   leaving no earlier, arriving no later with no more changes), `ConnectionCheck` (`ConnectionIssue`, `JourneyRefresher`), `PlatformChange`

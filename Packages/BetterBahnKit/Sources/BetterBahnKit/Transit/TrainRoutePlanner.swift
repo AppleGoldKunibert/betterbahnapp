@@ -87,12 +87,15 @@ public struct TrainRoutePlanner: Sendable {
     }
 
     /// Plans routes from `from` to `to` that ride every requirement, in the order given.
+    /// `pickedEarlier`: a run picked from the list as the first train may leave up to this long before
+    /// `date` (`TrainCandidateFinder.catchable`); the route then starts earlier.
     public func plan(_ requirements: [TrainRequirement], from: Station, to: Station,
-                     date: Date, limit: Int = 5) async throws -> TrainRoutePlan {
+                     date: Date, pickedEarlier: TimeInterval = 0, limit: Int = 5) async throws -> TrainRoutePlan {
         guard !requirements.isEmpty else {
             throw TransitError.invalidInput("Keine Zugvorgabe ausgewählt.")
         }
-        var beam = [Partial(legs: [], station: from, time: date, breaksRules: false)]
+        let start = requirements.first?.tripId != nil ? date.addingTimeInterval(-pickedEarlier) : date
+        var beam = [Partial(legs: [], station: from, time: start, breaksRules: false)]
         var names: [UUID: String] = [:]
 
         for (index, requirement) in requirements.enumerated() {

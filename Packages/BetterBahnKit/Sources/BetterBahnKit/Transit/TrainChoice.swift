@@ -321,6 +321,31 @@ public actor TrainCandidateFinder {
         }.map(\.element)
     }
 
+    /// How long before the traveller is there a train may leave and still be offered, when the route can
+    /// start earlier for it (from the search's origin), and how many such trains.
+    public static let earlierWindow: TimeInterval = 30 * 60
+    public static let maxEarlier = 2
+
+    /// The trains that can be caught: leaving at most 2 minutes before the traveller is at their boarding
+    /// station (`departure` gives the train's departure and that time), with `allowsEarlier` also the
+    /// `maxEarlier` latest of the `earlierWindow` before, as the route then starts earlier. Ones without
+    /// a known departure stay.
+    public static func catchable<T>(_ trains: [T], allowsEarlier: Bool,
+                                    departure: (T) -> (train: Date, reached: Date)?) -> [T] {
+        var kept = Set<Int>()
+        var earlier: [(index: Int, time: Date)] = []
+        for (index, train) in trains.enumerated() {
+            guard let times = departure(train) else { kept.insert(index); continue }
+            if times.train >= times.reached.addingTimeInterval(-2 * 60) {
+                kept.insert(index)
+            } else if allowsEarlier, times.train >= times.reached.addingTimeInterval(-earlierWindow) {
+                earlier.append((index, times.train))
+            }
+        }
+        for train in earlier.sorted(by: { $0.time > $1.time }).prefix(maxEarlier) { kept.insert(train.index) }
+        return trains.indices.filter(kept.contains).map { trains[$0] }
+    }
+
     /// The boards' trains that aren't runs of `number` – those come from the train search already.
     /// Only the run's own number counts: an RE 3 running as 3300 is no run of "3".
     public static func boardExtras(_ route: [TrainCandidate], besides number: Int) -> [TrainCandidate] {

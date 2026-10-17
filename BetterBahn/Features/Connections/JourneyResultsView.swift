@@ -165,7 +165,8 @@ struct JourneyResultsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showTrainSheet) {
             TrainNumberSheet(search: search, suggestions: trainSuggestions, defaultBoarding: nextBoardingDefault,
-                             stations: trainSearchStations, date: nextBoardingTime) { requirement in
+                             stations: trainSearchStations, date: nextBoardingTime, reached: trainSearchTimes,
+                             allowsEarlier: requirements.isEmpty) { requirement in
                 requirements.append(requirement)
                 Task { await replan() }
             }
@@ -363,6 +364,12 @@ struct JourneyResultsView: View {
         return planned + [search.from] + found
     }
 
+    /// When the connections found leave those stations, so the train list there shows trains that can be caught.
+    private var trainSearchTimes: [(station: Station, time: Date)] {
+        let legs = (plan?.journeys ?? []).prefix(2).flatMap(\.transitLegs) + journeys.prefix(4).flatMap(\.transitLegs)
+        return legs.map { ($0.origin, $0.departure.planned) }
+    }
+
     private func remove(_ requirement: TrainRequirement) {
         requirements.removeAll { $0.id == requirement.id }
         if requirements.isEmpty {
@@ -428,7 +435,8 @@ struct JourneyResultsView: View {
         defer { isPlanning = false }
         do {
             var result = try await model.trainRoutePlanner.plan(
-                requirements, from: search.from, to: search.to, date: searchDate)
+                requirements, from: search.from, to: search.to, date: searchDate,
+                pickedEarlier: TrainCandidateFinder.earlierWindow)
             if search.onlyValidTicket {
                 // Don't leave the user with nothing if the forced train itself isn't valid with the ticket.
                 let valid = result.journeys.filter(model.ticketFilter.isValid)

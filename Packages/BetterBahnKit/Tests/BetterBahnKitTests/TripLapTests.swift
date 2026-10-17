@@ -204,9 +204,30 @@ import Testing
         #expect(next.departure.planned == start.addingTimeInterval(120 * 60))
         #expect(next.arrival.planned == start.addingTimeInterval(140 * 60))
 
+        // From the search's origin a train picked up to 30 minutes earlier is ridden: the route starts earlier.
+        let earlier = try await planner.plan([picked], from: gesundbrunnen, to: beusselstrasse, date: start.addingTimeInterval(200 * 60),
+                                             pickedEarlier: TrainCandidateFinder.earlierWindow)
+        #expect(earlier.best?.transitLegs.first?.departure.planned == start.addingTimeInterval(180 * 60))
+
         // A picked lap that has already left can't be caught.
         await #expect(throws: TransitError.self) {
             try await planner.plan([picked], from: gesundbrunnen, to: beusselstrasse, date: start.addingTimeInterval(200 * 60))
         }
+    }
+
+    /// Searching at 13:50 listed the S41 at 13:20, which then couldn't be picked: only trains that can be
+    /// caught, from the origin also the two latest of the 30 minutes before.
+    @Test func trainListKeepsOnlyCatchableTrains() {
+        let reached = start.addingTimeInterval(60 * 60)
+        let departures = [-40, -25, -15, -5, -1, 0, 10, 90].map { reached.addingTimeInterval(TimeInterval($0 * 60)) }
+        func offsets(_ list: [Date]) -> [Int] { list.map { Int($0.timeIntervalSince(reached) / 60) } }
+
+        let onTheWay = TrainCandidateFinder.catchable(departures, allowsEarlier: false) { ($0, reached) }
+        #expect(offsets(onTheWay) == [-1, 0, 10, 90])
+        let fromOrigin = TrainCandidateFinder.catchable(departures, allowsEarlier: true) { ($0, reached) }
+        #expect(offsets(fromOrigin) == [-15, -5, -1, 0, 10, 90])
+        // Trains without a known departure stay.
+        let unknown: [Date?] = [nil, departures[0]]
+        #expect(TrainCandidateFinder.catchable(unknown, allowsEarlier: false) { date in date.map { ($0, reached) } }.count == 1)
     }
 }
