@@ -10,6 +10,11 @@ public struct TrainFormation: Codable, Sendable, Hashable {
         /// The trainset's christened name ("Taufname"), e.g. "Bundesrepublik Deutschland".
         public var name: String?
 
+        /// The trainset's special livery ("Sonderlackierung"), e.g. "Railbow"; nil for the standard paint.
+        public var livery: String? {
+            number.flatMap(Int.init).flatMap { TrainsetLiveries.byUnit[$0] }
+        }
+
         public init(model: String?, number: String?, name: String? = nil) {
             self.model = model
             self.number = number
@@ -301,6 +306,21 @@ public struct BahnDeClient: Sendable {
                          wholeRun: true, now: now, lookahead: lookahead)
     }
 
+    /// The request for `trip`'s formation at `stop`, whenever the train calls there (past or ahead): the stop must
+    /// have a time and a platform and not be cancelled, and the train a coach-sequence reference.
+    public static func formationRequest(for trip: Trip, at stop: Stopover) -> FormationRequest? {
+        guard let ref = sequenceReference(for: trip.line), !stop.cancelled,
+              let time = (stop.departure ?? stop.arrival)?.planned,
+              (stop.departurePlatform ?? stop.arrivalPlatform)?.best != nil else { return nil }
+        return FormationRequest(category: ref.category, number: ref.number, station: stop.station, plannedDeparture: time,
+                                stopsBefore: stopsBefore(stop.station, in: trip))
+    }
+
+    /// The stops of `trip` a Wagenreihung can be asked at, in order (see `formationRequest(for:at:)`).
+    public static func formationStops(of trip: Trip) -> [Stopover] {
+        trip.stopovers.filter { formationRequest(for: trip, at: $0) != nil }
+    }
+
     /// The names of `trip`'s stops before `station` (found by id, else by name), for a request made
     /// from a leg (`FormationRequest.stopsBefore`); nil when the station isn't one of its stops.
     public static func stopsBefore(_ station: Station, in trip: Trip) -> [String]? {
@@ -330,6 +350,8 @@ public struct BahnDeClient: Sendable {
     /// - Returns: nil if bahn.de has no coach sequence for it (yet).
     /// - Throws: `TransitError.rateLimited` while bahn.de is blocking requests.
     public func coachSequence(_ request: FormationRequest) async throws -> CoachSequence? {
+        // A category bahn.de doesn't know would be refused with a 403 that pauses every request.
+        guard !Self.plannedOnlyCategories.contains(request.category.uppercased()) else { return nil }
         guard usesSharedCaches else { return try await fetchCoachSequence(request) }
         return try await Self.sequenceCache.value(for: Self.sequenceKey(request), maxAge: Self.formationMaxAge) {
             try await self.fetchCoachSequence(request)
@@ -544,10 +566,29 @@ public struct BahnDeClient: Sendable {
         return (category.isEmpty ? "RB" : category, number)
     }
 
-    /// The train to ask bahn.de's coach sequence for: long-distance trains, and DB Regio's RE/RB by
-    /// their run number.
+    /// Long-distance trains bahn.de has no coach sequence for (and refuses the category with a 403), but
+    /// vagonweb has a planned Wagenreihung: Nightjet, Euronight and the SBB's InterRegio.
+    static let plannedOnlyCategories: Set<String> = ["NJ", "EN", "IR"]
+
+    /// A Nightjet, Euronight or InterRegio by its number ("NJ 403" → ("NJ", "403")). bahn.de lists these on its
+    /// boards, but the app only takes their platforms from it (`takesOnlyPlatforms(_:)`).
+    static func plannedOnlyReference(for line: Line?) -> (category: String, number: String)? {
+        guard let line, let number = line.number else { return nil }
+        let category = String(line.name.prefix { $0.isLetter }).uppercased()
+        return plannedOnlyCategories.contains(category) ? (category, number) : nil
+    }
+
+    /// Whether `line` is a train of another railway that bahn.de is only asked for the platforms it lacks:
+    /// no Zusatzhalte, no live times (`plannedOnlyReference`).
+    public static func takesOnlyPlatforms(_ line: Line?) -> Bool {
+        trainReference(for: line) == nil && plannedOnlyReference(for: line) != nil
+    }
+
+    /// The train to ask the coach sequence for: long-distance trains, and DB Regio's RE/RB by their run
+    /// number. The planned-only ones (`plannedOnlyCategories`) are only asked of vagonweb, never of bahn.de.
     public static func sequenceReference(for line: Line?) -> (category: String, number: String)? {
         if let ref = trainReference(for: line) { return ref }
+        if let ref = plannedOnlyReference(for: line) { return ref }
         guard let ref = regionalReference(for: line, products: [.regionalExpress, .regional]) else { return nil }
         return (regionalCategories.contains(ref.category) ? ref.category : "RB", ref.number)
     }

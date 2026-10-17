@@ -48,6 +48,18 @@ struct JourneyResultsView: View {
         requirements.isEmpty && search.onlyValidTicket && ticketJourneys.isEmpty && !journeys.isEmpty
     }
 
+    /// The warning when the ticket covers none of the connections: they are abroad entirely, or only reach the border.
+    private var borderFallbackText: String {
+        let filter = model.ticketFilter
+        guard journeys.allSatisfy(filter.isEntirelyAbroad) else {
+            return "Diese Verbindungen führen ins Ausland. Mit \(model.settings.ticketType.dativeShortName) kommst du nur bis zur Grenze."
+        }
+        switch model.settings.ticketType {
+        case .bahnCard100: return "Auf der kompletten Strecke gilt deine BahnCard 100 nicht!"
+        case .deutschlandticket: return "Auf der kompletten Strecke gilt dein Deutschlandticket nicht!"
+        }
+    }
+
     /// Fastest connection without any train requirement, for comparison.
     private var baselineDuration: TimeInterval? {
         journeys.filter { !$0.isCancelled }.compactMap(\.duration).min()
@@ -106,7 +118,7 @@ struct JourneyResultsView: View {
                 }
 
                 if showsBorderFallback {
-                    warningBanner("Diese Verbindungen führen ins Ausland. Mit \(model.settings.ticketType.dativeShortName) kommst du nur bis zur Grenze.")
+                    warningBanner(borderFallbackText)
                 }
 
                 if requirements.isEmpty, earlierCursor != nil {
@@ -136,6 +148,15 @@ struct JourneyResultsView: View {
                     }
                 }
 
+                // Inside the list, not as an overlay: it would sit on top of the chip below.
+                if !isLoading, !isPlanning, visibleJourneys.isEmpty, error == nil, planError == nil {
+                    ContentUnavailableView("Keine Verbindungen", systemImage: "tram.fill",
+                                           description: Text(requirements.isEmpty
+                                                             ? "Versuch eine andere Uhrzeit oder weniger Filter."
+                                                             : "Mit diesen Zügen haben wir keine Verbindung gefunden."))
+                        .padding(.top, 40)
+                }
+
                 VStack(spacing: 8) {
                     if hiddenCount + journeys.count - visibleJourneys.count > 0, requirements.isEmpty {
                         InfoChip(text: "\(hiddenCount + journeys.count - visibleJourneys.count) nicht mit \(model.settings.ticketType.shortName) nutzbar", systemImage: "eye.slash.fill")
@@ -154,18 +175,14 @@ struct JourneyResultsView: View {
         .overlay {
             if isLoading, journeys.isEmpty {
                 ProgressView("Suche Verbindungen …")
-            } else if !isLoading, !isPlanning, visibleJourneys.isEmpty, error == nil, planError == nil {
-                ContentUnavailableView("Keine Verbindungen", systemImage: "tram.fill",
-                                       description: Text(requirements.isEmpty
-                                                         ? "Versuch eine andere Uhrzeit oder weniger Filter."
-                                                         : "Mit diesen Zügen haben wir keine Verbindung gefunden."))
             }
         }
         .navigationTitle("Verbindungen")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showTrainSheet) {
             TrainNumberSheet(search: search, suggestions: trainSuggestions, defaultBoarding: nextBoardingDefault,
-                             stations: trainSearchStations, date: nextBoardingTime) { requirement in
+                             stations: trainSearchStations, date: nextBoardingTime, reached: trainSearchTimes,
+                             allowsEarlier: requirements.isEmpty) { requirement in
                 requirements.append(requirement)
                 Task { await replan() }
             }
@@ -363,6 +380,12 @@ struct JourneyResultsView: View {
         return planned + [search.from] + found
     }
 
+    /// When the connections found leave those stations, so the train list there shows trains that can be caught.
+    private var trainSearchTimes: [(station: Station, time: Date)] {
+        let legs = (plan?.journeys ?? []).prefix(2).flatMap(\.transitLegs) + journeys.prefix(4).flatMap(\.transitLegs)
+        return legs.map { ($0.origin, $0.departure.planned) }
+    }
+
     private func remove(_ requirement: TrainRequirement) {
         requirements.removeAll { $0.id == requirement.id }
         if requirements.isEmpty {
@@ -428,7 +451,8 @@ struct JourneyResultsView: View {
         defer { isPlanning = false }
         do {
             var result = try await model.trainRoutePlanner.plan(
-                requirements, from: search.from, to: search.to, date: searchDate)
+                requirements, from: search.from, to: search.to, date: searchDate,
+                pickedEarlier: TrainCandidateFinder.earlierWindow)
             if search.onlyValidTicket {
                 // Don't leave the user with nothing if the forced train itself isn't valid with the ticket.
                 let valid = result.journeys.filter(model.ticketFilter.isValid)

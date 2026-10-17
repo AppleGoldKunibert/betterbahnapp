@@ -1471,6 +1471,11 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(trainPositionRefresh.rawValue, forKey: "trainPositionRefresh") }
     }
 
+    /// Whether station search results start with the country's flag (#349). Stays on this device.
+    var stationFlagMode: StationFlagMode {
+        didSet { UserDefaults.standard.set(stationFlagMode.rawValue, forKey: "stationFlagMode") }
+    }
+
     /// Which kinds of trains the train search (#183) lists.
     var trainSearchKinds: Set<TrainSearchKind> {
         didSet {
@@ -1554,6 +1559,7 @@ final class AppSettings {
         ticketType = defaults.string(forKey: "ticketType").flatMap(TicketType.init) ?? .deutschlandticket
         liveActivitiesEnabled = defaults.object(forKey: "liveActivitiesEnabled") as? Bool ?? true
         trainPositionRefresh = defaults.string(forKey: "trainPositionRefresh").flatMap(TrainPositionRefresh.init) ?? .automatic
+        stationFlagMode = defaults.string(forKey: "stationFlagMode").flatMap(StationFlagMode.init) ?? .foreignOnly
         // A new key: switching off sharing (#169) said nothing about wanting to see the statistics.
         let showTrainStatistics = defaults.object(forKey: "showTrainStatistics") as? Bool ?? true
         self.showTrainStatistics = showTrainStatistics

@@ -7,12 +7,25 @@ import Synchronization
 public struct TrainStatistics: Sendable, Hashable, Decodable {
     /// Fewer runs say too little to show anything; 1 in `testMode`.
     public static var minimumRuns: Int { testMode ? 1 : 5 }
-    /// Shows figures from a single run on, to check what the server answers (the app turns it on in debug builds).
+    /// Shows figures from a single run on, to check what the server answers (the app turns it on with the
+    /// launch argument `-debugstats`, see `enableTestModeIfRequested`).
     public static var testMode: Bool {
         get { testModeFlag.load(ordering: .relaxed) }
         set { testModeFlag.store(newValue, ordering: .relaxed) }
     }
     private static let testModeFlag = Atomic<Bool>(false)
+    /// Remembers in `UserDefaults` that the app was once launched with `-debugstats`.
+    static let testModeDefaultsKey = "debugStatsEnabled"
+
+    /// Turns on `testMode` when the app is launched with `-debugstats` (or `debugstats`). The choice is kept in
+    /// `defaults`, so it stays on for later launches without the argument until the app is deleted.
+    public static func enableTestModeIfRequested(arguments: [String] = ProcessInfo.processInfo.arguments,
+                                                 defaults: UserDefaults = .standard) {
+        if arguments.dropFirst().contains(where: { $0 == "-debugstats" || $0 == "debugstats" }) {
+            defaults.set(true, forKey: testModeDefaultsKey)
+        }
+        testMode = defaults.bool(forKey: testModeDefaultsKey)
+    }
     /// A train counts as on time up to this many minutes late.
     public static let onTimeMinutes = 5
 

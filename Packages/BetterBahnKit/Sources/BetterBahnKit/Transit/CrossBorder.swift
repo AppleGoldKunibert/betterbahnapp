@@ -3,8 +3,9 @@ import Foundation
 extension Station {
     /// ISO country code ("DE", "CZ") when the stop ID or EVA number tells: a 7-digit EVA/UIC number
     /// ("8000207", "000005400003" in DELFI, "cz:0:5455659:1:1" in ÖBB's), an IFOPT prefix ("at:43:1")
-    /// or a CZPTT stop. `nil` if the feed gives none of these.
+    /// or a CZPTT stop; the source's own `country` comes first. `nil` if the feed gives none of these.
     var countryCode: String? {
+        if let country { return country.uppercased() }
         if let code = TrainSearchCountry.code(eva: evaNumber) { return code }
         if id.hasPrefix(TransitousProvider.czechTimetableFeed) { return "CZ" }
         let local = id.split(separator: "_", maxSplits: 1).last ?? Substring(id)
@@ -16,6 +17,13 @@ extension Station {
         if parts.count > 1, let first = parts.first?.uppercased(),
            TrainSearchCountry.uicCodes.values.contains(first) {
             return first
+        }
+        // Transitous names its feeds after their country: "at-Railway-…", "gb-great-britain", "de-DELFI".
+        // The Eurostar feed covers several countries, so it says nothing. A DELFI ID of a stop abroad
+        // ("de-DELFI_at:49:1349") was already read from its own "at:" above.
+        let feed = id.prefix { $0.isLetter }
+        if feed.count == 2, !id.contains("eurostar"), TrainSearchCountry.uicCodes.values.contains(feed.uppercased()) {
+            return feed.uppercased()
         }
         return nil
     }
@@ -39,11 +47,18 @@ enum CrossBorder {
         Station.normalize(name.folding(options: .diacriticInsensitive, locale: nil))
     }
 
+    /// Big stations abroad on international trains. Transitous' Eurostar stops carry no country in their
+    /// ID, so `countryCode` can't tell them; matched by name, folded as `fold` does.
+    static let foreignStationNames: [String] = [
+        "bruxelles", "brussel", "brussels", "paris", "london", "pancras", "amsterdam", "lille", "rotterdam", "calais",
+        "ebbsfleet", "ashford international",
+    ]
+
     /// Whether `station` is known to be outside Germany and not one of `covered` (matched by name start).
     static func isAbroad(_ station: Station, covered: [String]) -> Bool {
-        guard let code = station.countryCode, code != "DE" else { return false }
         let name = fold(station.name)
-        return !covered.contains { name.hasPrefix(fold($0)) }
+        let abroad = station.countryCode.map { $0 != "DE" } ?? foreignStationNames.contains { name.contains($0) }
+        return abroad && !covered.contains { name.hasPrefix(fold($0)) }
     }
 
     /// Whether a ride starts or ends abroad, so the ticket does not cover all of it.
