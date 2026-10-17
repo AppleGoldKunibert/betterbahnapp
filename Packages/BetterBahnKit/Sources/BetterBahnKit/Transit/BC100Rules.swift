@@ -26,11 +26,13 @@ public struct BC100Rules: Codable, Sendable, Hashable {
         excludedProducts: [.coach]
     )
 
-    /// `abroad`: the ride is already outside Germany, where the operator list doesn't apply.
+    /// `abroad`: the ride is already outside Germany, where the operator list and line prefixes don't apply
+    /// (Transitous names the Eurostar "EST 9157", which the "EST" prefix would otherwise block).
     public func isValid(_ line: Line?, abroad: Bool = false) -> Bool {
         guard let line else { return true } // walking
         if excludedProducts.contains(line.product) { return false }
-        if !abroad, let op = line.operatorName?.lowercased(),
+        if abroad { return true }
+        if let op = line.operatorName?.lowercased(),
            excludedOperators.contains(where: { op.contains($0.lowercased()) }) {
             return false
         }
