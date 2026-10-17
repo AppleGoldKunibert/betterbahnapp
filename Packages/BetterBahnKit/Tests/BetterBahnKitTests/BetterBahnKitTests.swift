@@ -3401,7 +3401,8 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
     }
 
     @Test func specialLiveryOfTrainset() {
-        #expect(TrainFormation.Unit(model: "ICE 3", number: "304").livery == "Railbow")
+        #expect(TrainFormation.Unit(model: "ICE 3", number: "304").livery == "Regenbogen")
+        #expect(TrainFormation.Unit(model: "ICE 4", number: "9457").livery == "Schwarz-Rot-Gold")
         #expect(TrainFormation.Unit(model: "ICE 3", number: "169").livery == nil)
         #expect(TrainFormation.Unit(model: nil, number: nil).livery == nil)
     }
