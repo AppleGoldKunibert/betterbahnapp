@@ -245,10 +245,26 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `FormationRequest.stopsBefore` or the leg's trip). bahn.de's `sequenceStatus` ("DIFFERS_FROM_SCHEDULE") is set for
   nearly every train, so "Abweichende Wagenreihung" comes from `CoachSequence.deviations(fromPlan:)` (missing/extra
   coaches, class changes; order ignored) against vagonweb's plan.
+  vagonweb files a train under its railway's country (`zeme=DB`, `OBB`, `SBB`): `VagonwebClient.countries(for:)` tries them
+  in turn (Nightjet/Euronight: ÖBB first). `NJ`, `EN`, `IR` (`plannedCategories`, `BahnDeClient.plannedOnlyCategories`) only
+  get a planned Wagenreihung from vagonweb and are never asked of bahn.de (it answers an unknown category with a 403 that
+  pauses all requests). Where the composition changes on the way, vagonweb labels vehicles ("Zürich - Buchs", stacked in one
+  position for locomotives) and whole compositions ("for the section: Zürich - Innsbruck") with a `Section`; with the
+  request's `route` the section the stop is in is picked (`Section.covers`, `composition(…route:)`, `restricted(to:)`), and
+  coaches of a train running together with this one ("RJX 184") are left out. Sleeping/couchette cars and car carriers are
+  read from the class bar. `startsReversed` covers "Changes direction in Buchs SG, from Zürich until Buchs in reverse
+  order". The parser reads both vagonweb's own HTML and the quoted DOM a browser serializes. Not read: day restrictions on
+  single coaches ("runs on ⑥, ⑦ …"). Legs of those trains also get their missing platforms from bahn.de's journey
+  details (`BahnDeClient.takesOnlyPlatforms`, in `JourneyRefresher.refresh`), but no Zusatzhalte and no live times. SBB's formation service (opentransportdata.swiss, live, today only) is not used yet.
 - `Transit/BahnExpert/` – bahn.expert, as fallback for the train type (`TrainTypeLookup`) when bahn.de
   has no coach sequence and vagonweb has none either: it has DB's planned formation (`DB-plan`) for days
   ahead; bahn.de is only asked for departures within `BahnDeClient.formationLookahead` (24 h). Needs a
   `Referer` and a non-curl User-Agent (else an empty 206).
+  Also fills the platforms bahn.de and Transitous lack (`ExpertPlatforms.swift`, `BahnExpertClient.fillingMissingPlatforms`):
+  at the SBB's and ÖBB's stations of EC/RJ(X) trains of those railways and for Nightjet, Euronight and InterRegio, on legs
+  (`JourneyRefresher.refresh`) and on trips (`TripView.insertZusatzhalte`); cached 30 min per run. ÖBB and SBB publish
+  platforms late (RJX 161 had 3 of 16 on the day), so far-off days stay partly empty. For Nightjet/Euronight/InterRegio the
+  expert and bahn.de platforms replace the feed's (`overwriting`): the ÖBB feed in Transitous has "87" at Köln Hbf.
   Also tells whether a connecting train waits (`TransferDisposition`, "Anschluss wartet (nicht)" in `TransferRow`):
   `disposition(from:to:)` finds the arriving train (`journey/find`, no administration so ODEG etc. match), its
   arrival ID at the transfer station (`journey/detailsByJourneyId`, by EVA or planned time) and the departing train

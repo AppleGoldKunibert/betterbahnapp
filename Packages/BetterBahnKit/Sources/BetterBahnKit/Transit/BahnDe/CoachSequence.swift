@@ -240,11 +240,12 @@ extension CoachSequence {
     }
 
     /// The plan as the train runs at a stop after `reversals` (stations where it changes direction):
-    /// turned round after an odd number of them.
-    public func turned(after reversals: [String]) -> CoachSequence {
+    /// turned round after an odd number of them. `startingReversed`: the plan is drawn as the train runs
+    /// after the first reversal, so one more is counted.
+    public func turned(after reversals: [String], startingReversed: Bool = false) -> CoachSequence {
         var sequence = self
         sequence.reversals = reversals
-        guard reversals.count % 2 == 1 else { return sequence }
+        guard (reversals.count + (startingReversed ? 1 : 0)) % 2 == 1 else { return sequence }
         sequence.coaches = coaches.reversed().enumerated().map { index, coach in
             var coach = coach
             coach.id = index

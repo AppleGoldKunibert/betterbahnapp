@@ -221,17 +221,22 @@ struct TripView: View {
     /// picked up today) at all — Transitous and DB Timetables above only ever overlay onto stops already there.
     /// Their live times also beat both where bahn.de has one (`BahnDeClient.applyingLiveTimes`).
     private func insertZusatzhalte() async {
-        guard let trip, let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: trip),
-              self.trip?.id == trip.id else { return }
-        let keepingDelays = model.timetablesClient != nil
-        let inserted = BahnDeClient.inserting(stops, into: trip.stopovers)
-        self.trip?.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: inserted, keepingDelays: keepingDelays)
-        // Where bahn.de and DB Timetables disagree on a stop, bahn.expert is asked which is right; shown once it answers.
-        let refereed = await BahnDeClient.applyingLiveTimes(from: stops, to: inserted, line: trip.line, keepingDelays: keepingDelays,
-                                                            referee: model.provider.bahnExpert)
-        guard self.trip?.id == trip.id else { return }
-        self.trip?.stopovers = refereed
-        if (try? await bahnDe.hasSleepingCars(for: trip)) == true, self.trip?.id == trip.id { self.trip?.line?.nightRail = true }
+        guard let trip else { return }
+        if let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: trip), self.trip?.id == trip.id {
+            let keepingDelays = model.timetablesClient != nil
+            let inserted = BahnDeClient.inserting(stops, into: trip.stopovers)
+            self.trip?.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: inserted, keepingDelays: keepingDelays)
+            // Where bahn.de and DB Timetables disagree on a stop, bahn.expert is asked which is right; shown once it answers.
+            let refereed = await BahnDeClient.applyingLiveTimes(from: stops, to: inserted, line: trip.line, keepingDelays: keepingDelays,
+                                                                referee: model.provider.bahnExpert)
+            guard self.trip?.id == trip.id else { return }
+            self.trip?.stopovers = refereed
+            if (try? await bahnDe.hasSleepingCars(for: trip)) == true, self.trip?.id == trip.id { self.trip?.line?.nightRail = true }
+        }
+        // Platforms bahn.de lacks, e.g. in Switzerland and Austria or for a Nightjet, from bahn.expert.
+        guard let expert = model.provider.bahnExpert, let current = self.trip, current.id == trip.id else { return }
+        let filled = await expert.fillingMissingPlatforms(in: current.stopovers, line: current.line)
+        if self.trip?.id == trip.id { self.trip?.stopovers = filled }
     }
 }
 
@@ -848,6 +853,10 @@ struct LegTripSheet: View {
             hasSleepingCars = (try? await bahnDe.hasSleepingCars(for: updated)) == true
         }
         if ownTrain { updated = updated.keepingAdditionalStops(of: leg) }
+        // Platforms bahn.de lacks, e.g. in Switzerland and Austria or for a Nightjet, from bahn.expert.
+        if let expert = model.provider.bahnExpert {
+            updated.stopovers = await expert.fillingMissingPlatforms(in: updated.stopovers, line: updated.line)
+        }
         guard self.trip?.id == updated.id, ownTrain == (shownTripId == nil) else { return }
         self.trip?.stopovers = updated.stopovers
         if hasSleepingCars { self.trip?.line?.nightRail = true }
