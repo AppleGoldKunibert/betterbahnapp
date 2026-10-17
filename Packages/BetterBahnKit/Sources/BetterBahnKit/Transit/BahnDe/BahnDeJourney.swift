@@ -247,18 +247,28 @@ extension BahnDeClient {
                                maxAge: TimeInterval = BahnDeClient.journeyStopsMaxAge,
                                includingOtherRailways: Bool = false) async throws -> JourneyCourse? {
         guard let ref = includingOtherRailways ? Self.lookupReference(for: line) : Self.journeyReference(for: line), let line else { return nil }
-        let journeyKey = "\(ref.category) \(ref.number)|\(station.id)|\(plannedDeparture.timeIntervalSince1970)"
-        guard usesSharedCaches else {
-            let id = try await findJourneyId(line: line, station: station, plannedDeparture: plannedDeparture)
-            return try await fetchJourneyCourse(journeyId: id, feedOperator: line.operatorName)
-        }
-        // The journey ID of a run never changes, so resolving it (a departure board request) only
-        // happens once; the stops themselves are refreshed every few minutes.
-        let id = try await Self.journeyIdCache.value(for: journeyKey, maxAge: 12 * 3600) {
-            try await self.findJourneyId(line: line, station: station, plannedDeparture: plannedDeparture)
-        }
+        let id = try await journeyId(ref: ref, line: line, station: station, plannedDeparture: plannedDeparture)
+        guard usesSharedCaches else { return try await fetchJourneyCourse(journeyId: id, feedOperator: line.operatorName) }
         return try await Self.journeyCourseCache.value(for: id, maxAge: maxAge) {
             try await self.fetchJourneyCourse(journeyId: id, feedOperator: line.operatorName)
+        }
+    }
+
+    /// bahn.de's journey ID of `leg`'s train (`lookupReference`), e.g. for the pickup page of an
+    /// `ArrivalShare`; nil for a train bahn.de can't be asked about or doesn't list.
+    public func journeyId(for leg: Leg) async -> String? {
+        guard !leg.isWalking, let line = leg.line, let ref = Self.lookupReference(for: line) else { return nil }
+        return try? await journeyId(ref: ref, line: line, station: leg.origin, plannedDeparture: leg.departure.planned)
+    }
+
+    private func journeyId(ref: (category: String, number: String, isRegional: Bool), line: Line, station: Station,
+                           plannedDeparture: Date) async throws -> String {
+        guard usesSharedCaches else { return try await findJourneyId(line: line, station: station, plannedDeparture: plannedDeparture) }
+        // The journey ID of a run never changes, so resolving it (a departure board request) only
+        // happens once; the stops themselves are refreshed every few minutes.
+        let journeyKey = "\(ref.category) \(ref.number)|\(station.id)|\(plannedDeparture.timeIntervalSince1970)"
+        return try await Self.journeyIdCache.value(for: journeyKey, maxAge: 12 * 3600) {
+            try await self.findJourneyId(line: line, station: station, plannedDeparture: plannedDeparture)
         }
     }
 

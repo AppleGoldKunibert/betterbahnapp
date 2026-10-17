@@ -28,6 +28,28 @@ import Testing
         }
     }
 
+    /// "Ankunft teilen" (#317): the journey for the app, the last train for the pickup page, dates as ISO 8601.
+    @Test func sharesAnArrivalWithTheJourney() async throws {
+        ShareWorkerProtocol.state = .init()
+        let journey = JourneyShareLinkTests.journey()
+        let arrival = try #require(ArrivalShare(journey: journey, journeyId: "2|#VN#1#"))
+
+        let url = try await client.arrivalURL(for: journey, arrival: arrival)
+        #expect(url.absoluteString == "https://share.test/s/Ab3xK9zz")
+        #expect(try await client.journey(id: "Ab3xK9zz") == journey)
+        let sent = try #require(ShareWorkerProtocol.state.arrival)
+        #expect(sent["train"] as? String == "ICE 171")
+        #expect(sent["product"] as? String == "highSpeed")
+        #expect(sent["journeyId"] as? String == "2|#VN#1#")
+        let stops = try #require(sent["stops"] as? [[String: Any]])
+        #expect(stops.map { $0["eva"] as? String } == ["8002549", "8010085"])
+        #expect(stops[1]["arrival"] as? String == "2026-09-21T18:13:20Z")
+
+        // No long link to fall back to: the page needs the Worker.
+        ShareWorkerProtocol.state = .init(createStatus: 503)
+        await #expect(throws: TransitError.self) { try await client.arrivalURL(for: journey, arrival: arrival) }
+    }
+
     @Test func reportsExpiredAndBrokenLinks() async throws {
         ShareWorkerProtocol.state = .init(stored: ["Broken12": "not-a-journey"])
         await #expect(throws: ShortShareLinkError.expired) { try await client.journey(id: "Gone1234") }
@@ -42,6 +64,9 @@ final class ShareWorkerProtocol: URLProtocol, @unchecked Sendable {
     struct State {
         var stored: [String: String] = [:]
         var createStatus = 201
+        /// The last arrival sent with a journey.
+        var arrivalJSON: Data?
+        var arrival: [String: Any]? { arrivalJSON.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } }
     }
     private static let lock = NSLock()
     nonisolated(unsafe) private static var _state = State()
@@ -66,8 +91,13 @@ final class ShareWorkerProtocol: URLProtocol, @unchecked Sendable {
         var response = #"{"error":"not_found"}"#
         if path == "/share", request.httpMethod == "POST" {
             status = Self.state.createStatus
-            if status == 201, let data = Self.body(of: request)["data"] {
-                Self.lock.withLock { Self._state.stored["Ab3xK9zz"] = data }
+            let body = Self.body(of: request)
+            if status == 201, let data = body["data"] as? String {
+                let arrival = body["arrival"].flatMap { try? JSONSerialization.data(withJSONObject: $0) }
+                Self.lock.withLock {
+                    Self._state.stored["Ab3xK9zz"] = data
+                    Self._state.arrivalJSON = arrival
+                }
                 response = #"{"id":"Ab3xK9zz","url":"https://share.test/s/Ab3xK9zz","expiresAt":"2026-11-03T00:00:00Z"}"#
             } else {
                 response = #"{"error":"refused"}"#
@@ -82,7 +112,7 @@ final class ShareWorkerProtocol: URLProtocol, @unchecked Sendable {
         client?.urlProtocolDidFinishLoading(self)
     }
 
-    private static func body(of request: URLRequest) -> [String: String] {
+    private static func body(of request: URLRequest) -> [String: Any] {
         var data = request.httpBody
         if data == nil, let stream = request.httpBodyStream {
             stream.open()
@@ -96,6 +126,6 @@ final class ShareWorkerProtocol: URLProtocol, @unchecked Sendable {
             }
             data = buffer
         }
-        return data.flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
+        return data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
     }
 }

@@ -19,7 +19,7 @@ comments are English.
 | `BetterBahnShare/` | Share extension: `ShareViewController` takes shared DB text/URL and opens `betterbahn://import?...`. |
 | `Packages/BetterBahnKit/` | Local SwiftPM package with all models, networking and logic (iOS 26 + macOS 26, everything `Sendable`). Tests live here. |
 | `Config/` | xcconfigs + Info.plists. `Signing.xcconfig` holds team ID; optional gitignored `Local.xcconfig` overrides it. |
-| `Cloudflare/` | Worker (`betterbahn`, `wrangler.toml`) that bounces the Träwelling OAuth callback to `betterbahn://oauth`, serves the privacy policy at `/datenschutz` (linked in Settings) and the support page at `/support`, and stores shared journeys for short links (`/share`, `/s/<id>` + `apple-app-site-association`, KV with 30-day TTL, App Attest + rate limit; see its README). |
+| `Cloudflare/` | Worker (`betterbahn`, `wrangler.toml`) that bounces the Träwelling OAuth callback to `betterbahn://oauth`, serves the privacy policy at `/datenschutz` (linked in Settings) and the support page at `/support`, and stores shared journeys for short links (`/share`, `/s/<id>` + `apple-app-site-association`, KV with 30-day TTL, App Attest + rate limit; see its README). "Ankunft teilen" (#317, `arrival.mjs`): with the last train attached, `/s/<id>` is a pickup page (arrival, delay, platform, stops; live from bahn.de's `fahrt`, refreshing via `/share/<id>/live`) and the link expires 2 h after the arrival. |
 | `Cloudflare/bahnde-proxy/` | Separate Worker (`betterbahn2`) proxying bahn.de's web API (`/web/api/…` paths), because bahn.de blocks Apple's URL loading stack, and DB Timetables (`/timetables/v1/…`, API key as Worker secret). Also hands out the App Attest tokens (`/auth/…`). See its README. `BahnDeClient.baseURL`, `TimetablesClient.baseURL` point at it. |
 | `Cloudflare/pass-signer/` | Worker (`betterbahn-pass`) that signs Apple Wallet passes for DB tickets with the Pass Type ID certificate (secrets), since that can't ship in the app. Needs an App Attest token, and only signs UIC (`#UT`) barcodes whose issuer signature verifies against UIC's public key list (`uicsignature.mjs`). `npm install && npm test` (see its README). |
 | `Cloudflare/stats/` | Worker (`betterbahn-stats`, D1 database) for train statistics (#169): the app reports bahn.de journey IDs of regional/long-distance trains it showed (`POST /sightings`), a five-minute cron also seeds long-distance runs from the departure boards of the stations they stop at (`seedLongDistance`, the busiest stations in `seed_stations`), a cron trigger asks bahn.de for each run's schedule, its Wagenreihung at departure and its final realtime state after arrival, stored one row per run (`schema.sql`, compact stops), and answers the app's `POST /train-stats` (#316). `backup.sh` downloads runs older than a year, then deletes them. `node --test Cloudflare/stats/worker.test.mjs` (see its README). |
@@ -132,8 +132,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   sign-up (`FollowedCheckinPushSubscription`, persisted) is kept current by `syncFollowedCheckinPush()` on every start (device
   token; a 404 = Träwelling ended the Worker's login → setting off, `followedCheckinPushEnded`) and ended on turning off or logout.
   Tapping one opens it in the list (`followedCheckinToOpen`).
-- `Features/Sharing/` – preview of shared journeys and imported DB shares; `JourneyShareButton` (in `JourneyDetailView`)
-  uploads for a short link, falls back to the long link, and opens `UIActivityViewController`.
+- `Features/Sharing/` – preview of shared journeys and imported DB shares; `JourneyShareButton` (in `JourneyDetailView`, a menu)
+  "Reise teilen" uploads for a short link, falls back to the long link, and opens `UIActivityViewController`; "Ankunft teilen"
+  (#317, until 2 h after the arrival) sends the last train as `ArrivalShare` too, for the Worker's pickup page.
 - `Features/Settings/` – settings (incl. privacy policy link and "not affiliated with DB" note), `DataSourcesView`
   (Datenquellen: every service with its attribution/license links; keep it current when adding a source), `BC100RulesView`, quick tags.
 - `Shared/DesignSystem.swift` – reusable UI pieces (`Card`, `SectionHeader`, `LineBadge`, `TimeStack`,
@@ -373,7 +374,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   longer than a month counts as a BahnCard 100's; `WalletPassPayload(pass:)` shows the validity as from → until). Passes are stored like tickets (`TicketStore`, `passes.json`).
   bahn.de's bot protection blocks the order API outside its page in a real browser (403), so there is no direct client.
 - `Sharing/` – `JourneyShareLink` (betterbahn://share encoding, payload limits, short-link IDs),
-  `ShortShareLinkClient` (`/share` on the `betterbahn` Worker, long link as fallback), `DBShare` + `DBShareImporter`
+  `ShortShareLinkClient` (`/share` on the `betterbahn` Worker, long link as fallback; `arrivalURL` for "Ankunft teilen"),
+  `ArrivalShare` (the journey's last train from boarding to getting off, bahn.de journey ID via `BahnDeClient.journeyId(for:)`, EVA numbers), `DBShare` + `DBShareImporter`
   (parse DB Navigator/bahn.de shared text, resolve via `betterbahn://import`).
 - `Widgets/` – `WidgetSnapshot` + `WidgetStore` (JSON in the App Group container), `JourneyWidgetState` (what the
   journey widget shows at a moment: phase, next stop and its delay, transfer "RE 5 → ICE 645, Gl. 4 → Gl. 7", final

@@ -16,7 +16,8 @@ features or data flows change (and update the privacy policy in `Cloudflare/work
 - **App Privacy:** nothing is collected in Apple's sense — data either stays on the device / in the
   user's iCloud, or is only passed through BetterBahn's Workers to answer the request right away
   (timetable lookups, Wallet pass signing) and not kept. Exception: a journey the user shares is
-  stored for 30 days (connection only, no identity) so the short link works – decide whether to
+  stored for 30 days (connection only, no identity) so the short link works ("Ankunft teilen" adds the last
+  train's stops and expires 2 h after the arrival) – decide whether to
   declare it (e.g. "Other User Content", not linked, not tracking). Second exception: the train
   statistics (`Cloudflare/stats`, Settings → "Zugdaten für Statistik teilen", on by default) report the
   bahn.de IDs of trains the app showed and keep those trains' data for a year, without any device or
