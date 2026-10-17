@@ -803,18 +803,25 @@ extension BahnDeClient {
            let stop = stop(in: stops, at: leg.destination, planned: leg.arrival.planned, side: \.arrival) {
             leg.arrivalPlatform = stop.arrivalPlatform
         }
-        for index in leg.stopovers.indices {
-            let stopover = leg.stopovers[index]
+        leg.stopovers = fillingMissingPlatforms(in: leg.stopovers, from: stops)
+        return leg
+    }
+
+    /// `stopovers` (a leg's or trip's) with every platform they lack taken from `stops`, matched like `fillingMissingPlatforms(in:from:)`.
+    public static func fillingMissingPlatforms(in stopovers: [Stopover], from stops: [JourneyStop]) -> [Stopover] {
+        var stopovers = stopovers
+        for index in stopovers.indices {
+            let stopover = stopovers[index]
             if stopover.arrivalPlatform?.best == nil, let planned = stopover.arrival?.planned,
                let stop = stop(in: stops, at: stopover.station, planned: planned, side: \.arrival) {
-                leg.stopovers[index].arrivalPlatform = stop.arrivalPlatform
+                stopovers[index].arrivalPlatform = stop.arrivalPlatform
             }
             if stopover.departurePlatform?.best == nil, let planned = stopover.departure?.planned,
                let stop = stop(in: stops, at: stopover.station, planned: planned, side: \.departure) {
-                leg.stopovers[index].departurePlatform = stop.departurePlatform
+                stopovers[index].departurePlatform = stop.departurePlatform
             }
         }
-        return leg
+        return stopovers
     }
 
     /// `leg` with DB's live times from bahn.de's journey details wherever bahn.de has one (`echtzeit`),

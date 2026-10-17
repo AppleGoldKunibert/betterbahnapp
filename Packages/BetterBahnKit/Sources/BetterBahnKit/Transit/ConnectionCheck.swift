@@ -245,6 +245,11 @@ public struct JourneyRefresher: Sendable {
             leg = BahnDeClient.fillingMissingPlatforms(in: leg, from: course.stops)
             if !platformsOnly { leg = BahnDeClient.markingNightTrain(leg, hasSleepingCars: course.hasSleepingCars) }
         }
+        // What bahn.de lacks, mostly at the stations of other railways (the SBB's and ÖBB's): bahn.expert lists
+        // the platforms of the whole run, also for a Nightjet.
+        if let bahnExpert = provider.bahnExpert, Self.needsPlatforms(leg, now: now) {
+            leg = await bahnExpert.fillingMissingPlatforms(in: leg)
+        }
         // International trains from DB's feed have no platforms in Czechia; the Czech timetable has them.
         if let transitous = provider.primary as? TransitousProvider {
             leg = await transitous.fillingCzechPlatforms(in: leg)

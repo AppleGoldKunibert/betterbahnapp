@@ -253,6 +253,10 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   has no coach sequence and vagonweb has none either: it has DB's planned formation (`DB-plan`) for days
   ahead; bahn.de is only asked for departures within `BahnDeClient.formationLookahead` (12 h). Needs a
   `Referer` and a non-curl User-Agent (else an empty 206).
+  Also fills the platforms bahn.de and Transitous lack (`ExpertPlatforms.swift`, `BahnExpertClient.fillingMissingPlatforms`):
+  at the SBB's and ÖBB's stations of EC/RJ(X) trains of those railways and for Nightjet, Euronight and InterRegio, on legs
+  (`JourneyRefresher.refresh`) and on trips (`TripView.insertZusatzhalte`); cached 30 min per run. ÖBB and SBB publish
+  platforms late (RJX 161 had 3 of 16 on the day), so far-off days stay partly empty.
   Also tells whether a connecting train waits (`TransferDisposition`, "Anschluss wartet (nicht)" in `TransferRow`):
   `disposition(from:to:)` finds the arriving train (`journey/find`, no administration so ODEG etc. match), its
   arrival ID at the transfer station (`journey/detailsByJourneyId`, by EVA or planned time) and the departing train

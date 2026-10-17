@@ -4401,6 +4401,67 @@ private final class TrainSearchProtocol: URLProtocol, @unchecked Sendable {
         #expect(filled.departurePlatform?.best == "19" && filled.arrivalPlatform?.best == "13")
     }
 
+    /// EC 163 and NJ 403 have no platforms at the stations of the SBB and ÖBB in bahn.de's journey details; bahn.expert
+    /// lists the ones its sources know for the whole run.
+    @Test func fillsMissingPlatformsFromBahnExpert() throws {
+        let json = #"""
+        {"stops": [
+          {"stopPlace": {"evaNumber": "8503000", "name": "Zürich HB"},
+           "departure": {"scheduledTime": "2026-10-17T06:00:00.000Z"}},
+          {"stopPlace": {"evaNumber": "8100108", "name": "Innsbruck Hbf"},
+           "arrival": {"scheduledTime": "2026-10-17T09:43:00.000Z", "scheduledPlatform": "7", "platform": "7"},
+           "departure": {"scheduledTime": "2026-10-17T10:20:00.000Z", "scheduledPlatform": "7", "platform": "8"}},
+          {"stopPlace": {"evaNumber": "8100173", "name": "Wörgl Hbf"},
+           "arrival": {"scheduledTime": "2026-10-17T10:53:00.000Z", "scheduledPlatform": "1"}}
+        ]}
+        """#
+        let run = try JSONDecoding.decoder.decode(BahnExpertClient.RunPlatforms.self, from: Data(json.utf8))
+        let stops = BahnExpertClient.journeyStops(from: run)
+        #expect(stops.count == 3)
+        #expect(stops[0].departurePlatform == nil)
+        #expect(stops[1].arrivalPlatform?.best == "7" && stops[1].departurePlatform?.best == "8")
+        // Planned only (bahn.expert has no live platform yet).
+        #expect(stops[2].arrivalPlatform?.planned == "1" && stops[2].arrivalPlatform?.actual == nil)
+
+        func at(_ iso: String) -> TimeInfo { TimeInfo(planned: JSONDecoding.parseISODate(iso)!, actual: nil) }
+        func stopover(_ id: String, _ name: String, arrival: String? = nil, departure: String? = nil, platform: String? = nil) -> Stopover {
+            Stopover(station: Station(id: id, name: name, coordinate: nil, evaNumber: nil, source: .transitous),
+                     arrival: arrival.map(at), departure: departure.map(at),
+                     arrivalPlatform: platform.map { PlatformInfo(planned: $0, actual: nil) },
+                     departurePlatform: platform.map { PlatformInfo(planned: $0, actual: nil) }, cancelled: false)
+        }
+        let stopovers = [stopover("z", "Zürich HB", departure: "2026-10-17T06:00:00Z"),
+                         stopover("i", "Innsbruck Hbf", arrival: "2026-10-17T09:43:00Z", departure: "2026-10-17T10:20:00Z"),
+                         // Platforms Transitous already has stay, whatever bahn.expert says.
+                         stopover("w", "Wörgl Hbf", arrival: "2026-10-17T10:53:00Z", platform: "4")]
+        let filled = BahnDeClient.fillingMissingPlatforms(in: stopovers, from: stops)
+        #expect(filled[0].departurePlatform?.best == nil)
+        #expect(filled[1].arrivalPlatform?.best == "7" && filled[1].departurePlatform?.best == "8")
+        #expect(filled[2].arrivalPlatform?.best == "4")
+        // Another time at Innsbruck isn't this stop.
+        let later = [stopover("i", "Innsbruck Hbf", arrival: "2026-10-17T12:43:00Z")]
+        #expect(BahnDeClient.fillingMissingPlatforms(in: later, from: stops)[0].arrivalPlatform?.best == nil)
+    }
+
+    @Test func asksBahnExpertForPlatformsOfOtherRailwaysTrainsOnly() {
+        func line(_ name: String, _ number: String, _ product: Product, _ operatorName: String?) -> Line {
+            Line(name: name, number: number, product: product, operatorName: operatorName)
+        }
+        let nightjet = BahnExpertClient.platformReference(for: line("NJ 403", "403", .longDistance, "OEBB Personenverkehr AG"))
+        #expect(nightjet?.category == "NJ" && nightjet?.number == 403)
+        // A Nightjet without a named railway is asked too.
+        #expect(BahnExpertClient.platformReference(for: line("NJ 403", "403", .longDistance, nil))?.number == 403)
+        // The SBB's EC 163 and ÖBB's RJX 161, which bahn.de has no platforms for abroad.
+        #expect(BahnExpertClient.platformReference(for: line("EC 163", "163", .longDistance, "Schweizerische Bundesbahnen"))?.category == "EC")
+        #expect(BahnExpertClient.platformReference(for: line("RJX 161", "161", .highSpeed, "OEBB Personenverkehr AG"))?.number == 161)
+        // DB's own trains have theirs from bahn.de.
+        #expect(BahnExpertClient.platformReference(for: line("ICE 599", "599", .highSpeed, "DB Fernverkehr AG")) == nil)
+        #expect(BahnExpertClient.platformReference(for: line("IC 2013", "2013", .longDistance, "Deutsche Bahn")) == nil)
+        #expect(BahnExpertClient.platformReference(for: line("ICE 599", "599", .highSpeed, nil)) == nil)
+        #expect(BahnExpertClient.platformReference(for: line("RE 5", "5", .regionalExpress, "Schweizerische Bundesbahnen")) == nil)
+        #expect(BahnExpertClient.platformReference(for: nil) == nil)
+    }
+
     @Test func findsJourneyIdOnBoard() throws {
         let json = #"""
         {"entries": [
