@@ -15,7 +15,7 @@ CLAUDE.md still applies; this file only adds GoldKunibert's own preferences and 
 - GoldKunibert owns the project: changes that would send the user's location to a server, merging into
   `externaltester` and redeploying the `betterbahn` Worker via the Cloudflare dashboard are GoldKunibert's calls.
 - When bahn.de data is needed (see "Privacy and data sources" in CLAUDE.md), give GoldKunibert the complete
-  curl command to run on the Mac and ask for the output to be pasted.
+  `curl_cffi` command to run on the Mac and ask for the output to be pasted.
 
 ## Commit identity and signing
 
