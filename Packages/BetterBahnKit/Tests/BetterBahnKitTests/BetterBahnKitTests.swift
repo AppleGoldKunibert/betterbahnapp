@@ -2749,6 +2749,14 @@ private final class Ril100GeocodeProtocol: URLProtocol, @unchecked Sendable {
         #expect(line("S5", "S-Bahn Berlin", .bus).lineColorHex == nil)
     }
 
+    #if canImport(SwiftUI)
+    @Test func sBahnAndUBahnShowTheirLogos() {
+        #expect(Line(name: "S9", number: nil, product: .suburban, operatorName: nil).symbolName == "s.circle.fill")
+        #expect(Line(name: "U2", number: nil, product: .subway, operatorName: nil).symbolName == "u.square.fill")
+        #expect(Line(name: "RE1", number: nil, product: .regional, operatorName: nil).symbolName == "tram.fill")
+    }
+    #endif
+
     @Test func uBahnAndFeedLineColors() {
         func line(_ name: String, _ op: String?, _ product: Product, feed: String? = nil) -> Line {
             Line(name: name, number: nil, product: product, operatorName: op, feedColorHex: Line.hex(fromFeedColor: feed))
