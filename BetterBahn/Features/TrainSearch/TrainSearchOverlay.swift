@@ -487,6 +487,8 @@ private struct CoachSequenceByStop: View {
     let nextSequence: CoachSequence?
     @Binding var expanded: Bool?
     @State private var pickedID: String?
+    /// The list of stops is unfolded.
+    @State private var showsStops = false
 
     /// The stop shown: the one picked, else the next one, else the train's first.
     private var shownStop: Stopover? {
@@ -534,19 +536,59 @@ private struct CoachSequenceByStop: View {
         }
     }
 
-    /// The system's menu picker rather than a `Menu` with a label of our own: the label of the latter sat at the
-    /// wrong place for a moment after a pick, until the Wagenreihung below it had loaded.
+    /// The stop shown, tapping it unfolds the list of the others below it. Our own list rather than a system
+    /// `Menu` or `Picker`: their label jumped and flashed the glass effect for a moment after a pick.
     private func stopMenu(selected: Stopover) -> some View {
-        Picker("Halt", selection: Binding(get: { selected.id }, set: { pickedID = $0 })) {
-            ForEach(stops) { stop in
-                let time = (stop.departure ?? stop.arrival)?.planned.timeString ?? ""
-                Text("\(stop.station.displayName) · \(time)").tag(stop.id)
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation(.snappy) { showsStops.toggle() }
+            } label: {
+                HStack(spacing: 8) {
+                    Text(title(of: selected)).font(.subheadline.weight(.semibold)).lineLimit(1)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.up.chevron.down").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.secondary.opacity(0.1), in: .rect(cornerRadius: 12, style: .continuous))
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityValue(showsStops ? "Ausgeklappt" : "Eingeklappt")
+            if showsStops {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(stops) { stop in
+                            Button {
+                                pickedID = stop.id
+                                withAnimation(.snappy) { showsStops = false }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Text(title(of: stop)).font(.subheadline)
+                                    Spacer(minLength: 0)
+                                    if stop.id == selected.id {
+                                        Image(systemName: "checkmark").font(.caption.weight(.bold)).foregroundStyle(Color.brand)
+                                    }
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 10)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(.rect)
+                            }
+                            .buttonStyle(.plain)
+                            if stop.id != stops.last?.id { Divider().padding(.leading, 12) }
+                        }
+                    }
+                }
+                .frame(maxHeight: 240)
+                .transition(.fold)
             }
         }
-        .pickerStyle(.menu)
-        .labelsHidden()
-        .tint(.brand)
-        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func title(of stop: Stopover) -> String {
+        let time = (stop.departure ?? stop.arrival)?.planned.timeString
+        return time.map { "\(stop.station.displayName) · \($0)" } ?? stop.station.displayName
     }
 }
 
