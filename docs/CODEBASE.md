@@ -97,7 +97,9 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   behind a calendar button (graphical picker below the bar), filtered by Settings → Zugschnellsuche (`AppSettings.trainSearchKinds`:
   ICE, IC/EC, FLX, RE, RB, S-Bahn, Sonstiges, all but Sonstiges by default; `trainSearchCountries`, default Germany; both synced).
   A result opens `TrainSearchResultView` in a sheet: "Zugdetails anzeigen" (`TripView` without a preselected stop, to save the
-  journey/check in), the Wagenreihung and "Auf Karte zeigen" (only while bahn.jetzt has a position).
+  journey/check in), the Wagenreihung and "Auf Karte zeigen" (only while bahn.jetzt has a position). The Wagenreihung is the one at
+  the next stop; a menu picks any other stop with a platform (`BahnDeClient.formationStops(of:)`), and a train that hasn't started or has
+  arrived starts at its first stop (`CoachSequenceByStop`). The panel says when bahn.de has none for the stop.
 - `Features/Map/` – `TravelMapView` heatmap of past trips (no banner when empty) (`TravelMapHeatmap`, `RailwayTileOverlay`: OpenRailwayMap tiles, 512 px, cached on disk 7 days, 10 min pause after 403/429, #171;
   a ride both saved and checked in on Träwelling is drawn from the check-in, saved journeys only add unchecked legs – `RideMatch.uncovered`),
   `YearReviewView` (#319, "Jahresrückblick": only via `YearReviewBanner` on Verbindungen, shown all through December

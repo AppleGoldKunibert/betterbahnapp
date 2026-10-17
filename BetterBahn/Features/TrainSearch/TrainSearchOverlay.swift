@@ -390,32 +390,15 @@ struct TrainSearchResultView: View {
         }
         .buttonStyle(.plain)
 
+        let stops = BahnDeClient.formationStops(of: trip)
         if let sequence, !sequence.coaches.isEmpty, let request = sequenceRequest(for: trip) {
-            TimelineView(.everyMinute) { context in
-                let departure = CoachSequenceDisclosure.departure(of: trip, for: request)
-                let open = sequenceExpanded ?? CoachSequence.unfoldsByItself(departure: departure, now: context.date)
-                VStack(spacing: 12) {
-                    Button {
-                        withAnimation(.snappy) { sequenceExpanded = !open }
-                    } label: {
-                        OptionRow(title: sequence.source == .bahnDe ? "Wagenreihung" : "Plan-Wagenreihung",
-                                  subtitle: "Wagen, Klassen und Ausstattung",
-                                  systemImage: "train.side.front.car", color: .brand,
-                                  chevron: open ? "chevron.up" : "chevron.down")
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityValue(open ? "Ausgeklappt" : "Eingeklappt")
-                    if open {
-                        Card {
-                            CoachSequencePanel(request: request, sequence: sequence)
-                        }
-                        .transition(.fold)
-                    }
-                }
-            }
+            CoachSequenceByStop(trip: trip, stops: stops, next: request, nextSequence: sequence, expanded: $sequenceExpanded)
         } else if !checkedSequence {
             OptionRow(title: "Wagenreihung", subtitle: "Wird gesucht …", systemImage: "train.side.front.car",
                       color: .secondary, loading: true)
+        } else if !stops.isEmpty {
+            // Not running now (yet, or arrived): any stop's Wagenreihung can be picked.
+            CoachSequenceByStop(trip: trip, stops: stops, next: sequenceRequest(for: trip), nextSequence: nil, expanded: $sequenceExpanded)
         } else {
             OptionRow(title: "Wagenreihung", subtitle: "Für diesen Zug gibt es keine Wagenreihung.",
                       systemImage: "train.side.front.car", color: .secondary, showsChevron: false)
@@ -489,6 +472,84 @@ struct TrainSearchResultView: View {
             }
             try? await Task.sleep(for: .seconds(120))
         }
+    }
+}
+
+/// The Wagenreihung row of a train found by number: at the next stop while the train runs, and a menu to pick
+/// any other stop it calls at (a train that hasn't started or has arrived has no next stop). The panel says so
+/// when bahn.de has none for the stop picked.
+private struct CoachSequenceByStop: View {
+    let trip: Trip
+    /// The stops a Wagenreihung can be asked at (`BahnDeClient.formationStops`).
+    let stops: [Stopover]
+    /// The request at the next stop, if the train has one, and its sequence when loaded.
+    let next: BahnDeClient.FormationRequest?
+    let nextSequence: CoachSequence?
+    @Binding var expanded: Bool?
+    @State private var pickedID: String?
+
+    /// The stop shown: the one picked, else the next one, else the train's first.
+    private var shownStop: Stopover? {
+        if let picked = stops.first(where: { $0.id == pickedID }) { return picked }
+        if let next, let stop = stops.first(where: { isStop($0, of: next) }) { return stop }
+        return stops.first
+    }
+
+    /// `next` at the next stop (it knows the coupled trains), else the request at `stop`.
+    private func formationRequest(at stop: Stopover) -> BahnDeClient.FormationRequest? {
+        if let next, isStop(stop, of: next) { return next }
+        return BahnDeClient.formationRequest(for: trip, at: stop)
+    }
+
+    private func isStop(_ stop: Stopover, of request: BahnDeClient.FormationRequest) -> Bool {
+        stop.station.id == request.station.id && (stop.departure ?? stop.arrival)?.planned == request.plannedDeparture
+    }
+
+    var body: some View {
+        TimelineView(.everyMinute) { context in
+            let departure = next.flatMap { CoachSequenceDisclosure.departure(of: trip, for: $0) }
+            let open = expanded ?? (nextSequence != nil && CoachSequence.unfoldsByItself(departure: departure, now: context.date))
+            VStack(spacing: 12) {
+                Button {
+                    withAnimation(.snappy) { expanded = !open }
+                } label: {
+                    OptionRow(title: nextSequence?.source == .bahnDe || nextSequence == nil ? "Wagenreihung" : "Plan-Wagenreihung",
+                              subtitle: nextSequence == nil ? "Halt wählen; Wagen, Klassen und Ausstattung" : "Wagen, Klassen und Ausstattung",
+                              systemImage: "train.side.front.car", color: .brand,
+                              chevron: open ? "chevron.up" : "chevron.down")
+                }
+                .buttonStyle(.plain)
+                .accessibilityValue(open ? "Ausgeklappt" : "Eingeklappt")
+                if open, let stop = shownStop, let request = formationRequest(at: stop) {
+                    Card {
+                        VStack(alignment: .leading, spacing: 12) {
+                            if stops.count > 1 { stopMenu(selected: stop) }
+                            CoachSequencePanel(request: request, sequence: request == next ? nextSequence : nil)
+                                .id(stop.id)
+                        }
+                    }
+                    .transition(.fold)
+                }
+            }
+        }
+    }
+
+    private func stopMenu(selected: Stopover) -> some View {
+        Menu {
+            Picker("Halt", selection: Binding(get: { selected.id }, set: { pickedID = $0 })) {
+                ForEach(stops) { stop in
+                    let time = (stop.departure ?? stop.arrival)?.planned.timeString ?? ""
+                    Text("\(stop.station.displayName) · \(time)").tag(stop.id)
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(selected.station.displayName).lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down").font(.caption2)
+            }
+            .font(.subheadline.weight(.semibold))
+        }
+        .tint(.brand)
     }
 }
 

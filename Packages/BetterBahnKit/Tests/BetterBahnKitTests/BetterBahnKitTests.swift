@@ -4166,6 +4166,39 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         #expect(result.lineName == nil)
     }
 
+    /// A train that has arrived (or not started) has no next stop, but its Wagenreihung can still be asked at
+    /// every stop that has a time and a platform.
+    @Test func formationStopsOfATrip() throws {
+        func date(_ value: String) -> Date { ISO8601DateFormatter().date(from: value)! }
+        func stop(_ name: String, arrival: String?, departure: String?, platform: String? = "4", cancelled: Bool = false) -> Stopover {
+            Stopover(station: Station(id: name, name: name, coordinate: nil, evaNumber: nil, source: .transitous),
+                     arrival: arrival.map { TimeInfo(planned: date($0), actual: nil) },
+                     departure: departure.map { TimeInfo(planned: date($0), actual: nil) },
+                     arrivalPlatform: nil, departurePlatform: platform.map { PlatformInfo(planned: $0, actual: nil) }, cancelled: cancelled)
+        }
+        let line = Line(name: "RJ 171", number: "171", product: .highSpeed, operatorName: nil)
+        let trip = Trip(id: "t", line: line, direction: nil, stopovers: [
+            stop("Hamburg-Altona", arrival: nil, departure: "2026-10-17T03:17:00Z"),
+            stop("Hamburg Dammtor", arrival: "2026-10-17T03:25:00Z", departure: "2026-10-17T03:26:00Z"),
+            stop("Hamburg Hbf", arrival: "2026-10-17T03:33:00Z", departure: "2026-10-17T03:36:00Z", cancelled: true),
+            stop("Berlin Hbf", arrival: "2026-10-17T05:56:00Z", departure: "2026-10-17T05:59:00Z", platform: nil),
+            stop("Praha hl.n.", arrival: "2026-10-17T09:25:00Z", departure: nil),
+        ], cancelled: false, remarks: [], source: .transitous)
+
+        // Not the cancelled stop, nor the one without a platform.
+        #expect(BahnDeClient.formationStops(of: trip).map(\.station.name) == ["Hamburg-Altona", "Hamburg Dammtor", "Praha hl.n."])
+        let dammtor = try #require(BahnDeClient.formationRequest(for: trip, at: trip.stopovers[1]))
+        #expect(dammtor.category == "RJ" && dammtor.number == "171")
+        #expect(dammtor.plannedDeparture == date("2026-10-17T03:26:00Z"))
+        #expect(dammtor.stopsBefore == ["Hamburg-Altona"])
+        // The last stop has an arrival only.
+        #expect(BahnDeClient.formationRequest(for: trip, at: trip.stopovers[4])?.plannedDeparture == date("2026-10-17T09:25:00Z"))
+        // Nothing for a train bahn.de has no sequence for.
+        var bus = trip
+        bus.line = Line(name: "Bus 7", number: "7", product: .bus, operatorName: nil)
+        #expect(BahnDeClient.formationStops(of: bus).isEmpty)
+    }
+
     @Test func looksTheTrainUpAtGermanStopsFirst() {
         let start = Date(timeIntervalSince1970: 1_800_000_000)
         let stops = [
