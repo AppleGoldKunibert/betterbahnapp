@@ -127,7 +127,7 @@ oder andere Angaben über dich sind nicht dabei. Ist der Server nicht erreichbar
 längeren Link, der die Reise selbst enthält; dann wird nichts gespeichert.</p>
 <p>Mit „Ankunft teilen“ schickt die App zusätzlich den letzten Zug der Reise mit seinen Halten, Zeiten und Gleisen.
 Wer den Link öffnet, sieht auch ohne App eine Seite mit Ankunftszeit und Gleis; die aktuellen Zeiten fragt der
-Server dafür bei bahn.de ab. Diese Links werden schon 2 Stunden nach der Ankunft gelöscht. Dein Standort ist nie
+Server dafür bei der Deutschen Bahn ab. Diese Links werden schon 2 Stunden nach der Ankunft gelöscht. Dein Standort ist nie
 dabei.</p>
 
 <h2>Zugstatistik</h2>

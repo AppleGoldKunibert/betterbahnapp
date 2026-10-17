@@ -2,11 +2,13 @@ import Foundation
 
 /// "Ankunft teilen" (#317): the last train of a journey, for the page the person picking you up opens in
 /// any browser (`/s/<id>` on the `betterbahn` Worker). The Worker keeps it until `lifetimeAfterArrival`
-/// after the arrival and asks bahn.de for the live times by `journeyId`; without one the page shows these
-/// times. Only this train's data, never a location.
+/// after the arrival and asks DB's IRIS for the live times per stop (by EVA number, `number` and planned time),
+/// else bahn.de by `journeyId`; without either the page shows these times. Only this train's data, never a location.
 public struct ArrivalShare: Codable, Sendable, Equatable {
     /// "ICE 1095", "RE 3 (3307)".
     public var train: String
+    /// The run number DB lists the train under ("1095", an RE 3's "3307"), to find it in IRIS.
+    public var number: String?
     public var product: Product
     /// The line's own color (S-Bahn Berlin …), as `0xRRGGBB`; else the page uses the product's.
     public var color: UInt32?
@@ -40,10 +42,11 @@ public struct ArrivalShare: Codable, Sendable, Equatable {
     }
 
     /// `evaNumbers` fills in EVA numbers for stations that have none (by `Station.id`), so the Worker
-    /// finds the stops in bahn.de's data.
+    /// finds the stops in IRIS and bahn.de.
     public init?(journey: Journey, journeyId: String? = nil, evaNumbers: [String: String] = [:]) {
         guard let leg = Self.leg(of: journey), let line = leg.line else { return nil }
         train = line.displayName
+        number = line.dispatchNumber
         product = line.product
         color = line.lineColorHex
         self.journeyId = journeyId
@@ -57,7 +60,7 @@ public struct ArrivalShare: Codable, Sendable, Equatable {
             let isLast = index == stopovers.count - 1
             // The destination's arrival platform, every other stop's departure platform.
             let platform = isLast ? (stop.arrivalPlatform ?? stop.departurePlatform) : (stop.departurePlatform ?? stop.arrivalPlatform)
-            return Stop(name: stop.station.displayName, eva: stop.station.evaNumber ?? evaNumbers[stop.station.id],
+            return Stop(name: stop.station.displayName, eva: Self.evaNumber(of: stop.station) ?? evaNumbers[stop.station.id],
                         arrival: stop.arrival?.planned, arrivalLive: stop.arrival?.actual,
                         departure: stop.departure?.planned, departureLive: stop.departure?.actual,
                         platform: platform?.planned, platformLive: platform?.actual,
@@ -68,6 +71,12 @@ public struct ArrivalShare: Codable, Sendable, Equatable {
     /// The stations the Worker needs EVA numbers for: where you board and where you get off.
     public static func stationsNeedingEVA(in journey: Journey) -> [Station] {
         guard let leg = leg(of: journey) else { return [] }
-        return [leg.origin, leg.destination].filter { $0.evaNumber == nil }
+        return [leg.origin, leg.destination].filter { evaNumber(of: $0) == nil }
+    }
+
+    /// The station's EVA number, from the station itself or the offline list (`StationNames`, the main level of a
+    /// station with several); IRIS asks by it.
+    static func evaNumber(of station: Station) -> String? {
+        station.evaNumber ?? StationNames.evaNumber(for: station) ?? StationNames.mainEvaNumber(for: station)
     }
 }

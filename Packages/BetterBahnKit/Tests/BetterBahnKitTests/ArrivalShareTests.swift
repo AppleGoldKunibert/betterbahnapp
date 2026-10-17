@@ -9,7 +9,7 @@ import Testing
     /// Hamburg → Berlin by ICE, then Berlin Hbf → Ostkreuz by S-Bahn, then a walk.
     private func journey() -> Journey {
         let ice = JourneyShareLinkTests.journey().legs[0]
-        let ostkreuz = station("ostkreuz", "Berlin Ostkreuz", source: .transitous)
+        let ostkreuz = station("ostkreuz", "Testhausen Ost", source: .transitous)
         let sBahn = Leg(origin: station("8011160", "Berlin Hbf"), destination: ostkreuz,
                         departure: TimeInfo(planned: start.addingTimeInterval(5 * 3600), actual: nil),
                         arrival: TimeInfo(planned: start.addingTimeInterval(5 * 3600 + 600), actual: start.addingTimeInterval(5 * 3600 + 780)),
@@ -31,11 +31,12 @@ import Testing
 
         let share = try #require(ArrivalShare(journey: journey, journeyId: "2|#VN#1#", evaNumbers: ["ostkreuz": "8011162"]))
         #expect(share.train == "S5")
+        #expect(share.number == nil)
         #expect(share.product == .suburban)
         #expect(share.color != nil)
         #expect(share.color == journey.legs[1].line?.lineColorHex)
         #expect(share.journeyId == "2|#VN#1#")
-        #expect(share.stops.map(\.name) == ["Berlin Hbf", "Berlin Ostkreuz"])
+        #expect(share.stops.map(\.name) == ["Berlin Hbf", "Testhausen Ost"])
         #expect(share.stops.map(\.eva) == ["8011160", "8011162"])
         // Where you board: the departure; where you get off: the arrival and its platform.
         #expect(share.stops[0].departure == start.addingTimeInterval(5 * 3600))
@@ -66,6 +67,7 @@ import Testing
         ]
         let share = try #require(ArrivalShare(journey: journey))
         #expect(share.stops.map(\.name) == ["Hamburg Hbf", "Hannover Hbf", "Dresden Hbf"])
+        #expect(share.number == "171")
         #expect(share.stops.map(\.cancelled) == [false, true, false])
         #expect(share.stops[2].platform == "17")
         #expect(share.journeyId == nil)

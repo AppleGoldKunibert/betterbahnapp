@@ -1,10 +1,13 @@
 // "Ankunft teilen" (#317): a share link for the person picking you up. Besides the journey for the app, the
 // app sends the last train (`arrival`: its stops from boarding to getting off, see `ArrivalShare` in the app);
 // `/s/<id>` then shows a small page with the arrival time, delay, platform and the remaining stops, which
-// asks `/share/<id>/live` every 30 seconds. Live times come from bahn.de's journey details (by the train's
-// journey ID, cached 30 s, so many viewers make one request), asked through our bahn.de server
-// (`Server/bahnde-proxy`, `BAHNDE_PROXY_URL`; bahn.de refuses Workers) with a token of our own; without them the
-// page shows what the app sent. The link only works until 2 hours after the arrival.
+// asks `/share/<id>/live` every 30 seconds. Live times come from DB's IRIS (the service behind DB Timetables, as in
+// the app), asked per stop: each station's schedule (cached 30 min) and changes (cached 30 s), so many viewers
+// make few requests. When IRIS doesn't have the train at the destination, bahn.de's journey details are asked
+// through our bahn.de server (`Server/bahnde-proxy`, `BAHNDE_PROXY_URL`; bahn.de refuses Workers) with a token
+// of our own; without either the page shows what the app sent. Every refused or failed request is logged
+// (`arrival upstream`, Workers Logs), to see whether IRIS or our server start limiting us.
+// The link only works until 2 hours after the arrival.
 
 import { signToken } from "./shared/appattest.mjs";
 
@@ -16,6 +19,15 @@ const LIVE_TIMEOUT = 5000;
 const MAX_STOPS = 150;
 // Our bahn.de server rate limits by this token's key: all arrival pages together.
 const TOKEN_KID = "arrival-pages";
+const IRIS = "https://iris.noncd.db.de/iris-tts/timetable/";
+const PLAN_TTL = 30 * 60;
+// Two IRIS requests per stop: long trains only get their last stops asked (Workers allow 50 requests per call).
+const MAX_IRIS_STOPS = 15;
+// DB only lists changes: a stop without one counts as on time once the train is about to run (as in the app).
+const ON_TIME_LOOKAHEAD = 2 * 3600 * 1000;
+// IRIS's and bahn.de's "no such data".
+const NO_DATA = new Set([400, 404, 410]);
+const RUN_NUMBER_PATTERN = /^[A-Za-z0-9]{1,12}$/;
 const JOURNEY_ID_PATTERN = /^\d+\|#[\x20-\x7eÀ-ſ]+$/;
 const EVA_PATTERN = /^\d{6,9}$/;
 const PRODUCTS = new Set(["highSpeed", "longDistance", "nightTrain", "interregio", "regionalExpress", "regional",
@@ -27,6 +39,7 @@ const PRODUCTS = new Set(["highSpeed", "longDistance", "nightTrain", "interregio
 export function parseArrival(input) {
     if (!input || typeof input !== "object") return null;
     const train = text(input.train, 40);
+    const number = typeof input.number === "string" && RUN_NUMBER_PATTERN.test(input.number) ? input.number : null;
     const product = PRODUCTS.has(input.product) ? input.product : "other";
     const color = Number.isInteger(input.color) && input.color >= 0 && input.color <= 0xffffff ? input.color : null;
     const journeyId = typeof input.journeyId === "string" && input.journeyId.length <= 500 && JOURNEY_ID_PATTERN.test(input.journeyId)
@@ -34,7 +47,7 @@ export function parseArrival(input) {
     if (!train || !Array.isArray(input.stops) || input.stops.length < 2 || input.stops.length > MAX_STOPS) return null;
     const stops = input.stops.map(parseStop);
     if (stops.some(stop => !stop) || !stops[stops.length - 1].arr) return null;
-    return { train, product, color, journeyId, stops };
+    return { train, number, product, color, journeyId, stops };
 }
 
 function parseStop(stop) {
@@ -79,15 +92,25 @@ export function extendedExpiry(entry, view) {
 
 // MARK: - Live data
 
-/// What the page shows: the stored arrival, with bahn.de's live times where it has the train.
+/// What the page shows: the stored arrival with DB's live times from IRIS, else from bahn.de where it has the train.
 export async function arrivalView(arrival, expiresAt, deps = {}) {
     const now = deps.now ?? Date.now();
     let stops = arrival.stops;
     let live = false;
     let messages = [];
-    if (arrival.journeyId && deps.proxyURL && deps.secret) {
+    let fromIris = null;
+    try {
+        fromIris = await irisStops(arrival, { ...deps, now });
+    } catch {
+        // Logged in `fetchCached`; bahn.de is asked instead.
+    }
+    if (fromIris) {
+        stops = fromIris;
+        const destination = stops[stops.length - 1];
+        live = destination.arrRt !== null || destination.cancelled;
+    } else if (arrival.journeyId && deps.proxyURL && deps.secret) {
         try {
-            const details = await journeyDetails(arrival.journeyId, deps);
+            const details = await journeyDetails(arrival.journeyId, { ...deps, now });
             const section = details ? liveSection(liveStops(details), arrival.stops) : null;
             if (section) {
                 stops = section;
@@ -101,24 +124,158 @@ export async function arrivalView(arrival, expiresAt, deps = {}) {
     return { train: arrival.train, product: arrival.product, color: arrival.color, live, stops, messages, updatedAt: now, expiresAt };
 }
 
-async function journeyDetails(journeyId, { proxyURL, secret, fetchUpstream = fetch, cache = null, waitUntil, now = Date.now() }) {
-    const url = new URL(`/web/api/reiseloesung/fahrt?journeyId=${encodeURIComponent(journeyId)}&poly=false`, proxyURL).href;
+/// bahn.de's journey details through our bahn.de server; null when bahn.de doesn't know the journey.
+async function journeyDetails(journeyId, deps) {
+    const url = new URL(`/web/api/reiseloesung/fahrt?journeyId=${encodeURIComponent(journeyId)}&poly=false`, deps.proxyURL).href;
+    const token = await signToken({ t: "a", kid: TOKEN_KID, exp: Math.floor(deps.now / 1000) + 300 }, deps.secret);
+    const body = await fetchCached(url, LIVE_TTL, "bahnde", deps,
+        { "Accept": "application/json", "X-BetterBahn-Token": token });
+    return body === null ? null : JSON.parse(body);
+}
+
+/// A GET answer's text, cached for `ttl` seconds; null for "no such data", throws (after logging) otherwise.
+async function fetchCached(url, ttl, source, { fetchUpstream = fetch, cache = null, waitUntil }, headers = {}) {
     const key = new Request(url);
     const cached = cache ? await cache.match(key) : null;
-    if (cached) return cached.json();
-    const token = await signToken({ t: "a", kid: TOKEN_KID, exp: Math.floor(now / 1000) + 300 }, secret);
-    const response = await fetchUpstream(url, {
-        headers: { "Accept": "application/json", "X-BetterBahn-Token": token },
-        signal: AbortSignal.timeout(LIVE_TIMEOUT),
-    });
-    if (response.status === 404 || response.status === 400) return null;
-    if (!response.ok) throw new Error(`bahn.de ${response.status}`);
+    if (cached) return cached.text();
+    const started = Date.now();
+    let response;
+    try {
+        response = await fetchUpstream(url, { headers, signal: AbortSignal.timeout(LIVE_TIMEOUT) });
+    } catch (error) {
+        logUpstream(source, url, error?.name === "TimeoutError" ? "timeout" : "unreachable", started);
+        throw error;
+    }
+    if (NO_DATA.has(response.status)) return null;
+    if (!response.ok) {
+        logUpstream(source, url, response.status, started, response.headers.get("Retry-After"));
+        throw new Error(`${source} ${response.status}`);
+    }
     const body = await response.text();
     if (cache) {
-        const store = cache.put(key, new Response(body, { headers: { "Cache-Control": `public, max-age=${LIVE_TTL}` } }));
+        const store = cache.put(key, new Response(body, { headers: { "Cache-Control": `public, max-age=${ttl}` } }));
         waitUntil ? waitUntil(store) : await store;
     }
-    return JSON.parse(body);
+    return body;
+}
+
+/// One line per refused or failed request, in Workers Logs (`wrangler tail` or the dashboard): a 429, 403 or
+/// 452 there means IRIS or our bahn.de server started limiting the arrival pages.
+function logUpstream(source, url, status, started, retryAfter = null) {
+    const limited = status === 429 || status === 403 || status === 452;
+    console.warn(JSON.stringify({
+        message: "arrival upstream", source, status, limited, path: new URL(url).pathname,
+        ms: Date.now() - started, ...(retryAfter ? { retryAfter } : {}),
+    }));
+}
+
+// MARK: - IRIS
+
+/// The shared stops with DB's live times from IRIS where it has the train; stops it doesn't have keep the app's
+/// times. null when IRIS doesn't have the train at the destination.
+export async function irisStops(arrival, deps) {
+    const stops = arrival.stops;
+    const first = Math.max(0, stops.length - MAX_IRIS_STOPS);
+    const boarding = stops[0].depRt ?? stops[0].dep ?? stops[0].arr;
+    const running = boarding - deps.now < ON_TIME_LOOKAHEAD;
+    const destination = stops.length - 1;
+    const looked = await Promise.all(stops.map((stop, index) => {
+        if (index < first) return null;
+        const lookup = irisStop(stop, index === destination, arrival, running, deps);
+        // A failing intermediate stop keeps the app's times; the destination decides.
+        return index === destination ? lookup : lookup.catch(() => null);
+    }));
+    if (!looked[destination]) return null;
+    return stops.map((stop, index) => looked[index] ?? stop);
+}
+
+async function irisStop(stop, isDestination, arrival, running, deps) {
+    const planned = isDestination ? stop.arr : stop.dep ?? stop.arr;
+    if (!stop.eva || !planned) return null;
+    const when = irisTime(planned);
+    const plan = await fetchCached(`${IRIS}plan/${stop.eva}/${when.day}/${when.hour}`, PLAN_TTL, "iris", deps);
+    const entry = plan && findTrain(plan, when.stamp, isDestination ? "ar" : "dp", arrival);
+    if (!entry) return null;
+    const changes = await fetchCached(`${IRIS}fchg/${stop.eva}`, LIVE_TTL, "iris", deps) ?? "";
+    const change = changesOf(changes, entry.id);
+    const event = name => {
+        const plan = entry[name];
+        if (!plan) return { planned: null, actual: null, platform: null, platformRt: null, cancelled: false };
+        const live = change[name] ?? {};
+        const plannedTime = irisUnix(plan.pt);
+        return {
+            planned: plannedTime,
+            actual: live.ct ? irisUnix(live.ct) : running ? plannedTime : null,
+            platform: plan.pp ?? null,
+            platformRt: live.cp ?? null,
+            cancelled: live.cs === "c" || plan.cs === "c",
+        };
+    };
+    const arriving = event("ar");
+    const leaving = event("dp");
+    const main = isDestination || !entry.dp ? arriving : leaving;
+    return {
+        name: stop.name, eva: stop.eva,
+        arr: arriving.planned ?? stop.arr, arrRt: arriving.actual,
+        dep: leaving.planned ?? stop.dep, depRt: leaving.actual,
+        platform: main.platform ?? stop.platform, platformRt: main.platformRt,
+        cancelled: main.cancelled,
+    };
+}
+
+/// The `<s>` of `arrival`'s train in an IRIS schedule: the event `kind` ("ar"/"dp", either when the stop
+/// has only one) at `stamp`, by run number or name.
+export function findTrain(xml, stamp, kind, arrival) {
+    const name = squashed(arrival.train);
+    for (const [, sAttributes, body] of xml.matchAll(/<s\b([^>]*)>([\s\S]*?)<\/s>/g)) {
+        const entry = { id: attributes(sAttributes).id, tl: element(body, "tl"), ar: element(body, "ar"), dp: element(body, "dp") };
+        const event = entry[kind] ?? entry[kind === "ar" ? "dp" : "ar"];
+        if (!entry.id || !entry.tl || event?.pt !== stamp) continue;
+        const sameNumber = arrival.number && entry.tl.n === arrival.number;
+        const sameName = [event.l, entry.tl.c && entry.tl.n ? entry.tl.c + entry.tl.n : null]
+            .some(label => label && squashed(label) === name);
+        if (sameNumber || sameName) return entry;
+    }
+    return null;
+}
+
+/// The `<ar>`/`<dp>` changes of the stop `id` in an IRIS change list (`fchg`).
+function changesOf(xml, id) {
+    const start = xml.indexOf(`<s id="${id}"`);
+    if (start < 0) return {};
+    const end = xml.indexOf("</s>", start);
+    const body = xml.slice(start, end < 0 ? undefined : end);
+    return { ar: element(body, "ar"), dp: element(body, "dp") };
+}
+
+function element(xml, name) {
+    const match = xml.match(new RegExp(`<${name}\\b([^>]*)>`));
+    return match ? attributes(match[1]) : null;
+}
+
+function attributes(text) {
+    return Object.fromEntries([...text.matchAll(/([\w-]+)=["']([^"']*)["']/g)].map(([, key, value]) => [key, value]));
+}
+
+function squashed(name) {
+    return String(name).toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+const irisFormat = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Berlin", year: "2-digit", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+});
+
+/// IRIS's day ("YYMMDD"), hour ("HH") and time stamp ("YYMMDDHHmm") of a moment, in Berlin.
+export function irisTime(ms) {
+    const part = Object.fromEntries(irisFormat.formatToParts(new Date(ms)).map(({ type, value }) => [type, value]));
+    const day = `${part.year}${part.month}${part.day}`;
+    return { day, hour: part.hour, stamp: `${day}${part.hour}${part.minute}` };
+}
+
+/// Unix milliseconds of IRIS's "YYMMDDHHmm" in Berlin.
+function irisUnix(stamp) {
+    const match = typeof stamp === "string" && stamp.match(/^(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/);
+    return match ? unix(`20${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}`) : null;
 }
 
 /// The stops of bahn.de's journey details (`halte`), times as Unix milliseconds.

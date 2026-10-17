@@ -72,7 +72,7 @@ struct JourneyShareButton: View {
         guard let leg = ArrivalShare.leg(of: journey) else { return }
         isPreparing = true
         defer { isPreparing = false }
-        // bahn.de's ID of the train gives the page live times; EVA numbers find the stops in them.
+        // EVA numbers let the page find the stops in DB's live data; bahn.de's ID of the train is its fallback.
         let bahnDe = BahnDeClient()
         async let journeyId = bahnDe.journeyId(for: leg)
         var evaNumbers: [String: String] = [:]

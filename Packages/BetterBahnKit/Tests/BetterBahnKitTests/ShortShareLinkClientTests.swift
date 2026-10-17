@@ -39,6 +39,7 @@ import Testing
         #expect(try await client.journey(id: "Ab3xK9zz") == journey)
         let sent = try #require(ShareWorkerProtocol.state.arrival)
         #expect(sent["train"] as? String == "ICE 171")
+        #expect(sent["number"] as? String == "171")
         #expect(sent["product"] as? String == "highSpeed")
         #expect(sent["journeyId"] as? String == "2|#VN#1#")
         let stops = try #require(sent["stops"] as? [[String: Any]])

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AFTER_ARRIVAL, parseArrival, renderArrival } from "./arrival.mjs";
+import { AFTER_ARRIVAL, findTrain, parseArrival, renderArrival } from "./arrival.mjs";
 import { verifyToken } from "./shared/appattest.mjs";
 import { handleShare } from "./worker.mjs";
 
@@ -51,16 +51,40 @@ function details({ arrivalRt = "2026-10-06T22:14:00", platformRt = "9" } = {}) {
     };
 }
 
-function bahnDe(body, status = 200) {
+const irisTimetable = (station, stops) => `<?xml version='1.0' encoding='UTF-8'?><timetable station='${station}'>${stops}</timetable>`;
+
+/// IRIS's schedules and changes for ICE 1095 at Nürnberg and Frankfurt (an RE leaves Nürnberg at the same minute).
+const irisPlans = {
+    "8000284": irisTimetable("Nürnberg Hbf", `<s id="-7-2610061756-5"><tl f="F" t="p" o="80" c="ICE" n="1095"/><ar pt="2610061900" pp="7" ppth="München Hbf"/><dp pt="2610061902" pp="7" ppth="Frankfurt(Main)Hbf"/></s>`
+        + `<s id="-9-2610061902-1"><tl f="N" t="p" o="800" c="RE" n="4012"/><dp pt="2610061902" pp="2" l="RE10"/></s>`),
+    "8000105": irisTimetable("Frankfurt(Main)Hbf", `<s id="-7-2610061756-9"><tl f="F" t="p" o="80" c="ICE" n="1095"/><ar pt="2610062209" pp="8"/></s>`),
+};
+const irisChanges = {
+    "8000284": irisTimetable("Nürnberg Hbf", `<s id="-7-2610061756-5" eva="8000284">\n<ar ct="2610061905"/>\n<dp ct="2610061907">\n<m t="d" c="34"/>\n</dp>\n</s>`),
+    "8000105": irisTimetable("Frankfurt(Main)Hbf", `<s id="-7-2610061756-9" eva="8000105">\n<ar ct="2610062214" cp="9"/>\n</s>`),
+};
+
+/// IRIS and our bahn.de server: answers by URL and records each request. IRIS knows nothing unless given.
+function upstream({ plans = {}, changes = {}, irisStatus = {}, bahnDe = null, bahnDeStatus = 200 } = {}) {
     const calls = [];
     const tokens = [];
     const fetchUpstream = async (url, init) => {
         calls.push(url);
+        const iris = url.match(/^https:\/\/iris\.noncd\.db\.de\/iris-tts\/timetable\/(plan|fchg)\/(\d+)/);
+        if (iris) {
+            const [, kind, eva] = iris;
+            if (irisStatus[eva]) return new Response("", { status: irisStatus[eva], headers: { "Retry-After": "60" } });
+            const body = (kind === "plan" ? plans : changes)[eva];
+            return new Response(body ?? "", { status: body === undefined ? 404 : 200 });
+        }
         tokens.push(init.headers["X-BetterBahn-Token"]);
-        return new Response(JSON.stringify(body), { status });
+        return bahnDe === null ? new Response("", { status: 404 }) : new Response(JSON.stringify(bahnDe), { status: bahnDeStatus });
     };
     return { calls, tokens, fetchUpstream };
 }
+
+const bahnDe = (body, status = 200) => upstream({ bahnDe: body, bahnDeStatus: status });
+const proxyCalls = fake => fake.calls.filter(url => url.startsWith("https://proxy.test/"));
 
 async function share(environment, body, now) {
     const request = new Request(`${origin}/share`, { method: "POST", body: JSON.stringify(body) });
@@ -105,7 +129,84 @@ test("refuses arrivals that aren't one or are long over", async () => {
     assert.equal(odd.color, null);
 });
 
-test("the page and its refresh show bahn.de's live arrival, delay and platform", async () => {
+test("the page and its refresh show DB's live arrival from IRIS, asked per stop", async () => {
+    const environment = env();
+    const now = at("20:00");
+    const { id } = await (await share(environment, { data: "abc", arrival: arrival() }, now)).json();
+    const fake = upstream({ plans: irisPlans, changes: irisChanges, bahnDe: details() });
+
+    const view = await (await handleShare(new Request(`${origin}/share/${id}/live`), environment, now, fake)).json();
+    assert.equal(view.live, true);
+    assert.equal(view.stops[1].arrRt, at("22:14"));
+    assert.equal(view.stops[1].platform, "8");
+    assert.equal(view.stops[1].platformRt, "9");
+    // Nürnberg's own departure, not the RE leaving at the same minute.
+    assert.equal(view.stops[0].depRt, at("19:07"));
+    assert.equal(view.stops[0].platform, "7");
+    // The schedule of the hour each stop is planned in; bahn.de isn't asked.
+    assert.ok(fake.calls.includes("https://iris.noncd.db.de/iris-tts/timetable/plan/8000105/261006/22"));
+    assert.ok(fake.calls.includes("https://iris.noncd.db.de/iris-tts/timetable/plan/8000284/261006/19"));
+    assert.ok(fake.calls.includes("https://iris.noncd.db.de/iris-tts/timetable/fchg/8000105"));
+    assert.deepEqual(proxyCalls(fake), []);
+
+    const html = renderArrival(view, now);
+    assert.match(html, /<span class="time ontime">22:14<\/span><span class="planned">22:09<\/span>/);
+    assert.match(html, /Live-Daten der Deutschen Bahn/);
+});
+
+test("IRIS lists only changes: no change counts as on time once the train is about to run", async () => {
+    const environment = env();
+    const { id } = await (await share(environment, { data: "abc", arrival: arrival() }, at("15:00"))).json();
+    const changes = { "8000284": irisTimetable("Nürnberg Hbf", ""), "8000105": irisTimetable("Frankfurt(Main)Hbf", "") };
+    const read = async now => (await handleShare(new Request(`${origin}/share/${id}/live`), environment, now,
+        upstream({ plans: irisPlans, changes, bahnDe: details() }))).json();
+
+    const running = await read(at("20:00"));
+    assert.equal(running.live, true);
+    assert.equal(running.stops[1].arrRt, at("22:09"));
+    assert.equal(running.stops[1].platformRt, null);
+
+    // More than 2 hours before it leaves Nürnberg nothing is live yet, and bahn.de wouldn't know more.
+    const ahead = await read(at("16:30"));
+    assert.equal(ahead.live, false);
+    assert.equal(ahead.stops[1].arrRt, null);
+});
+
+test("a stop IRIS fails for keeps the app's times; IRIS limiting us is logged and bahn.de answers instead", async t => {
+    const warnings = t.mock.method(console, "warn", () => {});
+    const environment = env();
+    const now = at("20:00");
+    const { id } = await (await share(environment, { data: "abc", arrival: arrival() }, now)).json();
+
+    const partly = await (await handleShare(new Request(`${origin}/share/${id}/live`), environment, now,
+        upstream({ plans: irisPlans, changes: irisChanges, irisStatus: { "8000284": 500 } }))).json();
+    assert.equal(partly.live, true);
+    assert.equal(partly.stops[1].arrRt, at("22:14"));
+    assert.equal(partly.stops[0].depRt, null);
+
+    const limited = upstream({ plans: irisPlans, changes: irisChanges, irisStatus: { "8000105": 429 }, bahnDe: details() });
+    const view = await (await handleShare(new Request(`${origin}/share/${id}/live`), environment, now, limited)).json();
+    assert.equal(view.live, true);
+    assert.deepEqual(view.messages, ["Reparatur am Zug."]);
+    assert.equal(proxyCalls(limited).length, 1);
+
+    const logged = warnings.mock.calls.map(call => JSON.parse(call.arguments[0]));
+    assert.deepEqual(logged.at(-1), {
+        message: "arrival upstream", source: "iris", status: 429, limited: true,
+        path: "/iris-tts/timetable/plan/8000105/261006/22", ms: logged.at(-1).ms, retryAfter: "60",
+    });
+    assert.ok(logged.some(entry => entry.status === 500 && entry.limited === false));
+});
+
+test("finds a regional train in IRIS by run number or line", () => {
+    const xml = `<timetable station='Hamburg Hbf'><s id="-6711-2610180005-11"><tl f="N" t="p" o="800201" c="RE" n="11293"/><ar pt="2610180124" pp="13D-F" l="RE7" ppth="Kiel Hbf"/></s></timetable>`;
+    assert.equal(findTrain(xml, "2610180124", "ar", { train: "RE 7", number: "11293" })?.id, "-6711-2610180005-11");
+    assert.equal(findTrain(xml, "2610180124", "ar", { train: "RE 7", number: null })?.id, "-6711-2610180005-11");
+    assert.equal(findTrain(xml, "2610180124", "ar", { train: "RE 70", number: "11295" }), null);
+    assert.equal(findTrain(xml, "2610180125", "ar", { train: "RE 7", number: "11293" }), null);
+});
+
+test("without IRIS the page and its refresh show bahn.de's live arrival, delay and platform", async () => {
     const environment = env();
     const now = at("20:00");
     const { id } = await (await share(environment, { data: "abc", arrival: arrival() }, now)).json();
@@ -120,7 +221,7 @@ test("the page and its refresh show bahn.de's live arrival, delay and platform",
     assert.equal(view.stops[1].platformRt, "9");
     assert.deepEqual(view.messages, ["Reparatur am Zug."]);
     // Through our bahn.de server, with a token it accepts.
-    assert.match(upstream.calls[0], /^https:\/\/proxy\.test\/web\/api\/reiseloesung\/fahrt\?journeyId=2%7C%23VN/);
+    assert.match(proxyCalls(upstream)[0], /^https:\/\/proxy\.test\/web\/api\/reiseloesung\/fahrt\?journeyId=2%7C%23VN/);
     assert.equal((await verifyToken(upstream.tokens[0], "a", "test-secret", now))?.kid, "arrival-pages");
 
     const page = await handleShare(new Request(`${origin}/s/${id}`), environment, now, upstream);
@@ -169,7 +270,7 @@ test("without bahn.de the page shows the times from the app", async () => {
     const quiet = bahnDe(details());
     const plain = await (await handleShare(new Request(`${origin}/share/${id}/live`), unconfigured, now, quiet)).json();
     assert.equal(plain.live, false);
-    assert.equal(quiet.calls.length, 0);
+    assert.deepEqual(proxyCalls(quiet), []);
 
     const html = renderArrival(blocked, now);
     assert.match(html, /Fahrplanzeiten, gerade ohne Live-Daten/);

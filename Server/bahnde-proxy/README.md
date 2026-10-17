@@ -25,8 +25,8 @@ It mirrors the Worker: the same `/web/api/…` paths (GET only, the list in `pro
 tokens (`X-BetterBahn-Token`, signed with `TOKEN_SECRET`). The app asks it first (`BahnDeProxy` in
 BetterBahnKit), and only it: while it is down, paused or refused, the app shows "Aktuelle Wagenreihung nicht
 verfügbar" instead of asking `betterbahn2`, which bahn.de refuses anyway. The server keeps no logs of who asked.
-The `betterbahn` Worker also asks it for the live times of shared arrivals ("Ankunft teilen", `Cloudflare/arrival.mjs`:
-`fahrt` only, cached 30 s per train), with a token of its own (key `arrival-pages`, one rate limit for all of them).
+The `betterbahn` Worker also asks it for the live times of shared arrivals when IRIS doesn't have the train
+("Ankunft teilen", `Cloudflare/arrival.mjs`: `fahrt` only, cached 30 s per train), with a token of its own (key `arrival-pages`, one rate limit for all of them).
 
 | Variable | Default | |
 | --- | --- | --- |
