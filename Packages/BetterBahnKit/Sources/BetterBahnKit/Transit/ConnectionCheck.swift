@@ -228,9 +228,13 @@ public struct JourneyRefresher: Sendable {
         // carry the platforms Transitous lacks at some stations (e.g. Hamburg Hbf), days before DB
         // Timetables knows them. Asked for legs underway or departing within 12 hours, and hourly
         // for legs up to a week ahead that miss a platform, so many saved journeys don't flood bahn.de.
-        let runningSoon = Self.isRunningSoon(leg)
+        // A Nightjet or the like only gets its platforms from bahn.de, which lists them on its board too:
+        // no stops inserted, no times, as they are not DB's trains.
+        let platformsOnly = BahnDeClient.takesOnlyPlatforms(leg.line)
+        let runningSoon = Self.isRunningSoon(leg) && !platformsOnly
         if let bahnDe = provider.bahnDe, runningSoon || Self.needsPlatforms(leg),
-           let course = try? await bahnDe.journeyCourse(for: leg, maxAge: runningSoon ? BahnDeClient.journeyStopsMaxAge : 3600) {
+           let course = try? await bahnDe.journeyCourse(for: leg, maxAge: runningSoon ? BahnDeClient.journeyStopsMaxAge : 3600,
+                                                        includingOtherRailways: platformsOnly) {
             if runningSoon {
                 if !leg.stopovers.isEmpty { leg.stopovers = BahnDeClient.inserting(course.stops, into: leg.stopovers) }
                 // DB's own live times beat Transitous' and fill stops DB Timetables missed.
@@ -238,8 +242,13 @@ public struct JourneyRefresher: Sendable {
                 leg = await BahnDeClient.applyingLiveTimes(from: course.stops, to: leg, keepingDelays: timetablesAnswered,
                                                            referee: provider.bahnExpert)
             }
-            leg = BahnDeClient.fillingMissingPlatforms(in: leg, from: course.stops)
-            leg = BahnDeClient.markingNightTrain(leg, hasSleepingCars: course.hasSleepingCars)
+            leg = BahnDeClient.fillingMissingPlatforms(in: leg, from: course.stops, overwriting: platformsOnly)
+            if !platformsOnly { leg = BahnDeClient.markingNightTrain(leg, hasSleepingCars: course.hasSleepingCars) }
+        }
+        // What bahn.de lacks, mostly at the stations of other railways (the SBB's and ÖBB's): bahn.expert lists
+        // the platforms of the whole run, also for a Nightjet.
+        if let bahnExpert = provider.bahnExpert, Self.needsPlatforms(leg, now: now) {
+            leg = await bahnExpert.fillingMissingPlatforms(in: leg)
         }
         // International trains from DB's feed have no platforms in Czechia; the Czech timetable has them.
         if let transitous = provider.primary as? TransitousProvider {
@@ -272,7 +281,8 @@ public struct JourneyRefresher: Sendable {
     /// A leg within the next week missing a platform somewhere, which bahn.de may know (see `refresh`).
     static func needsPlatforms(_ leg: Leg, now: Date = .now) -> Bool {
         !leg.isWalking && leg.departure.planned <= now.addingTimeInterval(7 * 24 * 3600) && leg.arrival.best >= now
-            && BahnDeClient.trainReference(for: leg.line) != nil && BahnDeClient.lacksPlatforms(leg)
+            && (BahnDeClient.takesOnlyPlatforms(leg.line)
+                || (BahnDeClient.trainReference(for: leg.line) != nil && BahnDeClient.lacksPlatforms(leg)))
     }
 
     /// A leg departing within the next 12 hours or still underway — the only ones a Zusatzhalt

@@ -22,6 +22,9 @@ namespace_id = "1102"
 simple = { limit = 60, period = 60 }
 
 [vars]
+# Our bahn.de server (Server/bahnde-proxy) for the live times on arrival pages ("Ankunft teilen"); bahn.de refuses
+# Workers. Same address as `BahnDeProxy.baseURL` in the app; empty switches live times off.
+BAHNDE_PROXY_URL = "https://bahnde-proxy.tail6eed6b.ts.net"
 # App IDs (team ID + bundle ID) that may open `/s/…` links (apple-app-site-association); comma-separated.
 APP_IDS = "9NXP66M9UL.de.goldkunibert.BetterBahn"
 # App Store link on the fallback page; leave empty until the app is in the store.

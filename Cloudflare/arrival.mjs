@@ -2,11 +2,11 @@
 // app sends the last train (`arrival`: its stops from boarding to getting off, see `ArrivalShare` in the app);
 // `/s/<id>` then shows a small page with the arrival time, delay, platform and the remaining stops, which
 // asks `/share/<id>/live` every 30 seconds. Live times come from bahn.de's journey details (by the train's
-// journey ID, cached 30 s, so many viewers make one request); without them the page shows what the app sent.
-// The link only works until 2 hours after the arrival.
+// journey ID, cached 30 s, so many viewers make one request), asked through our bahn.de server
+// (`Server/bahnde-proxy`, `BAHNDE_PROXY_URL`; bahn.de refuses Workers) with a token of our own; without them the
+// page shows what the app sent. The link only works until 2 hours after the arrival.
 
-import { upstreamHeaders } from "./bahnde-proxy/worker.mjs";
-import { berlinToUnix, parseJourney } from "./stats/worker.mjs";
+import { signToken } from "./shared/appattest.mjs";
 
 export const AFTER_ARRIVAL = 2 * 3600;
 // A late train keeps its link longer, but never past this after the planned arrival.
@@ -14,7 +14,8 @@ const MAX_LATE = 12 * 3600;
 export const LIVE_TTL = 30;
 const LIVE_TIMEOUT = 5000;
 const MAX_STOPS = 150;
-const BAHN_DE = "https://www.bahn.de/web/api/";
+// Our bahn.de server rate limits by this token's key: all arrival pages together.
+const TOKEN_KID = "arrival-pages";
 const JOURNEY_ID_PATTERN = /^\d+\|#[\x20-\x7eÀ-ſ]+$/;
 const EVA_PATTERN = /^\d{6,9}$/;
 const PRODUCTS = new Set(["highSpeed", "longDistance", "nightTrain", "interregio", "regionalExpress", "regional",
@@ -84,29 +85,32 @@ export async function arrivalView(arrival, expiresAt, deps = {}) {
     let stops = arrival.stops;
     let live = false;
     let messages = [];
-    if (arrival.journeyId) {
+    if (arrival.journeyId && deps.proxyURL && deps.secret) {
         try {
             const details = await journeyDetails(arrival.journeyId, deps);
-            const run = details ? parseJourney(details, arrival.journeyId) : null;
-            const section = run ? liveSection(run.stops, arrival.stops) : null;
+            const section = details ? liveSection(liveStops(details), arrival.stops) : null;
             if (section) {
                 stops = section;
                 live = true;
-                messages = run.messages.slice(0, 2);
+                messages = journeyMessages(details).slice(0, 2);
             }
         } catch {
-            // bahn.de blocked or down: the page shows the app's times until the next refresh.
+            // Our server or bahn.de down or refusing: the page shows the app's times until the next refresh.
         }
     }
     return { train: arrival.train, product: arrival.product, color: arrival.color, live, stops, messages, updatedAt: now, expiresAt };
 }
 
-async function journeyDetails(journeyId, { fetchUpstream = fetch, cache = null, waitUntil } = {}) {
-    const url = `${BAHN_DE}reiseloesung/fahrt?journeyId=${encodeURIComponent(journeyId)}&poly=false`;
+async function journeyDetails(journeyId, { proxyURL, secret, fetchUpstream = fetch, cache = null, waitUntil, now = Date.now() }) {
+    const url = new URL(`/web/api/reiseloesung/fahrt?journeyId=${encodeURIComponent(journeyId)}&poly=false`, proxyURL).href;
     const key = new Request(url);
     const cached = cache ? await cache.match(key) : null;
     if (cached) return cached.json();
-    const response = await fetchUpstream(url, { headers: upstreamHeaders(), signal: AbortSignal.timeout(LIVE_TIMEOUT) });
+    const token = await signToken({ t: "a", kid: TOKEN_KID, exp: Math.floor(now / 1000) + 300 }, secret);
+    const response = await fetchUpstream(url, {
+        headers: { "Accept": "application/json", "X-BetterBahn-Token": token },
+        signal: AbortSignal.timeout(LIVE_TIMEOUT),
+    });
     if (response.status === 404 || response.status === 400) return null;
     if (!response.ok) throw new Error(`bahn.de ${response.status}`);
     const body = await response.text();
@@ -115,6 +119,38 @@ async function journeyDetails(journeyId, { fetchUpstream = fetch, cache = null, 
         waitUntil ? waitUntil(store) : await store;
     }
     return JSON.parse(body);
+}
+
+/// The stops of bahn.de's journey details (`halte`), times as Unix milliseconds.
+export function liveStops(details) {
+    const halts = Array.isArray(details?.halte) ? details.halte : [];
+    return halts.map(halt => {
+        const prioritised = halt.priorisierteMeldungen ?? [];
+        return {
+            name: typeof halt.name === "string" ? halt.name : null,
+            eva: halt.extId ?? halt.evaNumber ?? hafasField(halt.id, "L"),
+            arr: unix(halt.ankunft?.sollzeit ?? halt.ankunftsZeitpunkt),
+            arrRt: unix(halt.ankunft?.echtzeit ?? halt.ezAnkunftsZeitpunkt),
+            dep: unix(halt.abfahrt?.sollzeit ?? halt.abfahrtsZeitpunkt),
+            depRt: unix(halt.abfahrt?.echtzeit ?? halt.ezAbfahrtsZeitpunkt),
+            platform: halt.gleis || null,
+            platformRt: halt.ezGleis || null,
+            cancelled: halt.canceled === true || prioritised.some(message => message?.type === "HALT_AUSFALL"),
+        };
+    }).filter(stop => stop.name);
+}
+
+/// The train's notices (delay reasons, construction work), each once.
+function journeyMessages(details) {
+    const texts = [...(details.himMeldungen ?? []), ...(details.priorisierteMeldungen ?? []), ...(details.meldungen ?? [])]
+        .map(message => typeof message === "string" ? message : message?.text ?? message?.ueberschrift)
+        .filter(text => typeof text === "string" && text.trim())
+        .map(text => text.trim());
+    return [...new Set(texts)];
+}
+
+function hafasField(id, name) {
+    return (id ?? "").split("@").map(part => part.split("=")).find(([key]) => key === name)?.[1] ?? null;
 }
 
 /// bahn.de's stops from where the user boards to where they get off, null when bahn.de's train doesn't
@@ -126,15 +162,7 @@ export function liveSection(liveStops, shared) {
     if (start < 0) return null;
     const end = liveStops.findIndex((stop, index) => index > start && sameStation(stop, last));
     if (end < 0) return null;
-    return liveStops.slice(start, end + 1).map(stop => ({
-        name: stop.name,
-        eva: stop.eva,
-        arr: unix(stop.arr), arrRt: unix(stop.arrRt),
-        dep: unix(stop.dep), depRt: unix(stop.depRt),
-        platform: stop.platform || null,
-        platformRt: stop.platformRt || null,
-        cancelled: stop.cancelled,
-    }));
+    return liveStops.slice(start, end + 1);
 }
 
 function sameStation(liveStop, sharedStop) {
@@ -146,8 +174,16 @@ function normalized(name) {
     return (name ?? "").toLowerCase().normalize("NFD").replace(/[^a-z0-9]/g, "");
 }
 
-function unix(local) {
-    return local ? berlinToUnix(local) * 1000 : null;
+const berlinOffset = new Intl.DateTimeFormat("en-US", { timeZone: "Europe/Berlin", timeZoneName: "longOffset" });
+
+/// Unix milliseconds of bahn.de's zone-less Berlin times ("2026-10-06T18:30:00"); null without one.
+export function unix(local) {
+    const match = typeof local === "string" && local.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})/);
+    if (!match) return null;
+    const asUTC = Date.parse(`${match[1]}:00Z`);
+    const name = berlinOffset.formatToParts(new Date(asUTC)).find(part => part.type === "timeZoneName")?.value ?? "GMT+01:00";
+    const [, sign, hours, minutes = "0"] = name.match(/GMT([+-])(\d{2}):?(\d{2})?/) ?? [, "+", "01"];
+    return asUTC - (Number(hours) * 60 + Number(minutes)) * 60000 * (sign === "-" ? -1 : 1);
 }
 
 // MARK: - Page

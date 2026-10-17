@@ -19,8 +19,10 @@ It also stores shared journeys for short links (`https://betterbahn.betterbahn.w
 journey (`ArrivalShare` in the app: train, product/color, bahn.de journey ID, stops from boarding to getting
 off). Such a link expires 2 hours after the arrival (later when the train runs late, at most 12 hours after
 the planned arrival), and `/s/<id>` shows a small page with the arrival time, delay, platform and stops in any
-browser. The page refreshes from `GET /share/<id>/live`, which reads bahn.de's journey details (`fahrt`, from the
-Worker itself with the proxy's browser headers, cached 30 s per train); without them it shows the app's times.
+browser. The page refreshes from `GET /share/<id>/live`, which reads bahn.de's journey details (`fahrt`) through our
+bahn.de server (`BAHNDE_PROXY_URL`, `Server/bahnde-proxy`; bahn.de refuses Workers) with a token the Worker signs
+itself (`TOKEN_SECRET`, key `arrival-pages`, so all arrival pages share the server's per-install rate limit),
+cached 30 s per train; without them it shows the app's times.
 With the app installed, iOS still opens the app, which shows the journey as before.
 
 `data` is the same zlib/base64url payload as in `betterbahn://share?data=…`; the Worker only checks

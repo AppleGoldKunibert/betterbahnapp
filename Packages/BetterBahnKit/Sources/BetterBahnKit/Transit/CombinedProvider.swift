@@ -116,12 +116,12 @@ public final class CombinedProvider: TransitProvider {
             try Task.checkCancellation()
             guard let bahnDe, search.modes.isEmpty else { throw error }
             let stations = try await Self.withDeadline(.milliseconds(2500)) { try await bahnDe.searchStations(search.text) }
-            return search.ordered(stations, near: location)
+            return search.ordered(search.filtered(stations), near: location)
         }
         try Task.checkCancellation()
         guard let bahnDe else { return [] }
         let stations = try await Self.withDeadline(.milliseconds(2500)) { try await bahnDe.searchStations(search.text) }
-        return search.ordered(stations, near: location)
+        return search.ordered(search.filtered(stations), near: location)
     }
 
     static func isShortQuery(_ query: String) -> Bool {
@@ -288,8 +288,35 @@ public final class CombinedProvider: TransitProvider {
         try await primary.trip(id: id)
     }
 
+    /// The trip with what `completing(_:)` adds: the run beyond a border and a train's Czech stops. Views that show the
+    /// trip as soon as it is there take `plainTrip(id:source:)` and complete it afterwards (`TripView`).
     public func trip(id: String, source: DataSource) async throws -> Trip {
+        await completing(try await plainTrip(id: id, source: source))
+    }
+
+    /// The trip as its source has it, in one request.
+    public func plainTrip(id: String, source: DataSource) async throws -> Trip {
         try await provider(for: source).trip(id: id)
+    }
+
+    /// `trip` with what Transitous lacks for it, each part within its own deadline: a DB train that its feed ends at the
+    /// border gets the trip carrying on there (see `TripContinuation.swift`), and a train through Czechia the platforms
+    /// (CZPTT's, `CzechPlatforms.swift`) and live times (bahn.expert's) its feed lacks there. Takes a few requests the first
+    /// time (answers are cached), so a view shows the plain trip first.
+    public func completing(_ trip: Trip) async -> Trip {
+        guard let transitous = primary as? TransitousProvider, trip.source == transitous.source else { return trip }
+        var trip = trip
+        if TransitousProvider.mayEndAtBorder(trip) {
+            let whole = trip
+            trip = (try? await Self.withDeadline(.seconds(3)) { await transitous.joiningContinuation(of: whole) }) ?? whole
+        }
+        guard trip.stopovers.contains(where: { TransitousProvider.isCzechStop($0.station) }) else { return trip }
+        let (whole, expert) = (trip, bahnExpert)
+        return (try? await Self.withDeadline(.seconds(4)) {
+            var trip = await transitous.fillingCzechPlatforms(in: whole)
+            if let expert { trip.stopovers = await expert.fillingCzechLiveTimes(in: trip.stopovers, line: trip.line) }
+            return trip
+        }) ?? whole
     }
 
     /// The run of a journey's leg. Transitous' trip IDs only last until the feed is next imported
@@ -316,7 +343,7 @@ public final class CombinedProvider: TransitProvider {
         guard let tripId = leg.tripId else { throw TransitError.notFound("Fahrt") }
         let id = await renumbered.id(for: tripId) ?? tripId
         do {
-            return try await trip(id: id, source: leg.source)
+            return try await plainTrip(id: id, source: leg.source)
         } catch let error as TransitError where error.isNotFound {
             guard leg.source == primary.source, let line = leg.line,
                   let entries = try? await primary.board(.departures, at: leg.origin,
@@ -324,7 +351,7 @@ public final class CombinedProvider: TransitProvider {
                                                          duration: 15, products: [line.product]),
                   let current = Self.sameTrain(as: leg, in: entries)?.tripId, current != id else { throw error }
             await renumbered.remember(current, for: tripId)
-            return try await trip(id: current, source: leg.source)
+            return try await plainTrip(id: current, source: leg.source)
         }
     }
 

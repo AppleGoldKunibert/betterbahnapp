@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { AFTER_ARRIVAL, parseArrival, renderArrival } from "./arrival.mjs";
+import { verifyToken } from "./shared/appattest.mjs";
 import { handleShare } from "./worker.mjs";
 
 const origin = "https://betterbahn.betterbahn.workers.dev";
@@ -19,7 +20,7 @@ class FakeKV {
 }
 
 function env() {
-    return { SHARES: new FakeKV(), ALLOW_UNATTESTED: "true" };
+    return { SHARES: new FakeKV(), ALLOW_UNATTESTED: "true", TOKEN_SECRET: "test-secret", BAHNDE_PROXY_URL: "https://proxy.test" };
 }
 
 /// What the app sends (`ArrivalShare`): Nürnberg → Frankfurt on ICE 1095.
@@ -52,11 +53,13 @@ function details({ arrivalRt = "2026-10-06T22:14:00", platformRt = "9" } = {}) {
 
 function bahnDe(body, status = 200) {
     const calls = [];
-    const fetchUpstream = async url => {
+    const tokens = [];
+    const fetchUpstream = async (url, init) => {
         calls.push(url);
+        tokens.push(init.headers["X-BetterBahn-Token"]);
         return new Response(JSON.stringify(body), { status });
     };
-    return { calls, fetchUpstream };
+    return { calls, tokens, fetchUpstream };
 }
 
 async function share(environment, body, now) {
@@ -116,7 +119,9 @@ test("the page and its refresh show bahn.de's live arrival, delay and platform",
     assert.equal(view.stops[1].arrRt, at("22:14"));
     assert.equal(view.stops[1].platformRt, "9");
     assert.deepEqual(view.messages, ["Reparatur am Zug."]);
-    assert.match(upstream.calls[0], /reiseloesung\/fahrt\?journeyId=2%7C%23VN/);
+    // Through our bahn.de server, with a token it accepts.
+    assert.match(upstream.calls[0], /^https:\/\/proxy\.test\/web\/api\/reiseloesung\/fahrt\?journeyId=2%7C%23VN/);
+    assert.equal((await verifyToken(upstream.tokens[0], "a", "test-secret", now))?.kid, "arrival-pages");
 
     const page = await handleShare(new Request(`${origin}/s/${id}`), environment, now, upstream);
     assert.equal(page.status, 200);
@@ -158,6 +163,13 @@ test("without bahn.de the page shows the times from the app", async () => {
     other.halte[2].extId = "8011160";
     const mismatched = await (await handleShare(new Request(`${origin}/share/${id}/live`), environment, now, bahnDe(other))).json();
     assert.equal(mismatched.live, false);
+
+    // Without our server configured nothing is asked.
+    const unconfigured = { ...environment, BAHNDE_PROXY_URL: "" };
+    const quiet = bahnDe(details());
+    const plain = await (await handleShare(new Request(`${origin}/share/${id}/live`), unconfigured, now, quiet)).json();
+    assert.equal(plain.live, false);
+    assert.equal(quiet.calls.length, 0);
 
     const html = renderArrival(blocked, now);
     assert.match(html, /Fahrplanzeiten, gerade ohne Live-Daten/);

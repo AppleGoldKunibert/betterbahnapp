@@ -256,6 +256,203 @@ private func berlinDate(_ year: Int, _ month: Int, _ day: Int, hour: Int = 12) -
             try await client.trainType(category: "ICE", number: "155", on: berlinDate(2026, 10, 5))
         }
     }
+
+    // MARK: Nightjet, Euronight and the ÖBB's and SBB's trains
+
+    private func request(_ category: String, _ number: String, at name: String, on date: Date) -> BahnDeClient.FormationRequest {
+        BahnDeClient.FormationRequest(category: category, number: number, station: station("x", name), plannedDeparture: date)
+    }
+
+    @Test func readsTheVehiclesOfEachSection() throws {
+        let composition = try #require(VagonwebComposition.scheduled(fromHTML: try vagonwebPage("vagonweb-ec163")).first)
+        // The locomotive changes on the way: vagonweb stacks them in one position, each with its section.
+        let locomotives = composition.coaches.filter { $0.number == nil }
+        #expect(locomotives.map(\.series) == ["460", "1116", "1116", "1116"])
+        #expect(locomotives.first?.section?.from == "Zürich" && locomotives.first?.section?.to == "Buchs")
+        #expect(composition.coaches.filter { $0.section == nil }.compactMap(\.number).first == "302")
+        // Notes are the ones under a coach, not its rating.
+        #expect(composition.coaches.first { $0.number == "312" }?.notes == ["seats 103-106 for service"])
+    }
+
+    @Test func cutsTheCompositionDownToTheStopsSection() throws {
+        let composition = try #require(VagonwebComposition.scheduled(fromHTML: try vagonwebPage("vagonweb-ec163")).first)
+        let atZurich = composition.restricted(to: ["Zürich HB"])
+        #expect(atZurich.coaches.filter { $0.number == nil }.map(\.series) == ["460"])
+        #expect(atZurich.coaches.compactMap(\.number) == (302...312).map(String.init))
+        // After Buchs the SBB's locomotive is gone and the ÖBB's one, which takes over there, is in.
+        let atInnsbruck = composition.restricted(to: ["Zürich HB", "Sargans", "Buchs SG", "Feldkirch", "Innsbruck Hbf"])
+        #expect(atInnsbruck.coaches.filter { $0.number == nil }.map(\.section?.to) == ["Selzthal"])
+        #expect(atInnsbruck.coaches.compactMap(\.number) == (302...312).map(String.init))
+        // A route that has none of the sections' stations (names spelt differently): the coaches for the whole run, no locomotive.
+        let nowhere = composition.restricted(to: ["Nowhere"])
+        #expect(nowhere.coaches.compactMap(\.number) == (302...312).map(String.init) && nowhere.coaches.allSatisfy { $0.number != nil })
+    }
+
+    @Test func picksTheCompositionOfTheSectionAndLeavesOutCoupledTrains() async throws {
+        let html = try vagonwebPage("vagonweb-rjx161")
+        let client = VagonwebClient(http: HTTPClient(session: VagonwebStubProtocol.session(category: "RJX", country: "OBB", number: "161", html: html)))
+        let date = berlinDate(2026, 10, 15)
+        let route = ["Zürich HB", "Sargans", "Buchs SG", "Feldkirch", "Innsbruck Hbf", "Salzburg Hbf"]
+        let first = try #require(try await client.coachSequence(for: request("RJX", "161", at: "Feldkirch", on: date), route: Array(route[...3])))
+        #expect(first.coaches.compactMap(\.number) == ["27", "26", "25", "24", "23", "22", "21"])
+        #expect(first.coaches.last?.kind == .locomotive)
+        // From Innsbruck the composition for that section: the coaches of RJX 184 running together with it are left out.
+        let second = try #require(try await client.coachSequence(for: request("RJX", "161", at: "Salzburg Hbf", on: date), route: route))
+        #expect(second.coaches.compactMap(\.number) == ["27", "26", "25", "24", "23", "22", "21"])
+        #expect(second.coaches.filter { $0.kind == .locomotive }.count == 1)
+        // Without the stops the first composition is the one.
+        let unknown = try #require(try await client.coachSequence(for: request("RJX", "161", at: "Salzburg Hbf", on: date)))
+        #expect(unknown.coaches.compactMap(\.number) == ["27", "26", "25", "24", "23", "22", "21"])
+    }
+
+    @Test func turnsTheStretchBeforeTheReversalRound() async throws {
+        let composition = try #require(VagonwebComposition.scheduled(fromHTML: try vagonwebPage("vagonweb-rjx161")).first)
+        // "Changes direction in Buchs SG, from Zürich until Buchs in reverse order": the drawing is the train after Buchs.
+        #expect(composition.reversalStations == ["Buchs SG"] && composition.startsReversed)
+        // Where a stretch starts at a station the train changes direction at anyway, counting reversals is enough.
+        let ice = try #require(VagonwebComposition.scheduled(fromHTML: try vagonwebPage("vagonweb-ice377")).first)
+        #expect(!ice.startsReversed)
+
+        let html = try vagonwebPage("vagonweb-rjx161")
+        let client = VagonwebClient(http: HTTPClient(session: VagonwebStubProtocol.session(category: "RJX", country: "OBB", number: "161", html: html)))
+        let date = berlinDate(2026, 10, 15)
+        let atStart = try #require(try await client.coachSequence(for: request("RJX", "161", at: "Zürich HB", on: date), route: ["Zürich HB"]))
+        #expect(atStart.coaches.first?.kind == .locomotive && atStart.coaches.last?.number == "27")
+        let afterBuchs = try #require(try await client.coachSequence(
+            for: request("RJX", "161", at: "Feldkirch", on: date), route: ["Zürich HB", "Buchs SG", "Feldkirch"]))
+        #expect(afterBuchs.coaches.first?.number == "27" && afterBuchs.coaches.last?.kind == .locomotive)
+    }
+
+    @Test func readsSleepingCouchetteAndCarCarrierWagons() async throws {
+        let html = try vagonwebPage("vagonweb-nj465")
+        let client = VagonwebClient(http: HTTPClient(session: VagonwebStubProtocol.session(category: "NJ", country: "OBB", number: "465", html: html)))
+        let date = berlinDate(2026, 3, 10)
+        let atStart = try #require(try await client.coachSequence(for: request("NJ", "465", at: "Zürich HB", on: date), route: ["Zürich HB"]))
+        let kinds = atStart.coaches.map(\.kind)
+        #expect(kinds.first == .locomotive)
+        #expect(kinds.contains(.sleeper) && kinds.contains(.couchette))
+        // The car transporters only run from Feldkirch.
+        #expect(!kinds.contains(.other))
+        let atInnsbruck = try #require(try await client.coachSequence(
+            for: request("NJ", "465", at: "Innsbruck Hbf", on: date), route: ["Zürich HB", "Buchs SG", "Feldkirch", "Innsbruck Hbf"]))
+        // The second car transporter only runs until 2 February.
+        #expect(atInnsbruck.coaches.filter { $0.kind == .other }.count == 1)
+        let winter = try #require(try await client.coachSequence(
+            for: request("NJ", "465", at: "Innsbruck Hbf", on: berlinDate(2026, 2, 1)), route: ["Zürich HB", "Buchs SG", "Feldkirch", "Innsbruck Hbf"]))
+        #expect(winter.coaches.filter { $0.kind == .other }.count == 2)
+        // The HŽPP coaches for Zagreb are only there up to Schwarzach-St.Veit, the Zürich–Graz ones all the way.
+        #expect(atInnsbruck.coaches.contains { $0.number == "318" } && atInnsbruck.coaches.contains { $0.number == "314" })
+        let atVillach = try #require(try await client.coachSequence(
+            for: request("NJ", "465", at: "Villach Hbf", on: date),
+            route: ["Zürich HB", "Buchs SG", "Feldkirch", "Innsbruck Hbf", "Schwarzach-St. Veit", "Villach Hbf"]))
+        #expect(!atVillach.coaches.contains { $0.number == "318" } && atVillach.coaches.contains { $0.number == "314" })
+        // The page is for the timetable year, but this composition only applies until 13 June.
+        #expect(try await client.coachSequence(for: request("NJ", "465", at: "Zürich HB", on: berlinDate(2026, 10, 15)), route: ["Zürich HB"]) == nil)
+    }
+
+    @Test func looksUnderTheCountriesOfTheRailways() async throws {
+        #expect(VagonwebClient.countries(for: "NJ") == ["OBB", "SBB", "DB"])
+        #expect(VagonwebClient.countries(for: "ec") == ["DB", "OBB", "SBB"])
+        #expect(VagonwebClient.trainURL(category: "EC", number: "163", timetableYear: 2026, country: "SBB").absoluteString
+            == "https://www.vagonweb.cz/razeni/vlak.php?zeme=SBB&kategorie=EC&cislo=163&rok=2026&lang=en")
+        // Not under DB's (404), not under ÖBB's, but under the SBB's.
+        let html = try vagonwebPage("vagonweb-ec163")
+        let client = VagonwebClient(http: HTTPClient(session: VagonwebStubProtocol.session(category: "EC", country: "SBB", number: "163", html: html)))
+        let composition = try await client.composition(category: "EC", number: "163", on: berlinDate(2026, 10, 15))
+        #expect(composition?.coaches.compactMap(\.number).first == "302")
+        // Only DB's trains are asked for their ICE series.
+        #expect(try await client.trainType(category: "EC", number: "163", on: berlinDate(2026, 10, 15)) == nil)
+    }
+
+    @Test func nightjetsAreOnlyAskedOfVagonwebNeverOfBahnDe() async throws {
+        let line = Line(name: "NJ 465", number: "465", product: .nightTrain, operatorName: nil)
+        let ref = try #require(BahnDeClient.sequenceReference(for: line))
+        #expect(ref.category == "NJ" && ref.number == "465")
+        let req = request("NJ", "465", at: "Zürich HB", on: berlinDate(2026, 10, 15))
+        // No request to bahn.de: its client has no stub here, so one would have gone to the real server.
+        #expect(try await BahnDeClient().coachSequence(req) == nil)
+        #expect(BahnDeClient.sequenceReference(for: Line(name: "FLX 20", number: "20", product: .regionalExpress, operatorName: nil)) == nil
+                || BahnDeClient.sequenceReference(for: Line(name: "FLX 20", number: "20", product: .regionalExpress, operatorName: nil))?.category != "FLX")
+    }
+
+    // MARK: Days a coach runs on
+
+    /// EC 163's coaches 302 and 303: "runs on ⑥, ⑦ until 13.6. and from 17.10., on 24., 25., 26., 31.12., 1., 2., 5., 6.1., …".
+    @Test func readsTheDaysACoachRunsOn() throws {
+        let note = "runs on ⑥ , ⑦ until 13.6. and from 17.10., on 24., 25., 26., 31.12., 1., 2., 5., 6.1., 6.4., 1., 14., 15., 25.5., 4., 5.6., 26.10., 7., 8.12."
+        let restriction = try #require(DayRestriction(note: note))
+        #expect(restriction.weekdays == [6, 7])
+        // Friday 16.10. is before the new period starts, Saturday 17.10. is in it, a Sunday in June after the 13th is not.
+        #expect(!restriction.runs(month: 10, day: 16, weekday: 5))
+        #expect(restriction.runs(month: 10, day: 17, weekday: 6))
+        #expect(restriction.runs(month: 6, day: 13, weekday: 6))
+        #expect(!restriction.runs(month: 6, day: 14, weekday: 7))
+        #expect(restriction.runs(month: 3, day: 7, weekday: 6))
+        #expect(!restriction.runs(month: 3, day: 9, weekday: 1))
+        // The holidays listed run whatever the weekday: the month of a bare "24." is the next one named (12).
+        #expect(restriction.runs(month: 12, day: 24, weekday: 4))
+        #expect(restriction.runs(month: 1, day: 6, weekday: 3))
+        #expect(restriction.runs(month: 5, day: 14, weekday: 4))
+        #expect(restriction.runs(month: 10, day: 26, weekday: 1) && restriction.runs(month: 12, day: 8, weekday: 2))
+        #expect(!restriction.runs(month: 12, day: 23, weekday: 3))
+
+        let until = try #require(DayRestriction(note: "runs until 02.02."))
+        #expect(until.runs(month: 2, day: 2, weekday: 1) && until.runs(month: 12, day: 20, weekday: 1))
+        #expect(!until.runs(month: 2, day: 3, weekday: 2) && !until.runs(month: 10, day: 1, weekday: 4))
+        #expect(DayRestriction(note: "runs from 17.10.")?.runs(month: 11, day: 1, weekday: 7) == true)
+        #expect(DayRestriction(note: "runs on ⑤, ⑦")?.runs(month: 4, day: 3, weekday: 5) == true)
+        #expect(DayRestriction(note: "runs on ⑤, ⑦")?.runs(month: 4, day: 4, weekday: 6) == false)
+        #expect(DayRestriction(note: "runs on 24., 25.12.")?.runs(month: 12, day: 25, weekday: 5) == true)
+        #expect(DayRestriction(note: "runs on 24., 25.12.")?.runs(month: 12, day: 26, weekday: 6) == false)
+    }
+
+    @Test func leavesNotesItDoesNotUnderstandAlone() {
+        for note in ["quiet zone", "service is provided by DoN boardservice", "seats 103-106 for service", "runs Mon-Fri",
+                     "runs on ⑧", "runs on ⑥, ⑦ except 24.12.", "runs on ⑥, not on 3.4.", "runs on 24.", "runs on ⑥, on 24., 25.",
+                     "runs until 32.13.", "runs together with RJX 184", "Fahrtrichtung wechselt", "8.4", ""] {
+            #expect(DayRestriction(note: note) == nil, "\(note)")
+        }
+    }
+
+    @Test func leavesOutCoachesThatDoNotRunThatDay() async throws {
+        let html = try vagonwebPage("vagonweb-ec163")
+        let client = VagonwebClient(http: HTTPClient(session: VagonwebStubProtocol.session(category: "EC", country: "SBB", number: "163", html: html)))
+        let numbers = { (day: Date) async throws -> [String] in
+            let sequence = try await client.coachSequence(for: request("EC", "163", at: "Zürich HB", on: day), route: ["Zürich HB"])
+            return try #require(sequence).coaches.compactMap(\.number)
+        }
+        // Friday 16 October: 302 and 303 run on Saturdays and Sundays from 17 October.
+        let friday = try await numbers(berlinDate(2026, 10, 16, hour: 8))
+        #expect(!friday.contains("302") && !friday.contains("303") && friday.contains("304") && friday.contains("312"))
+        let saturday = try await numbers(berlinDate(2026, 10, 17, hour: 8))
+        #expect(saturday.contains("302") && saturday.contains("303") && saturday.contains("304") && saturday.contains("312"))
+        // Christmas Eve 2025 is a Wednesday (and in the timetable year 2026), but listed.
+        let christmasEve = try await numbers(berlinDate(2025, 12, 24, hour: 8))
+        #expect(christmasEve.contains("302") && christmasEve.contains("303"))
+        // The plain composition keeps every coach: only a train's day cuts it down.
+        let composition = try #require(VagonwebComposition.scheduled(fromHTML: html).first)
+        #expect(composition.coaches.compactMap(\.number).count == 11)
+        #expect(composition.operating(on: berlinDate(2026, 10, 16, hour: 8)).coaches.compactMap(\.number).count == 9)
+    }
+
+    @Test func aTrainAfterMidnightCountsForTheDayItStartedOn() {
+        // 0:54 on Saturday 17 October is still the operating day of Friday the 16th.
+        let night = VagonwebComposition.operatingDay(of: berlinDate(2026, 10, 17, hour: 0))
+        #expect(night.day == 16 && night.weekday == 5)
+        let morning = VagonwebComposition.operatingDay(of: berlinDate(2026, 10, 17, hour: 6))
+        #expect(morning.day == 17 && morning.weekday == 6)
+        #expect(VagonwebComposition.operatingDay(of: berlinDate(2026, 10, 18, hour: 12)).weekday == 7)
+    }
+
+    @Test func stationNamesWithBahnhofMatch() {
+        #expect(VagonwebClient.stationKey("Feldkirch Bahnhof") == VagonwebClient.stationKey("Feldkirch"))
+        #expect(VagonwebClient.stationKey("Buchs SG") == VagonwebClient.stationKey("Buchs (SG)"))
+        #expect(VagonwebClient.stationKey("Buchs SG") == VagonwebClient.stationKey("Buchs"))
+        #expect(VagonwebClient.stationKey("Zürich HB") == VagonwebClient.stationKey("Zürich"))
+        // Another station of the same town is another station.
+        #expect(VagonwebClient.stationKey("Wien Meidling") != VagonwebClient.stationKey("Wien Hbf"))
+        #expect(VagonwebClient.stationKey("Schwarzach-St. Veit") == VagonwebClient.stationKey("Schwarzach-St.Veit"))
+    }
 }
 
 /// Answers requests for a train's page with the page registered for it. Keyed by URL, so tests running
@@ -266,8 +463,13 @@ final class VagonwebStubProtocol: URLProtocol, @unchecked Sendable {
 
     /// - Parameter revisit: the page when it is asked for again (with a `Referer`), like vagonweb
     ///   answers after its "anzeigen" page.
-    static func session(number: String, html: String, status: Int = 200, revisit: String? = nil) -> URLSession {
-        let url = VagonwebClient.trainURL(category: "ICE", number: number, timetableYear: 2026)
+    static func session(category: String = "ICE", country: String = "DB", number: String, html: String, status: Int = 200,
+                        revisit: String? = nil, otherPages: [String: String] = [:]) -> URLSession {
+        let url = VagonwebClient.trainURL(category: category, number: number, timetableYear: 2026, country: country)
+        for (otherCountry, page) in otherPages {
+            let other = VagonwebClient.trainURL(category: category, number: number, timetableYear: 2026, country: otherCountry)
+            lock.withLock { pages[other] = (page, 200, nil) }
+        }
         lock.withLock { pages[url] = (html, status, revisit) }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [VagonwebStubProtocol.self]

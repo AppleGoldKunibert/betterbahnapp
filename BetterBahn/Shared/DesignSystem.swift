@@ -315,7 +315,7 @@ struct TrainOperatorsLabel: View {
 
 /// Triebzug numbers and names of a train (e.g. "Tz 9457 „Bundesrepublik Deutschland“"). bahn.de's
 /// coach sequence first (it only has one in the coming hours); bahn.expert as fallback, which
-/// has the Tz once its data is live. Says so when bahn.de is refusing requests and nothing else helped.
+/// has the Tz once its data is live. That bahn.de's current Wagenreihung is missing says `CoachSequenceDisclosure`.
 /// A saved journey's leg remembers what was found, so it still shows once neither source answers.
 struct TrainFormationLabel: View {
     let request: BahnDeClient.FormationRequest?
@@ -339,7 +339,6 @@ struct TrainFormationLabel: View {
 
     @Environment(AppModel.self) private var model
     @State private var formation: TrainFormation?
-    @State private var blocked = false
 
     var body: some View {
         // A ZStack rather than Group: `.task` never fires on a view that is empty, and this one is
@@ -350,23 +349,14 @@ struct TrainFormationLabel: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fullTextPopup(units, lines: 2)
-            } else if blocked {
-                Label("Wagenreihung gerade nicht abrufbar", systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
         .task(id: "\(line?.name ?? "")|\(date)|\(request?.station.id ?? "")") {
             let remembered = leg.flatMap(model.rememberedFormation(for:))
             formation = remembered
-            blocked = false
             var found: TrainFormation?
             if let request {
-                do {
-                    found = try await model.formation(for: request)
-                } catch TransitError.rateLimited {
-                    blocked = remembered == nil
-                } catch {}
+                found = try? await model.formation(for: request)
             }
             if found?.unitDescription == nil, let fallback = await model.trainType(for: line, on: date)?.formation,
                fallback.unitDescription != nil {
@@ -375,7 +365,6 @@ struct TrainFormationLabel: View {
             if let found, found.unitDescription != nil || found.isIC1 {
                 // An IC 1 has no Tz: hide (and forget) one remembered by an older version.
                 formation = found
-                blocked = false
                 if let leg { model.rememberFormation(found, for: leg) }
             }
         }
