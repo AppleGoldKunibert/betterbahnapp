@@ -318,6 +318,11 @@ private struct TrainCard: View {
                                 .lineLimit(2)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
+                        if let livery = unit.livery {
+                            Label("Sonderlackierung: \(livery)", systemImage: "paintpalette")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }

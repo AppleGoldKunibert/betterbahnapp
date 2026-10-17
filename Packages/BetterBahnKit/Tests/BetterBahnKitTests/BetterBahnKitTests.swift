@@ -3400,6 +3400,12 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(BahnDeClient.trainsetName(from: "IC 2054") == nil)
     }
 
+    @Test func specialLiveryOfTrainset() {
+        #expect(TrainFormation.Unit(model: "ICE 3", number: "304").livery == "Railbow")
+        #expect(TrainFormation.Unit(model: "ICE 3", number: "169").livery == nil)
+        #expect(TrainFormation.Unit(model: nil, number: nil).livery == nil)
+    }
+
     /// Double traction of ICE 4 coupled with a second half running as another train: only the
     /// requested train's groups count, each with its own Tz and Taufname.
     @Test func decodesSequenceAndKeepsOwnTrainsGroups() throws {

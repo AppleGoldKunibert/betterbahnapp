@@ -10,6 +10,11 @@ public struct TrainFormation: Codable, Sendable, Hashable {
         /// The trainset's christened name ("Taufname"), e.g. "Bundesrepublik Deutschland".
         public var name: String?
 
+        /// The trainset's special livery ("Sonderlackierung"), e.g. "Railbow"; nil for the standard paint.
+        public var livery: String? {
+            number.flatMap(Int.init).flatMap { TrainsetLiveries.byUnit[$0] }
+        }
+
         public init(model: String?, number: String?, name: String? = nil) {
             self.model = model
             self.number = number
