@@ -4389,7 +4389,11 @@ private final class TrainSearchProtocol: URLProtocol, @unchecked Sendable {
 
         let missing = PlatformInfo(planned: nil, actual: nil)
         #expect(JourneyRefresher.needsPlatforms(leg("NJ 403", platform: missing), now: now))
-        #expect(!JourneyRefresher.needsPlatforms(leg("NJ 403", platform: PlatformInfo(planned: "19", actual: nil)), now: now))
+        // A Nightjet is asked even with all platforms: the ÖBB feed has odd ones ("87" at Köln Hbf).
+        #expect(JourneyRefresher.needsPlatforms(leg("NJ 403", platform: PlatformInfo(planned: "87", actual: nil)), now: now))
+        // DB's own train that has them all isn't.
+        #expect(!JourneyRefresher.needsPlatforms(leg("ICE 599", platform: PlatformInfo(planned: "19", actual: nil)), now: now))
+        #expect(JourneyRefresher.needsPlatforms(leg("ICE 599", platform: missing), now: now))
         // Still nothing for a train bahn.de isn't asked about at all.
         #expect(!JourneyRefresher.needsPlatforms(leg("FLX 20", platform: missing), now: now))
 
@@ -4399,6 +4403,14 @@ private final class TrainSearchProtocol: URLProtocol, @unchecked Sendable {
                      JourneyStop(evaNumber: "8503000", name: "Zürich HB", arrival: at(380), arrivalPlatform: PlatformInfo(planned: "13", actual: nil))]
         let filled = BahnDeClient.fillingMissingPlatforms(in: leg("NJ 403", platform: missing), from: stops)
         #expect(filled.departurePlatform?.best == "19" && filled.arrivalPlatform?.best == "13")
+
+        // The ÖBB feed's "87" for Köln Hbf is replaced by DB's platform, one it doesn't know stays.
+        let odd = leg("NJ 403", platform: PlatformInfo(planned: "87", actual: nil))
+        #expect(BahnDeClient.fillingMissingPlatforms(in: odd, from: stops).departurePlatform?.best == "87")
+        let replaced = BahnDeClient.fillingMissingPlatforms(in: odd, from: stops, overwriting: true)
+        #expect(replaced.departurePlatform?.best == "19" && replaced.arrivalPlatform?.best == "13")
+        let unknown = [JourneyStop(evaNumber: "8000105", name: "Frankfurt (Main) Hbf", departure: at(60))]
+        #expect(BahnDeClient.fillingMissingPlatforms(in: odd, from: unknown, overwriting: true).departurePlatform?.best == "87")
     }
 
     /// EC 163 and NJ 403 have no platforms at the stations of the SBB and ÖBB in bahn.de's journey details; bahn.expert

@@ -242,7 +242,7 @@ public struct JourneyRefresher: Sendable {
                 leg = await BahnDeClient.applyingLiveTimes(from: course.stops, to: leg, keepingDelays: timetablesAnswered,
                                                            referee: provider.bahnExpert)
             }
-            leg = BahnDeClient.fillingMissingPlatforms(in: leg, from: course.stops)
+            leg = BahnDeClient.fillingMissingPlatforms(in: leg, from: course.stops, overwriting: platformsOnly)
             if !platformsOnly { leg = BahnDeClient.markingNightTrain(leg, hasSleepingCars: course.hasSleepingCars) }
         }
         // What bahn.de lacks, mostly at the stations of other railways (the SBB's and ÖBB's): bahn.expert lists
@@ -281,8 +281,8 @@ public struct JourneyRefresher: Sendable {
     /// A leg within the next week missing a platform somewhere, which bahn.de may know (see `refresh`).
     static func needsPlatforms(_ leg: Leg, now: Date = .now) -> Bool {
         !leg.isWalking && leg.departure.planned <= now.addingTimeInterval(7 * 24 * 3600) && leg.arrival.best >= now
-            && (BahnDeClient.trainReference(for: leg.line) != nil || BahnDeClient.takesOnlyPlatforms(leg.line))
-            && BahnDeClient.lacksPlatforms(leg)
+            && (BahnDeClient.takesOnlyPlatforms(leg.line)
+                || (BahnDeClient.trainReference(for: leg.line) != nil && BahnDeClient.lacksPlatforms(leg)))
     }
 
     /// A leg departing within the next 12 hours or still underway — the only ones a Zusatzhalt

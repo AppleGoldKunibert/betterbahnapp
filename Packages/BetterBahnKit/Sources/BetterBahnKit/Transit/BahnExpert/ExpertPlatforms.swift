@@ -99,21 +99,25 @@ actor ExpertPlatformsCache {
 }
 
 extension BahnExpertClient {
-    /// `leg` with the platforms it still lacks from bahn.expert. Unchanged for a train `platformReference`
-    /// doesn't name, a leg that has them all, or when bahn.expert has nothing.
+    /// `leg` with the platforms it still lacks from bahn.expert; for a Nightjet or the like all it has, since the
+    /// ÖBB feed's are odd ("87" at Köln Hbf). Unchanged for a train `platformReference` doesn't name, a leg that
+    /// has them all, or when bahn.expert has nothing.
     public func fillingMissingPlatforms(in leg: Leg) async -> Leg {
-        guard BahnDeClient.lacksPlatforms(leg), let ref = Self.platformReference(for: leg.line) else { return leg }
+        let overwriting = BahnDeClient.takesOnlyPlatforms(leg.line)
+        guard overwriting || BahnDeClient.lacksPlatforms(leg), let ref = Self.platformReference(for: leg.line) else { return leg }
         let stops = await ExpertPlatformsCache.shared.stops(category: ref.category, number: ref.number, at: leg.departure.planned, using: self)
-        return stops.isEmpty ? leg : BahnDeClient.fillingMissingPlatforms(in: leg, from: stops, matchingByTimeAlone: true)
+        return stops.isEmpty ? leg : BahnDeClient.fillingMissingPlatforms(in: leg, from: stops, matchingByTimeAlone: true, overwriting: overwriting)
     }
 
-    /// `stopovers` of a trip of `line` with the platforms they still lack from bahn.expert.
+    /// `stopovers` of a trip of `line` with the platforms they still lack from bahn.expert (all of them for a Nightjet or the like).
     public func fillingMissingPlatforms(in stopovers: [Stopover], line: Line?) async -> [Stopover] {
+        let overwriting = BahnDeClient.takesOnlyPlatforms(line)
         guard let ref = Self.platformReference(for: line),
-              stopovers.contains(where: { ($0.arrival != nil && $0.arrivalPlatform?.best == nil) || ($0.departure != nil && $0.departurePlatform?.best == nil) }),
+              overwriting || stopovers.contains(where: { ($0.arrival != nil && $0.arrivalPlatform?.best == nil) || ($0.departure != nil && $0.departurePlatform?.best == nil) }),
               let first = stopovers.lazy.compactMap({ $0.departure?.planned ?? $0.arrival?.planned }).first
         else { return stopovers }
         let stops = await ExpertPlatformsCache.shared.stops(category: ref.category, number: ref.number, at: first, using: self)
-        return stops.isEmpty ? stopovers : BahnDeClient.fillingMissingPlatforms(in: stopovers, from: stops, matchingByTimeAlone: true)
+        return stops.isEmpty ? stopovers
+            : BahnDeClient.fillingMissingPlatforms(in: stopovers, from: stops, matchingByTimeAlone: true, overwriting: overwriting)
     }
 }

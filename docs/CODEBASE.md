@@ -256,7 +256,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   Also fills the platforms bahn.de and Transitous lack (`ExpertPlatforms.swift`, `BahnExpertClient.fillingMissingPlatforms`):
   at the SBB's and ÖBB's stations of EC/RJ(X) trains of those railways and for Nightjet, Euronight and InterRegio, on legs
   (`JourneyRefresher.refresh`) and on trips (`TripView.insertZusatzhalte`); cached 30 min per run. ÖBB and SBB publish
-  platforms late (RJX 161 had 3 of 16 on the day), so far-off days stay partly empty.
+  platforms late (RJX 161 had 3 of 16 on the day), so far-off days stay partly empty. For Nightjet/Euronight/InterRegio the
+  expert and bahn.de platforms replace the feed's (`overwriting`): the ÖBB feed in Transitous has "87" at Köln Hbf.
   Also tells whether a connecting train waits (`TransferDisposition`, "Anschluss wartet (nicht)" in `TransferRow`):
   `disposition(from:to:)` finds the arriving train (`journey/find`, no administration so ODEG etc. match), its
   arrival ID at the transfer station (`journey/detailsByJourneyId`, by EVA or planned time) and the departing train

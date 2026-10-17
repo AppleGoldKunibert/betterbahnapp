@@ -793,36 +793,45 @@ extension BahnDeClient {
     /// journey details. DB's feed in Transitous has none at all at some stations (e.g. Hamburg Hbf and
     /// Hamburg-Altona) and DB Timetables only knows the next hours, while bahn.de has them days ahead.
     /// A stop is matched by its planned time and place, so a station passed twice can't mix them up.
-    /// - Parameter matchingByTimeAlone: take a stop planned at the very same minute as the one, whatever it is
-    ///   called. For bahn.expert's stops, which name stations differently from Transitous ("Kirchberg in Tirol" /
-    ///   "Kirchberg i. T. Bahnhof", "Buchs SG" / "Buchs Bahnhof"): one run can't be at two stops at once.
-    public static func fillingMissingPlatforms(in leg: Leg, from stops: [JourneyStop], matchingByTimeAlone: Bool = false) -> Leg {
+    /// - Parameters:
+    ///   - matchingByTimeAlone: take a stop planned at the very same minute as the one, whatever it is
+    ///     called. For bahn.expert's stops, which name stations differently from Transitous ("Kirchberg in Tirol" /
+    ///     "Kirchberg i. T. Bahnhof", "Buchs SG" / "Buchs Bahnhof"): one run can't be at two stops at once.
+    ///   - overwriting: also replace a platform the leg has. For a Nightjet, whose ÖBB feed has odd ones
+    ///     ("87" at Köln Hbf, where DB has 5 or 6) that DB's own data should win over.
+    public static func fillingMissingPlatforms(in leg: Leg, from stops: [JourneyStop], matchingByTimeAlone: Bool = false,
+                                               overwriting: Bool = false) -> Leg {
         var leg = leg
-        if leg.departurePlatform?.best == nil,
-           let stop = stop(in: stops, at: leg.origin, planned: leg.departure.planned, side: \.departure, byTimeAlone: matchingByTimeAlone) {
-            leg.departurePlatform = stop.departurePlatform
+        if overwriting || leg.departurePlatform?.best == nil,
+           let stop = stop(in: stops, at: leg.origin, planned: leg.departure.planned, side: \.departure, byTimeAlone: matchingByTimeAlone),
+           let platform = stop.departurePlatform {
+            leg.departurePlatform = platform
         }
-        if leg.arrivalPlatform?.best == nil,
-           let stop = stop(in: stops, at: leg.destination, planned: leg.arrival.planned, side: \.arrival, byTimeAlone: matchingByTimeAlone) {
-            leg.arrivalPlatform = stop.arrivalPlatform
+        if overwriting || leg.arrivalPlatform?.best == nil,
+           let stop = stop(in: stops, at: leg.destination, planned: leg.arrival.planned, side: \.arrival, byTimeAlone: matchingByTimeAlone),
+           let platform = stop.arrivalPlatform {
+            leg.arrivalPlatform = platform
         }
-        leg.stopovers = fillingMissingPlatforms(in: leg.stopovers, from: stops, matchingByTimeAlone: matchingByTimeAlone)
+        leg.stopovers = fillingMissingPlatforms(in: leg.stopovers, from: stops, matchingByTimeAlone: matchingByTimeAlone,
+                                                overwriting: overwriting)
         return leg
     }
 
     /// `stopovers` (a leg's or trip's) with every platform they lack taken from `stops`, matched like `fillingMissingPlatforms(in:from:)`.
     public static func fillingMissingPlatforms(in stopovers: [Stopover], from stops: [JourneyStop],
-                                               matchingByTimeAlone: Bool = false) -> [Stopover] {
+                                               matchingByTimeAlone: Bool = false, overwriting: Bool = false) -> [Stopover] {
         var stopovers = stopovers
         for index in stopovers.indices {
             let stopover = stopovers[index]
-            if stopover.arrivalPlatform?.best == nil, let planned = stopover.arrival?.planned,
-               let stop = stop(in: stops, at: stopover.station, planned: planned, side: \.arrival, byTimeAlone: matchingByTimeAlone) {
-                stopovers[index].arrivalPlatform = stop.arrivalPlatform
+            if overwriting || stopover.arrivalPlatform?.best == nil, let planned = stopover.arrival?.planned,
+               let stop = stop(in: stops, at: stopover.station, planned: planned, side: \.arrival, byTimeAlone: matchingByTimeAlone),
+               let platform = stop.arrivalPlatform {
+                stopovers[index].arrivalPlatform = platform
             }
-            if stopover.departurePlatform?.best == nil, let planned = stopover.departure?.planned,
-               let stop = stop(in: stops, at: stopover.station, planned: planned, side: \.departure, byTimeAlone: matchingByTimeAlone) {
-                stopovers[index].departurePlatform = stop.departurePlatform
+            if overwriting || stopover.departurePlatform?.best == nil, let planned = stopover.departure?.planned,
+               let stop = stop(in: stops, at: stopover.station, planned: planned, side: \.departure, byTimeAlone: matchingByTimeAlone),
+               let platform = stop.departurePlatform {
+                stopovers[index].departurePlatform = platform
             }
         }
         return stopovers
