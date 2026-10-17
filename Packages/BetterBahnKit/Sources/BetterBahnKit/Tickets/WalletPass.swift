@@ -105,9 +105,6 @@ public struct WalletPassPayload: Encodable, Sendable, Hashable {
         expirationDate = pass.validUntil.map(JSONDecoding.isoString)
 
         var fields = BoardingPass()
-        if let kind = pass.kindDescription {
-            fields.headerFields = [Field(key: "kind", label: "Art", value: kind)]
-        }
         // Validity as the "route": from → until.
         fields.primaryFields = [
             Field(key: "from", label: pass.validFrom.map { "Ab " + $0.formatted(Self.berlinTime) } ?? "Ab",

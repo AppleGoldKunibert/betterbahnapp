@@ -5,7 +5,7 @@ import Testing
 
 @Suite struct TravelPassTests {
     /// UIC barcodes like DB Navigator's Deutschland-Ticket (made-up traveller, zeroed signature):
-    /// one of a BahnCard 100, valid three months, and a monthly one.
+    /// one valid three months (as for a BahnCard 100), and a monthly one.
     private func payload(_ name: String) throws -> Data {
         let url = try #require(Bundle.module.url(forResource: name, withExtension: "bin", subdirectory: "Fixtures"))
         return try Data(contentsOf: url)
@@ -32,12 +32,9 @@ import Testing
         #expect(document.validUntil == berlin("2026-12-02 03:00"))
     }
 
-    @Test func bahnCard100DeutschlandTicket() throws {
+    @Test func longValidityDeutschlandTicket() throws {
         let pass = try TravelPass(barcode: DBTicket.Barcode(payload: payload("uic-dticket-bc100"), image: nil))
         #expect(pass.name == "Deutschland-Ticket")
-        #expect(pass.isDeutschlandTicket)
-        #expect(pass.isBahnCard100)
-        #expect(pass.kindDescription == "BahnCard 100")
         #expect(pass.classDescription == "2. Klasse")
         #expect(pass.holder?.name == "Erika Mustermann")
         #expect(pass.holder?.birthDateDescription == "12.04.1990")
@@ -51,9 +48,6 @@ import Testing
         let pass = try TravelPass(barcode: DBTicket.Barcode(payload: payload("uic-dticket-month"), image: nil))
         #expect(pass.validFrom == berlin("2026-10-01 00:00"))
         #expect(pass.validUntil == berlin("2026-11-01 03:00"))
-        #expect(pass.isDeutschlandTicket)
-        #expect(!pass.isBahnCard100)
-        #expect(pass.kindDescription == "Abo")
     }
 
     @Test func rejectsOtherBarcodes() {
@@ -70,7 +64,7 @@ import Testing
         let image = try #require(Self.screenshot(withAztec: payload))
         let barcode = try #require(TicketBarcodeReader.barcode(inImage: image))
         #expect(barcode.payload == payload)
-        #expect(try TravelPass(barcode: barcode).isBahnCard100)
+        #expect(try TravelPass(barcode: barcode).name == "Deutschland-Ticket")
     }
 
     @Test func keepsOnlyTheCodeFromScreenshot() throws {
@@ -91,7 +85,8 @@ import Testing
         #expect(barcode.altText == nil)
         #expect(wallet.description == "Deutschland-Ticket")
         #expect(wallet.expirationDate == "2026-12-02T02:00:00Z")
-        #expect(wallet.boardingPass.headerFields.map(\.value) == ["BahnCard 100"])
+        // No guess whether it belongs to a BahnCard 100 or a subscription: the barcode doesn't say.
+        #expect(wallet.boardingPass.headerFields.isEmpty)
         #expect(wallet.boardingPass.primaryFields.map(\.label) == ["Ab 0:00", "Bis 3:00"])
         #expect(wallet.boardingPass.secondaryFields.map(\.value) == ["Deutschland-Ticket", "2. Klasse"])
         #expect(wallet.boardingPass.auxiliaryFields.map(\.value) == ["Erika Mustermann"])

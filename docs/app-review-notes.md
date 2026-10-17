@@ -5,6 +5,7 @@ features or data flows change (and update the privacy policy in `Cloudflare/work
 
 ## Before submitting
 
+- **bahn.de server** (`Server/bahnde-proxy`, game-server host behind Tailscale Funnel, `BahnDeProxy.baseURL`) running with the same `TOKEN_SECRET`.
 - **Workers deployed** with `TOKEN_SECRET` (same value in `betterbahn2`, `betterbahn-pass` and
   `betterbahn-stats`, whose D1 database is set up as in `Cloudflare/stats/README.md`, and
   `betterbahn-push` with its APNs key, as in `Cloudflare/checkin-push/README.md`),
@@ -17,11 +18,10 @@ features or data flows change (and update the privacy policy in `Cloudflare/work
   user's iCloud, or is only passed through BetterBahn's Workers to answer the request right away
   (timetable lookups, Wallet pass signing) and not kept. Exception: a journey the user shares is
   stored for 30 days (connection only, no identity) so the short link works – decide whether to
-  declare it (e.g. "Other User Content", not linked, not tracking). Second exception: the train
-  statistics (`Cloudflare/stats`, Settings → "Zugdaten für Statistik teilen", on by default) report the
-  bahn.de IDs of trains the app showed and keep those trains' data for a year, without any device or
-  install ID (the app also asks that server for a train's figures by train number and stops, nothing is kept) – likely "Usage Data → Product Interaction", not linked to the user, not tracking (or
-  "Other Data"). Third exception: the check-in notifications (`Cloudflare/checkin-push`, Settings →
+  declare it (e.g. "Other User Content", not linked, not tracking). The train statistics
+  (`Cloudflare/stats`, Settings → "Zugstatistik anzeigen", on by default) only ask that server for a
+  train's figures by train number and stops, nothing is kept; the figures come from DB's open data
+  (#336), the app reports nothing. Second exception: the check-in notifications (`Cloudflare/checkin-push`, Settings →
   Träwelling "Check-ins von Gefolgten melden", off by default) keep the Träwelling user ID, a read-only
   Träwelling login, the APNs device token and seen status IDs until turned off – likely "Identifiers →
   User ID" and "Device ID", linked to the user, not tracking, purpose "App Functionality".
@@ -38,8 +38,7 @@ features or data flows change (and update the privacy policy in `Cloudflare/work
 > affiliated with Deutsche Bahn AG (stated in Settings).
 >
 > Timetable data comes from Transitous (open data, transitous.org). Some details (coach sequences,
-> extra stops, platforms) come from bahn.de's public web API through our own server; when bahn.de
-> refuses our server, the app asks bahn.de directly from the device in a hidden web view.
+> extra stops, platforms) come from bahn.de's public web API through our own server.
 >
 > Träwelling (traewelling.de) is an optional, independent check-in service. Turn it on under
 > Settings → Für Profis → Expertenmodus → Träwelling, then sign in with the demo account below.
