@@ -200,11 +200,12 @@ in `project.pbxproj`: new files join their target automatically.
 - `Transit/Transitous/TripContinuation.swift` – a DB trip (DELFI) ending at a foreign stop (`mayEndAtBorder`; ICE 171
   Hamburg-Altona → Děčín) gets the trip carrying on there under the same number (the Czech "RJ 171", found on the
   departures within 10 min) joined to it (`joining`): one border stop, the continuation's name when it is a long-distance
-  brand ("RJ 171", the first as `alternateName`). Done in `CombinedProvider.trip(id:source:)` (3 s deadline), so the train
-  page and reloads show the whole run; journeys do the same with legs (`mergeThroughTrainLegs`). A Träwelling check-in on
-  such a run is still two statuses (`segments(for:)`). `TrainNumberSearch.named(after:)` gives a run found by number
-  DB's name from the search result. `CombinedProvider.trip(id:source:)` also fills a trip's Czech stops: CZPTT's planned
-  platforms (`fillingCzechPlatforms`) and bahn.expert's live times (`fillingCzechLiveTimes`; Transitous has none there).
+  brand ("RJ 171", the first as `alternateName`). `CombinedProvider.completing(_:)` does it (3 s deadline) and fills a
+  trip's Czech stops: CZPTT's planned platforms (`fillingCzechPlatforms`) and bahn.expert's live times
+  (`fillingCzechLiveTimes`; Transitous has none there). `trip(id:source:)` completes; `TripView` and `LegTripSheet` load
+  `plainTrip(id:source:)` and complete it after the first paint (`insertZusatzhalte`), since it takes a few requests the
+  first time. Journeys do the same with legs (`mergeThroughTrainLegs`). A Träwelling check-in on such a run is still two
+  statuses (`segments(for:)`). `TrainNumberSearch.named(after:)` gives a run found by number DB's name from the search result.
 - `Transit/BahnDe/` – bahn.de web API only via `Server/bahnde-proxy` (`BahnDeProxy`, #342; URLs built on the Worker's
   `baseURL` and mapped onto it; endpoints as Travel::Status::DE::DBRIS): station-search fallback, `TrainModel`,
   `TrainsetNames`, `CoachSequence` (coaches, classes, amenities, sectors, direction; RE/RB via `sequenceReference`),

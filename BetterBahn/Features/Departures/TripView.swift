@@ -139,7 +139,7 @@ struct TripView: View {
     private func load() async {
         let tripId = tripId
         do {
-            var loaded = try await model.provider.trip(id: tripId, source: entry.source)
+            var loaded = try await model.provider.plainTrip(id: tripId, source: entry.source)
             if tripId != entry.tripId, let train = runs.first(where: { $0.tripId == tripId }) {
                 // A coupled train: it leads, this one becomes the coupled one.
                 loaded.line = entry.line.riding(train, ownDirection: ownDirection, ownTripId: entry.tripId)
@@ -221,7 +221,11 @@ struct TripView: View {
     /// picked up today) at all — Transitous and DB Timetables above only ever overlay onto stops already there.
     /// Their live times also beat both where bahn.de has one (`BahnDeClient.applyingLiveTimes`).
     private func insertZusatzhalte() async {
-        guard let trip else { return }
+        guard let shown = trip else { return }
+        // The run beyond a border and the Czech stops' platforms and live times take a few requests: after the first paint.
+        let trip = await model.provider.completing(shown)
+        guard self.trip?.id == trip.id else { return }
+        if trip != shown { self.trip = trip }
         if let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: trip), self.trip?.id == trip.id {
             let keepingDelays = model.timetablesClient != nil
             let inserted = BahnDeClient.inserting(stops, into: trip.stopovers)
@@ -796,7 +800,7 @@ struct LegTripSheet: View {
             // The leg's own run is looked up again if a feed import renumbered it (a saved journey's).
             var loaded = tripId == leg.tripId
                 ? try await model.provider.trip(for: leg, extraLapsBefore: extraLapsBefore, extraLapsAfter: extraLapsAfter)
-                : try await model.provider.trip(id: tripId, source: leg.source)
+                : try await model.provider.plainTrip(id: tripId, source: leg.source)
             guard tripId == self.tripId else { return }
             // The leg's own line knows the trains coupled to it, so the trainsets of both show.
             if tripId == leg.tripId {
@@ -839,7 +843,9 @@ struct LegTripSheet: View {
     /// saved journey remembered (where you may have got on, off or changed). bahn.de's live times also
     /// beat Transitous' and DB Timetables' where it has one (`BahnDeClient.applyingLiveTimes`).
     private func insertZusatzhalte() async {
-        guard var updated = trip else { return }
+        guard let shown = trip else { return }
+        // The run beyond a border and the Czech stops' platforms and live times take a few requests: after the first paint.
+        var updated = await model.provider.completing(shown)
         let ownTrain = shownTripId == nil
         var hasSleepingCars = false
         if let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: updated) {
