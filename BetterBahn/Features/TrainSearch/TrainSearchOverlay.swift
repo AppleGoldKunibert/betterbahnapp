@@ -534,22 +534,19 @@ private struct CoachSequenceByStop: View {
         }
     }
 
+    /// The system's menu picker rather than a `Menu` with a label of our own: the label of the latter sat at the
+    /// wrong place for a moment after a pick, until the Wagenreihung below it had loaded.
     private func stopMenu(selected: Stopover) -> some View {
-        Menu {
-            Picker("Halt", selection: Binding(get: { selected.id }, set: { pickedID = $0 })) {
-                ForEach(stops) { stop in
-                    let time = (stop.departure ?? stop.arrival)?.planned.timeString ?? ""
-                    Text("\(stop.station.displayName) · \(time)").tag(stop.id)
-                }
+        Picker("Halt", selection: Binding(get: { selected.id }, set: { pickedID = $0 })) {
+            ForEach(stops) { stop in
+                let time = (stop.departure ?? stop.arrival)?.planned.timeString ?? ""
+                Text("\(stop.station.displayName) · \(time)").tag(stop.id)
             }
-        } label: {
-            HStack(spacing: 6) {
-                Text(selected.station.displayName).lineLimit(1)
-                Image(systemName: "chevron.up.chevron.down").font(.caption2)
-            }
-            .font(.subheadline.weight(.semibold))
         }
+        .pickerStyle(.menu)
+        .labelsHidden()
         .tint(.brand)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
