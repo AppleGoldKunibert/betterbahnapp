@@ -182,6 +182,16 @@ struct ConnectionsView: View {
                 path = [.journey(entry.route())]
                 model.journeyToOpen = nil
             }
+            // The departure board widget's route was tapped (#314): search it right away.
+            .onChange(of: model.searchToOpen, initial: true) { _, search in
+                guard let search else { return }
+                from = search.from
+                to = search.to
+                viaRows = []
+                model.remember(from: search.from, to: search.to)
+                path = [.search(search)]
+                model.searchToOpen = nil
+            }
             // The followed check-ins list sits on the first page (#266).
             .onChange(of: model.followedCheckinToOpen, initial: true) { _, id in
                 if id != nil { path = [] }

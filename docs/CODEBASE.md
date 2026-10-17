@@ -9,7 +9,7 @@ only the files you change. Keep it current when structure changes. Build, test a
 | Path | Contents |
 | --- | --- |
 | `BetterBahn/` | App target (UI + app state). Default isolation **MainActor** (hence `nonisolated` on some types). `PrivacyInfo.xcprivacy` declares required-reason APIs (UserDefaults); keep it current. |
-| `BetterBahnWidgets/` | `TripLiveActivity` (Lock Screen / Dynamic Island); `JourneyOverviewWidget` ("Reiseübersicht", small/medium, timer target via `JourneyWidgetIntent`); `CurrentTrainWidget` ("Aktueller Zug": next stops, delays, exit). `LiveTrainWidgets.swift`: "Live-Geschwindigkeit" (home + lock screen) and "Live-Position" (`MKMapSnapshotter`) fetch the ridden train (`JourneyWidgetState.ridingLeg`) from bahn.jetzt, fall back to the app's stored position, else next stop + timer; `RefreshLiveWidgetIntent` reloads, tap opens `TrainMapLink`. All read the `WidgetSnapshot` from App Group `group.de.goldkunibert.BetterBahn` (Info.plist key `BetterBahnAppGroup`). |
+| `BetterBahnWidgets/` | `TripLiveActivity` (Lock Screen / Dynamic Island); `JourneyOverviewWidget` ("Reiseübersicht", small/medium, timer target via `JourneyWidgetIntent`); `CurrentTrainWidget` ("Aktueller Zug": next stops, delays, exit). `LiveTrainWidgets.swift`: "Live-Geschwindigkeit" (home + lock screen) and "Live-Position" (`MKMapSnapshotter`) fetch the ridden train (`JourneyWidgetState.ridingLeg`) from bahn.jetzt, fall back to the app's stored position, else next stop + timer; `RefreshLiveWidgetIntent` reloads, tap opens `TrainMapLink`; on tinted/clear Home Screens (`widgetRenderingMode != .fullColor`) the position widget draws `RouteSketch` (track + train from `MapRoute`) instead of the map tiles, which flatten to a blot there. `StationBoardWidget.swift` ("Abfahrten", #314, small/medium/large + lock screen): the next departures of a station picked in the widget's settings (`StationBoardWidgetIntent`: `StationEntity` from the favourites, `onlyToDestination` toggle + `RouteDestinationEntity` for a commuter route – then the next connections there with arrival and changes; the toggle because the widget editor can't clear a picked station –, `BoardWidgetProducts` filter; rows per family via `ViewThatFits`); fetches Transitous itself (`StationBoardProvider`, no bahn.de: no Worker auth in the extension), timeline entries at each departure (Kit `BoardWidgetRows`), reload after 20 min; tap opens `BoardWidgetLink` (the board, or the route in the search). All read the `WidgetSnapshot` (and `WidgetStations`) from App Group `group.de.goldkunibert.BetterBahn` (Info.plist key `BetterBahnAppGroup`). |
 | `BetterBahnShare/` | `ShareViewController`: shared DB text/URL → `betterbahn://import?...`. |
 | `Packages/BetterBahnKit/` | Models, networking, logic (iOS 26 + macOS 26, all `Sendable`) and tests. |
 | `Config/` | xcconfigs, Info.plists, entitlements. `Signing.xcconfig` holds the team ID; gitignored `Local.xcconfig` overrides it. |
@@ -35,7 +35,9 @@ in `project.pbxproj`: new files join their target automatically.
   (`ConnectionsView`), Karte (`TravelMapView`), Abfahrten (`StationBoardView`), Einstellungen (`SettingsView`).
   `onOpenURL`: `DBShare.text(fromAppURL:)` → `ImportedJourneyView`; `JourneyShareLink` → `SharedJourneyPreviewView`
   (short links via `ShortShareLinkClient`, also Universal Links); `LiveActivityLink` (Live Activity, journey widget) →
-  saved journey via `AppModel.journeyToOpen`; `TrainMapLink` → `LiveTrainMapView`. Scene-phase refresh start/stop.
+  saved journey via `AppModel.journeyToOpen`; `TrainMapLink` → `LiveTrainMapView`; `BoardWidgetLink` → the Abfahrten
+  tab (`AppModel.boardStationToOpen`) or the route search on Verbindungen (`AppModel.searchToOpen`). Scene-phase
+  refresh start/stop.
 - `App/AppModel.swift` – the single `@Observable` app state (`.environment(model)`). Owns `CombinedProvider`,
   `TraewellingClient`, `TrainPicker`, `JourneyReplanner`, `DBShareImporter`, `TrainRoutePlanner`, `TicketFilter`,
   `TimetablesClient`, `JourneyRefresher`; persisted lists (favorites, recents, `savedJourneys`, `traewellingTrips`,
@@ -58,7 +60,8 @@ in `project.pbxproj`: new files join their target automatically.
 - `App/ExitReminders.swift` – exit reminders (#313, Settings → Meine Reisen, per journey `exitRemindersOff`): Kit `Journey.exitReminders` → time-sensitive notifications `exit|<entry>|<leg>`, rescheduled after every refresh, one per stop (per-device log `exitReminderDates`); while the Live Activity runs, its alert instead.
 - `App/WidgetSync.swift` – `updateWidgets()` (from `syncLiveActivity`, on position changes, forced on background)
   writes the `WidgetSnapshot` for `widgetJourney` (`liveJourneyCandidate`, else the next saved journey not switched
-  off) and reloads widgets only on change.
+  off) and reloads the journey widgets (`WidgetStore.journeyWidgetKinds`) only on change. `updateWidgetStations()` (on
+  every change of favourites/recent searches) writes `WidgetStations` for the board widget's settings.
 - `Features/Connections/` – `ConnectionsView`, `ConnectionSearch`, `RouteOptionsEditor` (vias, products, max
   transfers), `JourneyResultsView` + `JourneyCard`, `TrainNumberSheet` ("Bestimmten Zug wählen", #225: trains fitting
   the input via Kit `TrainCandidateFinder`; picking one shows its stops in `TripContent` with boarding/exit preselected
@@ -299,7 +302,10 @@ in `project.pbxproj`: new files join their target automatically.
 - `Sharing/` – `JourneyShareLink` (encoding, payload limits, short IDs), `ShortShareLinkClient` (long link as
   fallback), `DBShare` + `DBShareImporter` (DB Navigator/bahn.de shared text).
 - `Widgets/` – `WidgetSnapshot` + `WidgetStore` (App Group JSON), `JourneyWidgetState` (phase, next stop and delay,
-  transfer, countdown; `changeDates`), `WidgetTimer` (> 12 h reads "2d 3h 49m"), `TrainMapLink` (`betterbahn://map`).
+  transfer, countdown; `changeDates`), `WidgetTimer` (> 12 h reads "2d 3h 49m"), `TrainMapLink` (`betterbahn://map`),
+  `WidgetStations` (favourites + recent routes for the board widget's picker), `BoardWidgetLink` (`betterbahn://board`,
+  the stations travel in the link as base64url JSON, also the widget entities' IDs), `BoardWidgetRows` (board widget
+  rows from a board or from journeys, which are still ahead at a time with a 60 s grace, `changeDates`).
 - `Geometry/` – polyline decode, `RouteGeometryService`, `SegmentHeatmap`.
 
 ### Statistics, support
