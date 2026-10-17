@@ -2566,6 +2566,11 @@ private final class Ril100GeocodeProtocol: URLProtocol, @unchecked Sendable {
         let budapest = Station(id: "5500001", name: "Budapest Keleti", coordinate: nil, evaNumber: nil, source: .transitous)
         #expect(bc100.isEntirelyAbroad(Journey(legs: [leg(flixAbroad, from: wien, to: budapest)], source: .transitous)))
         #expect(!bc100.isEntirelyAbroad(toLondon))
+        // Transitous names feeds after their country: Vienna is abroad, Köln Hbf via the Eurostar feed is not.
+        let wienHbf = Station(id: "at-Railway-Current-Reference-Data-2026_Pat:49:1349", name: "Wien Hbf", coordinate: nil, evaNumber: nil, source: .transitous)
+        let koeln = Station(id: "fr-eurostar-gtfs-plan-de-transport-et-temps-reel_koln_hbf", name: "Köln Hbf", coordinate: nil, evaNumber: nil, source: .transitous)
+        #expect(CrossBorder.isAbroad(wienHbf, covered: []))
+        #expect(!CrossBorder.isAbroad(koeln, covered: []))
     }
 
     @Test func boardAbroadIsNotCovered() {

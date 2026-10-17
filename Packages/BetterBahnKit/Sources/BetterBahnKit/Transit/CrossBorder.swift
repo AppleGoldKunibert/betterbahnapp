@@ -7,6 +7,12 @@ extension Station {
     var countryCode: String? {
         if let code = TrainSearchCountry.code(eva: evaNumber) { return code }
         if id.hasPrefix(TransitousProvider.czechTimetableFeed) { return "CZ" }
+        // Transitous names its feeds after their country: "at-Railway-…", "gb-great-britain", "de-DELFI".
+        // The Eurostar feed covers several countries, so it says nothing.
+        let feed = id.prefix { $0.isLetter }
+        if feed.count == 2, !id.contains("eurostar"), TrainSearchCountry.uicCodes.values.contains(feed.uppercased()) {
+            return feed.uppercased()
+        }
         let local = id.split(separator: "_", maxSplits: 1).last ?? Substring(id)
         let parts = local.split(separator: ":")
         for part in parts where part.allSatisfy(\.isNumber) {
