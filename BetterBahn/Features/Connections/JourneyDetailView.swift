@@ -432,6 +432,16 @@ struct JourneyDetailView: View {
                     .tint(.brand)
                 }
             }
+            if model.settings.exitReminders, let entry = model.savedEntry(for: journey), !entry.isFinished {
+                Toggle(isOn: Binding(
+                    get: { entry.exitRemindersOff != true },
+                    set: { model.setExitReminders($0, for: entry.id) }
+                )) {
+                    Label("Ans Aussteigen erinnern (\(model.settings.exitReminderLead.displayName))", systemImage: "bell.badge.fill")
+                        .font(.caption.weight(.semibold))
+                }
+                .tint(.brand)
+            }
         }
     }
 }

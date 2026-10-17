@@ -64,7 +64,8 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   this device in `Application Support/BetterBahn/Tickets/` (list + PDFs, file protection, **not** synced via
   iCloud), and the `AppModel` ticket functions (`importTickets` matches a saved journey or imports the booked
   connection via `DBShareImporter.journey(from:)`).
-- `App/LiveActivityManager.swift` – ActivityKit wrapper; attributes in Kit `TripActivityAttributes`.
+- `App/LiveActivityManager.swift` – ActivityKit wrapper; attributes in Kit `TripActivityAttributes`; `alert` lights up the running activity (exit reminder).
+- `App/ExitReminders.swift` – exit reminders (#313, Settings → Meine Reisen "Ans Aussteigen erinnern" with `AppSettings.exitReminderLead` 3/5/10 min, per journey `SavedJourney.exitRemindersOff`): Kit `Journey.exitReminders` (transfers + destination, delays, transfer time, platform change, `TransferDisposition` from `AppModel.transferDispositions`) → time-sensitive local notifications `exit|<entry>|<leg>`, rescheduled after every refresh/change of `savedJourneys` (`scheduleExitReminderSync`, serialized). One per stop: the per-device log `exitReminderDates` remembers fire dates, a passed one never comes again. While the journey's Live Activity runs, the last refresh before the time alerts through it instead (`LiveActivityManager.alert`). `AppDelegate.willPresent` shows only these while the app is open.
 - `App/WidgetSync.swift` – `updateWidgets()` (called from `syncLiveActivity` and when train positions change; forced when
   the app goes to the background) writes the `WidgetSnapshot` for `widgetJourney` (the Live Activity's pick
   `liveJourneyCandidate`, else the next saved journey not switched off) and reloads the widgets only if it changed.
@@ -360,7 +361,7 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   `TrainRequirement.tripId`, so the planner loads it instead of searching boards.
 - Logic: `JourneyReplanner` (`continuations` come `fastestFirst`: by live arrival, without routes another one beats
   leaving no earlier, arriving no later with no more changes), `ConnectionCheck` (`ConnectionIssue`, `JourneyRefresher`), `PlatformChange`
-  (platform changes since the last refresh → push, ignores sectors/bus bays), `TrainRoutePlanner`,
+  (platform changes since the last refresh → push, ignores sectors/bus bays), `ExitReminder` (#313, `Journey.exitReminders`), `TrainRoutePlanner`,
   `ViaRoutePlanner` (vias without minimum stay keep a through train as one leg), `TrainPicker` ("Anderer Zug": `replacing` keeps
   the rest of the plan and reports a `MissedConnection` the user may ignore or pick another train for, #226; `reroutes`
   offers connections straight to the next via/destination that skip the transfer point, "Andere Routenführung"; also
