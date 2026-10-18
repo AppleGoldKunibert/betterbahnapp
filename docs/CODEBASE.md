@@ -72,7 +72,9 @@ in `project.pbxproj`: new files join their target automatically.
   the input via Kit `TrainCandidateFinder`; picking one shows its stops in `TripContent` with boarding/exit preselected
   and pins that run; "Ein- und Ausstieg selbst angeben"), `JourneyDetailView` (+ `LegCard`, `TransferRow`,
   alternatives sheets; below the legs `CO2SavingButton` "−42 kg CO₂" → `CO2Sheet`, #386, from Kit `CO2Comparison`
-  with the legs' cached track geometry), `JourneyMapView`, `JourneyReplanSheet` (replan mid-journey; "Halt hinzufügen" via
+  with the legs' cached track geometry; `WeatherLabel` "☀ 18° bei Ankunft" under the destination and "beim Umstieg"
+  under a transfer station with more than 15 min to the next train, tap → `WeatherDetails` popover with rain, wind and
+  the Open-Meteo credit, #385, `WeatherViews.swift`, off with `AppSettings.showWeather`), `JourneyMapView`, `JourneyReplanSheet` (replan mid-journey; "Halt hinzufügen" via
   `ManualStopSheet` adds an off-timetable exit, a check-in then becomes a manual trip via
   `AppModel.replaceCheckinWithManualTrip`; a new exit on the last train asks "Reise … beenden" / "Weiter nach …").
 - `Features/Departures/` – `StationBoardView`/`BoardRow`, `TripView`. `CoachSequenceView.swift`: the Wagenreihung
@@ -330,6 +332,12 @@ in `project.pbxproj`: new files join their target automatically.
   the stations travel in the link as base64url JSON, also the widget entities' IDs), `BoardWidgetRows` (board widget
   rows from a board or from journeys, which are still ahead at a time with a 60 s grace, `changeDates`).
 - `Geometry/` – polyline decode, `RouteGeometryService`, `SegmentHeatmap`.
+- `Weather/WeatherForecast.swift` (#385) – `WeatherClient` asks Open-Meteo's `/v1/forecast` (no key, CC BY 4.0) for a
+  station's hourly forecast (temperature, rain chance/amount, wind, WMO code → `WeatherCondition`: German name + SF
+  Symbol); only the station's position, rounded to 2 decimals, goes out. Kept per place for an hour, so reopening a
+  journey asks nothing. `covers`: arrivals still ahead, up to 10 days. `Journey.weatherPoints`: the destination plus
+  transfers with more than `weatherTransferWait` (15 min) to the next train, by live times; `weather(for:)` →
+  `JourneyWeather`.
 
 ### Statistics, support
 
