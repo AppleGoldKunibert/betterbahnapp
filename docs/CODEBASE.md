@@ -70,7 +70,8 @@ in `project.pbxproj`: new files join their target automatically.
   `savedJourneys` change and on becoming active) updates the events, removes those of deleted journeys and forgets
   ones deleted in the calendar. `.addOnly` (iOS write-only access) writes once. Event IDs are kept per device either
   way (`calendarEventIDs`, `CalendarEventLog`), so switching to full access later keeps the earlier events current.
-  The event's link opens the journey by `SavedJourney.id`.
+  The event's link opens the journey by `SavedJourney.id`. With full access `CalendarChoiceRow` (Settings → Kalender) picks
+  the calendar for new events (`AppSettings.calendarID`, per device, nil = default); events already added stay put.
 - `App/WidgetSync.swift` – `updateWidgets()` (from `syncLiveActivity`, on position changes, forced on background)
   writes the `WidgetSnapshot` for `widgetJourney` (`liveJourneyCandidate`, else the next saved journey not switched
   off) and reloads the journey widgets (`WidgetStore.journeyWidgetKinds`) only on change. `updateWidgetStations()` (on

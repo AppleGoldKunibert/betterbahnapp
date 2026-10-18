@@ -72,6 +72,8 @@ final class AppModel {
         didSet { CalendarEventLog.save(calendarEventIDs) }
     }
     @ObservationIgnored var calendarStore: EKEventStore?
+    /// Counts the times calendar access was granted, so the calendar setting reloads its list.
+    var calendarAccessChanges = 0
     @ObservationIgnored var calendarSync: Task<Void, Never>?
     /// Saved journey to open on the Verbindungen tab (set when the Live Activity is tapped);
     /// `ConnectionsView` pushes it and clears this.
@@ -1523,6 +1525,10 @@ final class AppSettings {
     var calendarAccess: CalendarAccessMode? {
         didSet { UserDefaults.standard.set(calendarAccess?.rawValue, forKey: "calendarAccess") }
     }
+    /// The calendar new journey events go to; nil for the default calendar. Per device, like `calendarAccess`.
+    var calendarID: String? {
+        didSet { UserDefaults.standard.set(calendarID, forKey: "calendarID") }
+    }
     /// Notifications when someone the user follows checks in on Träwelling (#266). Per device, like
     /// the permission to show notifications.
     var notifyFollowedCheckins: Bool {
@@ -1685,6 +1691,7 @@ final class AppSettings {
         exitReminders = defaults.object(forKey: "exitReminders") as? Bool ?? true
         exitReminderLead = ExitReminderLead(rawValue: defaults.integer(forKey: "exitReminderLead")) ?? .five
         calendarAccess = defaults.string(forKey: "calendarAccess").flatMap(CalendarAccessMode.init)
+        calendarID = defaults.string(forKey: "calendarID")
         quickTags = Storage.load(key: "quickTags") ?? QuickTag.defaults
         trainSearchKinds = defaults.stringArray(forKey: "trainSearchKinds").map { Set($0.compactMap(TrainSearchKind.init)) }
             ?? TrainSearchKind.defaults

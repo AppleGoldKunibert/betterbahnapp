@@ -128,6 +128,9 @@ struct SettingsView: View {
                     } label: {
                         IconLabel(title: "Termine deiner Reisen", systemImage: "calendar", color: .red)
                     }
+                    if settings.calendarAccess == .full {
+                        CalendarChoiceRow()
+                    }
                     .onChange(of: settings.calendarAccess) { _, mode in
                         guard mode == .full else { return }
                         Task {
@@ -138,7 +141,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Kalender")
                 } footer: {
-                    Text("Mit vollem Zugriff bleiben die Termine deiner Reisen aktuell, auch bei Verspätungen und Gleiswechseln, und verschwinden mit der Reise. Mit „Nur hinzufügen“ wird jeder Termin einmal eingetragen.")
+                    Text("Mit vollem Zugriff bleiben die Termine deiner Reisen aktuell, auch bei Verspätungen und Gleiswechseln, und verschwinden mit der Reise. Mit „Nur hinzufügen“ wird jeder Termin einmal in deinen Standardkalender eingetragen.")
                 }
 
                 Section {

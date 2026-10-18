@@ -24,7 +24,7 @@ extension AppModel {
         guard let entry = savedJourneys.first(where: { $0.id == entry.id }),
               let content = calendarEvent(for: entry) else { throw CalendarError.notSaved }
         let event = EKEvent(eventStore: store)
-        event.calendar = store.defaultCalendarForNewEvents
+        event.calendar = targetCalendar(in: store)
         Self.fill(event, with: content)
         try store.save(event, span: .thisEvent)
         if let id = event.eventIdentifier { calendarEventIDs[entry.id] = id }
@@ -43,7 +43,10 @@ extension AppModel {
             case .full: granted = (try? await store.requestFullAccessToEvents()) ?? false
             case .addOnly: granted = (try? await store.requestWriteOnlyAccessToEvents()) ?? false
             }
-            if granted { calendarStore = nil }
+            if granted {
+                calendarStore = nil
+                calendarAccessChanges += 1
+            }
         default: granted = false
         }
         guard granted else { return nil }
@@ -51,6 +54,23 @@ extension AppModel {
         let store = EKEventStore()
         calendarStore = store
         return store
+    }
+
+    /// The calendars new events can go to, for the setting; empty without full access, which reading them needs.
+    func writableCalendars() -> [EKCalendar] {
+        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return [] }
+        let store = calendarStore ?? EKEventStore()
+        calendarStore = store
+        return store.calendars(for: .event).filter(\.allowsContentModifications)
+            .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    }
+
+    /// `settings.calendarID`'s calendar, else (also with add-only access, which can't look it up) the default one.
+    private func targetCalendar(in store: EKEventStore) -> EKCalendar? {
+        if let id = settings.calendarID, let calendar = store.calendar(withIdentifier: id), calendar.allowsContentModifications {
+            return calendar
+        }
+        return store.defaultCalendarForNewEvents
     }
 
     /// Coalesces the many changes to `savedJourneys` (every refresh) into one sync.

@@ -1,4 +1,5 @@
 import BetterBahnKit
+import EventKit
 import SwiftUI
 import UIKit
 
@@ -57,6 +58,38 @@ struct CalendarButton: View {
             } catch AppModel.CalendarError.noAccess {
                 showsNoAccess = true
             } catch {}
+        }
+    }
+}
+
+/// Settings row choosing the calendar new journey events go to. Lists the calendars only with full access:
+/// without it iOS doesn't show them. Events already added stay where they are.
+struct CalendarChoiceRow: View {
+    @Environment(AppModel.self) private var model
+    @State private var calendars: [EKCalendar] = []
+
+    var body: some View {
+        @Bindable var settings = model.settings
+        Picker(selection: $settings.calendarID) {
+            Text("Standardkalender").tag(String?.none)
+            ForEach(calendars, id: \.calendarIdentifier) { calendar in
+                Label {
+                    Text(calendar.title)
+                } icon: {
+                    Image(systemName: "circle.fill").foregroundStyle(Color(cgColor: calendar.cgColor))
+                }
+                .tag(Optional(calendar.calendarIdentifier))
+            }
+        } label: {
+            IconLabel(title: "Kalender für neue Termine", systemImage: "calendar.badge.plus", color: .red)
+        }
+        .task(id: model.calendarAccessChanges) {
+            calendars = model.writableCalendars()
+            // A calendar deleted since then: new events go to the default one again.
+            if let id = model.settings.calendarID, !calendars.isEmpty,
+               !calendars.contains(where: { $0.calendarIdentifier == id }) {
+                model.settings.calendarID = nil
+            }
         }
     }
 }
