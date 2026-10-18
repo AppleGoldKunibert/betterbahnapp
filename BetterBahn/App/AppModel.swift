@@ -1,5 +1,6 @@
 import BackgroundTasks
 import BetterBahnKit
+import EventKit
 import Foundation
 import Network
 import Observation
@@ -42,6 +43,7 @@ final class AppModel {
             savedJourneysCloud.localChange(from: oldValue, to: savedJourneys)
             syncLiveActivity()
             scheduleExitReminderSync()
+            scheduleCalendarSync()
         }
     }
     /// Tickets fetched from bahn.de, kept on this device only (see `TicketStore`).
@@ -63,6 +65,12 @@ final class AppModel {
     @ObservationIgnored var transferDispositions: [String: TransferDisposition] = [:]
     @ObservationIgnored var exitReminderSync: Task<Void, Never>?
     @ObservationIgnored var exitReminderGeneration = 0
+    /// Calendar events of saved journeys on this device (#382), see `CalendarEvents.swift`.
+    var calendarEventIDs: [UUID: String] = CalendarEventLog.load() {
+        didSet { CalendarEventLog.save(calendarEventIDs) }
+    }
+    @ObservationIgnored var calendarStore: EKEventStore?
+    @ObservationIgnored var calendarSync: Task<Void, Never>?
     /// Saved journey to open on the Verbindungen tab (set when the Live Activity is tapped);
     /// `ConnectionsView` pushes it and clears this.
     var journeyToOpen: SavedJourney?
@@ -1501,6 +1509,11 @@ final class AppSettings {
             uploadToCloud()
         }
     }
+    /// What the app may do with the calendar events of saved journeys (#382); nil until the user chose.
+    /// Per device, like the calendar access itself.
+    var calendarAccess: CalendarAccessMode? {
+        didSet { UserDefaults.standard.set(calendarAccess?.rawValue, forKey: "calendarAccess") }
+    }
     /// Notifications when someone the user follows checks in on Träwelling (#266). Per device, like
     /// the permission to show notifications.
     var notifyFollowedCheckins: Bool {
@@ -1653,6 +1666,7 @@ final class AppSettings {
         connectionWarnings = defaults.object(forKey: "connectionWarnings") as? Bool ?? true
         exitReminders = defaults.object(forKey: "exitReminders") as? Bool ?? true
         exitReminderLead = ExitReminderLead(rawValue: defaults.integer(forKey: "exitReminderLead")) ?? .five
+        calendarAccess = defaults.string(forKey: "calendarAccess").flatMap(CalendarAccessMode.init)
         quickTags = Storage.load(key: "quickTags") ?? QuickTag.defaults
         trainSearchKinds = defaults.stringArray(forKey: "trainSearchKinds").map { Set($0.compactMap(TrainSearchKind.init)) }
             ?? TrainSearchKind.defaults

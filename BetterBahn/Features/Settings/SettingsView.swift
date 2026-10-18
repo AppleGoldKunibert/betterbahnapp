@@ -122,6 +122,26 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Picker(selection: Binding(get: { settings.calendarAccess ?? .full },
+                                              set: { settings.calendarAccess = $0 })) {
+                        ForEach(CalendarAccessMode.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                    } label: {
+                        IconLabel(title: "Termine deiner Reisen", systemImage: "calendar", color: .red)
+                    }
+                    .onChange(of: settings.calendarAccess) { _, mode in
+                        guard mode == .full else { return }
+                        Task {
+                            _ = await model.requestCalendarAccess(.full)
+                            model.scheduleCalendarSync(after: .zero)
+                        }
+                    }
+                } header: {
+                    Text("Kalender")
+                } footer: {
+                    Text("Mit vollem Zugriff bleiben die Termine deiner Reisen aktuell, auch bei Verspätungen und Gleiswechseln, und verschwinden mit der Reise. Mit „Nur hinzufügen“ wird jeder Termin einmal eingetragen.")
+                }
+
+                Section {
                     Picker(selection: $settings.stationFlagMode) {
                         Text("Aus").tag(StationFlagMode.off)
                         Text("Nur Ausland").tag(StationFlagMode.foreignOnly)
