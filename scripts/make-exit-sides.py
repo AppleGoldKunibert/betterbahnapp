@@ -10,11 +10,14 @@ on `heading`): trains arriving there always travel on `heading`, so the side app
 from. Platforms are assigned to the nearest station node, with its `railway:ref` (Ril100 code) and
 `uic_ref` (EVA number) so the app can tell neighbouring stations apart.
 
-Overpass (© OpenStreetMap contributors, ODbL) is asked tile by tile; the raw answers are cached in
---cache so a rerun (new rules, debugging) doesn't ask again. Takes a while (36 tiles, a few hundred MB):
-    python3 scripts/make-exit-sides.py [--cache /tmp/osm-exit-sides] [--only Fulda]
-Corrections for wrong OSM data go into Resources/ExitSideOverrides.json (same format, by hand), never
-into the generated file. Tests: python3 scripts/make-exit-sides-test.py
+The data (© OpenStreetMap contributors, ODbL) comes from an OSM extract read with pyosmium – the
+reliable way, Overpass often answers 502/504 –, Germany from Geofabrik (about 4 GB, three passes over it):
+    pip3 install osmium
+    curl -O https://download.geofabrik.de/europe/germany-latest.osm.pbf
+    python3 scripts/make-exit-sides.py --pbf germany-latest.osm.pbf [--only Fulda]
+Without --pbf, Overpass is asked tile by tile; the raw answers are cached in --cache so a rerun doesn't
+ask again. Corrections for wrong OSM data go into Resources/ExitSideOverrides.json (same format, by
+hand), never into the generated file. Tests: python3 scripts/make-exit-sides-test.py
 """
 import argparse
 import json
@@ -394,6 +397,53 @@ def dump(result):
     return '{"about":' + json.dumps(result["about"]) + ',\n"stations":[' + "".join("\n" + l + ("," if i < len(lines) - 1 else "") for i, l in enumerate(lines)) + "\n]}\n"
 
 
+# --- OSM extract -------------------------------------------------------------------------------------
+
+def load_pbf(path):
+    """The elements the analysis needs from an OSM extract, in Overpass' shape (tags, node ids, geometry,
+    relation members with geometry). Three passes with pyosmium's C++ filters, so a country-sized file
+    needs little memory and no Python work per node: the railway objects, then the member ways of
+    platform relations, then the positions of the nodes those ways use."""
+    import osmium
+
+    nodes, ways, relations, member_ways = [], {}, [], set()
+    for item in osmium.FileProcessor(str(path)).with_filter(osmium.filter.KeyFilter("railway")):
+        tags = dict(item.tags)
+        railway = tags.get("railway")
+        if item.is_node():
+            if railway in ("buffer_stop", "station", "halt"):
+                nodes.append({"type": "node", "id": item.id, "lat": item.location.lat, "lon": item.location.lon, "tags": tags})
+        elif item.is_way():
+            if railway in ("platform", "platform_edge") or (railway == "rail" and "railway:track_ref" in tags):
+                ways[item.id] = {"type": "way", "id": item.id, "tags": tags, "nodes": [n.ref for n in item.nodes]}
+        elif item.is_relation() and railway == "platform":
+            members = [(m.ref, m.role) for m in item.members if m.type == "w" and m.role in ("outer", "")]
+            relations.append({"type": "relation", "id": item.id, "tags": tags, "member_ids": members})
+            member_ways.update(ref for ref, _ in members)
+    missing = member_ways - ways.keys()
+    if missing:
+        for item in osmium.FileProcessor(str(path), osmium.osm.WAY).with_filter(osmium.filter.IdFilter(missing)):
+            ways[item.id] = {"type": "way", "id": item.id, "tags": {}, "nodes": [n.ref for n in item.nodes], "member_only": True}
+    node_ids = {ref for way in ways.values() for ref in way["nodes"]}
+    locations = {}
+    for item in osmium.FileProcessor(str(path), osmium.osm.NODE).with_filter(osmium.filter.IdFilter(node_ids)):
+        locations[item.id] = {"lat": item.location.lat, "lon": item.location.lon}
+
+    elements = list(nodes)
+    for way in ways.values():
+        geometry = [locations[ref] for ref in way["nodes"] if ref in locations]
+        if len(geometry) < 2:
+            continue
+        way["geometry"] = geometry
+        if not way.pop("member_only", False):
+            elements.append(way)
+    for relation in relations:
+        relation["members"] = [{"type": "way", "ref": ref, "role": role, "geometry": ways[ref]["geometry"]}
+                               for ref, role in relation.pop("member_ids") if ref in ways and "geometry" in ways[ref]]
+        elements.append(relation)
+    return elements
+
+
 # --- Overpass ----------------------------------------------------------------------------------------
 
 def tiles(bounds=BOUNDS, count=TILES):
@@ -431,6 +481,7 @@ def fetch(bbox, cache):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--pbf", type=Path, help="an OSM extract (.osm.pbf, e.g. Geofabrik's germany-latest) to read instead of asking Overpass")
     parser.add_argument("--cache", type=Path, default=Path("/tmp/osm-exit-sides"), help="where the raw Overpass answers are kept")
     parser.add_argument("--only", help="only stations whose name contains this (debugging; nothing is written)")
     parser.add_argument("--out", type=Path, default=OUT)
@@ -440,7 +491,12 @@ def main():
 
     log = print if args.only else (lambda *a: None)
     stations, dropped = {}, 0
-    all_tiles = list(tiles(count=args.tiles))
+    if args.pbf:
+        print(f"reading {args.pbf}", file=sys.stderr)
+        elements = load_pbf(args.pbf)
+        print(f"{len(elements)} railway elements", file=sys.stderr)
+        stations, dropped = analyse(Data(elements), only=args.only, log=log)
+    all_tiles = [] if args.pbf else list(tiles(count=args.tiles))
     for index, bbox in enumerate(all_tiles, 1):
         print(f"tile {index}/{len(all_tiles)} {bbox}", file=sys.stderr)
         elements = fetch(bbox, args.cache)
