@@ -299,7 +299,7 @@ def icons(image):
     # side become one box, which turns upright just as well).
     # Thick lines (walls) leave thin strips; they would join a pictogram next to them into one box too big to keep.
     boxes = [[x - r, y - r, x + w + r, y + h + r] for x, y, w, h, _ in components(solid)
-             if w < hi and h < hi and min(w, h) >= 3 and max(w, h) <= 4 * min(w, h)]
+             if w < hi and h < hi and min(w, h) >= 4 and max(w, h) <= 4 * min(w, h)]
     gap = 2 * r + 4
     merged = True
     while merged:
@@ -314,27 +314,66 @@ def icons(image):
                     break
             if merged:
                 break
-    # Grow each box over the box's rest below or beside a label ("Recycling") while the next row or column is
-    # still partly dark (a row of white letters leaves little of the box's colour).
+    # Snap each box to the pictogram's dark frame: what stays dark across a 3×3 square (2 px lines don't) and
+    # touches the box, unless it is a wall's size.
+    k = 3
+    sums = np.pad(dark.astype(int), ((2, 1), (2, 1))).cumsum(axis=0).cumsum(axis=1)
+    frames = components((sums[k:, k:] - sums[:-k, k:] - sums[k:, :-k] + sums[:-k, :-k]) == k * k)
+    # A light line drawn across a pictogram splits its frame, so pieces up to 3 px away join too.
+    frames = [f for f in frames if f[2] <= hi * 1.25 and f[3] <= hi * 1.25]
+    near = 3
+    for box in boxes:
+        grown = True
+        while grown:
+            grown = False
+            for x, y, w, h, _ in frames:
+                if (x - near <= box[2] and box[0] <= x + w + near and y - near <= box[3] and box[1] <= y + h + near
+                        and (x - 1 < box[0] or y - 1 < box[1] or x + w + 1 > box[2] or y + h + 1 > box[3])):
+                    box[:] = [min(box[0], x - 1), min(box[1], y - 1), max(box[2], x + w + 1), max(box[3], y + h + 1)]
+                    grown = True
+    # Grow each box over the box's rest below or beside a label ("Recycling") or a white frame inside it while the
+    # next row or column is still partly dark, or dark at both ends (the box's own edge).
+    def edge_row(row, x0, x1):
+        line = dark[row, x0:x1]
+        return line.mean() > 0.12 or (line[:4].mean() > 0.5 and line[-4:].mean() > 0.5)
+
+    def edge_column(column, y0, y1):
+        line = dark[y0:y1, column]
+        return line.mean() > 0.12 or (line[:4].mean() > 0.5 and line[-4:].mean() > 0.5)
+
     for box in boxes:
         for _ in range(16):
             grown = False
-            if box[1] > 0 and dark[box[1] - 1, box[0]:box[2]].mean() > 0.12:
+            tall, wide = box[3] - box[1] >= hi, box[2] - box[0] >= hi
+            if box[1] > 0 and not tall and edge_row(box[1] - 1, box[0], box[2]):
                 box[1] -= 1
                 grown = True
-            if box[3] < height and dark[box[3], box[0]:box[2]].mean() > 0.12:
+            if box[3] < height and not tall and edge_row(box[3], box[0], box[2]):
                 box[3] += 1
                 grown = True
-            if box[0] > 0 and dark[box[1]:box[3], box[0] - 1].mean() > 0.12:
+            if box[0] > 0 and not wide and edge_column(box[0] - 1, box[1], box[3]):
                 box[0] -= 1
                 grown = True
-            if box[2] < width and dark[box[1]:box[3], box[2]].mean() > 0.12:
+            if box[2] < width and not wide and edge_column(box[2], box[1], box[3]):
                 box[2] += 1
                 grown = True
             if not grown:
                 break
     boxes = [(x0, y0, x1 - x0, y1 - y0) for x0, y0, x1, y1 in boxes]
-    boxes = [(x, y, w, h) for x, y, w, h in boxes if lo <= h <= hi and lo <= w <= hi * 3.5 and w / h >= 0.55]
+    boxes = [(x, y, w, h) for x, y, w, h in boxes if lo <= h <= hi * 1.15 and lo <= w <= hi * 3.5 and w / h >= 0.55]
+    # A pictogram has a white symbol in it; black door corners and wall ends don't.
+    white = image.min(axis=2) >= 245
+    boxes = [(x, y, w, h) for x, y, w, h in boxes if white[y:y + h, x:x + w].mean() >= 0.005]
+
+    def door_corner(x, y, w, h):
+        """Black door corners at the coach's ends: white paper round them, not inside."""
+        if width * 0.04 < x and x + w < width * 0.96:
+            return False
+        part = white[max(0, y - 3):y + h + 3, max(0, x - 3):x + w + 3]
+        ring = np.concatenate([part[:2].ravel(), part[-2:].ravel(), part[:, :2].ravel(), part[:, -2:].ravel()])
+        return ring.mean() > 0.4
+
+    boxes = [box for box in boxes if not door_corner(*box)]
     pad = 3
     return [[round(max(0, x - pad) / width, 4), round(max(0, y - pad) / height, 4),
              round((min(width, x + w + pad) - max(0, x - pad)) / width, 4),
