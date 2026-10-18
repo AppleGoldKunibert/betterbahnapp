@@ -217,6 +217,17 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Toggle(isOn: $settings.showWeather) {
+                        IconLabel(title: "Wetter am Ziel", systemImage: "cloud.sun.fill", color: .orange)
+                    }
+                    .tint(.brand)
+                } header: {
+                    Text("Wetter")
+                } footer: {
+                    Text("Zeigt in der Reise das Wetter bei Ankunft und bei längeren Umstiegen. Dafür wird nur der Bahnhof verschickt, nie dein Standort.")
+                }
+
+                Section {
                     Button(role: .destructive) {
                         showClearHistoryConfirmation = true
                     } label: {

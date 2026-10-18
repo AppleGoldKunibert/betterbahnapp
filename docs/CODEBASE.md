@@ -37,7 +37,8 @@ in `project.pbxproj`: new files join their target automatically.
   `onOpenURL`: `DBShare.text(fromAppURL:)` → `ImportedJourneyView`; `JourneyShareLink` → `SharedJourneyPreviewView`
   (short links via `ShortShareLinkClient`, also Universal Links); `LiveActivityLink` (Live Activity, journey widget) →
   saved journey via `AppModel.journeyToOpen`; `TrainMapLink` → `LiveTrainMapView`; `BoardWidgetLink` → the Abfahrten
-  tab (`AppModel.boardStationToOpen`) or the route search on Verbindungen (`AppModel.searchToOpen`). Scene-phase
+  tab (`AppModel.boardStationToOpen`) or the route search on Verbindungen (`AppModel.searchToOpen`). All links go
+  through `RootView.open(_:)`, also Spotlight results (`CSSearchableItemActionType`, `AppModel.linkToOpen`). Scene-phase
   refresh start/stop.
 - `App/AppModel.swift` – the single `@Observable` app state (`.environment(model)`). Owns `CombinedProvider`,
   `TraewellingClient`, `TrainPicker`, `JourneyReplanner`, `DBShareImporter`, `TrainRoutePlanner`, `TicketFilter`,
@@ -74,12 +75,22 @@ in `project.pbxproj`: new files join their target automatically.
   writes the `WidgetSnapshot` for `widgetJourney` (`liveJourneyCandidate`, else the next saved journey not switched
   off) and reloads the journey widgets (`WidgetStore.journeyWidgetKinds`) only on change. `updateWidgetStations()` (on
   every change of favourites/recent searches) writes `WidgetStations` for the board widget's settings.
+- `App/SpotlightSync.swift` – favourite stations and saved journeys in the iOS search (#387): Kit `SpotlightEntry`
+  builds title, subtitle, keywords (RIL100 codes, train numbers), expiry (journey's end) and the deep link, which is
+  also the item's ID (`BoardWidgetLink` board, `LiveActivityLink` journey). `scheduleSpotlightSync()` (on every
+  change of the favourites or saved journeys, also from iCloud, and when the app comes to the foreground) indexes
+  them with their App Intents entities (`FavoriteStationEntity`, `SavedJourneyEntity`, `IndexedEntity`, queries via
+  `AppDependencyManager`) and removes what's gone (IDs in UserDefaults `spotlightIDs`). Tapping opens the link via
+  the entity's `OpenIntent` (`AppModel.linkToOpen`) or the `CSSearchableItemActionType` activity.
 - `Features/Connections/` – `ConnectionsView`, `ConnectionSearch`, `RouteOptionsEditor` (vias, products, max
   transfers), `JourneyResultsView` + `JourneyCard`, `TrainNumberSheet` ("Bestimmten Zug wählen", #225: trains fitting
   the input via Kit `TrainCandidateFinder`; picking one shows its stops in `TripContent` with boarding/exit preselected
   and pins that run; "Ein- und Ausstieg selbst angeben"), `JourneyDetailView` (+ `LegCard`, `TransferRow`,
   alternatives sheets; below the legs `CO2SavingButton` "−42 kg CO₂" → `CO2Sheet`, #386, from Kit `CO2Comparison`
-  with the legs' cached track geometry), `JourneyMapView`, `JourneyReplanSheet` (replan mid-journey; "Halt hinzufügen" via
+  with the legs' cached track geometry; `WeatherLabel` "☀ 18° bei Ankunft" under the destination (summary card and the
+  last leg) and "beim Umstieg" under a transfer station with more than 15 min to the next train
+  (`JourneyWeather.arrival(of:in:)`), tap → `WeatherDetails` popover with rain, wind and
+  the Open-Meteo credit, #385, `WeatherViews.swift`, off with `AppSettings.showWeather`), `JourneyMapView`, `JourneyReplanSheet` (replan mid-journey; "Halt hinzufügen" via
   `ManualStopSheet` adds an off-timetable exit, a check-in then becomes a manual trip via
   `AppModel.replaceCheckinWithManualTrip`; a new exit on the last train asks "Reise … beenden" / "Weiter nach …").
 - `Features/Departures/` – `StationBoardView`/`BoardRow`, `TripView`. `CoachSequenceView.swift`: the Wagenreihung
@@ -340,6 +351,12 @@ in `project.pbxproj`: new files join their target automatically.
   Hbf"), times, departure station with coordinate, notes (platforms, each change with transfer minutes, reserved
   seats, link) from a journey's latest data; `CalendarAccessMode`. Not in `scripts/searchsim` (needs `Tickets/`).
 - `Geometry/` – polyline decode, `RouteGeometryService`, `SegmentHeatmap`.
+- `Weather/WeatherForecast.swift` (#385) – `WeatherClient` asks Open-Meteo's `/v1/forecast` (no key, CC BY 4.0) for a
+  station's hourly forecast (temperature, rain chance/amount, wind, WMO code → `WeatherCondition`: German name + SF
+  Symbol); only the station's position, rounded to 2 decimals, goes out. Kept per place for an hour, so reopening a
+  journey asks nothing. `covers`: arrivals still ahead, up to 10 days. `Journey.weatherPoints`: the destination plus
+  transfers with more than `weatherTransferWait` (15 min) to the next train, by live times; `weather(for:)` →
+  `JourneyWeather`.
 
 ### Statistics, support
 

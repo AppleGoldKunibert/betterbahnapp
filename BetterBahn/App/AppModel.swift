@@ -20,6 +20,7 @@ final class AppModel {
             Storage.save(favoriteStations, key: "favoriteStations")
             favoriteStationsCloud.localChange(from: oldValue, to: favoriteStations)
             updateWidgetStations()
+            scheduleSpotlightSync()
         }
     }
     var recentSearches: [RecentSearch] {
@@ -44,6 +45,7 @@ final class AppModel {
             syncLiveActivity()
             scheduleExitReminderSync()
             scheduleCalendarSync()
+            scheduleSpotlightSync()
         }
     }
     /// Tickets fetched from bahn.de, kept on this device only (see `TicketStore`).
@@ -76,6 +78,12 @@ final class AppModel {
     var journeyToOpen: SavedJourney?
     /// Shows the train search (`TrainSearchOverlay`) over every tab.
     var showsTrainSearch = false
+    /// A deep link to open, set when a station or journey is opened from Spotlight (#387);
+    /// `RootView` opens it and clears this.
+    var linkToOpen: URL?
+    /// The waiting Spotlight update and what Spotlight was last given (see `SpotlightSync`).
+    @ObservationIgnored var spotlightSync: Task<Void, Never>?
+    @ObservationIgnored var lastSpotlightEntries: [SpotlightEntry]?
     /// Recently picked stations, newest first (used as suggestions).
     var recentStations: [Station] {
         didSet { Storage.save(recentStations, key: "recentStations") }
@@ -144,6 +152,7 @@ final class AppModel {
         travelPasses = TicketStore.loadPasses()
         manualLiveActivityJourneyID = UserDefaults.standard.string(forKey: "manualLiveActivityJourneyID").flatMap(UUID.init)
         updateWidgetStations()
+        scheduleSpotlightSync()
         // The check-in history can run to thousands of trips, so it's decoded off the main thread
         // instead of blocking the launch.
         traewellingTripsLoadTask = Task { [weak self] in
@@ -1587,6 +1596,14 @@ final class AppSettings {
         }
     }
 
+    /// The weather on arrival and at long transfers in a journey (#385), from Open-Meteo. On by default.
+    var showWeather: Bool {
+        didSet {
+            UserDefaults.standard.set(showWeather, forKey: "showWeather")
+            uploadToCloud()
+        }
+    }
+
     /// Unlocks the features below; each one still has to be switched on by itself.
     var expertMode: Bool {
         didSet {
@@ -1651,6 +1668,7 @@ final class AppSettings {
         self.showTrainStatistics = showTrainStatistics
         defaults.removeObject(forKey: "shareTrainStatistics")
         Task { await TrainStatisticsStore.shared.setEnabled(showTrainStatistics) }
+        showWeather = defaults.object(forKey: "showWeather") as? Bool ?? true
         expertMode = defaults.bool(forKey: "expertMode")
         expertTraewelling = defaults.bool(forKey: "expertTraewelling")
         expertEditJourney = defaults.bool(forKey: "expertEditJourney")
@@ -1699,6 +1717,7 @@ final class AppSettings {
         var exitReminders: Bool?
         var exitReminderLead: ExitReminderLead?
         var liveActivityServerUpdates: Bool?
+        var showWeather: Bool?
     }
 
     /// What iCloud stores: the settings and when they were last changed.
@@ -1715,7 +1734,7 @@ final class AppSettings {
         expertTrainChoice: false, expertIgnoreBoardingRules: false, expertRil100: false,
         trainSearchKinds: TrainSearchKind.defaults.sorted(by: { $0.rawValue < $1.rawValue }),
         trainSearchCountries: TrainSearchCountry.defaults.sorted(), exitReminders: true, exitReminderLead: .five,
-        liveActivityServerUpdates: true)
+        liveActivityServerUpdates: true, showWeather: true)
 
     @ObservationIgnored private var isApplyingCloudValue = false
 
@@ -1729,7 +1748,8 @@ final class AppSettings {
                    expertRil100: expertRil100,
                    trainSearchKinds: trainSearchKinds.sorted(by: { $0.rawValue < $1.rawValue }),
                    trainSearchCountries: trainSearchCountries.sorted(), exitReminders: exitReminders,
-                   exitReminderLead: exitReminderLead, liveActivityServerUpdates: liveActivityServerUpdates)
+                   exitReminderLead: exitReminderLead, liveActivityServerUpdates: liveActivityServerUpdates,
+                   showWeather: showWeather)
     }
 
     /// When the settings were last changed on this device or taken over from iCloud. Before
@@ -1781,6 +1801,7 @@ final class AppSettings {
         exitReminders = value.exitReminders ?? exitReminders
         exitReminderLead = value.exitReminderLead ?? exitReminderLead
         liveActivityServerUpdates = value.liveActivityServerUpdates ?? liveActivityServerUpdates
+        showWeather = value.showWeather ?? showWeather
     }
 }
 
