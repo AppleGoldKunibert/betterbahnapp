@@ -65,7 +65,8 @@ in `project.pbxproj`: new files join their target automatically.
   app goes to the background and after the background refresh, `takeBackLiveActivity()` ends that when it is active (#315).
 - `App/ExitReminders.swift` – exit reminders (#313, Settings → Meine Reisen, per journey `exitRemindersOff`): Kit `Journey.exitReminders` → time-sensitive notifications `exit|<entry>|<leg>`, rescheduled after every refresh, one per stop (per-device log `exitReminderDates`); while the Live Activity runs, its alert instead.
 - `App/CalendarEvents.swift` – calendar events of saved journeys (#382): `CalendarButton` (`Features/Trips/`, next to
-  the share button in `JourneyDetailView`) adds one from Kit `JourneyCalendarEvent`; the first time it asks for
+  the share button in `JourneyDetailView`) adds one from Kit `JourneyCalendarEvent`, tapped again deletes it
+  (`removeFromCalendar`, full access only); the first time it asks for
   `AppSettings.calendarAccess` (per device, Settings → Kalender). `.full`: `scheduleCalendarSync` (after every
   `savedJourneys` change and on becoming active) updates the events, removes those of deleted journeys and forgets
   ones deleted in the calendar. `.addOnly` (iOS write-only access) writes once. Event IDs are kept per device either

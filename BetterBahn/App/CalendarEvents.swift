@@ -25,6 +25,18 @@ extension AppModel {
         try insertEvent(for: entry, in: store)
     }
 
+    /// Deletes the journey's event. Needs full access: with add-only access iOS can't find it again.
+    /// Auto-add doesn't bring it back.
+    func removeFromCalendar(_ entry: SavedJourney) throws {
+        guard let eventID = calendarEventIDs[entry.id] else { return }
+        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else { throw CalendarError.noAccess }
+        let store = calendarStore ?? EKEventStore()
+        calendarStore = store
+        // Already deleted in the calendar: only forget it.
+        if let event = store.event(withIdentifier: eventID) { try store.remove(event, span: .thisEvent) }
+        calendarEventIDs[entry.id] = nil
+    }
+
     private func insertEvent(for entry: SavedJourney, in store: EKEventStore) throws {
         guard let content = calendarEvent(for: entry) else { throw CalendarError.notSaved }
         let event = EKEvent(eventStore: store)
