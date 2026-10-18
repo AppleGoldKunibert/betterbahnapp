@@ -372,7 +372,7 @@ struct TripContent: View {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(spacing: 12) {
                         LiveTrainIconTile(route: LiveTrainRoute(trip: trip), systemImage: trip.line?.symbolName ?? "tram.fill",
-                                          color: color, size: 46)
+                                          color: color, size: 46, logo: trip.line?.transitLogo)
                         VStack(alignment: .leading, spacing: 3) {
                             TrainNameRow(name: trip.line?.nameWithTripNumber ?? "Zug", font: .title3.weight(.bold), spacing: 8) {
                                 TrainSeriesTag(trip: trip, savedLeg: savedLeg)

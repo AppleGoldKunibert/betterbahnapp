@@ -76,6 +76,7 @@ struct LiveTrainIconTile: View {
     let systemImage: String
     let color: Color
     var size: CGFloat = 38
+    var logo: TransitLogo? = nil
 
     @Environment(AppModel.self) private var model
     @State private var available = false
@@ -124,7 +125,7 @@ struct LiveTrainIconTile: View {
     }
 
     private var tile: some View {
-        IconTile(systemImage: systemImage, color: color, size: size)
+        IconTile(systemImage: systemImage, color: color, size: size, logo: logo)
     }
 }
 

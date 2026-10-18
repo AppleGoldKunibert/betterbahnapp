@@ -138,18 +138,30 @@ struct SectionHeader: View {
     }
 }
 
-/// iOS-Settings style colored icon square.
+/// iOS-Settings style colored icon square. With a `logo` (S-Bahn, U-Bahn, #350) the logo itself takes
+/// the tile's place, in its own colors and with the tile's rounded corners.
 struct IconTile: View {
     let systemImage: String
     let color: Color
     var size: CGFloat = 30
+    var logo: TransitLogo? = nil
 
     var body: some View {
-        Image(systemName: systemImage)
-            .font(.system(size: size * 0.5, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(width: size, height: size)
-            .background(color.gradient, in: .rect(cornerRadius: size * 0.28, style: .continuous))
+        if let logo, UIImage(named: logo.assetName) != nil {
+            Image(logo.assetName)
+                .renderingMode(.original)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: size, height: size)
+                .clipShape(.rect(cornerRadius: size * 0.28, style: .continuous))
+                .accessibilityHidden(true)
+        } else {
+            Image(systemName: systemImage)
+                .font(.system(size: size * 0.5, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: size, height: size)
+                .background(color.gradient, in: .rect(cornerRadius: size * 0.28, style: .continuous))
+        }
     }
 }
 
@@ -184,20 +196,37 @@ struct IconLabel: View {
 struct LineBadge: View {
     let line: Line?
     var size: ControlSize = .regular
+    @ScaledMetric(relativeTo: .caption) private var logoSize: CGFloat = 14
+    @ScaledMetric(relativeTo: .caption2) private var smallLogoSize: CGFloat = 12
 
     private var badgeFont: Font { size == .small ? Font.caption2.weight(.bold) : Font.caption.weight(.bold) }
+
+    private var hasLogo: Bool { line?.transitLogo.map { UIImage(named: $0.assetName) != nil } ?? false }
 
     var body: some View {
         if let line {
             HStack(spacing: 4) {
-                Image(systemName: line.symbolName)
-                    .font(badgeFont)
+                // S-Bahn and U-Bahn lines show their logo, like their tile (#350).
+                if hasLogo, let logo = line.transitLogo {
+                    let side = size == .small ? smallLogoSize : logoSize
+                    Image(logo.assetName)
+                        .renderingMode(.original)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: side, height: side)
+                        .clipShape(.rect(cornerRadius: side * 0.28, style: .continuous))
+                        .accessibilityHidden(true)
+                } else {
+                    Image(systemName: line.symbolName)
+                        .font(badgeFont)
+                }
                 Text(line.displayName)
                     .font(badgeFont)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
             }
-            .padding(.horizontal, size == .small ? 6 : 8)
+            .padding(.leading, hasLogo ? (size == .small ? 3 : 4) : (size == .small ? 6 : 8))
+            .padding(.trailing, size == .small ? 6 : 8)
             .padding(.vertical, size == .small ? 3 : 4)
             .foregroundStyle(.white)
             .background(line.color.gradient, in: .capsule)

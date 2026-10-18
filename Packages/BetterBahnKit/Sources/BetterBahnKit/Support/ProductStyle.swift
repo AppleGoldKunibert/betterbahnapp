@@ -9,8 +9,9 @@ public extension Product {
         case .longDistance, .interregio: "train.side.middle.car"
         case .nightTrain: Self.nightTrainSymbolName
         case .regionalExpress, .regional: "tram.fill"
-        case .suburban: "lightrail.fill"
-        case .subway: "tram.fill.tunnel"
+        // The S-Bahn's round "S" and the U-Bahn's square "U" logo (#350).
+        case .suburban: "s.circle.fill"
+        case .subway: "u.square.fill"
         case .tram: "cablecar.fill"
         case .bus: "bus.fill"
         case .coach: "bus.doubledecker.fill"
