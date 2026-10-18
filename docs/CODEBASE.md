@@ -37,7 +37,8 @@ in `project.pbxproj`: new files join their target automatically.
   `onOpenURL`: `DBShare.text(fromAppURL:)` → `ImportedJourneyView`; `JourneyShareLink` → `SharedJourneyPreviewView`
   (short links via `ShortShareLinkClient`, also Universal Links); `LiveActivityLink` (Live Activity, journey widget) →
   saved journey via `AppModel.journeyToOpen`; `TrainMapLink` → `LiveTrainMapView`; `BoardWidgetLink` → the Abfahrten
-  tab (`AppModel.boardStationToOpen`) or the route search on Verbindungen (`AppModel.searchToOpen`). Scene-phase
+  tab (`AppModel.boardStationToOpen`) or the route search on Verbindungen (`AppModel.searchToOpen`). All links go
+  through `RootView.open(_:)`, also Spotlight results (`CSSearchableItemActionType`, `AppModel.linkToOpen`). Scene-phase
   refresh start/stop.
 - `App/AppModel.swift` – the single `@Observable` app state (`.environment(model)`). Owns `CombinedProvider`,
   `TraewellingClient`, `TrainPicker`, `JourneyReplanner`, `DBShareImporter`, `TrainRoutePlanner`, `TicketFilter`,
@@ -67,6 +68,13 @@ in `project.pbxproj`: new files join their target automatically.
   writes the `WidgetSnapshot` for `widgetJourney` (`liveJourneyCandidate`, else the next saved journey not switched
   off) and reloads the journey widgets (`WidgetStore.journeyWidgetKinds`) only on change. `updateWidgetStations()` (on
   every change of favourites/recent searches) writes `WidgetStations` for the board widget's settings.
+- `App/SpotlightSync.swift` – favourite stations and saved journeys in the iOS search (#387): Kit `SpotlightEntry`
+  builds title, subtitle, keywords (RIL100 codes, train numbers), expiry (journey's end) and the deep link, which is
+  also the item's ID (`BoardWidgetLink` board, `LiveActivityLink` journey). `scheduleSpotlightSync()` (on every
+  change of the favourites or saved journeys, also from iCloud, and when the app comes to the foreground) indexes
+  them with their App Intents entities (`FavoriteStationEntity`, `SavedJourneyEntity`, `IndexedEntity`, queries via
+  `AppDependencyManager`) and removes what's gone (IDs in UserDefaults `spotlightIDs`). Tapping opens the link via
+  the entity's `OpenIntent` (`AppModel.linkToOpen`) or the `CSSearchableItemActionType` activity.
 - `Features/Connections/` – `ConnectionsView`, `ConnectionSearch`, `RouteOptionsEditor` (vias, products, max
   transfers), `JourneyResultsView` + `JourneyCard`, `TrainNumberSheet` ("Bestimmten Zug wählen", #225: trains fitting
   the input via Kit `TrainCandidateFinder`; picking one shows its stops in `TripContent` with boarding/exit preselected
