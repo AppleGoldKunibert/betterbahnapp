@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AFTER_ARRIVAL, findTrain, parseArrival, renderArrival } from "./arrival.mjs";
+import { AFTER_ARRIVAL, findTrain, irisStops, parseArrival, renderArrival, shownStops } from "./arrival.mjs";
 import { verifyToken } from "./shared/appattest.mjs";
 import { handleShare } from "./worker.mjs";
 
@@ -305,4 +305,48 @@ test("the browser re-renders with the same function", async () => {
     assert.equal(render(view, at("18:20")), renderArrival(view, at("18:20")));
     assert.match(render(view, at("18:20")), /Ankunft in 20 Min\./);
     assert.match(render(view, at("18:20")), /background:#db1730/);
+});
+
+/// ICE 1095 Berlin → Frankfurt with 11 stops, 10 minutes late everywhere by the app's times.
+function longRun() {
+    const names = ["Berlin Hbf", "Berlin-Spandau", "Stendal Hbf", "Wolfsburg Hbf", "Braunschweig Hbf", "Hildesheim Hbf",
+        "Göttingen", "Kassel-Wilhelmshöhe", "Fulda", "Hanau Hbf", "Frankfurt(Main)Hbf"];
+    const times = ["16:30", "16:42", "17:20", "17:50", "18:10", "18:35", "19:05", "19:25", "20:00", "20:40", "20:55"];
+    return names.map((name, index) => ({
+        name, eva: `80000${String(index).padStart(2, "0")}`,
+        arr: index ? at(times[index]) : null, arrRt: index ? at(times[index]) + 600_000 : null,
+        dep: index < 10 ? at(times[index]) : null, depRt: index < 10 ? at(times[index]) + 600_000 : null,
+        platform: null, platformRt: null, cancelled: false,
+    }));
+}
+
+test("the page lists the next 2 stops and the last 2 before the destination", () => {
+    const stops = longRun();
+    // 18:15: Braunschweig (18:10, +10) not left yet.
+    const shown = shownStops(stops, at("18:15"));
+    assert.deepEqual(shown.map(stop => [stop.name, stop.skipped ?? 0]), [
+        ["Braunschweig Hbf", 4], ["Hildesheim Hbf", 0], ["Fulda", 2], ["Hanau Hbf", 0], ["Frankfurt(Main)Hbf", 0]]);
+    const html = renderArrival({ train: "ICE 1095", product: "highSpeed", color: null, live: true, messages: [],
+        from: { name: "Berlin Hbf", dep: stops[0].dep, depRt: stops[0].depRt }, stops: shown, updatedAt: at("18:15") }, at("18:15"));
+    assert.match(html, /4 Halte/);
+    assert.match(html, /2 Halte/);
+    assert.match(html, /von Berlin Hbf/);
+
+    // Before it leaves: where you board and the next stop; near the end the lists meet.
+    assert.deepEqual(shownStops(stops, at("16:00")).map(stop => stop.name),
+        ["Berlin Hbf", "Berlin-Spandau", "Fulda", "Hanau Hbf", "Frankfurt(Main)Hbf"]);
+    assert.deepEqual(shownStops(stops, at("20:20")).map(stop => stop.name), ["Fulda", "Hanau Hbf", "Frankfurt(Main)Hbf"]);
+    assert.deepEqual(shownStops(stops, at("23:00")).map(stop => stop.name), ["Fulda", "Hanau Hbf", "Frankfurt(Main)Hbf"]);
+});
+
+test("IRIS is asked only for the stops the page may list", async () => {
+    // At 18:15 the next stops are Braunschweig (4) and Hildesheim (5); 2 before them in case the train is later
+    // than the app knew, and the last 2 before Frankfurt (10).
+    const asked = new Set();
+    const fetchUpstream = async url => {
+        asked.add(Number(url.match(/\/(?:plan|fchg)\/80000(\d\d)/)[1]));
+        return new Response("", { status: 404 });
+    };
+    await irisStops({ train: "ICE 1095", number: "1095", stops: longRun() }, { now: at("18:15"), fetchUpstream });
+    assert.deepEqual([...asked].sort((a, b) => a - b), [2, 3, 4, 5, 8, 9, 10]);
 });

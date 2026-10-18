@@ -20,7 +20,9 @@ journey (`ArrivalShare` in the app: train, product/color, bahn.de journey ID, st
 off). Such a link expires 2 hours after the arrival (later when the train runs late, at most 12 hours after
 the planned arrival), and `/s/<id>` shows a small page with the arrival time, delay, platform and stops in any
 browser. The page refreshes from `GET /share/<id>/live`, which asks DB's IRIS (as the app's Timetables) per stop: the
-station's schedule for that hour (cached 30 min) and its changes (cached 30 s), for the last 15 stops at most.
+station's schedule for that hour (cached 30 min) and its changes (cached 30 s), only for the stops the page lists:
+the train's next 2 stops (with 2 before them, in case it runs later than the app knew) and the last 2 before the
+destination, with the destination; "N Halte" stands for the ones left out.
 When IRIS doesn't have the train at the destination, it reads bahn.de's journey details (`fahrt`) through our
 bahn.de server (`BAHNDE_PROXY_URL`, `Server/bahnde-proxy`; bahn.de refuses Workers) with a token the Worker signs
 itself (`TOKEN_SECRET`, key `arrival-pages`, so all arrival pages share the server's per-install rate limit),

@@ -21,8 +21,11 @@ const MAX_STOPS = 150;
 const TOKEN_KID = "arrival-pages";
 const IRIS = "https://iris.noncd.db.de/iris-tts/timetable/";
 const PLAN_TTL = 30 * 60;
-// Two IRIS requests per stop: long trains only get their last stops asked (Workers allow 50 requests per call).
-const MAX_IRIS_STOPS = 15;
+// The page lists the train's next stops and the last ones before the destination, and IRIS is asked only for
+// those (two requests per stop), plus a few before the next ones in case the train runs later than the app knew.
+const SHOWN_NEXT = 2;
+const SHOWN_BEFORE_DESTINATION = 2;
+const DELAY_BUFFER = 2;
 // DB only lists changes: a stop without one counts as on time once the train is about to run (as in the app).
 const ON_TIME_LOOKAHEAD = 2 * 3600 * 1000;
 // IRIS's and bahn.de's "no such data".
@@ -121,7 +124,37 @@ export async function arrivalView(arrival, expiresAt, deps = {}) {
             // Our server or bahn.de down or refusing: the page shows the app's times until the next refresh.
         }
     }
-    return { train: arrival.train, product: arrival.product, color: arrival.color, live, stops, messages, updatedAt: now, expiresAt };
+    const boarding = stops[0];
+    return {
+        train: arrival.train, product: arrival.product, color: arrival.color, live,
+        from: { name: boarding.name, dep: boarding.dep, depRt: boarding.depRt },
+        stops: shownStops(stops, now), messages, updatedAt: now, expiresAt,
+    };
+}
+
+/// The first stop the train hasn't left yet (the destination: not arrived at), by the best time known; -1 after
+/// the arrival.
+function nextStop(stops, now) {
+    const destination = stops.length - 1;
+    return stops.findIndex((stop, index) => (index === destination
+        ? stop.arrRt ?? stop.arr
+        : stop.depRt ?? stop.dep ?? stop.arrRt ?? stop.arr) > now);
+}
+
+/// The stops the page lists: the train's next 2, the last 2 before the destination and the destination. A stop
+/// after left-out ones says how many (`skipped`).
+export function shownStops(stops, now) {
+    const destination = stops.length - 1;
+    const next = nextStop(stops, now);
+    const shown = new Set();
+    for (let index = destination - SHOWN_BEFORE_DESTINATION; index <= destination; index++) shown.add(index);
+    for (let index = next; next >= 0 && index < next + SHOWN_NEXT; index++) shown.add(index);
+    let previous = -1;
+    return [...shown].filter(index => index >= 0 && index <= destination).sort((a, b) => a - b).map(index => {
+        const skipped = index - previous - 1;
+        previous = index;
+        return skipped > 0 ? { ...stops[index], skipped } : stops[index];
+    });
 }
 
 /// bahn.de's journey details through our bahn.de server; null when bahn.de doesn't know the journey.
@@ -175,12 +208,15 @@ function logUpstream(source, url, status, started, retryAfter = null) {
 /// times. null when IRIS doesn't have the train at the destination.
 export async function irisStops(arrival, deps) {
     const stops = arrival.stops;
-    const first = Math.max(0, stops.length - MAX_IRIS_STOPS);
     const boarding = stops[0].depRt ?? stops[0].dep ?? stops[0].arr;
     const running = boarding - deps.now < ON_TIME_LOOKAHEAD;
     const destination = stops.length - 1;
+    // The next stops by the app's times; a train running later than that is still at earlier ones.
+    const next = nextStop(stops, deps.now);
+    const from = (next < 0 ? destination : next) - DELAY_BUFFER;
+    const asked = index => index >= destination - SHOWN_BEFORE_DESTINATION || (index >= from && index < next + SHOWN_NEXT);
     const looked = await Promise.all(stops.map((stop, index) => {
-        if (index < first) return null;
+        if (!asked(index)) return null;
         const lookup = irisStop(stop, index === destination, arrival, running, deps);
         // A failing intermediate stop keeps the app's times; the destination decides.
         return index === destination ? lookup : lookup.catch(() => null);
@@ -363,7 +399,7 @@ export function renderArrival(view, now) {
         : `${Math.floor(minutes / 60)} Std.${minutes % 60 ? ` ${minutes % 60} Min.` : ""}`;
 
     const stops = view.stops;
-    const origin = stops[0];
+    const origin = view.from ?? stops[0];
     const destination = stops[stops.length - 1];
     const arrival = destination.arrRt ?? destination.arr;
     const delay = view.live ? delayOf(destination.arr, destination.arrRt) : null;
@@ -397,7 +433,9 @@ export function renderArrival(view, now) {
         const stopPlatform = stop.platformRt ?? stop.platform;
         const moved = stop.platformRt && stop.platform && stop.platformRt !== stop.platform;
         const state = index === nextIndex ? "next" : reached(stop) ? "passed" : "";
-        return `<li class="${state}${isLast ? " last" : ""}${stop.cancelled ? " cancelled" : ""}">
+        const gap = stop.skipped ? `<li class="gap${index <= nextIndex || nextIndex < 0 ? " passed" : ""}"><span></span><span></span>
+<span class="name">${stop.skipped} ${stop.skipped === 1 ? "Halt" : "Halte"}</span><span></span></li>` : "";
+        return `${gap}<li class="${state}${isLast ? " last" : ""}${stop.cancelled ? " cancelled" : ""}">
 <span class="times"><span class="${stopDelay === 0 ? "ontime" : ""}">${planned ? hhmm(planned) : ""}</span>${live}</span>
 <span class="dot"></span>
 <span class="name">${escape(stop.name)}</span>
@@ -485,9 +523,9 @@ ${footer}
 // In the app's colors (`DesignSystem.swift`): grouped background, white cards, the delay colors, the platform badge.
 const ARRIVAL_STYLE = `
 :root { --grouped: #f2f2f7; --card: #ffffff; --separator: rgba(60, 60, 67, .12); --fill: rgba(120, 120, 128, .13);
-  --ontime: #219e59; --slight: #f28c0d; --heavy: #e02633; --long-distance: #1a1a1a; --brand: #db1730; }
+  --ontime: #219e59; --slight: #f28c0d; --heavy: #e02633; --long-distance: #1a1a1a; --brand: #db1730; --gap: #c7c7cc; }
 @media (prefers-color-scheme: dark) { :root { --grouped: #000000; --card: #1c1c1e; --separator: rgba(84, 84, 88, .6);
-  --fill: rgba(118, 118, 128, .24); --long-distance: #6b6b6b; } }
+  --fill: rgba(118, 118, 128, .24); --long-distance: #6b6b6b; --gap: #48484a; } }
 body.grouped { background: var(--grouped); }
 main { max-width: 34rem; padding: 1rem 1rem 3rem; }
 .brand { margin: .25rem 0 1rem; font-weight: 700; font-size: .95rem; color: var(--brand); letter-spacing: -.01em; }
@@ -523,6 +561,11 @@ main { max-width: 34rem; padding: 1rem 1rem 3rem; }
 .stops li:not(.last)::after { content: ""; position: absolute; left: calc(3.4rem + .45rem + .6rem - 1.5px); top: 1.05rem; bottom: -1.05rem;
   width: 3px; background: var(--fill); }
 .stops li.passed:not(.last)::after { background: var(--line); }
+.stops li.gap { padding: .15rem 0; }
+.stops li:has(+ .gap)::after { bottom: 0; }
+.stops li.gap::after { top: 0; bottom: -.75rem; background: none; border-left: 3px dotted var(--gap); width: 0; }
+.stops li.gap.passed::after { border-left-color: var(--line); }
+.gap .name { color: var(--muted); font-size: .85rem; }
 .times { display: flex; flex-direction: column; font-variant-numeric: tabular-nums; font-weight: 600; }
 .live { font-size: .8rem; }
 .dot { width: 11px; height: 11px; margin: .25rem auto 0; border-radius: 50%; border: 2.5px solid var(--line);
