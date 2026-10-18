@@ -297,7 +297,9 @@ def icons(image):
     lo, hi = IMAGE_HEIGHT * 0.07, IMAGE_HEIGHT * 0.22
     # A pictogram's white symbol splits its box into pieces: join pieces that nearly touch (pictograms side by
     # side become one box, which turns upright just as well).
-    boxes = [[x - r, y - r, x + w + r, y + h + r] for x, y, w, h, _ in components(solid) if w < hi and h < hi]
+    # Thick lines (walls) leave thin strips; they would join a pictogram next to them into one box too big to keep.
+    boxes = [[x - r, y - r, x + w + r, y + h + r] for x, y, w, h, _ in components(solid)
+             if w < hi and h < hi and min(w, h) >= 3 and max(w, h) <= 4 * min(w, h)]
     gap = 2 * r + 4
     merged = True
     while merged:
@@ -313,20 +315,20 @@ def icons(image):
             if merged:
                 break
     # Grow each box over the box's rest below or beside a label ("Recycling") while the next row or column is
-    # still mostly dark.
+    # still partly dark (a row of white letters leaves little of the box's colour).
     for box in boxes:
-        for _ in range(12):
+        for _ in range(16):
             grown = False
-            if box[1] > 0 and dark[box[1] - 1, box[0]:box[2]].mean() > 0.3:
+            if box[1] > 0 and dark[box[1] - 1, box[0]:box[2]].mean() > 0.12:
                 box[1] -= 1
                 grown = True
-            if box[3] < height and dark[box[3], box[0]:box[2]].mean() > 0.3:
+            if box[3] < height and dark[box[3], box[0]:box[2]].mean() > 0.12:
                 box[3] += 1
                 grown = True
-            if box[0] > 0 and dark[box[1]:box[3], box[0] - 1].mean() > 0.3:
+            if box[0] > 0 and dark[box[1]:box[3], box[0] - 1].mean() > 0.12:
                 box[0] -= 1
                 grown = True
-            if box[2] < width and dark[box[1]:box[3], box[2]].mean() > 0.3:
+            if box[2] < width and dark[box[1]:box[3], box[2]].mean() > 0.12:
                 box[2] += 1
                 grown = True
             if not grown:
