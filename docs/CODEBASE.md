@@ -73,7 +73,7 @@ in `project.pbxproj`: new files join their target automatically.
   way (`calendarEventIDs`, `CalendarEventLog`), so switching to full access later keeps the earlier events current.
   The event's link opens the journey by `SavedJourney.id`. With full access `CalendarChoiceRow` (Settings → Kalender) picks
   the calendar for new events (`AppSettings.calendarID`, per device, nil = default); events already added stay put.
-  "Automatisch hinzufügen" (`AppSettings.calendarAutoAdd`, Kit `CalendarAutoAdd`: off by default, at departure or on
+  "Automatisch" (`AppSettings.calendarAutoAdd`, Kit `CalendarAutoAdd`: off by default, at departure or on
   saving, per device) adds due journeys in the sync, each once (`CalendarAutoAddLog`, also set by a manual add), so an
   event deleted in the calendar doesn't come back; access is only asked when the setting is switched on.
 - `App/WidgetSync.swift` – `updateWidgets()` (from `syncLiveActivity`, on position changes, forced on background)

@@ -97,15 +97,12 @@ struct CalendarChoiceRow: View {
         Picker(selection: $settings.calendarID) {
             Text("Standardkalender").tag(String?.none)
             ForEach(calendars, id: \.calendarIdentifier) { calendar in
-                Label {
-                    Text(calendar.title)
-                } icon: {
-                    Image(systemName: "circle.fill").foregroundStyle(Color(cgColor: calendar.cgColor))
-                }
-                .tag(Optional(calendar.calendarIdentifier))
+                // A small dot in the calendar's colour; an icon would show large next to the chosen one.
+                (Text("● ").foregroundStyle(Color(cgColor: calendar.cgColor)) + Text(calendar.title))
+                    .tag(Optional(calendar.calendarIdentifier))
             }
         } label: {
-            IconLabel(title: "Kalender für neue Termine", systemImage: "calendar.badge.plus", color: .red)
+            IconLabel(title: "Kalender", systemImage: "calendar.badge.plus", color: .red)
         }
         .task(id: model.calendarAccessChanges) {
             calendars = model.writableCalendars()

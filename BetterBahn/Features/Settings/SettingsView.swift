@@ -126,7 +126,7 @@ struct SettingsView: View {
                                               set: { settings.calendarAccess = $0 })) {
                         ForEach(CalendarAccessMode.allCases, id: \.self) { Text($0.displayName).tag($0) }
                     } label: {
-                        IconLabel(title: "Termine deiner Reisen", systemImage: "calendar", color: .red)
+                        IconLabel(title: "Zugriff", systemImage: "calendar", color: .red)
                     }
                     .onChange(of: settings.calendarAccess) { _, mode in
                         guard let mode, mode == .full || settings.calendarAutoAdd != .off else { return }
@@ -141,7 +141,7 @@ struct SettingsView: View {
                     Picker(selection: $settings.calendarAutoAdd) {
                         ForEach(CalendarAutoAdd.allCases, id: \.self) { Text($0.displayName).tag($0) }
                     } label: {
-                        IconLabel(title: "Automatisch hinzufügen", systemImage: "calendar.badge.clock", color: .red)
+                        IconLabel(title: "Automatisch", systemImage: "calendar.badge.clock", color: .red)
                     }
                     .onChange(of: settings.calendarAutoAdd) { _, autoAdd in
                         guard autoAdd != .off else { return }
