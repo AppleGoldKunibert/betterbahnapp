@@ -78,15 +78,61 @@ struct SettingsView: View {
                     .onChange(of: settings.connectionWarnings) { _, enabled in
                         if enabled { Task { await ConnectionNotifier.requestAuthorization() } }
                     }
+                    Toggle(isOn: $settings.exitReminders) {
+                        IconLabel(title: "Ans Aussteigen erinnern", systemImage: "bell.badge.fill", color: .red)
+                    }
+                    .tint(.brand)
+                    .onChange(of: settings.exitReminders) { _, enabled in
+                        if enabled { Task { await ConnectionNotifier.requestAuthorization() } }
+                        model.scheduleExitReminderSync()
+                    }
+                    if settings.exitReminders {
+                        Picker(selection: $settings.exitReminderLead) {
+                            ForEach(ExitReminderLead.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                        } label: {
+                            IconLabel(title: "Erinnerung", systemImage: "clock.fill", color: .red)
+                        }
+                        .onChange(of: settings.exitReminderLead) { model.scheduleExitReminderSync() }
+                    }
                     Toggle(isOn: $settings.liveActivitiesEnabled) {
                         IconLabel(title: "Live-Aktivitäten", systemImage: "bolt.badge.clock.fill", color: .indigo)
                     }
                     .tint(.brand)
                     .onChange(of: settings.liveActivitiesEnabled) { model.syncLiveActivity() }
+                    if settings.liveActivitiesEnabled {
+                        Toggle(isOn: $settings.liveActivityServerUpdates) {
+                            IconLabel(title: "Live-Aktivität über Server aktualisieren", systemImage: "arrow.trianglehead.2.clockwise",
+                                      color: .indigo)
+                        }
+                        .tint(.brand)
+                        .onChange(of: settings.liveActivityServerUpdates) {
+                            // Whether an activity gets updates from our server is fixed when it starts.
+                            Task {
+                                await model.liveActivities.restart()
+                                model.syncLiveActivity()
+                            }
+                        }
+                    }
                 } header: {
                     Text("Meine Reisen")
                 } footer: {
-                    Text("Wir sagen dir Bescheid bei Ausfällen, Gleiswechseln und verpassten Anschlüssen.")
+                    Text(settings.liveActivitiesEnabled
+                         ? "Wir sagen dir Bescheid bei Ausfällen, Gleiswechseln und verpassten Anschlüssen – und kurz bevor du aussteigen musst. Über unseren Server zeigt die Live-Aktivität auch bei geschlossener App aktuelle Zeiten und Gleise. Er bekommt dafür deine Reise bis zur Ankunft."
+                         : "Wir sagen dir Bescheid bei Ausfällen, Gleiswechseln und verpassten Anschlüssen – und kurz bevor du aussteigen musst.")
+                }
+
+                Section {
+                    Picker(selection: $settings.stationFlagMode) {
+                        Text("Aus").tag(StationFlagMode.off)
+                        Text("Nur Ausland").tag(StationFlagMode.foreignOnly)
+                        Text("An").tag(StationFlagMode.always)
+                    } label: {
+                        IconLabel(title: "Flagge", systemImage: "flag.fill", color: .brand)
+                    }
+                } header: {
+                    Text("Bahnhofssuche")
+                } footer: {
+                    Text("Zeigt in der Suche die Flagge vor dem Bahnhof, auf Wunsch nur bei Bahnhöfen im Ausland. Mit einer Flagge hinter dem Namen siehst du nur Bahnhöfe aus diesem Land.")
                 }
 
                 Section {
@@ -140,14 +186,14 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Toggle(isOn: $settings.shareTrainStatistics) {
-                        IconLabel(title: "Zugdaten für Statistik teilen", systemImage: "chart.bar.fill", color: .teal)
+                    Toggle(isOn: $settings.showTrainStatistics) {
+                        IconLabel(title: "Zugstatistik anzeigen", systemImage: "chart.bar.fill", color: .teal)
                     }
                     .tint(.brand)
                 } header: {
                     Text("Statistik")
                 } footer: {
-                    Text("Hilft uns, Statistiken zu Verspätungen und Ausfällen zu sammeln. Dabei wird nichts über dich gespeichert.")
+                    Text("Zeigt dir, wie pünktlich ein Zug in den letzten 30 Tagen war und wie oft er ausfiel oder das Gleis wechselte.")
                 }
 
                 Section {

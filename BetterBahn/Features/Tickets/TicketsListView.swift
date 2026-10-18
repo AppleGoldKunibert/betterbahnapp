@@ -154,13 +154,15 @@ struct TicketsListView: View {
 
     private func row(_ pass: TravelPass) -> some View {
         HStack(spacing: 12) {
-            IconTile(systemImage: pass.isBahnCard100 ? "creditcard.fill" : "ticket.fill",
+            IconTile(systemImage: "ticket.fill",
                      color: pass.isExpired() ? .secondary : .brand, size: 34)
             VStack(alignment: .leading, spacing: 2) {
                 Text(pass.name).font(.subheadline.weight(.semibold)).lineLimit(1)
-                Text([pass.kindDescription, validity(of: pass)].compactMap(\.self).joined(separator: " · "))
-                    .font(.caption)
-                    .foregroundStyle(pass.isExpired() ? Color.slightDelay : .secondary)
+                if let validity = validity(of: pass) {
+                    Text(validity)
+                        .font(.caption)
+                        .foregroundStyle(pass.isExpired() ? Color.slightDelay : .secondary)
+                }
             }
             Spacer()
         }

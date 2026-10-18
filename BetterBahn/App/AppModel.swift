@@ -18,14 +18,21 @@ final class AppModel {
         didSet {
             Storage.save(favoriteStations, key: "favoriteStations")
             favoriteStationsCloud.localChange(from: oldValue, to: favoriteStations)
+            updateWidgetStations()
         }
     }
     var recentSearches: [RecentSearch] {
         didSet {
             Storage.save(recentSearches, key: "recentSearches")
             recentSearchesCloud.localChange(from: oldValue, to: recentSearches)
+            updateWidgetStations()
         }
     }
+    /// A station whose board the Abfahrten tab shows next: set when the departure board widget is tapped
+    /// (`BoardWidgetLink`), cleared by `StationBoardView` once shown.
+    var boardStationToOpen: Station?
+    /// A search the Verbindungen tab runs next: the widget's commuter route, cleared by `ConnectionsView`.
+    var searchToOpen: ConnectionSearch?
     /// Journeys the user saved. The next upcoming one is shown as Live Activity.
     var savedJourneys: [SavedJourney] {
         didSet {
@@ -34,6 +41,7 @@ final class AppModel {
             Storage.saveInBackground(savedJourneys, key: "savedJourneys")
             savedJourneysCloud.localChange(from: oldValue, to: savedJourneys)
             syncLiveActivity()
+            scheduleExitReminderSync()
         }
     }
     /// Tickets fetched from bahn.de, kept on this device only (see `TicketStore`).
@@ -51,6 +59,10 @@ final class AppModel {
     /// Laps of looping trains (Ringbahn) loaded by "Vorherige / Nächste Runde laden", kept on disk; unsaved
     /// trips forget them after 15 minutes without a look (see `LoadedLaps`).
     @ObservationIgnored private var loadedLaps = LoadedLaps()
+    /// What DB decided for transfers at the last refreshes (by the departing leg's `id`), for the exit reminders.
+    @ObservationIgnored var transferDispositions: [String: TransferDisposition] = [:]
+    @ObservationIgnored var exitReminderSync: Task<Void, Never>?
+    @ObservationIgnored var exitReminderGeneration = 0
     /// Saved journey to open on the Verbindungen tab (set when the Live Activity is tapped);
     /// `ConnectionsView` pushes it and clears this.
     var journeyToOpen: SavedJourney?
@@ -107,12 +119,6 @@ final class AppModel {
         // The list of station names every stop is shown under, read before the first screen needs it.
         Task { await StationNames.preload() }
         provider = CombinedProvider(vagonweb: VagonwebClient(browserLoader: { url in try await VagonwebBrowser.shared.html(at: url) }))
-        // When bahn.de blocks our Worker, the phone asks bahn.de itself in a hidden web view.
-        Task {
-            await BahnDeBrowserFallback.shared.use({ url in try await BahnDeBrowser.shared.fetch(url) },
-                                                   prepare: { await BahnDeBrowser.shared.prepare() },
-                                                   release: { await BahnDeBrowser.shared.release() })
-        }
         traewelling = TraewellingClient(config: TraewellingConfig())
         // Older versions stored everything in UserDefaults; move the raw bytes into files once
         // (re-encoding everything on every launch is what used to slow the start down).
@@ -129,6 +135,7 @@ final class AppModel {
         tickets = TicketStore.load()
         travelPasses = TicketStore.loadPasses()
         manualLiveActivityJourneyID = UserDefaults.standard.string(forKey: "manualLiveActivityJourneyID").flatMap(UUID.init)
+        updateWidgetStations()
         // The check-in history can run to thousands of trips, so it's decoded off the main thread
         // instead of blocking the launch.
         traewellingTripsLoadTask = Task { [weak self] in
@@ -607,7 +614,7 @@ final class AppModel {
     /// can be picked up again when the route is re-planned from an earlier exit.
     func save(_ journey: Journey, search: ConnectionSearch? = nil) {
         guard !isSaved(journey) else { return }
-        if settings.connectionWarnings { Task { await ConnectionNotifier.requestAuthorization() } }
+        if settings.connectionWarnings || settings.exitReminders { Task { await ConnectionNotifier.requestAuthorization() } }
         // One assignment, so the list is persisted and synced once rather than twice.
         var updated = savedJourneys
         updated.append(SavedJourney(journey: journey, search: search))
@@ -688,6 +695,7 @@ final class AppModel {
     }
     /// What the widgets were last given, so they're only reloaded when something changed.
     @ObservationIgnored var lastWidgetSnapshot: WidgetSnapshot?
+    @ObservationIgnored var lastWidgetStations: WidgetStations?
 
     /// Fetches the position of each train leg of an unfinished saved journey that is underway
     /// (plus 10 minutes either side, since departures and arrivals shift). All legs share one
@@ -793,6 +801,9 @@ final class AppModel {
     /// The train's coach sequence ("Wagenreihung") at the request's station. Shares bahn.de's
     /// response with `formation(for:)`.
     func coachSequence(for request: BahnDeClient.FormationRequest) async throws -> CoachSequence? {
+        #if DEBUG
+        if let demo = debugCoachSequence(for: request) { return demo }
+        #endif
         guard let bahnDe = provider.bahnDe else { return nil }
         return try await bahnDe.coachSequence(request)
     }
@@ -1083,10 +1094,17 @@ final class AppModel {
     /// Fetches realtime data for one saved journey, stores it and sends notifications for new issues.
     private func refresh(_ entry: SavedJourney, using refresher: JourneyRefresher) async {
         let refreshed = await refresher.refresh(entry.journey)
-        guard let index = savedJourneys.firstIndex(where: { $0.id == entry.id }) else { return }
+        // The refresh takes seconds; if the user replanned meanwhile (same entry ID, new journey),
+        // this result belongs to the old plan and must neither overwrite nor notify. The next
+        // refresh picks up the new plan.
+        guard let index = stillSavedIndex(of: entry) else { return }
         var updated = savedJourneys[index]
         let previous = updated.journey
         updated.journey = refreshed
+        // DB's dispatchers decided whether a connecting train waits (from bahn.expert); also named in the exit reminders.
+        let dispositions = settings.connectionWarnings || settings.exitReminders
+            ? await (provider.bahnExpert?.dispositions(in: refreshed) ?? []) : []
+        for update in dispositions { transferDispositions[update.departing.id] = update.disposition }
         if settings.connectionWarnings {
             let known = Set(updated.notifiedIssues ?? [])
             let newIssues = refreshed.connectionIssues().filter { !known.contains($0.id) }
@@ -1106,8 +1124,7 @@ final class AppModel {
             for change in newPlatforms {
                 await ConnectionNotifier.notify(change, journey: refreshed)
             }
-            // DB's dispatchers decided whether a connecting train waits (from bahn.expert).
-            let newDispositions = await (provider.bahnExpert?.dispositions(in: refreshed) ?? [])
+            let newDispositions = dispositions
                 .filter { $0.notificationID.map { !known.contains($0) } ?? false }
             for update in newDispositions {
                 await ConnectionNotifier.notify(update, journey: refreshed)
@@ -1115,7 +1132,17 @@ final class AppModel {
             updated.notifiedIssues = Array(known.union(newIssues.map(\.id)).union(newReasons.map(\.id))
                 .union(newPlatforms.map(\.id)).union(newDispositions.compactMap(\.notificationID)))
         }
-        if updated != savedJourneys[index] { savedJourneys[index] = updated }
+        // The notifications above await too, so check again before storing.
+        guard let storeIndex = stillSavedIndex(of: entry) else { return }
+        if updated != savedJourneys[storeIndex] { savedJourneys[storeIndex] = updated }
+        await scheduleExitReminderSync(after: .zero).value
+        await notifyPassengerRights(for: entry.id)
+    }
+
+    /// Where `entry` is saved, provided it still holds the journey it had when it was handed to a
+    /// refresh (`replaceSaved` keeps the entry ID but swaps the journey).
+    private func stillSavedIndex(of entry: SavedJourney) -> Int? {
+        savedJourneys.firstIndex { $0.id == entry.id && $0.journey.id == entry.journey.id }
     }
 
     /// Past journeys; once their live data is gone (`SavedJourney.liveDataLifetime`) shown as planned,
@@ -1159,7 +1186,7 @@ final class AppModel {
         let candidate = liveJourneyCandidate
         // Switched off in the settings: `show(nil)` ends whatever is still running.
         let journey = settings.liveActivitiesEnabled ? candidate?.journey : nil
-        Task { await liveActivities.show(journey) }
+        Task { await liveActivities.show(journey, pushUpdates: settings.liveActivityServerUpdates) }
         updateWidgets()
     }
 
@@ -1212,12 +1239,64 @@ final class AppModel {
             await refreshLiveJourney()
             syncLiveActivity()
             scheduleLiveActivityBackgroundCheck()
+            // Our server goes on from what was just loaded (or lets go of an activity that has ended).
+            await handOverLiveActivity()
             task.setTaskCompleted(success: true)
         }
         // `@Sendable` keeps the closure nonisolated: a plain closure here would inherit MainActor and
         // crash on the assertion if iOS calls the expiration handler from another queue.
         let cancelWork: @Sendable () -> Void = { work.cancel() }
         task.expirationHandler = cancelWork
+    }
+
+    // MARK: Live Activity push updates (#315)
+
+    /// The Live Activity's sign-up at the `betterbahn-live` Worker, while the app is in the background.
+    @ObservationIgnored var liveActivityPush: LiveActivityPushRegistration? = Storage.load(key: "liveActivityPush") {
+        didSet { Storage.save(liveActivityPush, key: "liveActivityPush") }
+    }
+    /// Hand-overs and take-backs run one after the other, so opening the app right away can't overtake a hand-over.
+    @ObservationIgnored private var liveActivityPushQueue: Task<Void, Never>?
+
+    /// Hands the Live Activity to our server when the app goes to the background: it keeps the delays, platforms
+    /// and next stop current with push updates until the app is opened again (`LiveActivityPush`). Without an
+    /// activity to hand over (setting off, none running, no push token yet), an earlier sign-up ends.
+    func handOverLiveActivity() async {
+        await enqueueLiveActivityPush { [self] in
+            let entry = settings.liveActivitiesEnabled && settings.liveActivityServerUpdates ? liveJourneyCandidate : nil
+            guard let entry, let pushToken = liveActivities.pushToken(for: entry.journey.id) else {
+                await endLiveActivityPush()
+                return
+            }
+            if liveActivityPush.map({ $0.journeyID != entry.journey.id }) == true { await endLiveActivityPush() }
+            let registration = liveActivityPush ?? LiveActivityPushRegistration(journeyID: entry.journey.id)
+            liveActivityPush = registration
+            try? await LiveActivityPush().register(registration, pushToken: pushToken, sandbox: Self.pushUsesSandbox,
+                                                    journey: LiveActivityPushJourney(entry.journey))
+        }
+    }
+
+    /// Takes the Live Activity back when the app is open: from then on the app updates it itself.
+    func takeBackLiveActivity() async {
+        await enqueueLiveActivityPush { [self] in await endLiveActivityPush() }
+    }
+
+    private func endLiveActivityPush() async {
+        guard let registration = liveActivityPush else { return }
+        // Offline the sign-up is kept and ended next time; the server forgets it after the arrival anyway.
+        if (try? await LiveActivityPush().unregister(registration)) != nil, liveActivityPush == registration {
+            liveActivityPush = nil
+        }
+    }
+
+    private func enqueueLiveActivityPush(_ work: @escaping @MainActor () async -> Void) async {
+        let previous = liveActivityPushQueue
+        let task = Task {
+            await previous?.value
+            await work()
+        }
+        liveActivityPushQueue = task
+        await task.value
     }
 
     func rememberStation(_ station: Station) {
@@ -1284,6 +1363,11 @@ nonisolated struct SavedJourney: Codable, Hashable, Identifiable {
     /// Trainsets (Tz, Taufname) seen on the legs' trains, keyed by `Leg.formationKey`, kept and
     /// synced so they stay known after the journey (optional so older saved data still decodes).
     var formations: [String: TrainFormation]?
+    /// The Fahrgastrechte claim seen when the journey arrived (#311), kept so it stays after the live
+    /// data is gone (optional so older saved data still decodes).
+    var recordedClaim: PassengerRightsClaim?
+    /// The exit reminders (#313) are switched off for this journey (optional so older saved data still decodes).
+    var exitRemindersOff: Bool?
 
     var issues: [ConnectionIssue] { journey.currentIssues() }
 
@@ -1404,6 +1488,19 @@ final class AppSettings {
             uploadToCloud()
         }
     }
+    /// A notification shortly before arriving where the user gets off (#313); saved journeys can opt out.
+    var exitReminders: Bool {
+        didSet {
+            UserDefaults.standard.set(exitReminders, forKey: "exitReminders")
+            uploadToCloud()
+        }
+    }
+    var exitReminderLead: ExitReminderLead {
+        didSet {
+            UserDefaults.standard.set(exitReminderLead.rawValue, forKey: "exitReminderLead")
+            uploadToCloud()
+        }
+    }
     /// Notifications when someone the user follows checks in on Träwelling (#266). Per device, like
     /// the permission to show notifications.
     var notifyFollowedCheckins: Bool {
@@ -1432,10 +1529,23 @@ final class AppSettings {
         }
     }
 
+    /// Our server keeps the Live Activity current while the app is closed (#315); it gets the journey for that.
+    var liveActivityServerUpdates: Bool {
+        didSet {
+            UserDefaults.standard.set(liveActivityServerUpdates, forKey: "liveActivityServerUpdates")
+            uploadToCloud()
+        }
+    }
+
     /// How often maps refresh the positions of running trains. Stays on this device, since the
     /// data it costs depends on the device's connection.
     var trainPositionRefresh: TrainPositionRefresh {
         didSet { UserDefaults.standard.set(trainPositionRefresh.rawValue, forKey: "trainPositionRefresh") }
+    }
+
+    /// Whether station search results start with the country's flag (#349). Stays on this device.
+    var stationFlagMode: StationFlagMode {
+        didSet { UserDefaults.standard.set(stationFlagMode.rawValue, forKey: "stationFlagMode") }
     }
 
     /// Which kinds of trains the train search (#183) lists.
@@ -1454,13 +1564,13 @@ final class AppSettings {
     }
     var trainSearchFilter: TrainSearchFilter { TrainSearchFilter(kinds: trainSearchKinds, countries: trainSearchCountries) }
 
-    /// Reports the regional and long-distance trains the app shows to BetterBahn's statistics server
-    /// (`TrainSightings`, #169). On by default, per device.
-    var shareTrainStatistics: Bool {
+    /// Shows what BetterBahn's statistics server knows about a train: delays, cancellations and platforms
+    /// of the last 30 days (`TrainStatisticsStore`, #316). The app reports nothing (#336). On by default, per device.
+    var showTrainStatistics: Bool {
         didSet {
-            UserDefaults.standard.set(shareTrainStatistics, forKey: "shareTrainStatistics")
-            let enabled = shareTrainStatistics
-            Task { await TrainSightings.shared.setEnabled(enabled) }
+            UserDefaults.standard.set(showTrainStatistics, forKey: "showTrainStatistics")
+            let enabled = showTrainStatistics
+            Task { await TrainStatisticsStore.shared.setEnabled(enabled) }
         }
     }
 
@@ -1520,10 +1630,14 @@ final class AppSettings {
         ticketFilterByDefault = defaults.bool(forKey: "onlyBC100ByDefault")
         ticketType = defaults.string(forKey: "ticketType").flatMap(TicketType.init) ?? .deutschlandticket
         liveActivitiesEnabled = defaults.object(forKey: "liveActivitiesEnabled") as? Bool ?? true
+        liveActivityServerUpdates = defaults.object(forKey: "liveActivityServerUpdates") as? Bool ?? true
         trainPositionRefresh = defaults.string(forKey: "trainPositionRefresh").flatMap(TrainPositionRefresh.init) ?? .automatic
-        let shareTrainStatistics = defaults.object(forKey: "shareTrainStatistics") as? Bool ?? true
-        self.shareTrainStatistics = shareTrainStatistics
-        Task { await TrainSightings.shared.setEnabled(shareTrainStatistics) }
+        stationFlagMode = defaults.string(forKey: "stationFlagMode").flatMap(StationFlagMode.init) ?? .foreignOnly
+        // A new key: switching off sharing (#169) said nothing about wanting to see the statistics.
+        let showTrainStatistics = defaults.object(forKey: "showTrainStatistics") as? Bool ?? true
+        self.showTrainStatistics = showTrainStatistics
+        defaults.removeObject(forKey: "shareTrainStatistics")
+        Task { await TrainStatisticsStore.shared.setEnabled(showTrainStatistics) }
         expertMode = defaults.bool(forKey: "expertMode")
         expertTraewelling = defaults.bool(forKey: "expertTraewelling")
         expertEditJourney = defaults.bool(forKey: "expertEditJourney")
@@ -1537,6 +1651,8 @@ final class AppSettings {
         lastTraewellingSync = defaults.object(forKey: "lastTraewellingSync") as? Date
         traewellingImportNextPage = defaults.object(forKey: "traewellingImportNextPage") as? Int
         connectionWarnings = defaults.object(forKey: "connectionWarnings") as? Bool ?? true
+        exitReminders = defaults.object(forKey: "exitReminders") as? Bool ?? true
+        exitReminderLead = ExitReminderLead(rawValue: defaults.integer(forKey: "exitReminderLead")) ?? .five
         quickTags = Storage.load(key: "quickTags") ?? QuickTag.defaults
         trainSearchKinds = defaults.stringArray(forKey: "trainSearchKinds").map { Set($0.compactMap(TrainSearchKind.init)) }
             ?? TrainSearchKind.defaults
@@ -1566,6 +1682,9 @@ final class AppSettings {
         var expertRil100: Bool?
         var trainSearchKinds: [TrainSearchKind]?
         var trainSearchCountries: [String]?
+        var exitReminders: Bool?
+        var exitReminderLead: ExitReminderLead?
+        var liveActivityServerUpdates: Bool?
     }
 
     /// What iCloud stores: the settings and when they were last changed.
@@ -1581,7 +1700,8 @@ final class AppSettings {
         liveActivitiesEnabled: true, expertMode: false, expertTraewelling: false, expertEditJourney: false,
         expertTrainChoice: false, expertIgnoreBoardingRules: false, expertRil100: false,
         trainSearchKinds: TrainSearchKind.defaults.sorted(by: { $0.rawValue < $1.rawValue }),
-        trainSearchCountries: TrainSearchCountry.defaults.sorted())
+        trainSearchCountries: TrainSearchCountry.defaults.sorted(), exitReminders: true, exitReminderLead: .five,
+        liveActivityServerUpdates: true)
 
     @ObservationIgnored private var isApplyingCloudValue = false
 
@@ -1594,7 +1714,8 @@ final class AppSettings {
                    expertTrainChoice: expertTrainChoice, expertIgnoreBoardingRules: expertIgnoreBoardingRules,
                    expertRil100: expertRil100,
                    trainSearchKinds: trainSearchKinds.sorted(by: { $0.rawValue < $1.rawValue }),
-                   trainSearchCountries: trainSearchCountries.sorted())
+                   trainSearchCountries: trainSearchCountries.sorted(), exitReminders: exitReminders,
+                   exitReminderLead: exitReminderLead, liveActivityServerUpdates: liveActivityServerUpdates)
     }
 
     /// When the settings were last changed on this device or taken over from iCloud. Before
@@ -1643,6 +1764,9 @@ final class AppSettings {
         expertRil100 = value.expertRil100 ?? expertRil100
         trainSearchKinds = value.trainSearchKinds.map(Set.init) ?? trainSearchKinds
         trainSearchCountries = value.trainSearchCountries.map(Set.init) ?? trainSearchCountries
+        exitReminders = value.exitReminders ?? exitReminders
+        exitReminderLead = value.exitReminderLead ?? exitReminderLead
+        liveActivityServerUpdates = value.liveActivityServerUpdates ?? liveActivityServerUpdates
     }
 }
 

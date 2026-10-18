@@ -34,7 +34,30 @@ struct JourneyResultsView: View {
 
     /// Only routes that fulfil every train requirement are shown once one is set.
     private var visibleJourneys: [Journey] {
-        requirements.isEmpty ? journeys : (plan?.journeys ?? []).removingDuplicateIDs()
+        guard requirements.isEmpty else { return (plan?.journeys ?? []).removingDuplicateIDs() }
+        return ticketJourneys.isEmpty ? journeys : ticketJourneys
+    }
+
+    /// With the ticket filter on, the connections the ticket covers; all of them without it.
+    private var ticketJourneys: [Journey] {
+        search.onlyValidTicket ? journeys.filter(model.ticketFilter.isValid) : journeys
+    }
+
+    /// The ticket covers none of the connections, they only cross a border: shown with a warning.
+    private var showsBorderFallback: Bool {
+        requirements.isEmpty && search.onlyValidTicket && ticketJourneys.isEmpty && !journeys.isEmpty
+    }
+
+    /// The warning when the ticket covers none of the connections: they are abroad entirely, or only reach the border.
+    private var borderFallbackText: String {
+        let filter = model.ticketFilter
+        guard journeys.allSatisfy(filter.isEntirelyAbroad) else {
+            return "Diese Verbindungen führen ins Ausland. Mit \(model.settings.ticketType.dativeShortName) kommst du nur bis zur Grenze."
+        }
+        switch model.settings.ticketType {
+        case .bahnCard100: return "Auf der kompletten Strecke gilt deine BahnCard 100 nicht!"
+        case .deutschlandticket: return "Auf der kompletten Strecke gilt dein Deutschlandticket nicht!"
+        }
     }
 
     /// Fastest connection without any train requirement, for comparison.
@@ -94,6 +117,10 @@ struct JourneyResultsView: View {
                     }
                 }
 
+                if showsBorderFallback {
+                    warningBanner(borderFallbackText)
+                }
+
                 if requirements.isEmpty, earlierCursor != nil {
                     pageButton("Frühere Verbindungen", systemImage: "chevron.up") {
                         await load(cursor: earlierCursor, prepend: true)
@@ -103,7 +130,7 @@ struct JourneyResultsView: View {
                 ForEach(Array(visibleJourneys.enumerated()), id: \.element.id) { index, result in
                     let journey = liveResults[result.id].map { JourneyRefresher.keepingPlatforms(of: result, in: $0) } ?? result
                     NavigationLink(value: ConnectionsRoute.journey(JourneyRoute(journey: journey, finalDestination: search.to, search: search))) {
-                        JourneyCard(journey: journey)
+                        JourneyCard(journey: journey, warnsAboutTransfers: true)
                             .overlay {
                                 if !requirements.isEmpty, index == 0 {
                                     RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -121,9 +148,18 @@ struct JourneyResultsView: View {
                     }
                 }
 
+                // Inside the list, not as an overlay: it would sit on top of the chip below.
+                if !isLoading, !isPlanning, visibleJourneys.isEmpty, error == nil, planError == nil {
+                    ContentUnavailableView("Keine Verbindungen", systemImage: "tram.fill",
+                                           description: Text(requirements.isEmpty
+                                                             ? "Versuch eine andere Uhrzeit oder weniger Filter."
+                                                             : "Mit diesen Zügen haben wir keine Verbindung gefunden."))
+                        .padding(.top, 40)
+                }
+
                 VStack(spacing: 8) {
-                    if hiddenCount > 0, requirements.isEmpty {
-                        InfoChip(text: "\(hiddenCount) nicht mit \(model.settings.ticketType.shortName) nutzbar", systemImage: "eye.slash.fill")
+                    if hiddenCount + journeys.count - visibleJourneys.count > 0, requirements.isEmpty {
+                        InfoChip(text: "\(hiddenCount + journeys.count - visibleJourneys.count) nicht mit \(model.settings.ticketType.shortName) nutzbar", systemImage: "eye.slash.fill")
                     }
                     if source == .transitous {
                         SourceNotice()
@@ -139,18 +175,14 @@ struct JourneyResultsView: View {
         .overlay {
             if isLoading, journeys.isEmpty {
                 ProgressView("Suche Verbindungen …")
-            } else if !isLoading, !isPlanning, visibleJourneys.isEmpty, error == nil, planError == nil {
-                ContentUnavailableView("Keine Verbindungen", systemImage: "tram.fill",
-                                       description: Text(requirements.isEmpty
-                                                         ? "Versuch eine andere Uhrzeit oder weniger Filter."
-                                                         : "Mit diesen Zügen haben wir keine Verbindung gefunden."))
             }
         }
         .navigationTitle("Verbindungen")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showTrainSheet) {
             TrainNumberSheet(search: search, suggestions: trainSuggestions, defaultBoarding: nextBoardingDefault,
-                             stations: trainSearchStations, date: nextBoardingTime) { requirement in
+                             stations: trainSearchStations, date: nextBoardingTime, reached: trainSearchTimes,
+                             allowsEarlier: requirements.isEmpty) { requirement in
                 requirements.append(requirement)
                 Task { await replan() }
             }
@@ -348,6 +380,12 @@ struct JourneyResultsView: View {
         return planned + [search.from] + found
     }
 
+    /// When the connections found leave those stations, so the train list there shows trains that can be caught.
+    private var trainSearchTimes: [(station: Station, time: Date)] {
+        let legs = (plan?.journeys ?? []).prefix(2).flatMap(\.transitLegs) + journeys.prefix(4).flatMap(\.transitLegs)
+        return legs.map { ($0.origin, $0.departure.planned) }
+    }
+
     private func remove(_ requirement: TrainRequirement) {
         requirements.removeAll { $0.id == requirement.id }
         if requirements.isEmpty {
@@ -413,7 +451,8 @@ struct JourneyResultsView: View {
         defer { isPlanning = false }
         do {
             var result = try await model.trainRoutePlanner.plan(
-                requirements, from: search.from, to: search.to, date: searchDate)
+                requirements, from: search.from, to: search.to, date: searchDate,
+                pickedEarlier: TrainCandidateFinder.earlierWindow)
             if search.onlyValidTicket {
                 // Don't leave the user with nothing if the forced train itself isn't valid with the ticket.
                 let valid = result.journeys.filter(model.ticketFilter.isValid)
@@ -471,7 +510,8 @@ struct JourneyResultsView: View {
             if search.onlyValidTicket {
                 let filter = model.ticketFilter
                 let before = result.count
-                result = result.filter(filter.isValid)
+                // Connections that only cross a border stay in the list; the view hides them while others fit.
+                result = result.filter { filter.isValid($0) || filter.crossesBorder($0) }
                 hiddenCount += before - result.count
             }
             source = page?.source ?? model.provider.source
@@ -598,6 +638,12 @@ struct JourneyResultsView: View {
 
 struct JourneyCard: View {
     let journey: Journey
+    /// Search results warn when an incoming train is often too late for a tight transfer, from past
+    /// runs (#316). Off elsewhere, so lists of saved or alternative journeys don't ask the server.
+    var warnsAboutTransfers = false
+
+    @Environment(AppModel.self) private var model
+    @State private var transferWarning: String?
 
     var body: some View {
         Card {
@@ -662,7 +708,17 @@ struct JourneyCard: View {
                         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.slightDelay)
                     }
                 }
+
+                if let transferWarning {
+                    TransferWarning(text: transferWarning)
+                }
             }
+        }
+        .task(id: journey.id) {
+            guard warnsAboutTransfers, !journey.isCancelled else { return }
+            let warnings = await TrainStatisticsModel.transferWarnings(for: journey, upTo: 10, here: false, bahnDe: model.provider.bahnDe)
+            // The first of them, in the order of the journey.
+            transferWarning = journey.tightTransfers(upTo: 10).lazy.compactMap { warnings[$0.id] }.first
         }
     }
 }
@@ -742,6 +798,7 @@ struct ChipFlowLayout: Layout {
         .padding()
     }
     .background { AppBackground() }
+    .environment(AppModel())
 }
 
 private extension Task where Failure == Never {

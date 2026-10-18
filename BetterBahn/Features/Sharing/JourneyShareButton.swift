@@ -5,17 +5,29 @@ import UIKit
 
 /// The share button in `JourneyDetailView`: uploads the journey for a short link (falls back to the
 /// long `betterbahn://share` link offline) and then opens the share sheet. `ShareLink` can't wait for
-/// the upload, hence the button and `UIActivityViewController`.
+/// the upload, hence the menu and `UIActivityViewController`. "Ankunft teilen" (#317) shares a link to a
+/// web page with the last train's live arrival and platform, for whoever picks the user up.
 struct JourneyShareButton: View {
     let journey: Journey
     let title: String
     @State private var isPreparing = false
     /// The link made for the journey's current payload, so sharing again doesn't upload it again.
     @State private var lastLink: (payload: String, url: URL)?
+    @State private var arrivalFailed = false
 
     var body: some View {
-        Button {
-            Task { await share() }
+        Menu {
+            Button("Reise teilen", systemImage: "square.and.arrow.up") {
+                Task { await share() }
+            }
+            if ArrivalShare.canShare(journey) {
+                Button {
+                    Task { await shareArrival() }
+                } label: {
+                    Label("Ankunft teilen", systemImage: "figure.wave")
+                    Text("Zum Abholen: Ankunftszeit und Gleis live")
+                }
+            }
         } label: {
             Group {
                 if isPreparing {
@@ -27,10 +39,16 @@ struct JourneyShareButton: View {
             }
             .frame(width: 40, height: 40)
         }
+        .menuStyle(.button)
         .buttonStyle(.plain)
         .glassEffect(.regular, in: .circle)
         .disabled(isPreparing)
-        .accessibilityLabel("Reise teilen")
+        .accessibilityLabel("Teilen")
+        .alert("Ankunft konnte nicht geteilt werden", isPresented: $arrivalFailed) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Prüf deine Internetverbindung und versuch es noch einmal.")
+        }
     }
 
     private func share() async {
@@ -48,6 +66,26 @@ struct JourneyShareButton: View {
             url = shared
         }
         ShareSheet.present(JourneyLinkItem(url: url, title: title, icon: .appIcon))
+    }
+
+    private func shareArrival() async {
+        guard let leg = ArrivalShare.leg(of: journey) else { return }
+        isPreparing = true
+        defer { isPreparing = false }
+        // EVA numbers let the page find the stops in DB's live data; bahn.de's ID of the train is its fallback.
+        let bahnDe = BahnDeClient()
+        async let journeyId = bahnDe.journeyId(for: leg)
+        var evaNumbers: [String: String] = [:]
+        for station in ArrivalShare.stationsNeedingEVA(in: journey) {
+            if let eva = try? await bahnDe.evaNumber(for: station) { evaNumbers[station.id] = eva }
+        }
+        guard let arrival = ArrivalShare(journey: journey, journeyId: await journeyId, evaNumbers: evaNumbers) else { return }
+        do {
+            let url = try await ShortShareLinkClient().arrivalURL(for: journey, arrival: arrival)
+            ShareSheet.present(JourneyLinkItem(url: url, title: "Ankunft in \(leg.destination.displayName)", icon: .appIcon))
+        } catch {
+            arrivalFailed = true
+        }
     }
 }
 

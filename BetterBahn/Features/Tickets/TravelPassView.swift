@@ -13,8 +13,8 @@ struct TravelPassView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(pass.name).font(.title2.weight(.bold))
-                        if let subtitle = [pass.kindDescription, pass.classDescription].compactMap(\.self).nonEmptyJoined {
-                            Text(subtitle).font(.headline).foregroundStyle(.secondary)
+                        if let travelClass = pass.classDescription {
+                            Text(travelClass).font(.headline).foregroundStyle(.secondary)
                         }
                     }
 
@@ -89,8 +89,4 @@ struct TravelPassView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(color.opacity(0.12), in: .rect(cornerRadius: 14, style: .continuous))
     }
-}
-
-private extension Array where Element == String {
-    var nonEmptyJoined: String? { isEmpty ? nil : joined(separator: " · ") }
 }

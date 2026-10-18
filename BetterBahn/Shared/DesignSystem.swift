@@ -138,18 +138,30 @@ struct SectionHeader: View {
     }
 }
 
-/// iOS-Settings style colored icon square.
+/// iOS-Settings style colored icon square. With a `logo` (S-Bahn, U-Bahn, #350) the logo itself takes
+/// the tile's place, in its own colors and with the tile's rounded corners.
 struct IconTile: View {
     let systemImage: String
     let color: Color
     var size: CGFloat = 30
+    var logo: TransitLogo? = nil
 
     var body: some View {
-        Image(systemName: systemImage)
-            .font(.system(size: size * 0.5, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(width: size, height: size)
-            .background(color.gradient, in: .rect(cornerRadius: size * 0.28, style: .continuous))
+        if let logo, UIImage(named: logo.assetName) != nil {
+            Image(logo.assetName)
+                .renderingMode(.original)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: size, height: size)
+                .clipShape(.rect(cornerRadius: size * 0.28, style: .continuous))
+                .accessibilityHidden(true)
+        } else {
+            Image(systemName: systemImage)
+                .font(.system(size: size * 0.5, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: size, height: size)
+                .background(color.gradient, in: .rect(cornerRadius: size * 0.28, style: .continuous))
+        }
     }
 }
 
@@ -184,20 +196,37 @@ struct IconLabel: View {
 struct LineBadge: View {
     let line: Line?
     var size: ControlSize = .regular
+    @ScaledMetric(relativeTo: .caption) private var logoSize: CGFloat = 14
+    @ScaledMetric(relativeTo: .caption2) private var smallLogoSize: CGFloat = 12
 
     private var badgeFont: Font { size == .small ? Font.caption2.weight(.bold) : Font.caption.weight(.bold) }
+
+    private var hasLogo: Bool { line?.transitLogo.map { UIImage(named: $0.assetName) != nil } ?? false }
 
     var body: some View {
         if let line {
             HStack(spacing: 4) {
-                Image(systemName: line.symbolName)
-                    .font(badgeFont)
+                // S-Bahn and U-Bahn lines show their logo, like their tile (#350).
+                if hasLogo, let logo = line.transitLogo {
+                    let side = size == .small ? smallLogoSize : logoSize
+                    Image(logo.assetName)
+                        .renderingMode(.original)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: side, height: side)
+                        .clipShape(.rect(cornerRadius: side * 0.28, style: .continuous))
+                        .accessibilityHidden(true)
+                } else {
+                    Image(systemName: line.symbolName)
+                        .font(badgeFont)
+                }
                 Text(line.displayName)
                     .font(badgeFont)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
             }
-            .padding(.horizontal, size == .small ? 6 : 8)
+            .padding(.leading, hasLogo ? (size == .small ? 3 : 4) : (size == .small ? 6 : 8))
+            .padding(.trailing, size == .small ? 6 : 8)
             .padding(.vertical, size == .small ? 3 : 4)
             .foregroundStyle(.white)
             .background(line.color.gradient, in: .capsule)
@@ -315,7 +344,7 @@ struct TrainOperatorsLabel: View {
 
 /// Triebzug numbers and names of a train (e.g. "Tz 9457 „Bundesrepublik Deutschland“"). bahn.de's
 /// coach sequence first (it only has one in the coming hours); bahn.expert as fallback, which
-/// has the Tz once its data is live. Says so when bahn.de is refusing requests and nothing else helped.
+/// has the Tz once its data is live. That bahn.de's current Wagenreihung is missing says `CoachSequenceDisclosure`.
 /// A saved journey's leg remembers what was found, so it still shows once neither source answers.
 struct TrainFormationLabel: View {
     let request: BahnDeClient.FormationRequest?
@@ -339,7 +368,6 @@ struct TrainFormationLabel: View {
 
     @Environment(AppModel.self) private var model
     @State private var formation: TrainFormation?
-    @State private var blocked = false
 
     var body: some View {
         // A ZStack rather than Group: `.task` never fires on a view that is empty, and this one is
@@ -350,23 +378,14 @@ struct TrainFormationLabel: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fullTextPopup(units, lines: 2)
-            } else if blocked {
-                Label("Wagenreihung gerade nicht abrufbar", systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
         .task(id: "\(line?.name ?? "")|\(date)|\(request?.station.id ?? "")") {
             let remembered = leg.flatMap(model.rememberedFormation(for:))
             formation = remembered
-            blocked = false
             var found: TrainFormation?
             if let request {
-                do {
-                    found = try await model.formation(for: request)
-                } catch TransitError.rateLimited {
-                    blocked = remembered == nil
-                } catch {}
+                found = try? await model.formation(for: request)
             }
             if found?.unitDescription == nil, let fallback = await model.trainType(for: line, on: date)?.formation,
                fallback.unitDescription != nil {
@@ -375,7 +394,6 @@ struct TrainFormationLabel: View {
             if let found, found.unitDescription != nil || found.isIC1 {
                 // An IC 1 has no Tz: hide (and forget) one remembered by an older version.
                 formation = found
-                blocked = false
                 if let leg { model.rememberFormation(found, for: leg) }
             }
         }

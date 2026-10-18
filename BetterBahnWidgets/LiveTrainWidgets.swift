@@ -13,6 +13,13 @@ struct RefreshLiveWidgetIntent: AppIntent {
     func perform() async throws -> some IntentResult { .result() }
 }
 
+/// Where the track and the train lie on the map snapshot (points in the snapshot's `size`).
+struct MapRoute: Hashable, Sendable {
+    var points: [CGPoint]
+    var train: CGPoint
+    var size: CGSize
+}
+
 struct LiveTrainEntry: TimelineEntry {
     let date: Date
     let state: JourneyWidgetState?
@@ -21,6 +28,18 @@ struct LiveTrainEntry: TimelineEntry {
     let position: TrainPosition?
     /// Map snapshot around `position`, only for the position widget.
     let map: UIImage?
+    /// The track and the train on that snapshot, drawn instead of it where a map wouldn't show
+    /// (tinted and clear Home Screens).
+    let mapRoute: MapRoute?
+
+    init(date: Date, state: JourneyWidgetState?, journeyID: String?, position: TrainPosition?, map: UIImage?, mapRoute: MapRoute? = nil) {
+        self.date = date
+        self.state = state
+        self.journeyID = journeyID
+        self.position = position
+        self.map = map
+        self.mapRoute = mapRoute
+    }
 
     var mapLink: URL? {
         guard let journeyID, let state else { return nil }
@@ -70,7 +89,8 @@ struct LiveTrainProvider: TimelineProvider {
                 }
                 for date in dates.sorted() {
                     entries.append(LiveTrainEntry(date: date, state: JourneyWidgetState.from(journey, now: date),
-                                                  journeyID: first.journeyID, position: first.position, map: first.map))
+                                                  journeyID: first.journeyID, position: first.position, map: first.map,
+                                                  mapRoute: first.mapRoute))
                 }
             }
             completion(Timeline(entries: entries, policy: .after(reload)))
@@ -91,15 +111,16 @@ struct LiveTrainProvider: TimelineProvider {
                 position = stored
             }
         }
-        var map: UIImage?
+        var map: (image: UIImage, route: MapRoute)?
         if withMap, let position, let leg = state.ridingLeg(of: journey) {
             map = await Self.mapImage(at: position.coordinate, leg: leg, color: state.product.color, size: mapSize)
         }
-        return LiveTrainEntry(date: now, state: state, journeyID: journey.id, position: position, map: map)
+        return LiveTrainEntry(date: now, state: state, journeyID: journey.id, position: position, map: map?.image, mapRoute: map?.route)
     }
 
     /// A map around the train with its route and a dot where it is. Widgets can't show a live `Map`.
-    private static func mapImage(at coordinate: Coordinate, leg: Leg, color: Color, size: CGSize) async -> UIImage? {
+    /// Also where the route and the train lie on it, for `RouteSketch`.
+    private static func mapImage(at coordinate: Coordinate, leg: Leg, color: Color, size: CGSize) async -> (image: UIImage, route: MapRoute)? {
         guard size.width > 0, size.height > 0 else { return nil }
         let center = CLLocationCoordinate2D(latitude: coordinate.latitude, longitude: coordinate.longitude)
         let options = MKMapSnapshotter.Options()
@@ -111,18 +132,23 @@ struct LiveTrainProvider: TimelineProvider {
         let route = leg.geometry.flatMap { RouteGeometryService.followsTracks($0) ? $0 : nil } ?? []
         return await withCheckedContinuation { continuation in
             MKMapSnapshotter(options: options).start(with: .main) { snapshot, _ in
-                continuation.resume(returning: snapshot.map { draw($0, center: center, route: route, color: color, size: size) })
+                guard let snapshot else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                let mapRoute = MapRoute(points: route.map { snapshot.point(for: CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)) },
+                                        train: snapshot.point(for: center), size: size)
+                continuation.resume(returning: (draw(snapshot, route: mapRoute, color: color), mapRoute))
             }
         }
     }
 
-    private nonisolated static func draw(_ snapshot: MKMapSnapshotter.Snapshot, center: CLLocationCoordinate2D,
-                                         route: [Coordinate], color: Color, size: CGSize) -> UIImage {
-        let path = route.map { snapshot.point(for: CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)) }
+    private nonisolated static func draw(_ snapshot: MKMapSnapshotter.Snapshot, route: MapRoute, color: Color) -> UIImage {
+        let path = route.points
         let format = UIGraphicsImageRendererFormat()
         format.scale = snapshot.image.scale
         let tint = UIColor(color)
-        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+        return UIGraphicsImageRenderer(size: route.size, format: format).image { _ in
             snapshot.image.draw(at: .zero)
             if let first = path.first {
                 let line = UIBezierPath()
@@ -134,7 +160,7 @@ struct LiveTrainProvider: TimelineProvider {
                 tint.withAlphaComponent(0.6).setStroke()
                 line.stroke()
             }
-            let point = snapshot.point(for: center)
+            let point = route.train
             let dot = CGRect(x: point.x - 7, y: point.y - 7, width: 14, height: 14)
             UIColor.white.setFill()
             UIBezierPath(ovalIn: dot.insetBy(dx: -3, dy: -3)).fill()
@@ -272,38 +298,21 @@ struct LivePositionWidget: Widget {
 
 struct LivePositionView: View {
     let entry: LiveTrainEntry
+    @Environment(\.widgetRenderingMode) private var renderingMode
 
     var body: some View {
         if let state = entry.state, state.phase != .arrived {
-            if let map = entry.map {
+            if let map = entry.map, renderingMode == .fullColor {
                 ZStack {
                     Image(uiImage: map).resizable().scaledToFill()
-                    VStack(alignment: .leading) {
-                        HStack(alignment: .top) {
-                            TrainBadge(name: state.trainName, product: state.product, nightTrain: state.isNightTrain)
-                            Spacer(minLength: 0)
-                            if let speed = entry.position?.speedKmh {
-                                Text("\(Int(speed.rounded())) km/h")
-                                    .font(.caption.weight(.bold)).monospacedDigit()
-                                    .padding(.horizontal, 7).padding(.vertical, 3)
-                                    .background(.regularMaterial, in: .capsule)
-                            }
-                        }
-                        Spacer(minLength: 0)
-                        HStack(alignment: .bottom) {
-                            VStack(alignment: .leading, spacing: 1) {
-                                NextStopLine(state: state)
-                                PositionTime(position: entry.position)
-                            }
-                            .padding(.horizontal, 7).padding(.vertical, 4)
-                            .background(.regularMaterial, in: .rect(cornerRadius: 8))
-                            Spacer(minLength: 0)
-                            RefreshButton()
-                                .padding(5)
-                                .background(.regularMaterial, in: .circle)
-                        }
-                    }
-                    .padding(10)
+                    mapLabels(state)
+                }
+            } else if let route = entry.mapRoute {
+                // Tinted and clear Home Screens flatten the map tiles into a blot nobody can read: the
+                // track and the train alone instead, in the accent colour.
+                ZStack {
+                    RouteSketch(route: route)
+                    mapLabels(state)
                 }
             } else {
                 // No position (or no map): the same as the speed widget without live data.
@@ -325,11 +334,82 @@ struct LivePositionView: View {
             }
         }
     }
+
+    /// Train, speed, next stop and the refresh button over the map (or the sketch).
+    private func mapLabels(_ state: JourneyWidgetState) -> some View {
+        VStack(alignment: .leading) {
+            HStack(alignment: .top) {
+                TrainBadge(name: state.trainName, product: state.product, nightTrain: state.isNightTrain)
+                Spacer(minLength: 0)
+                if let speed = entry.position?.speedKmh {
+                    Text("\(Int(speed.rounded())) km/h")
+                        .font(.caption.weight(.bold)).monospacedDigit()
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(plate, in: .capsule)
+                }
+            }
+            Spacer(minLength: 0)
+            HStack(alignment: .bottom) {
+                VStack(alignment: .leading, spacing: 1) {
+                    NextStopLine(state: state)
+                    PositionTime(position: entry.position)
+                }
+                .padding(.horizontal, 7).padding(.vertical, 4)
+                .background(plate, in: .rect(cornerRadius: 8))
+                Spacer(minLength: 0)
+                RefreshButton()
+                    .padding(5)
+                    .background(plate, in: .circle)
+            }
+        }
+        .padding(10)
+    }
+
+    /// Behind the labels: a material over the map; a faint plate where everything is drawn in one colour
+    /// (materials don't show there).
+    private var plate: AnyShapeStyle {
+        renderingMode == .fullColor ? AnyShapeStyle(.regularMaterial) : AnyShapeStyle(.quaternary)
+    }
+}
+
+/// The track and the train without map tiles, for the tinted and clear Home Screens: the line in the
+/// text colour, the train in the accent colour.
+private struct RouteSketch: View {
+    let route: MapRoute
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Path { path in
+                    guard let first = route.points.first else { return }
+                    path.move(to: scaled(first, to: geometry.size))
+                    for point in route.points.dropFirst() {
+                        path.addLine(to: scaled(point, to: geometry.size))
+                    }
+                }
+                .stroke(.primary.opacity(0.45), style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+                Circle()
+                    .fill(.primary)
+                    .frame(width: 20, height: 20)
+                    .position(scaled(route.train, to: geometry.size))
+                Circle()
+                    .fill(.primary)
+                    .frame(width: 14, height: 14)
+                    .position(scaled(route.train, to: geometry.size))
+                    .widgetAccentable()
+            }
+        }
+    }
+
+    /// The snapshot was made for the widget's size; scaled in case the view differs slightly.
+    private func scaled(_ point: CGPoint, to size: CGSize) -> CGPoint {
+        CGPoint(x: point.x * size.width / max(route.size.width, 1), y: point.y * size.height / max(route.size.height, 1))
+    }
 }
 
 // MARK: Pieces
 
-private struct RefreshButton: View {
+struct RefreshButton: View {
     var body: some View {
         Button(intent: RefreshLiveWidgetIntent()) {
             Image(systemName: "arrow.clockwise").font(.caption2.weight(.bold))

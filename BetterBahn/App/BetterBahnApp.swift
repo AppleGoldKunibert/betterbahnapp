@@ -8,6 +8,9 @@ struct BetterBahnApp: App {
     @State private var model: AppModel
 
     init() {
+        // Train statistics from one run on, with their raw values (TrainStatisticsRows): launch once with
+        // `-debugstats`, stays on until the app is deleted.
+        TrainStatistics.enableTestModeIfRequested()
         let model = AppModel()
         _model = State(initialValue: model)
         appDelegate.model = model
@@ -51,8 +54,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         model?.didRegisterForPush(deviceToken: nil)
     }
 
+    /// Exit reminders (#313) also show while the app is open; the others don't, as before.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                            withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler(notification.request.identifier.hasPrefix(AppModel.exitReminderPrefix) ? [.banner, .list, .sound] : [])
+    }
+
     /// A followed user's check-in notification (#266) opens that check-in; the others just open the app.
-    /// Without `willPresent` notifications still don't show while the app is open, as before.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                             withCompletionHandler completionHandler: @escaping () -> Void) {
         let statusID = FollowedCheckinNotifier.statusID(in: response.notification.request.content.userInfo)
@@ -119,6 +127,7 @@ struct RootView: View {
         .onChange(of: scenePhase, initial: true) { _, phase in
             if phase == .active {
                 model.cancelLiveActivityBackgroundCheck()
+                Task { await model.takeBackLiveActivity() }
                 model.syncLiveActivity()
                 model.startRefreshing()
                 Task { await model.syncTraewelling() }
@@ -129,7 +138,7 @@ struct RootView: View {
                 model.stopRefreshing()
                 model.scheduleLiveActivityBackgroundCheck()
                 model.updateWidgets(force: true)
-                Task { await TrainSightings.shared.flush() }
+                withBackgroundTime("LiveActivityHandOver") { await model.handOverLiveActivity() }
             }
         }
         // A followed user's check-in notification was tapped (#266): its list is on the Verbindungen tab.
@@ -143,11 +152,29 @@ struct RootView: View {
         #if DEBUG
         .task {
             model.seedBrokenTripIfRequested()
+            model.seedLateTripsIfRequested()
+            model.seedSeatMapTripsIfRequested()
             await model.seedStressTripsIfRequested()
             await model.seedDemoTripsIfRequested()
         }
         #endif
         .onOpenURL { url in
+            // The departure board widget was tapped: its station's board, or its route in the search (#314).
+            if let target = BoardWidgetLink.target(from: url) {
+                incomingSharedJourney = nil
+                incomingDBShare = nil
+                linkedTrainMap = nil
+                switch target {
+                case .board(let station):
+                    selectedTab = .departures
+                    model.boardStationToOpen = station
+                case .route(let from, let to):
+                    selectedTab = .connections
+                    model.searchToOpen = ConnectionSearch(from: from, to: to, date: .now, isArrival: false,
+                                                          onlyValidTicket: model.settings.ticketFilterByDefault)
+                }
+                return
+            }
             // A live widget was tapped: show its train on the live map.
             if let target = TrainMapLink.target(from: url) {
                 if let entry = model.savedJourneys.first(where: { $0.journey.id == target.journeyID }),
@@ -220,4 +247,24 @@ struct RootView: View {
 private struct LinkedTrainMap: Identifiable {
     let id = UUID()
     let route: LiveTrainRoute
+}
+
+/// Runs `work` although the app just went to the background: iOS gives it a few more seconds for that.
+private func withBackgroundTime(_ name: String, _ work: @escaping @MainActor () async -> Void) {
+    let assertion = BackgroundTimeAssertion()
+    assertion.id = UIApplication.shared.beginBackgroundTask(withName: name) { assertion.end() }
+    Task {
+        await work()
+        assertion.end()
+    }
+}
+
+private final class BackgroundTimeAssertion {
+    var id = UIBackgroundTaskIdentifier.invalid
+
+    func end() {
+        guard id != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(id)
+        id = .invalid
+    }
 }

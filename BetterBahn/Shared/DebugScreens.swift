@@ -19,6 +19,44 @@ extension AppModel {
 }
 
 extension AppModel {
+    /// Launch with `-seedLateTrips YES` to add two finished journeys that arrived over an hour late (Fahrgastrechte,
+    /// #311): an ICE 75 minutes late, and a missed connection replaced by a later train. Only adds, never
+    /// removes saved journeys; remove them by hand afterwards (they sync through iCloud like any saved journey).
+    func seedLateTripsIfRequested() {
+        guard UserDefaults.standard.bool(forKey: "seedLateTrips"),
+              !savedJourneys.contains(where: { $0.journey.legs.first?.tripId?.hasPrefix("lateseed-") == true }) else { return }
+        func station(_ id: String, _ name: String) -> Station {
+            Station(id: id, name: name, coordinate: nil, evaNumber: id, source: .bahnDe)
+        }
+        let hamburg = station("8002549", "Hamburg Hbf"), muenchen = station("8000261", "München Hbf")
+        let koeln = station("8000207", "Köln Hbf"), frankfurt = station("8000105", "Frankfurt(Main)Hbf")
+        func leg(_ id: String, _ name: String, from: Station, to: Station, departs: Double, arrives: Double,
+                 departDelay: Double = 0, arriveDelay: Double = 0) -> Leg {
+            func time(_ minutes: Double, _ delay: Double) -> TimeInfo {
+                let planned = Date.now.addingTimeInterval(minutes * 60)
+                return TimeInfo(planned: planned, actual: planned.addingTimeInterval(delay * 60))
+            }
+            let number = name.split(separator: " ").last.map(String.init)
+            return Leg(origin: from, destination: to, departure: time(departs, departDelay), arrival: time(arrives, arriveDelay),
+                       departurePlatform: nil, arrivalPlatform: nil, tripId: "lateseed-" + id,
+                       line: Line(name: name, number: number, product: .highSpeed, operatorName: "DB Fernverkehr AG"),
+                       direction: to.name, isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .bahnDe)
+        }
+        // 1. The ICE arrived 75 minutes late.
+        save(Journey(legs: [leg("1", "ICE 71", from: hamburg, to: muenchen, departs: -440, arrives: -120,
+                                departDelay: 60, arriveDelay: 75)], source: .bahnDe))
+        // 2. ICE 20 came 70 minutes late into Frankfurt, ICE 50 had left; ICE 928 was taken instead.
+        let first = leg("2", "ICE 20", from: koeln, to: frankfurt, departs: -330, arrives: -240, departDelay: 60, arriveDelay: 70)
+        let booked = Journey(legs: [first, leg("3", "ICE 50", from: frankfurt, to: muenchen, departs: -230, arrives: -110)], source: .bahnDe)
+        let replacement = Journey(legs: [first, leg("4", "ICE 928", from: frankfurt, to: muenchen, departs: -140, arrives: -35)], source: .bahnDe)
+        save(booked)
+        if let entry = savedEntry(for: booked) {
+            replaceSaved(id: entry.id, with: replacement, reason: "Anderer Zug gewählt")
+        }
+    }
+}
+
+extension AppModel {
     /// Launch with `-seedStressTrips <count>` to fill the map with a large synthetic trip history (perf testing only).
     func seedStressTripsIfRequested() async {
         await loadTraewellingTrips()
@@ -79,6 +117,63 @@ extension AppModel {
                          tripId: nil, line: Line(name: "ICE 849", number: "849", product: .highSpeed, operatorName: "DB Fernverkehr AG"),
                          direction: "Berlin Ostbahnhof", isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
         save(Journey(legs: [first, second], source: .transitous))
+    }
+}
+
+extension AppModel {
+    /// Launch with `-seedSeatMapTrips YES` to save two made-up ICE journeys leaving in 20 minutes, each with a seat
+    /// reservation and a made-up Wagenreihung, for trying the seat maps (#365): ICE 9901 is an ICE 1 standing
+    /// turned round (Wagen 12, Platz 43), ICE 9902 an ICE 3neo (Wagen 24, Platz 78). Re-seeds once they have
+    /// left; remove them by hand afterwards (they sync through iCloud like any saved journey).
+    func seedSeatMapTripsIfRequested() {
+        guard UserDefaults.standard.bool(forKey: "seedSeatMapTrips") else { return }
+        let seeded = savedJourneys.filter { $0.journey.legs.first?.tripId?.hasPrefix("seatseed-") == true }
+        guard seeded.isEmpty || seeded.allSatisfy({ $0.journey.legs[0].departure.planned < .now }) else { return }
+        seeded.forEach { unsave($0.journey) }
+        func station(_ id: String, _ name: String, _ lat: Double, _ lon: Double) -> Station {
+            Station(id: id, name: name, coordinate: Coordinate(latitude: lat, longitude: lon), evaNumber: id, source: .bahnDe)
+        }
+        let koeln = station("8000207", "Köln Hbf", 50.943, 6.958), frankfurt = station("8000105", "Frankfurt(Main)Hbf", 50.107, 8.663)
+        let hamburg = station("8002549", "Hamburg Hbf", 53.553, 10.007), berlin = station("8011160", "Berlin Hbf", 52.525, 13.369)
+        for (index, train) in Self.seatMapDemoTrains.enumerated() {
+            let departure = Date.now.addingTimeInterval(Double(20 + index * 5) * 60)
+            let (from, to) = index == 0 ? (hamburg, frankfurt) : (koeln, berlin)
+            let leg = Leg(origin: from, destination: to,
+                          departure: TimeInfo(planned: departure, actual: nil),
+                          arrival: TimeInfo(planned: departure.addingTimeInterval(4 * 3600), actual: nil),
+                          departurePlatform: PlatformInfo(planned: "7", actual: "7"), arrivalPlatform: PlatformInfo(planned: "9", actual: "9"),
+                          tripId: "seatseed-\(train.number)",
+                          line: Line(name: "ICE \(train.number)", number: train.number, product: .highSpeed, operatorName: "DB Fernverkehr AG"),
+                          direction: to.name, isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .bahnDe)
+            save(Journey(legs: [leg], source: .bahnDe))
+        }
+    }
+
+    private struct SeatMapDemoTrain {
+        var number: String
+        var sheet: String
+        var unit: TrainFormation.Unit
+        var turned: Bool
+        var reservation: SeatReservation
+    }
+
+    private static let seatMapDemoTrains = [
+        SeatMapDemoTrain(number: "9901", sheet: "401", unit: TrainFormation.Unit(model: "ICE 1", number: "199", name: "Testzug"),
+                         turned: true, reservation: SeatReservation(trainName: "ICE 9901", coach: "12", seats: ["43"])),
+        SeatMapDemoTrain(number: "9902", sheet: "408", unit: TrainFormation.Unit(model: "ICE 3neo", number: "8030"),
+                         turned: false, reservation: SeatReservation(trainName: "ICE 9902", coach: "24", seats: ["78"])),
+    ]
+
+    /// The made-up Wagenreihung of a seeded seat-map train.
+    func debugCoachSequence(for request: BahnDeClient.FormationRequest) -> CoachSequence? {
+        guard request.category == "ICE", let train = Self.seatMapDemoTrains.first(where: { $0.number == request.number }) else { return nil }
+        return CoachSequence.seatMapDemo(sheet: train.sheet, trainName: "ICE \(train.number)", unit: train.unit, turned: train.turned)
+    }
+
+    /// The seat reservation of a seeded seat-map train.
+    func debugReservation(for leg: Leg) -> SeatReservation? {
+        guard leg.tripId?.hasPrefix("seatseed-") == true else { return nil }
+        return Self.seatMapDemoTrains.first { $0.number == leg.line?.number }?.reservation
     }
 }
 
