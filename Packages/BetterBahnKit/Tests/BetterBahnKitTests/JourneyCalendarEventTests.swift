@@ -5,7 +5,9 @@ import Testing
 @Suite struct JourneyCalendarEventTests {
     let koeln = station("8000207", "Köln Hbf", 50.943, 6.959)
     let mannheim = station("8000244", "Mannheim Hbf")
-    let muenchen = station("8000261", "München Hbf")
+    let muenchen = station("8000261", "München Hbf", 48.140, 11.558)
+    let koelnDeutz = station("8003368", "Köln Messe/Deutz", 50.941, 6.975)
+    let bonn = station("8000044", "Bonn Hbf", 50.732, 7.097)
     let now = Date(timeIntervalSince1970: 1_800_000_000)
     let link = LiveActivityLink.url(journeyID: "ABC")
 
@@ -25,7 +27,7 @@ import Testing
         let journey = Journey(legs: [leg("ICE 597", koeln, muenchen, dep: time(0), arr: time(270),
                                          platform: PlatformInfo(planned: "5", actual: nil))], source: .bahnDe)
         let event = try #require(JourneyCalendarEvent(journey: journey, link: link))
-        #expect(event.title == "ICE 597 → München Hbf")
+        #expect(event.title == "ICE 597 → München")
         #expect(event.start == now)
         #expect(event.end == now.addingTimeInterval(270 * 60))
         #expect(event.location == "Köln Hbf")
@@ -43,7 +45,7 @@ import Testing
         ], source: .bahnDe)
         let seat = SeatReservation(trainName: "ICE 123", coach: "7", seats: ["41", "42"])
         let event = try #require(JourneyCalendarEvent(journey: journey, reservations: [seat]))
-        #expect(event.title == "Köln Hbf → München Hbf")
+        #expect(event.title == "Köln → München")
         #expect(event.start == now.addingTimeInterval(5 * 60))
         #expect(event.notes == """
             ICE 597 ab Gl. 6
@@ -53,5 +55,15 @@ import Testing
 
     @Test func journeyWithoutTrainsHasNoEvent() {
         #expect(JourneyCalendarEvent(journey: Journey(legs: [], source: .bahnDe)) == nil)
+    }
+
+    /// Main stations lose "Hbf" only on long journeys; other stations keep their names.
+    @Test func shortTitleOnlyForMainStationsOnLongJourneys() throws {
+        let short = Journey(legs: [leg("RE 5", koeln, bonn, dep: time(0), arr: time(20), platform: nil)], source: .bahnDe)
+        #expect(try #require(JourneyCalendarEvent(journey: short)).title == "RE 5 → Bonn Hbf")
+        let long = Journey(legs: [leg("ICE 527", koelnDeutz, muenchen, dep: time(0), arr: time(270), platform: nil)], source: .bahnDe)
+        let event = try #require(JourneyCalendarEvent(journey: long))
+        #expect(event.title == "ICE 527 → München")
+        #expect(event.location == "Köln Messe/Deutz")
     }
 }

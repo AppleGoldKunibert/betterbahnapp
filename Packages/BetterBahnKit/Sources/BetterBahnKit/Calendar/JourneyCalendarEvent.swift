@@ -19,10 +19,18 @@ public struct JourneyCalendarEvent: Sendable, Hashable {
         guard let first = trains.first, let origin = journey.legs.first?.origin,
               let destination = journey.legs.last?.destination,
               let start = journey.departure?.best, let end = journey.arrival?.best else { return nil }
+        // On long journeys the city says enough: "Köln → München" instead of "Köln Hbf → München Hbf".
+        let isLong = origin.coordinate.flatMap { from in destination.coordinate.map { from.distance(to: $0) } }
+            .map { $0 >= Self.longJourneyDistance } ?? false
+        func name(_ station: Station) -> String {
+            let name = station.displayName
+            guard isLong, name.hasSuffix(" Hbf") else { return name }
+            return String(name.dropLast(4))
+        }
         if trains.count == 1, let line = first.line {
-            title = "\(line.displayName) → \(destination.displayName)"
+            title = "\(line.displayName) → \(name(destination))"
         } else {
-            title = "\(origin.displayName) → \(destination.displayName)"
+            title = "\(name(origin)) → \(name(destination))"
         }
         self.start = start
         self.end = max(end, start)
@@ -42,6 +50,9 @@ public struct JourneyCalendarEvent: Sendable, Hashable {
         notes = lines.joined(separator: "\n")
         url = link
     }
+
+    /// From this straight-line distance (m) main stations are named by their city in the title.
+    static let longJourneyDistance: Double = 100_000
 
     /// "ICE 597 ab Gl. 5", "ICE 123 ab Mannheim ARENA, Gl. 3" when it leaves from another station
     /// than `station`, "… – fällt aus" when cancelled.

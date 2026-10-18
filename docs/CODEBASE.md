@@ -347,8 +347,8 @@ in `project.pbxproj`: new files join their target automatically.
   `WidgetStations` (favourites + recent routes for the board widget's picker), `BoardWidgetLink` (`betterbahn://board`,
   the stations travel in the link as base64url JSON, also the widget entities' IDs), `BoardWidgetRows` (board widget
   rows from a board or from journeys, which are still ahead at a time with a 60 s grace, `changeDates`).
-- `Calendar/JourneyCalendarEvent.swift` (#382) – title ("ICE 597 → München Hbf", with changes "Köln Hbf → München
-  Hbf"), times, departure station with coordinate, notes (platforms, each change with transfer minutes, reserved
+- `Calendar/JourneyCalendarEvent.swift` (#382) – title ("ICE 597 → München", with changes "Köln → München"; "Hbf" dropped only from 100 km straight-line distance, else "Bonn Hbf"),
+  times, departure station with coordinate, notes (platforms, each change with transfer minutes, reserved
   seats, link) from a journey's latest data; `CalendarAccessMode`. Not in `scripts/searchsim` (needs `Tickets/`).
 - `Geometry/` – polyline decode, `RouteGeometryService`, `SegmentHeatmap`.
 - `Weather/WeatherForecast.swift` (#385) – `WeatherClient` asks Open-Meteo's `/v1/forecast` (no key, CC BY 4.0) for a
