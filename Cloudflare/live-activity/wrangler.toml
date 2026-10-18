@@ -1,0 +1,35 @@
+name = "betterbahn-live"
+main = "worker.mjs"
+compatibility_date = "2026-09-01"
+workers_dev = true
+
+# Live Activities kept current while the app is closed (#315). Create the database once with
+# `npx wrangler d1 create betterbahn-live`, put its id here and load schema.sql (see README.md).
+[[d1_databases]]
+binding = "DB"
+database_name = "betterbahn-live"
+database_id = "c5a91934-604b-43ac-9fd1-97aee7c3a254"
+
+# Every minute: look at the activities that are due.
+[triggers]
+crons = ["* * * * *"]
+
+# Per app install (App Attest key): 20 hand-overs per minute (the app sends one each time it goes to the
+# background or comes back). namespace_id is any number unique within the account.
+[[ratelimits]]
+name = "REGISTER_LIMITER"
+namespace_id = "1501"
+simple = { limit = 20, period = 60 }
+
+[vars]
+# Activities looked at per cron run. Each takes up to 7 outgoing requests (IRIS, APNs); the free plan allows
+# 50 per run. Workers Paid can take more.
+BATCH = "6"
+APNS_TEAM_ID = "9NXP66M9UL"
+APNS_TOPIC = "de.goldkunibert.BetterBahn"
+# The key ID of the APNs auth key (APNS_KEY below), the same key as betterbahn-push's.
+APNS_KEY_ID = "9C64LU6XCX"
+# Secrets (`npx wrangler secret put …`):
+#   TOKEN_SECRET – same value as in betterbahn2, betterbahn, betterbahn-stats, betterbahn-pass and betterbahn-push
+#   APNS_KEY     – the APNs auth key (.p8 file content), the same as betterbahn-push's
+# ALLOW_UNATTESTED = "true" lets apps without App Attest (Simulator) hand activities over.

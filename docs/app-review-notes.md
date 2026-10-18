@@ -8,7 +8,8 @@ features or data flows change (and update the privacy policy in `Cloudflare/work
 - **bahn.de server** (`Server/bahnde-proxy`, game-server host behind Tailscale Funnel, `BahnDeProxy.baseURL`) running with the same `TOKEN_SECRET`.
 - **Workers deployed** with `TOKEN_SECRET` (same value in `betterbahn2`, `betterbahn-pass` and
   `betterbahn-stats`, whose D1 database is set up as in `Cloudflare/stats/README.md`, and
-  `betterbahn-push` with its APNs key, as in `Cloudflare/checkin-push/README.md`),
+  `betterbahn-push` with its APNs key, as in `Cloudflare/checkin-push/README.md`, and `betterbahn-live` with
+  the same key and its D1 database, as in `Cloudflare/live-activity/README.md`),
   `DB_CLIENT_ID`/`DB_API_KEY` in `betterbahn2`, and `ALLOW_UNATTESTED` removed once no old builds
   are left. The privacy policy Worker (`betterbahn`) has the controller's name filled in, its KV
   namespace `SHARES` and `TOKEN_SECRET` set (share links), and the App ID has Associated Domains.
@@ -24,7 +25,11 @@ features or data flows change (and update the privacy policy in `Cloudflare/work
   (#336), the app reports nothing. Second exception: the check-in notifications (`Cloudflare/checkin-push`, Settings →
   Träwelling "Check-ins von Gefolgten melden", off by default) keep the Träwelling user ID, a read-only
   Träwelling login, the APNs device token and seen status IDs until turned off – likely "Identifiers →
-  User ID" and "Device ID", linked to the user, not tracking, purpose "App Functionality".
+  User ID" and "Device ID", linked to the user, not tracking, purpose "App Functionality". Third exception: the
+  Live Activity updates (`Cloudflare/live-activity`, Settings → Meine Reisen "Live-Aktivität über Server
+  aktualisieren", on by default) keep the running journey (trains, stations, times, platforms) and the activity's
+  push token from leaving the app until the arrival or reopening it – likely "Other User Content", not linked to
+  the user, not tracking, purpose "App Functionality".
   Check this against the current code before
   answering "Data Not Collected"; Träwelling check-ins go to the user's own Träwelling account at
   their request.

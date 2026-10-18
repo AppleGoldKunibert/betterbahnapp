@@ -82,10 +82,8 @@ import Testing
         #expect(change.isTight)
     }
 
-    #if canImport(ActivityKit) && os(iOS)
     @Test func liveActivityShowsReplacedPlatform() {
         #expect(TripActivityAttributes.ContentState.replacedPlatform(PlatformInfo(planned: "7", actual: "9")) == "7")
         #expect(TripActivityAttributes.ContentState.replacedPlatform(PlatformInfo(planned: "7", actual: "7 A-C")) == nil)
     }
-    #endif
 }

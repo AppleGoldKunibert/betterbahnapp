@@ -99,10 +99,26 @@ struct SettingsView: View {
                     }
                     .tint(.brand)
                     .onChange(of: settings.liveActivitiesEnabled) { model.syncLiveActivity() }
+                    if settings.liveActivitiesEnabled {
+                        Toggle(isOn: $settings.liveActivityServerUpdates) {
+                            IconLabel(title: "Live-Aktivität über Server aktualisieren", systemImage: "arrow.trianglehead.2.clockwise",
+                                      color: .indigo)
+                        }
+                        .tint(.brand)
+                        .onChange(of: settings.liveActivityServerUpdates) {
+                            // Whether an activity gets updates from our server is fixed when it starts.
+                            Task {
+                                await model.liveActivities.restart()
+                                model.syncLiveActivity()
+                            }
+                        }
+                    }
                 } header: {
                     Text("Meine Reisen")
                 } footer: {
-                    Text("Wir sagen dir Bescheid bei Ausfällen, Gleiswechseln und verpassten Anschlüssen – und kurz bevor du aussteigen musst.")
+                    Text(settings.liveActivitiesEnabled
+                         ? "Wir sagen dir Bescheid bei Ausfällen, Gleiswechseln und verpassten Anschlüssen – und kurz bevor du aussteigen musst. Über unseren Server zeigt die Live-Aktivität auch bei geschlossener App aktuelle Zeiten und Gleise. Er bekommt dafür deine Reise bis zur Ankunft."
+                         : "Wir sagen dir Bescheid bei Ausfällen, Gleiswechseln und verpassten Anschlüssen – und kurz bevor du aussteigen musst.")
                 }
 
                 Section {

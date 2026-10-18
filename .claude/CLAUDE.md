@@ -13,7 +13,7 @@ iOS app (SwiftUI, iOS 26, Swift 6) for German train travel. UI text is German, c
 | `BetterBahnWidgets/`, `BetterBahnShare/` | Widgets + Live Activity; share extension (imports DB shares). |
 | `Packages/BetterBahnKit/` | SwiftPM package: all models, networking, logic and the tests. |
 | `Config/` | xcconfigs, Info.plists, entitlements. |
-| `Cloudflare/` | Workers: `betterbahn`, `bahnde-proxy` (`betterbahn2`), `pass-signer`, `stats`, `checkin-push`, `shared`. |
+| `Cloudflare/` | Workers: `betterbahn`, `bahnde-proxy` (`betterbahn2`), `pass-signer`, `stats`, `checkin-push`, `live-activity`, `shared`. |
 | `Server/` | `bahnde-proxy`: Docker server asking bahn.de with a browser's TLS fingerprint (the app asks it before `betterbahn2`). |
 | `scripts/` | Offline data rebuilds; `searchsim/` runs Kit tests on Linux. |
 | `.github/workflows/` | `pr-build.yml`, `pr-secrets.yml`, `sync-prod.yml`, `monthly-data-update.yml` (monthly PR into `prod` with rebuilt station data). |
