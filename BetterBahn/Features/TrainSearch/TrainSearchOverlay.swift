@@ -281,7 +281,7 @@ private struct TrainSearchRow: View {
     var body: some View {
         HStack(spacing: 12) {
             IconTile(systemImage: result.product.symbolName(nightTrain: result.product.isTrain && Line.isNightTrainCategory(result.category)),
-                     color: result.product.color, size: 34)
+                     color: result.product.color, size: 34, logo: TransitLogo(product: result.product, operatorName: nil))
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(result.name).font(.headline)
@@ -357,7 +357,8 @@ struct TrainSearchResultView: View {
     private var header: some View {
         Card {
             HStack(spacing: 12) {
-                IconTile(systemImage: (trip?.line?.product ?? result.product).symbolName, color: color, size: 46)
+                IconTile(systemImage: (trip?.line?.product ?? result.product).symbolName, color: color, size: 46,
+                         logo: trip == nil ? TransitLogo(product: result.product, operatorName: nil) : trip?.line?.transitLogo)
                 VStack(alignment: .leading, spacing: 3) {
                     if let trip {
                         TrainNameRow(name: trip.line?.nameWithTripNumber ?? result.name, font: .title3.weight(.bold), spacing: 8) {

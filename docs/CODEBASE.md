@@ -152,6 +152,10 @@ in `project.pbxproj`: new files join their target automatically.
   logo), `OperatorBrand.displayName` ("ODEG", "Transdev"). International trains: `BahnDeClient.trainOperators(for:)`
   → `[TrainOperator]` from each stop's `adminID` (UIC code), shown by `TrainOperatorsLabel` (`OperatorLogo`) and at
   handover stops (`operatorStops(for:)`); the feed only names one.
+- `TransitLogo` (#350) – product + feed agency → S-Bahn/U-Bahn logo (`Assets.xcassets/TransitLogos/Logo-<case>`, vector
+  PDFs from Wikimedia Commons). Replaces the whole train tile (`IconTile(logo:)`, `LiveTrainIconTile`): DB's "S" for
+  German S-Bahns (ÖBB/Salzburg: Austrian "S", SBB/DSB/… none), city "U" logos (Berlin, Hamburg, München, Nürnberg,
+  Frankfurt, Wien, Stadtbahn Stuttgart), else the plain "U". Badges keep the SF symbols `s.circle.fill`/`u.square.fill`.
 - `Models/TripLap.swift` – `Trip.lap(at:near:arriving:)`: Transitous' trip for a ring line (S41/S42) is the vehicle's
   whole day (S42: 490 stops), so stops looked up by station hit the first lap. Cuts out one lap (needs a station
   visited ≥ 3 times); applied in `TripView.load()`, `CombinedProvider.trip(for:)` and "Zug vorgeben"

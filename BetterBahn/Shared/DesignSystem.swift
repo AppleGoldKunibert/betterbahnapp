@@ -138,18 +138,30 @@ struct SectionHeader: View {
     }
 }
 
-/// iOS-Settings style colored icon square.
+/// iOS-Settings style colored icon square. With a `logo` (S-Bahn, U-Bahn, #350) the logo itself takes
+/// the tile's place, in its own colors and with the tile's rounded corners.
 struct IconTile: View {
     let systemImage: String
     let color: Color
     var size: CGFloat = 30
+    var logo: TransitLogo? = nil
 
     var body: some View {
-        Image(systemName: systemImage)
-            .font(.system(size: size * 0.5, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(width: size, height: size)
-            .background(color.gradient, in: .rect(cornerRadius: size * 0.28, style: .continuous))
+        if let logo, UIImage(named: logo.assetName) != nil {
+            Image(logo.assetName)
+                .renderingMode(.original)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: size, height: size)
+                .clipShape(.rect(cornerRadius: size * 0.28, style: .continuous))
+                .accessibilityHidden(true)
+        } else {
+            Image(systemName: systemImage)
+                .font(.system(size: size * 0.5, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: size, height: size)
+                .background(color.gradient, in: .rect(cornerRadius: size * 0.28, style: .continuous))
+        }
     }
 }
 

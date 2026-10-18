@@ -6945,6 +6945,70 @@ private final class RE3318CancelledProtocol: RE3318Protocol, @unchecked Sendable
     }
 }
 
+@Suite struct TransitLogoTests {
+    private func logo(_ product: Product, _ operatorName: String?) -> TransitLogo? {
+        TransitLogo(product: product, operatorName: operatorName)
+    }
+
+    /// Agency names as Transitous reports them on the boards of the bigger cities (#350).
+    @Test func recognisesCityNetworks() {
+        #expect(logo(.subway, "Berliner Verkehrsbetriebe") == .uBahnBerlin)
+        #expect(logo(.subway, "BVG") == .uBahnBerlin)
+        #expect(logo(.subway, "Hochbahn U-Bahn") == .uBahnHamburg)
+        #expect(logo(.subway, "Hamburger Hochbahn AG") == .uBahnHamburg)
+        #expect(logo(.subway, "U-Bahn München") == .uBahnMuenchen)
+        #expect(logo(.subway, "Münchner Verkehrsgesellschaft mbH") == .uBahnMuenchen)
+        #expect(logo(.subway, "U-Bahn Nürnberg") == .uBahnNuernberg)
+        #expect(logo(.subway, "VAG Verkehrs-Aktiengesellschaft Nürnberg") == .uBahnNuernberg)
+        #expect(logo(.subway, "Stadtwerke Verkehrsgesellschaft Frankfurt") == .uBahnFrankfurt)
+        #expect(logo(.subway, "Wiener Linien GmbH & Co KG") == .uBahnWien)
+        #expect(logo(.subway, "Stadtbahn") == .stadtbahnStuttgart)
+        #expect(logo(.subway, "SSB Stuttgarter Straßenbahnen AG") == .stadtbahnStuttgart)
+    }
+
+    @Test func otherSubwaysGetThePlainU() {
+        #expect(logo(.subway, "üstra Hannoversche Verkehrsbetriebe AG") == .uBahn)
+        #expect(logo(.subway, "Rheinbahn Stadtbahn") == .uBahn)
+        #expect(logo(.subway, "DVG Strab") == .uBahn)
+        #expect(logo(.subway, nil) == .uBahn)
+    }
+
+    @Test func sBahnsGetTheirS() {
+        #expect(logo(.suburban, "S-Bahn Berlin GmbH") == .sBahn)
+        #expect(logo(.suburban, "DB Regio AG S-Bahn Rhein-Main") == .sBahn)
+        #expect(logo(.suburban, "DB Regio AG Bayern") == .sBahn)
+        #expect(logo(.suburban, "S-Bahn Hannover (Transdev)") == .sBahn)
+        #expect(logo(.suburban, nil) == .sBahn)
+        #expect(logo(.suburban, "OEBB Personenverkehr AG Kundenservice") == .sBahnAustria)
+        #expect(logo(.suburban, "Salzburg AG (Salzburger Lokalbahn)") == .sBahnAustria)
+        // S-Bahn Zürich and Copenhagen's S-tog aren't S-Bahns with DB's "S".
+        #expect(logo(.suburban, "Schweizerische Bundesbahnen SBB") == nil)
+        #expect(logo(.suburban, "DSB") == nil)
+    }
+
+    @Test func otherProductsHaveNoLogo() {
+        #expect(logo(.tram, "Berliner Verkehrsbetriebe") == nil)
+        #expect(logo(.regional, "DB Regio AG NRW") == nil)
+        #expect(logo(.bus, "Hochbahn U-Bahn") == nil)
+        #expect(Line(name: "S9", number: nil, product: .suburban, operatorName: "S-Bahn Berlin GmbH").transitLogo == .sBahn)
+        #expect(Line(name: "U2", number: nil, product: .subway, operatorName: "Berliner Verkehrsbetriebe").transitLogo == .uBahnBerlin)
+    }
+
+    /// Every logo needs its image in the app's asset catalog, else the tile would stay empty.
+    @Test func everyTransitLogoHasAnImage() throws {
+        var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        while !FileManager.default.fileExists(atPath: dir.appending(path: "BetterBahn/Assets.xcassets").path) {
+            try #require(dir.path != "/", "repository root not found")
+            dir.deleteLastPathComponent()
+        }
+        let logos = dir.appending(path: "BetterBahn/Assets.xcassets/TransitLogos")
+        for logo in TransitLogo.allCases {
+            let pdf = logos.appending(path: "\(logo.assetName).imageset/\(logo.assetName).pdf")
+            #expect(FileManager.default.fileExists(atPath: pdf.path), "\(logo)")
+        }
+    }
+}
+
 @Suite struct OperatorBrandTests {
     /// Agency names as Transitous reports them on German, Swiss and Austrian boards (#166).
     @Test func recognisesFeedAgencyNames() {
