@@ -101,7 +101,9 @@ nonisolated struct FavoriteStationEntity: IndexedEntity {
     }
 }
 
-nonisolated struct FavoriteStationQuery: EntityQuery {
+/// Queries and intents aren't marked `nonisolated` like the entities: Swift refuses it on their property
+/// wrappers (`@Dependency`, `@Parameter`), and as `Sendable` types they aren't main-actor isolated anyway.
+struct FavoriteStationQuery: EntityQuery {
     @Dependency private var model: AppModel
 
     func entities(for identifiers: [String]) async throws -> [FavoriteStationEntity] {
@@ -136,7 +138,7 @@ nonisolated struct SavedJourneyEntity: IndexedEntity {
     }
 }
 
-nonisolated struct SavedJourneyQuery: EntityQuery {
+struct SavedJourneyQuery: EntityQuery {
     @Dependency private var model: AppModel
 
     func entities(for identifiers: [String]) async throws -> [SavedJourneyEntity] {
@@ -152,7 +154,7 @@ nonisolated struct SavedJourneyQuery: EntityQuery {
 
 // MARK: Opening
 
-nonisolated struct OpenFavoriteStationIntent: OpenIntent {
+struct OpenFavoriteStationIntent: OpenIntent {
     static var title: LocalizedStringResource { "Abfahrten öffnen" }
 
     @Parameter(title: "Bahnhof") var target: FavoriteStationEntity
@@ -164,7 +166,7 @@ nonisolated struct OpenFavoriteStationIntent: OpenIntent {
     }
 }
 
-nonisolated struct OpenSavedJourneyIntent: OpenIntent {
+struct OpenSavedJourneyIntent: OpenIntent {
     static var title: LocalizedStringResource { "Reise öffnen" }
 
     @Parameter(title: "Reise") var target: SavedJourneyEntity
