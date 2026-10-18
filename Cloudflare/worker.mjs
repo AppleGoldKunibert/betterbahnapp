@@ -1,11 +1,13 @@
 import { TOKEN_HEADER, unauthorized, verifyToken } from "./shared/appattest.mjs";
+import { arrivalPageHTML, arrivalView, expiryOf, extendedExpiry, parseArrival } from "./arrival.mjs";
 
 export default {
-    async fetch(request, env) {
+    async fetch(request, env, ctx) {
+        const deps = { cache: globalThis.caches?.default ?? null, waitUntil: ctx && (promise => ctx.waitUntil(promise)) };
         return handlePage(request)
             ?? handleTraewellingCallback(request)
             ?? handleAppSiteAssociation(request, env)
-            ?? await handleShare(request, env)
+            ?? await handleShare(request, env, Date.now(), deps)
             ?? new Response("Not Found", { status: 404 });
     },
 };
@@ -125,6 +127,10 @@ von BetterBahn. Dort wird sie unter einer zufälligen Kennung 30 Tage lang gespe
 gelöscht. Geteilt wird nur ein kurzer Link; wer ihn hat, kann die Reise in dieser Zeit abrufen. Namen, Tickets
 oder andere Angaben über dich sind nicht dabei. Ist der Server nicht erreichbar, teilt die App stattdessen einen
 längeren Link, der die Reise selbst enthält; dann wird nichts gespeichert.</p>
+<p>Mit „Ankunft teilen“ schickt die App zusätzlich den letzten Zug der Reise mit seinen Halten, Zeiten und Gleisen.
+Wer den Link öffnet, sieht auch ohne App eine Seite mit Ankunftszeit und Gleis; die aktuellen Zeiten fragt der
+Server dafür bei der Deutschen Bahn ab. Diese Links werden schon 2 Stunden nach der Ankunft gelöscht. Dein Standort ist nie
+dabei.</p>
 
 <h2>Zugstatistik</h2>
 <p>Solange „Zugstatistik anzeigen“ in den Einstellungen eingeschaltet ist (Standard), zeigt dir die App
@@ -283,6 +289,12 @@ export function handleTraewellingCallback(request) {
 // POST /share { data }  → 201 { id, url, expiresAt }   (App Attest token, rate limited per app install)
 // GET  /share/<id>      → { data }                     (what the app fetches for a link)
 // GET  /s/<id>          → fallback page: with the app installed, iOS opens the app instead (Universal Link)
+//
+// "Ankunft teilen" (#317, see arrival.mjs): `POST /share { data, arrival }` also stores the last train, only
+// until 2 hours after its arrival; `/s/<id>` then shows the arrival page, which refreshes from
+// GET  /share/<id>/live  → the page's data with bahn.de's live times
+//
+// KV holds the plain `data`, or for an arrival `{ data, arrival, expiresAt }` as JSON (`data` never starts with "{").
 
 export const SHARE_API_PATH = "/share";
 export const SHARE_PAGE_PREFIX = "/s/";
@@ -290,6 +302,8 @@ export const SHARE_TTL = 30 * 24 * 60 * 60;
 // Same cap as `JourneyShareLink.maxEncodedLength` in the app.
 export const MAX_SHARE_DATA_LENGTH = 64 * 1024;
 export const SHARE_ID_LENGTH = 8;
+// Room for the arrival next to the journey: up to 150 stops of about 200 bytes.
+const MAX_ARRIVAL_LENGTH = 32 * 1024;
 const ID_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 const ID_PATTERN = /^[A-Za-z0-9]{8}$/;
 const DATA_PATTERN = /^[A-Za-z0-9_-]+$/;
@@ -311,17 +325,32 @@ export function handleAppSiteAssociation(request, env = {}) {
     });
 }
 
-// null means the request is for a different route. `now` only matters for the returned expiry.
-export async function handleShare(request, env = {}, now = Date.now()) {
+// null means the request is for a different route. `deps` (bahn.de's fetch, the cache, waitUntil) only
+// matter for arrival links.
+export async function handleShare(request, env = {}, now = Date.now(), deps = {}) {
     const url = new URL(request.url);
     if (url.pathname === SHARE_API_PATH) return createShare(request, env, url, now);
     if (url.pathname.startsWith(`${SHARE_API_PATH}/`)) {
-        return readShare(request, env, url.pathname.slice(SHARE_API_PATH.length + 1));
+        const rest = url.pathname.slice(SHARE_API_PATH.length + 1);
+        if (rest.endsWith("/live")) return readArrival(request, env, rest.slice(0, -"/live".length), now, deps);
+        return readShare(request, env, rest, now);
     }
     if (url.pathname.startsWith(SHARE_PAGE_PREFIX)) {
-        return sharePage(request, env, url.pathname.slice(SHARE_PAGE_PREFIX.length).replace(/\/$/, ""));
+        return sharePage(request, env, url.pathname.slice(SHARE_PAGE_PREFIX.length).replace(/\/$/, ""), now, deps);
     }
     return null;
+}
+
+/// A stored share: `{ data }`, plus `arrival` and `expiresAt` (Unix ms) for an arrival link.
+export function parseEntry(value) {
+    if (value === null) return null;
+    if (!value.startsWith("{")) return { data: value };
+    try {
+        const entry = JSON.parse(value);
+        return typeof entry?.data === "string" ? entry : null;
+    } catch {
+        return null;
+    }
 }
 
 async function createShare(request, env, url, now) {
@@ -338,59 +367,115 @@ async function createShare(request, env, url, now) {
     }
 
     const body = await request.arrayBuffer();
-    if (body.byteLength > MAX_SHARE_DATA_LENGTH + 1024) return shareJSON(413, { error: "too_large" });
-    let data;
+    if (body.byteLength > MAX_SHARE_DATA_LENGTH + MAX_ARRIVAL_LENGTH) return shareJSON(413, { error: "too_large" });
+    let input;
     try {
-        data = JSON.parse(new TextDecoder().decode(body))?.data;
+        input = JSON.parse(new TextDecoder().decode(body));
     } catch {
         return shareJSON(400, { error: "invalid_json" });
     }
+    const data = input?.data;
     if (typeof data !== "string" || !DATA_PATTERN.test(data)) return shareJSON(400, { error: "invalid_data" });
     if (data.length > MAX_SHARE_DATA_LENGTH) return shareJSON(413, { error: "too_large" });
+
+    let value = data;
+    let expiresAt = now + SHARE_TTL * 1000;
+    if (input.arrival !== undefined) {
+        const arrival = parseArrival(input.arrival);
+        if (!arrival) return shareJSON(400, { error: "invalid_arrival" });
+        expiresAt = Math.min(expiryOf(arrival.stops), expiresAt);
+        if (expiresAt <= now) return shareJSON(400, { error: "already_arrived" });
+        value = JSON.stringify({ data, arrival, expiresAt });
+    }
 
     // No "is this ID free?" read first: KV caches a miss for up to a minute at that location, so the
     // link would 404 right after sharing. With 62^8 IDs a collision is practically impossible.
     const id = randomID();
-    await env.SHARES.put(id, data, { expirationTtl: SHARE_TTL });
+    await env.SHARES.put(id, value, { expirationTtl: ttlUntil(expiresAt, now) });
     return shareJSON(201, {
         id,
         url: `${url.origin}${SHARE_PAGE_PREFIX}${id}`,
-        expiresAt: new Date(now + SHARE_TTL * 1000).toISOString(),
+        expiresAt: new Date(expiresAt).toISOString(),
     });
 }
 
-async function readShare(request, env, id) {
-    if (request.method !== "GET") return shareJSON(405, { error: "method_not_allowed" }, { Allow: "GET" });
-    if (!env.SHARES) return shareJSON(503, { error: "not_configured" });
-    if (!ID_PATTERN.test(id)) return shareJSON(404, { error: "not_found" });
-    if (!(await withinLimit(env.SHARE_READ_LIMITER, clientIP(request)))) return shareJSON(429, { error: "rate_limited" });
-    const data = await env.SHARES.get(id);
-    if (data === null) return shareJSON(404, { error: "not_found" });
-    return shareJSON(200, { data });
+/// KV keeps entries for 60 s at least: an arrival link past its time reads as expired, also in the app.
+function isExpiredArrival(entry, now) {
+    return Boolean(entry.arrival) && entry.expiresAt <= now;
 }
 
-async function sharePage(request, env, id) {
+/// KV's TTL in seconds for an entry that should go at `expiresAt`; KV takes 60 at least.
+function ttlUntil(expiresAt, now) {
+    return Math.max(60, Math.ceil((expiresAt - now) / 1000));
+}
+
+/// Looks up `id` for a reader: rate limited per IP, null when unknown, expired or not stored as expected.
+async function storedEntry(request, env, id) {
+    if (!ID_PATTERN.test(id) || !env.SHARES) return { entry: null };
+    if (!(await withinLimit(env.SHARE_READ_LIMITER, clientIP(request)))) return { limited: true };
+    return { entry: parseEntry(await env.SHARES.get(id)) };
+}
+
+/// The arrival page's data. A train that is late keeps its link until 2 hours after its new arrival.
+async function readArrival(request, env, id, now, deps) {
+    if (request.method !== "GET") return shareJSON(405, { error: "method_not_allowed" }, { Allow: "GET" });
+    if (!env.SHARES) return shareJSON(503, { error: "not_configured" });
+    const { entry, limited } = await storedEntry(request, env, id);
+    if (limited) return shareJSON(429, { error: "rate_limited" });
+    if (!entry?.arrival || entry.expiresAt <= now) return shareJSON(404, { error: "not_found" });
+    const view = await currentArrival(env, id, entry, now, deps);
+    return shareJSON(200, view);
+}
+
+async function currentArrival(env, id, entry, now, deps) {
+    const view = await arrivalView(entry.arrival, entry.expiresAt,
+        { proxyURL: env.BAHNDE_PROXY_URL, secret: env.TOKEN_SECRET, ...deps, now });
+    const later = extendedExpiry(entry, view);
+    if (later) {
+        const store = env.SHARES.put(id, JSON.stringify({ ...entry, expiresAt: later }), { expirationTtl: ttlUntil(later, now) });
+        deps.waitUntil ? deps.waitUntil(store) : await store;
+        view.expiresAt = later;
+    }
+    return view;
+}
+
+async function readShare(request, env, id, now) {
+    if (request.method !== "GET") return shareJSON(405, { error: "method_not_allowed" }, { Allow: "GET" });
+    if (!env.SHARES) return shareJSON(503, { error: "not_configured" });
+    const { entry, limited } = await storedEntry(request, env, id);
+    if (limited) return shareJSON(429, { error: "rate_limited" });
+    if (!entry || isExpiredArrival(entry, now)) return shareJSON(404, { error: "not_found" });
+    return shareJSON(200, { data: entry.data });
+}
+
+async function sharePage(request, env, id, now, deps) {
     if (request.method !== "GET" && request.method !== "HEAD") {
         return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
     }
-    let exists = false;
-    if (ID_PATTERN.test(id) && env.SHARES) {
-        if (!(await withinLimit(env.SHARE_READ_LIMITER, clientIP(request)))) {
-            return new Response("Too many requests", { status: 429 });
-        }
-        exists = await env.SHARES.get(id) !== null;
+    const { entry, limited } = await storedEntry(request, env, id);
+    if (limited) return new Response("Too many requests", { status: 429 });
+    const headers = {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-store",
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+        "Referrer-Policy": "no-referrer",
+        "X-Content-Type-Options": "nosniff",
+    };
+    if (entry?.arrival && entry.expiresAt > now && request.method === "GET") {
+        const nonce = randomID();
+        const view = await currentArrival(env, id, entry, now, deps);
+        const html = arrivalPageHTML(id, view, nonce, { style: PAGE_STYLE, footer: SHARE_FOOTER });
+        return new Response(html, {
+            status: 200,
+            headers: {
+                ...headers,
+                "Content-Security-Policy": `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; connect-src 'self'`,
+            },
+        });
     }
+    const exists = entry !== null && !isExpiredArrival(entry, now);
     const html = sharePageHTML(exists ? id : null, env.APP_STORE_URL);
-    return new Response(request.method === "HEAD" ? null : html, {
-        status: exists ? 200 : 404,
-        headers: {
-            "Content-Type": "text/html; charset=utf-8",
-            "Cache-Control": "no-store",
-            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
-            "Referrer-Policy": "no-referrer",
-            "X-Content-Type-Options": "nosniff",
-        },
-    });
+    return new Response(request.method === "HEAD" ? null : html, { status: exists ? 200 : 404, headers });
 }
 
 /// Rate limiting binding (`[[ratelimits]]` in wrangler.toml); without one, nothing is limited.
@@ -426,6 +511,9 @@ function escapeHTML(text) {
     return String(text).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
 
+const SHARE_FOOTER = `<p class="muted"><a href="${PRIVACY_PATH}">Datenschutz</a> · BetterBahn ist ein privates Projekt und steht in keiner
+Verbindung zur Deutschen Bahn AG.</p>`;
+
 /// `id` is null when the link is unknown or has expired.
 export function sharePageHTML(id, appStoreURL) {
     const store = appStoreURL
@@ -438,8 +526,8 @@ erscheint die Reise direkt in der App.</p>
 <p><a class="button" href="betterbahn://share?id=${id}">In BetterBahn öffnen</a></p>
 ${store}`
         : `<h1>Link abgelaufen</h1>
-<p>Diese Reise ist nicht mehr gespeichert. Geteilte Reisen bleiben ${SHARE_TTL / 86400} Tage abrufbar. Bitte
-lass sie dir noch einmal schicken.</p>
+<p>Diese Reise ist nicht mehr gespeichert. Geteilte Reisen bleiben ${SHARE_TTL / 86400} Tage abrufbar, geteilte
+Ankünfte bis 2 Stunden nach der Ankunft. Bitte lass sie dir noch einmal schicken.</p>
 ${store}`;
     return `<!doctype html>
 <html lang="de">
@@ -459,8 +547,7 @@ ${PAGE_STYLE}
 <body>
 <main>
 ${content}
-<p class="muted"><a href="${PRIVACY_PATH}">Datenschutz</a> · BetterBahn ist ein privates Projekt und steht in keiner
-Verbindung zur Deutschen Bahn AG.</p>
+${SHARE_FOOTER}
 </main>
 </body>
 </html>

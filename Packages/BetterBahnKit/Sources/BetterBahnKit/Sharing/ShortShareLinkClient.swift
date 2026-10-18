@@ -43,11 +43,25 @@ public struct ShortShareLinkClient: Sendable {
 
     /// Stores `payload` and returns its short link.
     public func shortURL(forPayload payload: String) async throws -> URL {
+        try await create(body: JSONEncoder().encode(["data": payload]))
+    }
+
+    /// "Ankunft teilen" (#317): a short link that opens the pickup page for `arrival` in any browser, and
+    /// `journey` in the app. It only works until shortly after the arrival, and there is no long link
+    /// to fall back to: the page needs the Worker.
+    public func arrivalURL(for journey: Journey, arrival: ArrivalShare) async throws -> URL {
+        guard let payload = JourneyShareLink.payload(for: journey) else { throw ShortShareLinkError.invalid }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return try await create(body: encoder.encode(ArrivalRequest(data: payload, arrival: arrival)))
+    }
+
+    private func create(body: Data) async throws -> URL {
         var request = URLRequest(url: baseURL.appending(path: "share"), timeoutInterval: http.timeout)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.httpBody = try JSONEncoder().encode(["data": payload])
+        request.httpBody = body
         let response = try await http.send(request, as: CreatedResponse.self, auth: auth)
         guard JourneyShareLink.isValidShortLinkID(response.id) else { throw ShortShareLinkError.invalid }
         return baseURL.appending(path: "s/\(response.id)")
@@ -68,6 +82,10 @@ public struct ShortShareLinkClient: Sendable {
         return journey
     }
 
+    struct ArrivalRequest: Encodable {
+        var data: String
+        var arrival: ArrivalShare
+    }
     struct CreatedResponse: Decodable { var id: String }
     struct PayloadResponse: Decodable { var data: String }
 }
