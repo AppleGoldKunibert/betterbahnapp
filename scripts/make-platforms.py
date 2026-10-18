@@ -8,10 +8,13 @@ has the lifts' positions on some platforms, but none of the stairs.
 
 The stairs, escalators, lifts and buffer stops come from OpenStreetMap (© OpenStreetMap contributors, ODbL
 1.0, so Platforms.json is under the ODbL too): each track's platform edge (`railway=platform_edge` with the
-track as `ref`), the stairs and lifts on that platform, and the sector signs (`railway:platform:section`),
-which tie the positions to bahn.de's sectors. A buffer stop at one end of the edge makes that end the
-platform's exit (a terminus like Frankfurt Hbf). Stations get their positions from Ril100.json, as in
-make-station-names.py, and each platform edge goes to the nearest station that has its track.
+track as `ref`), else the platform with the tracks as `ref` ("11;12", drawn as a way or a multipolygon) and
+its long axis, the stairs and lifts on that platform, and the sector signs (`railway:platform:section`),
+which tie the positions to bahn.de's sectors. At a terminus like Frankfurt Hbf the end at the buffer stops
+is the platform's exit: most of its tracks end at buffer stops side by side, and no track above ground
+(OSM's `railway=rail`) runs on past them, as through tracks do beside bay platforms. Stations get their
+positions from Ril100.json, as in make-station-names.py, and each platform edge goes to the nearest station
+that has its track.
 
 Per EVA number: {"p": [["11", "12"], …], "t": {"11": [lat, lon, lat, lon, length, [[kind, m], …],
 [[sector, m], …]], …}}, the edge from its first to its last point (positions in metres from the first),
@@ -111,25 +114,55 @@ def ril100_points():
     return points
 
 
+def is_train_platform(tags):
+    """A railway platform, or a public transport one for trains (not a bus stop's)."""
+    return tags.get("railway") == "platform" or (tags.get("public_transport") == "platform" and tags.get("train") == "yes")
+
+
 def read_osm(pbf_path):
-    """The platform edges, stairs, escalators and lifts (ways with their points) and the lifts, buffer
-    stops and sector signs (nodes) of the extract."""
+    """The platform edges, platforms, stairs, escalators and lifts (ways with their points; platforms
+    drawn as multipolygons with their outer ring and the relation's tags), the lifts, buffer stops and
+    sector signs (nodes) and the tracks above ground (their points) of the extract."""
     import osmium
     from osmium.filter import IdFilter, KeyFilter, TagFilter
+
+    platform = TagFilter(("railway", "platform"), ("public_transport", "platform"))
+    relations = []
+    for relation in osmium.FileProcessor(pbf_path, osmium.osm.RELATION).with_filter(platform):
+        tags = dict(relation.tags)
+        if tags.get("type") == "multipolygon" and is_train_platform(tags):
+            relations.append((tags, [m.ref for m in relation.members if m.type == "w" and m.role in ("outer", "")]))
+    members = {ref for _, refs in relations for ref in refs}
 
     ways = {}
     wanted = TagFilter(("railway", "platform_edge"), ("railway", "platform"), ("public_transport", "platform"),
                        ("highway", "steps"), ("highway", "elevator"))
     for way in osmium.FileProcessor(pbf_path, osmium.osm.WAY).with_filter(wanted):
         tags = dict(way.tags)
-        if tags.get("public_transport") == "platform" and tags.get("railway") != "platform" and tags.get("train") != "yes":
+        if tags.get("public_transport") == "platform" and not is_train_platform(tags):
             continue
         ways[way.id] = (tags, [node.ref for node in way.nodes])
     for way in osmium.FileProcessor(pbf_path, osmium.osm.WAY).with_filter(KeyFilter("conveying")):
         ways.setdefault(way.id, (dict(way.tags), [node.ref for node in way.nodes]))
-    needed = {ref for _, refs in ways.values() for ref in refs}
+    # Tracks above ground, to tell bay platforms from a terminus: a city tunnel beneath the hall doesn't count.
+    rails = []
+    for way in osmium.FileProcessor(pbf_path, osmium.osm.WAY).with_filter(TagFilter(("railway", "rail"))):
+        tags = dict(way.tags)
+        layer = tags.get("layer", "0")
+        if tags.get("tunnel") not in (None, "no") or (layer.lstrip("-").isdigit() and int(layer) < 0):
+            continue
+        rails.append([node.ref for node in way.nodes])
+    outlines = {way.id: [node.ref for node in way.nodes]
+                for way in osmium.FileProcessor(pbf_path, osmium.osm.WAY).with_filter(IdFilter(members))}
+    needed = ({ref for _, refs in ways.values() for ref in refs} | {ref for refs in outlines.values() for ref in refs}
+              | {ref for refs in rails for ref in refs})
     points = {node.id: (node.location.lat, node.location.lon)
               for node in osmium.FileProcessor(pbf_path, osmium.osm.NODE).with_filter(IdFilter(needed))}
+    for tags, refs in relations:
+        ring = outer_ring([[points[n] for n in outlines[ref] if n in points] for ref in refs if ref in outlines])
+        if ring:
+            # A platform drawn as a multipolygon is used like one drawn as a closed way.
+            ways[f"r{len(ways)}"] = (tags, ring)
     nodes = {}
     filters = [TagFilter(("highway", "elevator"), ("railway", "buffer_stop"), ("railway", "platform_section_sign"),
                          ("public_transport", "platform_section_sign")),
@@ -137,8 +170,33 @@ def read_osm(pbf_path):
     for node_filter in filters:
         for node in osmium.FileProcessor(pbf_path, osmium.osm.NODE).with_filter(node_filter):
             nodes[node.id] = (dict(node.tags), (node.location.lat, node.location.lon))
-    return ([(tags, [points[ref] for ref in refs if ref in points]) for tags, refs in ways.values()],
-            list(nodes.values()))
+    return ([(tags, refs if isinstance(key, str) else [points[ref] for ref in refs if ref in points])
+             for key, (tags, refs) in ways.items()],
+            list(nodes.values()),
+            [[points[ref] for ref in refs if ref in points] for refs in rails])
+
+
+def outer_ring(pieces):
+    """The largest closed ring the outer ways of a multipolygon form, end to end; None if none closes."""
+    pieces = [list(piece) for piece in pieces if len(piece) > 1]
+    rings = []
+    while pieces:
+        ring = pieces.pop()
+        while ring[0] != ring[-1]:
+            for index, piece in enumerate(pieces):
+                if piece[0] == ring[-1]:
+                    ring += piece[1:]
+                elif piece[-1] == ring[-1]:
+                    ring += piece[::-1][1:]
+                else:
+                    continue
+                del pieces[index]
+                break
+            else:
+                break
+        if len(ring) > 3 and ring[0] == ring[-1]:
+            rings.append(ring)
+    return max(rings, key=len, default=None)
 
 
 class Plane:
@@ -245,8 +303,8 @@ def inside(polygon, point, tolerance=2):
 def main(netex_path, pbf_path):
     stations = openstation(netex_path)
     print(f"{len(stations)} stations in OpenStation", flush=True)
-    ways, nodes = read_osm(pbf_path)
-    print(f"{len(ways)} ways, {len(nodes)} nodes from OpenStreetMap", flush=True)
+    ways, nodes, rails = read_osm(pbf_path)
+    print(f"{len(ways)} ways, {len(nodes)} nodes, {len(rails)} tracks from OpenStreetMap", flush=True)
 
     by_code = ril100_points()
     for station in stations:
@@ -297,11 +355,14 @@ def main(netex_path, pbf_path):
                                  and not name_words(tags["name"]) & name_words(located[index]["name"])):
                 continue
             for track in tracks:
-                areas[(index, track)].append(line)
+                areas[(index, track)].append((line, len(tracks)))
         else:
             kind = "l" if tags.get("highway") == "elevator" else "s"
             for i in near(middle):
                 things[i].append(((kind, None), line))
+    for line in rails:
+        for i in {i for point in line[::5] + line[-1:] for i in near(point)}:
+            things[i].append((("t", None), line))
     for tags, point in nodes:
         if tags.get("highway") == "elevator":
             kind = ("l", None)
@@ -330,11 +391,12 @@ def main(netex_path, pbf_path):
         for (i, track), pieces in areas.items():
             if i != index or track in shapes:
                 continue
-            piece = max(pieces, key=len)
+            piece, served = max(pieces, key=lambda piece: len(piece[0]))
             points = [plane.xy(p) for p in piece]
             if len(points) > 3 and math.dist(points[0], points[-1]) < 1:
                 line, width = axis(points[:-1])
-                shape = {"line": line, "width": width / 2 + 2, "side": None, "outline": points[:-1], "edge": False}
+                shape = {"line": line, "width": width / 2 + 2, "side": None, "outline": points[:-1], "edge": False,
+                         "half": width / 2, "served": served}
             else:
                 shape = {"line": points, "width": SIDE_PLATFORM_WIDTH, "side": None, "outline": None, "edge": False}
             if length(shape["line"]) > 20:
@@ -357,15 +419,28 @@ def main(netex_path, pbf_path):
 
         # A terminus: most of its tracks end at buffer stops, where the platforms meet the station hall.
         # Bay platforms of a through station (Augsburg, Ulm) end at buffer stops too, with no way out there.
+        buffer_stops = [plane.xy(point) for (kind, _), shape_points in things[index] if kind == "b" for point in shape_points]
         buffers = {}
         for track, shape in shapes.items():
-            ends = {buffer_end(shape["line"], plane.xy(point), shape["width"] if shape["outline"] else 3.5)
-                    for (kind, _), shape_points in things[index] if kind == "b" for point in shape_points} - {None}
+            if shape["outline"]:
+                # An area: on a track along one of its long sides (one in line with the platform's middle
+                # is no track's), and on both for an island's two tracks (one alone may be a bay's beside it).
+                found = {buffer_side(shape["line"], point, shape["half"]) for point in buffer_stops} - {None}
+                ends = {end for end, _ in found if shape["served"] < 2 or {(end, 1), (end, -1)} <= found}
+            else:
+                ends = {buffer_end(shape["line"], point, 3.5) for point in buffer_stops} - {None}
             if len(ends) == 1:
                 buffers[track] = ends.pop()
         heads = head_tracks({t: (shapes[t]["line"], end) for t, end in buffers.items()})
-        if len(heads) < 2 or len(heads) * 10 < len(station["tracks"]) * 6:
-            heads = set()
+        # Most of its tracks, or a row of three where OSM lacks some (Kassel Hbf); and no track runs on
+        # past the row, as through tracks do beside bay platforms (Hamm). A big terminus's row is taken
+        # as it is: one wing of München Hbf ends before the others.
+        most = len(heads) * 10 >= len(station["tracks"]) * 6
+        if len(heads) < 6 or not most:
+            tracks_here = [[plane.xy(p) for p in line] for (kind, _), line in things[index] if kind == "t"]
+            if len(heads) < 2 or not (most or len(heads) >= 3) or runs_past(
+                    {t: (shapes[t]["line"], buffers[t]) for t in heads}, tracks_here):
+                heads = set()
 
         tracks = {}
         for track, shape in shapes.items():
@@ -381,6 +456,8 @@ def main(netex_path, pbf_path):
 
             accesses, sectors = [], defaultdict(list)
             for (kind, extra), shape_points in things[index]:
+                if kind == "t":
+                    continue
                 points = [plane.xy(p) for p in shape_points]
                 if kind == "s":
                     # Stairs often run along the platform; which end is the top isn't always mapped.
@@ -453,6 +530,64 @@ def head_tracks(ends):
         if len(row) >= 2:
             kept.update(track for _, track in row)
     return kept
+
+
+def buffer_side(line, point, half_width):
+    """(0 or the line's length, side) when a buffer stop stands just beyond that end of a platform area's
+    axis, on a track along one of its long sides (about 1.7 m beyond the edge)."""
+    total = length(line)
+    for (a, b), along in (((line[1], line[0]), 0), ((line[-2], line[-1]), total)):
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        segment = math.hypot(dx, dy)
+        if segment == 0:
+            continue
+        beyond = ((point[0] - b[0]) * dx + (point[1] - b[1]) * dy) / segment
+        lateral = (dx * (point[1] - b[1]) - dy * (point[0] - b[0])) / segment
+        if -15 <= beyond <= BUFFER_STOP_DISTANCE and half_width - 1 <= abs(lateral) <= half_width + 4:
+            return (along, 1 if lateral > 0 else -1)
+    return None
+
+
+def runs_past(ends, tracks):
+    """Whether tracks (`tracks`: lines) run on beyond the row of buffer ends (`ends`: {track: (line,
+    0 or its length)}): beside the row (within 25 m of its outer tracks) they cover at least 150 m of
+    the stretch from 50 to 250 m past the platform ends, as a line running through does. A terminus's
+    tracks end at the buffer stops, up to 35 m past the platforms; a siding beside it ends soon after."""
+    points, directions = [], []
+    for line, end in ends.values():
+        far, near = (line[-1], line[0]) if end == 0 else (line[0], line[-1])
+        size = math.dist(far, near)
+        points.append(near)
+        directions.append(((near[0] - far[0]) / size, (near[1] - far[1]) / size))
+    mx, my = sum(d[0] for d in directions), sum(d[1] for d in directions)
+    size = math.hypot(mx, my)
+    mx, my = mx / size, my / size
+    row = max(p[0] * mx + p[1] * my for p in points)
+    across = [p[1] * mx - p[0] * my for p in points]
+    low, high = min(across) - 25, max(across) + 25
+    covered = []
+    for line in tracks:
+        for a, b in zip(line, line[1:]):
+            along_a, along_b = a[0] * mx + a[1] * my, b[0] * mx + b[1] * my
+            across_a, across_b = a[1] * mx - a[0] * my, b[1] * mx - b[0] * my
+            # The part of the segment in the stretch beside the row, in its own parameter t (0…1).
+            t0, t1 = 0.0, 1.0
+            for value_a, value_b, lower, upper in ((along_a, along_b, row + 50, row + 250), (across_a, across_b, low, high)):
+                if value_a == value_b:
+                    if not lower <= value_a <= upper:
+                        t0, t1 = 1.0, 0.0
+                    continue
+                u, v = (lower - value_a) / (value_b - value_a), (upper - value_a) / (value_b - value_a)
+                t0, t1 = max(t0, min(u, v)), min(t1, max(u, v))
+            if t0 < t1:
+                first, last = along_a + t0 * (along_b - along_a), along_a + t1 * (along_b - along_a)
+                covered.append((min(first, last), max(first, last)))
+    total, reach = 0.0, -math.inf
+    for first, last in sorted(covered):
+        if last > reach:
+            total += last - max(first, reach)
+            reach = last
+    return total >= 150
 
 
 def buffer_end(line, point, lateral_limit):
