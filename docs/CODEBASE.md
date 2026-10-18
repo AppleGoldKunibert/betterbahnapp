@@ -64,6 +64,18 @@ in `project.pbxproj`: new files join their target automatically.
   with a push token; `AppModel.handOverLiveActivity()` gives it and the journey to `Cloudflare/live-activity` when the
   app goes to the background and after the background refresh, `takeBackLiveActivity()` ends that when it is active (#315).
 - `App/ExitReminders.swift` – exit reminders (#313, Settings → Meine Reisen, per journey `exitRemindersOff`): Kit `Journey.exitReminders` → time-sensitive notifications `exit|<entry>|<leg>`, rescheduled after every refresh, one per stop (per-device log `exitReminderDates`); while the Live Activity runs, its alert instead.
+- `App/CalendarEvents.swift` – calendar events of saved journeys (#382): `CalendarButton` (`Features/Trips/`, next to
+  the share button in `JourneyDetailView`) adds one from Kit `JourneyCalendarEvent`, tapped again deletes it
+  (`removeFromCalendar`, full access only); the first time it asks for
+  `AppSettings.calendarAccess` (per device, Settings → Kalender). `.full`: `scheduleCalendarSync` (after every
+  `savedJourneys` change and on becoming active) updates the events, removes those of deleted journeys and forgets
+  ones deleted in the calendar. `.addOnly` (iOS write-only access) writes once. Event IDs are kept per device either
+  way (`calendarEventIDs`, `CalendarEventLog`), so switching to full access later keeps the earlier events current.
+  The event's link opens the journey by `SavedJourney.id`. With full access `CalendarChoiceRow` (Settings → Kalender) picks
+  the calendar for new events (`AppSettings.calendarID`, per device, nil = default); events already added stay put.
+  "Automatisch" (`AppSettings.calendarAutoAdd`, Kit `CalendarAutoAdd`: off by default, at departure or on
+  saving, per device) adds due journeys in the sync, each once (`CalendarAutoAddLog`, also set by a manual add), so an
+  event deleted in the calendar doesn't come back; access is only asked when the setting is switched on.
 - `App/WidgetSync.swift` – `updateWidgets()` (from `syncLiveActivity`, on position changes, forced on background)
   writes the `WidgetSnapshot` for `widgetJourney` (`liveJourneyCandidate`, else the next saved journey not switched
   off) and reloads the journey widgets (`WidgetStore.journeyWidgetKinds`) only on change. `updateWidgetStations()` (on
@@ -152,6 +164,9 @@ in `project.pbxproj`: new files join their target automatically.
   attribution/license; keep current when adding one), `BC100RulesView`, quick tags.
 - `Shared/DesignSystem.swift` – `Card`, `SectionHeader`, `LineBadge`, `TimeStack`, `DelayPill`, `PlatformBadge`,
   `InfoChip`, `OperatorLabel`, `Color.brand`, `.transition(.fold)` …; reuse these instead of new styling.
+- `Shared/ClosesMenusOnScroll.swift` – `.closesMenusOnScroll()` on scroll views with a `Menu` or menu `Picker` in their
+  content (journey details, Settings, check-in): an open menu otherwise slides along while the content scrolls.
+  `.resetsWhenMenusCloseOnScroll()` rebuilds a glass menu button (`JourneyShareButton`) that stayed where its menu was.
 - `Shared/StationPicker.swift` (`StationInput`, `TimeSelector`), `LocationService`, `PreviewData`, `VagonwebBrowser`.
   `Shared/DebugScreens.swift` (DEBUG): `-debugScreen <name>`, `-seedDemoTrips YES`, `-seedStressTrips <count>`, `-seedSeatMapTrips YES` (two made-up ICEs leaving in 20 min with a reservation and a made-up Wagenreihung, `CoachSequence.seatMapDemo`: ICE 1 turned round, Wagen 12 Platz 43; ICE 3neo Wagen 24 Platz 78).
 
@@ -340,6 +355,9 @@ in `project.pbxproj`: new files join their target automatically.
   `WidgetStations` (favourites + recent routes for the board widget's picker), `BoardWidgetLink` (`betterbahn://board`,
   the stations travel in the link as base64url JSON, also the widget entities' IDs), `BoardWidgetRows` (board widget
   rows from a board or from journeys, which are still ahead at a time with a 60 s grace, `changeDates`).
+- `Calendar/JourneyCalendarEvent.swift` (#382) – title ("ICE 597 → München", with changes "Köln → München"; "Hbf" dropped only from 100 km straight-line distance, else "Bonn Hbf"),
+  times, departure station with coordinate, notes (platforms, each change with transfer minutes, reserved
+  seats, link) from a journey's latest data; `CalendarAccessMode`, `CalendarAutoAdd.isDue`. Not in `scripts/searchsim` (needs `Tickets/`).
 - `Geometry/` – polyline decode, `RouteGeometryService`, `SegmentHeatmap`.
 - `Weather/WeatherForecast.swift` (#385) – `WeatherClient` asks Open-Meteo's `/v1/forecast` (no key, CC BY 4.0) for a
   station's hourly forecast (temperature, rain chance/amount, wind, WMO code → `WeatherCondition`: German name + SF

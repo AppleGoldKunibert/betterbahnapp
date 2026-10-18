@@ -1,5 +1,6 @@
 import BackgroundTasks
 import BetterBahnKit
+import EventKit
 import Foundation
 import Network
 import Observation
@@ -43,6 +44,7 @@ final class AppModel {
             savedJourneysCloud.localChange(from: oldValue, to: savedJourneys)
             syncLiveActivity()
             scheduleExitReminderSync()
+            scheduleCalendarSync()
             scheduleSpotlightSync()
         }
     }
@@ -65,6 +67,14 @@ final class AppModel {
     @ObservationIgnored var transferDispositions: [String: TransferDisposition] = [:]
     @ObservationIgnored var exitReminderSync: Task<Void, Never>?
     @ObservationIgnored var exitReminderGeneration = 0
+    /// Calendar events of saved journeys on this device (#382), see `CalendarEvents.swift`.
+    var calendarEventIDs: [UUID: String] = CalendarEventLog.load() {
+        didSet { CalendarEventLog.save(calendarEventIDs) }
+    }
+    @ObservationIgnored var calendarStore: EKEventStore?
+    /// Counts the times calendar access was granted, so the calendar setting reloads its list.
+    var calendarAccessChanges = 0
+    @ObservationIgnored var calendarSync: Task<Void, Never>?
     /// Saved journey to open on the Verbindungen tab (set when the Live Activity is tapped);
     /// `ConnectionsView` pushes it and clears this.
     var journeyToOpen: SavedJourney?
@@ -1510,6 +1520,19 @@ final class AppSettings {
             uploadToCloud()
         }
     }
+    /// What the app may do with the calendar events of saved journeys (#382); nil until the user chose.
+    /// Per device, like the calendar access itself.
+    var calendarAccess: CalendarAccessMode? {
+        didSet { UserDefaults.standard.set(calendarAccess?.rawValue, forKey: "calendarAccess") }
+    }
+    /// The calendar new journey events go to; nil for the default calendar. Per device, like `calendarAccess`.
+    var calendarID: String? {
+        didSet { UserDefaults.standard.set(calendarID, forKey: "calendarID") }
+    }
+    /// Adds saved journeys to the calendar by themselves (off by default). Per device, like `calendarAccess`.
+    var calendarAutoAdd: CalendarAutoAdd {
+        didSet { UserDefaults.standard.set(calendarAutoAdd.rawValue, forKey: "calendarAutoAdd") }
+    }
     /// Notifications when someone the user follows checks in on Träwelling (#266). Per device, like
     /// the permission to show notifications.
     var notifyFollowedCheckins: Bool {
@@ -1671,6 +1694,9 @@ final class AppSettings {
         connectionWarnings = defaults.object(forKey: "connectionWarnings") as? Bool ?? true
         exitReminders = defaults.object(forKey: "exitReminders") as? Bool ?? true
         exitReminderLead = ExitReminderLead(rawValue: defaults.integer(forKey: "exitReminderLead")) ?? .five
+        calendarAccess = defaults.string(forKey: "calendarAccess").flatMap(CalendarAccessMode.init)
+        calendarID = defaults.string(forKey: "calendarID")
+        calendarAutoAdd = defaults.string(forKey: "calendarAutoAdd").flatMap(CalendarAutoAdd.init) ?? .off
         quickTags = Storage.load(key: "quickTags") ?? QuickTag.defaults
         trainSearchKinds = defaults.stringArray(forKey: "trainSearchKinds").map { Set($0.compactMap(TrainSearchKind.init)) }
             ?? TrainSearchKind.defaults
