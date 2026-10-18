@@ -77,7 +77,8 @@ in `project.pbxproj`: new files join their target automatically.
   visible edge (`onScrollGeometryChange`), `CoachTile`s to scale, "← Richtung".
   Tapping an ICE coach (bahn.de's sequence only) opens `SeatMapSheet` (`SeatMapView.swift`, #365): the coaches from
   above in the diagram's order, each turned round when its trainset stands with the higher numbers on the left
-  (`SeatMap.isTurned`), seat numbers drawn on top so they stay upright, the leg's reserved seat highlighted.
+  (`SeatMap.isTurned`), seat numbers drawn on top and the pictograms (`SeatMap.icons`) drawn again from the unturned
+  drawing, so both stay upright; the leg's reserved seat highlighted.
 - `Features/TrainSearch/` – `TrainSearchOverlay` (#183): Spotlight-style bar over every tab
   (`AppModel.showsTrainSearch`, from the train button on Verbindungen and the map's search button), searches while
   typing, day behind a calendar button, filtered by `AppSettings.trainSearchKinds` (all but "Sonstiges" by default)

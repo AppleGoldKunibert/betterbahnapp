@@ -3714,7 +3714,7 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(plan.seatMap(for: plan.coaches[0]) == nil)
     }
 
-    @Test func seatMapSheets() {
+    @Test func seatMapSheets() throws {
         let ice1 = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "11", "12", "14"]
         #expect(SeatMap.sheet(subtype: "401", coachNumbers: ice1) == "401")
         #expect(SeatMap.sheet(subtype: "401", coachNumbers: ["1", "2", "3", "4", "5", "6", "7", "11", "12"]) == "401.LDV")
@@ -3731,6 +3731,10 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
             #expect(coaches.allSatisfy { $0.seats.allSatisfy { Int($0.number).map { $0 >= 11 } ?? false } }, "\(sheet)")
             #expect(coaches.allSatisfy { Set($0.seats.map(\.number)).count == $0.seats.count }, "\(sheet)")
         }
+        // The pictograms are known, so a coach turned round can show them upright.
+        let serviceCoach = try #require(SeatMap.coach("25", sheet: "403"))
+        #expect(!serviceCoach.icons.isEmpty)
+        #expect(serviceCoach.icons.allSatisfy { $0.x >= 0 && $0.y >= 0 && $0.x + $0.width <= 1.001 && $0.y + $0.height <= 1.001 })
         // DB's ICE 3neo sheet misprints coach 24's 76–78 as 75–77.
         #expect(SeatMap.coach("24", sheet: "408")?.seat("78") != nil)
         // As many seats as DB's sheets list.

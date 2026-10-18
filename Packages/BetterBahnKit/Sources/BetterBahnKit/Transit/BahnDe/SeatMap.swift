@@ -16,6 +16,14 @@ public struct SeatMap: Sendable, Hashable {
         public var height: Double
     }
 
+    /// A box within the drawing, as fractions of its width and height (origin top left).
+    public struct Box: Sendable, Hashable {
+        public var x: Double
+        public var y: Double
+        public var width: Double
+        public var height: Double
+    }
+
     /// The sheet the coach comes from, e.g. "412.7".
     public var sheet: String
     /// Coach numbers this layout has in the trainset: "23" and "33" for the two halves of a double ICE 3.
@@ -29,6 +37,8 @@ public struct SeatMap: Sendable, Hashable {
     /// Width divided by height of the drawing.
     public var aspectRatio: Double
     public var seats: [Seat]
+    /// The pictograms (WC, luggage, wheelchair …), turned upright again in a coach shown turned round.
+    public var icons: [Box] = []
 
     public func seat(_ number: String) -> Seat? {
         seats.first { $0.number == number }
@@ -74,7 +84,8 @@ public struct SeatMap: Sendable, Hashable {
         return file.reduce(into: [:]) { result, entry in
             result[entry.key] = entry.value.coaches.map { coach in
                 SeatMap(sheet: entry.key, numbers: coach.numbers, title: coach.title, type: coach.type,
-                        imageName: coach.image, aspectRatio: coach.aspect, seats: coach.seats.map(\.seat))
+                        imageName: coach.image, aspectRatio: coach.aspect, seats: coach.seats.map(\.seat),
+                        icons: (coach.icons ?? []).compactMap { $0.count == 4 ? Box(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) : nil })
             }
         }
     }
@@ -90,6 +101,8 @@ public struct SeatMap: Sendable, Hashable {
         var image: String
         var aspect: Double
         var seats: [SeatRow]
+        /// `[x, y, width, height]`
+        var icons: [[Double]]?
     }
 
     /// `["45", x, y, width, height]`

@@ -131,6 +131,21 @@ private struct SeatMapCoach: View {
             .frame(width: width, height: height)
             .rotationEffect(turned ? .degrees(180) : .zero)
             .overlay {
+                // Turned round, the pictograms would stand on their heads: each is drawn again from the
+                // unturned drawing at its turned place.
+                if turned {
+                    ForEach(Array(map.icons.enumerated()), id: \.offset) { _, icon in
+                        Image(map.imageName)
+                            .resizable()
+                            .frame(width: width, height: height)
+                            .offset(x: -icon.x * width, y: -icon.y * height)
+                            .frame(width: icon.width * width, height: icon.height * height, alignment: .topLeading)
+                            .clipped()
+                            .position(x: (1 - icon.x - icon.width / 2) * width, y: (1 - icon.y - icon.height / 2) * height)
+                    }
+                }
+            }
+            .overlay {
                 ForEach(Array(map.seats.enumerated()), id: \.offset) { _, seat in
                     // Turned round, a seat's box moves to the opposite corner; its number stays upright.
                     let x = turned ? 1 - seat.x - seat.width : seat.x

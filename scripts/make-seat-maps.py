@@ -23,6 +23,7 @@ import re
 import shutil
 import subprocess
 import sys
+from collections import deque
 import tempfile
 import urllib.request
 from pathlib import Path
@@ -219,8 +220,17 @@ def strip_numbers(image, seats, scale, box):
             counts[q] = counts.get(q, 0) + 1
         background_key = max(counts, key=counts.get)
         background = region[[q == background_key for q in quantized]].mean(axis=0)
-        # DB prints every seat number light on its seat; the seat's darker outline stays.
-        glyph = region[np.argmax(region.sum(axis=1))]
+        # DB prints seat numbers light on the seats and dark on the floor or the bike spaces' grey circles: the
+        # number is whichever side has more pixels, so a seat's darker outline stays.
+        brightness = region.sum(axis=1)
+        lighter = (brightness > background.sum() + 120).sum()
+        darker = (brightness < background.sum() - 120).sum()
+        if background.sum() > 690 and darker > 0.3 * len(region):
+            # A white number filling a dark badge (some ICE 4 seats): the badge is the background.
+            background = region[brightness < background.sum() - 120].mean(axis=0)
+            glyph = region[np.argmax(brightness)]
+        else:
+            glyph = region[np.argmax(brightness)] if lighter >= darker else region[np.argmin(brightness)]
         direction = glyph - background
         length = max(1, (direction ** 2).sum())
         t = ((region - background) * direction).sum(axis=1) / length
@@ -237,6 +247,87 @@ def corrected(sheet, coach, seat, box):
         if (fix_sheet, fix_coach) == (sheet, coach) and abs(x - fix_x) < 0.003 and abs(y - fix_y) < 0.003:
             return seat[:4] + (number,)
     return seat
+
+
+def components(mask):
+    """Bounding boxes (x, y, width, height) and pixel counts of the 4-connected True areas of `mask`."""
+    seen = np.zeros_like(mask, dtype=bool)
+    height, width = mask.shape
+    found = []
+    for y, x in zip(*np.nonzero(mask)):
+        if seen[y, x]:
+            continue
+        seen[y, x] = True
+        queue = deque([(y, x)])
+        x0 = x1 = x
+        y0 = y1 = y
+        count = 0
+        while queue:
+            cy, cx = queue.popleft()
+            count += 1
+            x0, x1, y0, y1 = min(x0, cx), max(x1, cx), min(y0, cy), max(y1, cy)
+            for ny, nx in ((cy + 1, cx), (cy - 1, cx), (cy, cx + 1), (cy, cx - 1)):
+                if 0 <= ny < height and 0 <= nx < width and mask[ny, nx] and not seen[ny, nx]:
+                    seen[ny, nx] = True
+                    queue.append((ny, nx))
+        found.append((int(x0), int(y0), int(x1 - x0 + 1), int(y1 - y0 + 1), count))
+    return found
+
+
+def icons(image):
+    """The pictograms (WC, luggage, wheelchair …: dark blue or black boxes) as (x, y, width, height) fractions
+    of the image, so the app can turn them upright again in a coach shown turned round."""
+    height, width = image.shape[:2]
+    dark = image.astype(int).sum(axis=2) < 260
+    # Only what stays dark across a 7×7 square: the boxes' fill, not the lines touching them (BR 408's black
+    # pictograms sit on black walls and racks).
+    r = 3
+    sums = np.pad(dark.astype(int), ((r + 1, r), (r + 1, r))).cumsum(axis=0).cumsum(axis=1)
+    k = 2 * r + 1
+    solid = (sums[k:, k:] - sums[:-k, k:] - sums[k:, :-k] + sums[:-k, :-k]) == k * k
+    lo, hi = IMAGE_HEIGHT * 0.07, IMAGE_HEIGHT * 0.22
+    # A pictogram's white symbol splits its box into pieces: join pieces that nearly touch (pictograms side by
+    # side become one box, which turns upright just as well).
+    boxes = [[x - r, y - r, x + w + r, y + h + r] for x, y, w, h, _ in components(solid) if w < hi and h < hi]
+    gap = 2 * r + 4
+    merged = True
+    while merged:
+        merged = False
+        for i in range(len(boxes)):
+            for j in range(i + 1, len(boxes)):
+                a, b = boxes[i], boxes[j]
+                if a[0] - gap <= b[2] and b[0] - gap <= a[2] and a[1] - gap <= b[3] and b[1] - gap <= a[3]:
+                    boxes[i] = [min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3])]
+                    del boxes[j]
+                    merged = True
+                    break
+            if merged:
+                break
+    # Grow each box over the box's rest below or beside a label ("Recycling") while the next row or column is
+    # still mostly dark.
+    for box in boxes:
+        for _ in range(12):
+            grown = False
+            if box[1] > 0 and dark[box[1] - 1, box[0]:box[2]].mean() > 0.3:
+                box[1] -= 1
+                grown = True
+            if box[3] < height and dark[box[3], box[0]:box[2]].mean() > 0.3:
+                box[3] += 1
+                grown = True
+            if box[0] > 0 and dark[box[1]:box[3], box[0] - 1].mean() > 0.3:
+                box[0] -= 1
+                grown = True
+            if box[2] < width and dark[box[1]:box[3], box[2]].mean() > 0.3:
+                box[2] += 1
+                grown = True
+            if not grown:
+                break
+    boxes = [(x0, y0, x1 - x0, y1 - y0) for x0, y0, x1, y1 in boxes]
+    boxes = [(x, y, w, h) for x, y, w, h in boxes if lo <= h <= hi and lo <= w <= hi * 3.5 and w / h >= 0.55]
+    pad = 3
+    return [[round(max(0, x - pad) / width, 4), round(max(0, y - pad) / height, 4),
+             round((min(width, x + w + pad) - max(0, x - pad)) / width, 4),
+             round((min(height, y + h + pad) - max(0, y - pad)) / height, 4)] for x, y, w, h in boxes]
 
 
 def coach_image(pdf, page, box, seats):
@@ -302,6 +393,7 @@ def main():
                 seats = [w for w in words if re.fullmatch(r"\d{1,3}", w[4])
                          and box[0] <= (w[0] + w[2]) / 2 <= box[2] and box[1] <= (w[1] + w[3]) / 2 <= box[3]]
                 image = coach_image(pdf, number, box, seats)
+                pictograms = icons(np.asarray(image))
                 data = png_bytes(image)
                 digest = hashlib.sha1(data).hexdigest()
                 name = images.get(digest)
@@ -320,6 +412,7 @@ def main():
                     "seats": [[s[4], round((s[0] - box[0]) / w, 4), round((s[1] - box[1]) / h, 4),
                                round((s[2] - s[0]) / w, 4), round((s[3] - s[1]) / h, 4)]
                               for s in seats],
+                    "icons": pictograms,
                 })
                 if debug:
                     draw = ImageDraw.Draw(debug)
