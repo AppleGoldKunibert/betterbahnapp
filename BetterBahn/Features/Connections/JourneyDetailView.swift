@@ -55,6 +55,7 @@ struct JourneyDetailView: View {
                 plan
             }
         }
+        .closesMenusOnScroll()
         .refreshable {
             await TimetablesClient.invalidateDelays()
             await refreshRealtime()
