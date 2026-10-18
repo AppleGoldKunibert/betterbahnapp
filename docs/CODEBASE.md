@@ -71,7 +71,8 @@ in `project.pbxproj`: new files join their target automatically.
   transfers), `JourneyResultsView` + `JourneyCard`, `TrainNumberSheet` ("Bestimmten Zug wählen", #225: trains fitting
   the input via Kit `TrainCandidateFinder`; picking one shows its stops in `TripContent` with boarding/exit preselected
   and pins that run; "Ein- und Ausstieg selbst angeben"), `JourneyDetailView` (+ `LegCard`, `TransferRow`,
-  alternatives sheets), `JourneyMapView`, `JourneyReplanSheet` (replan mid-journey; "Halt hinzufügen" via
+  alternatives sheets; below the legs `CO2SavingButton` "−42 kg CO₂" → `CO2Sheet`, #386, from Kit `CO2Comparison`
+  with the legs' cached track geometry), `JourneyMapView`, `JourneyReplanSheet` (replan mid-journey; "Halt hinzufügen" via
   `ManualStopSheet` adds an off-timetable exit, a check-in then becomes a manual trip via
   `AppModel.replaceCheckinWithManualTrip`; a new exit on the last train asks "Reise … beenden" / "Weiter nach …").
 - `Features/Departures/` – `StationBoardView`/`BoardRow`, `TripView`. `CoachSequenceView.swift`: the Wagenreihung
@@ -151,7 +152,9 @@ in `project.pbxproj`: new files join their target automatically.
 
 - `Journey` → `Leg` → `Stopover`, `Line`, `Product`, `TimeInfo` (planned/actual), `PlatformInfo`, `Trip`,
   `JourneyPage`, `Station` (+ `DataSource`, `Coordinate`), `BoardEntry`, `TrainMessage` (DB delay reasons/notices),
-  `RideMatch`, `YearReview` (km, hours, punctuality < 6 min, series, stations, routes, countries from EVA/IFOPT).
+  `RideMatch`, `YearReview` (km, hours, punctuality < 6 min, series, stations, routes, countries from EVA/IFOPT, CO₂),
+  `CO2Comparison` (#386: km × Umweltbundesamt g/Pkm per product, reference year 2024; car and domestic flight over the
+  same km; walks, ferries and unknown products left out).
 - `StationNames` (#205) – `Station.displayName`: DB's name for German stations, the national railway's with accents
   abroad, from `Resources/StationNames.json` (OpenStation with DHID/EVA, names from DB RIS via bahn.expert's
   `stopPlace/byTerm`). Matched by the DHID in the stop ID ("de:08135:0620" = "de:08135:620"), EVA, `aliases` (non-German

@@ -32,6 +32,8 @@ struct JourneyDetailView: View {
     @State private var transferWarnings: [String: String] = [:]
     /// Where to board for a quick transfer or exit (#383), keyed by the leg to board.
     @State private var coachAdvice: [String: CoachAdvice] = [:]
+    /// CO₂ compared with car and plane (#386), once the track geometry is in.
+    @State private var co2: CO2Comparison?
 
     /// Where the journey is going now.
     private var goal: Station { editedDestination ?? finalDestination }
@@ -82,6 +84,7 @@ struct JourneyDetailView: View {
                 await loadCoachAdvice()
             }
         }
+        .task(id: journey.transitLegs.map(\.id)) { await loadCO2() }
         .tabBarSafePadding()
         .background { AppBackground() }
         .navigationTitle(title)
@@ -172,6 +175,7 @@ struct JourneyDetailView: View {
                     }
                 }
             }
+            if let co2, co2.savedComparedToCar >= 0.1 { CO2SavingButton(comparison: co2) }
             if !readOnly { historySection }
         }
         .padding(.horizontal)
@@ -190,6 +194,19 @@ struct JourneyDetailView: View {
     private func loadTransferWarnings() async {
         guard !journey.isOver() else { return }
         transferWarnings = await TrainStatisticsModel.transferWarnings(for: journey, upTo: 15, here: true, bahnDe: model.provider.bahnDe)
+    }
+
+    /// Measures the legs along their tracks (cached, like the journey map) for the CO₂ comparison.
+    private func loadCO2() async {
+        let legs = journey.transitLegs, model = model
+        let geometries = await withTaskGroup(of: (String, [Coordinate]?).self) { group in
+            for leg in legs { group.addTask { await (leg.id, model.geometry(for: leg)) } }
+            var found: [String: [Coordinate]] = [:]
+            for await (id, geometry) in group { found[id] = geometry }
+            return found
+        }
+        guard !Task.isCancelled else { return }
+        co2 = CO2Comparison(legs: legs, geometries: geometries)
     }
 
     /// Whether opening waits for live data (see the `.task` above): only for a journey not seen live yet.
