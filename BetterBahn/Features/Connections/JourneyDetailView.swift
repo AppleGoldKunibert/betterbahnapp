@@ -585,6 +585,8 @@ struct LegCard: View {
     @State private var showFullTrip = false
     /// What past runs of this train say (#316), shown in the details.
     @State private var statistics = TrainStatisticsModel()
+    /// Which side the platform is on where this leg ends (#394), if the offline list knows.
+    @State private var exitSide: ExitSide?
     @Environment(AppModel.self) private var model
 
     private var color: Color { leg.line?.color ?? .gray }
@@ -702,7 +704,7 @@ struct LegCard: View {
 
                     TimelineNode(kind: .major, color: color, lineAbove: color) {
                         stationRow(time: leg.arrival, name: leg.destination.displayName, platform: leg.arrivalPlatform,
-                                   weather: arrivalWeather)
+                                   weather: arrivalWeather, exitSide: exitSide)
                     }
 
                     // Between the stops and "Mehr"; unfolds by itself around the departure.
@@ -782,9 +784,15 @@ struct LegCard: View {
         .task(id: leg.id) {
             await statistics.load(line: leg.line, stops: statisticsStops, date: leg.departure.planned, bahnDe: model.provider.bahnDe)
         }
+        .task(id: [leg.id, leg.arrivalPlatform?.best ?? ""]) {
+            // The list loads and the lookup runs off the main thread.
+            let leg = leg
+            exitSide = await Task.detached(priority: .userInitiated) { ExitSides.side(leaving: leg) }.value
+        }
     }
 
-    private func stationRow(time: TimeInfo, name: String, platform: PlatformInfo?, weather: LegArrivalWeather? = nil) -> some View {
+    private func stationRow(time: TimeInfo, name: String, platform: PlatformInfo?, weather: LegArrivalWeather? = nil,
+                            exitSide: ExitSide? = nil) -> some View {
         HStack(alignment: .top, spacing: 10) {
             TimeStack(time: time, cancelled: leg.cancelled, font: .headline)
                 .frame(width: 54, alignment: .leading)
@@ -792,6 +800,10 @@ struct LegCard: View {
                 Text(name)
                     .font(.headline)
                     .fullTextPopup(name, lines: 2)
+                if let exitSide {
+                    ExitSideLabel(side: exitSide)
+                        .transition(.fold)
+                }
                 if let weather {
                     WeatherLabel(forecast: weather.forecast, context: weather.atDestination ? "bei Ankunft" : "beim Umstieg",
                                  station: name)

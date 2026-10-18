@@ -629,6 +629,17 @@ struct PlannedPlatformNote: View {
     }
 }
 
+/// "Ausstieg in Fahrtrichtung links" under the stop where the user gets off (#394).
+struct ExitSideLabel: View {
+    let side: ExitSide
+
+    var body: some View {
+        Label(side.displayName, systemImage: side == .left ? "arrow.left.to.line" : "arrow.right.to.line")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+}
+
 struct InfoChip: View {
     let text: String
     let systemImage: String
