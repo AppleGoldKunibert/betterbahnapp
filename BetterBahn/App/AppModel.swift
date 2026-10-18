@@ -1529,6 +1529,10 @@ final class AppSettings {
     var calendarID: String? {
         didSet { UserDefaults.standard.set(calendarID, forKey: "calendarID") }
     }
+    /// Adds saved journeys to the calendar by themselves (off by default). Per device, like `calendarAccess`.
+    var calendarAutoAdd: CalendarAutoAdd {
+        didSet { UserDefaults.standard.set(calendarAutoAdd.rawValue, forKey: "calendarAutoAdd") }
+    }
     /// Notifications when someone the user follows checks in on Träwelling (#266). Per device, like
     /// the permission to show notifications.
     var notifyFollowedCheckins: Bool {
@@ -1692,6 +1696,7 @@ final class AppSettings {
         exitReminderLead = ExitReminderLead(rawValue: defaults.integer(forKey: "exitReminderLead")) ?? .five
         calendarAccess = defaults.string(forKey: "calendarAccess").flatMap(CalendarAccessMode.init)
         calendarID = defaults.string(forKey: "calendarID")
+        calendarAutoAdd = defaults.string(forKey: "calendarAutoAdd").flatMap(CalendarAutoAdd.init) ?? .off
         quickTags = Storage.load(key: "quickTags") ?? QuickTag.defaults
         trainSearchKinds = defaults.stringArray(forKey: "trainSearchKinds").map { Set($0.compactMap(TrainSearchKind.init)) }
             ?? TrainSearchKind.defaults

@@ -66,4 +66,15 @@ import Testing
         #expect(event.title == "ICE 527 → München")
         #expect(event.location == "Köln Messe/Deutz")
     }
+
+    /// "Bei Abfahrt" waits for the (realtime) departure, "Beim Speichern" doesn't; finished journeys get none.
+    @Test func autoAddIsDueAtDepartureOrRightAway() {
+        let journey = Journey(legs: [leg("ICE 597", koeln, muenchen, dep: time(30, delay: 10), arr: time(300),
+                                         platform: nil)], source: .bahnDe)
+        #expect(!CalendarAutoAdd.off.isDue(journey, now: now))
+        #expect(CalendarAutoAdd.onSave.isDue(journey, now: now))
+        #expect(!CalendarAutoAdd.onDeparture.isDue(journey, now: now.addingTimeInterval(35 * 60)))
+        #expect(CalendarAutoAdd.onDeparture.isDue(journey, now: now.addingTimeInterval(40 * 60)))
+        #expect(!CalendarAutoAdd.onSave.isDue(journey, now: now.addingTimeInterval(400 * 60)))
+    }
 }

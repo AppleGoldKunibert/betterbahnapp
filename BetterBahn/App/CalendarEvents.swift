@@ -21,13 +21,19 @@ extension AppModel {
         let mode = settings.calendarAccess ?? .full
         guard let store = await requestCalendarAccess(mode) else { throw CalendarError.noAccess }
         // Asking may have taken a while: take the journey's latest data.
-        guard let entry = savedJourneys.first(where: { $0.id == entry.id }),
-              let content = calendarEvent(for: entry) else { throw CalendarError.notSaved }
+        guard let entry = savedJourneys.first(where: { $0.id == entry.id }) else { throw CalendarError.notSaved }
+        try insertEvent(for: entry, in: store)
+    }
+
+    private func insertEvent(for entry: SavedJourney, in store: EKEventStore) throws {
+        guard let content = calendarEvent(for: entry) else { throw CalendarError.notSaved }
         let event = EKEvent(eventStore: store)
         event.calendar = targetCalendar(in: store)
         Self.fill(event, with: content)
         try store.save(event, span: .thisEvent)
         if let id = event.eventIdentifier { calendarEventIDs[entry.id] = id }
+        // Added once, by hand or by itself: auto-add doesn't bring it back after it's deleted in the calendar.
+        CalendarAutoAddLog.insert(entry.id)
     }
 
     /// Asks iOS for the access `mode` needs (full access also covers adding). Nil when it's refused.
@@ -75,7 +81,7 @@ extension AppModel {
 
     /// Coalesces the many changes to `savedJourneys` (every refresh) into one sync.
     func scheduleCalendarSync(after delay: Duration = .seconds(2)) {
-        guard settings.calendarAccess == .full, !calendarEventIDs.isEmpty else { return }
+        guard settings.calendarAutoAdd != .off || (settings.calendarAccess == .full && !calendarEventIDs.isEmpty) else { return }
         calendarSync?.cancel()
         calendarSync = Task {
             try? await Task.sleep(for: delay)
@@ -84,9 +90,10 @@ extension AppModel {
         }
     }
 
-    /// Brings the events up to date with the saved journeys, removes those of deleted journeys and
-    /// forgets those deleted in the calendar. Only with full access: without it events can't be read.
+    /// Adds the events `settings.calendarAutoAdd` asks for, then (with full access) brings the events up to date
+    /// with the saved journeys, removes those of deleted journeys and forgets those deleted in the calendar.
     private func syncCalendarEvents() {
+        addDueCalendarEvents()
         guard settings.calendarAccess == .full, EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return }
         let store = calendarStore ?? EKEventStore()
         calendarStore = store
@@ -106,6 +113,23 @@ extension AppModel {
         }
         try? store.commit()
         if ids != calendarEventIDs { calendarEventIDs = ids }
+    }
+
+    /// Adds the events of journeys due by `settings.calendarAutoAdd`, once each. Never asks for access: that
+    /// happens when the setting is switched on.
+    private func addDueCalendarEvents(now: Date = .now) {
+        guard settings.calendarAutoAdd != .off, let mode = settings.calendarAccess else { return }
+        let status = EKEventStore.authorizationStatus(for: .event)
+        guard status == .fullAccess || (mode == .addOnly && status == .writeOnly) else { return }
+        let added = CalendarAutoAddLog.load()
+        let due = savedJourneys.filter { entry in
+            calendarEventIDs[entry.id] == nil && !added.contains(entry.id) && settings.calendarAutoAdd.isDue(entry.journey, now: now)
+        }
+        guard !due.isEmpty else { return }
+        let store = calendarStore ?? EKEventStore()
+        calendarStore = store
+        for entry in due { try? insertEvent(for: entry, in: store) }
+        CalendarAutoAddLog.keep(only: Set(savedJourneys.map(\.id)))
     }
 
     private func calendarEvent(for entry: SavedJourney) -> JourneyCalendarEvent? {
@@ -148,5 +172,27 @@ enum CalendarEventLog {
 
     static func save(_ ids: [UUID: String]) {
         UserDefaults.standard.set(Dictionary(uniqueKeysWithValues: ids.map { ($0.uuidString, $1) }), forKey: key)
+    }
+}
+
+/// Journeys whose event was added once (by hand or automatically), so auto-add skips them. Per device.
+enum CalendarAutoAddLog {
+    static let key = "calendarAutoAdded"
+
+    static func load() -> Set<UUID> {
+        Set((UserDefaults.standard.stringArray(forKey: key) ?? []).compactMap(UUID.init))
+    }
+
+    static func insert(_ id: UUID) {
+        save(load().union([id]))
+    }
+
+    /// Forgets deleted journeys.
+    static func keep(only ids: Set<UUID>) {
+        save(load().intersection(ids))
+    }
+
+    private static func save(_ ids: Set<UUID>) {
+        UserDefaults.standard.set(ids.map(\.uuidString), forKey: key)
     }
 }

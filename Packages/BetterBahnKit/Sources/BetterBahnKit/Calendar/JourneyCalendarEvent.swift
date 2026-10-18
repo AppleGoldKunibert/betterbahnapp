@@ -82,3 +82,31 @@ public enum CalendarAccessMode: String, Codable, Sendable, CaseIterable {
         }
     }
 }
+
+/// Whether saved journeys get their calendar event by themselves (#382). Each journey only once: an event
+/// deleted in the calendar doesn't come back.
+public enum CalendarAutoAdd: String, Codable, Sendable, CaseIterable {
+    case off
+    /// When the journey departs.
+    case onDeparture
+    /// As soon as the journey is saved.
+    case onSave
+
+    public var displayName: String {
+        switch self {
+        case .off: "Aus"
+        case .onDeparture: "Bei Abfahrt"
+        case .onSave: "Beim Speichern"
+        }
+    }
+
+    /// Whether `journey` is due for its event at `now`; finished journeys never are.
+    public func isDue(_ journey: Journey, now: Date = .now) -> Bool {
+        guard !journey.isOver(now: now), let departure = journey.departure?.best else { return false }
+        switch self {
+        case .off: return false
+        case .onDeparture: return departure <= now
+        case .onSave: return true
+        }
+    }
+}

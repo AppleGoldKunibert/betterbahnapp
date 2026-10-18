@@ -128,20 +128,34 @@ struct SettingsView: View {
                     } label: {
                         IconLabel(title: "Termine deiner Reisen", systemImage: "calendar", color: .red)
                     }
+                    .onChange(of: settings.calendarAccess) { _, mode in
+                        guard let mode, mode == .full || settings.calendarAutoAdd != .off else { return }
+                        Task {
+                            _ = await model.requestCalendarAccess(mode)
+                            model.scheduleCalendarSync(after: .zero)
+                        }
+                    }
                     if settings.calendarAccess == .full {
                         CalendarChoiceRow()
                     }
-                    .onChange(of: settings.calendarAccess) { _, mode in
-                        guard mode == .full else { return }
+                    Picker(selection: $settings.calendarAutoAdd) {
+                        ForEach(CalendarAutoAdd.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                    } label: {
+                        IconLabel(title: "Automatisch hinzufügen", systemImage: "calendar.badge.clock", color: .red)
+                    }
+                    .onChange(of: settings.calendarAutoAdd) { _, autoAdd in
+                        guard autoAdd != .off else { return }
+                        // Asked here, never in the background: the access the first choice in this section stands for.
+                        if settings.calendarAccess == nil { settings.calendarAccess = .full }
                         Task {
-                            _ = await model.requestCalendarAccess(.full)
+                            _ = await model.requestCalendarAccess(settings.calendarAccess ?? .full)
                             model.scheduleCalendarSync(after: .zero)
                         }
                     }
                 } header: {
                     Text("Kalender")
                 } footer: {
-                    Text("Mit vollem Zugriff bleiben die Termine deiner Reisen aktuell, auch bei Verspätungen und Gleiswechseln, und verschwinden mit der Reise. Mit „Nur hinzufügen“ wird jeder Termin einmal in deinen Standardkalender eingetragen.")
+                    Text("Mit vollem Zugriff bleiben die Termine deiner Reisen aktuell, auch bei Verspätungen und Gleiswechseln, und verschwinden mit der Reise. Mit „Nur hinzufügen“ wird jeder Termin einmal in deinen Standardkalender eingetragen. Automatisch kommt jede gespeicherte Reise einmal in den Kalender, beim Speichern oder erst bei der Abfahrt.")
                 }
 
                 Section {

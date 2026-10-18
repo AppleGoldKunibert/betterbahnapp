@@ -72,6 +72,9 @@ in `project.pbxproj`: new files join their target automatically.
   way (`calendarEventIDs`, `CalendarEventLog`), so switching to full access later keeps the earlier events current.
   The event's link opens the journey by `SavedJourney.id`. With full access `CalendarChoiceRow` (Settings → Kalender) picks
   the calendar for new events (`AppSettings.calendarID`, per device, nil = default); events already added stay put.
+  "Automatisch hinzufügen" (`AppSettings.calendarAutoAdd`, Kit `CalendarAutoAdd`: off by default, at departure or on
+  saving, per device) adds due journeys in the sync, each once (`CalendarAutoAddLog`, also set by a manual add), so an
+  event deleted in the calendar doesn't come back; access is only asked when the setting is switched on.
 - `App/WidgetSync.swift` – `updateWidgets()` (from `syncLiveActivity`, on position changes, forced on background)
   writes the `WidgetSnapshot` for `widgetJourney` (`liveJourneyCandidate`, else the next saved journey not switched
   off) and reloads the journey widgets (`WidgetStore.journeyWidgetKinds`) only on change. `updateWidgetStations()` (on
@@ -353,7 +356,7 @@ in `project.pbxproj`: new files join their target automatically.
   rows from a board or from journeys, which are still ahead at a time with a 60 s grace, `changeDates`).
 - `Calendar/JourneyCalendarEvent.swift` (#382) – title ("ICE 597 → München", with changes "Köln → München"; "Hbf" dropped only from 100 km straight-line distance, else "Bonn Hbf"),
   times, departure station with coordinate, notes (platforms, each change with transfer minutes, reserved
-  seats, link) from a journey's latest data; `CalendarAccessMode`. Not in `scripts/searchsim` (needs `Tickets/`).
+  seats, link) from a journey's latest data; `CalendarAccessMode`, `CalendarAutoAdd.isDue`. Not in `scripts/searchsim` (needs `Tickets/`).
 - `Geometry/` – polyline decode, `RouteGeometryService`, `SegmentHeatmap`.
 - `Weather/WeatherForecast.swift` (#385) – `WeatherClient` asks Open-Meteo's `/v1/forecast` (no key, CC BY 4.0) for a
   station's hourly forecast (temperature, rain chance/amount, wind, WMO code → `WeatherCondition`: German name + SF
