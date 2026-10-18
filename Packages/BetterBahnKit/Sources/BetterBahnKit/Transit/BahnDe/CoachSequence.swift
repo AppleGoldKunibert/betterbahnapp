@@ -20,6 +20,8 @@ public struct CoachSequence: Sendable, Hashable {
         public var unit: TrainFormation.Unit?
         /// Whether this part runs as the train that was asked for.
         public var isRequestedTrain: Bool
+        /// The sheet of DB's seat maps for this trainset ("412.7"), see `SeatMap`; nil without one.
+        public var seatMapSheet: String? = nil
     }
 
     public struct Coach: Sendable, Hashable, Identifiable {
@@ -299,7 +301,8 @@ extension BahnDeClient {
                 trainName: trainName,
                 destination: group.transport?.destination?.name,
                 unit: unitNumber.map { TrainFormation.Unit(model: nil, number: $0, name: trainsetName(from: groupName)) },
-                isRequestedTrain: isRequested(group)))
+                isRequestedTrain: isRequested(group),
+                seatMapSheet: isTrainset ? seatMapSheet(of: group, category: category) : nil))
             for vehicle in group.vehicles ?? [] {
                 let kind = CoachSequence.Coach.Kind(category: vehicle.type?.category)
                 let typeCategory = vehicle.type?.category ?? ""

@@ -22,7 +22,7 @@ only the files you change. Keep it current when structure changes. Build, test a
 | `Cloudflare/live-activity/` | Worker `betterbahn-live` (D1, cron every minute): keeps the Live Activity current while the app is closed (#315). The app hands over the activity's push token and the journey (Kit `LiveActivityPushJourney`) when it goes to the background (`PUT /activities/<id>`) and takes it back when opened (`DELETE`). On `LiveActivityRefreshSchedule`'s times it asks DB's keyless IRIS about the current train (`iris.mjs`: `plan` once per stop, then `fchg`), works out the state like `ContentState.from` (`state.mjs`, checked against the Kit fixture `live-activity-push.json`) and pushes it when it changed; ends the activity after the arrival. `node --test Cloudflare/live-activity/worker.test.mjs`. |
 | `Cloudflare/shared/` | `appattest.mjs`: App Attest verification and the `X-BetterBahn-Token` the Workers check. `node --test Cloudflare/shared/appattest.test.mjs`. `apns.mjs`: APNs with the provider token (`betterbahn-push`, `betterbahn-live`). |
 | `.github/workflows/` | `pr-build.yml` (macOS: Kit tests + unsigned app build on code PRs), `pr-secrets.yml` (gitleaks + guard against `DefaultCredentials.swift`), `sync-prod.yml` (merges prod into every branch but `appstorerelease`), `train-stats-import.yml` (daily, into D1), `monthly-data-update.yml` (1st of the month: rebuilds the three station lists, PR into prod on `monthlyupdate-<MM>/<YY>`; `scripts/check-data-update.py` stops it when a list is empty or 10 % smaller; the PR gets no CI by itself, push an empty commit). |
-| `scripts/` | `make-station-hints.py` (offline search hints), `make-ril100.py` (`Ril100.swift`, also DB's XLSX for codes abroad, needs `openpyxl`), `make-station-names.py` (`StationNames.swift` from OpenStation NeTEx, DB RIS names via bahn.expert and Transitous; run after `make-ril100.py`; `--refresh` re-asks bahn.expert, ~1 h), `check-data-update.py`. `searchsim/`: Linux package (`./sync.sh`, `swift test`; `swift run SearchSim scenarios.txt` runs ~1150 live station-search scenarios, rerun after changing search ranking). |
+| `scripts/` | `make-station-hints.py` (offline search hints), `make-ril100.py` (`Ril100.swift`, also DB's XLSX for codes abroad, needs `openpyxl`), `make-station-names.py` (`StationNames.swift` from OpenStation NeTEx, DB RIS names via bahn.expert and Transitous; run after `make-ril100.py`; `--refresh` re-asks bahn.expert, ~1 h), `check-data-update.py`, `make-seat-maps.py` (ICE seat maps from DB's Wagenreihungspläne via bahn.expert `/WRSheets/<sheet>.pdf`: images in `Assets.xcassets/SeatMaps/`, seat positions in `SeatMaps.json`; needs poppler, Pillow, numpy). `searchsim/`: Linux package (`./sync.sh`, `swift test`; `swift run SearchSim scenarios.txt` runs ~1150 live station-search scenarios, rerun after changing search ranking). |
 | `docs/` | `transit-providers.md` (data sources), `app-review-notes.md` (App Store checklist and review notes). |
 
 Targets: `BetterBahn`, `BetterBahnWidgetsExtension`, `BetterBahnShareExtension`, `BetterBahnKit`. Bundle IDs
@@ -84,6 +84,10 @@ in `project.pbxproj`: new files join their target automatically.
   402, 403, 407, 408, 411, 412; © DB AG, "Quelle: Deutsche Bahn", picked by Kit `TrainDrawing`).
   `CoachSequenceDiagram`: horizontal platform opening at the train's front, sector bar, part labels sticking to the
   visible edge (`onScrollGeometryChange`), `CoachTile`s to scale, "← Richtung".
+  Tapping an ICE coach (bahn.de's sequence only) opens `SeatMapSheet` (`SeatMapView.swift`, #365): the coaches from
+  above in the diagram's order, each turned round when its trainset stands with the higher numbers on the left
+  (`SeatMap.isTurned`), seat numbers drawn on top and the pictograms (`SeatMap.icons`) drawn again from the unturned
+  drawing, so both stay upright; the leg's reserved seat highlighted.
 - `Features/TrainSearch/` – `TrainSearchOverlay` (#183): Spotlight-style bar over every tab
   (`AppModel.showsTrainSearch`, from the train button on Verbindungen and the map's search button), searches while
   typing, day behind a calendar button, filtered by `AppSettings.trainSearchKinds` (all but "Sonstiges" by default)
@@ -137,7 +141,7 @@ in `project.pbxproj`: new files join their target automatically.
 - `Shared/DesignSystem.swift` – `Card`, `SectionHeader`, `LineBadge`, `TimeStack`, `DelayPill`, `PlatformBadge`,
   `InfoChip`, `OperatorLabel`, `Color.brand`, `.transition(.fold)` …; reuse these instead of new styling.
 - `Shared/StationPicker.swift` (`StationInput`, `TimeSelector`), `LocationService`, `PreviewData`, `VagonwebBrowser`.
-  `Shared/DebugScreens.swift` (DEBUG): `-debugScreen <name>`, `-seedDemoTrips YES`, `-seedStressTrips <count>`.
+  `Shared/DebugScreens.swift` (DEBUG): `-debugScreen <name>`, `-seedDemoTrips YES`, `-seedStressTrips <count>`, `-seedSeatMapTrips YES` (two made-up ICEs leaving in 20 min with a reservation and a made-up Wagenreihung, `CoachSequence.seatMapDemo`: ICE 1 turned round, Wagen 12 Platz 43; ICE 3neo Wagen 24 Platz 78).
 
 ## BetterBahnKit (`Packages/BetterBahnKit/Sources/BetterBahnKit/`)
 
@@ -231,6 +235,12 @@ in `project.pbxproj`: new files join their target automatically.
   "Plan-Wagenreihung · Aktuelle nicht verfügbar" / "Aktuelle Wagenreihung nicht verfügbar". No other way to bahn.de:
   the Worker and the phone's hidden browser were refused. `requiresReservation(for:)` (attribute `RP`, also other
   railways via `lookupReference`; shares the `journeyCourse` cache).
+- `Transit/BahnDe/SeatMap.swift` – DB's seat map per ICE coach (#365, `Resources/SeatMaps.json`): coach numbers, type,
+  each seat number's box as fractions of the drawing (lower coach numbers on the left on every sheet).
+  `CoachSequence.Group.seatMapSheet` per trainset from its UIC numbers (`TrainModel.detectSubtype`) and coach count
+  (`SeatMap.sheet`: ICE 1 with 12 or, modernised, 9 middle coaches; ICE 4 with 7, 12 or 13; all BR 403 on the Redesign
+  sheet); `CoachSequence.seatMap(for:)` by coach number. Misprints on DB's sheets are fixed in the
+  script's `CORRECTIONS` (408 Wagen 24: 76–78 printed as 75–77; 401.LDV Wagen 6: 42 printed as 43).
 - `Transit/Vagonweb/` – vagonweb.cz (with permission, #95): planned compositions for the timetable year from the train's
   HTML (`VagonwebComposition.scheduled`, fixtures `vagonweb-ice*.html`), used when bahn.de has none: `AppModel.trainType`
   and "Plan-Wagenreihung" (`CoachSequence.source == .vagonweb`). Cloudflare bot check → hidden `WebPage`

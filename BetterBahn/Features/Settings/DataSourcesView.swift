@@ -33,7 +33,7 @@ struct DataSourcesView: View {
                url: URL(string: "https://www.bahn.de")!),
         Source(name: "vagonweb.cz", usage: "Geplante Wagenreihungen und Zugtypen, mit Erlaubnis von vagonweb",
                url: URL(string: "https://www.vagonweb.cz")!),
-        Source(name: "bahn.expert", usage: "Zugtypen, Zugsuche nach Nummer, Namen der Bahnhöfe", url: URL(string: "https://bahn.expert")!),
+        Source(name: "bahn.expert", usage: "Zugtypen, Zugsuche nach Nummer, Namen der Bahnhöfe; Sitzpläne der ICE aus den Wagenreihungsplänen, © Deutsche Bahn AG", url: URL(string: "https://bahn.expert")!),
         Source(name: "bahn.jetzt", usage: "Zugpositionen auf der Karte", url: URL(string: "https://bahn.jetzt")!),
         Source(name: "Träwelling", usage: "Check-ins", url: URL(string: "https://traewelling.de")!),
         Source(name: "zug.network", usage: "Emojis im Check-in-Text (oder die deiner mit Träwelling verbundenen Mastodon-Instanz)",

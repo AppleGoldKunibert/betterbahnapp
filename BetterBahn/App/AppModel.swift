@@ -801,6 +801,9 @@ final class AppModel {
     /// The train's coach sequence ("Wagenreihung") at the request's station. Shares bahn.de's
     /// response with `formation(for:)`.
     func coachSequence(for request: BahnDeClient.FormationRequest) async throws -> CoachSequence? {
+        #if DEBUG
+        if let demo = debugCoachSequence(for: request) { return demo }
+        #endif
         guard let bahnDe = provider.bahnDe else { return nil }
         return try await bahnDe.coachSequence(request)
     }

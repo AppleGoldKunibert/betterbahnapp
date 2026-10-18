@@ -484,6 +484,18 @@ public struct BahnDeClient: Sendable {
             ?? model(constructionTypes: types, groupName: group.name ?? "", category: category)
     }
 
+    /// The seat-map sheet of one trainset (`SeatMap.sheet`), from its vehicles' UIC numbers and coach numbers.
+    static func seatMapSheet(of group: SequenceResponse.Group, category: String) -> String? {
+        let vehicles = group.vehicles ?? []
+        let carriages = vehicles.map { Carriage(vehicleID: $0.vehicleID, constructionType: $0.type?.constructionType) }
+        let passengerCoaches = vehicles.filter { vehicle in
+            let kind = CoachSequence.Coach.Kind(category: vehicle.type?.category)
+            return kind != .locomotive && kind != .powerCar
+        }
+        return SeatMap.sheet(subtype: TrainModel.detectSubtype(carriages, category: category),
+                             coachNumbers: passengerCoaches.compactMap { $0.wagonIdentificationNumber.map(String.init) })
+    }
+
     /// Loco-hauled IC 1 coaches aren't a trainset: their group name ("IC450007") carries a coach-set
     /// number, not a Tz. Groups without vehicles fall back to "IC 1" for any IC, so they keep theirs.
     static func isIC1(_ group: SequenceResponse.Group, model: String?) -> Bool {

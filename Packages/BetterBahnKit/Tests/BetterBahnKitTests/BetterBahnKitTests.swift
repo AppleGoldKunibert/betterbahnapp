@@ -3699,6 +3699,73 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(actual.deviations(fromPlan: renumbered).first == "7 statt 6 Wagen")
     }
 
+    /// DB's seat maps (#365): ICE 117's 7-car ICE 4 gets the "412.7" sheet and each coach its layout. It
+    /// stands with coach 27 on the left of the platform, so its coaches are shown turned round.
+    @Test func seatMapsForAnICE4() throws {
+        let response = try fixture("bahnde-vehicle-sequence", as: BahnDeClient.SequenceResponse.self)
+        let sequence = BahnDeClient.coachSequence(from: response, category: "ICE", number: 117)
+        #expect(sequence.groups.first?.seatMapSheet == "412.7")
+        let endCar = try #require(sequence.seatMap(for: sequence.coaches[0]))
+        #expect(endCar.numbers == ["21", "31"])
+        #expect(endCar.type == "Bpmdzf 7812.2")
+        #expect(endCar.seat("17") != nil)
+        #expect(endCar.seats.allSatisfy { (0...1).contains($0.x) && (0...1).contains($0.y) })
+        #expect(sequence.seatMap(for: sequence.coaches[5])?.title?.hasPrefix("Bordrestaurant") == true)
+
+        let leftToRight = sequence.coaches.sorted { $0.start! < $1.start! }.compactMap(\.number)
+        #expect(SeatMap.isTurned(numbersLeftToRight: leftToRight))
+        #expect(!SeatMap.isTurned(numbersLeftToRight: ["21", "22", "29"]))
+
+        // Not for vagonweb's plan.
+        var plan = sequence
+        plan.source = .vagonweb(validFrom: nil, validUntil: nil)
+        #expect(plan.seatMap(for: plan.coaches[0]) == nil)
+    }
+
+    @Test func seatMapSheets() throws {
+        let ice1 = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "11", "12", "14"]
+        #expect(SeatMap.sheet(subtype: "401", coachNumbers: ice1) == "401")
+        #expect(SeatMap.sheet(subtype: "401", coachNumbers: ["1", "2", "3", "4", "5", "6", "7", "11", "12"]) == "401.LDV")
+        #expect(SeatMap.sheet(subtype: "403.S1", coachNumbers: []) == "403")
+        #expect(SeatMap.sheet(subtype: "412", coachNumbers: ice1) == "412")
+        #expect(SeatMap.sheet(subtype: "412", coachNumbers: ice1 + ["10"]) == "412.13")
+        #expect(SeatMap.sheet(subtype: "406", coachNumbers: []) == nil)
+        #expect(SeatMap.sheet(subtype: "445", coachNumbers: []) == nil)
+        // Every sheet the app can pick has its coaches. Seats are numbered from 11 on: a smaller number would
+        // be a seat number the PDF split into digits (the ICE T's "7", "5" for 75).
+        for sheet in ["401", "401.LDV", "402", "403", "407", "408", "411.S1", "411.S2", "412", "412.7", "412.13"] {
+            let coaches = SeatMap.sheets[sheet] ?? []
+            #expect(!coaches.isEmpty, "\(sheet)")
+            #expect(coaches.allSatisfy { $0.seats.allSatisfy { Int($0.number).map { $0 >= 11 } ?? false } }, "\(sheet)")
+            #expect(coaches.allSatisfy { Set($0.seats.map(\.number)).count == $0.seats.count }, "\(sheet)")
+        }
+        // The pictograms are known, so a coach turned round can show them upright.
+        let serviceCoach = try #require(SeatMap.coach("25", sheet: "403"))
+        #expect(!serviceCoach.icons.isEmpty)
+        #expect(serviceCoach.icons.allSatisfy { $0.x >= 0 && $0.y >= 0 && $0.x + $0.width <= 1.001 && $0.y + $0.height <= 1.001 })
+        // DB's ICE 3neo sheet misprints coach 24's 76–78 as 75–77.
+        #expect(SeatMap.coach("24", sheet: "408")?.seat("78") != nil)
+        // As many seats as DB's sheets list.
+        #expect(SeatMap.sheets["403"]?.reduce(0) { $0 + $1.seats.count } == 450)
+        #expect(SeatMap.sheets["411.S2"]?.reduce(0) { $0 + $1.seats.count } == 376)
+        #expect(SeatMap.coach("37", sheet: "403")?.type == "Bpmz 403.2")
+    }
+
+    /// The made-up Wagenreihung behind the app's `-seedSeatMapTrips`: every coach of the sheet, each with its seat map.
+    @Test func seatMapDemoSequence() throws {
+        let unit = TrainFormation.Unit(model: "ICE 1", number: "199")
+        let ice1 = try #require(CoachSequence.seatMapDemo(sheet: "401", trainName: "ICE 9901", unit: unit, turned: true))
+        #expect(ice1.coaches.count == 14)
+        #expect(ice1.coaches.first?.kind == .powerCar && ice1.coaches.last?.kind == .powerCar)
+        #expect(ice1.coaches.compactMap(\.number).first == "14")
+        #expect(SeatMap.isTurned(numbersLeftToRight: ice1.coaches.compactMap(\.number)))
+        #expect(ice1.coaches.filter(\.isPassengerCoach).allSatisfy { ice1.seatMap(for: $0) != nil })
+        let neo = try #require(CoachSequence.seatMapDemo(sheet: "408", trainName: "ICE 9902", unit: unit))
+        #expect(neo.coaches.compactMap(\.number) == ["21", "22", "23", "24", "25", "26", "28", "29"])
+        #expect(neo.seatMap(for: neo.coaches[3])?.seat("78") != nil)
+        #expect(CoachSequence.seatMapDemo(sheet: "445", trainName: "RE 1", unit: unit) == nil)
+    }
+
     @Test func coachNumberList() {
         #expect(CoachSequence.numberList(["25"]) == "25")
         #expect(CoachSequence.numberList(["23", "21"]) == "21, 23")
