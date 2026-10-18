@@ -141,6 +141,26 @@ public struct JourneyWeather: Sendable, Hashable {
         self.destination = destination
         self.transfers = transfers
     }
+
+    /// What a leg's card shows where the leg arrives: the destination's forecast on the journey's last leg,
+    /// a long transfer's on the others.
+    public func arrival(of leg: Leg, in journey: Journey) -> LegArrivalWeather? {
+        if leg.id == journey.legs.last?.id {
+            return destination.map { LegArrivalWeather(forecast: $0, atDestination: true) }
+        }
+        return transfers[leg.id].map { LegArrivalWeather(forecast: $0, atDestination: false) }
+    }
+}
+
+/// The forecast at a leg's arrival: "bei Ankunft" at the destination, "beim Umstieg" at a transfer.
+public struct LegArrivalWeather: Sendable, Hashable {
+    public var forecast: WeatherForecast
+    public var atDestination: Bool
+
+    public init(forecast: WeatherForecast, atDestination: Bool) {
+        self.forecast = forecast
+        self.atDestination = atDestination
+    }
 }
 
 public extension Journey {

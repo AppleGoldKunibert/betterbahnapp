@@ -159,6 +159,12 @@ import Testing
         #expect(weather.transfers[first.id]?.date == Self.now.addingTimeInterval(2 * 3600))
         #expect(OpenMeteoProtocol.state.requests.count == 2)
 
+        // Each leg's card: the transfer's forecast on the first, the destination's on the last.
+        #expect(weather.arrival(of: first, in: journey) == LegArrivalWeather(forecast: weather.transfers[first.id]!, atDestination: false))
+        #expect(weather.arrival(of: second, in: journey) == LegArrivalWeather(forecast: weather.destination!, atDestination: true))
+        // A short transfer has none.
+        #expect(JourneyWeather(destination: weather.destination).arrival(of: first, in: journey) == nil)
+
         // Arrived already: nothing left to show.
         let over = await client().weather(for: journey, now: Self.now.addingTimeInterval(5 * 3600))
         #expect(over == JourneyWeather())
