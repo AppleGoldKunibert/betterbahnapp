@@ -143,12 +143,13 @@ private struct ScaledCard<Content: View>: View {
 // MARK: - Cards
 
 enum YearReviewCard: Hashable {
-    case intro, distance, time, punctuality, series, stations, routes, longestRide, abroad, map, summary
+    case intro, distance, co2, time, punctuality, series, stations, routes, longestRide, abroad, map, summary
 
     /// The cards there is something to say on.
     static func cards(for review: YearReview, hasMap: Bool) -> [YearReviewCard] {
         var cards: [YearReviewCard] = [.intro]
         if review.kilometers > 0 { cards.append(.distance) }
+        if review.co2.savedComparedToCar >= 1 { cards.append(.co2) }
         cards.append(.time)
         if review.punctuality != nil { cards.append(.punctuality) }
         if !review.series.isEmpty { cards.append(.series) }
@@ -195,6 +196,7 @@ struct YearReviewCardView: View {
         case .intro, .summary: [.brand, .brandDeep]
         case .distance, .map: [Color(HeatColor.color(for: 10)), .black]
         case .time, .stations: [Color(HeatColor.color(for: 5)), .brandDeep]
+        case .co2: [.punctual, .brandDeep]
         case .punctuality: [Color(HeatColor.color(for: 2)), .brand]
         case .series, .routes: [.brandDeep, .black]
         case .longestRide, .abroad: [Color(HeatColor.color(for: 1)), Color(HeatColor.color(for: 3))]
@@ -211,6 +213,10 @@ struct YearReviewCardView: View {
             headline("So weit bist du gefahren")
             big(kilometers(review.kilometers), unit: "km")
             caption(distanceComparison)
+        case .co2:
+            headline("So viel CO₂ gespart")
+            big(kilometers(review.co2.savedComparedToCar), unit: "kg")
+            caption("gegenüber denselben Strecken mit dem Auto.")
         case .time:
             headline("So lange warst du im Zug")
             big(review.hours.formatted(.number.precision(.fractionLength(0))), unit: "Stunden")
