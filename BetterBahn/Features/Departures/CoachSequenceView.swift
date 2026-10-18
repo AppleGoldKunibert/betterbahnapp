@@ -18,10 +18,13 @@ struct CoachSequenceDisclosure: View {
     var spacing: CGFloat = 0
     /// The seat reserved on this train; its coach is highlighted in the Wagenreihung and the seat in the seat map.
     var reservation: SeatReservation?
+    /// Where to board for a quick transfer or exit (#383); its coaches are marked.
+    var coachAdvice: CoachAdvice?
 
-    init(leg: Leg, reservation: SeatReservation? = nil, spacing: CGFloat = 0) {
+    init(leg: Leg, reservation: SeatReservation? = nil, coachAdvice: CoachAdvice? = nil, spacing: CGFloat = 0) {
         self.spacing = spacing
         self.reservation = reservation
+        self.coachAdvice = coachAdvice
         request = BahnDeClient.formationRequest(for: leg)
         plannedRequest = BahnDeClient.formationRequest(for: leg, lookahead: nil)
         departure = leg.departure.best
@@ -66,7 +69,7 @@ struct CoachSequenceDisclosure: View {
                             withAnimation(.snappy) { expanded = !open }
                         }
                         if open {
-                            CoachSequencePanel(request: shown, sequence: sequence, reservation: reservation)
+                            CoachSequencePanel(request: shown, sequence: sequence, reservation: reservation, coachAdvice: coachAdvice)
                                 .transition(.fold)
                         }
                     }
@@ -104,6 +107,22 @@ struct CoachSequenceDisclosure: View {
     }
 }
 
+/// Where to board for a quick transfer or exit (#383): next to a transfer, or below the last train's stops.
+struct CoachAdviceLabel: View {
+    let advice: CoachAdvice
+    /// Already on the train: walk to those coaches.
+    var boarded = false
+
+    static let symbol = "figure.walk.motion"
+
+    var body: some View {
+        Label(advice.text(boarded: boarded), systemImage: Self.symbol)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
 /// "Wagenreihung ⌄", styled like a card's "Mehr".
 struct CoachSequenceToggle: View {
     let title: String
@@ -135,11 +154,15 @@ struct CoachSequencePanel: View {
     @State private var sequence: CoachSequence?
     /// The seat reserved on this train: its coach is highlighted, the seat in the seat map.
     let reservation: SeatReservation?
+    /// Where to board for a quick transfer or exit (#383): its coaches are marked, with a note below.
+    let coachAdvice: CoachAdvice?
 
     /// - Parameter sequence: already loaded by the caller; fetched here otherwise (e.g. from a stop's platform).
-    init(request: BahnDeClient.FormationRequest, sequence: CoachSequence? = nil, reservation: SeatReservation? = nil) {
+    init(request: BahnDeClient.FormationRequest, sequence: CoachSequence? = nil, reservation: SeatReservation? = nil,
+         coachAdvice: CoachAdvice? = nil) {
         self.request = request
         self.reservation = reservation
+        self.coachAdvice = coachAdvice
         _sequence = State(initialValue: sequence)
     }
 
@@ -164,12 +187,19 @@ struct CoachSequencePanel: View {
                     ForEach(Array(sequence.formation.partsBySeries.enumerated()), id: \.offset) { _, part in
                         TrainCard(formation: part)
                     }
+                    let suggested = coachAdvice.map(sequence.coachIDs(for:)) ?? []
                     CoachSequenceDiagram(sequence: sequence, reservation: reservation, highlightedCoachID: reservation.flatMap { reservation in
                         switch sequence.position(ofCoach: reservation.coach, train: reservation.trainName) {
                         case .sectors(_, let id), .noSectors(let id): id
                         case .coachMissing: nil
                         }
-                    })
+                    }, suggestedCoachIDs: suggested)
+                    if let coachAdvice, !suggested.isEmpty {
+                        Label(coachAdvice.legend, systemImage: CoachAdviceLabel.symbol)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     legend(sequence)
                 }
             } else if loading {
@@ -368,6 +398,8 @@ private struct CoachSequenceDiagram: View {
     var reservation: SeatReservation?
     /// The coach of the reserved seat, marked with a frame.
     var highlightedCoachID: Int?
+    /// Coaches to board for a quick transfer or exit (#383), marked with a dashed frame.
+    var suggestedCoachIDs: Set<Int> = []
 
     private static let pointsPerMeter: CGFloat = 3
     /// Coach length used when bahn.de gave no positions.
@@ -462,6 +494,7 @@ private struct CoachSequenceDiagram: View {
                             let nose = hasTrainsets || !item.coach.isPassengerCoach
                             let tile = CoachTile(coach: item.coach,
                                                  highlighted: item.coach.id == highlightedCoachID,
+                                                 suggested: suggestedCoachIDs.contains(item.coach.id),
                                                  leadingNose: nose && (index == 0 || placed[index - 1].coach.group != group),
                                                  trailingNose: nose && (index == placed.count - 1 || placed[index + 1].coach.group != group))
                             Group {
@@ -604,6 +637,8 @@ nonisolated private struct DividerLine: Shape {
 private struct CoachTile: View {
     let coach: CoachSequence.Coach
     var highlighted = false
+    /// One of the coaches to board for a quick transfer or exit (#383).
+    var suggested = false
     var leadingNose = false
     var trailingNose = false
 
@@ -679,7 +714,7 @@ private struct CoachTile: View {
     }
 
     private var accessibilityText: String {
-        var parts = [highlighted ? "Dein Wagen" : nil, coach.number.map { "Wagen \($0)" }, coach.title == "Wagen" ? nil : coach.title, coach.closed ? "Geschlossen" : nil].compactMap(\.self)
+        var parts = [highlighted ? "Dein Wagen" : suggested ? "Empfohlener Wagen" : nil, coach.number.map { "Wagen \($0)" }, coach.title == "Wagen" ? nil : coach.title, coach.closed ? "Geschlossen" : nil].compactMap(\.self)
         parts += coach.amenities.map(\.title)
         if let bikes = coach.bikeSpaces, coach.amenities.contains(.bikeSpace) { parts.append("\(bikes) Fahrradstellplätze") }
         return parts.joined(separator: ", ")
@@ -701,7 +736,11 @@ private struct CoachTile: View {
         return outline
             .fill(fill.opacity(coach.isPassengerCoach ? 0.22 : 0.45))
             .overlay {
-                outline.strokeBorder(highlighted ? Color.brand : fill.opacity(0.6), lineWidth: highlighted ? 3 : 1)
+                if suggested && !highlighted {
+                    outline.strokeBorder(Color.brand, style: StrokeStyle(lineWidth: 2.5, dash: [6, 4]))
+                } else {
+                    outline.strokeBorder(highlighted ? Color.brand : fill.opacity(0.6), lineWidth: highlighted ? 3 : 1)
+                }
             }
             .overlay {
                 if let number = coach.number {

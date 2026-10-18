@@ -808,6 +808,29 @@ final class AppModel {
         return try await bahnDe.coachSequence(request)
     }
 
+    /// Where to board each leg of `journey` for a quick transfer or exit (#383), by leg ID (see
+    /// `CoachAdvice.plan`): the journey's tickets give the seat reservations and the class.
+    func coachAdvice(for journey: Journey) async -> [String: CoachAdvice] {
+        var reservations: [String: CoachAdvice.Reservation] = [:]
+        for leg in journey.legs {
+            if let seat = reservation(for: leg, in: journey) { reservations[leg.id] = (seat.coach, seat.trainName) }
+        }
+        let travelClass = tickets(for: journey).lazy.compactMap(\.ticket.travelClass).first
+        return await CoachAdvice.plan(for: journey, reservations: reservations, travelClass: travelClass,
+                                      sequence: { [weak self] request in try? await self?.coachSequence(for: request) },
+                                      stops: { [weak self] leg in await self?.runStops(of: leg) })
+    }
+
+    /// Every stop of `leg`'s train run, from the trips seen live or loaded; nil when it can't be loaded.
+    private func runStops(of leg: Leg) async -> [Stopover]? {
+        #if DEBUG
+        if let demo = debugRunStops(of: leg) { return demo }
+        #endif
+        guard let tripId = leg.tripId else { return nil }
+        if let trip = liveTrips.value(for: tripId) { return trip.stopovers }
+        return try? await provider.trip(id: tripId, source: leg.source).stopovers
+    }
+
     /// The formation remembered for a saved journey's leg, if any.
     func rememberedFormation(for leg: Leg) -> TrainFormation? {
         let key = leg.formationKey

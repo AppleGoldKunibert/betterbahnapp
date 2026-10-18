@@ -166,6 +166,7 @@ extension AppModel {
 
     /// The made-up Wagenreihung of a seeded seat-map train.
     func debugCoachSequence(for request: BahnDeClient.FormationRequest) -> CoachSequence? {
+        if let advice = debugAdviceSequence(for: request) { return advice }
         guard request.category == "ICE", let train = Self.seatMapDemoTrains.first(where: { $0.number == request.number }) else { return nil }
         return CoachSequence.seatMapDemo(sheet: train.sheet, trainName: "ICE \(train.number)", unit: train.unit, turned: train.turned)
     }
@@ -174,6 +175,89 @@ extension AppModel {
     func debugReservation(for leg: Leg) -> SeatReservation? {
         guard leg.tripId?.hasPrefix("seatseed-") == true else { return nil }
         return Self.seatMapDemoTrains.first { $0.number == leg.line?.number }?.reservation
+    }
+}
+
+extension AppModel {
+    /// Launch with `-seedCoachAdviceTrips YES` to save two made-up journeys leaving in 20 minutes with made-up
+    /// Wagenreihungen, for trying the coach advice (#383): ICE 9911 Göttingen → Hannover Hbf (Gleis 12), going on
+    /// to Hamburg, and ICE 9912 leaving 6 minutes later across the platform (Gleis 11, shorter, at the far end);
+    /// ICE 9913 Mannheim → Frankfurt(Main)Hbf, ending at Gleis 13 of the terminus. Re-seeds once they have left;
+    /// remove them by hand afterwards.
+    func seedCoachAdviceTripsIfRequested() {
+        guard UserDefaults.standard.bool(forKey: "seedCoachAdviceTrips") else { return }
+        let seeded = savedJourneys.filter { $0.journey.legs.first?.tripId?.hasPrefix("adviceseed-") == true }
+        guard seeded.isEmpty || seeded.allSatisfy({ $0.journey.legs[0].departure.planned < .now }) else { return }
+        seeded.forEach { unsave($0.journey) }
+        let start = Date.now.addingTimeInterval(20 * 60)
+        func leg(_ number: String, _ from: Station, _ departure: Double, _ to: Station, _ arrival: Double,
+                 from fromTrack: String, to toTrack: String) -> Leg {
+            Leg(origin: from, destination: to,
+                departure: TimeInfo(planned: start.addingTimeInterval(departure * 60), actual: nil),
+                arrival: TimeInfo(planned: start.addingTimeInterval(arrival * 60), actual: nil),
+                departurePlatform: PlatformInfo(planned: fromTrack, actual: nil), arrivalPlatform: PlatformInfo(planned: toTrack, actual: nil),
+                tripId: "adviceseed-\(number)",
+                line: Line(name: "ICE \(number)", number: number, product: .highSpeed, operatorName: "DB Fernverkehr AG"),
+                direction: to.name, isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .bahnDe)
+        }
+        let s = Self.adviceStations
+        save(Journey(legs: [leg("9911", s.goettingen, 0, s.hannover, 60, from: "8", to: "12"),
+                            leg("9912", s.hannover, 66, s.berlin, 160, from: "11", to: "14")], source: .bahnDe))
+        save(Journey(legs: [leg("9913", s.mannheim, 5, s.frankfurt, 45, from: "3", to: "13")], source: .bahnDe))
+    }
+
+    private static let adviceStations = {
+        func station(_ id: String, _ name: String, _ lat: Double, _ lon: Double) -> Station {
+            Station(id: id, name: name, coordinate: Coordinate(latitude: lat, longitude: lon), evaNumber: id, source: .bahnDe)
+        }
+        return (goettingen: station("8000128", "Göttingen", 51.536, 9.927), hannover: station("8000152", "Hannover Hbf", 52.376, 9.741),
+                hamburg: station("8002549", "Hamburg Hbf", 53.553, 10.007), berlin: station("8011160", "Berlin Hbf", 52.525, 13.369),
+                mannheim: station("8000244", "Mannheim Hbf", 49.479, 8.469), frankfurt: station("8000105", "Frankfurt(Main)Hbf", 50.107, 8.663))
+    }()
+
+    /// The made-up Wagenreihung of a seeded coach-advice train: ICE 9911 a long ICE 4 on Gleis 12, ICE 9912 a
+    /// short one on Gleis 11 at the far end, ICE 9913 an ICE 3neo.
+    func debugAdviceSequence(for request: BahnDeClient.FormationRequest) -> CoachSequence? {
+        guard request.category == "ICE", ["9911", "9912", "9913"].contains(request.number),
+              var sequence = CoachSequence.seatMapDemo(sheet: request.number == "9913" ? "408" : "412", trainName: "ICE \(request.number)",
+                                                       unit: TrainFormation.Unit(model: "ICE 4", number: "9\(request.number.suffix(3))"))
+        else { return nil }
+        sequence.eva = request.station.evaNumber
+        sequence.platform = switch (request.number, request.station.id) {
+        case ("9912", _): "11"
+        case ("9911", "8000152"): "12"
+        case ("9911", _): "8"
+        default: "3"
+        }
+        if request.number == "9912", let long = CoachSequence.seatMapDemo(sheet: "412", trainName: "ICE 9911",
+                                                                        unit: TrainFormation.Unit(model: "ICE 4", number: "9911")) {
+            // Seven coaches standing at the far end of the long train's platform, with its sectors.
+            sequence.coaches = Array(sequence.coaches.prefix(7)).map { coach in
+                var coach = coach
+                coach.start = coach.start.map { $0 + 130 }
+                coach.end = coach.end.map { $0 + 130 }
+                return coach
+            }
+            sequence.sectors = long.sectors
+            sequence.platformLength = long.platformLength
+        }
+        return sequence
+    }
+
+    /// The made-up runs of the seeded coach-advice trains: ICE 9911 goes on to Hamburg, ICE 9913 ends in Frankfurt.
+    func debugRunStops(of leg: Leg) -> [Stopover]? {
+        guard leg.tripId?.hasPrefix("adviceseed-") == true else { return nil }
+        func stop(_ station: Station, _ arrival: Date?, _ departure: Date?) -> Stopover {
+            Stopover(station: station, arrival: arrival.map { TimeInfo(planned: $0, actual: nil) },
+                     departure: departure.map { TimeInfo(planned: $0, actual: nil) }, arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+        }
+        let s = Self.adviceStations
+        switch leg.line?.number {
+        case "9911": return [stop(s.goettingen, nil, leg.departure.planned), stop(s.hannover, leg.arrival.planned, leg.arrival.planned.addingTimeInterval(180)),
+                             stop(s.hamburg, leg.arrival.planned.addingTimeInterval(80 * 60), nil)]
+        case "9913": return [stop(s.mannheim, nil, leg.departure.planned), stop(s.frankfurt, leg.arrival.planned, nil)]
+        default: return nil
+        }
     }
 }
 

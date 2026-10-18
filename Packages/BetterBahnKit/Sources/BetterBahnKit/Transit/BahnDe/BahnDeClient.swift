@@ -386,8 +386,9 @@ public struct BahnDeClient: Sendable {
             let candidates = [eva, Self.otherLevel(of: eva)].compactMap(\.self)
             for candidate in candidates {
                 guard let response = try await sequenceResponse(request, eva: candidate) else { continue }
-                let sequence = Self.coachSequence(from: response, category: request.category, number: Int(request.number),
+                var sequence = Self.coachSequence(from: response, category: request.category, number: Int(request.number),
                                                   coupledNumbers: Set(request.coupledNumbers.compactMap { Int($0) }))
+                sequence.eva = candidate
                 guard !sequence.coaches.isEmpty || !sequence.formation.units.isEmpty else {
                     await Self.sequenceNotes.set("Antwort ohne Wagen an EVA \(candidate): \(Self.summary(of: response)) · \(asked)", for: key)
                     return nil

@@ -30,6 +30,8 @@ struct JourneyDetailView: View {
     @State private var dispositions: [String: TransferDisposition] = [:]
     /// Transfers whose incoming train is often too late there (#316), keyed by the incoming leg's id.
     @State private var transferWarnings: [String: String] = [:]
+    /// Where to board for a quick transfer or exit (#383), keyed by the leg to board.
+    @State private var coachAdvice: [String: CoachAdvice] = [:]
 
     /// Where the journey is going now.
     private var goal: Station { editedDestination ?? finalDestination }
@@ -55,6 +57,7 @@ struct JourneyDetailView: View {
             await TimetablesClient.invalidateDelays()
             await refreshRealtime()
             await loadDispositions()
+            await loadCoachAdvice()
         }
         .task {
             if !readOnly, model.savedEntry(for: journey) == nil, let seen = model.liveJourneys.value(for: journey.id) {
@@ -69,12 +72,14 @@ struct JourneyDetailView: View {
             liveDataLoaded = true
             await loadDispositions()
             await loadTransferWarnings()
+            await loadCoachAdvice()
             // Keep a saved journey's delays current while it's open.
             while !Task.isCancelled {
                 try? await Task.sleep(for: AppModel.realtimeRefreshInterval)
                 guard !Task.isCancelled else { return }
                 if model.savedEntry(for: journey) != nil { await refreshRealtime() }
                 await loadDispositions()
+                await loadCoachAdvice()
             }
         }
         .tabBarSafePadding()
@@ -155,11 +160,15 @@ struct JourneyDetailView: View {
                         onShowCheckin: model.settings.traewellingEnabled
                             ? model.checkinStatusIDs[leg.id].map { id -> () -> Void in { shownCheckin = ShownCheckin(leg: leg, statusId: id) } }
                             : nil,
-                        reservation: model.reservation(for: leg, in: journey)
+                        reservation: model.reservation(for: leg, in: journey),
+                        coachAdvice: coachAdvice[leg.id],
+                        // Next to the transfer when there is one.
+                        showsCoachAdvice: transferInfo(after: leg) == nil
                     )
                     if let info = transferInfo(after: leg) {
                         TransferRow(from: leg, to: info.next, walk: info.walk, isPast: journey.isOver(),
-                                    disposition: dispositions[info.next.id], warning: transferWarnings[leg.id])
+                                    disposition: dispositions[info.next.id], warning: transferWarnings[leg.id],
+                                    coachAdvice: coachAdvice[leg.id])
                     }
                 }
             }
@@ -167,6 +176,14 @@ struct JourneyDetailView: View {
         }
         .padding(.horizontal)
         .padding(.bottom, 32)
+    }
+
+    /// Where to board for each tight transfer and the exit (#383); not for old plans or a journey that is over.
+    private func loadCoachAdvice() async {
+        guard !readOnly, !journey.isOver() else { return }
+        let advice = await model.coachAdvice(for: journey)
+        guard advice != coachAdvice else { return }
+        withAnimation { coachAdvice = advice }
     }
 
     /// Which tight transfers the incoming train usually misses (#316); not for a journey that is over.
@@ -459,6 +476,8 @@ struct TransferRow: View {
     var disposition: TransferDisposition?
     /// Says the incoming train is often too late for this transfer, from past runs (#316).
     var warning: String?
+    /// Where to board the incoming train to be quick here (#383).
+    var coachAdvice: CoachAdvice?
 
     private var minutes: Int {
         Int((to.departure.best.timeIntervalSince(from.arrival.best) / 60).rounded())
@@ -486,6 +505,9 @@ struct TransferRow: View {
                 }
                 if let warning, !isPast, !broken {
                     TransferWarning(text: warning)
+                }
+                if let coachAdvice, !isPast, !broken {
+                    CoachAdviceLabel(advice: coachAdvice, boarded: from.departure.best < .now)
                 }
                 if let walk {
                     Text("\(Int((walk.arrival.best.timeIntervalSince(walk.departure.best) / 60).rounded())) min Fußweg")
@@ -540,6 +562,10 @@ struct LegCard: View {
     var onShowCheckin: (() -> Void)?
     /// The seat reserved on this train (from the journey's ticket), if any.
     var reservation: SeatReservation?
+    /// Where to board for a quick transfer or exit (#383): its coaches are marked in the Wagenreihung.
+    var coachAdvice: CoachAdvice?
+    /// Whether the card says it too (getting off at the end); a transfer's row says it otherwise.
+    var showsCoachAdvice = false
 
     @State private var showStops = false
     @State private var showDetails = false
@@ -666,7 +692,13 @@ struct LegCard: View {
                     }
 
                     // Between the stops and "Mehr"; unfolds by itself around the departure.
-                    CoachSequenceDisclosure(leg: leg, reservation: reservation, spacing: 14)
+                    CoachSequenceDisclosure(leg: leg, reservation: reservation, coachAdvice: coachAdvice, spacing: 14)
+
+                    if showsCoachAdvice, let coachAdvice {
+                        CoachAdviceLabel(advice: coachAdvice, boarded: leg.departure.best < .now)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 14)
+                    }
 
                     let platformChanges = platformChangeHints
                     if !platformChanges.isEmpty {

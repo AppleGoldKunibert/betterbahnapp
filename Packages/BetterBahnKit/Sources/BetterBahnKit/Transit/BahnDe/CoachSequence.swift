@@ -91,6 +91,9 @@ public struct CoachSequence: Sendable, Hashable {
     /// vagonweb's plan only: the stations up to this stop where the train changes direction (it is
     /// shown turned round after an odd number of them).
     public var reversals: [String] = []
+    /// bahn.de's sequence only: the EVA number of the station it was asked for, to find its platforms
+    /// (`StationPlatforms`).
+    public var eva: String?
 
     /// A group with nothing but locomotives. bahn.de lists a locomotive as its own group with the
     /// station where it is changed as destination, which is no part of the train passengers ride on.
