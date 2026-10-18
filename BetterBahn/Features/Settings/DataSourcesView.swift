@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Settings → Datenquellen: every service the app gets data from, with the attribution their terms ask for
-/// (Transitous sources, OSM + OpenRailwayMap with links, DB Timetables under CC BY 4.0, operator logos).
+/// (Transitous sources, OSM + OpenRailwayMap with links, DB Timetables and Open-Meteo under CC BY 4.0, operator logos).
 struct DataSourcesView: View {
     struct Source: Identifiable {
         let name: String
@@ -36,6 +36,9 @@ struct DataSourcesView: View {
         Source(name: "bahn.expert", usage: "Zugtypen, Zugsuche nach Nummer, Namen der Bahnhöfe; Sitzpläne der ICE aus den Wagenreihungsplänen, © Deutsche Bahn AG", url: URL(string: "https://bahn.expert")!),
         Source(name: "bahn.jetzt", usage: "Zugpositionen auf der Karte", url: URL(string: "https://bahn.jetzt")!),
         Source(name: "Träwelling", usage: "Check-ins", url: URL(string: "https://traewelling.de")!),
+        Source(name: "Open-Meteo", usage: "Wetter bei Ankunft und beim Umstieg",
+               url: URL(string: "https://open-meteo.com")!,
+               license: ("Lizenz: CC BY 4.0", URL(string: "https://creativecommons.org/licenses/by/4.0/deed.de")!)),
         Source(name: "zug.network", usage: "Emojis im Check-in-Text (oder die deiner mit Träwelling verbundenen Mastodon-Instanz)",
                url: URL(string: "https://zug.network")!),
         Source(name: "OpenStreetMap", usage: "Kartendaten des Schienennetzes, Treppen und Aufzüge an den Bahnsteigen, © OpenStreetMap-Mitwirkende",
