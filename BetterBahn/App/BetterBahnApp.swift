@@ -146,6 +146,7 @@ struct RootView: View {
         .task {
             model.seedBrokenTripIfRequested()
             model.seedLateTripsIfRequested()
+            model.seedSeatMapTripsIfRequested()
             await model.seedStressTripsIfRequested()
             await model.seedDemoTripsIfRequested()
         }

@@ -3739,6 +3739,21 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(SeatMap.coach("37", sheet: "403")?.type == "Bpmz 403.2")
     }
 
+    /// The made-up Wagenreihung behind the app's `-seedSeatMapTrips`: every coach of the sheet, each with its seat map.
+    @Test func seatMapDemoSequence() throws {
+        let unit = TrainFormation.Unit(model: "ICE 1", number: "199")
+        let ice1 = try #require(CoachSequence.seatMapDemo(sheet: "401", trainName: "ICE 9901", unit: unit, turned: true))
+        #expect(ice1.coaches.count == 14)
+        #expect(ice1.coaches.first?.kind == .powerCar && ice1.coaches.last?.kind == .powerCar)
+        #expect(ice1.coaches.compactMap(\.number).first == "14")
+        #expect(SeatMap.isTurned(numbersLeftToRight: ice1.coaches.compactMap(\.number)))
+        #expect(ice1.coaches.filter(\.isPassengerCoach).allSatisfy { ice1.seatMap(for: $0) != nil })
+        let neo = try #require(CoachSequence.seatMapDemo(sheet: "408", trainName: "ICE 9902", unit: unit))
+        #expect(neo.coaches.compactMap(\.number) == ["21", "22", "23", "24", "25", "26", "28", "29"])
+        #expect(neo.seatMap(for: neo.coaches[3])?.seat("78") != nil)
+        #expect(CoachSequence.seatMapDemo(sheet: "445", trainName: "RE 1", unit: unit) == nil)
+    }
+
     @Test func coachNumberList() {
         #expect(CoachSequence.numberList(["25"]) == "25")
         #expect(CoachSequence.numberList(["23", "21"]) == "21, 23")

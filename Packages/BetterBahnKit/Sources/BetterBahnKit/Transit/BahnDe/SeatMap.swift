@@ -113,3 +113,45 @@ extension CoachSequence {
         return SeatMap.coach(number, sheet: sheet)
     }
 }
+
+extension CoachSequence {
+    /// A made-up Wagenreihung of one trainset of `sheet` with its coaches in the sheet's order, on a platform
+    /// with sectors, for trying the seat maps without a real train (the app's `-seedSeatMapTrips`). `turned`
+    /// stands it with the higher coach numbers on the left; the train leaves to the left either way.
+    public static func seatMapDemo(sheet: String, trainName: String, unit: TrainFormation.Unit, turned: Bool = false) -> CoachSequence? {
+        guard let maps = SeatMap.sheets[sheet], !maps.isEmpty else { return nil }
+        let coachLength = 26.0
+        // Lower numbers on the left, as the sheets draw them.
+        var leftToRight = maps.sorted { (Int($0.numbers[0]) ?? 0) < (Int($1.numbers[0]) ?? 0) }
+        if turned { leftToRight.reverse() }
+        // The ICE 1 and 2 have power cars at their ends.
+        let powerCars = sheet.hasPrefix("401") ? 2 : sheet == "402" ? 1 : 0
+        var coaches: [Coach] = []
+        func add(_ kind: Coach.Kind, number: String?, firstClass: Bool = false) {
+            let start = 10 + Double(coaches.count) * coachLength
+            coaches.append(Coach(id: coaches.count, number: number, kind: kind, firstClass: firstClass,
+                                 secondClass: kind != .diningCar && !firstClass, closed: false, amenities: [], bikeSpaces: nil,
+                                 start: start, end: start + coachLength, sector: nil, group: 0))
+        }
+        if powerCars > 0 { add(.powerCar, number: nil) }
+        for map in leftToRight {
+            let title = map.title ?? ""
+            let kind: Coach.Kind = title.hasPrefix("Bordrestaurant") ? (map.seats.isEmpty ? .diningCar : .halfDiningCar) : .passenger
+            add(kind, number: map.numbers[0], firstClass: title.hasPrefix("1.") || (kind == .halfDiningCar && title.contains("1.")))
+        }
+        if powerCars > 1 { add(.powerCar, number: nil) }
+        let length = 20 + Double(coaches.count) * coachLength
+        let sectorLength = length / 6
+        let sectors = ["A", "B", "C", "D", "E", "F"].enumerated().map { index, name in
+            Sector(name: name, start: Double(index) * sectorLength, end: Double(index + 1) * sectorLength)
+        }
+        for index in coaches.indices {
+            let middle = (coaches[index].start! + coaches[index].end!) / 2
+            coaches[index].sector = sectors.first { $0.start <= middle && middle < $0.end }?.name
+        }
+        return CoachSequence(platform: "7", platformLength: length, sectors: sectors,
+                             groups: [Group(trainName: trainName, destination: nil, unit: unit, isRequestedTrain: true, seatMapSheet: sheet)],
+                             coaches: coaches, travelsTowardsPlatformEnd: false, differsFromSchedule: false,
+                             formation: TrainFormation(units: [unit]))
+    }
+}
