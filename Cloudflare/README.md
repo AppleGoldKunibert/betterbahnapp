@@ -15,6 +15,22 @@ It also stores shared journeys for short links (`https://betterbahn.betterbahn.w
 - `/.well-known/apple-app-site-association` → Universal Links for `/s/*` (`APP_IDS`), so iOS opens the
   app directly (Associated Domains entitlement in `Config/BetterBahn.entitlements`).
 
+"Ankunft teilen" (#317, `arrival.mjs`): `POST /share { data, arrival }` also stores the last train of the
+journey (`ArrivalShare` in the app: train, product/color, bahn.de journey ID, stops from boarding to getting
+off). Such a link expires 2 hours after the arrival (later when the train runs late, at most 12 hours after
+the planned arrival), and `/s/<id>` shows a small page with the arrival time, delay, platform and stops in any
+browser. The page refreshes from `GET /share/<id>/live`, which asks DB's IRIS (as the app's Timetables) per stop: the
+station's schedule for that hour (cached 30 min) and its changes (cached 30 s), only for the stops the page lists:
+the train's next 2 stops (with 2 before them, in case it runs later than the app knew) and the last 2 before the
+destination, with the destination; "N Halte" stands for the ones left out.
+When IRIS doesn't have the train at the destination, it reads bahn.de's journey details (`fahrt`) through our
+bahn.de server (`BAHNDE_PROXY_URL`, `Server/bahnde-proxy`; bahn.de refuses Workers) with a token the Worker signs
+itself (`TOKEN_SECRET`, key `arrival-pages`, so all arrival pages share the server's per-install rate limit),
+cached 30 s per train; without either it shows the app's times. Every refused or failed request is logged as
+`arrival upstream` (`status`, `limited` for 429/403/452, `path`, `retryAfter`): Workers Logs is on
+(`[observability]`), so they show under Workers → betterbahn → Logs, or live with `npx wrangler tail`.
+With the app installed, iOS still opens the app, which shows the journey as before.
+
 `data` is the same zlib/base64url payload as in `betterbahn://share?data=…`; the Worker only checks
 its characters and size (64 KiB) and keeps it in KV (`SHARES`) for 30 days. The app falls back to the
 long link when this fails, and old long links keep working.
@@ -31,7 +47,7 @@ does not exchange or store tokens and needs no Client Secret.
 
 ## Update the existing Worker
 
-`worker.mjs` (with `shared/appattest.mjs`) is the complete Worker source: the pages, the callback
+`worker.mjs` (with `arrival.mjs`, `shared/appattest.mjs` and the bahn.de helpers it imports from `bahnde-proxy/` and `stats/`) is the complete Worker source: the pages, the callback
 (a fixed redirect to the app), share links and a 404 fallback. The association file only covers
 `/s/*`, so the OAuth callback still opens in the browser session.
 
@@ -50,7 +66,7 @@ strings because they contain authorization codes.
 
 ## Verify
 
-Run the handler tests with `node --test Cloudflare/traewelling-callback.test.mjs Cloudflare/share.test.mjs`.
+Run the handler tests with `node --test Cloudflare/traewelling-callback.test.mjs Cloudflare/share.test.mjs Cloudflare/arrival.test.mjs`.
 After deploying, this synthetic request should return HTTP 302 with
 `Location: betterbahn://oauth?code=test-code&state=test-state`:
 

@@ -201,7 +201,8 @@ struct JourneyReplanSheet: View {
                 TrainNumberSheet(search: continuationSearch, suggestions: trainSuggestions,
                                  defaultBoarding: requirements.last?.exit ?? exitStation,
                                  stations: [exitStation] + results.prefix(4).flatMap { $0.transitLegs.map(\.origin) },
-                                 date: exitArrival) { requirement in
+                                 date: exitArrival,
+                                 reached: results.prefix(4).flatMap(\.transitLegs).map { ($0.origin, $0.departure.planned) }) { requirement in
                     requirements.append(requirement)
                     Task { await runSearch() }
                 }

@@ -10,6 +10,11 @@ public struct TrainFormation: Codable, Sendable, Hashable {
         /// The trainset's christened name ("Taufname"), e.g. "Bundesrepublik Deutschland".
         public var name: String?
 
+        /// The trainset's special livery ("Sonderlackierung"), e.g. "Railbow"; nil for the standard paint.
+        public var livery: String? {
+            number.flatMap(Int.init).flatMap { TrainsetLiveries.byUnit[$0] }
+        }
+
         public init(model: String?, number: String?, name: String? = nil) {
             self.model = model
             self.number = number
@@ -79,13 +84,11 @@ extension Leg {
 /// Endpoints of bahn.de's web API: station search, departure boards, journey details and coach
 /// sequences — the same ones Travel::Status::DE::DBRIS uses (https://github.com/derf/Travel-Status-DE-DBRIS).
 ///
-/// bahn.de's bot protection blocks Apple's URL loading stack whatever headers are sent, so requests
-/// go through our Cloudflare Worker (`Cloudflare/bahnde-proxy`), which mirrors bahn.de's `/web/api/…`
-/// paths and sends the DBRIS browser headers itself. Requests carry the app's App Attest token
-/// (`WorkerAuth`). Responses are cached, and a 403/429 (passed through by the Worker) pauses every
-/// bahn.de request through the Worker for `BahnDeGate.cooldown` instead of retrying. Meanwhile the app
-/// asks bahn.de from the phone itself, in a hidden browser (`BahnDeBrowserFallback`), so one block of
-/// the shared Worker doesn't take bahn.de's data away from every user.
+/// bahn.de's bot protection (Akamai) refuses every request whose TLS handshake isn't a browser's, so the
+/// app asks only our own server (`BahnDeProxy`, `Server/bahnde-proxy`, #342), which asks with a browser's
+/// handshake and mirrors bahn.de's `/web/api/…` paths (the URLs are built on the Worker's `baseURL` and
+/// mapped onto the server). Requests carry the app's App Attest token (`WorkerAuth`). While the server
+/// fails, it is left alone for a while (`BahnDeProxy.gate`) and requests throw `rateLimited`.
 public struct BahnDeClient: Sendable {
     public static let baseURL = URL(string: "https://betterbahn2.betterbahn.workers.dev/web/api")!
     /// Deutsche Bahn's administration ID.
@@ -100,16 +103,16 @@ public struct BahnDeClient: Sendable {
     let http: HTTPClient
     let gate: BahnDeGate
     let auth: WorkerAuth?
-    /// Asks bahn.de from the phone when the Worker is blocked; none in widgets and tests.
-    let browser: BahnDeBrowserFallback?
+    /// Our own server with a browser's TLS fingerprint (#342), the app's only way to bahn.de; none in tests.
+    let proxy: BahnDeProxy?
 
-    /// `auth` and `browser` default to the shared ones on the app's real session and none on others (tests).
+    /// `auth` and `proxy` default to the shared ones on the app's real session and none on others (tests).
     public init(http: HTTPClient = HTTPClient(timeout: 8), gate: BahnDeGate = .shared, auth: WorkerAuth? = nil,
-                browser: BahnDeBrowserFallback? = nil) {
+                proxy: BahnDeProxy? = nil) {
         self.http = http
         self.gate = gate
         self.auth = http.workerAuth(auth)
-        self.browser = browser ?? (http.session === URLSession.shared ? .shared : nil)
+        self.proxy = proxy ?? (http.session === URLSession.shared ? .shared : nil)
     }
 
     /// Caches are only shared on the app's real session; a client on a custom session (tests,
@@ -154,9 +157,11 @@ public struct BahnDeClient: Sendable {
 
     static let trainProducts: Set<String> = ["ICE", "EC_IC", "IR", "REGIONAL", "SBAHN"]
 
-    /// EVA number for a station from any source (nearest match by name).
+    /// EVA number for a station from any source: the feed's, the offline station list's, else bahn.de's
+    /// search (nearest match by name), which keeps a screen full of stops from asking bahn.de for each.
     public func evaNumber(for station: Station) async throws -> String? {
         if let eva = station.evaNumber { return eva }
+        if let eva = StationNames.evaNumber(for: station) { return eva }
         return Self.bestEVA(for: station, among: try await candidates(station.name))
     }
 
@@ -266,9 +271,9 @@ public struct BahnDeClient: Sendable {
         }
     }
 
-    /// bahn.de only has the coach sequence for departures in the coming hours (late in the evening it
-    /// already had the next morning's), so later ones aren't asked for at all and go to bahn.expert.
-    public static let formationLookahead: TimeInterval = 12 * 3600
+    /// bahn.de only has the coach sequence for departures in the coming hours (at night it already had
+    /// the next evening's, 18 hours ahead), so later ones aren't asked for at all and go to bahn.expert.
+    public static let formationLookahead: TimeInterval = 24 * 3600
 
     /// The request for `line`'s formation at the first of `stops` where it still departs, if that
     /// departure is soon enough for bahn.de to know the coach sequence (see `formationLookahead`).
@@ -301,6 +306,21 @@ public struct BahnDeClient: Sendable {
                          wholeRun: true, now: now, lookahead: lookahead)
     }
 
+    /// The request for `trip`'s formation at `stop`, whenever the train calls there (past or ahead): the stop must
+    /// have a time and a platform and not be cancelled, and the train a coach-sequence reference.
+    public static func formationRequest(for trip: Trip, at stop: Stopover) -> FormationRequest? {
+        guard let ref = sequenceReference(for: trip.line), !stop.cancelled,
+              let time = (stop.departure ?? stop.arrival)?.planned,
+              (stop.departurePlatform ?? stop.arrivalPlatform)?.best != nil else { return nil }
+        return FormationRequest(category: ref.category, number: ref.number, station: stop.station, plannedDeparture: time,
+                                stopsBefore: stopsBefore(stop.station, in: trip))
+    }
+
+    /// The stops of `trip` a Wagenreihung can be asked at, in order (see `formationRequest(for:at:)`).
+    public static func formationStops(of trip: Trip) -> [Stopover] {
+        trip.stopovers.filter { formationRequest(for: trip, at: $0) != nil }
+    }
+
     /// The names of `trip`'s stops before `station` (found by id, else by name), for a request made
     /// from a leg (`FormationRequest.stopsBefore`); nil when the station isn't one of its stops.
     public static func stopsBefore(_ station: Station, in trip: Trip) -> [String]? {
@@ -330,6 +350,8 @@ public struct BahnDeClient: Sendable {
     /// - Returns: nil if bahn.de has no coach sequence for it (yet).
     /// - Throws: `TransitError.rateLimited` while bahn.de is blocking requests.
     public func coachSequence(_ request: FormationRequest) async throws -> CoachSequence? {
+        // A category bahn.de doesn't know would be refused with a 403 that pauses every request.
+        guard !Self.plannedOnlyCategories.contains(request.category.uppercased()) else { return nil }
         guard usesSharedCaches else { return try await fetchCoachSequence(request) }
         return try await Self.sequenceCache.value(for: Self.sequenceKey(request), maxAge: Self.formationMaxAge) {
             try await self.fetchCoachSequence(request)
@@ -378,7 +400,10 @@ public struct BahnDeClient: Sendable {
         } catch {
             var reason = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
             // Usually not this request's fault: an earlier answer paused every bahn.de request.
-            if case TransitError.rateLimited = error, let block = await gate.blockDescription { reason += " (\(block))" }
+            if case TransitError.rateLimited = error {
+                let block = await (proxy?.gate ?? gate).blockDescription
+                if let block { reason += " (\(block))" }
+            }
             await Self.sequenceNotes.set("\(reason) · \(asked)", for: key)
             throw error
         }
@@ -457,6 +482,18 @@ public struct BahnDeClient: Sendable {
         let types = vehicles.compactMap { $0.type?.constructionType }
         return TrainModel.detect(carriages, category: category).map(\.name)
             ?? model(constructionTypes: types, groupName: group.name ?? "", category: category)
+    }
+
+    /// The seat-map sheet of one trainset (`SeatMap.sheet`), from its vehicles' UIC numbers and coach numbers.
+    static func seatMapSheet(of group: SequenceResponse.Group, category: String) -> String? {
+        let vehicles = group.vehicles ?? []
+        let carriages = vehicles.map { Carriage(vehicleID: $0.vehicleID, constructionType: $0.type?.constructionType) }
+        let passengerCoaches = vehicles.filter { vehicle in
+            let kind = CoachSequence.Coach.Kind(category: vehicle.type?.category)
+            return kind != .locomotive && kind != .powerCar
+        }
+        return SeatMap.sheet(subtype: TrainModel.detectSubtype(carriages, category: category),
+                             coachNumbers: passengerCoaches.compactMap { $0.wagonIdentificationNumber.map(String.init) })
     }
 
     /// Loco-hauled IC 1 coaches aren't a trainset: their group name ("IC450007") carries a coach-set
@@ -541,10 +578,29 @@ public struct BahnDeClient: Sendable {
         return (category.isEmpty ? "RB" : category, number)
     }
 
-    /// The train to ask bahn.de's coach sequence for: long-distance trains, and DB Regio's RE/RB by
-    /// their run number.
+    /// Long-distance trains bahn.de has no coach sequence for (and refuses the category with a 403), but
+    /// vagonweb has a planned Wagenreihung: Nightjet, Euronight and the SBB's InterRegio.
+    static let plannedOnlyCategories: Set<String> = ["NJ", "EN", "IR"]
+
+    /// A Nightjet, Euronight or InterRegio by its number ("NJ 403" → ("NJ", "403")). bahn.de lists these on its
+    /// boards, but the app only takes their platforms from it (`takesOnlyPlatforms(_:)`).
+    static func plannedOnlyReference(for line: Line?) -> (category: String, number: String)? {
+        guard let line, let number = line.number else { return nil }
+        let category = String(line.name.prefix { $0.isLetter }).uppercased()
+        return plannedOnlyCategories.contains(category) ? (category, number) : nil
+    }
+
+    /// Whether `line` is a train of another railway that bahn.de is only asked for the platforms it lacks:
+    /// no Zusatzhalte, no live times (`plannedOnlyReference`).
+    public static func takesOnlyPlatforms(_ line: Line?) -> Bool {
+        trainReference(for: line) == nil && plannedOnlyReference(for: line) != nil
+    }
+
+    /// The train to ask the coach sequence for: long-distance trains, and DB Regio's RE/RB by their run
+    /// number. The planned-only ones (`plannedOnlyCategories`) are only asked of vagonweb, never of bahn.de.
     public static func sequenceReference(for line: Line?) -> (category: String, number: String)? {
         if let ref = trainReference(for: line) { return ref }
+        if let ref = plannedOnlyReference(for: line) { return ref }
         guard let ref = regionalReference(for: line, products: [.regionalExpress, .regional]) else { return nil }
         return (regionalCategories.contains(ref.category) ? ref.category : "RB", ref.number)
     }
@@ -603,110 +659,32 @@ public struct BahnDeClient: Sendable {
         ]
     }
 
-    /// GET through the Worker and its shared cooldown: while bahn.de is blocking the Worker, nothing is
-    /// sent there at all and the phone's browser asks instead, if the app has one.
+    /// GET from bahn.de. The app asks only our server (`BahnDeProxy`): bahn.de refuses every other way in since
+    /// October 2026, the Worker's included. While the server fails (down, paused, refused) it is left alone for
+    /// a while and every request throws `rateLimited`, so the app says the live data isn't available.
+    /// Without a server (tests) the request goes to `url` itself, with `gate`'s cooldown after a block.
     func get<T: Decodable>(_ url: URL, as type: T.Type) async throws -> T {
-        if await gate.isBlocked {
-            return try await viaBrowser(url, as: type)
+        if let proxy, let proxied = proxy.url(for: url) {
+            if await proxy.gate.isBlocked { throw TransitError.rateLimited }
+            do {
+                return try await http.get(proxied, as: type, headers: Self.headers(), auth: auth)
+            } catch let error as TransitError where error.isBahnDeAnswer {
+                // bahn.de's own answer (404 etc.).
+                throw error
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let error as URLError where error.code == .cancelled {
+                throw error
+            } catch {
+                await proxy.gate.pause(after: error, url: url)
+                throw TransitError.rateLimited
+            }
         }
+        if await gate.isBlocked { throw TransitError.rateLimited }
         do {
-            let value = try await http.get(url, as: type, headers: Self.headers(), auth: auth)
-            // The Worker gets through again: the browser's page isn't needed any more.
-            await browser?.workerAnswered()
-            return value
+            return try await http.get(url, as: type, headers: Self.headers(), auth: auth)
         } catch let error as TransitError {
             await gate.report(error)
-            guard error.isBlocked else { throw error }
-            await browser?.workerBlocked()
-            return try await viaBrowser(url, as: type)
-        }
-    }
-
-    /// The same request from the phone's hidden browser on bahn.de (`BahnDeBrowserFallback`), which has
-    /// a cooldown of its own. Throws `rateLimited` without one (widgets, tests) or while it is blocked too.
-    private func viaBrowser<T: Decodable>(_ url: URL, as type: T.Type) async throws -> T {
-        guard let browser, let direct = Self.directURL(for: url) else { throw TransitError.rateLimited }
-        let data = try await browser.fetch(direct)
-        do {
-            return try JSONDecoding.decoder.decode(T.self, from: data)
-        } catch {
-            throw TransitError.decoding(String(describing: error))
-        }
-    }
-
-    /// bahn.de's own address for a request to the Worker, which mirrors its `/web/api/…` paths.
-    static func directURL(for url: URL) -> URL? {
-        guard url.host() == baseURL.host(), url.path().hasPrefix("/web/api/"),
-              var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
-        components.scheme = "https"
-        components.host = "www.bahn.de"
-        components.port = nil
-        return components.url
-    }
-}
-
-/// The app's hidden browser on bahn.de (set once at launch, `use(_:)`): bahn.de's bot protection lets a
-/// real browser engine through where it blocks Apple's URL loading stack, so when the shared Worker is
-/// blocked, each phone can still ask for itself, with its own IP address. Has a cooldown of its own for
-/// when bahn.de blocks the phone too. Widgets set none.
-public actor BahnDeBrowserFallback {
-    public static let shared = BahnDeBrowserFallback()
-
-    /// Loads a `https://www.bahn.de/web/api/…` URL in the browser: the HTTP status and the body.
-    public typealias Fetch = @Sendable (URL) async throws -> (status: Int, body: Data)
-
-    /// Something for the browser to do without waiting for it: start loading its page, or let it go.
-    public typealias Hook = @Sendable () async -> Void
-
-    private var load: Fetch?
-    private var prepare: Hook?
-    private var release: Hook?
-    /// Whether the browser may hold a page (prepared or used since the Worker last answered).
-    private(set) var isActive = false
-    let gate = BahnDeGate()
-
-    public init(_ load: Fetch? = nil, prepare: Hook? = nil, release: Hook? = nil) {
-        self.load = load
-        self.prepare = prepare
-        self.release = release
-    }
-
-    /// `prepare` starts loading the browser's page in the background as soon as the Worker is blocked,
-    /// so the first requests don't wait for it; `release` drops the page once the Worker answers again.
-    public func use(_ load: @escaping Fetch, prepare: Hook? = nil, release: Hook? = nil) {
-        self.load = load
-        self.prepare = prepare
-        self.release = release
-    }
-
-    /// The Worker was blocked: get the page ready, once.
-    func workerBlocked() async {
-        guard load != nil, !isActive else { return }
-        isActive = true
-        await prepare?()
-    }
-
-    /// The Worker answered: let the page go if the browser has one.
-    func workerAnswered() async {
-        guard isActive else { return }
-        isActive = false
-        await release?()
-    }
-
-    /// The body of a successful answer; a 404 etc. as `TransitError.http`, a block as `rateLimited`.
-    func fetch(_ url: URL) async throws -> Data {
-        guard let load else { throw TransitError.rateLimited }
-        try await gate.check()
-        isActive = true
-        do {
-            let (status, body) = try await load(url)
-            switch status {
-            case 200..<300: return body
-            case 429: throw TransitError.rateLimited
-            default: throw TransitError.http(status: status, body: String(data: body, encoding: .utf8))
-            }
-        } catch let error as TransitError {
-            await gate.report(error, url: url)
             throw error.isBlocked ? TransitError.rateLimited : error
         }
     }
@@ -738,6 +716,20 @@ public actor BahnDeGate {
         if isBlocked { throw TransitError.rateLimited }
     }
 
+    /// How long the proxy is left alone after it failed without being blocked (down, offline, paused).
+    static let failurePause: TimeInterval = 2 * 60
+
+    /// Any failure: a block pauses for `cooldown` (as `report`), anything else for `failurePause`.
+    func pause(after error: Error, url: URL? = nil) {
+        if let error = error as? TransitError, error.isBlocked {
+            report(error, url: url)
+            return
+        }
+        blockedUntil = Date.now.addingTimeInterval(Self.failurePause)
+        let time = Date.now.formatted(Date.FormatStyle(timeZone: BahnDeClient.berlin).hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+        blockReason = "\((error as? LocalizedError)?.errorDescription ?? String(describing: error)) um \(time)"
+    }
+
     func report(_ error: TransitError, url: URL? = nil) {
         guard error.isBlocked else { return }
         blockedUntil = Date.now.addingTimeInterval(Self.cooldown)
@@ -761,7 +753,17 @@ extension TransitError {
     var isBlocked: Bool {
         switch self {
         case .rateLimited: true
-        case .http(let status, _): status == 403
+        // 452 is what bahn.de answers since October 2026 instead of 403.
+        case .http(let status, _): status == 403 || status == 452
+        default: false
+        }
+    }
+
+    /// bahn.de's own answer to the request (not found, invalid), which another way of asking wouldn't change.
+    var isBahnDeAnswer: Bool {
+        switch self {
+        case .http(let status, _): (400..<500).contains(status) && !isBlocked && status != 401
+        case .decoding: true
         default: false
         }
     }

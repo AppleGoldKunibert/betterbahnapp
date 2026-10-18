@@ -281,7 +281,7 @@ private struct TrainSearchRow: View {
     var body: some View {
         HStack(spacing: 12) {
             IconTile(systemImage: result.product.symbolName(nightTrain: result.product.isTrain && Line.isNightTrainCategory(result.category)),
-                     color: result.product.color, size: 34)
+                     color: result.product.color, size: 34, logo: TransitLogo(product: result.product, operatorName: nil))
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(result.name).font(.headline)
@@ -357,7 +357,8 @@ struct TrainSearchResultView: View {
     private var header: some View {
         Card {
             HStack(spacing: 12) {
-                IconTile(systemImage: (trip?.line?.product ?? result.product).symbolName, color: color, size: 46)
+                IconTile(systemImage: (trip?.line?.product ?? result.product).symbolName, color: color, size: 46,
+                         logo: trip == nil ? TransitLogo(product: result.product, operatorName: nil) : trip?.line?.transitLogo)
                 VStack(alignment: .leading, spacing: 3) {
                     if let trip {
                         TrainNameRow(name: trip.line?.nameWithTripNumber ?? result.name, font: .title3.weight(.bold), spacing: 8) {
@@ -390,32 +391,15 @@ struct TrainSearchResultView: View {
         }
         .buttonStyle(.plain)
 
+        let stops = BahnDeClient.formationStops(of: trip)
         if let sequence, !sequence.coaches.isEmpty, let request = sequenceRequest(for: trip) {
-            TimelineView(.everyMinute) { context in
-                let departure = CoachSequenceDisclosure.departure(of: trip, for: request)
-                let open = sequenceExpanded ?? CoachSequence.unfoldsByItself(departure: departure, now: context.date)
-                VStack(spacing: 12) {
-                    Button {
-                        withAnimation(.snappy) { sequenceExpanded = !open }
-                    } label: {
-                        OptionRow(title: sequence.source == .bahnDe ? "Wagenreihung" : "Plan-Wagenreihung",
-                                  subtitle: "Wagen, Klassen und Ausstattung",
-                                  systemImage: "train.side.front.car", color: .brand,
-                                  chevron: open ? "chevron.up" : "chevron.down")
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityValue(open ? "Ausgeklappt" : "Eingeklappt")
-                    if open {
-                        Card {
-                            CoachSequencePanel(request: request, sequence: sequence)
-                        }
-                        .transition(.fold)
-                    }
-                }
-            }
+            CoachSequenceByStop(trip: trip, stops: stops, next: request, nextSequence: sequence, expanded: $sequenceExpanded)
         } else if !checkedSequence {
             OptionRow(title: "Wagenreihung", subtitle: "Wird gesucht …", systemImage: "train.side.front.car",
                       color: .secondary, loading: true)
+        } else if !stops.isEmpty {
+            // Not running now (yet, or arrived): any stop's Wagenreihung can be picked.
+            CoachSequenceByStop(trip: trip, stops: stops, next: sequenceRequest(for: trip), nextSequence: nil, expanded: $sequenceExpanded)
         } else {
             OptionRow(title: "Wagenreihung", subtitle: "Für diesen Zug gibt es keine Wagenreihung.",
                       systemImage: "train.side.front.car", color: .secondary, showsChevron: false)
@@ -489,6 +473,123 @@ struct TrainSearchResultView: View {
             }
             try? await Task.sleep(for: .seconds(120))
         }
+    }
+}
+
+/// The Wagenreihung row of a train found by number: at the next stop while the train runs, and a menu to pick
+/// any other stop it calls at (a train that hasn't started or has arrived has no next stop). The panel says so
+/// when bahn.de has none for the stop picked.
+private struct CoachSequenceByStop: View {
+    let trip: Trip
+    /// The stops a Wagenreihung can be asked at (`BahnDeClient.formationStops`).
+    let stops: [Stopover]
+    /// The request at the next stop, if the train has one, and its sequence when loaded.
+    let next: BahnDeClient.FormationRequest?
+    let nextSequence: CoachSequence?
+    @Binding var expanded: Bool?
+    @State private var pickedID: String?
+    /// The list of stops is unfolded.
+    @State private var showsStops = false
+
+    /// The stop shown: the one picked, else the next one, else the train's first.
+    private var shownStop: Stopover? {
+        if let picked = stops.first(where: { $0.id == pickedID }) { return picked }
+        if let next, let stop = stops.first(where: { isStop($0, of: next) }) { return stop }
+        return stops.first
+    }
+
+    /// `next` at the next stop (it knows the coupled trains), else the request at `stop`.
+    private func formationRequest(at stop: Stopover) -> BahnDeClient.FormationRequest? {
+        if let next, isStop(stop, of: next) { return next }
+        return BahnDeClient.formationRequest(for: trip, at: stop)
+    }
+
+    private func isStop(_ stop: Stopover, of request: BahnDeClient.FormationRequest) -> Bool {
+        stop.station.id == request.station.id && (stop.departure ?? stop.arrival)?.planned == request.plannedDeparture
+    }
+
+    var body: some View {
+        TimelineView(.everyMinute) { context in
+            let departure = next.flatMap { CoachSequenceDisclosure.departure(of: trip, for: $0) }
+            let open = expanded ?? (nextSequence != nil && CoachSequence.unfoldsByItself(departure: departure, now: context.date))
+            VStack(spacing: 12) {
+                Button {
+                    withAnimation(.snappy) { expanded = !open }
+                } label: {
+                    OptionRow(title: nextSequence?.source == .bahnDe || nextSequence == nil ? "Wagenreihung" : "Plan-Wagenreihung",
+                              subtitle: nextSequence == nil ? "Halt wählen; Wagen, Klassen und Ausstattung" : "Wagen, Klassen und Ausstattung",
+                              systemImage: "train.side.front.car", color: .brand,
+                              chevron: open ? "chevron.up" : "chevron.down")
+                }
+                .buttonStyle(.plain)
+                .accessibilityValue(open ? "Ausgeklappt" : "Eingeklappt")
+                if open, let stop = shownStop, let request = formationRequest(at: stop) {
+                    Card {
+                        VStack(alignment: .leading, spacing: 12) {
+                            if stops.count > 1 { stopMenu(selected: stop) }
+                            CoachSequencePanel(request: request, sequence: request == next ? nextSequence : nil)
+                                .id(stop.id)
+                        }
+                    }
+                    .transition(.fold)
+                }
+            }
+        }
+    }
+
+    /// The stop shown, tapping it unfolds the list of the others below it. Our own list rather than a system
+    /// `Menu` or `Picker`: their label jumped and flashed the glass effect for a moment after a pick.
+    private func stopMenu(selected: Stopover) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation(.snappy) { showsStops.toggle() }
+            } label: {
+                HStack(spacing: 8) {
+                    Text(title(of: selected)).font(.subheadline.weight(.semibold)).lineLimit(1)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.up.chevron.down").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.secondary.opacity(0.1), in: .rect(cornerRadius: 12, style: .continuous))
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityValue(showsStops ? "Ausgeklappt" : "Eingeklappt")
+            if showsStops {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(stops) { stop in
+                            Button {
+                                pickedID = stop.id
+                                withAnimation(.snappy) { showsStops = false }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Text(title(of: stop)).font(.subheadline)
+                                    Spacer(minLength: 0)
+                                    if stop.id == selected.id {
+                                        Image(systemName: "checkmark").font(.caption.weight(.bold)).foregroundStyle(Color.brand)
+                                    }
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 10)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(.rect)
+                            }
+                            .buttonStyle(.plain)
+                            if stop.id != stops.last?.id { Divider().padding(.leading, 12) }
+                        }
+                    }
+                }
+                .frame(maxHeight: 240)
+                .transition(.fold)
+            }
+        }
+    }
+
+    private func title(of stop: Stopover) -> String {
+        let time = (stop.departure ?? stop.arrival)?.planned.timeString
+        return time.map { "\(stop.station.displayName) · \($0)" } ?? stop.station.displayName
     }
 }
 

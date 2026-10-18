@@ -20,6 +20,20 @@ extension AppModel {
         guard force || !snapshot.hasSameContent(as: lastWidgetSnapshot) else { return }
         lastWidgetSnapshot = snapshot
         WidgetStore.save(snapshot)
-        WidgetCenter.shared.reloadAllTimelines()
+        // Only the widgets following the journey; the departure board widget fetches on its own and
+        // would spend its reload budget for nothing.
+        for kind in WidgetStore.journeyWidgetKinds {
+            WidgetCenter.shared.reloadTimelines(ofKind: kind)
+        }
+    }
+
+    /// Hands the departure board widget the stations it can be set to (#314): the favourites and the
+    /// routes searched last, whenever they change. The widget's settings read them from the App Group.
+    func updateWidgetStations() {
+        let stations = WidgetStations(favorites: favoriteStations,
+                                      recentRoutes: recentSearches.map { WidgetStations.Route(from: $0.from, to: $0.to) })
+        guard stations != lastWidgetStations else { return }
+        lastWidgetStations = stations
+        WidgetStations.save(stations)
     }
 }

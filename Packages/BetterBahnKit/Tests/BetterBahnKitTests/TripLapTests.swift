@@ -159,4 +159,75 @@ import Testing
     @Test func unknownStationGivesNothing() {
         #expect(ring(laps: 4).lap(at: station("t:Hamburg", "Hamburg Hbf", source: .transitous), near: start) == nil)
     }
+
+    /// #355: a ring train picked under "Zug vorgeben" showed the whole day from its first stop.
+    @Test func pickedRingTrainShowsTheLapFromItsBoarding() throws {
+        let trip = ring(laps: 4)
+        let gesundbrunnen = trip.stopovers[0].station, beusselstrasse = trip.stopovers[2].station
+        let candidate = TrainCandidateFinder.candidate(trip, boardingAt: gesundbrunnen, near: start.addingTimeInterval(120 * 60),
+                                                       target: beusselstrasse, exact: true)
+
+        #expect(candidate.trip.stopovers.count == 5)
+        #expect(candidate.boarding.map(minutes) == 120)
+        #expect(candidate.exit.map(minutes) == 140)
+        #expect(candidate.trip.hasPreviousLap && candidate.trip.hasNextLap)
+
+        let wider = try #require(candidate.addingLaps(after: 1, target: beusselstrasse))
+        // The block's last lap, cut at its end.
+        #expect(minutes(wider.trip.stopovers.last!) == 210 && !wider.trip.hasNextLap)
+        #expect(wider.boarding.map(minutes) == 120)
+        let widest = try #require(wider.addingLaps(before: 1, target: beusselstrasse))
+        #expect(minutes(widest.trip.stopovers.first!) == 60 && minutes(widest.trip.stopovers.last!) == 210)
+        #expect(widest.boarding.map(minutes) == 120 && widest.exit.map(minutes) == 140)
+    }
+
+    /// #355: "Zug vorgeben" with the S41 at a later lap planned the ride on the day's first lap.
+    @Test func pinnedRingTrainRidesThePickedLap() async throws {
+        let trip = ring(laps: 4)
+        let gesundbrunnen = trip.stopovers[0].station, beusselstrasse = trip.stopovers[2].station
+        let mock = RoutingMockProvider()
+        mock.trips[trip.id] = trip
+        let planner = TrainRoutePlanner(provider: CombinedProvider(primary: mock, fallback: nil, bahnDe: nil))
+
+        let picked = TrainRequirement(trainName: "S42", boarding: gesundbrunnen, exit: beusselstrasse, tripId: trip.id,
+                                      tripSource: .bahnDe, departure: start.addingTimeInterval(180 * 60))
+        let plan = try await planner.plan([picked], from: gesundbrunnen, to: beusselstrasse, date: start.addingTimeInterval(60 * 60))
+        let ride = try #require(plan.best?.transitLegs.first)
+        #expect(ride.departure.planned == start.addingTimeInterval(180 * 60))
+        #expect(ride.arrival.planned == start.addingTimeInterval(200 * 60))
+        #expect(ride.stopovers.count == 3)
+
+        // Without a picked time the next visit after the search's time, not the day's first.
+        let named = TrainRequirement(trainName: "S42", boarding: gesundbrunnen, exit: beusselstrasse, tripId: trip.id, tripSource: .bahnDe)
+        let next = try #require(try await planner.plan([named], from: gesundbrunnen, to: beusselstrasse,
+                                                       date: start.addingTimeInterval(110 * 60)).best?.transitLegs.first)
+        #expect(next.departure.planned == start.addingTimeInterval(120 * 60))
+        #expect(next.arrival.planned == start.addingTimeInterval(140 * 60))
+
+        // From the search's origin a train picked up to 30 minutes earlier is ridden: the route starts earlier.
+        let earlier = try await planner.plan([picked], from: gesundbrunnen, to: beusselstrasse, date: start.addingTimeInterval(200 * 60),
+                                             pickedEarlier: TrainCandidateFinder.earlierWindow)
+        #expect(earlier.best?.transitLegs.first?.departure.planned == start.addingTimeInterval(180 * 60))
+
+        // A picked lap that has already left can't be caught.
+        await #expect(throws: TransitError.self) {
+            try await planner.plan([picked], from: gesundbrunnen, to: beusselstrasse, date: start.addingTimeInterval(200 * 60))
+        }
+    }
+
+    /// Searching at 13:50 listed the S41 at 13:20, which then couldn't be picked: only trains that can be
+    /// caught, from the origin also the two latest of the 30 minutes before.
+    @Test func trainListKeepsOnlyCatchableTrains() {
+        let reached = start.addingTimeInterval(60 * 60)
+        let departures = [-40, -25, -15, -5, -1, 0, 10, 90].map { reached.addingTimeInterval(TimeInterval($0 * 60)) }
+        func offsets(_ list: [Date]) -> [Int] { list.map { Int($0.timeIntervalSince(reached) / 60) } }
+
+        let onTheWay = TrainCandidateFinder.catchable(departures, allowsEarlier: false) { ($0, reached) }
+        #expect(offsets(onTheWay) == [-1, 0, 10, 90])
+        let fromOrigin = TrainCandidateFinder.catchable(departures, allowsEarlier: true) { ($0, reached) }
+        #expect(offsets(fromOrigin) == [-15, -5, -1, 0, 10, 90])
+        // Trains without a known departure stay.
+        let unknown: [Date?] = [nil, departures[0]]
+        #expect(TrainCandidateFinder.catchable(unknown, allowsEarlier: false) { date in date.map { ($0, reached) } }.count == 1)
+    }
 }

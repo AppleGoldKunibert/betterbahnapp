@@ -126,6 +126,11 @@ struct TrainModel: Sendable, Hashable {
     /// The most likely series of `carriages`, or nil if the numbers are inconclusive (fewer than two
     /// vehicles agreeing, except for the single-car BR 631/640/650).
     static func detect(_ carriages: [Carriage], category: String) -> TrainModel? {
+        detectSubtype(carriages, category: category).flatMap { names[$0] }
+    }
+
+    /// The key of `names` that `detect` picks, e.g. "403.S2".
+    static func detectSubtype(_ carriages: [Carriage], category: String) -> String? {
         var votes: [String: Int] = [:]
         var order: [String] = []
         for carriage in carriages {
@@ -136,7 +141,7 @@ struct TrainModel: Sendable, Hashable {
         guard let best = order.max(by: { votes[$0]! < votes[$1]! }) else { return nil }
         let singleCar = ["631", "640", "650"].contains(best) && carriages.count == 1 && carriages[0].digits(0, 2) == "95"
         guard votes[best]! >= 2 || singleCar else { return nil }
-        return names[best]
+        return best
     }
 
     static func subtype(of carriage: Carriage, category: String) -> String? {

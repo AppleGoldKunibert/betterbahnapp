@@ -5,6 +5,7 @@ let package = Package(
     targets: [
         .target(name: "Kit", resources: [
             .copy("Resources/StationHints.json"), .copy("Resources/Ril100.json"), .copy("Resources/StationNames.json"),
+            .copy("Resources/SeatMaps.json"),
         ]),
         .executableTarget(name: "SearchSim", dependencies: ["Kit"]),
         .testTarget(name: "KitTests", dependencies: ["Kit"], resources: [.copy("Fixtures")]),
