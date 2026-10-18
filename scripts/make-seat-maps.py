@@ -204,13 +204,20 @@ def coach_boxes(image, page_labels, width, height):
     return boxes
 
 
+def most_common(pixels):
+    """The most frequent exact colour of `pixels` (an array of RGB rows)."""
+    colours, counts = np.unique(pixels, axis=0, return_counts=True)
+    return colours[np.argmax(counts)].astype(float)
+
+
 def strip_numbers(image, seats, scale, box):
     """Paints the seat numbers out of the coach image."""
     for seat in seats:
-        x0 = max(0, int((seat[0] - box[0]) * scale))
-        x1 = min(image.shape[1], int(np.ceil((seat[2] - box[0]) * scale)))
-        y0 = max(0, int((seat[1] - box[1]) * scale))
-        y1 = min(image.shape[0], int(np.ceil((seat[3] - box[1]) * scale)))
+        # One pixel more on each side for the glyphs' soft edges.
+        x0 = max(0, int((seat[0] - box[0]) * scale) - 1)
+        x1 = min(image.shape[1], int(np.ceil((seat[2] - box[0]) * scale)) + 1)
+        y0 = max(0, int((seat[1] - box[1]) * scale) - 1)
+        y1 = min(image.shape[0], int(np.ceil((seat[3] - box[1]) * scale)) + 1)
         region = image[y0:y1, x0:x1].reshape(-1, 3).astype(int)
         if len(region) == 0:
             continue
@@ -219,7 +226,9 @@ def strip_numbers(image, seats, scale, box):
         for q in quantized:
             counts[q] = counts.get(q, 0) + 1
         background_key = max(counts, key=counts.get)
-        background = region[[q == background_key for q in quantized]].mean(axis=0)
+        # The exact colour, not an average: an average comes out a shade off after quantizing and leaves a
+        # ghost of the number.
+        background = most_common(region[[q == background_key for q in quantized]])
         # DB prints seat numbers light on the seats and dark on the floor or the bike spaces' grey circles: the
         # number is whichever side has more pixels, so a seat's darker outline stays.
         brightness = region.sum(axis=1)
@@ -227,14 +236,14 @@ def strip_numbers(image, seats, scale, box):
         darker = (brightness < background.sum() - 120).sum()
         if background.sum() > 690 and darker > 0.3 * len(region):
             # A white number filling a dark badge (some ICE 4 seats): the badge is the background.
-            background = region[brightness < background.sum() - 120].mean(axis=0)
+            background = most_common(region[brightness < background.sum() - 120])
             glyph = region[np.argmax(brightness)]
         else:
             glyph = region[np.argmax(brightness)] if lighter >= darker else region[np.argmin(brightness)]
         direction = glyph - background
         length = max(1, (direction ** 2).sum())
         t = ((region - background) * direction).sum(axis=1) / length
-        mask = (t > 0.12).reshape(y1 - y0, x1 - x0)
+        mask = (t > 0.05).reshape(y1 - y0, x1 - x0)
         patch = image[y0:y1, x0:x1]
         patch[mask] = background.astype(np.uint8)
 
