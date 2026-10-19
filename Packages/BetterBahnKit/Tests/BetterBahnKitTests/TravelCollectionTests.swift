@@ -16,7 +16,7 @@ import Testing
     private let stations = [
         BigStation(dhid: "berlin", name: "Berlin Hbf", priceClass: 1),
         BigStation(dhid: "hamburg", name: "Hamburg Hbf", priceClass: 1),
-        BigStation(dhid: "hannover", name: "Hannover Hbf", priceClass: 1),
+        BigStation(dhid: "hannover", name: "Hannover Hbf", priceClass: 2),
     ]
 
     private func dhid(_ station: Station) -> String? {
@@ -96,8 +96,9 @@ import Testing
         let hamburg = stations.items.first { $0.title == "Hamburg Hbf" }!
         #expect(hamburg.sightings.count == 2)
         #expect(hamburg.firstSighting?.train == "ICE 1")
-        #expect(hamburg.subtitle == "Preisklasse 1")
-        #expect(!stations.items.first { $0.title == "Hannover Hbf" }!.isCollected)
+        #expect(hamburg.subtitle == "Großer Bahnhof")
+        let hannover = stations.items.first { $0.title == "Hannover Hbf" }!
+        #expect(!hannover.isCollected && hannover.subtitle == "Mittlerer Bahnhof")
     }
 
     @Test func newItemsAreThoseCollectedSinceLastLook() {

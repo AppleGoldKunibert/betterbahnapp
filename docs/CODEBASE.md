@@ -160,7 +160,7 @@ in `project.pbxproj`: new files join their target automatically.
   same km; walks, ferries and unknown products left out).
 - `TravelCollection` (#384) – collected special liveries (`TrainsetLiveries`, per Tz), series (`TravelCollection.series`,
   unit model via `seriesName(of:)`: "ICE 3neo Redesign" → "ICE 3neo"), named trainsets (`TrainsetNames`) and
-  `BigStations` (DB price class 1 and 2, by DHID via `StationNames.dhid(for:)`; boarding, alighting, changing; arriving
+  `BigStations` (DB price class 1 and 2, shown as "Großer"/"Mittlerer Bahnhof", by DHID via `StationNames.dhid(for:)`; boarding, alighting, changing; arriving
   and leaving within 3 h is one visit). Only arrived, not cancelled legs; IC 1 coach sets don't count.
 - `StationNames` (#205) – `Station.displayName`: DB's name for German stations, the national railway's with accents
   abroad, from `Resources/StationNames.json` (OpenStation with DHID/EVA, names from DB RIS via bahn.expert's

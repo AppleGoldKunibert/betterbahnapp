@@ -61,7 +61,7 @@ public struct TravelCollection: Sendable, Hashable {
         public var category: Category
         /// "Regenbogen", "ICE 4", "Tz 9018", "Berlin Hbf".
         public var title: String
-        /// "Tz 304", "Freiburg im Breisgau", "Preisklasse 1".
+        /// "Tz 304", "Freiburg im Breisgau", "Großer Bahnhof".
         public var subtitle: String?
         /// Newest first.
         public var sightings: [Sighting]
@@ -145,7 +145,7 @@ public struct TravelCollection: Sendable, Hashable {
         }
         let stationItems = stations.sorted { ($0.priceClass, $0.name) < ($1.priceClass, $1.name) }.map { station in
             Item(id: "station:\(station.dhid)", category: .stations, title: Station.displayName(for: station.name),
-                 subtitle: "Preisklasse \(station.priceClass)",
+                 subtitle: station.priceClass == 1 ? "Großer Bahnhof" : "Mittlerer Bahnhof",
                  sightings: Self.visits(newestFirst(stationSightings[station.dhid])))
         }
         groups = [
