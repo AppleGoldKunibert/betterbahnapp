@@ -589,6 +589,8 @@ struct LegCard: View {
     @State private var showFullTrip = false
     /// What past runs of this train say (#316), shown in the details.
     @State private var statistics = TrainStatisticsModel()
+    /// DB's occupancy forecast for this ride (#399): an icon by the name, the words in the details.
+    @State private var occupancy: OccupancyForecast?
     @Environment(AppModel.self) private var model
 
     private var color: Color { leg.line?.color ?? .gray }
@@ -628,6 +630,9 @@ struct LegCard: View {
                     }
                     Spacer()
                     HStack(spacing: 10) {
+                        if !leg.cancelled {
+                            OccupancyButton(forecast: occupancy, travelClass: model.settings.travelClass)
+                        }
                         TrainMessagesButton(messages: leg.messages)
                         if leg.cancelled {
                             InfoChip(text: "Fällt aus", systemImage: "xmark.octagon.fill", tint: .heavyDelay)
@@ -733,7 +738,7 @@ struct LegCard: View {
                     ReservationRow(reservation: reservation, request: BahnDeClient.formationRequest(for: leg))
                 }
 
-                if leg.line?.operatorName != nil || statistics.rows != nil || onReplace != nil || onReplan != nil || onCheckin != nil || onShowCheckin != nil {
+                if leg.line?.operatorName != nil || occupancy != nil || statistics.rows != nil || onReplace != nil || onReplan != nil || onCheckin != nil || onShowCheckin != nil {
                     Button {
                         withAnimation(.snappy) { showDetails.toggle() }
                     } label: {
@@ -752,6 +757,12 @@ struct LegCard: View {
                             TrainOperatorsLabel(source: .leg(leg))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                        }
+
+                        if let occupancy, !leg.cancelled {
+                            OccupancyDetails(forecast: occupancy, travelClass: model.settings.travelClass)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .transition(.fold)
                         }
 
                         if let rows = statistics.rows {
@@ -785,6 +796,12 @@ struct LegCard: View {
         }
         .task(id: leg.id) {
             await statistics.load(line: leg.line, stops: statisticsStops, date: leg.departure.planned, bahnDe: model.provider.bahnDe)
+        }
+        .task(id: leg.id) {
+            // Shares bahn.de's journey details with the live refresh and the operators; over once arrived.
+            guard leg.arrival.best > .now, let bahnDe = model.provider.bahnDe,
+                  let found = try? await bahnDe.occupancy(for: leg) else { return }
+            occupancy = found
         }
     }
 
