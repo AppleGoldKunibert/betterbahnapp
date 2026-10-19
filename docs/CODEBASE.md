@@ -98,7 +98,10 @@ in `project.pbxproj`: new files join their target automatically.
   the Open-Meteo credit, #385, `WeatherViews.swift`, off with `AppSettings.showWeather`), `JourneyMapView`, `JourneyReplanSheet` (replan mid-journey; "Halt hinzufügen" via
   `ManualStopSheet` adds an off-timetable exit, a check-in then becomes a manual trip via
   `AppModel.replaceCheckinWithManualTrip`; a new exit on the last train asks "Reise … beenden" / "Weiter nach …").
-- `Features/Departures/` – `StationBoardView`/`BoardRow`, `TripView`. `CoachSequenceView.swift`: the Wagenreihung
+- `Features/Departures/` – `StationBoardView`/`BoardRow`, `TripView` (and `LegTripSheet`, the read-only run of a journey's
+  leg): `plainTrip` with the board's line and lap, then `AppModel.liveRun` with the shown or remembered trip (and the
+  saved leg) as baseline, painted as the sources answer, remembered via `rememberLive`. `DelayTimeText` shows a delay
+  in planned-time mode only with a live time (no "0" for a plain timetable). `CoachSequenceView.swift`: the Wagenreihung
   unfolds in place, no sheet. `CoachSequenceDisclosure` (row in `LegCard` and `TripContent`'s header) uses bahn.de's
   sequence, else vagonweb's plan, opens by itself 30 min before to 15 min after departure
   (`CoachSequence.unfoldsByItself`) or by tap; tapping a stop's platform in `TripContent` unfolds that stop's.
@@ -247,19 +250,19 @@ in `project.pbxproj`: new files join their target automatically.
 - `Transit/Transitous/CzechPlatforms.swift` – planned Czech platforms for feeds without any there (DELFI's ICE/IC
   Berlin–Praha, alex, copies): the first Czech stop (`isCzechStop`) as CZPTT's station via `v1/map/stops`, the train by
   number ±5 min, tracks via `v5/trip`, cached 12 h. Only where missing, `PlatformInfo.source == .czechTimetable` →
-  info dot, `PlannedPlatformNote`. Applied in `CombinedProvider.journeys`, `CombinedProvider.trip(for:)`,
-  `JourneyRefresher.refresh`.
+  info dot, `PlannedPlatformNote`. Applied in `CombinedProvider.journeys`, `CombinedProvider.trip(for:)` and, last
+  of all, in `LiveRun`.
 - `Transit/Transitous/TwinTrainStops.swift` – stops/platforms a long-distance train's own feed leaves out (ÖBB's RJ
   177; `mayLackStops`): taken from the same train in another feed on the leg's start board (`insertingMissingStops`,
   cached 12 h), shared stops take DB's names. Runs before the Czech platforms; journey view does both first
-  (`completingStopsAndPlatforms`), then the live refresh.
+  (`completingStopsAndPlatforms`), then the live refresh. First step of `LiveRun` (`fillingMissingStops(in: trip)`).
 - `Transit/Transitous/TripContinuation.swift` – a DB trip (DELFI) ending at a foreign stop (`mayEndAtBorder`; ICE 171
   Hamburg-Altona → Děčín) gets the trip carrying on there under the same number (the Czech "RJ 171", found on the
   departures within 10 min) joined to it (`joining`): one border stop, the continuation's name when it is a long-distance
   brand ("RJ 171", the first as `alternateName`). `CombinedProvider.completing(_:)` does it (3 s deadline) and fills a
   trip's Czech stops: CZPTT's planned platforms (`fillingCzechPlatforms`) and bahn.expert's live times
   (`fillingCzechLiveTimes`; Transitous has none there). `trip(id:source:)` completes; `TripView` and `LegTripSheet` load
-  `plainTrip(id:source:)` and complete it after the first paint (`insertZusatzhalte`), since it takes a few requests the
+  `plainTrip(id:source:)`, and `LiveRun` completes it after the first paint, since it takes a few requests the
   first time. Journeys do the same with legs (`mergeThroughTrainLegs`). A Träwelling check-in on such a run is still two
   statuses (`segments(for:)`). `TrainNumberSearch.named(after:)` gives a run found by number DB's name from the search result.
 - `Transit/BahnDe/` – bahn.de web API only via `Server/bahnde-proxy` (`BahnDeProxy`, #342; URLs built on the Worker's
@@ -268,7 +271,10 @@ in `project.pbxproj`: new files join their target automatically.
   Zusatzhalte (`inserting`, `nextRegularStop`), `fillingMissingPlatforms` (e.g. Hamburg Hbf), `correctingTrainNames`
   ("RJ 171" Transitous calls "ICE 171"). Live times (`ezZeit`; `correctingFromBoard`, `applyingLiveTimes`,
   `applyingLiveTimes(from:to:)`) beat DELFI's forecasts, but not a delay/early time DB Timetables set (`keepingDelays`),
-  and never turn 2+ min early into on time (`turnsEarlyIntoOnTime`). Responses cached. On failure the server is left
+  and never turn 2+ min early into on time (`turnsEarlyIntoOnTime`). The journey details (`journeyCourse`) are asked
+  only by `LiveRun`, for legs and trip views alike: for a run underway or leaving within 12 h (`isRunningSoon`,
+  `journeyStopsMaxAge`), hourly for one up to a week ahead that lacks a platform (`needsPlatforms`), platforms only for
+  other railways' night trains (`takesOnlyPlatforms`). Responses cached. On failure the server is left
   alone (`BahnDeProxy.gate`: 10 min after 403/429/452, 2 min when down) and requests throw `rateLimited`, shown as
   "Plan-Wagenreihung · Aktuelle nicht verfügbar" / "Aktuelle Wagenreihung nicht verfügbar". No other way to bahn.de:
   the Worker and the phone's hidden browser were refused. `requiresReservation(for:)` (attribute `RP`, also other
@@ -296,7 +302,7 @@ in `project.pbxproj`: new files join their target automatically.
 - `Transit/BahnExpert/` – train type fallback (`TrainTypeLookup`, `DB-plan`) when bahn.de and vagonweb have none;
   bahn.de is only asked within `BahnDeClient.formationLookahead` (24 h). Needs `Referer` + non-curl UA (else empty
   206). Platforms bahn.de and Transitous lack (`ExpertPlatforms.swift`, `BahnExpertClient.fillingMissingPlatforms`):
-  SBB/ÖBB stations of their EC/RJ(X), Nightjet, Euronight, InterRegio, on legs and trips (`TripView.insertZusatzhalte`),
+  SBB/ÖBB stations of their EC/RJ(X), Nightjet, Euronight, InterRegio, on legs and trips (step 4 of `LiveRun`),
   cached 30 min; for NJ/EN/IR they replace the feed's (`overwriting`). `TransferDisposition` ("Anschluss wartet
   (nicht)" in `TransferRow`) via `disposition(from:to:)`/`dispositions(in:now:)` (`dispositionStatus`, 15 min ago to
   3 h ahead, notifies once per `notificationID`). `ExpertTimes` (`liveTimes(category:number:day:)`, `ExpertTimesCache`
@@ -316,11 +322,26 @@ in `project.pbxproj`: new files join their target automatically.
   station levels via `/station` `meta`; no requests for trains over 4 h ago (`changesMemory`); without live data no
   `actual` (no "+0"). Boards: `applyingRealtime(to:at:)` after bahn.de/Transitous (nothing changes without `fchg`).
   The Worker asks IRIS first, the API Marketplace only on failure (60/min). `infersOnTime` only within 2 h;
-  `JourneyRefresher.droppingInferredOnTime` cleans older saves.
+  `JourneyRefresher.droppingInferredOnTime` cleans older saves. `realtime(for:)` gives a leg's ends
+  (`JourneyRefresher.refreshEnds`); a run's stops get `liveTrip` (`tripWithRealtime` + `fillMissingPlatforms`) through
+  `LiveRun`, legs and trip views alike.
 
 ### Logic
 
-- `JourneyReplanner` (`continuations`, `fastestFirst`), `ConnectionCheck` (`ConnectionIssue`), `ExitReminder`, `PlatformChange` (push,
+- `Transit/LiveRun.swift` – the one way a train run gets its live data, for a saved journey's leg
+  (`JourneyRefresher.refresh`, the part between origin and destination as a `Trip` via `run(of:)`/`applying(_:to:)`,
+  `syncingEnds`) and the trip views (`AppModel.liveRun`, the whole run) alike, so the journey card and the run opened
+  from it agree (before, ICE 279 showed +3/+18 on the card and "0" at every stop of the run). Fixed order: Transitous'
+  twin stops, DB Timetables (`liveTrip`, within `knowsChanges`), `CombinedProvider.completing` (whole runs only),
+  bahn.de's `journeyCourse` (Zusatzhalte, `applyingLiveTimes(keepingDelays:referee:)`, platforms, sleeping cars; the
+  12-h/one-week rules above), bahn.expert platforms, Czech platforms. A `baseline` (the remembered trip,
+  `AppModel.liveTrips`; the saved leg, `Leg.savedTrip`) fills what the fresh answers lack (`keepingKnown`: live time,
+  platform, Zusatzhalt, night-train mark), matched by station and planned time (`isSameVisit`: another lap takes
+  nothing), never overriding fresh data; its inferred "on time" is dropped hours ahead. `progress` paints the screen as
+  the sources answer (the timetable after `LoadingDeadline.liveData` if DB is slow, bahn.de before and after the
+  referee), each version with the baseline.
+- `JourneyReplanner` (`continuations`, `fastestFirst`), `ConnectionCheck` (`ConnectionIssue`, `JourneyRefresher`: `refreshEnds`
+  for every result on screen, `refresh` through `LiveRun`), `ExitReminder`, `PlatformChange` (push,
   ignores sectors/bus bays), `TrainRoutePlanner`, `ViaRoutePlanner` (vias without stay keep a through train as one
   leg), `TrainPicker` ("Anderer Zug": `replacing` + `MissedConnection` #226, `reroutes` "Andere Routenführung",
   `journeysIgnoringBoardingRules`, `journeysContinuingFromRestrictedTrains`, both added in `JourneyResultsView`),
@@ -392,8 +413,9 @@ in `project.pbxproj`: new files join their target automatically.
   filter-only (`Line.product` stays `.longDistance`, filters compare `Line.filterProduct`); old searches upgraded via
   `Product.upgradingLegacySelection` (`hasProductGroups`).
 - `Support/LoadingDeadline.swift` – waits up to 4 s for live data on a journey/run never loaded live, so it doesn't
-  jump from timetable to delays. `Support/LiveDataCache.swift` – `AppModel.liveJourneys`/`liveTrips` (12 h, 50 each)
-  show at once and refresh in the background; `AppModel.prepareLiveData` for the first search result.
+  jump from timetable to delays (`LiveRun` for runs). `Support/LiveDataCache.swift` – `AppModel.liveJourneys`/`liveTrips`
+  (12 h, 50 each) show at once and refresh in the background, as the baseline of `LiveRun` for a trip; `AppModel.prepareLiveData`
+  for the first search result.
 - `Support/WorkerAuth.swift` – App Attest for own Workers: attests once, hourly `X-BetterBahn-Token`,
   `HTTPClient.sendRaw(_:auth:)` retries once after a 401; only on the real `URLSession.shared` (mocked tests get none).
 

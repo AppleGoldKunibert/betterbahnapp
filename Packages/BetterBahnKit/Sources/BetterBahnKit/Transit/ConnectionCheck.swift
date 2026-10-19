@@ -203,56 +203,49 @@ public struct JourneyRefresher: Sendable {
         leg.arrival.best.addingTimeInterval(30 * 60) < now
     }
 
+    /// The leg with every source's live data: its ends from the fresh trip and DB Timetables (`refreshEnds`),
+    /// then its stop sequence through `LiveRun`, the same way the trip view loads the whole run, so a journey
+    /// card and the run opened from it agree. The leg as it was is the baseline: what the fresh answers lack
+    /// (a delay seen earlier, a platform, a Zusatzhalt) stays.
     private func refresh(_ originalLeg: Leg, now: Date) async -> Leg {
         guard !Self.isLongOver(originalLeg, now: now) else { return originalLeg }
-        var leg = await refreshEnds(of: originalLeg, now: now)
-        // Stops the leg's own feed leaves out (ÖBB's RJ 177 has none between Südkreuz and Děčín), before
-        // DB's live data and bahn.de's Zusatzhalte are laid over them.
-        if let transitous = provider.primary as? TransitousProvider {
-            leg = await transitous.fillingMissingStops(in: leg)
-        }
-        let timetables = TimetablesClient.knowsChanges(until: leg.arrival.planned, now: now) ? self.timetables : nil
-        // Asked DB Timetables: its delays stay where bahn.de's forecast differs (see `BahnDeClient.applyingLiveTimes`).
-        var timetablesAnswered = false
-        if let timetables, timetables.canLookUp(leg) {
-            timetablesAnswered = true
-            leg = Self.syncingEnds(of: leg, toStopovers: true)
-            let live = await timetables.liveStopovers(for: leg, now: now)
-            leg.stopovers = live.stopovers
-            leg.messages = TrainMessage.merged(leg.messages + live.messages)
-            leg = Self.syncingEnds(of: leg, toStopovers: false)
-        }
-        // Neither Transitous nor DB Timetables above ever *inserts* a stop — only bahn.de's journey
-        // details report a Zusatzhalt (an unscheduled stop the train additionally picked up today)
-        // at all, so it's the only way one ends up in `leg.stopovers` for the UI to show. They also
-        // carry the platforms Transitous lacks at some stations (e.g. Hamburg Hbf), days before DB
-        // Timetables knows them. Asked for legs underway or departing within 12 hours, and hourly
-        // for legs up to a week ahead that miss a platform, so many saved journeys don't flood bahn.de.
-        // A Nightjet or the like only gets its platforms from bahn.de, which lists them on its board too:
-        // no stops inserted, no times, as they are not DB's trains.
+        let leg = await refreshEnds(of: originalLeg, now: now)
+        guard !leg.isWalking, let run = Self.run(of: leg) else { return leg }
+        let baseline = Self.run(of: Self.droppingInferredOnTime(originalLeg, now: now))
+        let live = await LiveRun(provider: provider, timetables: timetables).refresh(run, baseline: baseline, wholeRun: false, now: now)
+        return Self.applying(live, to: leg)
+    }
+
+    /// The part of the train's run `leg` rides, for `LiveRun`: its stops, carrying its ends' live data
+    /// (`syncingEnds`), or just its two ends when it was saved without stops.
+    static func run(of leg: Leg) -> Trip? {
+        syncingEnds(of: leg, toStopovers: true).savedTrip
+    }
+
+    /// `leg` with the run `LiveRun` refreshed: its stops (unless it never had any), notices and night-train
+    /// mark, and its ends synced from the first and last stop (`syncingEnds`), with their platforms where the
+    /// leg lacks one — or throughout for a night train of another railway, whose feed's platforms bahn.de's replace.
+    static func applying(_ run: Trip, to leg: Leg) -> Leg {
+        var leg = leg
+        // A leg saved without stops went through as its two ends (`run(of:)`), which aren't stops to show.
+        if leg.stopovers.count >= 2 { leg.stopovers = run.stopovers }
+        leg.messages = run.messages
+        if run.line?.nightRail == true { leg.line?.nightRail = true }
         let platformsOnly = BahnDeClient.takesOnlyPlatforms(leg.line)
-        let runningSoon = Self.isRunningSoon(leg) && !platformsOnly
-        if let bahnDe = provider.bahnDe, runningSoon || Self.needsPlatforms(leg),
-           let course = try? await bahnDe.journeyCourse(for: leg, maxAge: runningSoon ? BahnDeClient.journeyStopsMaxAge : 3600,
-                                                        includingOtherRailways: platformsOnly) {
-            if runningSoon {
-                if !leg.stopovers.isEmpty { leg.stopovers = BahnDeClient.inserting(course.stops, into: leg.stopovers) }
-                // DB's own live times beat Transitous' and fill stops DB Timetables missed.
-                // Where bahn.de and DB Timetables disagree, bahn.expert is asked which is right.
-                leg = await BahnDeClient.applyingLiveTimes(from: course.stops, to: leg, keepingDelays: timetablesAnswered,
-                                                           referee: provider.bahnExpert)
+        if let first = run.stopovers.first(where: { $0.station.isSamePlace(as: leg.origin) && $0.departure?.planned == leg.departure.planned }) {
+            if let departure = first.departure { leg.departure = departure }
+            if first.departurePlatform?.best != nil, platformsOnly || leg.departurePlatform?.best == nil {
+                leg.departurePlatform = first.departurePlatform
             }
-            leg = BahnDeClient.fillingMissingPlatforms(in: leg, from: course.stops, overwriting: platformsOnly)
-            if !platformsOnly { leg = BahnDeClient.markingNightTrain(leg, hasSleepingCars: course.hasSleepingCars) }
+            // The leg's ends take DB's names like its stops (see `TwinTrainStops.swift`).
+            if first.station.id.hasPrefix("de-DELFI_") { leg.origin.name = first.station.name }
         }
-        // What bahn.de lacks, mostly at the stations of other railways (the SBB's and ÖBB's): bahn.expert lists
-        // the platforms of the whole run, also for a Nightjet.
-        if let bahnExpert = provider.bahnExpert, Self.needsPlatforms(leg, now: now) {
-            leg = await bahnExpert.fillingMissingPlatforms(in: leg)
-        }
-        // International trains from DB's feed have no platforms in Czechia; the Czech timetable has them.
-        if let transitous = provider.primary as? TransitousProvider {
-            leg = await transitous.fillingCzechPlatforms(in: leg)
+        if let last = run.stopovers.last(where: { $0.station.isSamePlace(as: leg.destination) && $0.arrival?.planned == leg.arrival.planned }) {
+            if let arrival = last.arrival { leg.arrival = arrival }
+            if last.arrivalPlatform?.best != nil, platformsOnly || leg.arrivalPlatform?.best == nil {
+                leg.arrivalPlatform = last.arrivalPlatform
+            }
+            if last.station.id.hasPrefix("de-DELFI_") { leg.destination.name = last.station.name }
         }
         return leg
     }
@@ -278,17 +271,15 @@ public struct JourneyRefresher: Sendable {
         return leg
     }
 
-    /// A leg within the next week missing a platform somewhere, which bahn.de may know (see `refresh`).
+    /// A leg within the next week missing a platform somewhere, which bahn.de may know (see `LiveRun`).
     static func needsPlatforms(_ leg: Leg, now: Date = .now) -> Bool {
-        !leg.isWalking && leg.departure.planned <= now.addingTimeInterval(7 * 24 * 3600) && leg.arrival.best >= now
-            && (BahnDeClient.takesOnlyPlatforms(leg.line)
-                || (BahnDeClient.trainReference(for: leg.line) != nil && BahnDeClient.lacksPlatforms(leg)))
+        LiveRun.needsPlatforms(leg, now: now)
     }
 
     /// A leg departing within the next 12 hours or still underway — the only ones a Zusatzhalt
-    /// lookup is worth a bahn.de request for.
+    /// lookup is worth a bahn.de request for (see `LiveRun`).
     static func isRunningSoon(_ leg: Leg, now: Date = .now) -> Bool {
-        leg.departure.planned <= now.addingTimeInterval(12 * 3600) && leg.arrival.best >= now.addingTimeInterval(-3600)
+        LiveRun.isRunningSoon(leg, now: now)
     }
 
     static func apply(_ trip: Trip, to leg: Leg) -> Leg {

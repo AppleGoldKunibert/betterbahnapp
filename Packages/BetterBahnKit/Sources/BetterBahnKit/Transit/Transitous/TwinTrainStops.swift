@@ -25,6 +25,12 @@ extension TransitousProvider {
         return Self.fillingMissingStops(in: leg, from: twin)
     }
 
+    /// Like `fillingMissingStops(in:)` for a run on its own (`LiveRun`): looked up by its first departure.
+    public func fillingMissingStops(in trip: Trip) async -> Trip {
+        guard let span = LiveRun.span(of: trip) else { return trip }
+        return await fillingMissingStops(in: trip, of: span)
+    }
+
     /// Like `fillingMissingStops(in:)` for the whole run of `leg`'s train.
     public func fillingMissingStops(in trip: Trip, of leg: Leg) async -> Trip {
         guard Self.mayLackStops(leg), trip.id == leg.tripId, let twin = await twinStops(for: leg),
