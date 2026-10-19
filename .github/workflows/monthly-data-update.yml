@@ -74,6 +74,8 @@ jobs:
           python3 scripts/make-ril100.py "$data/M1 Betriebsstellen.csv" "$data/betriebsstellen.xlsx"
           # Needs the new Ril100.json for the stations' positions; only asks bahn.expert for new stations.
           python3 scripts/make-station-names.py "$data/netex.xml"
+          # The collection's big stations (#384), named as in the new StationNames.json.
+          python3 scripts/make-big-stations.py "$data/netex.xml"
           python3 scripts/make-station-hints.py
           python3 scripts/make-platforms.py "$data/netex.xml" "$data/germany.osm.pbf"
 
@@ -100,11 +102,12 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
           git add Packages/BetterBahnKit/Sources/BetterBahnKit/Resources
+          git add Packages/BetterBahnKit/Sources/BetterBahnKit/Models/BigStations.swift
           git commit -m "Update offline station data ($(date -u +%m/%Y))"
           git push -u origin "$BRANCH"
           {
             echo "Monthly rebuild of the offline station lists with \`scripts/make-ril100.py\`,"
-            echo "\`make-station-names.py\`, \`make-station-hints.py\` and \`make-platforms.py\`."
+            echo "\`make-station-names.py\`, \`make-big-stations.py\`, \`make-station-hints.py\` and \`make-platforms.py\`."
             echo
             cat "$RUNNER_TEMP/table.md"
             echo
