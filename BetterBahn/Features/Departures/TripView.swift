@@ -654,9 +654,9 @@ private struct DelayTimeText: View {
                     .lineLimit(1)
                     .fixedSize()
                     .foregroundStyle(Color.heavyDelay)
-            } else if showPlanned {
-                // Original/planned time is shown, so the delay isn't reflected above — always show it, even +0.
-                let delayMinutes = time.delayMinutes ?? 0
+            } else if showPlanned, let delayMinutes = time.delayMinutes {
+                // Original/planned time is shown, so the delay isn't reflected above — show it, even +0.
+                // Without a live time nothing: a "0" would pass for on time when nothing is known yet.
                 Text(delayMinutes > 0 ? "+\(delayMinutes)" : "\(delayMinutes)")
                     .font(.caption2.weight(.bold))
                     .lineLimit(1)
@@ -810,9 +810,11 @@ struct LegTripSheet: View {
                 ? try await model.provider.trip(for: leg, extraLapsBefore: extraLapsBefore, extraLapsAfter: extraLapsAfter)
                 : try await model.provider.plainTrip(id: tripId, source: leg.source)
             guard tripId == self.tripId else { return }
-            // The leg's own line knows the trains coupled to it, so the trainsets of both show.
+            // The leg's own line knows the trains coupled to it, so the trainsets of both show; its live
+            // times and platforms (the journey's refresh) fill what the feed's run lacks.
             if tripId == leg.tripId {
                 loaded.line = leg.line ?? loaded.line
+                loaded = loaded.takingLiveData(from: leg)
             } else if let train = runs.first(where: { $0.tripId == tripId }) {
                 loaded.line = leg.line?.riding(train, ownDirection: leg.direction, ownTripId: leg.tripId) ?? loaded.line
             }
