@@ -62,42 +62,6 @@ public extension Trip {
         }
         return trip
     }
-
-    /// This run with the live times and platforms `leg` knows at the stops the run has none for, matched
-    /// by station and planned time. A saved journey refreshes its legs (DB Timetables, bahn.de's forecast)
-    /// while a freshly loaded run starts with its feed's data alone, so the run opened from a leg never
-    /// knows less than the leg: an ICE hours ahead showed "+3" on the journey and a bare timetable as its run.
-    func takingLiveData(from leg: Leg) -> Trip {
-        var trip = self
-        let ends = [
-            Stopover(station: leg.origin, arrival: nil, departure: leg.departure, arrivalPlatform: nil,
-                     departurePlatform: leg.departurePlatform, cancelled: leg.cancelled),
-            Stopover(station: leg.destination, arrival: leg.arrival, departure: nil, arrivalPlatform: leg.arrivalPlatform,
-                     departurePlatform: nil, cancelled: leg.cancelled),
-        ]
-        for known in leg.stopovers + ends {
-            guard let index = trip.stopovers.firstIndex(where: { stop in
-                stop.station.isSamePlace(as: known.station)
-                    && ((stop.arrival?.planned != nil && stop.arrival?.planned == known.arrival?.planned)
-                        || (stop.departure?.planned != nil && stop.departure?.planned == known.departure?.planned))
-            }) else { continue }
-            var stop = trip.stopovers[index]
-            if stop.arrival?.actual == nil, let arrival = known.arrival, arrival.planned == stop.arrival?.planned {
-                stop.arrival?.actual = arrival.actual
-            }
-            if stop.departure?.actual == nil, let departure = known.departure, departure.planned == stop.departure?.planned {
-                stop.departure?.actual = departure.actual
-            }
-            if stop.arrivalPlatform?.best == nil, let platform = known.arrivalPlatform, platform.best != nil {
-                stop.arrivalPlatform = platform
-            }
-            if stop.departurePlatform?.best == nil, let platform = known.departurePlatform, platform.best != nil {
-                stop.departurePlatform = platform
-            }
-            trip.stopovers[index] = stop
-        }
-        return trip
-    }
 }
 
 /// Result of picking a specific train: the ride itself, plus – when boarding at the requested origin

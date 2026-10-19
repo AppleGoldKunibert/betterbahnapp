@@ -86,7 +86,7 @@ in `project.pbxproj`: new files join their target automatically.
   the Open-Meteo credit, #385, `WeatherViews.swift`, off with `AppSettings.showWeather`), `JourneyMapView`, `JourneyReplanSheet` (replan mid-journey; "Halt hinzufügen" via
   `ManualStopSheet` adds an off-timetable exit, a check-in then becomes a manual trip via
   `AppModel.replaceCheckinWithManualTrip`; a new exit on the last train asks "Reise … beenden" / "Weiter nach …").
-- `Features/Departures/` – `StationBoardView`/`BoardRow`, `TripView` (`LegTripSheet` opens a leg's run with the leg's live times and platforms filled in where the feed's run has none, `Trip.takingLiveData(from:)`; in the planned-times mode a delay shows only with a live time, never a made-up "0"). `CoachSequenceView.swift`: the Wagenreihung
+- `Features/Departures/` – `StationBoardView`/`BoardRow`, `TripView`. `CoachSequenceView.swift`: the Wagenreihung
   unfolds in place, no sheet. `CoachSequenceDisclosure` (row in `LegCard` and `TripContent`'s header) uses bahn.de's
   sequence, else vagonweb's plan, opens by itself 30 min before to 15 min after departure
   (`CoachSequence.unfoldsByItself`) or by tap; tapping a stop's platform in `TripContent` unfolds that stop's.
