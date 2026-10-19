@@ -30,6 +30,10 @@ struct JourneyDetailView: View {
     @State private var dispositions: [String: TransferDisposition] = [:]
     /// Transfers whose incoming train is often too late there (#316), keyed by the incoming leg's id.
     @State private var transferWarnings: [String: String] = [:]
+    /// The forecast on arrival and at long transfers (#385).
+    @State private var weather = JourneyWeather()
+    /// CO₂ compared with car and plane (#386), once the track geometry is in.
+    @State private var co2: CO2Comparison?
 
     /// Where the journey is going now.
     private var goal: Station { editedDestination ?? finalDestination }
@@ -51,6 +55,7 @@ struct JourneyDetailView: View {
                 plan
             }
         }
+        .closesMenusOnScroll()
         .refreshable {
             await TimetablesClient.invalidateDelays()
             await refreshRealtime()
@@ -76,6 +81,13 @@ struct JourneyDetailView: View {
                 if model.savedEntry(for: journey) != nil { await refreshRealtime() }
                 await loadDispositions()
             }
+        }
+        .task(id: journey.transitLegs.map(\.id)) { await loadCO2() }
+        .task(id: weatherPoints) {
+            var loaded = JourneyWeather()
+            if !weatherPoints.isEmpty { loaded = await WeatherClient.shared.weather(for: journey) }
+            guard !Task.isCancelled, loaded != weather else { return }
+            withAnimation { weather = loaded }
         }
         .tabBarSafePadding()
         .background { AppBackground() }
@@ -136,6 +148,9 @@ struct JourneyDetailView: View {
     private var plan: some View {
         VStack(spacing: 16) {
             summaryCard
+            if let entry = model.savedEntry(for: journey), let claim = model.passengerRightsClaim(for: entry) {
+                PassengerRightsCard(entry: entry, claim: claim)
+            }
             if !readOnly { issuesCard }
             ForEach(Array(journey.legs.enumerated()), id: \.element.id) { index, leg in
                 if !leg.isWalking {
@@ -152,7 +167,8 @@ struct JourneyDetailView: View {
                         onShowCheckin: model.settings.traewellingEnabled
                             ? model.checkinStatusIDs[leg.id].map { id -> () -> Void in { shownCheckin = ShownCheckin(leg: leg, statusId: id) } }
                             : nil,
-                        reservation: model.reservation(for: leg, in: journey)
+                        reservation: model.reservation(for: leg, in: journey),
+                        arrivalWeather: weather.arrival(of: leg, in: journey)
                     )
                     if let info = transferInfo(after: leg) {
                         TransferRow(from: leg, to: info.next, walk: info.walk, isPast: journey.isOver(),
@@ -160,6 +176,7 @@ struct JourneyDetailView: View {
                     }
                 }
             }
+            if let co2, co2.savedComparedToCar >= 0.1 { CO2SavingButton(comparison: co2) }
             if !readOnly { historySection }
         }
         .padding(.horizontal)
@@ -170,6 +187,25 @@ struct JourneyDetailView: View {
     private func loadTransferWarnings() async {
         guard !journey.isOver() else { return }
         transferWarnings = await TrainStatisticsModel.transferWarnings(for: journey, upTo: 15, here: true, bahnDe: model.provider.bahnDe)
+    }
+
+    /// Measures the legs along their tracks (cached, like the journey map) for the CO₂ comparison.
+    private func loadCO2() async {
+        let legs = journey.transitLegs, model = model
+        let geometries = await withTaskGroup(of: (String, [Coordinate]?).self) { group in
+            for leg in legs { group.addTask { await (leg.id, model.geometry(for: leg)) } }
+            var found: [String: [Coordinate]] = [:]
+            for await (id, geometry) in group { found[id] = geometry }
+            return found
+        }
+        guard !Task.isCancelled else { return }
+        co2 = CO2Comparison(legs: legs, geometries: geometries)
+    }
+
+    /// Where the weather is looked up; reloads when a delay moves an arrival (the forecasts stay cached).
+    /// None for old plans or with the setting off.
+    private var weatherPoints: [WeatherPoint] {
+        readOnly || !model.settings.showWeather ? [] : journey.weatherPoints
     }
 
     /// Whether opening waits for live data (see the `.task` above): only for a journey not seen live yet.
@@ -228,6 +264,7 @@ struct JourneyDetailView: View {
         guard refreshed != journey else { return }
         model.updateSavedJourneyData(id: entry.id, journey: refreshed)
         withAnimation { journey = refreshed }
+        await model.notifyPassengerRights(for: entry.id)
     }
 
     private var recentlyFinishedEntry: SavedJourney? {
@@ -337,6 +374,10 @@ struct JourneyDetailView: View {
                             TimeStack(time: arrival, alignment: .trailing, font: .largeTitle.weight(.bold))
                             Text(last.destination.displayName).font(.subheadline.weight(.semibold)).lineLimit(2)
                                 .multilineTextAlignment(.trailing)
+                            if let forecast = weather.destination {
+                                WeatherLabel(forecast: forecast, context: "bei Ankunft", station: last.destination.displayName)
+                                    .transition(.fold)
+                            }
                         }
                     }
                 }
@@ -394,7 +435,8 @@ struct JourneyDetailView: View {
                     TicketButton(tickets: model.tickets(for: journey), journey: journey)
                 }
                 JourneyShareButton(journey: journey, title: shareTitle)
-                if model.isSaved(journey) {
+                if !readOnly, let entry = model.savedEntry(for: journey) {
+                    CalendarButton(entry: entry)
                     RegularTripButton(journey: journey)
                 }
                 if model.settings.editJourneyEnabled {
@@ -430,6 +472,16 @@ struct JourneyDetailView: View {
                     }
                     .tint(.brand)
                 }
+            }
+            if model.settings.exitReminders, let entry = model.savedEntry(for: journey), !entry.isFinished {
+                Toggle(isOn: Binding(
+                    get: { entry.exitRemindersOff != true },
+                    set: { model.setExitReminders($0, for: entry.id) }
+                )) {
+                    Label("Ans Aussteigen erinnern (\(model.settings.exitReminderLead.displayName))", systemImage: "bell.badge.fill")
+                        .font(.caption.weight(.semibold))
+                }
+                .tint(.brand)
             }
         }
     }
@@ -529,6 +581,9 @@ struct LegCard: View {
     var onShowCheckin: (() -> Void)?
     /// The seat reserved on this train (from the journey's ticket), if any.
     var reservation: SeatReservation?
+    /// The forecast where this leg arrives: at the destination, or at a transfer with more than 15 minutes
+    /// until the next train (#385).
+    var arrivalWeather: LegArrivalWeather?
 
     @State private var showStops = false
     @State private var showDetails = false
@@ -561,7 +616,7 @@ struct LegCard: View {
                 // A tap gesture rather than a Button, so the warning triangle inside can be its own button.
                 HStack(spacing: 10) {
                     LiveTrainIconTile(route: LiveTrainRoute(leg: leg), systemImage: leg.line?.symbolName ?? "tram.fill",
-                                      color: color, size: 38)
+                                      color: color, size: 38, logo: leg.line?.transitLogo)
                     VStack(alignment: .leading, spacing: 2) {
                         // Coupled trains have a long name; their series tag goes below it rather than being cut off.
                         TrainNameRow(name: leg.line?.displayName ?? "Zug") {
@@ -651,11 +706,12 @@ struct LegCard: View {
                     }
 
                     TimelineNode(kind: .major, color: color, lineAbove: color) {
-                        stationRow(time: leg.arrival, name: leg.destination.displayName, platform: leg.arrivalPlatform)
+                        stationRow(time: leg.arrival, name: leg.destination.displayName, platform: leg.arrivalPlatform,
+                                   weather: arrivalWeather)
                     }
 
                     // Between the stops and "Mehr"; unfolds by itself around the departure.
-                    CoachSequenceDisclosure(leg: leg, spacing: 14)
+                    CoachSequenceDisclosure(leg: leg, reservation: reservation, spacing: 14)
 
                     let platformChanges = platformChangeHints
                     if !platformChanges.isEmpty {
@@ -675,7 +731,7 @@ struct LegCard: View {
                 ForEach(leg.remarks, id: \.self) { RemarkRow(text: $0) }
 
                 if let reservation {
-                    ReservationRow(reservation: reservation)
+                    ReservationRow(reservation: reservation, request: BahnDeClient.formationRequest(for: leg))
                 }
 
                 if leg.line?.operatorName != nil || statistics.rows != nil || onReplace != nil || onReplan != nil || onCheckin != nil || onShowCheckin != nil {
@@ -733,13 +789,20 @@ struct LegCard: View {
         }
     }
 
-    private func stationRow(time: TimeInfo, name: String, platform: PlatformInfo?) -> some View {
+    private func stationRow(time: TimeInfo, name: String, platform: PlatformInfo?, weather: LegArrivalWeather? = nil) -> some View {
         HStack(alignment: .top, spacing: 10) {
             TimeStack(time: time, cancelled: leg.cancelled, font: .headline)
                 .frame(width: 54, alignment: .leading)
-            Text(name)
-                .font(.headline)
-                .fullTextPopup(name, lines: 2)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name)
+                    .font(.headline)
+                    .fullTextPopup(name, lines: 2)
+                if let weather {
+                    WeatherLabel(forecast: weather.forecast, context: weather.atDestination ? "bei Ankunft" : "beim Umstieg",
+                                 station: name)
+                        .transition(.fold)
+                }
+            }
             Spacer()
             PlatformBadge(platform: platform)
         }

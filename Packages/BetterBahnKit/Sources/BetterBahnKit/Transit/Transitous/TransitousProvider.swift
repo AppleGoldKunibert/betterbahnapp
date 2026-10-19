@@ -15,6 +15,8 @@ public struct TransitousProvider: TransitProvider {
     let czechTimetableCache = ExpiringCache<[Stopover]?>()
     /// `twinStops(for:)` answers per leg (see `TwinTrainStops.swift`).
     let twinStopsCache = ExpiringCache<[Stopover]?>()
+    /// `continuationID(of:)` answers per trip: the trip ID that goes on, "" for none (see `TripContinuation.swift`).
+    let continuationCache = ExpiringCache<String>()
 
     public init(baseURL: URL = TransitousProvider.defaultBaseURL, http: HTTPClient = HTTPClient()) {
         self.baseURL = baseURL
@@ -146,6 +148,7 @@ public struct TransitousProvider: TransitProvider {
     /// village without a station. "l" sorts by distance alone.
     static func applying(_ search: StationSearch, to merged: [MGeocodeMatch], near location: Coordinate?) -> [MGeocodeMatch] {
         var kept: [MGeocodeMatch]
+        let merged = search.country.map { code in merged.filter { $0.country?.uppercased() == code } } ?? merged
         if search.modes.isEmpty {
             kept = merged.filter { !isBusOnly($0) }
             if kept.isEmpty { kept = merged }
@@ -1320,7 +1323,7 @@ public struct TransitousProvider: TransitProvider {
     /// Whether two products can be the same train in two feeds. Long-distance and high-speed count as one:
     /// the Railjet København → Praha is high-speed in DB's feed but long-distance in the Czech one
     /// ("Ex5 (rj 383)"), which showed it as two trains with a change at Děčín.
-    private static func isSameKind(_ a: Product, _ b: Product) -> Bool {
+    static func isSameKind(_ a: Product, _ b: Product) -> Bool {
         let longDistance: Set<Product> = [.highSpeed, .longDistance]
         return a == b || (longDistance.contains(a) && longDistance.contains(b))
     }

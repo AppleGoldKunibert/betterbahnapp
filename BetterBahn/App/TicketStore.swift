@@ -120,6 +120,9 @@ extension AppModel {
     /// The reservation for the train `leg` rides; one for a train no longer on the journey (e.g.
     /// after choosing another train) simply matches no leg and isn't shown.
     func reservation(for leg: Leg, in journey: Journey) -> SeatReservation? {
+        #if DEBUG
+        if let demo = debugReservation(for: leg) { return demo }
+        #endif
         guard let entry = savedEntry(for: journey) else { return nil }
         return reservations(for: entry).first { $0.matches(leg) }
     }

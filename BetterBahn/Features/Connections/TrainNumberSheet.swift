@@ -16,6 +16,10 @@ struct TrainNumberSheet: View {
     let stations: [Station]
     /// About when the train should leave.
     let date: Date
+    /// When the traveller is at the route's stations, from the connections found; `date` for the others.
+    let reached: [(station: Station, time: Date)]
+    /// From the search's origin a train up to 30 minutes earlier may be picked: the route then starts earlier.
+    let allowsEarlier: Bool
     let onAdd: (TrainRequirement) -> Void
 
     @Environment(AppModel.self) private var model
@@ -41,17 +45,23 @@ struct TrainNumberSheet: View {
     @State private var showsManualEntry = false
     @State private var boardingStation: Station?
     @State private var exitStation: Station?
+    /// Opens to full height once a train is picked, so its stops and the button fit (#355).
+    @State private var detent: PresentationDetent = .medium
+    @State private var scrollPosition = ScrollPosition(edge: .top)
     @FocusState private var focused: Field?
 
     private enum Field: Hashable { case train, boardingStation, exitStation }
 
     init(search: ConnectionSearch, suggestions: [String], defaultBoarding: Station, stations: [Station] = [],
-         date: Date? = nil, onAdd: @escaping (TrainRequirement) -> Void) {
+         date: Date? = nil, reached: [(station: Station, time: Date)] = [], allowsEarlier: Bool = false,
+         onAdd: @escaping (TrainRequirement) -> Void) {
         self.search = search
         self.suggestions = suggestions
         self.defaultBoarding = defaultBoarding
         self.stations = [defaultBoarding] + stations
         self.date = date ?? search.date
+        self.reached = reached
+        self.allowsEarlier = allowsEarlier
         self.onAdd = onAdd
         _boardingStation = State(initialValue: defaultBoarding)
     }
@@ -71,6 +81,7 @@ struct TrainNumberSheet: View {
                 }
                 .padding()
             }
+            .scrollPosition($scrollPosition)
             .background { AppBackground() }
             .scrollDismissesKeyboard(.interactively)
             .closesStationSearchOnOutsideTap($focused)
@@ -94,7 +105,7 @@ struct TrainNumberSheet: View {
             // Searches while typing, a moment after the last key.
             .task(id: trimmed) { await searchTrains() }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.medium, .large], selection: $detent)
     }
 
     // MARK: Searching
@@ -119,7 +130,7 @@ struct TrainNumberSheet: View {
                     .submitLabel(.search)
                     .focused($focused, equals: .train)
                     .onSubmit {
-                        if let first = shownNumbered.first { pick(first) } else if let first = candidates.first { pick(first) }
+                        if let first = shownNumbered.first { pick(first) } else if let first = shownCandidates.first { pick(first) }
                     }
                     .padding(12)
                     .background(Color.secondary.opacity(0.1), in: .rect(cornerRadius: 12, style: .continuous))
@@ -139,7 +150,7 @@ struct TrainNumberSheet: View {
                 FlowChips(items: suggestions) { name in train = name }
             }
         } else {
-            if isSearching, shownNumbered.isEmpty, candidates.isEmpty {
+            if isSearching, shownNumbered.isEmpty, shownCandidates.isEmpty {
                 HStack(spacing: 10) {
                     ProgressView()
                     Text("Suche Züge …").font(.callout).foregroundStyle(.secondary)
@@ -155,18 +166,18 @@ struct TrainNumberSheet: View {
             if isCheckingRoute {
                 hint("Prüfe, wo die Züge halten …")
             }
-            if !candidates.isEmpty, !shownNumbered.isEmpty {
+            if !shownCandidates.isEmpty, !shownNumbered.isEmpty {
                 SectionHeader(title: "Weitere Züge auf deiner Strecke", systemImage: "tram.fill")
                     .padding(.top, 4)
             }
-            ForEach(candidates) { candidate in
+            ForEach(shownCandidates) { candidate in
                 Button { pick(candidate) } label: { candidateRow(candidate) }
                     .buttonStyle(.plain)
             }
-            if isSearching, !shownNumbered.isEmpty || !candidates.isEmpty {
+            if isSearching, !shownNumbered.isEmpty || !shownCandidates.isEmpty {
                 hint("Suche auf den Bahnhöfen deiner Strecke …")
             }
-            if isDone, shownNumbered.isEmpty, candidates.isEmpty {
+            if isDone, shownNumbered.isEmpty, shownCandidates.isEmpty {
                 ContentUnavailableView("Kein passender Zug", systemImage: "tram.fill",
                                        description: Text("Auf deiner Strecke fährt um diese Zeit kein Zug „\(trimmed)“. Du kannst Ein- und Ausstieg auch selbst angeben."))
             }
@@ -187,10 +198,28 @@ struct TrainNumberSheet: View {
     /// The runs by number to show: in a wanted country by their ends, else once their stops say so
     /// (or couldn't be loaded – then rather shown than lost).
     private var shownNumbered: [NumberedTrain] {
-        (numbered ?? []).filter { train in
+        let inCountries = (numbered ?? []).filter { train in
             if let fit = train.fit { return fit.inCountries }
             return TrainCandidateFinder.countryStatus(train.result, countries: countries) == true || checkedIDs.contains(train.id)
         }
+        return TrainCandidateFinder.catchable(inCountries, allowsEarlier: allowsEarlier) { train in
+            guard let boarding = train.fit?.boarding, let departure = train.fit?.departure else { return nil }
+            return (departure, reachedTime(at: boarding))
+        }
+    }
+
+    /// The boards' trains that can still be caught (see `shownNumbered`).
+    private var shownCandidates: [TrainCandidate] {
+        TrainCandidateFinder.catchable(candidates, allowsEarlier: allowsEarlier) { candidate in
+            guard let boarding = candidate.boarding, let departure = boarding.departure else { return nil }
+            return (departure.planned, reachedTime(at: boarding.station))
+        }
+    }
+
+    /// When the traveller is at `station`: the earliest the connections found get there, else `date`.
+    private func reachedTime(at station: Station) -> Date {
+        if station.isSamePlace(as: defaultBoarding) { return date }
+        return reached.filter { $0.station.isSamePlace(as: station) }.map(\.time).min() ?? date
     }
 
     private func numberedRow(_ train: NumberedTrain) -> some View {
@@ -409,7 +438,14 @@ struct TrainNumberSheet: View {
         addButton(candidate)
 
         TripContent(trip: candidate.trip, highlight: candidate.boarding?.station,
-                    boardingID: $boardingID, exitID: $exitID)
+                    boardingID: $boardingID, exitID: $exitID,
+                    onLoadPreviousLap: { addLaps(before: 1) }, onLoadNextLap: { addLaps(after: 1) })
+    }
+
+    /// A ring train shows only the lap from its boarding stop; these add the laps around it.
+    private func addLaps(before: Int = 0, after: Int = 0) {
+        guard let wider = picked?.addingLaps(before: before, after: after, target: search.to) else { return }
+        withAnimation(.snappy) { picked = wider }
     }
 
     private func addButton(_ candidate: TrainCandidate) -> some View {
@@ -444,6 +480,8 @@ struct TrainNumberSheet: View {
         focused = nil
         boardingID = candidate.boarding?.id
         exitID = candidate.exit?.id
+        detent = .large
+        scrollPosition.scrollTo(edge: .top)
         withAnimation(.snappy) { picked = candidate }
     }
 
@@ -452,7 +490,8 @@ struct TrainNumberSheet: View {
         guard let boarding = trip.stopovers.first(where: { $0.id == boardingID }) else { return }
         let exit = trip.stopovers.first { $0.id == exitID }
         onAdd(TrainRequirement(trainName: trip.line?.name ?? trimmed, boarding: boarding.station,
-                               exit: exit?.station, tripId: trip.id, tripSource: trip.source))
+                               exit: exit?.station, tripId: trip.id, tripSource: trip.source,
+                               departure: boarding.departure?.planned))
         dismiss()
     }
 

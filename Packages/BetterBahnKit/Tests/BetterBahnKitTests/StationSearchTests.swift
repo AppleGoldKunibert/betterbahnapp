@@ -10,7 +10,7 @@ struct StationSearchTests {
         #expect(front.modes == [.bus])
         #expect(!front.byDistance)
 
-        let back = StationSearch(parsing: "Alexanderplatz T")
+        let back = StationSearch(parsing: "Alexanderplatz T ")
         #expect(back.text == "Alexanderplatz")
         #expect(back.modes == [.tram])
 
@@ -27,7 +27,7 @@ struct StationSearchTests {
 
     /// Names with single letters or words starting with them are left alone.
     @Test func namesAreNotMistakenForShortcuts() {
-        for name in ["Bad Tölz", "Berlin S", "Bonn", "Bernau b Berlin", "Lübeck", "S Südkreuz"] {
+        for name in ["Bad Tölz", "München Terminal B", "Alexanderplatz t", "Berlin S", "Bonn", "Bernau b Berlin", "Lübeck", "S Südkreuz"] {
             let search = StationSearch(parsing: name)
             #expect(search.text == name)
             #expect(!search.hasShortcuts)
@@ -105,5 +105,28 @@ struct StationSearchTests {
 
         let stations = [far, near, middle].map { $0.toStation() }
         #expect(search.ordered(stations, near: here).map(\.id) == ["near", "middle", "far"])
+    }
+}
+
+struct StationFlagTests {
+    private let wien = Station(id: "1", name: "Wien Hbf", coordinate: nil, evaNumber: nil, source: .transitous, country: "AT")
+    private let berlin = Station(id: "2", name: "Berlin Hbf", coordinate: nil, evaNumber: "8011160", source: .bahnDe)
+
+    @Test func flagAtTheEndFiltersByCountry() {
+        let search = StationSearch(parsing: "Wien 🇦🇹")
+        #expect(search.text == "Wien")
+        #expect(search.country == "AT")
+        #expect(search.filtered([wien, berlin]) == [wien])
+    }
+
+    @Test func noFlagKeepsEveryStation() {
+        #expect(StationSearch(parsing: "Wien").filtered([wien, berlin]).count == 2)
+    }
+
+    @Test func foreignOnlyLeavesOutTheHomeCountry() {
+        #expect(StationFlagMode.foreignOnly.flag(for: wien, home: "DE") == "🇦🇹")
+        #expect(StationFlagMode.foreignOnly.flag(for: berlin, home: "DE") == nil)
+        #expect(StationFlagMode.always.flag(for: berlin, home: "DE") == "🇩🇪")
+        #expect(StationFlagMode.off.flag(for: wien, home: "DE") == nil)
     }
 }

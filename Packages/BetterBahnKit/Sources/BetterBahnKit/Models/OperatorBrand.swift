@@ -69,7 +69,7 @@ public enum OperatorBrand: String, CaseIterable, Sendable {
     }
 
     /// The name's words as the rules match them, with a space before and after.
-    private static func normalized(_ operatorName: String) -> String {
+    static func normalized(_ operatorName: String) -> String {
         let words = operatorName
             .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "de_DE"))
             .lowercased()

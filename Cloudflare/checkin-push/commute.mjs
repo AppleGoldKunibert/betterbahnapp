@@ -6,18 +6,15 @@
 // same rules and texts as the app (`CommuteAlerts`, `ConnectionIssue`, `PlatformChange`). It never asks
 // bahn.de (#334). Stored per device: the APNs device token and those journeys. No location, no account.
 
-import { APNs } from "./apns.mjs";
+import { APNs } from "../shared/apns.mjs";
+import { Iris, findStop, liveChange, parseStops, planPath } from "../shared/iris.mjs";
 
-const IRIS = "https://iris.noncd.db.de/iris-tts/timetable/";
-const USER_AGENT = "BetterBahn-Push (+https://betterbahn.betterbahn.workers.dev/support)";
 const MINUTE = 60 * 1000;
 const ID_PATTERN = /^[0-9a-f]{32}$/;
 const SECRET_PATTERN = /^[0-9a-f]{64}$/;
 const DEVICE_TOKEN_PATTERN = /^[0-9a-f]{64,200}$/;
 const MAX_JOURNEYS = 4;
 const MAX_LEGS = 6;
-/// A train in IRIS' schedule only counts as the one meant when it is planned this close to the app's time.
-const MATCH_TOLERANCE = 3 * MINUTE;
 /// Journeys are looked at from this long before their first departure …
 const LOOK_BEFORE = 2 * 60 * MINUTE;
 /// … until this long after their last arrival, and forgotten after `FORGET_AFTER`.
@@ -65,8 +62,8 @@ export async function handleCommute(id, body, env, now, fetchUpstream) {
                 legs.push(old);
                 continue;
             }
-            const departure = await iris.scheduled(leg.from.eva, leg.number, leg.from.time * 1000, "dp").catch(() => null);
-            const arrival = await iris.scheduled(leg.to.eva, leg.number, leg.to.time * 1000, "ar").catch(() => null);
+            const departure = await scheduled(iris, leg, leg.from, "departure");
+            const arrival = await scheduled(iris, leg, leg.to, "arrival");
             legs.push({ ...leg, departure, arrival, state: {} });
         }
         if (legs.every(leg => leg.departure)) {
@@ -109,6 +106,21 @@ function validJourneys(journeys) {
     }));
 }
 
+/// Where IRIS' schedule has `leg`'s train at `stop` on `side`: `{ eva, id, platform, planned }` (planned time in
+/// milliseconds), or null when it doesn't or IRIS can't be reached.
+async function scheduled(iris, leg, stop, side) {
+    try {
+        const ref = await findStop(iris, { eva: stop.eva, category: leg.category, number: leg.number, planned: stop.time, side });
+        if (!ref) return null;
+        // The plan was just loaded for this: its planned time is the one delays are counted from.
+        const xml = await iris.text(planPath(ref.eva, stop.time));
+        const found = xml && parseStops(xml).find(entry => entry.id === ref.id);
+        return { ...ref, planned: (found?.[side]?.planned ?? stop.time) * 1000 };
+    } catch {
+        return null;
+    }
+}
+
 function sameLeg(a, b) {
     return a.number === b.number && a.from.eva === b.from.eva && a.from.time === b.from.time
         && a.to.eva === b.to.eva && a.to.time === b.to.time;
@@ -149,7 +161,12 @@ async function look(row, env, now, iris, apns) {
         if (now < firstDeparture(journey) - LOOK_BEFORE || now > lastArrival(journey) + LOOK_AFTER) continue;
         const live = await Promise.all(journey.legs.map(leg => liveLeg(leg, iris)));
         for (const alert of alerts(journey, live, now)) {
-            const result = await apns.send(row, payload(journey, alert), `commute-${journey.id}-${alert.key}`);
+            const result = await apns.send(row.device_token, row.sandbox, payload(journey, alert), {
+                "apns-topic": env.APNS_TOPIC,
+                "apns-push-type": "alert",
+                "apns-priority": "10",
+                "apns-collapse-id": `commute-${journey.id}-${alert.key}`,
+            });
             if (result === "gone") {
                 await env.DB.prepare("DELETE FROM commutes WHERE id = ?").bind(row.id).run();
                 return;
@@ -173,22 +190,22 @@ const lastArrival = (journey) => journey.legs.at(-1).to.time * 1000;
 
 /// A leg as IRIS has it now: live departure and arrival (time, platform, cancelled).
 async function liveLeg(leg, iris) {
-    const side = async (scheduled, eva, key) => {
-        if (!scheduled) return null;
-        const change = await iris.change(eva, scheduled.id, key).catch(() => undefined);
+    const side = async (ref, key) => {
+        if (!ref) return null;
+        const change = await liveChange(iris, ref, key).catch(() => undefined);
         // Without the change list nothing can be said; no entry for the train means no change.
         if (change === undefined) return null;
         return {
-            planned: scheduled.planned,
-            actual: change?.time ?? scheduled.planned,
-            plannedPlatform: scheduled.platform,
-            platform: change?.platform ?? scheduled.platform,
+            planned: ref.planned,
+            actual: change?.actual != null ? change.actual * 1000 : ref.planned,
+            plannedPlatform: ref.platform ?? null,
+            platform: change?.actualPlatform ?? ref.platform ?? null,
             cancelled: change?.cancelled ?? false,
         };
     };
     return {
-        departure: await side(leg.departure, leg.from.eva, "dp"),
-        arrival: await side(leg.arrival, leg.to.eva, "ar"),
+        departure: await side(leg.departure, "departure"),
+        arrival: await side(leg.arrival, "arrival"),
     };
 }
 
@@ -288,128 +305,17 @@ function isDifferentTrack(a, b) {
     return first !== null && second !== null && first !== second;
 }
 
-// MARK: - IRIS
-
-/// DB's timetable feed: the hourly schedule (`plan`) names each train's stop ID, the change list (`fchg`)
-/// carries what changed for it. Answers are kept for the run.
-class Iris {
-    constructor(fetchUpstream) {
-        this.fetchUpstream = fetchUpstream;
-        this.texts = new Map();
-    }
-
-    async text(path, cacheTtl) {
-        if (!this.texts.has(path)) {
-            const fetchUpstream = this.fetchUpstream;
-            this.texts.set(path, fetchUpstream(IRIS + path, {
-                headers: { Accept: "application/xml", "User-Agent": USER_AGENT },
-                cf: { cacheTtl, cacheEverything: true },
-            }).then(response => {
-                if (!response.ok) throw new Error(`IRIS ${response.status}`);
-                return response.text();
-            }));
-        }
-        return this.texts.get(path);
-    }
-
-    /// The scheduled stop of train `number` at `eva` whose planned `side` ("dp"/"ar") time is closest to `time`
-    /// (within `MATCH_TOLERANCE`): { id, planned, platform }, or null.
-    async scheduled(eva, number, time, side) {
-        const hours = new Set([time - MATCH_TOLERANCE, time, time + MATCH_TOLERANCE].map(planHour));
-        let best = null;
-        for (const hour of hours) {
-            const xml = await this.text(`plan/${eva}/${hour}`, 3600).catch(() => "");
-            for (const stop of stops(xml)) {
-                const event = stop.events[side];
-                if (stop.number !== number || !event?.pt) continue;
-                const planned = fromIrisTime(event.pt);
-                const distance = Math.abs(planned - time);
-                if (distance <= MATCH_TOLERANCE && (!best || distance < best.distance)) {
-                    best = { id: stop.id, planned, platform: event.pp ?? null, distance };
-                }
-            }
-        }
-        if (!best) return null;
-        const { distance, ...found } = best;
-        return found;
-    }
-
-    /// What the change list says about stop `id`'s `side` at `eva`: { time, platform, cancelled } (fields
-    /// missing when unchanged), or null when it has nothing on the train.
-    async change(eva, id, side) {
-        const xml = await this.text(`fchg/${eva}`, 60);
-        // Change lists of big stations are large: only the one stop is read.
-        const start = xml.indexOf(`<s id="${id}"`);
-        if (start < 0) return null;
-        const selfClosing = xml.indexOf("/>", start);
-        const opening = xml.indexOf(">", start);
-        if (selfClosing >= 0 && selfClosing < opening) return null;
-        const end = xml.indexOf("</s>", start);
-        const element = xml.slice(start, end < 0 ? undefined : end);
-        const event = attributes(element.match(new RegExp(`<${side}\\b[^>]*>`))?.[0] ?? "");
-        return {
-            time: event.ct ? fromIrisTime(event.ct) : undefined,
-            platform: event.cp,
-            cancelled: event.cs === "c" ? true : event.cs === "p" ? false : undefined,
-        };
-    }
-}
-
-/// The `<s>` elements of a `plan` answer: { id, number, events: { ar, dp } }.
-export function stops(xml) {
-    const found = [];
-    for (const match of xml.matchAll(/<s\b([^>]*)>([\s\S]*?)<\/s>/g)) {
-        const id = attributes(match[1]).id;
-        const label = attributes(match[2].match(/<tl\b[^>]*>/)?.[0] ?? "");
-        if (!id || !label.n) continue;
-        found.push({
-            id,
-            number: label.n.replace(/^0+(?=\d)/, ""),
-            events: {
-                ar: match[2].match(/<ar\b[^>]*>/) ? attributes(match[2].match(/<ar\b[^>]*>/)[0]) : null,
-                dp: match[2].match(/<dp\b[^>]*>/) ? attributes(match[2].match(/<dp\b[^>]*>/)[0]) : null,
-            },
-        });
-    }
-    return found;
-}
-
-function attributes(tag) {
-    return Object.fromEntries([...tag.matchAll(/([\w-]+)="([^"]*)"/g)].map(([, key, value]) => [key, value]));
-}
-
 // MARK: - German time
 
-/// The parts of `ms` on a German clock.
-function berlin(ms) {
-    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-GB", {
-        timeZone: "Europe/Berlin", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
-        hourCycle: "h23",
+function clockParts(ms) {
+    return Object.fromEntries(new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Europe/Berlin", hour: "numeric", minute: "2-digit", hourCycle: "h23",
     }).formatToParts(new Date(ms)).map(({ type, value }) => [type, Number(value)]));
-    return parts;
-}
-
-/// IRIS' "yyMMddHHmm" (German time) as unix milliseconds.
-export function fromIrisTime(text) {
-    const [y, m, d, h, min] = text.match(/^(\d\d)(\d\d)(\d\d)(\d\d)(\d\d)$/).slice(1).map(Number);
-    const wall = Date.UTC(2000 + y, m - 1, d, h, min);
-    // Germany is 1 or 2 hours ahead of UTC; the guess is checked against the German clock.
-    let guess = wall - 60 * MINUTE;
-    const shown = (ms) => { const p = berlin(ms); return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute); };
-    guess = wall - (shown(guess) - guess);
-    return guess;
-}
-
-/// "261019/07": the `plan` bucket `ms` falls into.
-function planHour(ms) {
-    const p = berlin(ms);
-    const two = (value) => String(value).padStart(2, "0");
-    return `${two(p.year % 100)}${two(p.month)}${two(p.day)}/${two(p.hour)}`;
 }
 
 /// "7:42", like the app.
 export function clock(ms) {
-    const p = berlin(ms);
+    const p = clockParts(ms);
     return `${p.hour}:${String(p.minute).padStart(2, "0")}`;
 }
 

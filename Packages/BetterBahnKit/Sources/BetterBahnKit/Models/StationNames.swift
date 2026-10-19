@@ -15,6 +15,11 @@ public enum StationNames {
         /// Where the station's RIL100 codes lie; empty for the few without one in `Ril100.json`.
         let points: [Coordinate]
         let words: NameWords
+        /// Its EVA numbers, sorted, so the main station's comes first ("8011160" before Berlin Hbf's lower
+        /// level "8098160").
+        var evas: [String] = []
+        /// Its stop area's DHID ("de:11000:900003201"); empty for the few without one.
+        var dhid: String = ""
     }
 
     /// A train stop of another railway's feed that is this German station under another name, e.g.
@@ -97,7 +102,8 @@ public enum StationNames {
         var index = Index()
         for station in germany {
             let number = index.stations.count
-            index.stations.append(GermanStation(name: station.name, points: station.points, words: nameWords(station.name)))
+            index.stations.append(GermanStation(name: station.name, points: station.points, words: nameWords(station.name),
+                                                evas: station.evas, dhid: station.dhid))
             if !station.dhid.isEmpty { index.byDHID[station.dhid] = number }
             for eva in station.evas where index.byEVA[eva] == nil { index.byEVA[eva] = number }
             for cell in Set(station.points.map(cell(of:))) { index.cells[cell, default: []].append(number) }
@@ -129,6 +135,38 @@ public enum StationNames {
             names[key] = found
         }
         return found
+    }
+
+    /// `station`'s EVA number from the offline list, so it needn't be asked from bahn.de. Only for a station
+    /// with a single one: of a station with several levels (Berlin Hbf, Frankfurt (Main) Hbf), the stop may be
+    /// on either, which only bahn.de's search by the stop's own name tells.
+    public static func evaNumber(for station: Station) -> String? {
+        evaNumber(for: station, in: index)
+    }
+
+    /// The main station's EVA number of `station` from the offline list, also of one with several levels
+    /// (Berlin Hbf's "8011160", not its lower level's "8098160"): for what files every level under the main
+    /// station, like the train statistics.
+    public static func mainEvaNumber(for station: Station) -> String? {
+        germanStation(for: station, in: index).flatMap { index.stations[$0].evas.first }
+    }
+
+    /// The DHID of DB's station for `station` ("de:11000:900003201" for any level of Berlin Hbf), matched like
+    /// its name; nil abroad or when no DB station fits.
+    public static func dhid(for station: Station) -> String? {
+        dhid(for: station, in: index)
+    }
+
+    static func dhid(for station: Station, in index: Index) -> String? {
+        guard let number = germanStation(for: station, in: index) else { return nil }
+        let dhid = index.stations[number].dhid
+        return dhid.isEmpty ? nil : dhid
+    }
+
+    static func evaNumber(for station: Station, in index: Index) -> String? {
+        guard let number = germanStation(for: station, in: index) else { return nil }
+        let evas = index.stations[number].evas
+        return evas.count == 1 ? evas[0] : nil
     }
 
     static func name(for station: Station, in index: Index) -> String? {

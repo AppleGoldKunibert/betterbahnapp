@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { signToken, toBase64 } from "../shared/appattest.mjs";
-import { clock, fromIrisTime, processDueCommutes } from "./commute.mjs";
+import { parseTime } from "../shared/iris.mjs";
+import { clock, processDueCommutes } from "./commute.mjs";
 import { handleRequest } from "./worker.mjs";
 
 const secret = "test-secret";
@@ -94,9 +95,9 @@ async function put(env, body, fetch, path = `/commutes/${id}`) {
 }
 
 test("IRIS times are German time", () => {
-    assert.equal(fromIrisTime("2610190742"), Date.parse("2026-10-19T05:42:00Z"));
+    assert.equal(parseTime("2610190742") * 1000, Date.parse("2026-10-19T05:42:00Z"));
     // After summer time ended on the 25th.
-    assert.equal(fromIrisTime("2610260742"), Date.parse("2026-10-26T06:42:00Z"));
+    assert.equal(parseTime("2610260742") * 1000, Date.parse("2026-10-26T06:42:00Z"));
     assert.equal(clock(Date.parse("2026-10-26T06:42:00Z")), "7:42");
 });
 

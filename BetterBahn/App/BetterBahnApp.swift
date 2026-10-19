@@ -1,5 +1,7 @@
+import AppIntents
 import BackgroundTasks
 import BetterBahnKit
+import CoreSpotlight
 import SwiftUI
 import UserNotifications
 
@@ -9,9 +11,14 @@ struct BetterBahnApp: App {
     @State private var model: AppModel
 
     init() {
+        // Train statistics from one run on, with their raw values (TrainStatisticsRows): launch once with
+        // `-debugstats`, stays on until the app is deleted.
+        TrainStatistics.enableTestModeIfRequested()
         let model = AppModel()
         _model = State(initialValue: model)
         appDelegate.model = model
+        // For the Spotlight entities and their intents (`SpotlightSync`), also when iOS starts the app for one.
+        AppDependencyManager.shared.add(dependency: model)
     }
 
     var body: some Scene {
@@ -77,13 +84,14 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         }
     }
 
-    /// Only a regular trip's question and the pushes about its journey show while the app is open; the others
-    /// don't, as before.
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
-                                            willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+    /// Exit reminders (#313), a regular trip's question and the pushes about its journey (#397) also show while
+    /// the app is open; the others don't, as before.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                            withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         let userInfo = notification.request.content.userInfo
-        let isCommute = CommuteNotifier.question(in: userInfo) != nil || CommuteNotifier.journeyID(in: userInfo) != nil
-        return isCommute ? [.banner, .list, .sound] : []
+        let shows = notification.request.identifier.hasPrefix(AppModel.exitReminderPrefix)
+            || CommuteNotifier.question(in: userInfo) != nil || CommuteNotifier.journeyID(in: userInfo) != nil
+        completionHandler(shows ? [.banner, .list, .sound] : [])
     }
 }
 
@@ -144,10 +152,15 @@ struct RootView: View {
         .onChange(of: scenePhase, initial: true) { _, phase in
             if phase == .active {
                 model.cancelLiveActivityBackgroundCheck()
+                Task { await model.takeBackLiveActivity() }
                 model.syncLiveActivity()
                 model.startRefreshing()
                 Task { await model.syncTraewelling() }
                 Task { await model.syncFollowedCheckinPush() }
+                // Picks up events deleted in the calendar and a switch to full access in iOS Settings.
+                model.scheduleCalendarSync()
+                // Journeys that ended meanwhile leave the iOS search.
+                model.scheduleSpotlightSync()
                 model.scheduleCommuteQuestions()
                 Task { await model.syncCommutePush() }
                 // Build the travel map's heatmap in the background so its tab opens instantly.
@@ -156,7 +169,7 @@ struct RootView: View {
                 model.stopRefreshing()
                 model.scheduleLiveActivityBackgroundCheck()
                 model.updateWidgets(force: true)
-                Task { await TrainSightings.shared.flush() }
+                withBackgroundTime("LiveActivityHandOver") { await model.handOverLiveActivity() }
             }
         }
         // A saved journey to show (the Live Activity or a regular trip's notification): on the Verbindungen tab.
@@ -179,49 +192,24 @@ struct RootView: View {
         #if DEBUG
         .task {
             model.seedBrokenTripIfRequested()
+            model.seedLateTripsIfRequested()
+            model.seedSeatMapTripsIfRequested()
             await model.seedStressTripsIfRequested()
             await model.seedDemoTripsIfRequested()
         }
         #endif
-        .onOpenURL { url in
-            // A live widget was tapped: show its train on the live map.
-            if let target = TrainMapLink.target(from: url) {
-                if let entry = model.savedJourneys.first(where: { $0.journey.id == target.journeyID }),
-                   entry.journey.legs.indices.contains(target.legIndex) {
-                    incomingSharedJourney = nil
-                    incomingDBShare = nil
-                    linkedTrainMap = LinkedTrainMap(route: LiveTrainRoute(leg: entry.journey.legs[target.legIndex]))
-                }
-                return
+        .onOpenURL(perform: open)
+        // A favourite station or saved journey picked in the iOS search (#387).
+        .onContinueUserActivity(CSSearchableItemActionType) { activity in
+            if let id = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String, let url = SpotlightEntry.url(forID: id) {
+                open(url)
             }
-            // The Live Activity was tapped: show its journey (if it's still saved).
-            if let journeyID = LiveActivityLink.journeyID(from: url) {
-                if let entry = model.savedJourneys.first(where: { $0.journey.id == journeyID }) {
-                    incomingSharedJourney = nil
-                    incomingDBShare = nil
-                    selectedTab = .connections
-                    model.journeyToOpen = entry
-                }
-                return
-            }
-            // A connection shared from the DB Navigator / bahn.de, handed over by the share extension.
-            if let text = DBShare.text(fromAppURL: url) {
-                incomingSharedJourney = nil
-                incomingDBShare = DBShareText(text: text)
-                return
-            }
-            // A short link (`https://…/s/<id>` as Universal Link, or the fallback page's button):
-            // the journey is fetched from BetterBahn's Worker.
-            if let id = JourneyShareLink.shortLinkID(from: url) {
-                Task { await openShortShareLink(id: id) }
-                return
-            }
-            guard let journey = JourneyShareLink.journey(from: url) else {
-                showInvalidShareLinkAlert = true
-                return
-            }
-            incomingDBShare = nil
-            incomingSharedJourney = journey
+        }
+        // The same, opened through the entity's intent (`SpotlightSync`).
+        .onChange(of: model.linkToOpen, initial: true) { _, url in
+            guard let url else { return }
+            model.linkToOpen = nil
+            open(url)
         }
         .sheet(item: $incomingSharedJourney) { SharedJourneyPreviewView(journey: $0) }
         .sheet(item: $incomingDBShare) { ImportedJourneyView(text: $0.text) }
@@ -237,6 +225,65 @@ struct RootView: View {
         } message: {
             Text(shareLinkError ?? "")
         }
+    }
+
+    /// Opens a deep link: from a widget, the Live Activity, Spotlight, a share or a shared journey.
+    private func open(_ url: URL) {
+        // The departure board widget was tapped: its station's board, or its route in the search (#314).
+        if let target = BoardWidgetLink.target(from: url) {
+            incomingSharedJourney = nil
+            incomingDBShare = nil
+            linkedTrainMap = nil
+            switch target {
+            case .board(let station):
+                selectedTab = .departures
+                model.boardStationToOpen = station
+            case .route(let from, let to):
+                selectedTab = .connections
+                model.searchToOpen = ConnectionSearch(from: from, to: to, date: .now, isArrival: false,
+                                                      onlyValidTicket: model.settings.ticketFilterByDefault)
+            }
+            return
+        }
+        // A live widget was tapped: show its train on the live map.
+        if let target = TrainMapLink.target(from: url) {
+            if let entry = model.savedJourneys.first(where: { $0.journey.id == target.journeyID }),
+               entry.journey.legs.indices.contains(target.legIndex) {
+                incomingSharedJourney = nil
+                incomingDBShare = nil
+                linkedTrainMap = LinkedTrainMap(route: LiveTrainRoute(leg: entry.journey.legs[target.legIndex]))
+            }
+            return
+        }
+        // The Live Activity or a calendar event was tapped: show its journey (if it's still saved).
+        if let journeyID = LiveActivityLink.journeyID(from: url) {
+            // Calendar events link by the saved journey's ID, which survives replanning.
+            if let entry = model.savedJourneys.first(where: { $0.journey.id == journeyID || $0.id.uuidString == journeyID }) {
+                incomingSharedJourney = nil
+                incomingDBShare = nil
+                selectedTab = .connections
+                model.journeyToOpen = entry
+            }
+            return
+        }
+        // A connection shared from the DB Navigator / bahn.de, handed over by the share extension.
+        if let text = DBShare.text(fromAppURL: url) {
+            incomingSharedJourney = nil
+            incomingDBShare = DBShareText(text: text)
+            return
+        }
+        // A short link (`https://…/s/<id>` as Universal Link, or the fallback page's button):
+        // the journey is fetched from BetterBahn's Worker.
+        if let id = JourneyShareLink.shortLinkID(from: url) {
+            Task { await openShortShareLink(id: id) }
+            return
+        }
+        guard let journey = JourneyShareLink.journey(from: url) else {
+            showInvalidShareLinkAlert = true
+            return
+        }
+        incomingDBShare = nil
+        incomingSharedJourney = journey
     }
 
     private func openShortShareLink(id: String) async {
@@ -256,4 +303,24 @@ struct RootView: View {
 private struct LinkedTrainMap: Identifiable {
     let id = UUID()
     let route: LiveTrainRoute
+}
+
+/// Runs `work` although the app just went to the background: iOS gives it a few more seconds for that.
+private func withBackgroundTime(_ name: String, _ work: @escaping @MainActor () async -> Void) {
+    let assertion = BackgroundTimeAssertion()
+    assertion.id = UIApplication.shared.beginBackgroundTask(withName: name) { assertion.end() }
+    Task {
+        await work()
+        assertion.end()
+    }
+}
+
+private final class BackgroundTimeAssertion {
+    var id = UIBackgroundTaskIdentifier.invalid
+
+    func end() {
+        guard id != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(id)
+        id = .invalid
+    }
 }

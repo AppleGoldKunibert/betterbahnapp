@@ -79,11 +79,41 @@ struct SettingsView: View {
                         if enabled { Task { await ConnectionNotifier.requestAuthorization() } }
                         Task { await model.syncCommutePush() }
                     }
+                    Toggle(isOn: $settings.exitReminders) {
+                        IconLabel(title: "Ans Aussteigen erinnern", systemImage: "bell.badge.fill", color: .red)
+                    }
+                    .tint(.brand)
+                    .onChange(of: settings.exitReminders) { _, enabled in
+                        if enabled { Task { await ConnectionNotifier.requestAuthorization() } }
+                        model.scheduleExitReminderSync()
+                    }
+                    if settings.exitReminders {
+                        Picker(selection: $settings.exitReminderLead) {
+                            ForEach(ExitReminderLead.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                        } label: {
+                            IconLabel(title: "Erinnerung", systemImage: "clock.fill", color: .red)
+                        }
+                        .onChange(of: settings.exitReminderLead) { model.scheduleExitReminderSync() }
+                    }
                     Toggle(isOn: $settings.liveActivitiesEnabled) {
                         IconLabel(title: "Live-Aktivitäten", systemImage: "bolt.badge.clock.fill", color: .indigo)
                     }
                     .tint(.brand)
                     .onChange(of: settings.liveActivitiesEnabled) { model.syncLiveActivity() }
+                    if settings.liveActivitiesEnabled {
+                        Toggle(isOn: $settings.liveActivityServerUpdates) {
+                            IconLabel(title: "Live-Aktivität über Server aktualisieren", systemImage: "arrow.trianglehead.2.clockwise",
+                                      color: .indigo)
+                        }
+                        .tint(.brand)
+                        .onChange(of: settings.liveActivityServerUpdates) {
+                            // Whether an activity gets updates from our server is fixed when it starts.
+                            Task {
+                                await model.liveActivities.restart()
+                                model.syncLiveActivity()
+                            }
+                        }
+                    }
                     NavigationLink {
                         RegularTripsView()
                     } label: {
@@ -92,7 +122,60 @@ struct SettingsView: View {
                 } header: {
                     Text("Meine Reisen")
                 } footer: {
-                    Text("Wir sagen dir Bescheid bei Ausfällen, Gleiswechseln und verpassten Anschlüssen.")
+                    Text(settings.liveActivitiesEnabled
+                         ? "Wir sagen dir Bescheid bei Ausfällen, Gleiswechseln und verpassten Anschlüssen – und kurz bevor du aussteigen musst. Über unseren Server zeigt die Live-Aktivität auch bei geschlossener App aktuelle Zeiten und Gleise. Er bekommt dafür deine Reise bis zur Ankunft."
+                         : "Wir sagen dir Bescheid bei Ausfällen, Gleiswechseln und verpassten Anschlüssen – und kurz bevor du aussteigen musst.")
+                }
+
+                Section {
+                    Picker(selection: Binding(get: { settings.calendarAccess ?? .full },
+                                              set: { settings.calendarAccess = $0 })) {
+                        ForEach(CalendarAccessMode.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                    } label: {
+                        IconLabel(title: "Zugriff", systemImage: "calendar", color: .red)
+                    }
+                    .onChange(of: settings.calendarAccess) { _, mode in
+                        guard let mode, mode == .full || settings.calendarAutoAdd != .off else { return }
+                        Task {
+                            _ = await model.requestCalendarAccess(mode)
+                            model.scheduleCalendarSync(after: .zero)
+                        }
+                    }
+                    if settings.calendarAccess == .full {
+                        CalendarChoiceRow()
+                    }
+                    Picker(selection: $settings.calendarAutoAdd) {
+                        ForEach(CalendarAutoAdd.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                    } label: {
+                        IconLabel(title: "Automatisch", systemImage: "calendar.badge.clock", color: .red)
+                    }
+                    .onChange(of: settings.calendarAutoAdd) { _, autoAdd in
+                        guard autoAdd != .off else { return }
+                        // Asked here, never in the background: the access the first choice in this section stands for.
+                        if settings.calendarAccess == nil { settings.calendarAccess = .full }
+                        Task {
+                            _ = await model.requestCalendarAccess(settings.calendarAccess ?? .full)
+                            model.scheduleCalendarSync(after: .zero)
+                        }
+                    }
+                } header: {
+                    Text("Kalender")
+                } footer: {
+                    Text("Mit vollem Zugriff bleiben die Termine deiner Reisen aktuell, auch bei Verspätungen und Gleiswechseln, und verschwinden mit der Reise. Mit „Nur hinzufügen“ wird jeder Termin einmal in deinen Standardkalender eingetragen. Automatisch kommt jede gespeicherte Reise einmal in den Kalender, beim Speichern oder erst bei der Abfahrt.")
+                }
+
+                Section {
+                    Picker(selection: $settings.stationFlagMode) {
+                        Text("Aus").tag(StationFlagMode.off)
+                        Text("Nur Ausland").tag(StationFlagMode.foreignOnly)
+                        Text("An").tag(StationFlagMode.always)
+                    } label: {
+                        IconLabel(title: "Flagge", systemImage: "flag.fill", color: .brand)
+                    }
+                } header: {
+                    Text("Bahnhofssuche")
+                } footer: {
+                    Text("Zeigt in der Suche die Flagge vor dem Bahnhof, auf Wunsch nur bei Bahnhöfen im Ausland. Mit einer Flagge hinter dem Namen siehst du nur Bahnhöfe aus diesem Land.")
                 }
 
                 Section {
@@ -146,14 +229,25 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Toggle(isOn: $settings.shareTrainStatistics) {
-                        IconLabel(title: "Zugdaten für Statistik teilen", systemImage: "chart.bar.fill", color: .teal)
+                    Toggle(isOn: $settings.showTrainStatistics) {
+                        IconLabel(title: "Zugstatistik anzeigen", systemImage: "chart.bar.fill", color: .teal)
                     }
                     .tint(.brand)
                 } header: {
                     Text("Statistik")
                 } footer: {
-                    Text("Hilft uns, Statistiken zu Verspätungen und Ausfällen zu sammeln, und zeigt dir Erfahrungswerte zu Zügen. Dabei wird nichts über dich gespeichert.")
+                    Text("Zeigt dir, wie pünktlich ein Zug in den letzten 30 Tagen war und wie oft er ausfiel oder das Gleis wechselte.")
+                }
+
+                Section {
+                    Toggle(isOn: $settings.showWeather) {
+                        IconLabel(title: "Wetter am Ziel", systemImage: "cloud.sun.fill", color: .orange)
+                    }
+                    .tint(.brand)
+                } header: {
+                    Text("Wetter")
+                } footer: {
+                    Text("Zeigt in der Reise das Wetter bei Ankunft und bei längeren Umstiegen. Dafür wird nur der Bahnhof verschickt, nie dein Standort.")
                 }
 
                 Section {
@@ -218,6 +312,7 @@ struct SettingsView: View {
                     Text("Fahrplandaten: [Transitous](https://transitous.org/sources/), Echtzeitdaten: Deutsche Bahn ([DB Timetables](https://developers.deutschebahn.com/db-api-marketplace/apis/product/timetables), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.de)), Karten: [© OpenStreetMap](https://www.openstreetmap.org/copyright), [OpenRailwayMap](https://www.openrailwaymap.org)\n\nBetterBahn ist ein privates Projekt und steht in keiner Verbindung zur Deutschen Bahn AG.")
                 }
             }
+            .closesMenusOnScroll()
             .navigationTitle("Einstellungen")
             .task { await refreshLogin() }
             .confirmationDialog(

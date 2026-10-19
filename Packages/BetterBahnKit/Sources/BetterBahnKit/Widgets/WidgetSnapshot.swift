@@ -40,12 +40,18 @@ public enum WidgetStore {
     public static let currentTrainWidgetKind = "CurrentTrainWidget"
     public static let liveSpeedWidgetKind = "LiveSpeedWidget"
     public static let livePositionWidgetKind = "LivePositionWidget"
+    public static let boardWidgetKind = "StationBoardWidget"
+    /// The widgets that follow the snapshot's journey: the ones the app reloads when it changes (the
+    /// board widget fetches on its own and isn't reloaded for that).
+    public static let journeyWidgetKinds = [journeyWidgetKind, currentTrainWidgetKind, liveSpeedWidgetKind, livePositionWidgetKind]
 
-    public static var fileURL: URL? {
+    public static var fileURL: URL? { containerURL?.appendingPathComponent(fileName) }
+    public static var stationsFileURL: URL? { containerURL?.appendingPathComponent(WidgetStations.fileName) }
+
+    private static var containerURL: URL? {
         #if os(iOS) || os(macOS)
-        guard let group = Bundle.main.object(forInfoDictionaryKey: appGroupInfoKey) as? String, !group.isEmpty,
-              let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group) else { return nil }
-        return container.appendingPathComponent(fileName)
+        guard let group = Bundle.main.object(forInfoDictionaryKey: appGroupInfoKey) as? String, !group.isEmpty else { return nil }
+        return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)
         #else
         return nil
         #endif
@@ -58,6 +64,51 @@ public enum WidgetStore {
 
     public static func save(_ snapshot: WidgetSnapshot, to url: URL? = fileURL) {
         guard let url, let data = try? JSONEncoder().encode(snapshot) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+}
+
+/// The stations the departure board widget can be set to (#314): the favourites and the routes searched
+/// last, written by the app to the App Group container whenever they change. The widget's settings
+/// list them; the station is always picked by the user, never found by location.
+public struct WidgetStations: Codable, Sendable, Hashable {
+    static let fileName = "widgetStations.json"
+
+    public struct Route: Codable, Sendable, Hashable {
+        public var from: Station
+        public var to: Station
+
+        public init(from: Station, to: Station) {
+            self.from = from
+            self.to = to
+        }
+    }
+
+    public var favorites: [Station]
+    public var recentRoutes: [Route]
+
+    public init(favorites: [Station], recentRoutes: [Route]) {
+        self.favorites = favorites
+        self.recentRoutes = recentRoutes
+    }
+
+    /// Stations to pick a route's destination from: the favourites, then every end of a recent route,
+    /// each place once.
+    public var destinations: [Station] {
+        var result: [Station] = []
+        for station in favorites + recentRoutes.flatMap({ [$0.to, $0.from] }) where !result.contains(where: { $0.isSamePlace(as: station) }) {
+            result.append(station)
+        }
+        return result
+    }
+
+    public static func load(from url: URL? = WidgetStore.stationsFileURL) -> WidgetStations? {
+        guard let url, let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(WidgetStations.self, from: data)
+    }
+
+    public static func save(_ stations: WidgetStations, to url: URL? = WidgetStore.stationsFileURL) {
+        guard let url, let data = try? JSONEncoder().encode(stations) else { return }
         try? data.write(to: url, options: .atomic)
     }
 }

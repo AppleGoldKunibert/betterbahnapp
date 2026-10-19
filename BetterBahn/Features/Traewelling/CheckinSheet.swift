@@ -64,6 +64,7 @@ struct CheckinSheet: View {
                 }
                 .padding()
             }
+            .closesMenusOnScroll()
             .background { AppBackground() }
             .navigationTitle("Träwelling")
             .navigationBarTitleDisplayMode(.inline)

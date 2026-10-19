@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Settings → Datenquellen: every service the app gets data from, with the attribution their terms ask for
-/// (Transitous sources, OSM + OpenRailwayMap with links, DB Timetables under CC BY 4.0, operator logos).
+/// (Transitous sources, OSM + OpenRailwayMap with links, DB Timetables and Open-Meteo under CC BY 4.0, operator logos).
 struct DataSourcesView: View {
     struct Source: Identifiable {
         let name: String
@@ -18,6 +18,9 @@ struct DataSourcesView: View {
         Source(name: "Deutsche Bahn – DB Timetables", usage: "Echtzeitdaten und Meldungen",
                url: URL(string: "https://developers.deutschebahn.com/db-api-marketplace/apis/product/timetables")!,
                license: ("Lizenz: CC BY 4.0", URL(string: "https://creativecommons.org/licenses/by/4.0/deed.de")!)),
+        Source(name: "deutsche-bahn-data von Piet Brömmel", usage: "Zugstatistik: Verspätungen, Ausfälle und Gleiswechsel der letzten 30 Tage, aus DB Timetables",
+               url: URL(string: "https://github.com/piebro/deutsche-bahn-data")!,
+               license: ("Lizenz: CC BY 4.0, Deutsche Bahn", URL(string: "https://creativecommons.org/licenses/by/4.0/deed.de")!)),
         Source(name: "Deutsche Bahn – Infrastrukturdaten der DB InfraGO", usage: "RIL100-Codes der Bahnhöfe",
                url: URL(string: "https://mobilithek.info/offers/922109165921083392")!,
                license: ("Lizenz: CC BY 4.0", URL(string: "https://creativecommons.org/licenses/by/4.0/deed.de")!)),
@@ -30,9 +33,12 @@ struct DataSourcesView: View {
                url: URL(string: "https://www.bahn.de")!),
         Source(name: "vagonweb.cz", usage: "Geplante Wagenreihungen und Zugtypen, mit Erlaubnis von vagonweb",
                url: URL(string: "https://www.vagonweb.cz")!),
-        Source(name: "bahn.expert", usage: "Zugtypen, Zugsuche nach Nummer, Namen der Bahnhöfe", url: URL(string: "https://bahn.expert")!),
+        Source(name: "bahn.expert", usage: "Zugtypen, Zugsuche nach Nummer, Namen der Bahnhöfe; Sitzpläne der ICE aus den Wagenreihungsplänen, © Deutsche Bahn AG", url: URL(string: "https://bahn.expert")!),
         Source(name: "bahn.jetzt", usage: "Zugpositionen auf der Karte", url: URL(string: "https://bahn.jetzt")!),
         Source(name: "Träwelling", usage: "Check-ins", url: URL(string: "https://traewelling.de")!),
+        Source(name: "Open-Meteo", usage: "Wetter bei Ankunft und beim Umstieg",
+               url: URL(string: "https://open-meteo.com")!,
+               license: ("Lizenz: CC BY 4.0", URL(string: "https://creativecommons.org/licenses/by/4.0/deed.de")!)),
         Source(name: "zug.network", usage: "Emojis im Check-in-Text (oder die deiner mit Träwelling verbundenen Mastodon-Instanz)",
                url: URL(string: "https://zug.network")!),
         Source(name: "OpenStreetMap", usage: "Kartendaten des Schienennetzes, © OpenStreetMap-Mitwirkende",

@@ -125,8 +125,19 @@ public struct TrainSearchCountry: Sendable, Hashable, Identifiable {
     public var name: String
     public var id: String { code }
 
-    public var flag: String {
-        String(String.UnicodeScalarView(code.unicodeScalars.compactMap { Unicode.Scalar(127_397 + $0.value) }))
+    public var flag: String { Self.flag(forCode: code) ?? "" }
+
+    /// The flag emoji for an ISO code ("DE" -> 🇩🇪); nil unless it is two letters.
+    public static func flag(forCode code: String) -> String? {
+        guard code.count == 2, code.allSatisfy({ $0.isASCII && $0.isLetter }) else { return nil }
+        return String(String.UnicodeScalarView(code.uppercased().unicodeScalars.compactMap { Unicode.Scalar(127_397 + $0.value) }))
+    }
+
+    /// The ISO code of a flag emoji (🇩🇪 -> "DE"); nil if `text` is not exactly one flag.
+    public static func code(forFlag text: String) -> String? {
+        let scalars = Array(text.unicodeScalars)
+        guard scalars.count == 2, scalars.allSatisfy({ (127_462...127_487).contains($0.value) }) else { return nil }
+        return String(String.UnicodeScalarView(scalars.compactMap { Unicode.Scalar($0.value - 127_397) }))
     }
 
     /// Germany and the countries its trains run to, plus a few beyond.
@@ -241,9 +252,26 @@ public struct TrainNumberSearch: Sendable {
                   let entry = Self.entry(for: result, departing: planned, in: entries),
                   let trip = try? await provider.trip(id: entry.tripId, source: entry.source)
             else { continue }
-            return (entry, trip)
+            return Self.named(after: result, entry: entry, trip: trip)
         }
         throw TransitError.notFound("\(result.name) im Fahrplan")
+    }
+
+    /// `entry` and `trip` of a long-distance train under the name DB's search result gives it. For some
+    /// cross-border trains Transitous only has DB's GTFS entry, which brands them generically, e.g. the ČD
+    /// Railjet "RJ 171" Hamburg–Dresden as "ICE 171"; the result's name (bahn.expert) is DB's own.
+    static func named(after result: TrainSearchResult, entry: BoardEntry, trip: Trip) -> (entry: BoardEntry, trip: Trip) {
+        guard BahnDeClient.longDistanceCategories.contains(result.category.uppercased()),
+              BahnDeClient.trainReference(for: entry.line)?.number == String(result.number),
+              BahnDeClient.normalizedTrainName(entry.line.name) != BahnDeClient.normalizedTrainName(result.name) else {
+            return (entry, trip)
+        }
+        var entry = entry, trip = trip
+        entry.line = BahnDeClient.renamed(entry.line, to: result.name)
+        if let line = trip.line, BahnDeClient.trainReference(for: line)?.number == String(result.number) {
+            trip.line = BahnDeClient.renamed(line, to: result.name)
+        }
+        return (entry, trip)
     }
 
     /// bahn.de's station search knows the EVA numbers bahn.expert gives; the provider's is the fallback.

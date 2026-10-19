@@ -17,6 +17,7 @@ enum ConnectionsRoute: Hashable {
     case search(ConnectionSearch)
     case journey(JourneyRoute)
     case pastTrips
+    case collection
 }
 
 nonisolated struct ConnectionSearch: Hashable, Codable {
@@ -101,6 +102,8 @@ struct ConnectionsView: View {
     @State private var suggestionsShown = false
     @State private var path: [ConnectionsRoute] = []
     @State private var swapRotation = 0.0
+    /// The year the review banner offers (#319); nil without any rides.
+    @State private var reviewBannerYear: Int?
 
     private static let startLegID = UUID()
     private static let productsRowID = "productsRow"
@@ -123,17 +126,24 @@ struct ConnectionsView: View {
                         searchButton
                         AddTicketButton()
                     }
+                    if let year = reviewBannerYear {
+                        YearReviewBanner(year: year)
+                            .transition(.fold)
+                    }
                     UpcomingTripsSection()
                     if !model.recentSearches.isEmpty {
                         recentSection
                     }
-                    NavigationLink(value: ConnectionsRoute.pastTrips) {
-                        Label("Vergangene Fahrten", systemImage: "clock.arrow.circlepath")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity)
+                    HStack(spacing: 10) {
+                        NavigationLink(value: ConnectionsRoute.pastTrips) {
+                            Label("Vergangene Fahrten", systemImage: "clock.arrow.circlepath")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.glass)
+                        .controlSize(.large)
+                        CollectionButton()
                     }
-                    .buttonStyle(.glass)
-                    .controlSize(.large)
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 32)
@@ -164,16 +174,29 @@ struct ConnectionsView: View {
                                       readOnly: journey.readOnly, title: journey.title, search: journey.search)
                 case .pastTrips:
                     PastTripsView()
+                case .collection:
+                    CollectionView()
                 }
             }
             .scrollDismissesKeyboard(.interactively)
             .closesStationSearchOnOutsideTap($focused)
             .onAppear { onlyValidTicket = model.settings.ticketFilterByDefault }
             .task { await model.keepFollowedCheckinsFresh() }
+            .task { reviewBannerYear = await model.featuredYearReview() }
             .onChange(of: model.journeyToOpen, initial: true) { _, entry in
                 guard let entry else { return }
                 path = [.journey(entry.route())]
                 model.journeyToOpen = nil
+            }
+            // The departure board widget's route was tapped (#314): search it right away.
+            .onChange(of: model.searchToOpen, initial: true) { _, search in
+                guard let search else { return }
+                from = search.from
+                to = search.to
+                viaRows = []
+                model.remember(from: search.from, to: search.to)
+                path = [.search(search)]
+                model.searchToOpen = nil
             }
             // The followed check-ins list sits on the first page (#266).
             .onChange(of: model.followedCheckinToOpen, initial: true) { _, id in

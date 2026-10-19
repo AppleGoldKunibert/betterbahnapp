@@ -12,11 +12,11 @@
 //
 // It also looks after the journeys of regular trips (#397, `/commutes`, see commute.mjs).
 
+import { APNs } from "../shared/apns.mjs";
 import { TOKEN_HEADER, fromBase64, toBase64, unauthorized, verifyToken } from "../shared/appattest.mjs";
-import { APNs } from "./apns.mjs";
 import { handleCommute, processDueCommutes } from "./commute.mjs";
 
-export { signProviderToken } from "./apns.mjs";
+export { signProviderToken } from "../shared/apns.mjs";
 
 const TRAEWELLING = "https://traewelling.de";
 const USER_AGENT = "BetterBahn-Push (+https://betterbahn.betterbahn.workers.dev/support)";
@@ -210,7 +210,13 @@ async function check(subscription, env, now, fetchUpstream, apns) {
     // Only what was delivered counts as reported; the others are tried again on the next look.
     const sent = [];
     for (const status of fresh) {
-        const result = await apns.send(subscription, notification(status));
+        const payload = notification(status);
+        const result = await apns.send(subscription.device_token, subscription.sandbox, payload, {
+            "apns-topic": env.APNS_TOPIC,
+            "apns-push-type": "alert",
+            "apns-priority": "10",
+            "apns-collapse-id": `followed-${payload.followedStatusID}`,
+        });
         if (result === "gone") {
             await remove();
             return;

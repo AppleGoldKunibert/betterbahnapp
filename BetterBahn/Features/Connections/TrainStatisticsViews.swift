@@ -16,8 +16,8 @@ struct StatisticsStop: Hashable {
     var platform: String?
 }
 
-/// What past runs say about a train, as short lines: delays, cancellations, platform changes and
-/// vehicles. Only what has enough runs behind it (`TrainStatistics.minimumRuns`) shows up.
+/// What past runs say about a train, as short lines: delays, cancellations and platform changes.
+/// Only what has enough runs behind it (`TrainStatistics.minimumRuns`) shows up.
 struct TrainStatisticsRows {
     struct Row: Identifiable {
         let id: Int
@@ -57,17 +57,35 @@ struct TrainStatisticsRows {
             add("xmark.octagon.fill", "Fällt bei \(text) der Fahrten aus", tint: share >= 0.1 ? .heavyDelay : .slightDelay)
         }
 
-        if let unplanned = lookup.statistics.unplannedVehicles, let share = Self.percent(unplanned.share) {
-            let vehicles = unplanned.vehicles.prefix(3).compactMap { vehicle in
-                Self.percent(vehicle.share).map { "\(vehicle.name) (\($0))" }
-            }
-            add("tram.fill", "Anderes Fahrzeug als geplant bei \(share) der Fahrten",
-                detail: vehicles.isEmpty ? nil : "Dann meist \(vehicles.joined(separator: ", "))")
-        }
+        if TrainStatistics.testMode { rows += Self.testRows(lookup: lookup, stops: stops, from: rows.count) }
 
         guard !rows.isEmpty else { return nil }
         self.rows = rows
         self.subtitle = "Letzte \(lookup.statistics.days) Tage · \(lookup.statistics.runs) Fahrten"
+    }
+
+    /// Test mode (launch argument `-debugstats`): what the app asked for and the raw values the server answered, per stop.
+    static func testRows(lookup: TrainStatisticsLookup, stops: [StatisticsStop], from id: Int) -> [Row] {
+        let statistics = lookup.statistics
+        var rows = [Row(id: id, systemImage: "ladybug.fill",
+                        text: "Test: \(statistics.category) \(statistics.number), \(statistics.runs) Fahrten, \(statistics.cancelledRuns) ganz ausgefallen")]
+        for stop in stops {
+            let name = stop.station.displayName
+            guard let eva = lookup.eva(of: stop.station) else {
+                rows.append(Row(id: id + rows.count, systemImage: "ladybug", text: "\(name): keine EVA-Nummer"))
+                continue
+            }
+            guard let figures = lookup.stop(at: stop.station) else {
+                rows.append(Row(id: id + rows.count, systemImage: "ladybug", text: "\(name) (\(eva)): keine Daten"))
+                continue
+            }
+            let delays = { (values: [Int]) in values.isEmpty ? "–" : values.map { $0 >= 0 ? "+\($0)" : "\($0)" }.joined(separator: " ") }
+            let platforms = figures.platforms.map { "\($0.from)→\($0.to) ×\($0.n)" }.joined(separator: ", ")
+            rows.append(Row(id: id + rows.count, systemImage: "ladybug",
+                            text: "\(name) (\(eva)): \(figures.runs) Fahrten, \(figures.cancelled) ausgefallen",
+                            detail: "An \(delays(figures.arrival)) · Ab \(delays(figures.departure))" + (platforms.isEmpty ? "" : " · Gleis \(platforms)")))
+        }
+        return rows
     }
 
     /// "+6 min", "-1 min".
@@ -81,23 +99,30 @@ struct TrainStatisticsRows {
         Int((share * 100).rounded()) > 0 ? percentText(share) : nil
     }
 
-    /// The text for a transfer the incoming train often misses: "ICE 578 kommt in Fulda bei 33 % der Fahrten zu spät für den Umstieg."
-    static func transferWarning(line: Line?, place: String, outlook: TrainStatistics.Stop.TransferOutlook) -> String? {
-        guard outlook.isRisky, let share = percent(outlook.lateShare) else { return nil }
-        return "\(line?.name ?? "Der Zug") kommt \(place) bei \(share) der Fahrten zu spät für den Umstieg."
+    /// The text for a transfer the incoming train often misses, as how often it works: "Klappt 7 von 10 Mal"
+    /// at the transfer itself, "Umstieg in Fulda klappt 7 von 10 Mal" with the transfer's `station`.
+    static func transferWarning(station: String? = nil, outlook: TrainStatistics.Stop.TransferOutlook) -> String? {
+        guard outlook.isRisky else { return nil }
+        let works = Int(((1 - outlook.lateShare) * 10).rounded())
+        let often = works > 0 ? "\(works) von 10 Mal" : "fast nie"
+        guard let station else { return "Klappt \(often)" }
+        return "Umstieg in \(station) klappt \(often)"
     }
 }
 
-/// "Gleiswechsel in 40 % der Fälle (meist Gleis 18 (33 %) / Gleis 19 (20 %))": only above 10 % and with at
-/// most two platforms. Shown where the platform matters (below the Wagenreihung, 30 minutes before a stop).
+/// "Gleiswechsel in 30 % der Fälle (meist Gleis 18 (67 %) / Gleis 19 (33 %))": only above 10 % and with at
+/// most two platforms, each with its share of the changes. "meist Gleis 18" without a share when every
+/// change went there. Shown where the platform matters (below the Wagenreihung, 30 minutes before a stop).
 struct PlatformChangeHint: Hashable {
     let text: String
     let severe: Bool
 
     init?(outlook: TrainStatistics.Stop.PlatformOutlook?) {
         guard let outlook, outlook.changeShare > 0.1, let changed = TrainStatisticsRows.percent(outlook.changeShare) else { return nil }
-        let others = outlook.alternatives.prefix(2).compactMap { option in
-            TrainStatisticsRows.percent(option.share).map { "Gleis \(option.platform) (\($0))" }
+        let onlyOne = outlook.alternatives.count == 1
+        let others = outlook.alternatives.prefix(2).compactMap { option -> String? in
+            if onlyOne { return "Gleis \(option.platform)" }
+            return TrainStatisticsRows.percent(option.shareOfChanges).map { "Gleis \(option.platform) (\($0))" }
         }
         text = "Gleiswechsel in \(changed) der Fälle" + (others.isEmpty ? "" : " (meist \(others.joined(separator: " / ")))")
         severe = outlook.changeShare >= 0.3
@@ -192,7 +217,7 @@ extension TrainStatisticsModel {
         var warnings: [String: String] = [:]
         for transfer in transfers {
             guard let outlook = outlooks[transfer.id],
-                  let text = TrainStatisticsRows.transferWarning(line: transfer.line, place: here ? "hier" : "in \(transfer.station.displayName)", outlook: outlook)
+                  let text = TrainStatisticsRows.transferWarning(station: here ? nil : transfer.station.displayName, outlook: outlook)
             else { continue }
             warnings[transfer.id] = text
         }

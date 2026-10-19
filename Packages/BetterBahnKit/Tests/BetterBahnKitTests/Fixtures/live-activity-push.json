@@ -1,0 +1,407 @@
+{
+  "note": "A journey as the app sends it to the betterbahn-live Worker and the Live Activity state for it at `now`, as ActivityKit decodes it. Checked by LiveActivityPushTests (Swift) and Cloudflare/live-activity/worker.test.mjs.",
+  "scenarios": [
+    {
+      "name": "transfer",
+      "journey": {
+        "legs": [
+          {
+            "line": "ICE 571",
+            "category": "ICE",
+            "number": "571",
+            "product": "highSpeed",
+            "night": false,
+            "cancelled": false,
+            "origin": "Teststadt Nord",
+            "originEva": "1000001",
+            "destination": "Teststadt Mitte",
+            "destinationEva": "1000002",
+            "departure": {
+              "planned": 1792231200,
+              "actual": 1792231380
+            },
+            "arrival": {
+              "planned": 1792234800,
+              "actual": 1792235040
+            },
+            "departurePlatform": {
+              "planned": "7",
+              "actual": "9"
+            },
+            "arrivalPlatform": {
+              "planned": "3"
+            },
+            "stops": [
+              {
+                "eva": "1000003",
+                "arrival": {
+                  "planned": 1792233000,
+                  "actual": 1792233300
+                }
+              },
+              {
+                "eva": "1000002",
+                "arrival": {
+                  "planned": 1792234800,
+                  "actual": 1792235040
+                }
+              }
+            ]
+          },
+          {
+            "line": "RE 3",
+            "category": "RE",
+            "number": "3312",
+            "product": "regionalExpress",
+            "night": false,
+            "cancelled": false,
+            "origin": "Teststadt Mitte",
+            "originEva": "1000002",
+            "destination": "Testhafen",
+            "departure": {
+              "planned": 1792235400
+            },
+            "arrival": {
+              "planned": 1792237200
+            },
+            "departurePlatform": {
+              "planned": "12"
+            },
+            "stops": []
+          }
+        ]
+      },
+      "cases": [
+        {
+          "now": 1792230000,
+          "state": {
+            "lineName": "ICE 571",
+            "nextStopName": "Teststadt Nord",
+            "plannedTime": 813924000,
+            "expectedTime": 813924180,
+            "platform": "9",
+            "isDeparture": true,
+            "cancelled": false,
+            "progressStart": 813922380,
+            "progressEnd": 813924180,
+            "product": "highSpeed",
+            "currentDelayMinutes": 3,
+            "replacedPlatform": "7",
+            "followUpStorage": [
+              {
+                "lineName": "ICE 571",
+                "nextStopName": "Teststadt Mitte",
+                "plannedTime": 813927600,
+                "expectedTime": 813927840,
+                "platform": "3",
+                "isDeparture": false,
+                "cancelled": false,
+                "progressStart": 813924180,
+                "progressEnd": 813927840,
+                "product": "highSpeed",
+                "currentDelayMinutes": 5
+              }
+            ]
+          }
+        },
+        {
+          "now": 1792232400,
+          "state": {
+            "lineName": "ICE 571",
+            "nextStopName": "Teststadt Mitte",
+            "plannedTime": 813927600,
+            "expectedTime": 813927840,
+            "platform": "3",
+            "isDeparture": false,
+            "cancelled": false,
+            "progressStart": 813924180,
+            "progressEnd": 813927840,
+            "product": "highSpeed",
+            "currentDelayMinutes": 5,
+            "followUpStorage": [
+              {
+                "lineName": "RE 3",
+                "nextStopName": "Teststadt Mitte",
+                "plannedTime": 813928200,
+                "expectedTime": 813928200,
+                "platform": "12",
+                "isDeparture": true,
+                "cancelled": false,
+                "progressStart": 813927840,
+                "progressEnd": 813928200,
+                "product": "regionalExpress",
+                "transfer": {
+                  "incomingLine": "ICE 571",
+                  "incomingPlannedArrival": 813927600,
+                  "incomingExpectedArrival": 813927840,
+                  "incomingPlatform": "3"
+                },
+                "currentDelayMinutes": 0
+              }
+            ]
+          }
+        },
+        {
+          "now": 1792234680,
+          "state": {
+            "lineName": "ICE 571",
+            "nextStopName": "Teststadt Mitte",
+            "plannedTime": 813927600,
+            "expectedTime": 813927840,
+            "platform": "3",
+            "isDeparture": false,
+            "cancelled": false,
+            "progressStart": 813924180,
+            "progressEnd": 813927840,
+            "product": "highSpeed",
+            "currentDelayMinutes": 4,
+            "transferPlatform": "12",
+            "followUpStorage": [
+              {
+                "lineName": "RE 3",
+                "nextStopName": "Teststadt Mitte",
+                "plannedTime": 813928200,
+                "expectedTime": 813928200,
+                "platform": "12",
+                "isDeparture": true,
+                "cancelled": false,
+                "progressStart": 813927840,
+                "progressEnd": 813928200,
+                "product": "regionalExpress",
+                "transfer": {
+                  "incomingLine": "ICE 571",
+                  "incomingPlannedArrival": 813927600,
+                  "incomingExpectedArrival": 813927840,
+                  "incomingPlatform": "3"
+                },
+                "currentDelayMinutes": 0
+              }
+            ]
+          }
+        },
+        {
+          "now": 1792237140,
+          "state": {
+            "lineName": "RE 3",
+            "nextStopName": "Testhafen",
+            "plannedTime": 813930000,
+            "expectedTime": 813930000,
+            "isDeparture": false,
+            "cancelled": false,
+            "progressStart": 813928200,
+            "progressEnd": 813930000,
+            "product": "regionalExpress",
+            "currentDelayMinutes": 0,
+            "followUpStorage": [
+              {
+                "lineName": "RE 3",
+                "nextStopName": "Testhafen",
+                "plannedTime": 813930000,
+                "expectedTime": 813930000,
+                "isDeparture": false,
+                "cancelled": false,
+                "progressStart": 813928200,
+                "progressEnd": 813930000,
+                "product": "regionalExpress",
+                "currentDelayMinutes": 0,
+                "arrivedFlag": true
+              }
+            ]
+          }
+        },
+        {
+          "now": 1792237320,
+          "state": {
+            "lineName": "RE 3",
+            "nextStopName": "Testhafen",
+            "plannedTime": 813930000,
+            "expectedTime": 813930000,
+            "isDeparture": false,
+            "cancelled": false,
+            "progressStart": 813928200,
+            "progressEnd": 813930000,
+            "product": "regionalExpress",
+            "currentDelayMinutes": 0,
+            "arrivedFlag": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "missedTransfer",
+      "journey": {
+        "legs": [
+          {
+            "line": "NJ 421",
+            "category": "NJ",
+            "number": "421",
+            "product": "longDistance",
+            "night": true,
+            "cancelled": false,
+            "origin": "Teststadt Nord",
+            "originEva": "1000001",
+            "destination": "Teststadt Mitte",
+            "destinationEva": "1000002",
+            "departure": {
+              "planned": 1792231200,
+              "actual": 1792231200
+            },
+            "arrival": {
+              "planned": 1792234800,
+              "actual": 1792235520
+            },
+            "stops": []
+          },
+          {
+            "line": "RB 12",
+            "category": "RB",
+            "number": "12",
+            "product": "regional",
+            "night": false,
+            "cancelled": false,
+            "origin": "Teststadt Mitte",
+            "originEva": "1000002",
+            "destination": "Testhafen",
+            "departure": {
+              "planned": 1792235400
+            },
+            "arrival": {
+              "planned": 1792237200
+            },
+            "departurePlatform": {
+              "planned": "2",
+              "actual": "5"
+            },
+            "stops": []
+          }
+        ]
+      },
+      "cases": [
+        {
+          "now": 1792233000,
+          "state": {
+            "lineName": "NJ 421",
+            "nextStopName": "Teststadt Mitte",
+            "plannedTime": 813927600,
+            "expectedTime": 813928320,
+            "isDeparture": false,
+            "cancelled": false,
+            "progressStart": 813924000,
+            "progressEnd": 813928320,
+            "product": "longDistance",
+            "currentDelayMinutes": 12,
+            "nightTrainFlag": true,
+            "warning": "Umstieg in Teststadt Mitte klappt nicht mehr",
+            "followUpStorage": [
+              {
+                "lineName": "RB 12",
+                "nextStopName": "Testhafen",
+                "plannedTime": 813930000,
+                "expectedTime": 813930000,
+                "isDeparture": false,
+                "cancelled": false,
+                "progressStart": 813928200,
+                "progressEnd": 813930000,
+                "product": "regional",
+                "currentDelayMinutes": 0,
+                "warning": "Umstieg in Teststadt Mitte klappt nicht mehr"
+              }
+            ]
+          }
+        },
+        {
+          "now": 1792235160,
+          "state": {
+            "lineName": "NJ 421",
+            "nextStopName": "Teststadt Mitte",
+            "plannedTime": 813927600,
+            "expectedTime": 813928320,
+            "isDeparture": false,
+            "cancelled": false,
+            "progressStart": 813924000,
+            "progressEnd": 813928320,
+            "product": "longDistance",
+            "currentDelayMinutes": 12,
+            "transferPlatform": "5",
+            "replacedPlatform": "2",
+            "nightTrainFlag": true,
+            "warning": "Umstieg in Teststadt Mitte klappt nicht mehr",
+            "followUpStorage": [
+              {
+                "lineName": "RB 12",
+                "nextStopName": "Testhafen",
+                "plannedTime": 813930000,
+                "expectedTime": 813930000,
+                "isDeparture": false,
+                "cancelled": false,
+                "progressStart": 813928200,
+                "progressEnd": 813930000,
+                "product": "regional",
+                "currentDelayMinutes": 0,
+                "warning": "Umstieg in Teststadt Mitte klappt nicht mehr"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "cancelled",
+      "journey": {
+        "legs": [
+          {
+            "line": "S 1",
+            "category": "S",
+            "number": "1",
+            "product": "suburban",
+            "night": false,
+            "cancelled": true,
+            "origin": "Testdorf",
+            "originEva": "1000004",
+            "destination": "Testhafen",
+            "departure": {
+              "planned": 1792231200
+            },
+            "arrival": {
+              "planned": 1792232400
+            },
+            "stops": []
+          }
+        ]
+      },
+      "cases": [
+        {
+          "now": 1792230600,
+          "state": {
+            "lineName": "S 1",
+            "nextStopName": "Testdorf",
+            "plannedTime": 813924000,
+            "expectedTime": 813924000,
+            "isDeparture": true,
+            "cancelled": true,
+            "progressStart": 813922200,
+            "progressEnd": 813924000,
+            "product": "suburban",
+            "currentDelayMinutes": 0,
+            "warning": "S 1 fällt aus",
+            "followUpStorage": [
+              {
+                "lineName": "S 1",
+                "nextStopName": "Testhafen",
+                "plannedTime": 813925200,
+                "expectedTime": 813925200,
+                "isDeparture": false,
+                "cancelled": true,
+                "progressStart": 813924000,
+                "progressEnd": 813925200,
+                "product": "suburban",
+                "currentDelayMinutes": 0,
+                "warning": "S 1 fällt aus"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

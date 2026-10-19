@@ -15,15 +15,19 @@ public struct TrainRequirement: Sendable, Hashable, Identifiable, Codable {
     /// looking the name up on the boarding station's board. Nil when only a name was typed.
     public var tripId: String?
     public var tripSource: DataSource?
+    /// The picked run's planned departure at `boarding`: a ring line's trip (S41/S42) is the vehicle's
+    /// whole day and calls there every lap, this tells which visit was picked.
+    public var departure: Date?
 
     public init(id: UUID = UUID(), trainName: String, boarding: Station, exit: Station? = nil,
-                tripId: String? = nil, tripSource: DataSource? = nil) {
+                tripId: String? = nil, tripSource: DataSource? = nil, departure: Date? = nil) {
         self.id = id
         self.trainName = trainName
         self.boarding = boarding
         self.exit = exit
         self.tripId = tripId
         self.tripSource = tripSource
+        self.departure = departure
     }
 }
 
@@ -83,12 +87,15 @@ public struct TrainRoutePlanner: Sendable {
     }
 
     /// Plans routes from `from` to `to` that ride every requirement, in the order given.
+    /// `pickedEarlier`: a run picked from the list as the first train may leave up to this long before
+    /// `date` (`TrainCandidateFinder.catchable`); the route then starts earlier.
     public func plan(_ requirements: [TrainRequirement], from: Station, to: Station,
-                     date: Date, limit: Int = 5) async throws -> TrainRoutePlan {
+                     date: Date, pickedEarlier: TimeInterval = 0, limit: Int = 5) async throws -> TrainRoutePlan {
         guard !requirements.isEmpty else {
             throw TransitError.invalidInput("Keine Zugvorgabe ausgewählt.")
         }
-        var beam = [Partial(legs: [], station: from, time: date, breaksRules: false)]
+        let start = requirements.first?.tripId != nil ? date.addingTimeInterval(-pickedEarlier) : date
+        var beam = [Partial(legs: [], station: from, time: start, breaksRules: false)]
         var names: [UUID: String] = [:]
 
         for (index, requirement) in requirements.enumerated() {
@@ -147,8 +154,14 @@ public struct TrainRoutePlanner: Sendable {
         let (trainName, trip) = if let pinned { pinned } else {
             try await train(requirement.trainName, at: requirement.boarding, notBefore: notBefore)
         }
-        guard let boardIndex = boardingIndex(in: trip, at: requirement.boarding, notBefore: notBefore),
-              let departure = trip.stopovers[boardIndex].departure
+        guard let visit = boardingIndex(in: trip, at: requirement.boarding, notBefore: notBefore,
+                                        picked: pinned == nil ? nil : requirement.departure),
+              let departure = trip.stopovers[visit].departure
+        else { throw TransitError.notFound("\(requirement.trainName) ab \(requirement.boarding.displayName)") }
+        // A ring line's trip is the vehicle's whole day: only the lap from this visit is ridden, so the
+        // exit is looked up there and not on the day's first lap.
+        let lap = trip.lap(at: requirement.boarding, near: departure.planned) ?? trip
+        guard let boardIndex = lap.stopovers.firstIndex(where: { $0.id == trip.stopovers[visit].id })
         else { throw TransitError.notFound("\(requirement.trainName) ab \(requirement.boarding.displayName)") }
 
         // 3. Ride to the boarding station as late as comfortably possible.
@@ -162,8 +175,8 @@ public struct TrainRoutePlanner: Sendable {
 
         // 4. Where to get off, and how to go on from there.
         let alightStations = requirement.exit.map { [$0] }
-            ?? alightCandidates(trip: trip, after: boardIndex, target: target)
-        let extended = await rides(trip: trip, from: requirement.boarding, to: alightStations,
+            ?? alightCandidates(trip: lap, after: boardIndex, target: target)
+        let extended = await rides(trip: lap, from: boardIndex, to: alightStations,
                                    target: target, continuing: requirement.exit == nil,
                                    after: feederLegs, base: partial)
         guard !extended.isEmpty else {
@@ -174,9 +187,12 @@ public struct TrainRoutePlanner: Sendable {
     }
 
     /// Builds one partial route per alighting stop (and, when continuing, per onward connection).
-    private func rides(trip: Trip, from boarding: Station, to alightStations: [Station], target: Station,
+    private func rides(trip: Trip, from boardIndex: Int, to alightStations: [Station], target: Station,
                        continuing: Bool, after feederLegs: [Leg], base: Partial) async -> [Partial] {
-        let legs = alightStations.compactMap { trip.leg(from: boarding, to: $0) }
+        let legs = alightStations.compactMap { station in
+            trip.stopovers[(boardIndex + 1)...].firstIndex { $0.station.isSamePlace(as: station) }
+                .flatMap { trip.leg(fromIndex: boardIndex, toIndex: $0) }
+        }
         guard continuing else {
             return legs.map { ride in
                 Partial(legs: merge(base.legs + feederLegs + [ride]), station: ride.destination,
@@ -266,20 +282,27 @@ public struct TrainRoutePlanner: Sendable {
         guard let tripId = requirement.tripId,
               let trip = try? await provider.trip(id: tripId, source: requirement.tripSource ?? provider.source) else { return nil }
         let name = trip.line?.name ?? requirement.trainName
-        guard boardingIndex(in: trip, at: requirement.boarding, notBefore: notBefore) != nil else {
-            throw TransitError.notFound("\(name) ab \(requirement.boarding.displayName) – bis zur Abfahrt nicht erreichbar")
+        guard boardingIndex(in: trip, at: requirement.boarding, notBefore: notBefore, picked: requirement.departure) != nil else {
+            throw TransitError.invalidInput("\(name) ab \(requirement.boarding.displayName) fährt ab, bevor du dort sein kannst.")
         }
         return (name, trip)
     }
 
     /// Where `trip` is boarded at `station`: the first visit leaving at or after `notBefore` (ring lines
-    /// call at a station twice).
-    private func boardingIndex(in trip: Trip, at station: Station, notBefore: Date) -> Int? {
+    /// call at a station every lap), or the visit at the `picked` planned departure if that can be caught.
+    private func boardingIndex(in trip: Trip, at station: Station, notBefore: Date, picked: Date? = nil) -> Int? {
         let slack: TimeInterval = -2 * 60
-        return trip.stopovers.firstIndex { stop in
-            guard stop.station.isSamePlace(as: station), let departure = stop.departure else { return false }
-            return departure.best >= notBefore.addingTimeInterval(slack)
+        let visits = trip.stopovers.indices.filter {
+            trip.stopovers[$0].station.isSamePlace(as: station) && trip.stopovers[$0].departure != nil
         }
+        func departure(_ index: Int) -> TimeInfo { trip.stopovers[index].departure! }
+        guard let picked else {
+            return visits.first { departure($0).best >= notBefore.addingTimeInterval(slack) }
+        }
+        guard let visit = visits.min(by: {
+            abs(departure($0).planned.timeIntervalSince(picked)) < abs(departure($1).planned.timeIntervalSince(picked))
+        }) else { return nil }
+        return departure(visit).best >= notBefore.addingTimeInterval(slack) ? visit : nil
     }
 
     /// Finds the next run of `name` leaving `station` at or after `notBefore`.
