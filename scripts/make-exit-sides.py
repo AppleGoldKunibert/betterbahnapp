@@ -349,7 +349,17 @@ def same_level(a, b):
     return x is None or y is None or x == y
 
 
-def tracks_for(ref, refs, adjacent, is_edge):
+def on_platform_level(platform_tags, candidates):
+    """The candidates on the platform's level when they span several: the platform's own level, or
+    the ground (no `level`/`layer`) for a platform that says nothing – Frankfurt Hbf's hall platforms
+    lie above the S-Bahn's tunnel tracks. Empty when none is there: which level is it on, then?"""
+    if len({level_of(a[0]["tags"]) for a in candidates}) <= 1:
+        return candidates
+    wanted = level_of(platform_tags) or "0"
+    return [a for a in candidates if (level_of(a[0]["tags"]) or "0") == wanted]
+
+
+def tracks_for(ref, refs, adjacent, is_edge, platform_tags={}):
     """Which of the `adjacent` tracks (way, side, heading) is platform `ref`'s: the ones numbered like
     it (`railway:track_ref`), else – for a platform edge, or a platform with one number – the only
     track next to it, possibly in several way pieces lying end to end (stations often number their
@@ -362,10 +372,7 @@ def tracks_for(ref, refs, adjacent, is_edge):
         return []
     # Pieces of one track all lie on the same side of the platform; a track numbered as another of
     # the platform's own tracks is that one, not this one.
-    candidates = [a for a in adjacent if not any(r in refs for r in track_refs(a[0]["tags"]))]
-    # Tracks of different levels at a platform without a level: which one is on its level? Unknown.
-    if len({level_of(a[0]["tags"]) for a in candidates}) > 1:
-        return []
+    candidates = on_platform_level(platform_tags, [a for a in adjacent if not any(r in refs for r in track_refs(a[0]["tags"]))])
     if candidates and combine([(side, heading) for _, side, heading in candidates]) is not None:
         return candidates
     return []
@@ -393,7 +400,7 @@ def analyse(data, only=None, log=lambda *a: None):
         edge = EDGE_DISTANCE if closed or is_edge else LINE_DISTANCE
         adjacent = data.adjacent_tracks(outline, frame, bounds_of([p for o in outlines for p in o]), edge, tags)
         for ref in refs:
-            pieces = tracks_for(ref, refs, adjacent, is_edge)
+            pieces = tracks_for(ref, refs, adjacent, is_edge, tags)
             if not pieces:
                 continue
             combined = combine([(side, heading) for _, side, heading in pieces])

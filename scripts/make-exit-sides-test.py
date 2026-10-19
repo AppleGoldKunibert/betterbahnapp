@@ -187,6 +187,10 @@ class AnalysisTests(unittest.TestCase):
             way(14, {"railway": "rail", "layer": "1"}, [(-300, 200), (300, 200)]),
             way(15, {"railway": "rail", "layer": "-2"}, [(-300, 201), (300, 201)]),
             way(22, {"railway": "platform_edge", "ref": "13"}, [(-150, 201.7), (150, 201.7)]),
+            # An edge without a level takes the track without one (the ground) over a tunnel track.
+            way(18, {"railway": "rail"}, [(-300, 400), (300, 400)]),
+            way(19, {"railway": "rail", "layer": "-2"}, [(-300, 401), (300, 401)]),
+            way(24, {"railway": "platform_edge", "ref": "14"}, [(-150, 401.7), (150, 401.7)]),
             # But a numbered track wins whatever the levels say.
             way(16, {"railway": "rail", "layer": "1"}, [(-300, 300), (300, 300)]),
             way(17, {"railway": "light_rail", "layer": "-2", "railway:track_ref": "15"}, [(-300, 301), (300, 301)]),
@@ -197,6 +201,7 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(stations[0]["tracks"], [
             {"track": "1", "heading": 90, "side": "left"},
             {"track": "12", "heading": 90, "side": "left"},
+            {"track": "14", "heading": 90, "side": "left"},
             {"track": "15", "heading": 90, "side": "left"},
         ])
 
