@@ -175,13 +175,18 @@ public enum ExitSides {
                 && $0.coordinate.distance(to: coordinate) < 1500
         }
         guard !near.isEmpty else { return [] }
-        let code = near.contains { $0.ril100 != nil } ? Ril100.code(for: station) : nil
-        let name = Station.normalize(station.name)
+        // A feed's own name ("S+U Gesundbrunnen Bhf (Berlin)") and DB's ("Berlin Gesundbrunnen", which OSM
+        // uses too), the EVA numbers the feed and the offline list know.
+        var shown = station
+        shown.name = station.displayName
+        let evas = Set([station.evaNumber, StationNames.evaNumber(for: station), StationNames.mainEvaNumber(for: station)].compactMap { $0 })
+        let codes = near.contains { $0.ril100 != nil } ? Set([Ril100.code(for: station), Ril100.code(for: shown)].compactMap { $0 }) : []
+        let names = Set([station.name, shown.name].map(Station.normalize)).filter { !$0.isEmpty }
         func rank(_ entry: Entry) -> Int? {
-            if let eva = station.evaNumber, entry.uic == eva { return 0 }
-            if let code, entry.ril100 == code { return 1 }
+            if let uic = entry.uic, evas.contains(uic) { return 0 }
+            if let ril100 = entry.ril100, codes.contains(ril100) { return 1 }
             let entryName = Station.normalize(entry.name)
-            if !name.isEmpty, !entryName.isEmpty, name.contains(entryName) || entryName.contains(name) { return 2 }
+            if !entryName.isEmpty, names.contains(where: { $0.contains(entryName) || entryName.contains($0) }) { return 2 }
             return nil
         }
         return near.compactMap { entry in rank(entry).map { (entry: entry, rank: $0, distance: entry.coordinate.distance(to: coordinate)) } }

@@ -63,6 +63,15 @@ import Testing
         #expect(ExitSides.side(at: other, platform: "7", heading: 90, product: .regional, in: entries) == nil)
     }
 
+    @Test func feedNamesAreMatchedUnderDBsName() {
+        // VBB calls it "S+U Gesundbrunnen Bhf (Berlin)", OSM and DB "Berlin Gesundbrunnen"; the offline
+        // station names tell the app so.
+        let gesundbrunnen = station("de:11000:900007102", "S+U Gesundbrunnen Bhf (Berlin)", 52.5484, 13.3907, source: .transitous)
+        let list = [ExitSides.Entry(name: "Berlin Gesundbrunnen", ril100: "BGS", uic: "8007799", lat: 52.5486, lon: 13.3902,
+                                    tracks: [ExitSides.Track(track: "1", heading: 266, side: .left)])]
+        #expect(ExitSides.side(at: gesundbrunnen, platform: "1", heading: 270, product: .suburban, in: list) == .left)
+    }
+
     @Test func lightRailStationsServeOnlySBahnTrains() {
         // Only the S-Bahn's own station node knows track 15.
         let light = [ExitSides.Entry(name: "Hauptbahnhof", lat: 50.0003, lon: 8.0, tracks: [ExitSides.Track(track: "15", heading: 90, side: .left)],
