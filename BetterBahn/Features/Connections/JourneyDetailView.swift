@@ -181,6 +181,7 @@ struct JourneyDetailView: View {
         }
         .padding(.horizontal)
         .padding(.bottom, 32)
+        .environment(\.bikeMode, replanSearch?.withBike ?? model.settings.searchWithBike)
     }
 
     /// Which tight transfers the incoming train usually misses (#316); not for a journey that is over.
@@ -590,6 +591,7 @@ struct LegCard: View {
     /// What past runs of this train say (#316), shown in the details.
     @State private var statistics = TrainStatisticsModel()
     @Environment(AppModel.self) private var model
+    @Environment(\.bikeMode) private var bikeMode
 
     private var color: Color { leg.line?.color ?? .gray }
     private var statisticsStops: [StatisticsStop] {
@@ -731,6 +733,10 @@ struct LegCard: View {
 
                 if let reservation {
                     ReservationRow(reservation: reservation, request: BahnDeClient.formationRequest(for: leg))
+                }
+
+                if bikeMode, !leg.cancelled {
+                    BikeTransportRow(leg: leg)
                 }
 
                 if leg.line?.operatorName != nil || statistics.rows != nil || onReplace != nil || onReplan != nil || onCheckin != nil || onShowCheckin != nil {

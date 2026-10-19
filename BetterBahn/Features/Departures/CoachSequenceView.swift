@@ -148,6 +148,7 @@ struct CoachSequencePanel: View {
     @State private var blocked = false
     /// What bahn.de's sequence has differently from vagonweb's plan (`CoachSequence.deviations(fromPlan:)`).
     @State private var deviations: [String] = []
+    @Environment(\.bikeMode) private var bikeMode
     #if DEBUG
     /// Why bahn.de had no Wagenreihung when vagonweb's plan is shown instead (`BahnDeClient.coachSequenceNote(for:)`),
     /// only in debug builds to find out why a train shows the plan.
@@ -218,6 +219,9 @@ struct CoachSequencePanel: View {
                 .foregroundStyle(.secondary)
             if case .vagonweb(let from, let until) = sequence.source {
                 plannedNote(sequence, from: from, until: until)
+            }
+            if bikeMode, let bikes = sequence.bikeCoachSummary {
+                InfoChip(text: "Fahrradstellplätze: \(bikes)", systemImage: "bicycle", tint: .punctual)
             }
             #if DEBUG
             if let bahnDeNote {
@@ -368,6 +372,8 @@ private struct CoachSequenceDiagram: View {
     var reservation: SeatReservation?
     /// The coach of the reserved seat, marked with a frame.
     var highlightedCoachID: Int?
+    /// In bike mode (#398) the coaches with bike spaces and their sectors are marked.
+    @Environment(\.bikeMode) private var bikeMode
 
     private static let pointsPerMeter: CGFloat = 3
     /// Coach length used when bahn.de gave no positions.
@@ -422,6 +428,8 @@ private struct CoachSequenceDiagram: View {
         let labels = partLabels(placed)
         // Trainsets have a nose at both ends of each part; so do locomotives and power cars.
         let hasTrainsets = !sequence.formation.units.isEmpty
+        let bikeCoaches = bikeMode ? Set(sequence.bikeCoaches.map(\.id)) : []
+        let bikeSectors = bikeMode ? Set(sequence.bikeSectors) : []
 
         VStack(alignment: .leading, spacing: 10) {
             ScrollView(.horizontal) {
@@ -431,11 +439,13 @@ private struct CoachSequenceDiagram: View {
                             ForEach(sectors.filter { $0.end > left && $0.start < right }, id: \.name) { sector in
                                 let start = max(sector.start, left)
                                 let end = min(sector.end, right)
+                                let bikes = bikeSectors.contains(sector.name)
                                 Text(sector.name)
                                     .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(bikes ? Color.punctual : Color.secondary)
                                     .frame(width: max(x(end) - x(start) - 2, 0), height: 26)
-                                    .background(Color.secondary.opacity(0.12), in: .rect(cornerRadius: 6, style: .continuous))
+                                    .background(bikes ? Color.punctual.opacity(0.2) : Color.secondary.opacity(0.12),
+                                                in: .rect(cornerRadius: 6, style: .continuous))
                                     .offset(x: x(start) + 1)
                             }
                         }
@@ -462,6 +472,7 @@ private struct CoachSequenceDiagram: View {
                             let nose = hasTrainsets || !item.coach.isPassengerCoach
                             let tile = CoachTile(coach: item.coach,
                                                  highlighted: item.coach.id == highlightedCoachID,
+                                                 bikeHighlighted: bikeCoaches.contains(item.coach.id),
                                                  leadingNose: nose && (index == 0 || placed[index - 1].coach.group != group),
                                                  trailingNose: nose && (index == placed.count - 1 || placed[index + 1].coach.group != group))
                             Group {
@@ -604,6 +615,8 @@ nonisolated private struct DividerLine: Shape {
 private struct CoachTile: View {
     let coach: CoachSequence.Coach
     var highlighted = false
+    /// A coach with bike spaces in bike mode, framed in green (the reserved seat's frame wins).
+    var bikeHighlighted = false
     var leadingNose = false
     var trailingNose = false
 
@@ -701,7 +714,8 @@ private struct CoachTile: View {
         return outline
             .fill(fill.opacity(coach.isPassengerCoach ? 0.22 : 0.45))
             .overlay {
-                outline.strokeBorder(highlighted ? Color.brand : fill.opacity(0.6), lineWidth: highlighted ? 3 : 1)
+                outline.strokeBorder(highlighted ? Color.brand : bikeHighlighted ? Color.punctual : fill.opacity(0.6),
+                                     lineWidth: highlighted || bikeHighlighted ? 3 : 1)
             }
             .overlay {
                 if let number = coach.number {

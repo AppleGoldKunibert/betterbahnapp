@@ -155,6 +155,13 @@ public enum StationNames {
         return evas.count == 1 ? evas[0] : nil
     }
 
+    /// Whether `station` lies in Germany: a German stop ID (DHID) or EVA number, else one of DB's stations (`germanStation`).
+    static func isGerman(_ station: Station) -> Bool {
+        if dhid(in: station.id) != nil { return true }
+        if let eva = station.evaNumber, eva.count == 7, eva.hasPrefix("80") { return true }
+        return germanStation(for: station, in: index) != nil
+    }
+
     static func name(for station: Station, in index: Index) -> String? {
         if let number = germanStation(for: station, in: index) { return index.stations[number].name }
         return nameAbroad(for: station.name, near: station.coordinate, in: index)

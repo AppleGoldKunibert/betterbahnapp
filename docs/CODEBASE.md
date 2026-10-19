@@ -134,7 +134,16 @@ in `project.pbxproj`: new files join their target automatically.
   `PhotosPicker`, `TravelPassView`), `SeatReservationViews` (`ReservationRow` in `LegCard`;
   `AppModel.reservations(for:)`, only on the leg whose train matches).
 - `Features/Trips/TripsView.swift` – upcoming/past journeys, `SaveJourneyButton` (warns "Zug ist
-  reservierungspflichtig" via `AppModel.reservationRequiredLegs`; ticket/reservation imports never warn).
+  reservierungspflichtig", in bike mode also "Fahrradreservierung nötig" / "Keine Fahrradmitnahme", via
+  `AppModel.saveWarnings`; ticket/reservation imports never warn).
+- Bike mode (#398): "Mit Fahrrad" in the search options (`AppSettings.searchWithBike`, synced, off by default, carried as
+  `ConnectionSearch.withBike`; results aren't filtered). `JourneyDetailView` sets the environment value `bikeMode`:
+  `LegCard` shows `BikeTransportRow` (`Features/Connections/BikeTransportViews.swift`, `AppModel.bikeTransport(for:)`),
+  the Wagenreihung frames the coaches with bike spaces in green and tints their sectors (Kit `CoachSequence.bikeCoaches`,
+  `bikeSectors`, `bikeCoachSummary`). Kit `BikeTransport` (`Transit/BikeTransport.swift`): bahn.de's bike attributes
+  (`BahnDeClient.bikeTransport(for:)`: "FR" reservierungspflichtig, "FB" begrenzt, others by wording; narrowed to the
+  leg's section), DB's notices 91/92 on the leg, else the rule of thumb (regional trains in Germany without, long-distance
+  trains with a reservation). Transitous' `bikesAllowed` is no use: DELFI sends `false` for every German train.
 - `Features/Traewelling/` – `CheckinSheet` (`MenuPickerRow` with constant width; keyboard hides on submit and only
   returns on `TraewellingError.isInvalidInput`; `.collision` offers "Trotzdem einchecken", `CheckinDraft.force`),
   `TraewellingLoginButton`, `CustomEmojiViews` (`EmojiMessageField`, `EmojiText`), `CheckinDetailSheet` ("Check-in
@@ -263,7 +272,7 @@ in `project.pbxproj`: new files join their target automatically.
   alone (`BahnDeProxy.gate`: 10 min after 403/429/452, 2 min when down) and requests throw `rateLimited`, shown as
   "Plan-Wagenreihung · Aktuelle nicht verfügbar" / "Aktuelle Wagenreihung nicht verfügbar". No other way to bahn.de:
   the Worker and the phone's hidden browser were refused. `requiresReservation(for:)` (attribute `RP`, also other
-  railways via `lookupReference`; shares the `journeyCourse` cache).
+  railways via `lookupReference`; shares the `journeyCourse` cache) and `bikeTransport(for:)` (bike attributes, same cache).
 - `Transit/BahnDe/SeatMap.swift` – DB's seat map per ICE coach (#365, `Resources/SeatMaps.json`): coach numbers, type,
   each seat number's box as fractions of the drawing (lower coach numbers on the left on every sheet).
   `CoachSequence.Group.seatMapSheet` per trainset from its UIC numbers (`TrainModel.detectSubtype`) and coach count

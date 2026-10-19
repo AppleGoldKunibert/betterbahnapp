@@ -127,6 +127,20 @@ extension BahnDeClient {
         /// DB marks trains where a seat reservation is mandatory (e.g. Snälltåget, Nightjet) with the attribute `RP`.
         /// Only the key counts: "FR" is "Fahrradmitnahme reservierungspflichtig", which concerns bikes alone.
         var requiresReservation: Bool { zugattribute?.contains { $0.key == "RP" } ?? false }
+        /// The bike attributes (`BikeTransport.kind(ofAttribute:category:value:)`), each with its section if it has one,
+        /// e.g. Nightjet NJ 471's "Fahrradmitnahme reservierungspflichtig" for "(Basel SBB - Zürich HB)".
+        var bikeAttributes: [BikeAttribute] {
+            (zugattribute ?? []).compactMap { attribute in
+                BikeTransport.kind(ofAttribute: attribute.key, category: attribute.kategorie, value: attribute.value).map {
+                    BikeAttribute(kind: $0, section: attribute.teilstreckenHinweis.flatMap(BahnDeClient.section))
+                }
+            }
+        }
+    }
+
+    struct BikeAttribute: Sendable, Hashable {
+        var kind: BikeTransport.Kind
+        var section: TrainOperator.Section?
     }
 
     /// A train's journey details: its realtime stops, the operators running it and what its attributes say.
@@ -136,6 +150,7 @@ extension BahnDeClient {
         var hasSleepingCars = false
         /// Whether a seat reservation is mandatory on the train (attribute `RP`).
         var requiresReservation = false
+        var bikeAttributes: [BikeAttribute] = []
     }
 
     // MARK: Journey stops
@@ -283,6 +298,54 @@ extension BahnDeClient {
         guard let line = leg.line, !leg.isWalking else { return nil }
         return try await journeyCourse(line: line, station: leg.origin, plannedDeparture: leg.departure.planned,
                                        includingOtherRailways: true)?.requiresReservation
+    }
+
+    /// Whether bahn.de lets a bike come along on `leg`'s train, from the journey details' bike attributes for the part
+    /// of the train you ride (`bikeTransport(_:riding:stops:)`). Nil when bahn.de can't be asked about the train
+    /// (`lookupReference`) or names no bike attribute; throws `TransitError.notFound` if bahn.de doesn't list it.
+    /// Shares the request and cache of `requiresReservation(for:)`, so the warning on saving costs nothing extra.
+    public func bikeTransport(for leg: Leg) async throws -> BikeTransport? {
+        guard let line = leg.line, !leg.isWalking,
+              let course = try await journeyCourse(line: line, station: leg.origin, plannedDeparture: leg.departure.planned,
+                                                   includingOtherRailways: true)
+        else { return nil }
+        return Self.bikeTransport(course.bikeAttributes, riding: leg, stops: course.stops)
+    }
+
+    /// The strictest of the bike attributes whose section overlaps `leg` (one that can't be placed counts). The
+    /// section is kept only when the leg runs beyond it.
+    static func bikeTransport(_ attributes: [BikeAttribute], riding leg: Leg, stops: [JourneyStop]) -> BikeTransport? {
+        let range = legRange(of: leg, in: stops)
+        let riding = attributes.compactMap { attribute -> BikeTransport? in
+            guard let section = attribute.section else { return BikeTransport(kind: attribute.kind, isConfirmed: true) }
+            let shown = "\(section.from) – \(section.to)"
+            guard let range, let placed = sectionRange(section, in: stops) else {
+                return BikeTransport(kind: attribute.kind, section: shown, isConfirmed: true)
+            }
+            guard placed.lowerBound < range.upperBound, placed.upperBound > range.lowerBound else { return nil }
+            let coversLeg = placed.lowerBound <= range.lowerBound && placed.upperBound >= range.upperBound
+            return BikeTransport(kind: attribute.kind, section: coversLeg ? nil : shown, isConfirmed: true)
+        }
+        return BikeTransport.strictest(riding)
+    }
+
+    /// Where `leg` gets on and off in bahn.de's stop order, matched by planned time and place.
+    static func legRange(of leg: Leg, in stops: [JourneyStop]) -> ClosedRange<Int>? {
+        guard let start = stops.firstIndex(where: { stop in
+                  stop.departure.map { abs($0.planned.timeIntervalSince(leg.departure.planned)) < 60 } == true && isNear(stop, leg.origin) }),
+              let end = stops.indices.last(where: { index in
+                  index > start && stops[index].arrival.map { abs($0.planned.timeIntervalSince(leg.arrival.planned)) < 60 } == true
+                      && isNear(stops[index], leg.destination) })
+        else { return nil }
+        return start...end
+    }
+
+    /// A section's first and last stop in bahn.de's stop order, by name.
+    static func sectionRange(_ section: TrainOperator.Section, in stops: [JourneyStop]) -> ClosedRange<Int>? {
+        guard let from = stops.firstIndex(where: { Station.normalize($0.name) == Station.normalize(section.from) }),
+              let to = stops.indices.last(where: { $0 > from && Station.normalize(stops[$0].name) == Station.normalize(section.to) })
+        else { return nil }
+        return from...to
     }
 
     private static let journeyIdCache = ExpiringCache<String>()
@@ -611,7 +674,8 @@ extension BahnDeClient {
         return JourneyCourse(stops: details.halte.compactMap(JourneyStop.init),
                              operators: Self.operators(of: details, feedOperator: feedOperator),
                              hasSleepingCars: details.hasSleepingCars,
-                             requiresReservation: details.requiresReservation)
+                             requiresReservation: details.requiresReservation,
+                             bikeAttributes: details.bikeAttributes)
     }
 
     /// The operators bahn.de names in the train's attributes, unless its stops' railways (`adminID`, else
@@ -757,20 +821,12 @@ extension BahnDeClient {
     /// Anything that can't be placed (no section, a station not found) is kept. Once only one operator
     /// is left, its section is dropped: it runs everything you ride.
     static func operators(_ operators: [TrainOperator], riding leg: Leg, stops: [JourneyStop]) -> [TrainOperator] {
-        guard operators.count > 1,
-              let legStart = stops.firstIndex(where: { stop in
-                  stop.departure.map { abs($0.planned.timeIntervalSince(leg.departure.planned)) < 60 } == true && isNear(stop, leg.origin) }),
-              let legEnd = stops.indices.last(where: { index in
-                  index > legStart && stops[index].arrival.map { abs($0.planned.timeIntervalSince(leg.arrival.planned)) < 60 } == true
-                      && isNear(stops[index], leg.destination) })
+        guard operators.count > 1, let leg = legRange(of: leg, in: stops)
         else { return operators.count == 1 ? [TrainOperator(name: operators[0].name)] : operators }
         let riding = operators.filter { entry in
-            guard let section = entry.section,
-                  let from = stops.firstIndex(where: { Station.normalize($0.name) == Station.normalize(section.from) }),
-                  let to = stops.indices.last(where: { $0 > from && Station.normalize(stops[$0].name) == Station.normalize(section.to) })
-            else { return true }
+            guard let section = entry.section, let placed = sectionRange(section, in: stops) else { return true }
             // Its section runs on to the next stop (Bad Schandau → Děčín is still DB's).
-            return from < legEnd && to >= legStart
+            return placed.lowerBound < leg.upperBound && placed.upperBound >= leg.lowerBound
         }
         var seen = Set<String>()
         let unique = riding.filter { seen.insert($0.name).inserted }
