@@ -328,89 +328,91 @@ final class JourneyMarkerAnnotation: NSObject, MKAnnotation {
 /// Bottom sheet showing transfer/stopover details.
 struct TransferDetailsSheet: View {
     let transfer: TransferPoint
+    @State private var contentHeight: CGFloat = 200
+    @State private var safeAreaHeight: CGFloat = 0
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    // Header
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 8) {
-                            Image(systemName: transfer.type.symbol)
-                                .font(.headline)
-                                .foregroundStyle(transfer.type == .end ? Color.punctual : Color.brand)
-                            Text(transfer.station.displayName)
-                                .font(.headline)
-                        }
-                        if transfer.type == .stopover {
-                            Text("Zwischenhalt")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                // Header
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Image(systemName: transfer.type.symbol)
+                            .font(.headline)
+                            .foregroundStyle(transfer.type == .end ? Color.punctual : Color.brand)
+                        Text(transfer.station.displayName)
+                            .font(.headline)
                     }
-                    .padding(.horizontal)
-
-                    Divider()
-
-                    // Details
-                    VStack(alignment: .leading, spacing: 12) {
-                        if let arrival = transfer.arrivalTime {
-                            HStack {
-                                Label("Ankunft", systemImage: "arrow.down")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                Text(arrival.formatted(date: .omitted, time: .shortened))
-                                    .font(.headline)
-                            }
-                        }
-
-                        if let departure = transfer.departureTime {
-                            HStack {
-                                Label("Abfahrt", systemImage: "arrow.up")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                Text(departure.formatted(date: .omitted, time: .shortened))
-                                    .font(.headline)
-                            }
-                        }
-
-                        if transfer.type == .transfer, transfer.platform?.best != nil || transfer.departurePlatform?.best != nil {
-                            HStack {
-                                Label("Gleiswechsel", systemImage: "train.side.front.car")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                HStack(spacing: 6) {
-                                    Text(transfer.platform?.best ?? "?")
-                                    Image(systemName: "arrow.right")
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(.secondary)
-                                    Text(transfer.departurePlatform?.best ?? "?")
-                                }
-                                .font(.headline)
-                            }
-                        } else if let platform = transfer.platform?.best {
-                            HStack {
-                                Label("Gleis", systemImage: "train.side.front.car")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                Text(platform)
-                                    .font(.headline)
-                            }
-                        }
+                    if transfer.type == .stopover {
+                        Text("Zwischenhalt")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    .padding(.horizontal)
-
-                    Spacer(minLength: 20)
                 }
-                .padding(.vertical)
+                .padding(.horizontal)
+
+                Divider()
+
+                // Details
+                VStack(alignment: .leading, spacing: 12) {
+                    if let arrival = transfer.arrivalTime {
+                        HStack {
+                            Label("Ankunft", systemImage: "arrow.down")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(arrival.formatted(date: .omitted, time: .shortened))
+                                .font(.headline)
+                        }
+                    }
+
+                    if let departure = transfer.departureTime {
+                        HStack {
+                            Label("Abfahrt", systemImage: "arrow.up")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(departure.formatted(date: .omitted, time: .shortened))
+                                .font(.headline)
+                        }
+                    }
+
+                    if transfer.type == .transfer, transfer.platform?.best != nil || transfer.departurePlatform?.best != nil {
+                        HStack {
+                            Label("Gleiswechsel", systemImage: "train.side.front.car")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            HStack(spacing: 6) {
+                                Text(transfer.platform?.best ?? "?")
+                                Image(systemName: "arrow.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                Text(transfer.departurePlatform?.best ?? "?")
+                            }
+                            .font(.headline)
+                        }
+                    } else if let platform = transfer.platform?.best {
+                        HStack {
+                            Label("Gleis", systemImage: "train.side.front.car")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(platform)
+                                .font(.headline)
+                        }
+                    }
+                }
+                .padding(.horizontal)
             }
-            .navigationTitle("Details")
-            .navigationBarTitleDisplayMode(.inline)
+            .padding(.top, 28)
+            .padding(.bottom)
+            // Size the sheet to its content instead of a fixed half-screen detent.
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
         }
-        .presentationDetents([.medium, .large])
+        .scrollBounceBehavior(.basedOnSize)
+        .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top + $0.safeAreaInsets.bottom } action: { safeAreaHeight = $0 }
+        .presentationDetents([.height(contentHeight + safeAreaHeight)])
+        .presentationDragIndicator(.visible)
     }
 }
