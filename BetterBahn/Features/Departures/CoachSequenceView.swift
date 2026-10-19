@@ -112,11 +112,13 @@ struct CoachAdviceLabel: View {
     let advice: CoachAdvice
     /// Already on the train: walk to those coaches.
     var boarded = false
+    /// False next to the transfer, which says where already.
+    var namesStation = true
 
     static let symbol = "figure.walk.motion"
 
     var body: some View {
-        Label(advice.text(boarded: boarded), systemImage: Self.symbol)
+        Label(advice.text(boarded: boarded, namingStation: namesStation), systemImage: Self.symbol)
             .font(.caption)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)

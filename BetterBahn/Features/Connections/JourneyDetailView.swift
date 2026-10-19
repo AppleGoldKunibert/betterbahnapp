@@ -526,6 +526,19 @@ struct TransferRow: View {
     private var color: Color { isPast && minutes < 0 ? .secondary : transferColor(minutes) }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            summary
+            // Its own line across the row, below the platforms, so it doesn't wrap into a narrow column.
+            if let coachAdvice, !isPast, !broken {
+                CoachAdviceLabel(advice: coachAdvice, boarded: from.departure.best < .now, namesStation: false)
+                    .padding(.leading, 40)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 4)
+    }
+
+    private var summary: some View {
         // Centered, so a taller platform badge doesn't push the transfer text off the middle.
         HStack(spacing: 10) {
             Image(systemName: walk != nil ? "figure.walk" : "arrow.triangle.2.circlepath")
@@ -546,9 +559,6 @@ struct TransferRow: View {
                 if let warning, !isPast, !broken {
                     TransferWarning(text: warning)
                 }
-                if let coachAdvice, !isPast, !broken {
-                    CoachAdviceLabel(advice: coachAdvice, boarded: from.departure.best < .now)
-                }
                 if let walk {
                     Text("\(Int((walk.arrival.best.timeIntervalSince(walk.departure.best) / 60).rounded())) min Fußweg")
                         .font(.caption)
@@ -568,8 +578,6 @@ struct TransferRow: View {
                 .layoutPriority(1)
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 4)
     }
 
     /// The platform, or the line (e.g. "Bus 825") when that leg has none, so the arrow never points at nothing.

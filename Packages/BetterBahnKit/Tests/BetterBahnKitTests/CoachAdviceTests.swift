@@ -62,6 +62,26 @@ import Testing
         #expect(advice.text() == "Steig in Wagen 29–31 ein, dann stehst du in Hannover Hbf direkt an Wagen 35 deines Anschlusses.")
     }
 
+    @Test func walksFromAReservedSeatBeforeArriving() throws {
+        let arriving = train(numbers(21...32), from: 10, towardsEnd: false)
+        let departing = train(numbers(31...37), from: 18, towardsEnd: false, platform: "11", sectors: Self.reversedSectors, name: "ICE 200")
+        // The seat in Wagen 22 stands 138 m short of the connecting train: walk to Wagen 30–32 before arriving.
+        let advice = try #require(CoachAdvice.transfer(arriving: arriving, departing: departing, platforms: hannover,
+                                                       station: "Hannover Hbf", seat: (coach: "22", train: "ICE 100")))
+        #expect(advice.coaches == ["30", "31", "32"])
+        #expect(advice.walkBeforeArrival)
+        #expect(advice.text() == "Geh vor der Ankunft in Wagen 30–32, dann stehst du in Hannover Hbf direkt an deinem Anschluss.")
+        // Next to the transfer, which names the station already.
+        #expect(advice.text(boarded: true, namingStation: false) == "Geh vor der Ankunft in Wagen 30–32, dann stehst du direkt an deinem Anschluss.")
+        // The seat's coach is framed in the Wagenreihung too, so the note says which coaches.
+        #expect(advice.legend == advice.text())
+        // A seat 8 m short of it or opposite it is close enough, and one in a coach the train lacks says nothing.
+        for coach in ["27", "31", "45"] {
+            #expect(CoachAdvice.transfer(arriving: arriving, departing: departing, platforms: hannover, station: "Hannover Hbf",
+                                         seat: (coach: coach, train: "ICE 100")) == nil)
+        }
+    }
+
     @Test func aimsForTheTravelClass() throws {
         // On the same track: ICE 200 leaves later from 200–382 m, its first class at the far end.
         let arriving = train(numbers(21...32), from: 10, towardsEnd: false)
@@ -238,10 +258,11 @@ import Testing
         // ICE 200's run is unknown, so there's nothing for getting off in Hamburg.
         #expect(advice[journey.legs[1].id] == nil)
 
-        // A seat reserved on ICE 100 decides where to board.
+        // With a seat reserved on ICE 100 (Wagen 25, 60 m short of ICE 200), walk forward before arriving.
         let reserved = await CoachAdvice.plan(for: journey, reservations: [journey.legs[0].id: (coach: "25", train: "ICE 100")], now: now,
                                               sequence: sequence, stops: { _ in run })
-        #expect(reserved.isEmpty)
+        #expect(reserved[journey.legs[0].id]?.coaches == ["30", "31", "32"])
+        #expect(reserved[journey.legs[0].id]?.walkBeforeArrival == true)
         // One on ICE 200 is where to get to.
         let connecting = await CoachAdvice.plan(for: journey, reservations: [journey.legs[1].id: (coach: "35", train: "ICE 200")], now: now,
                                                 sequence: sequence, stops: { _ in run })
@@ -274,6 +295,13 @@ import Testing
         let advice = await CoachAdvice.plan(for: journey, now: now, sequence: sequence, stops: { _ in run }, platformsAt: { _ in platforms })
         #expect(advice[journey.legs[0].id]?.coaches == ["31", "32"])
         #expect(advice[journey.legs[0].id]?.target == .access(.stairs))
+        // Getting off there at the end: the stairs too, but nothing with a seat reserved, which decides there.
+        let ending = Journey(legs: [journey.legs[0]], source: .bahnDe)
+        let exit = await CoachAdvice.plan(for: ending, now: now, sequence: sequence, stops: { _ in run }, platformsAt: { _ in platforms })
+        #expect(exit[ending.legs[0].id]?.target == .access(.stairs))
+        let seated = await CoachAdvice.plan(for: ending, reservations: [ending.legs[0].id: (coach: "22", train: "ICE 100")], now: now,
+                                            sequence: sequence, stops: { _ in run }, platformsAt: { _ in platforms })
+        #expect(seated.isEmpty)
         // Across the platform (track 11) it's unknown where the S-Bahn stops, so nothing is said.
         journey.legs[1].departurePlatform = PlatformInfo(planned: "11", actual: nil)
         #expect(await CoachAdvice.plan(for: journey, now: now, sequence: sequence, stops: { _ in run }, platformsAt: { _ in platforms }).isEmpty)
