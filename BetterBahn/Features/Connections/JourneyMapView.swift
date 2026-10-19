@@ -10,8 +10,6 @@ struct JourneyMapView: View {
     @Environment(AppModel.self) private var model
     @State private var mapVersion = 0
     @State private var selectedTransfer: TransferPoint?
-    @State private var alternativeConnections: [Journey] = []
-    @State private var isLoadingAlternatives = false
     @State private var trains: [LiveTrainPosition] = []
 
     var body: some View {
@@ -30,51 +28,7 @@ struct JourneyMapView: View {
             await model.followPositions(of: journey.legs) { trains = $0 }
         }
         .sheet(item: $selectedTransfer) { transfer in
-            TransferDetailsSheet(
-                transfer: transfer,
-                journey: journey,
-                finalDestination: finalDestination,
-                alternativeConnections: $alternativeConnections,
-                isLoadingAlternatives: $isLoadingAlternatives,
-                model: model
-            )
-            .onAppear {
-                loadAlternativeConnections(for: transfer)
-            }
-        }
-    }
-
-    private func loadAlternativeConnections(for transfer: TransferPoint) {
-        guard transfer.type == .end else { return }
-
-        isLoadingAlternatives = true
-        Task {
-            do {
-                if let arrivalTime = transfer.arrivalTime {
-                    let searchStart = arrivalTime.addingTimeInterval(60)
-                    let query = JourneyQuery(
-                        from: transfer.station,
-                        to: finalDestination,
-                        date: searchStart
-                    )
-                    let page = try await model.provider.journeys(query)
-
-                    let longDistance = page.journeys.filter { journey in
-                        journey.legs.contains { leg in
-                            let name = leg.line?.name ?? ""
-                            return name.contains("IC") || name.contains("EC") || name.contains("RJ") ||
-                                   name.contains("ICE") || name.contains("TGV")
-                        }
-                    }
-
-                    withAnimation {
-                        alternativeConnections = longDistance.prefix(5).map { $0 }
-                        isLoadingAlternatives = false
-                    }
-                }
-            } catch {
-                isLoadingAlternatives = false
-            }
+            TransferDetailsSheet(transfer: transfer)
         }
     }
 }
@@ -317,7 +271,7 @@ struct JourneyMap: UIViewRepresentable {
                 view?.markerTintColor = UIColor.systemRed
             case .transfer:
                 view?.markerTintColor = annotation.transfer.transferColor
-                view?.glyphText = annotation.transfer.transferTimeMinutes.map { "\($0)m" } ?? "∞"
+                view?.glyphText = annotation.transfer.transferTimeMinutes.map { "\($0) min" } ?? "∞"
             case .end:
                 view?.markerTintColor = UIColor.systemGreen
             }
@@ -371,14 +325,9 @@ final class JourneyMarkerAnnotation: NSObject, MKAnnotation {
     }
 }
 
-/// Bottom sheet showing transfer/stopover details and alternative connections.
+/// Bottom sheet showing transfer/stopover details.
 struct TransferDetailsSheet: View {
     let transfer: TransferPoint
-    let journey: Journey
-    let finalDestination: Station
-    @Binding var alternativeConnections: [Journey]
-    @Binding var isLoadingAlternatives: Bool
-    let model: AppModel
 
     var body: some View {
         NavigationStack {
@@ -454,41 +403,6 @@ struct TransferDetailsSheet: View {
                         }
                     }
                     .padding(.horizontal)
-
-                    // Alternative connections (only for end point)
-                    if transfer.type == .end {
-                        Divider()
-
-                        VStack(alignment: .leading, spacing: 12) {
-                            Label("Alternativen (nächste Stunde)", systemImage: "arrow.triangle.branch")
-                                .font(.subheadline.weight(.semibold))
-
-                            if isLoadingAlternatives {
-                                ProgressView()
-                                    .frame(maxWidth: .infinity, alignment: .center)
-                            } else if alternativeConnections.isEmpty {
-                                Text("Keine Verbindungen gefunden")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .frame(maxWidth: .infinity)
-                            } else {
-                                VStack(spacing: 8) {
-                                    ForEach(alternativeConnections, id: \.id) { altJourney in
-                                        NavigationLink {
-                                            JourneyDetailView(
-                                                journey: altJourney,
-                                                finalDestination: finalDestination
-                                            )
-                                        } label: {
-                                            JourneyCard(journey: altJourney)
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                }
-                            }
-                        }
-                        .padding(.horizontal)
-                    }
 
                     Spacer(minLength: 20)
                 }
