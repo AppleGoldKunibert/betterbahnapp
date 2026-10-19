@@ -641,10 +641,12 @@ struct ExitSideArrow: View {
         Button {
             showsNote = true
         } label: {
+            // Hugs its content: a wider frame would widen the column and push the badge off the
+            // other rows' badges.
             Image(systemName: symbol)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 12)
                 .padding(.vertical, 3)
                 .contentShape(.rect)
         }
@@ -653,8 +655,11 @@ struct ExitSideArrow: View {
         .popover(isPresented: $showsNote) {
             Label(side.displayName, systemImage: symbol)
                 .font(.subheadline.weight(.semibold))
+                .multilineTextAlignment(.center)
                 .padding()
-                .fixedSize()
+                // A fixed width, centred: the popover is wider than the text's own size anyway.
+                .frame(width: 300)
+                .fixedSize(horizontal: false, vertical: true)
                 .presentationCompactAdaptation(.popover)
         }
     }
