@@ -98,7 +98,7 @@ struct CalendarChoiceRow: View {
             Text("Standardkalender").tag(String?.none)
             ForEach(calendars, id: \.calendarIdentifier) { calendar in
                 // A small dot in the calendar's colour; an icon would show large next to the chosen one.
-                (Text("● ").foregroundStyle(Color(cgColor: calendar.cgColor)) + Text(calendar.title))
+                Text("\(Text("● ").foregroundStyle(Color(cgColor: calendar.cgColor)))\(calendar.title)")
                     .tag(Optional(calendar.calendarIdentifier))
             }
         } label: {

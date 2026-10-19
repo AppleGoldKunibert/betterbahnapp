@@ -11,7 +11,8 @@ let package = Package(
     targets: [
         .target(name: "BetterBahnKit", resources: [
             .copy("Resources/StationHints.json"), .copy("Resources/Ril100.json"), .copy("Resources/StationNames.json"),
-            .copy("Resources/SeatMaps.json"), .copy("Resources/Platforms.json"),
+            .copy("Resources/SeatMaps.json"), .copy("Resources/ExitSides.json"), .copy("Resources/ExitSideOverrides.json"),
+            .copy("Resources/Platforms.json"),
         ]),
         .testTarget(
             name: "BetterBahnKitTests",

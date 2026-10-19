@@ -12,7 +12,8 @@ public enum ExitReminderLead: Int, Codable, Sendable, CaseIterable, Hashable {
 }
 
 /// A reminder shortly before a train of a saved journey reaches the stop where the user gets off:
-/// "In 5 Min. (+23) Ankunft in Fulda – Umstieg in ICE 578 (+23), in 26 Min. auf Gl. 4 statt Gl. 5 (Anschluss wartet)".
+/// "In 5 Min. (+23) Ankunft in Fulda, Ausstieg links – Umstieg in ICE 578 (+23), in 26 Min. auf Gl. 4 statt Gl. 5
+/// (Anschluss wartet)" (the side when `ExitSides` knows it).
 public struct ExitReminder: Sendable, Hashable, Identifiable {
     /// The leg arriving at the stop.
     public var legID: String
@@ -44,8 +45,10 @@ public extension Journey {
     ///   - scheduled: fire dates of the reminders scheduled before, by `ExitReminder.id`. One whose date has
     ///     passed was shown already and doesn't come again, even if a new delay moved the arrival.
     ///   - dispositions: what DB decided for the train departing after a transfer, by that leg's `id`.
+    ///   - exitSide: which side of the train the platform is on where the leg ends (#394), if known.
     func exitReminders(lead: TimeInterval, now: Date = .now, scheduled: [String: Date] = [:],
-                       dispositions: [String: TransferDisposition] = [:]) -> [ExitReminder] {
+                       dispositions: [String: TransferDisposition] = [:],
+                       exitSide: (Leg) -> ExitSide? = { ExitSides.side(leaving: $0) }) -> [ExitReminder] {
         let transit = transitLegs
         var reminders: [ExitReminder] = []
         for (index, leg) in transit.enumerated() where !leg.cancelled {
@@ -54,14 +57,16 @@ public extension Journey {
             let id = "exit|\(leg.id)"
             if let shown = scheduled[id], shown <= now { continue }
             let station = leg.destination.displayName
+            // "Fulda, Ausstieg links"
+            let place = station + (exitSide(leg).map { ", \($0.shortName)" } ?? "")
             var details = Self.delay(leg.arrival).map { "(\($0)) " } ?? ""
             if index + 1 < transit.count {
                 let next = transit[index + 1]
-                details += "Ankunft in \(station) – " + Self.transfer(from: leg, to: next, disposition: dispositions[next.id])
+                details += "Ankunft in \(place) – " + Self.transfer(from: leg, to: next, disposition: dispositions[next.id])
             } else if leg.destination.isSamePlace(as: legs.last?.destination ?? leg.destination) {
-                details += "Ankunft am Ziel \(station)"
+                details += "Ankunft am Ziel \(place)"
             } else {
-                details += "Ankunft in \(station) – hier aussteigen"
+                details += "Ankunft in \(place) – hier aussteigen"
             }
             reminders.append(ExitReminder(legID: leg.id, station: station, arrival: arrival,
                                           fireDate: max(arrival.addingTimeInterval(-lead), now),

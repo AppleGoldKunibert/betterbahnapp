@@ -10,8 +10,8 @@ struct BetterBahnApp: App {
     @State private var model: AppModel
 
     init() {
-        // Train statistics from one run on, with their raw values (TrainStatisticsRows): launch once with
-        // `-debugstats`, stays on until the app is deleted.
+        // Train statistics from one run on, with their raw values (TrainStatisticsRows): only for launches with
+        // `-debugstats`.
         TrainStatistics.enableTestModeIfRequested()
         let model = AppModel()
         _model = State(initialValue: model)
