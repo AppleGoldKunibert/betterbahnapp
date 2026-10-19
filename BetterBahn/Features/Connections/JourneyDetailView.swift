@@ -394,6 +394,9 @@ struct JourneyDetailView: View {
                     TicketButton(tickets: model.tickets(for: journey), journey: journey)
                 }
                 JourneyShareButton(journey: journey, title: shareTitle)
+                if model.isSaved(journey) {
+                    RegularTripButton(journey: journey)
+                }
                 if model.settings.editJourneyEnabled {
                     Button {
                         showJourneyEditor = true

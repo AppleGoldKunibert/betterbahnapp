@@ -34,8 +34,34 @@ final class AppModel {
             Storage.saveInBackground(savedJourneys, key: "savedJourneys")
             savedJourneysCloud.localChange(from: oldValue, to: savedJourneys)
             syncLiveActivity()
+            commuteJourneysChanged(from: oldValue)
         }
     }
+    /// Journeys the user takes on the same weekdays (#397): on each of those days the app asks shortly before
+    /// the departure whether they ride today, and a yes saves that day's journey (see `CommuteModel.swift`).
+    var regularTrips: [RegularTrip] {
+        didSet {
+            Storage.save(regularTrips, key: "regularTrips")
+            regularTripsCloud.localChange(from: oldValue, to: regularTrips)
+            if regularTrips != oldValue { scheduleCommuteQuestions() }
+        }
+    }
+    /// "Fährst du heute?" to ask in the app, after its notification was tapped.
+    var commuteQuestionToAsk: CommuteQuestion?
+    /// This device at the push Worker for regular trips, made on the first sign-up.
+    @ObservationIgnored var commutePushRegistration: CommutePushRegistration? = Storage.load(key: "commutePushRegistration") {
+        didSet { Storage.save(commutePushRegistration, key: "commutePushRegistration") }
+    }
+    /// The saved journeys (by `SavedJourney.id`) the Worker reports problems of; the app leaves those to it.
+    @ObservationIgnored var commutePushWatched: Set<String> = Storage.load(key: "commutePushWatched") ?? [] {
+        didSet { Storage.save(commutePushWatched, key: "commutePushWatched") }
+    }
+    /// What the Worker was last sent, so an unchanged list isn't sent again on every start.
+    @ObservationIgnored var commutePushSent: Data? = Storage.load(key: "commutePushSent") {
+        didSet { Storage.save(commutePushSent, key: "commutePushSent") }
+    }
+    @ObservationIgnored var commuteQuestionsTask: Task<Void, Never>?
+    @ObservationIgnored var commutePushTask: Task<Void, Never>?
     /// Tickets fetched from bahn.de, kept on this device only (see `TicketStore`).
     var tickets: [SavedTicket] {
         didSet { TicketStore.save(tickets) }
@@ -121,6 +147,7 @@ final class AppModel {
         recentSearches = Storage.load(key: "recentSearches") ?? []
         recentStations = Storage.load(key: "recentStations") ?? []
         savedJourneys = Storage.load(key: "savedJourneys") ?? []
+        regularTrips = Storage.load(key: "regularTrips") ?? []
         trackedManualCheckins = Storage.load(key: "trackedManualCheckins") ?? []
         checkinStatusIDs = Storage.load(key: "checkinStatusIDs") ?? [:]
         liveJourneys = Storage.load(key: "liveJourneys") ?? LiveDataCache()
@@ -151,11 +178,12 @@ final class AppModel {
     @ObservationIgnored private let favoriteStationsCloud = CloudList<Station>(key: "favoriteStations")
     @ObservationIgnored private let recentSearchesCloud = CloudList<RecentSearch>(key: "recentSearches")
     @ObservationIgnored private let savedJourneysCloud = CloudList<SavedJourney>(key: "savedJourneys")
+    @ObservationIgnored private let regularTripsCloud = CloudList<RegularTrip>(key: "regularTrips")
 
     /// Merges with what iCloud already has (uploading what only exists here, e.g. on the first
     /// launch after updating) and takes over changes made on the user's other devices.
     private func startCloudSync() {
-        applyCloudChange(keys: ["favoriteStations", "recentSearches", "savedJourneys", AppSettings.cloudKey])
+        applyCloudChange(keys: ["favoriteStations", "recentSearches", "savedJourneys", "regularTrips", AppSettings.cloudKey])
         cloudObserver = CloudSync.observe { [weak self] keys in
             self?.applyCloudChange(keys: keys)
         }
@@ -170,6 +198,9 @@ final class AppModel {
         }
         if keys.contains("savedJourneys") {
             savedJourneysCloud.receive(local: savedJourneys) { savedJourneys = $0 }
+        }
+        if keys.contains("regularTrips") {
+            regularTripsCloud.receive(local: regularTrips) { regularTrips = $0 }
         }
         if keys.contains(AppSettings.cloudKey) { settings.receiveCloudValue() }
     }
@@ -1081,7 +1112,7 @@ final class AppModel {
     }
 
     /// Fetches realtime data for one saved journey, stores it and sends notifications for new issues.
-    private func refresh(_ entry: SavedJourney, using refresher: JourneyRefresher) async {
+    func refresh(_ entry: SavedJourney, using refresher: JourneyRefresher) async {
         let refreshed = await refresher.refresh(entry.journey)
         guard let index = savedJourneys.firstIndex(where: { $0.id == entry.id }) else { return }
         var updated = savedJourneys[index]
@@ -1089,20 +1120,33 @@ final class AppModel {
         updated.journey = refreshed
         if settings.connectionWarnings {
             let known = Set(updated.notifiedIssues ?? [])
-            let newIssues = refreshed.connectionIssues().filter { !known.contains($0.id) }
+            // A regular trip's day (#397) stays quiet while its trains run fine; when the push Worker looks
+            // after it, cancellations, delays, platform changes and transfers come from there instead.
+            let commute = updated.commute
+            let reportedByWorker = commute != nil && commutePushWatched.contains(updated.id.uuidString)
+            let newIssues = reportedByWorker ? [] : refreshed.connectionIssues().filter { !known.contains($0.id) }
             for issue in newIssues {
                 await ConnectionNotifier.notify(issue, journey: refreshed)
+            }
+            var newDelays: [CommuteDelay] = []
+            if let commute, !reportedByWorker {
+                newDelays = CommuteAlerts.delays(in: refreshed, threshold: commute.delayThreshold, notified: Array(known))
+            }
+            for delay in newDelays {
+                await ConnectionNotifier.notify(delay)
             }
             // New delay reasons from DB ("Reparatur an einem Signal") get a notification too;
             // plain notices (no WLAN, missing coach) only show as the yellow triangle.
             let newReasons = refreshed.transitLegs.flatMap { leg in
                 leg.messages.filter { $0.kind == .delay }.map { (id: "reason|\(leg.id)|\($0.text)", leg: leg, message: $0) }
-            }.filter { !known.contains($0.id) }
+            }.filter { reason in
+                !known.contains(reason.id) && (commute.map { CommuteAlerts.isLateEnough(reason.leg, threshold: $0.delayThreshold) } ?? true)
+            }
             for reason in newReasons {
                 await ConnectionNotifier.notify(reason.message, leg: reason.leg, id: reason.id)
             }
             // Platform changes for departures and arrivals within the next two hours, incl. transfers.
-            let newPlatforms = refreshed.platformChanges(since: previous).filter { !known.contains($0.id) }
+            let newPlatforms = reportedByWorker ? [] : refreshed.platformChanges(since: previous).filter { !known.contains($0.id) }
             for change in newPlatforms {
                 await ConnectionNotifier.notify(change, journey: refreshed)
             }
@@ -1113,7 +1157,8 @@ final class AppModel {
                 await ConnectionNotifier.notify(update, journey: refreshed)
             }
             updated.notifiedIssues = Array(known.union(newIssues.map(\.id)).union(newReasons.map(\.id))
-                .union(newPlatforms.map(\.id)).union(newDispositions.compactMap(\.notificationID)))
+                .union(newPlatforms.map(\.id)).union(newDispositions.compactMap(\.notificationID))
+                .union(newDelays.map(\.notificationID)))
         }
         if updated != savedJourneys[index] { savedJourneys[index] = updated }
     }
@@ -1284,6 +1329,8 @@ nonisolated struct SavedJourney: Codable, Hashable, Identifiable {
     /// Trainsets (Tz, Taufname) seen on the legs' trains, keyed by `Leg.formationKey`, kept and
     /// synced so they stay known after the journey (optional so older saved data still decodes).
     var formations: [String: TrainFormation]?
+    /// Set when the journey is a regular trip's day (#397): it then only reports problems.
+    var commute: CommuteDay?
 
     var issues: [ConnectionIssue] { journey.currentIssues() }
 
@@ -1688,6 +1735,17 @@ enum ConnectionNotifier {
         content.sound = disposition == .notWaiting ? .defaultCritical : .default
         content.interruptionLevel = .timeSensitive
         let request = UNNotificationRequest(identifier: id + journey.id, content: content, trigger: nil)
+        try? await UNUserNotificationCenter.current().add(request)
+    }
+
+    /// A regular trip's train is late enough to say so (#397).
+    static func notify(_ delay: CommuteDelay) async {
+        let content = UNMutableNotificationContent()
+        content.title = delay.title
+        content.body = delay.message
+        content.sound = .default
+        content.interruptionLevel = .timeSensitive
+        let request = UNNotificationRequest(identifier: delay.notificationID, content: content, trigger: nil)
         try? await UNUserNotificationCenter.current().add(request)
     }
 

@@ -77,12 +77,18 @@ struct SettingsView: View {
                     .tint(.brand)
                     .onChange(of: settings.connectionWarnings) { _, enabled in
                         if enabled { Task { await ConnectionNotifier.requestAuthorization() } }
+                        Task { await model.syncCommutePush() }
                     }
                     Toggle(isOn: $settings.liveActivitiesEnabled) {
                         IconLabel(title: "Live-Aktivitäten", systemImage: "bolt.badge.clock.fill", color: .indigo)
                     }
                     .tint(.brand)
                     .onChange(of: settings.liveActivitiesEnabled) { model.syncLiveActivity() }
+                    NavigationLink {
+                        RegularTripsView()
+                    } label: {
+                        IconLabel(title: "Regelmäßige Fahrten", systemImage: "repeat", color: .brand)
+                    }
                 } header: {
                     Text("Meine Reisen")
                 } footer: {

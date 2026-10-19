@@ -23,7 +23,7 @@ comments are English.
 | `Cloudflare/bahnde-proxy/` | Separate Worker (`betterbahn2`) proxying bahn.de's web API (`/web/api/…` paths), because bahn.de blocks Apple's URL loading stack, and DB Timetables (`/timetables/v1/…`, API key as Worker secret). Also hands out the App Attest tokens (`/auth/…`). See its README. `BahnDeClient.baseURL`, `TimetablesClient.baseURL` point at it. |
 | `Cloudflare/pass-signer/` | Worker (`betterbahn-pass`) that signs Apple Wallet passes for DB tickets with the Pass Type ID certificate (secrets), since that can't ship in the app. Needs an App Attest token, and only signs UIC (`#UT`) barcodes whose issuer signature verifies against UIC's public key list (`uicsignature.mjs`). `npm install && npm test` (see its README). |
 | `Cloudflare/stats/` | Worker (`betterbahn-stats`, D1 database) for train statistics (#169): the app reports bahn.de journey IDs of regional/long-distance trains it showed (`POST /sightings`), a five-minute cron also seeds long-distance runs from the departure boards of the stations they stop at (`seedLongDistance`, the busiest stations in `seed_stations`), a cron trigger asks bahn.de for each run's schedule, its Wagenreihung at departure and its final realtime state after arrival, stored one row per run (`schema.sql`, compact stops), and answers the app's `POST /train-stats` (#316). `backup.sh` downloads runs older than a year, then deletes them. `node --test Cloudflare/stats/worker.test.mjs` (see its README). |
-| `Cloudflare/checkin-push/` | Worker (`betterbahn-push`, D1 database, cron every minute) for notifications about new check-ins of followed Träwelling users (#266): keeps its own read-only Träwelling login per device (from the app's authorization code, AES-GCM encrypted), looks at the dashboard every 2 min and sends APNs pushes (`followedStatusID`). `node --test Cloudflare/checkin-push/worker.test.mjs` (see its README for the APNs key setup). |
+| `Cloudflare/checkin-push/` | Worker (`betterbahn-push`, D1 database, cron every minute) for notifications about new check-ins of followed Träwelling users (#266): keeps its own read-only Träwelling login per device (from the app's authorization code, AES-GCM encrypted), looks at the dashboard every 2 min and sends APNs pushes (`followedStatusID`). Also the regular trips' journeys (#397, `commute.mjs`, table `commutes`): `PUT /commutes/<id>` with the day's trains (DB category + number, EVA + planned times), looked up in IRIS' `plan`, then its `fchg` read every 2 min from 2 h before departure; pushes cancellation, delay from the threshold (again +5 min), platform change, transfer at risk (`commuteJourneyID`); never bahn.de. APNs code in `apns.mjs`. `node --test Cloudflare/checkin-push/*.test.mjs` (see its README for the APNs key setup). |
 | `Cloudflare/shared/` | `appattest.mjs`: App Attest verification and the signed tokens both Workers check (`X-BetterBahn-Token`); `node --test Cloudflare/shared/appattest.test.mjs`. |
 | `.github/workflows/` | GitHub Actions: `pr-build.yml` (macOS: Kit tests + unsigned app build on PRs touching code), `pr-secrets.yml` (Linux: gitleaks secret scan + guard against committing `DefaultCredentials.swift`), `sync-prod.yml` (merges prod into every other branch except `appstorerelease`). |
 | `scripts/` | `make-station-hints.py`: rebuilds BetterBahnKit's offline station list for search (see Transitous below). `make-ril100.py`: rebuilds the RIL100 code list (`Ril100.swift`), also from DB's XLSX of all operating points for the codes abroad (needs `openpyxl`). `make-station-names.py`: rebuilds the station names shown (`StationNames.swift`) from DB InfraGO's OpenStation NeTEx, DB's RIS names via bahn.expert's station search and Transitous (run after `make-ril100.py`, it takes the positions from there; keeps the names it has, `--refresh` asks bahn.expert for all again, about an hour). `searchsim/`: Linux package that copies the platform-neutral Kit sources in (`./sync.sh`), so `swift test` runs `BetterBahnKitTests.swift` without a Mac and `swift run SearchSim scenarios.txt` runs the real station search against live Transitous for ~1150 place/query scenarios (rerun after changing search ranking). |
@@ -134,6 +134,17 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   Tapping one opens it in the list (`followedCheckinToOpen`).
 - `Features/Sharing/` – preview of shared journeys and imported DB shares; `JourneyShareButton` (in `JourneyDetailView`)
   uploads for a short link, falls back to the long link, and opens `UIActivityViewController`.
+- `Features/Commute/` – regular trips (#397, "Regelmäßige Fahrten"): `RegularTripButton` (round ↻ next to "Gespeichert" on a
+  saved journey) opens `RegularTripEditor` (weekdays, question 15–60 min before, delay threshold, "Pausieren bis");
+  Settings → Meine Reisen → "Regelmäßige Fahrten" lists them (`RegularTripsView`). `CommuteModel.swift`: `AppModel.regularTrips`
+  (stored, synced via `CloudList` key `regularTrips`), `scheduleCommuteQuestions()` (one-shot "Fährst du heute?" notifications
+  for the next 14 days, max 40, category with "Ja, ich fahre" / "Heute nicht", rescheduled on start and when trips or saved days
+  change), `confirmCommute` (on "Ja" in the background: Kit `RegularTripPlanner` builds the day's journey, saved as a normal
+  `SavedJourney` with `commute: CommuteDay` and an ID per trip and day, so two devices save one), `syncCommutePush()` (hands
+  today's commute journeys to the push Worker, `commutePushWatched` = the ones it looks after). Tapping the question asks in
+  the app (`commuteQuestionAlert`); a Worker push opens its journey. `AppModel.refresh` keeps those journeys quiet: delays only
+  from the threshold (`CommuteAlerts`), delay reasons only then, and cancellations/platforms/transfers left to the Worker
+  when it watches the journey.
 - `Features/Settings/` – settings (incl. privacy policy link and "not affiliated with DB" note), `DataSourcesView`
   (Datenquellen: every service with its attribution/license links; keep it current when adding a source), `BC100RulesView`, quick tags.
 - `Shared/DesignSystem.swift` – reusable UI pieces (`Card`, `SectionHeader`, `LineBadge`, `TimeStack`,
@@ -359,6 +370,12 @@ Bundle IDs: `de.goldkunibert.BetterBahn[.Widgets|.Share]`. URL scheme: `betterba
   the scope existed must log in again), `CombinedProvider.leg(forCheckin:)` (the run by the check-in's `hafasId`, which is Transitous' trip ID, else on Transitous' board at the check-in's
   origin, by planned time and name or run number; `nil` for manual trips, whose `hafasId` is a UUID). Token refreshes send
   no `scope`, so adding a scope never invalidates existing logins.
+- `Commute/` – regular trips (#397): `RegularTrip` (template journey without live data, ISO weekdays, `questionLead`,
+  `delayThreshold`, `pausedUntil`; days in German time, `questions(from:)`, `journeyID(forDay:)`, `plannedJourney(on:)` keeps
+  the wall-clock time across DST), `RegularTripPlanner` (each train from its boarding station's departures at the planned
+  time ±3 min, same run number first, else the same name; a train not found keeps its planned times), `CommuteAlerts`
+  (delay from the threshold, again after +5 min, keyed by line/origin/planned time), `CommutePush` + `CommuteWatch`
+  (client for `/commutes` on the push Worker).
 - `Mastodon/CustomEmoji.swift` – Mastodon custom emojis for check-in texts (#168): `CustomEmojiClient` loads
   `/api/v1/custom_emojis` of the instance from the Träwelling user's `mastodonUrl` (else zug.network) and caches it a day on
   disk; `CustomEmojiText` finds the `:shortcode` being typed, completes it, ranks suggestions and splits text into text/emoji.

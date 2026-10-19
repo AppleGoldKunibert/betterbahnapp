@@ -27,6 +27,28 @@ Each look costs one Träwelling request (two when renewing) plus one per notific
 allows 50 outgoing requests and 10 ms CPU per invocation, which fits a few dozen subscriptions per
 minute. Beyond that, switch to Workers Paid.
 
+## Regular trips (`/commutes`, #397)
+
+The same Worker looks after the journeys of regular trips ("Regelmäßige Fahrten" in the app). When the user
+says yes to "Fährst du heute?", the app saves that day's journey and sends `PUT /commutes/<id> { secret,
+deviceToken, sandbox, journeys }` (App Attest token): per train its DB category and number, boarding and exit
+station (EVA number, name) with the planned times, and the delay threshold. `<id>` and `secret` are made on
+the device; the first PUT signs it up, later ones replace the list, an empty list signs it off. The Worker
+looks each train up in IRIS' hourly schedule (`plan`, keyless, the same feed the app's DB Timetables data
+comes from) and answers `{ watched }`: the journeys it found every train of. The app reports the others
+itself while it runs.
+
+The cron trigger then reads IRIS' change list (`fchg`) of the stations involved every `INTERVAL_MINUTES`,
+from 2 hours before the first departure until 10 minutes after the last arrival, and pushes: a cancellation
+(once), a delay from the threshold on (again when it grew by 5 more minutes), a platform change within the
+next 2 hours, and a transfer at risk (as the app's `ConnectionIssue`). The journey is forgotten 30 minutes
+after its arrival and the row deleted when none is left. bahn.de is never asked (#334). Code and tests:
+`commute.mjs`, `node --test Cloudflare/checkin-push/commute.test.mjs`.
+
+An existing database needs the new table once:
+`npx wrangler d1 execute betterbahn-push --remote --file=schema.sql` (everything in it is `IF NOT EXISTS`),
+then `npx wrangler deploy`.
+
 ## Setup (once)
 
 1. Apple Developer account → Certificates, Identifiers & Profiles → Keys → new key with "Apple Push
@@ -55,4 +77,4 @@ a development build (APNs sandbox) and have someone you follow check in; the Wor
 
 ## Tests
 
-`node --test Cloudflare/checkin-push/worker.test.mjs` (Node 22.5+, uses `node:sqlite` for D1).
+`node --test Cloudflare/checkin-push/*.test.mjs` (Node 22.5+, uses `node:sqlite` for D1).

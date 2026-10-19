@@ -24,7 +24,10 @@ features or data flows change (and update the privacy policy in `Cloudflare/work
   "Other Data"). Third exception: the check-in notifications (`Cloudflare/checkin-push`, Settings →
   Träwelling "Check-ins von Gefolgten melden", off by default) keep the Träwelling user ID, a read-only
   Träwelling login, the APNs device token and seen status IDs until turned off – likely "Identifiers →
-  User ID" and "Device ID", linked to the user, not tracking, purpose "App Functionality".
+  User ID" and "Device ID", linked to the user, not tracking, purpose "App Functionality". Fourth: regular
+  trips (#397, `/commutes` on the same Worker) keep the APNs device token with the day's trains, stations and
+  planned times until shortly after arrival – "Device ID", not linked to an account, not tracking, "App
+  Functionality".
   Check this against the current code before
   answering "Data Not Collected"; Träwelling check-ins go to the user's own Träwelling account at
   their request.
