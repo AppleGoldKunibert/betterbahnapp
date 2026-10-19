@@ -220,7 +220,7 @@ struct CoachSequencePanel: View {
             if case .vagonweb(let from, let until) = sequence.source {
                 plannedNote(sequence, from: from, until: until)
             }
-            if bikeMode, let bikes = sequence.bikeCoachSummary {
+            if bikeMode == .bike, let bikes = sequence.bikeCoachSummary {
                 InfoChip(text: "Fahrradstellplätze: \(bikes)", systemImage: "bicycle", tint: .punctual)
             }
             #if DEBUG
@@ -428,8 +428,8 @@ private struct CoachSequenceDiagram: View {
         let labels = partLabels(placed)
         // Trainsets have a nose at both ends of each part; so do locomotives and power cars.
         let hasTrainsets = !sequence.formation.units.isEmpty
-        let bikeCoaches = bikeMode ? Set(sequence.bikeCoaches.map(\.id)) : []
-        let bikeSectors = bikeMode ? Set(sequence.bikeSectors) : []
+        let bikeCoaches = bikeMode == .bike ? Set(sequence.bikeCoaches.map(\.id)) : []
+        let bikeSectors = bikeMode == .bike ? Set(sequence.bikeSectors) : []
 
         VStack(alignment: .leading, spacing: 10) {
             ScrollView(.horizontal) {

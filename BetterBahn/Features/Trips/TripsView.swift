@@ -206,7 +206,8 @@ struct SaveJourneyButton: View {
         // gets here, so every journey saved with this button still lacks a reservation.
         isCheckingReservation = true
         Task {
-            let found = await model.saveWarnings(for: journey, withBike: search?.withBike ?? model.settings.searchWithBike)
+            let bike = model.settings.bike(searchingWithBike: search?.withBike ?? model.settings.searchWithBike)
+            let found = await model.saveWarnings(for: journey, bike: bike)
             isCheckingReservation = false
             if found.isEmpty {
                 save()

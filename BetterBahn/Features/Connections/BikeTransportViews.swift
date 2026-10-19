@@ -2,22 +2,25 @@ import BetterBahnKit
 import SwiftUI
 
 nonisolated private struct BikeModeKey: EnvironmentKey {
-    static let defaultValue = false
+    static let defaultValue: BikeOption? = nil
 }
 
 extension EnvironmentValues {
-    /// "Mit Fahrrad" (#398) for the journey shown: its legs say whether a bike can come along, and the
-    /// Wagenreihung marks the coaches with bike spaces and where they stop.
-    nonisolated var bikeMode: Bool {
+    /// The bike (#398) for the journey shown, nil while the search option is off or bikes are hidden in the settings:
+    /// its legs say whether it comes along and what it needs, and for a normal bike the Wagenreihung marks the
+    /// coaches with bike spaces and where they stop.
+    nonisolated var bikeMode: BikeOption? {
         get { self[BikeModeKey.self] }
         set { self[BikeModeKey.self] = newValue }
     }
 }
 
-/// In bike mode, whether a bike can come along on `leg`: the rule of thumb right away, then what bahn.de says
-/// (`AppModel.bikeTransport(for:)`), and where the coaches with bike spaces stop once the Wagenreihung is known.
+/// Whether `bike` can come along on `leg` and what it needs: the rules right away, then what bahn.de and the train
+/// itself say (`AppModel.bikeTransport(for:bike:)`), and where the coaches with bike spaces stop once the
+/// Wagenreihung is known.
 struct BikeTransportRow: View {
     let leg: Leg
+    let bike: BikeOption
 
     @Environment(AppModel.self) private var model
     @State private var transport: BikeTransport?
@@ -28,7 +31,7 @@ struct BikeTransportRow: View {
         // A ZStack rather than Group: `.task` never fires on a view that is empty.
         ZStack {
             if let transport {
-                HStack(spacing: 10) {
+                HStack(alignment: .top, spacing: 10) {
                     Image(systemName: "bicycle")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(color(of: transport))
@@ -51,23 +54,26 @@ struct BikeTransportRow: View {
                 .transition(.fold)
             }
         }
-        .task(id: leg.id) {
-            transport = BikeTransport.resolved(bahnDe: nil, for: leg)
-            let found = await model.bikeTransport(for: leg)
+        .task(id: "\(leg.id)|\(bike.rawValue)") {
+            coaches = nil
+            transport = BikeTransport.resolved(bahnDe: nil, for: leg, bike: bike)
+            let found = await model.bikeTransport(for: leg, bike: bike)
             withAnimation(.snappy) { transport = found }
-            guard found?.kind != .notAllowed, let request = BahnDeClient.formationRequest(for: leg),
+            guard bike == .bike, found?.kind != .notAllowed, let request = BahnDeClient.formationRequest(for: leg),
                   let sequence = try? await model.coachSequence(for: request) else { return }
             withAnimation(.snappy) { coaches = sequence.bikeCoachSummary.map { "Fahrradstellplätze: \($0)" } }
         }
     }
 
     private func details(of transport: BikeTransport) -> [String] {
-        [transport.section.map { "Gilt für \($0)" }, transport.kind == .notAllowed ? nil : coaches].compactMap(\.self)
+        var lines = [transport.section.map { "Gilt für \($0)" }, transport.ticket, transport.note]
+        if transport.kind != .notAllowed { lines.append(coaches) }
+        return lines.compactMap(\.self)
     }
 
     private func color(of transport: BikeTransport) -> Color {
         switch transport.kind {
-        case .allowed: .punctual
+        case .allowed, .luggage: transport.ticket == nil ? .punctual : .brand
         case .limited, .reservationRequired: .slightDelay
         case .notAllowed: .heavyDelay
         }

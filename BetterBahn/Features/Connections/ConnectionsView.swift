@@ -335,12 +335,16 @@ struct ConnectionsView: View {
 
                 Divider()
 
-                Toggle(isOn: Bindable(model.settings).searchWithBike) {
-                    optionLabel("Mit Fahrrad", subtitle: "Zeigt, ob dein Fahrrad mitkommt", icon: "bicycle", color: .brand)
-                }
-                .tint(.brand)
+                if let title = model.settings.bikeOption.searchTitle {
+                    Toggle(isOn: Bindable(model.settings).searchWithBike) {
+                        optionLabel(title, subtitle: model.settings.bikeOption == .foldingBike
+                                    ? "Zeigt, wo dein Klapprad mitkommt" : "Zeigt, ob dein Fahrrad mitkommt",
+                                    icon: "bicycle", color: .brand)
+                    }
+                    .tint(.brand)
 
-                Divider()
+                    Divider()
+                }
 
                 transfersPicker
 

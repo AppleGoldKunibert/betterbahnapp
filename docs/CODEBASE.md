@@ -136,14 +136,21 @@ in `project.pbxproj`: new files join their target automatically.
 - `Features/Trips/TripsView.swift` – upcoming/past journeys, `SaveJourneyButton` (warns "Zug ist
   reservierungspflichtig", in bike mode also "Fahrradreservierung nötig" / "Keine Fahrradmitnahme", via
   `AppModel.saveWarnings`; ticket/reservation imports never warn).
-- Bike mode (#398): "Mit Fahrrad" in the search options (`AppSettings.searchWithBike`, synced, off by default, carried as
-  `ConnectionSearch.withBike`; results aren't filtered). `JourneyDetailView` sets the environment value `bikeMode`:
-  `LegCard` shows `BikeTransportRow` (`Features/Connections/BikeTransportViews.swift`, `AppModel.bikeTransport(for:)`),
-  the Wagenreihung frames the coaches with bike spaces in green and tints their sectors (Kit `CoachSequence.bikeCoaches`,
-  `bikeSectors`, `bikeCoachSummary`). Kit `BikeTransport` (`Transit/BikeTransport.swift`): bahn.de's bike attributes
-  (`BahnDeClient.bikeTransport(for:)`: "FR" reservierungspflichtig, "FB" begrenzt, others by wording; narrowed to the
-  leg's section), DB's notices 91/92 on the leg, else the rule of thumb (regional trains in Germany without, long-distance
-  trains with a reservation). Transitous' `bikesAllowed` is no use: DELFI sends `false` for every German train.
+- Bike mode (#398): Settings → Fahrrad (`AppSettings.bikeOption`: Ausblenden (default), Klapprad, Fahrrad; synced). Unless
+  hidden, the search options get "Mit Klapprad"/"Mit Fahrrad" (`AppSettings.searchWithBike`, carried as
+  `ConnectionSearch.withBike`; results aren't filtered); `AppSettings.bike(searchingWithBike:)` gives the bike in effect.
+  `JourneyDetailView` sets the environment value `bikeMode`: `LegCard` shows `BikeTransportRow`
+  (`Features/Connections/BikeTransportViews.swift`, `AppModel.bikeTransport(for:bike:)`: title, ticket, note); for a normal
+  bike the Wagenreihung frames the coaches with bike spaces in green and tints their sectors (Kit `CoachSequence.bikeCoaches`,
+  `bikeSectors`, `bikeCoachSummary`). Kit `BikeTransport` (`Transit/BikeTransport.swift`): a folding bike rides as luggage
+  everywhere (`.luggage`); a normal bike: DB's notices 91/92, no bike spaces (`hasBikeSpaces`: ICE 1/2/3/Velaro by series,
+  an ICE whose bahn.de Wagenreihung has none, e.g. ICE T BR 415), bahn.de's bike attributes (`BahnDeClient.bikeTransport(for:)`:
+  "FR" reservierungspflichtig, "FB" begrenzt, others by wording; narrowed to the leg's section), else the rules: long-distance
+  trains with the Fahrradkarte Fernverkehr and a reservation, regional trains and S-Bahns per `BikeTariff`
+  (`Transit/BikeTariffs.swift`, researched 2026-10-19: the Verbund both ends lie in, found by district via
+  `StationNames.district(of:)` (AGS code in the DHID), else the state's rule, else DB's Fahrradtageskarte Nahverkehr; tickets
+  that only apply Mo–Fr at some hours and S-Bahn Sperrzeiten (HVV, VGN) by the leg's departure, holidays not known).
+  Transitous' `bikesAllowed` is no use: DELFI sends `false` for every German train.
 - `Features/Traewelling/` – `CheckinSheet` (`MenuPickerRow` with constant width; keyboard hides on submit and only
   returns on `TraewellingError.isInvalidInput`; `.collision` offers "Trotzdem einchecken", `CheckinDraft.force`),
   `TraewellingLoginButton`, `CustomEmojiViews` (`EmojiMessageField`, `EmojiText`), `CheckinDetailSheet` ("Check-in

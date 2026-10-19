@@ -642,12 +642,13 @@ final class AppModel {
     }
 
     /// What saving `journey` warns about: the trains bahn.de lists as reservation-only (a seat reservation is
-    /// mandatory) and, `withBike`, those a bike only comes along on with a bike reservation or not at all (#398).
+    /// mandatory) and, with a normal `bike`, those it only comes along on with a bike reservation or not at all (#398).
     /// Answers within `limit`: a train bahn.de doesn't know, or doesn't answer for in time, counts as free of a seat
-    /// reservation and gets the bike rule of thumb (`BikeTransport.resolved`), so saving never waits long. Both come
-    /// from the same cached journey details, so a second try is instant.
-    func saveWarnings(for journey: Journey, withBike: Bool, within limit: Duration = .seconds(3)) async -> SaveWarnings {
+    /// reservation and gets the bike rules alone (`BikeTransport.resolved`), so saving never waits long. The lookups
+    /// stay cached, so a second try is instant.
+    func saveWarnings(for journey: Journey, bike: BikeOption?, within limit: Duration = .seconds(3)) async -> SaveWarnings {
         let legs = journey.transitLegs
+        let checksBike = bike == .bike
         var answers: [String: (seat: Bool, bike: BikeTransport?)] = [:]
         if let bahnDe = provider.bahnDe {
             answers = await withTaskGroup(of: [String: (seat: Bool, bike: BikeTransport?)]?.self) { group in
@@ -656,13 +657,13 @@ final class AppModel {
                         for leg in legs {
                             lookups.addTask {
                                 let seat = (try? await bahnDe.requiresReservation(for: leg)) == true
-                                var bike: BikeTransport?
-                                if withBike { bike = try? await bahnDe.bikeTransport(for: leg) }
-                                return (leg.id, seat, bike)
+                                var transport: BikeTransport?
+                                if checksBike { transport = await self.bikeTransport(for: leg, bike: .bike) }
+                                return (leg.id, seat, transport)
                             }
                         }
                         var found: [String: (seat: Bool, bike: BikeTransport?)] = [:]
-                        for await (id, seat, bike) in lookups { found[id] = (seat, bike) }
+                        for await (id, seat, transport) in lookups { found[id] = (seat, transport) }
                         return found
                     }
                 }
@@ -678,8 +679,8 @@ final class AppModel {
         var warnings = SaveWarnings()
         for leg in legs {
             if answers[leg.id]?.seat == true { warnings.seatReservation.append(leg) }
-            guard withBike else { continue }
-            switch BikeTransport.resolved(bahnDe: answers[leg.id]?.bike ?? nil, for: leg)?.kind {
+            guard checksBike else { continue }
+            switch (answers[leg.id]?.bike ?? BikeTransport.resolved(bahnDe: nil, for: leg))?.kind {
             case .reservationRequired: warnings.bikeReservation.append(leg)
             case .notAllowed: warnings.noBikes.append(leg)
             default: break
@@ -688,11 +689,28 @@ final class AppModel {
         return warnings
     }
 
-    /// Whether a bike can come along on `leg` (#398): bahn.de's answer once it is in (cached with the reservation
-    /// check), else the rule of thumb.
-    func bikeTransport(for leg: Leg) async -> BikeTransport? {
+    /// Whether `bike` can come along on `leg` (#398): bahn.de's answer (cached with the reservation check), whether the
+    /// train has bike spaces at all (its Wagenreihung or series, the same lookups the leg shows anyway), else the rules.
+    func bikeTransport(for leg: Leg, bike: BikeOption) async -> BikeTransport? {
+        guard bike == .bike else { return BikeTransport.resolved(bahnDe: nil, for: leg, bike: bike) }
         let bahnDe = try? await provider.bahnDe?.bikeTransport(for: leg)
-        return BikeTransport.resolved(bahnDe: bahnDe, for: leg)
+        var sequence: CoachSequence?
+        var families: [String] = []
+        if leg.line?.product.isLongDistance == true {
+            if let request = BahnDeClient.formationRequest(for: leg) {
+                sequence = try? await coachSequence(for: request)
+                families = sequence?.formation.units.compactMap(\.model) ?? []
+            }
+            if families.isEmpty { families = rememberedFormation(for: leg)?.units.compactMap(\.model) ?? [] }
+            if families.isEmpty, let lookup = await trainType(for: leg.line, on: leg.departure.planned) {
+                families = lookup.families
+            }
+            if sequence?.coaches.isEmpty != false, let request = BahnDeClient.formationRequest(for: leg, lookahead: nil) {
+                sequence = await plannedCoachSequence(for: request, direction: false)
+            }
+        }
+        let hasSpaces = BikeTransport.hasBikeSpaces(line: leg.line, families: families, sequence: sequence)
+        return BikeTransport.resolved(bahnDe: bahnDe, for: leg, bike: bike, hasBikeSpaces: hasSpaces)
     }
 
     func unsave(_ journey: Journey) {
@@ -1503,6 +1521,18 @@ final class AppSettings {
             uploadToCloud()
         }
     }
+    /// What the user takes along (#398): the search option "Mit Fahrrad"/"Mit Klapprad" only shows for a
+    /// folding or normal bike. Hidden by default.
+    var bikeOption: BikeOption {
+        didSet {
+            UserDefaults.standard.set(bikeOption.rawValue, forKey: "bikeOption")
+            uploadToCloud()
+        }
+    }
+    /// The bike to show whether it comes along on a search's legs, nil while the search option is off or bikes are hidden.
+    func bike(searchingWithBike: Bool) -> BikeOption? {
+        searchingWithBike && bikeOption != .hidden ? bikeOption : nil
+    }
     /// The search option "Mit Fahrrad" (#398): legs say whether a bike can come along, saving warns about bike
     /// reservations. Kept from one search to the next, off by default.
     var searchWithBike: Bool {
@@ -1704,6 +1734,7 @@ final class AppSettings {
         let defaults = UserDefaults.standard
         ticketFilterByDefault = defaults.bool(forKey: "onlyBC100ByDefault")
         searchWithBike = defaults.bool(forKey: "searchWithBike")
+        bikeOption = defaults.string(forKey: "bikeOption").flatMap(BikeOption.init) ?? .hidden
         ticketType = defaults.string(forKey: "ticketType").flatMap(TicketType.init) ?? .deutschlandticket
         liveActivitiesEnabled = defaults.object(forKey: "liveActivitiesEnabled") as? Bool ?? true
         liveActivityServerUpdates = defaults.object(forKey: "liveActivityServerUpdates") as? Bool ?? true
@@ -1767,6 +1798,7 @@ final class AppSettings {
         var liveActivityServerUpdates: Bool?
         var showWeather: Bool?
         var searchWithBike: Bool?
+        var bikeOption: BikeOption?
     }
 
     /// What iCloud stores: the settings and when they were last changed.
@@ -1783,7 +1815,7 @@ final class AppSettings {
         expertTrainChoice: false, expertIgnoreBoardingRules: false, expertRil100: false,
         trainSearchKinds: TrainSearchKind.defaults.sorted(by: { $0.rawValue < $1.rawValue }),
         trainSearchCountries: TrainSearchCountry.defaults.sorted(), exitReminders: true, exitReminderLead: .five,
-        liveActivityServerUpdates: true, showWeather: true, searchWithBike: false)
+        liveActivityServerUpdates: true, showWeather: true, searchWithBike: false, bikeOption: .hidden)
 
     @ObservationIgnored private var isApplyingCloudValue = false
 
@@ -1798,7 +1830,7 @@ final class AppSettings {
                    trainSearchKinds: trainSearchKinds.sorted(by: { $0.rawValue < $1.rawValue }),
                    trainSearchCountries: trainSearchCountries.sorted(), exitReminders: exitReminders,
                    exitReminderLead: exitReminderLead, liveActivityServerUpdates: liveActivityServerUpdates,
-                   showWeather: showWeather, searchWithBike: searchWithBike)
+                   showWeather: showWeather, searchWithBike: searchWithBike, bikeOption: bikeOption)
     }
 
     /// When the settings were last changed on this device or taken over from iCloud. Before
@@ -1852,6 +1884,7 @@ final class AppSettings {
         liveActivityServerUpdates = value.liveActivityServerUpdates ?? liveActivityServerUpdates
         showWeather = value.showWeather ?? showWeather
         searchWithBike = value.searchWithBike ?? searchWithBike
+        bikeOption = value.bikeOption ?? bikeOption
     }
 }
 
