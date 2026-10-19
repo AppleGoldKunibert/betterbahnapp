@@ -19,6 +19,10 @@
 			</array>
 		</dict>
 	</array>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Damit deine Reisen im Kalender stehen und bei Verspätungen und Gleiswechseln aktuell bleiben.</string>
+	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
+	<string>Damit deine Reisen im Kalender stehen.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>

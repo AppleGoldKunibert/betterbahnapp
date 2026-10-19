@@ -10,8 +10,8 @@ struct BetterBahnApp: App {
     @State private var model: AppModel
 
     init() {
-        // Train statistics from one run on, with their raw values (TrainStatisticsRows): launch once with
-        // `-debugstats`, stays on until the app is deleted.
+        // Train statistics from one run on, with their raw values (TrainStatisticsRows): only for launches with
+        // `-debugstats`.
         TrainStatistics.enableTestModeIfRequested()
         let model = AppModel()
         _model = State(initialValue: model)
@@ -136,6 +136,8 @@ struct RootView: View {
                 model.startRefreshing()
                 Task { await model.syncTraewelling() }
                 Task { await model.syncFollowedCheckinPush() }
+                // Picks up events deleted in the calendar and a switch to full access in iOS Settings.
+                model.scheduleCalendarSync()
                 // Journeys that ended meanwhile leave the iOS search.
                 model.scheduleSpotlightSync()
                 // Build the travel map's heatmap in the background so its tab opens instantly.
@@ -221,9 +223,10 @@ struct RootView: View {
             }
             return
         }
-        // The Live Activity was tapped: show its journey (if it's still saved).
+        // The Live Activity or a calendar event was tapped: show its journey (if it's still saved).
         if let journeyID = LiveActivityLink.journeyID(from: url) {
-            if let entry = model.savedJourneys.first(where: { $0.journey.id == journeyID }) {
+            // Calendar events link by the saved journey's ID, which survives replanning.
+            if let entry = model.savedJourneys.first(where: { $0.journey.id == journeyID || $0.id.uuidString == journeyID }) {
                 incomingSharedJourney = nil
                 incomingDBShare = nil
                 selectedTab = .connections

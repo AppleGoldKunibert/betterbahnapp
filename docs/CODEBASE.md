@@ -22,7 +22,7 @@ only the files you change. Keep it current when structure changes. Build, test a
 | `Cloudflare/live-activity/` | Worker `betterbahn-live` (D1, cron every minute): keeps the Live Activity current while the app is closed (#315). The app hands over the activity's push token and the journey (Kit `LiveActivityPushJourney`) when it goes to the background (`PUT /activities/<id>`) and takes it back when opened (`DELETE`). On `LiveActivityRefreshSchedule`'s times it asks DB's keyless IRIS about the current train (`iris.mjs`: `plan` once per stop, then `fchg`), works out the state like `ContentState.from` (`state.mjs`, checked against the Kit fixture `live-activity-push.json`) and pushes it when it changed; ends the activity after the arrival. `node --test Cloudflare/live-activity/worker.test.mjs`. |
 | `Cloudflare/shared/` | `appattest.mjs`: App Attest verification and the `X-BetterBahn-Token` the Workers check. `node --test Cloudflare/shared/appattest.test.mjs`. `apns.mjs`: APNs with the provider token (`betterbahn-push`, `betterbahn-live`). |
 | `.github/workflows/` | `pr-build.yml` (macOS: Kit tests + unsigned app build on code PRs), `pr-secrets.yml` (gitleaks + guard against `DefaultCredentials.swift`), `sync-prod.yml` (merges prod into every branch but `appstorerelease`), `train-stats-import.yml` (daily, into D1), `monthly-data-update.yml` (1st of the month: rebuilds the three station lists, PR into prod on `monthlyupdate-<MM>/<YY>`; `scripts/check-data-update.py` stops it when a list is empty or 10 % smaller; the PR gets no CI by itself, push an empty commit). |
-| `scripts/` | `make-station-hints.py` (offline search hints), `make-ril100.py` (`Ril100.swift`, also DB's XLSX for codes abroad, needs `openpyxl`), `make-station-names.py` (`StationNames.swift` from OpenStation NeTEx, DB RIS names via bahn.expert and Transitous; run after `make-ril100.py`; `--refresh` re-asks bahn.expert, ~1 h), `check-data-update.py`, `make-exit-sides.py` (#394: `ExitSides.json`, which side of the track each platform is on, from OpenStreetMap: `--pbf germany-latest.osm.pbf` reads Geofabrik's extract with pyosmium in four passes, else Overpass tile by tile with a cache, which often answers 502; run on a Mac, both are blocked from cloud sessions. A platform edge takes the track it touches on its level, a platform the track numbered like it or the only one next to it; S-Bahn tracks are `light_rail`; tests `python3 scripts/make-exit-sides-test.py`), `make-seat-maps.py` (ICE seat maps from DB's Wagenreihungspläne via bahn.expert `/WRSheets/<sheet>.pdf`: images in `Assets.xcassets/SeatMaps/`, seat positions in `SeatMaps.json`; needs poppler, Pillow, numpy). `searchsim/`: Linux package (`./sync.sh`, `swift test`; `swift run SearchSim scenarios.txt` runs ~1150 live station-search scenarios, rerun after changing search ranking). |
+| `scripts/` | `make-station-hints.py` (offline search hints), `make-ril100.py` (`Ril100.swift`, also DB's XLSX for codes abroad, needs `openpyxl`), `make-station-names.py` (`StationNames.swift` from OpenStation NeTEx, DB RIS names via bahn.expert and Transitous; run after `make-ril100.py`; `--refresh` re-asks bahn.expert, ~1 h), `make-big-stations.py` (`Models/BigStations.swift`: price class 1 and 2 from OpenStation NeTEx, run after `make-station-names.py`), `check-data-update.py`, `make-exit-sides.py` (#394: `ExitSides.json`, which side of the track each platform is on, from OpenStreetMap: `--pbf germany-latest.osm.pbf` reads Geofabrik's extract with pyosmium in four passes, else Overpass tile by tile with a cache, which often answers 502; run on a Mac, both are blocked from cloud sessions. A platform edge takes the track it touches on its level, a platform the track numbered like it or the only one next to it; S-Bahn tracks are `light_rail`; tests `python3 scripts/make-exit-sides-test.py`), `make-seat-maps.py` (ICE seat maps from DB's Wagenreihungspläne via bahn.expert `/WRSheets/<sheet>.pdf`: images in `Assets.xcassets/SeatMaps/`, seat positions in `SeatMaps.json`; needs poppler, Pillow, numpy). `searchsim/`: Linux package (`./sync.sh`, `swift test`; `swift run SearchSim scenarios.txt` runs ~1150 live station-search scenarios, rerun after changing search ranking). |
 | `docs/` | `transit-providers.md` (data sources), `app-review-notes.md` (App Store checklist and review notes). |
 
 Targets: `BetterBahn`, `BetterBahnWidgetsExtension`, `BetterBahnShareExtension`, `BetterBahnKit`. Bundle IDs
@@ -64,6 +64,18 @@ in `project.pbxproj`: new files join their target automatically.
   with a push token; `AppModel.handOverLiveActivity()` gives it and the journey to `Cloudflare/live-activity` when the
   app goes to the background and after the background refresh, `takeBackLiveActivity()` ends that when it is active (#315).
 - `App/ExitReminders.swift` – exit reminders (#313, Settings → Meine Reisen, per journey `exitRemindersOff`): Kit `Journey.exitReminders` → time-sensitive notifications `exit|<entry>|<leg>`, rescheduled after every refresh, one per stop (per-device log `exitReminderDates`); while the Live Activity runs, its alert instead. The text names the exit side ("Fulda, Ausstieg links", `ExitSides.side(leaving:)`, #394) when known.
+- `App/CalendarEvents.swift` – calendar events of saved journeys (#382): `CalendarButton` (`Features/Trips/`, next to
+  the share button in `JourneyDetailView`) adds one from Kit `JourneyCalendarEvent`, tapped again deletes it
+  (`removeFromCalendar`, full access only); the first time it asks for
+  `AppSettings.calendarAccess` (per device, Settings → Kalender). `.full`: `scheduleCalendarSync` (after every
+  `savedJourneys` change and on becoming active) updates the events, removes those of deleted journeys and forgets
+  ones deleted in the calendar. `.addOnly` (iOS write-only access) writes once. Event IDs are kept per device either
+  way (`calendarEventIDs`, `CalendarEventLog`), so switching to full access later keeps the earlier events current.
+  The event's link opens the journey by `SavedJourney.id`. With full access `CalendarChoiceRow` (Settings → Kalender) picks
+  the calendar for new events (`AppSettings.calendarID`, per device, nil = default); events already added stay put.
+  "Automatisch" (`AppSettings.calendarAutoAdd`, Kit `CalendarAutoAdd`: off by default, at departure or on
+  saving, per device) adds due journeys in the sync, each once (`CalendarAutoAddLog`, also set by a manual add), so an
+  event deleted in the calendar doesn't come back; access is only asked when the setting is switched on.
 - `App/WidgetSync.swift` – `updateWidgets()` (from `syncLiveActivity`, on position changes, forced on background)
   writes the `WidgetSnapshot` for `widgetJourney` (`liveJourneyCandidate`, else the next saved journey not switched
   off) and reloads the journey widgets (`WidgetStore.journeyWidgetKinds`) only on change. `updateWidgetStations()` (on
@@ -114,6 +126,11 @@ in `project.pbxproj`: new files join their target automatically.
   image (`ImageRenderer`, heatmap card via `Canvas`). `LiveTrainMapView`: one train live on its track
   (`AppModel.geometry(for:)`, never straight lines), opened from `LiveTrainIconTile`; `JourneyMapView` shows running
   trains too.
+- `Features/Collection/` – `CollectionView` (#384, "Sammlung", `CollectionButton` next to "Vergangene Fahrten" on
+  Verbindungen): progress per category, `CollectionCategoryView` grid (not collected greyed out), sheet with the first and
+  all rides. Kit `TravelCollection` from the travel map's rides (`AppModel.travelCollection()`); trains only from
+  `rememberedFormation`, so Träwelling check-ins count only for stations. "Neu" badges: IDs collected since the last
+  visit (`newCollectionIDs`, UserDefaults `collectionSeenIDs`, the first computation is the starting point).
 - `Features/Tickets/` – `TicketLookupView` (bahn.de's "Auftragssuche" in a hidden SwiftUI `WebView`:
   `DBOrderPage.fillScript` fills the form, `fetchScript` fetches order + PDFs inside the page; shown only when bahn.de
   asks for more, e.g. a captcha), `TicketView` (full-brightness barcode, PDF, `AddToWalletButton`, "Zugbindung
@@ -152,6 +169,9 @@ in `project.pbxproj`: new files join their target automatically.
   attribution/license; keep current when adding one), `BC100RulesView`, quick tags.
 - `Shared/DesignSystem.swift` – `Card`, `SectionHeader`, `LineBadge`, `TimeStack`, `DelayPill`, `PlatformBadge`,
   `InfoChip`, `OperatorLabel`, `Color.brand`, `.transition(.fold)` …; reuse these instead of new styling.
+- `Shared/ClosesMenusOnScroll.swift` – `.closesMenusOnScroll()` on scroll views with a `Menu` or menu `Picker` in their
+  content (journey details, Settings, check-in): an open menu otherwise slides along while the content scrolls.
+  `.resetsWhenMenusCloseOnScroll()` rebuilds a glass menu button (`JourneyShareButton`) that stayed where its menu was.
 - `Shared/StationPicker.swift` (`StationInput`, `TimeSelector`), `LocationService`, `PreviewData`, `VagonwebBrowser`.
   `Shared/DebugScreens.swift` (DEBUG): `-debugScreen <name>`, `-seedDemoTrips YES`, `-seedStressTrips <count>`, `-seedSeatMapTrips YES` (two made-up ICEs leaving in 20 min with a reservation and a made-up Wagenreihung, `CoachSequence.seatMapDemo`: ICE 1 turned round, Wagen 12 Platz 43; ICE 3neo Wagen 24 Platz 78).
 
@@ -164,6 +184,10 @@ in `project.pbxproj`: new files join their target automatically.
   `RideMatch`, `YearReview` (km, hours, punctuality < 6 min, series, stations, routes, countries from EVA/IFOPT, CO₂),
   `CO2Comparison` (#386: km × Umweltbundesamt g/Pkm per product, reference year 2024; car and domestic flight over the
   same km; walks, ferries and unknown products left out).
+- `TravelCollection` (#384) – collected special liveries (`TrainsetLiveries`, per Tz), series (`TravelCollection.series`,
+  unit model via `seriesName(of:)`: "ICE 3neo Redesign" → "ICE 3neo"), named trainsets (`TrainsetNames`) and
+  `BigStations` (DB price class 1 and 2, shown as "Großer"/"Mittlerer Bahnhof", by DHID via `StationNames.dhid(for:)`; boarding, alighting, changing; arriving
+  and leaving within 3 h is one visit). Only arrived, not cancelled legs; IC 1 coach sets don't count.
 - `StationNames` (#205) – `Station.displayName`: DB's name for German stations, the national railway's with accents
   abroad, from `Resources/StationNames.json` (OpenStation with DHID/EVA, names from DB RIS via bahn.expert's
   `stopPlace/byTerm`). Matched by the DHID in the stop ID ("de:08135:0620" = "de:08135:620"), EVA, `aliases` (non-German
@@ -341,6 +365,9 @@ in `project.pbxproj`: new files join their target automatically.
   `WidgetStations` (favourites + recent routes for the board widget's picker), `BoardWidgetLink` (`betterbahn://board`,
   the stations travel in the link as base64url JSON, also the widget entities' IDs), `BoardWidgetRows` (board widget
   rows from a board or from journeys, which are still ahead at a time with a 60 s grace, `changeDates`).
+- `Calendar/JourneyCalendarEvent.swift` (#382) – title ("ICE 597 → München", with changes "Köln → München"; "Hbf" dropped only from 100 km straight-line distance, else "Bonn Hbf"),
+  times, departure station with coordinate, notes (platforms, each change with transfer minutes, reserved
+  seats, link) from a journey's latest data; `CalendarAccessMode`, `CalendarAutoAdd.isDue`. Not in `scripts/searchsim` (needs `Tickets/`).
 - `Geometry/` – polyline decode, `RouteGeometryService`, `SegmentHeatmap`.
 - `Weather/WeatherForecast.swift` (#385) – `WeatherClient` asks Open-Meteo's `/v1/forecast` (no key, CC BY 4.0) for a
   station's hourly forecast (temperature, rain chance/amount, wind, WMO code → `WeatherCondition`: German name + SF
@@ -354,7 +381,7 @@ in `project.pbxproj`: new files join their target automatically.
 - `Statistics/TrainStatistics.swift` (#316) – `TrainStatistics` (30 days per stop: delays, cancellations, platform
   moves), `TrainStatisticsClient`, `TrainStatisticsStore` (cache per train and day; off with
   `AppSettings.showTrainStatistics`; EVA via `BahnDeClient.evaNumber(for:)`). Shown from `minimumRuns` (5); launch arg
-  `-debugstats` enables `TrainStatistics.testMode` until the app is deleted (`enableTestModeIfRequested`: from 1 run,
+  `-debugstats` enables `TrainStatistics.testMode` for that launch only (`enableTestModeIfRequested`: from 1 run,
   plus debug rows). Views in `TrainStatisticsViews.swift`: "Erfahrungswerte" (`LegCard` "Mehr", `TripContent`), tight
   transfer warning (`Journey.tightTransfers`, `TrainStatistics.Stop.transferOutlook`) in `TransferRow` and `JourneyCard`.
 - `Support/HTTPClient.swift` – shared HTTP, `TransitError`, `JSONDecoding`; every request sends `identifyingUserAgent`
