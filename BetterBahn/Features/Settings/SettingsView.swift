@@ -122,6 +122,43 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Picker(selection: Binding(get: { settings.calendarAccess ?? .full },
+                                              set: { settings.calendarAccess = $0 })) {
+                        ForEach(CalendarAccessMode.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                    } label: {
+                        IconLabel(title: "Zugriff", systemImage: "calendar", color: .red)
+                    }
+                    .onChange(of: settings.calendarAccess) { _, mode in
+                        guard let mode, mode == .full || settings.calendarAutoAdd != .off else { return }
+                        Task {
+                            _ = await model.requestCalendarAccess(mode)
+                            model.scheduleCalendarSync(after: .zero)
+                        }
+                    }
+                    if settings.calendarAccess == .full {
+                        CalendarChoiceRow()
+                    }
+                    Picker(selection: $settings.calendarAutoAdd) {
+                        ForEach(CalendarAutoAdd.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                    } label: {
+                        IconLabel(title: "Automatisch", systemImage: "calendar.badge.clock", color: .red)
+                    }
+                    .onChange(of: settings.calendarAutoAdd) { _, autoAdd in
+                        guard autoAdd != .off else { return }
+                        // Asked here, never in the background: the access the first choice in this section stands for.
+                        if settings.calendarAccess == nil { settings.calendarAccess = .full }
+                        Task {
+                            _ = await model.requestCalendarAccess(settings.calendarAccess ?? .full)
+                            model.scheduleCalendarSync(after: .zero)
+                        }
+                    }
+                } header: {
+                    Text("Kalender")
+                } footer: {
+                    Text("Mit vollem Zugriff bleiben die Termine deiner Reisen aktuell, auch bei Verspätungen und Gleiswechseln, und verschwinden mit der Reise. Mit „Nur hinzufügen“ wird jeder Termin einmal in deinen Standardkalender eingetragen. Automatisch kommt jede gespeicherte Reise einmal in den Kalender, beim Speichern oder erst bei der Abfahrt.")
+                }
+
+                Section {
                     Picker(selection: $settings.stationFlagMode) {
                         Text("Aus").tag(StationFlagMode.off)
                         Text("Nur Ausland").tag(StationFlagMode.foreignOnly)
@@ -269,6 +306,7 @@ struct SettingsView: View {
                     Text("Fahrplandaten: [Transitous](https://transitous.org/sources/), Echtzeitdaten: Deutsche Bahn ([DB Timetables](https://developers.deutschebahn.com/db-api-marketplace/apis/product/timetables), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.de)), Karten: [© OpenStreetMap](https://www.openstreetmap.org/copyright), [OpenRailwayMap](https://www.openrailwaymap.org)\n\nBetterBahn ist ein privates Projekt und steht in keiner Verbindung zur Deutschen Bahn AG.")
                 }
             }
+            .closesMenusOnScroll()
             .navigationTitle("Einstellungen")
             .task { await refreshLogin() }
             .confirmationDialog(
