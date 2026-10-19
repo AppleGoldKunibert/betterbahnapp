@@ -21,7 +21,8 @@ public enum ExitSide: String, Codable, Sendable, Hashable {
 /// A platform's side is given for a train on a compass heading; a train the other way has it on its other
 /// side. So the side where the user gets off needs the direction the train arrives in: along the route's
 /// geometry, else from the previous stop. A dead-end track (`terminal`) is always entered on its heading.
-/// Nothing is shown when the list doesn't know the track or the direction isn't clear.
+/// Nothing is shown when the list doesn't know the track or the direction isn't clear, and nothing for
+/// U-Bahn, tram and bus legs: their platforms aren't in the list, and "2 (U5)" would pass as track 2.
 public enum ExitSides {
     public struct Track: Codable, Sendable, Hashable {
         /// The track number as the app compares it (`normalizedTrack`): "7", "4a", "101".
@@ -49,14 +50,19 @@ public enum ExitSides {
         public var lat: Double
         public var lon: Double
         public var tracks: [Track]
+        /// An S-Bahn or Stadtbahn station of its own (OSM `station=light_rail`): used for S-Bahn trains
+        /// only, since a Stadtbahn stop next to a station can share its platform numbers.
+        public var light: Bool?
 
-        public init(name: String, ril100: String? = nil, uic: String? = nil, lat: Double, lon: Double, tracks: [Track]) {
+        public init(name: String, ril100: String? = nil, uic: String? = nil, lat: Double, lon: Double, tracks: [Track],
+                    light: Bool? = nil) {
             self.name = name
             self.ril100 = ril100
             self.uic = uic
             self.lat = lat
             self.lon = lon
             self.tracks = tracks
+            self.light = light
         }
 
         var coordinate: Coordinate { Coordinate(latitude: lat, longitude: lon) }
@@ -116,10 +122,11 @@ public enum ExitSides {
     }
 
     static func side(leaving leg: Leg, in entries: [Entry]) -> ExitSide? {
-        guard !leg.isWalking, let stop = leg.destination.coordinate else { return nil }
+        // Trains only: the list has railway platforms, and "2 (U5)" at Berlin Hbf is the U-Bahn's, not DB's track 2.
+        guard !leg.isWalking, leg.line?.product.isTrain == true, let stop = leg.destination.coordinate else { return nil }
         let previous = leg.stopovers.last { !$0.station.isSamePlace(as: leg.destination) }?.station ?? leg.origin
         let heading = arrivalHeading(at: stop, along: leg.geometry, from: previous.coordinate)
-        return side(at: leg.destination, platform: leg.arrivalPlatform?.best, heading: heading, in: entries)
+        return side(at: leg.destination, platform: leg.arrivalPlatform?.best, heading: heading, product: leg.line?.product, in: entries)
     }
 
     /// Where the user gets off `trip` at the stop at `index`.
@@ -128,24 +135,24 @@ public enum ExitSides {
     }
 
     static func side(leaving trip: Trip, at index: Int, in entries: [Entry]) -> ExitSide? {
-        guard trip.stopovers.indices.contains(index), index > 0,
+        guard trip.line?.product.isTrain == true, trip.stopovers.indices.contains(index), index > 0,
               let stop = trip.stopovers[index].station.coordinate else { return nil }
         let stopover = trip.stopovers[index]
         let heading = arrivalHeading(at: stop, along: trip.geometry, from: trip.stopovers[index - 1].station.coordinate)
         return side(at: stopover.station, platform: stopover.arrivalPlatform?.best ?? stopover.departurePlatform?.best,
-                    heading: heading, in: entries)
+                    heading: heading, product: trip.line?.product, in: entries)
     }
 
-    /// The side at `station` for a train on `platform` arriving on `heading` (compass degrees; nil when
-    /// unknown). nil when the list doesn't know the track, the platform has no number, or the heading is too
-    /// far from the track's axis to tell (over 60° off both ways).
-    public static func side(at station: Station, platform: String?, heading: Double?) -> ExitSide? {
-        side(at: station, platform: platform, heading: heading, in: all)
+    /// The side at `station` for a train of `product` on `platform` arriving on `heading` (compass degrees;
+    /// nil when unknown). nil when the list doesn't know the track, the platform has no number, or the
+    /// heading is too far from the track's axis to tell (over 60° off both ways).
+    public static func side(at station: Station, platform: String?, heading: Double?, product: Product?) -> ExitSide? {
+        side(at: station, platform: platform, heading: heading, product: product, in: all)
     }
 
-    static func side(at station: Station, platform: String?, heading: Double?, in entries: [Entry]) -> ExitSide? {
+    static func side(at station: Station, platform: String?, heading: Double?, product: Product?, in entries: [Entry]) -> ExitSide? {
         guard let platform, let track = normalizedTrack(platform) else { return nil }
-        for entry in candidates(for: station, in: entries) {
+        for entry in candidates(for: station, product: product, in: entries) {
             guard let found = entry.tracks.first(where: { $0.track == track }) else { continue }
             if found.terminal == true { return found.side }
             guard let heading else { return nil }
@@ -158,11 +165,13 @@ public enum ExitSides {
     }
 
     /// The entries that are `station`, best first: by EVA number, then by Ril100 code, then by name – all
-    /// within 1.5 km, so a neighbouring station's track with the same number is never taken.
-    static func candidates(for station: Station, in entries: [Entry]) -> [Entry] {
+    /// within 1.5 km, so a neighbouring station's track with the same number is never taken. An S-Bahn or
+    /// Stadtbahn station of its own (`light`) only for an S-Bahn train.
+    static func candidates(for station: Station, product: Product?, in entries: [Entry]) -> [Entry] {
         guard let coordinate = station.coordinate else { return [] }
         let near = entries.filter {
-            abs($0.lat - coordinate.latitude) < 0.015 && abs($0.lon - coordinate.longitude) < 0.025
+            ($0.light != true || product == .suburban)
+                && abs($0.lat - coordinate.latitude) < 0.015 && abs($0.lon - coordinate.longitude) < 0.025
                 && $0.coordinate.distance(to: coordinate) < 1500
         }
         guard !near.isEmpty else { return [] }

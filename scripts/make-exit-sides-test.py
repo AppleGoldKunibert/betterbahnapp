@@ -145,6 +145,75 @@ class AnalysisTests(unittest.TestCase):
             {"track": "4", "heading": 90, "side": "left"},
         ])
 
+    def test_platform_edge_takes_the_track_next_to_it_whatever_its_number(self):
+        elements = [
+            station_node(),
+            # Operational numbers on the tracks (Frankfurt Hbf style): the edge's own track is the one it touches.
+            way(10, {"railway": "rail", "railway:track_ref": "104"}, [(-300, 0), (300, 0)]),
+            way(11, {"railway": "rail", "railway:track_ref": "105"}, [(-300, -4.5), (300, -4.5)]),
+            way(20, {"railway": "platform_edge", "ref": "4"}, [(-150, 1.7), (150, 1.7)]),
+            # A track in two pieces, unnumbered, with a platform of one number.
+            way(12, {"railway": "rail"}, [(-300, 40), (0, 40)], node_ids=[1200, 1201]),
+            way(13, {"railway": "rail"}, [(0, 40), (300, 40)], node_ids=[1201, 1301]),
+            way(21, {"railway": "platform", "ref": "6"}, rectangle(-150, 42, 150, 50)),
+            # Unnumbered tracks on both sides of a platform with one number: which one is it? Skipped.
+            way(14, {"railway": "rail"}, [(-300, 100), (300, 100)]),
+            way(15, {"railway": "rail"}, [(-300, 112), (300, 112)]),
+            way(22, {"railway": "platform", "ref": "9"}, rectangle(-150, 102, 150, 110)),
+            # Two unnumbered tracks at a platform "11;12": skipped too.
+            way(16, {"railway": "rail"}, [(-300, 200), (300, 200)]),
+            way(17, {"railway": "rail"}, [(-300, 212), (300, 212)]),
+            way(23, {"railway": "platform", "ref": "11;12"}, rectangle(-150, 202, 150, 210)),
+        ]
+        stations, dropped = self.analyse(elements)
+        self.assertEqual(dropped, 0)
+        self.assertEqual(stations[0]["tracks"], [
+            {"track": "4", "heading": 90, "side": "left"},
+            {"track": "6", "heading": 90, "side": "left"},
+        ])
+
+    def test_levels_are_kept_apart(self):
+        elements = [
+            station_node(),
+            # An upper track crosses right above the lower platform's track (Berlin Hbf): not its track.
+            way(10, {"railway": "rail", "layer": "-2", "railway:track_ref": "1"}, [(-300, 0), (300, 0)]),
+            way(11, {"railway": "rail", "layer": "1"}, [(0, -300), (0, 300)]),
+            way(20, {"railway": "platform", "ref": "1", "level": "-2", "layer": "-2"}, rectangle(-150, 2, 150, 10)),
+            # An edge with one unnumbered track on its level and one on another.
+            way(12, {"railway": "rail", "layer": "1"}, [(-300, 100), (300, 100)]),
+            way(13, {"railway": "rail", "layer": "-2"}, [(-300, 101), (300, 101)]),
+            way(21, {"railway": "platform_edge", "ref": "12", "layer": "1"}, [(-150, 101.7), (150, 101.7)]),
+            # An edge without a level between unnumbered tracks of two levels: which is its? Skipped.
+            way(14, {"railway": "rail", "layer": "1"}, [(-300, 200), (300, 200)]),
+            way(15, {"railway": "rail", "layer": "-2"}, [(-300, 201), (300, 201)]),
+            way(22, {"railway": "platform_edge", "ref": "13"}, [(-150, 201.7), (150, 201.7)]),
+            # But a numbered track wins whatever the levels say.
+            way(16, {"railway": "rail", "layer": "1"}, [(-300, 300), (300, 300)]),
+            way(17, {"railway": "light_rail", "layer": "-2", "railway:track_ref": "15"}, [(-300, 301), (300, 301)]),
+            way(23, {"railway": "platform_edge", "ref": "15"}, [(-150, 301.7), (150, 301.7)]),
+        ]
+        stations, dropped = self.analyse(elements)
+        self.assertEqual(dropped, 0)
+        self.assertEqual(stations[0]["tracks"], [
+            {"track": "1", "heading": 90, "side": "left"},
+            {"track": "12", "heading": 90, "side": "left"},
+            {"track": "15", "heading": 90, "side": "left"},
+        ])
+
+    def test_light_rail_station_is_marked_and_comes_second(self):
+        s_bahn = station_node(5, "Hauptbahnhof", station="light_rail")
+        s_bahn["lat"] = LAT + 20 / KY   # nearer to the platform than the railway's node
+        elements = [
+            station_node(**{"railway:ref": "TST"}), s_bahn,
+            way(10, {"railway": "light_rail", "railway:track_ref": "15"}, [(-300, 30), (300, 30)]),
+            way(20, {"railway": "platform", "ref": "15"}, rectangle(-150, 32, 150, 40)),
+        ]
+        stations, _ = self.analyse(elements)
+        self.assertEqual([(s["name"], s.get("light")) for s in stations], [("Teststadt Hbf", None)])
+        # Alone, the S-Bahn's node takes the platform and is marked.
+        stations, _ = self.analyse([e for e in elements if e.get("id") != 1])
+        self.assertEqual([(s["name"], s.get("light")) for s in stations], [("Hauptbahnhof", True)])
+
     def test_contradictions_are_dropped(self):
         elements = [
             station_node(),

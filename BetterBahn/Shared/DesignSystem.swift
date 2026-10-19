@@ -629,14 +629,34 @@ struct PlannedPlatformNote: View {
     }
 }
 
-/// "Ausstieg in Fahrtrichtung links" under the stop where the user gets off (#394).
-struct ExitSideLabel: View {
+/// An arrow under the platform badge of the stop where the user gets off (#394): which side of the
+/// train the platform is on. Tapping it says so in words ("Ausstieg in Fahrtrichtung links").
+struct ExitSideArrow: View {
     let side: ExitSide
+    @State private var showsNote = false
+
+    private var symbol: String { side == .left ? "arrow.left.to.line" : "arrow.right.to.line" }
 
     var body: some View {
-        Label(side.displayName, systemImage: side == .left ? "arrow.left.to.line" : "arrow.right.to.line")
-            .font(.caption)
-            .foregroundStyle(.secondary)
+        Button {
+            showsNote = true
+        } label: {
+            Image(systemName: symbol)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 3)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(side.displayName)
+        .popover(isPresented: $showsNote) {
+            Label(side.displayName, systemImage: symbol)
+                .font(.subheadline.weight(.semibold))
+                .padding()
+                .fixedSize()
+                .presentationCompactAdaptation(.popover)
+        }
     }
 }
 

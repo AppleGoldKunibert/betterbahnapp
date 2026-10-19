@@ -800,10 +800,6 @@ struct LegCard: View {
                 Text(name)
                     .font(.headline)
                     .fullTextPopup(name, lines: 2)
-                if let exitSide {
-                    ExitSideLabel(side: exitSide)
-                        .transition(.fold)
-                }
                 if let weather {
                     WeatherLabel(forecast: weather.forecast, context: weather.atDestination ? "bei Ankunft" : "beim Umstieg",
                                  station: name)
@@ -811,7 +807,13 @@ struct LegCard: View {
                 }
             }
             Spacer()
-            PlatformBadge(platform: platform)
+            VStack(spacing: 2) {
+                PlatformBadge(platform: platform)
+                if let exitSide {
+                    ExitSideArrow(side: exitSide)
+                        .transition(.fold)
+                }
+            }
         }
     }
 }

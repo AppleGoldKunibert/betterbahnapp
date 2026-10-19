@@ -537,9 +537,6 @@ struct TripContent: View {
                                     InfoChip(text: "Einstieg", systemImage: "arrow.up.right.circle.fill", tint: .punctual)
                                 } else if isExit {
                                     InfoChip(text: "Ausstieg", systemImage: "arrow.down.right.circle.fill", tint: .brand)
-                                    if let exitSide {
-                                        ExitSideLabel(side: exitSide)
-                                    }
                                 }
                                 if stop.isAdditional {
                                     InfoChip(text: "Zusatzhalt", systemImage: "plus.circle.fill", tint: .brand)
@@ -563,7 +560,12 @@ struct TripContent: View {
                     .buttonStyle(.plain)
                     .disabled(!interactive)
 
-                    platformButton(stop)
+                    VStack(spacing: 2) {
+                        platformButton(stop)
+                        if isExit, let exitSide {
+                            ExitSideArrow(side: exitSide)
+                        }
+                    }
                 }
                 if sequenceStopID == stop.id, let request = coachSequenceRequest(at: stop) {
                     CoachSequencePanel(request: request)
