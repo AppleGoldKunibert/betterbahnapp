@@ -255,6 +255,30 @@ import Testing
         #expect(await CoachAdvice.plan(for: journey, now: now.addingTimeInterval(125 * 60), sequence: sequence, stops: { _ in run }).isEmpty)
     }
 
+    @Test func plansStairsForAConnectionWithoutWagenreihung() async throws {
+        // ICE 100 arrives on track 12; 9 minutes later S 5 leaves from track 1, another platform. bahn.de
+        // has no Wagenreihung for the S-Bahn, so its platform alone says: make for the stairs.
+        var platforms = hannover
+        platforms.tracks["12"] = .init(start: .init(latitude: 52, longitude: 9), end: .init(latitude: 52.0036, longitude: 9), length: 400,
+                                       accesses: [.init(kind: .stairs, position: 290)],
+                                       sectorSigns: Self.sectors.map { .init(name: $0.name, position: ($0.start + $0.end) / 2) })
+        var sBahn = leg("ICE 200", from: hannoverHbf, at: 129, to: hamburg, at: 210)
+        sBahn.line = Line(name: "S 5", number: "5", product: .suburban, operatorName: nil)
+        sBahn.departurePlatform = PlatformInfo(planned: "1", actual: nil)
+        var journey = Journey(legs: [leg("ICE 100", from: goettingen, at: 60, to: hannoverHbf, at: 120, platform: "12"), sBahn], source: .bahnDe)
+        let arriving = train(numbers(21...32), from: 10, towardsEnd: false)
+        let run = run100
+        let sequence: @Sendable (BahnDeClient.FormationRequest) async -> CoachSequence? = { request in
+            request.number == "100" ? arriving : nil
+        }
+        let advice = await CoachAdvice.plan(for: journey, now: now, sequence: sequence, stops: { _ in run }, platformsAt: { _ in platforms })
+        #expect(advice[journey.legs[0].id]?.coaches == ["31", "32"])
+        #expect(advice[journey.legs[0].id]?.target == .access(.stairs))
+        // Across the platform (track 11) it's unknown where the S-Bahn stops, so nothing is said.
+        journey.legs[1].departurePlatform = PlatformInfo(planned: "11", actual: nil)
+        #expect(await CoachAdvice.plan(for: journey, now: now, sequence: sequence, stops: { _ in run }, platformsAt: { _ in platforms }).isEmpty)
+    }
+
     @Test func findsWhereTheTrainGoesOn() async throws {
         let first = transferJourney.legs[0]
         let run = run100
@@ -314,6 +338,13 @@ import Testing
         #expect(track.length == 438)
         #expect(track.accesses == [.init(kind: .stairs, position: 286), .init(kind: .lift, position: 307), .init(kind: .exit, position: 438)])
         #expect(track.sectorSigns == [.init(name: "F", position: 108)])
+        // A track's sections: "3a/b" is track 3 (or its "3a") where there's nothing for "3a/b" itself.
+        #expect(StationPlatforms.trackKeys("Gleis 3a/b") == ["3a/b", "3a", "3"])
+        let sections = StationPlatforms(sharedPlatforms: [["2", "3"]], tracks: ["3": track])
+        #expect(sections.track("3a/b") == track)
+        #expect(sections.sharePlatform("3a/b", "2"))
+        #expect(sections.sharePlatform("3a", "3b"))
+        #expect(!sections.sharePlatform("3a/b", "1a"))
         // The app's own data: Hannover Hbf's tracks 11 and 12 share a platform.
         #expect(StationPlatforms.at(eva: "8000152")?.sharePlatform("11", "12") == true)
         #expect(StationPlatforms.at(eva: "8000152")?.sharePlatform("12", "13") == false)

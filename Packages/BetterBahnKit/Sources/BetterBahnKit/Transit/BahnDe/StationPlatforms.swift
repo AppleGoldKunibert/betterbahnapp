@@ -66,12 +66,29 @@ public struct StationPlatforms: Sendable, Hashable {
 
     /// Whether trains on these tracks stop at the same platform: the same track, or the other side of it.
     public func sharePlatform(_ first: String, _ second: String) -> Bool {
-        let a = Self.trackKey(first), b = Self.trackKey(second)
-        return a == b || sharedPlatforms.contains { $0.contains(a) && $0.contains(b) }
+        guard !Self.sameTrack(first, second) else { return true }
+        let a = Self.trackKeys(first), b = Self.trackKeys(second)
+        return sharedPlatforms.contains { group in a.contains(where: group.contains) && b.contains(where: group.contains) }
     }
 
+    /// By its name as the feeds or bahn.de write it: "3a/b" is "3a/b", else "3a", else "3".
     public func track(_ name: String) -> Track? {
-        tracks[Self.trackKey(name)]
+        Self.trackKeys(name).lazy.compactMap { tracks[$0] }.first
+    }
+
+    /// The names a track goes by, from the most specific: "Gleis 3a/b" is "3a/b", "3a" and "3".
+    static func trackKeys(_ name: String) -> [String] {
+        let key = trackKey(name)
+        var keys = [key]
+        if let first = key.split(separator: "/").first.map(String.init), !keys.contains(first) { keys.append(first) }
+        let number = String(key.prefix(while: \.isNumber))
+        if !number.isEmpty, !keys.contains(number) { keys.append(number) }
+        return keys
+    }
+
+    /// Sections of one track ("3a", "3b", "3a/b") are the same track.
+    static func sameTrack(_ first: String, _ second: String) -> Bool {
+        trackKeys(first).last == trackKeys(second).last
     }
 
     /// "Gleis 11" and "11 " are "11", as in the script.

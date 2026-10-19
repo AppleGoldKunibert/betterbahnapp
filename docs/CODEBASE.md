@@ -264,7 +264,9 @@ in `project.pbxproj`: new files join their target automatically.
   train's reservation is the target; class from the ticket): the arriving train's Wagenreihung at the transfer
   station (its departure there, from its run) against the connecting train's at the same platform
   (`transfer(arriving:…)`, positions of the other track by shared sector names), else the stairs
-  (`exit(sequence:…)`: OSM positions onto bahn.de's by the sector signs, else by the way the train runs). A train
+  (`exit(sequence:…)`: OSM positions onto bahn.de's by the sector signs, else by the way the train runs); a
+  connecting train without a Wagenreihung (S-Bahn, bus) still counts by its platform. Tracks match by section
+  ("3a/b" → "3a" → "3", `StationPlatforms.trackKeys`). A train
   ending at a terminus has no Wagenreihung there: laid out from the buffer stops in its order at the stop before
   (`transfer(endingAt:…)`, `exit(endingAt:…)`). `CoachSequence.eva` is the EVA number it was asked for.
 - `Transit/Vagonweb/` – vagonweb.cz (with permission, #95): planned compositions for the timetable year from the train's

@@ -92,7 +92,7 @@ extension CoachAdvice {
                                 course: Course? = nil) -> CoachAdvice? {
         guard let arrivalTrack = arriving.platform, let departureTrack = departing.platform else { return nil }
         let samePlatform = platforms?.sharePlatform(arrivalTrack, departureTrack)
-            ?? (StationPlatforms.trackKey(arrivalTrack) == StationPlatforms.trackKey(departureTrack))
+            ?? StationPlatforms.sameTrack(arrivalTrack, departureTrack)
         guard samePlatform else {
             return platforms.flatMap { exit(sequence: arriving, platforms: $0, station: station, travelClass: travelClass, course: course) }
         }
@@ -191,15 +191,18 @@ extension CoachAdvice {
     /// Advice for each leg of `journey` still ahead (by leg ID): where to board for each tight transfer
     /// (up to `tightTransfer` minutes) and for getting off at the end. None for a leg with a seat
     /// reservation (`reservations`, by leg ID), where the reserved seat decides; the connecting train's
-    /// reservation is where to get to.
+    /// reservation is where to get to. A connecting train without a Wagenreihung (an S-Bahn, a bus)
+    /// still tells by its platform whether to make for the stairs.
     /// - Parameters:
     ///   - sequence: bahn.de's Wagenreihung for a request, nil when there's none.
     ///   - stops: every stop of a leg's train run, to find the stops around where you get off; nil when
     ///     the run can't be loaded.
+    ///   - platformsAt: a station's platforms by EVA number.
     public static func plan(for journey: Journey, reservations: [String: Reservation] = [:], travelClass: Int? = nil,
                             now: Date = .now,
                             sequence: @Sendable (BahnDeClient.FormationRequest) async -> CoachSequence?,
-                            stops: @Sendable (Leg) async -> [Stopover]?) async -> [String: CoachAdvice] {
+                            stops: @Sendable (Leg) async -> [Stopover]?,
+                            platformsAt: (String) -> StationPlatforms? = StationPlatforms.at(eva:)) async -> [String: CoachAdvice] {
         let legs = journey.transitLegs
         var advice: [String: CoachAdvice] = [:]
         for (index, leg) in legs.enumerated() {
@@ -207,32 +210,43 @@ extension CoachAdvice {
                   BahnDeClient.sequenceReference(for: leg.line) != nil else { continue }
             let next = legs.indices.contains(index + 1) ? legs[index + 1] : nil
             let station = leg.destination.displayName
+            let stationEVA = leg.destination.evaNumber ?? StationNames.evaNumber(for: leg.destination)
             if let next {
                 let minutes = Int((next.departure.best.timeIntervalSince(leg.arrival.best) / 60).rounded())
                 guard minutes > 0, minutes <= tightTransfer, next.origin.isSamePlace(as: leg.destination),
-                      let request = BahnDeClient.formationRequest(for: next, now: now), request.station.isSamePlace(as: next.origin),
-                      let departing = await sequence(request), let arrival = await arrival(of: leg, now: now, stops: stops)
-                else { continue }
-                let platforms = (departing.eva).flatMap(StationPlatforms.at(eva:))
+                      let arrival = await arrival(of: leg, now: now, stops: stops) else { continue }
+                var departing: CoachSequence?
+                if let request = BahnDeClient.formationRequest(for: next, now: now), request.station.isSamePlace(as: next.origin) {
+                    departing = await sequence(request)
+                }
+                guard let departureTrack = departing?.platform ?? next.departurePlatform?.best else { continue }
                 switch arrival {
                 case .continuing(let request, let course):
                     guard let arriving = await sequence(request) else { continue }
-                    advice[leg.id] = transfer(arriving: arriving, departing: departing,
-                                              platforms: platforms ?? arriving.eva.flatMap(StationPlatforms.at(eva:)), station: station,
-                                              reservation: reservations[next.id], travelClass: travelClass, course: course)
+                    let here = (departing?.eva ?? arriving.eva ?? stationEVA).flatMap(platformsAt)
+                    if let departing {
+                        advice[leg.id] = transfer(arriving: arriving, departing: departing, platforms: here, station: station,
+                                                  reservation: reservations[next.id], travelClass: travelClass, course: course)
+                    } else if let here, let track = arriving.platform, !here.sharePlatform(track, departureTrack) {
+                        advice[leg.id] = exit(sequence: arriving, platforms: here, station: station, travelClass: travelClass, course: course)
+                    }
                 case .ending(let request):
-                    guard let platforms, let track = leg.arrivalPlatform?.best, let before = await sequence(request) else { continue }
-                    advice[leg.id] = transfer(endingAt: track, before: before, departing: departing, platforms: platforms,
-                                              station: station, reservation: reservations[next.id], travelClass: travelClass)
+                    guard let here = (departing?.eva ?? stationEVA).flatMap(platformsAt), let track = leg.arrivalPlatform?.best,
+                          let before = await sequence(request) else { continue }
+                    if let departing {
+                        advice[leg.id] = transfer(endingAt: track, before: before, departing: departing, platforms: here,
+                                                  station: station, reservation: reservations[next.id], travelClass: travelClass)
+                    } else if !here.sharePlatform(track, departureTrack) {
+                        advice[leg.id] = exit(endingAt: track, before: before, platforms: here, station: station, travelClass: travelClass)
+                    }
                 }
             } else {
                 switch await arrival(of: leg, now: now, stops: stops) {
                 case .continuing(let request, let course):
-                    guard let here = await sequence(request), let platforms = here.eva.flatMap(StationPlatforms.at(eva:)) else { continue }
+                    guard let here = await sequence(request), let platforms = (here.eva ?? stationEVA).flatMap(platformsAt) else { continue }
                     advice[leg.id] = exit(sequence: here, platforms: platforms, station: station, travelClass: travelClass, course: course)
                 case .ending(let request):
-                    guard let eva = leg.destination.evaNumber ?? StationNames.evaNumber(for: leg.destination),
-                          let platforms = StationPlatforms.at(eva: eva), let track = leg.arrivalPlatform?.best,
+                    guard let platforms = stationEVA.flatMap(platformsAt), let track = leg.arrivalPlatform?.best,
                           let before = await sequence(request) else { continue }
                     advice[leg.id] = exit(endingAt: track, before: before, platforms: platforms, station: station, travelClass: travelClass)
                 case nil:
@@ -398,7 +412,7 @@ extension CoachSequence {
     /// Turns positions on `other`'s platform (another train at the same platform) into positions on
     /// this one's: the same where both stop at the same track, else by the sectors both share.
     func mapping(from other: CoachSequence) -> ((Double) -> Double)? {
-        if let a = platform, let b = other.platform, StationPlatforms.trackKey(a) == StationPlatforms.trackKey(b) {
+        if let a = platform, let b = other.platform, StationPlatforms.sameTrack(a, b) {
             return { $0 }
         }
         let pairs = other.sectors.compactMap { sector -> (Double, Double)? in
