@@ -28,6 +28,8 @@ import Testing
         #expect(ExitSides.normalizedTrack("07") == "7")
         #expect(ExitSides.normalizedTrack("101") == "101")
         #expect(ExitSides.normalizedTrack("7a-c") == "7a")
+        #expect(ExitSides.normalizedTrack("Regio 3") == "3")
+        #expect(ExitSides.normalizedTrack("Fern 5") == "5")
         #expect(ExitSides.normalizedTrack("Bus") == nil)
         #expect(ExitSides.normalizedTrack("7ab") == nil)
         #expect(ExitSides.normalizedTrack("") == nil)

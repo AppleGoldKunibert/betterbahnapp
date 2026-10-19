@@ -77,11 +77,10 @@ NOT_A_TRAIN_STATION = {"subway", "monorail", "funicular", "miniature"}
 # --- Names and numbers -------------------------------------------------------------------------------
 
 def normalize_track(text):
-    """The track number the app compares platforms by: "7 D-G" -> "7", "Gleis 4a" -> "4a", "07" -> "7".
-    Must match `ExitSides.normalizedTrack` in the Kit. None when there is no number."""
-    text = text.strip().lower()
-    text = re.sub(r"^(gleis|gl\.|bahnsteig|track|platform|voie|perron)\s*", "", text)
-    match = re.match(r"(\d+)([a-z])?(?![a-z0-9])", text)
+    """The track number the app compares platforms by: "7 D-G" -> "7", "Gleis 4a" -> "4a", "07" -> "7",
+    "Regio 3" -> "3" (Frankfurt Flughafen names its tracks so, in OSM and in the feeds). Must match
+    `ExitSides.normalizedTrack` in the Kit. None when there is no number."""
+    match = re.match(r"[^\d]*(\d+)([a-z])?(?![a-z0-9])", text.strip().lower())
     if not match:
         return None
     return (match.group(1).lstrip("0") or "0") + (match.group(2) or "")

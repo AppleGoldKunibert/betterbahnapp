@@ -224,14 +224,11 @@ public enum ExitSides {
         return nil
     }
 
-    /// The track number platforms are compared by: "7 D-G" -> "7", "Gleis 4a" -> "4a", "07" -> "7"; nil
-    /// without a number. Mirrors `normalize_track` in `scripts/make-exit-sides.py`.
+    /// The track number platforms are compared by: "7 D-G" -> "7", "Gleis 4a" -> "4a", "07" -> "7",
+    /// "Regio 3" -> "3" (Frankfurt Flughafen names its tracks so); nil without a number. Mirrors
+    /// `normalize_track` in `scripts/make-exit-sides.py`.
     static func normalizedTrack(_ text: String) -> String? {
-        var rest = Substring(text.trimmingCharacters(in: .whitespaces).lowercased())
-        for prefix in ["gleis", "gl.", "bahnsteig", "track", "platform", "voie", "perron"] where rest.hasPrefix(prefix) {
-            rest = rest.dropFirst(prefix.count).drop { $0 == " " }
-            break
-        }
+        var rest = Substring(text.lowercased()).drop { !($0.isASCII && $0.isNumber) }
         let digits = rest.prefix { $0.isASCII && $0.isNumber }
         guard !digits.isEmpty else { return nil }
         rest = rest.dropFirst(digits.count)

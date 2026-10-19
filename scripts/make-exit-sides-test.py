@@ -39,6 +39,8 @@ class NumbersTests(unittest.TestCase):
         self.assertEqual(exit_sides.normalize_track("Gleis 4a"), "4a")
         self.assertEqual(exit_sides.normalize_track("07"), "7")
         self.assertEqual(exit_sides.normalize_track("101"), "101")
+        self.assertEqual(exit_sides.normalize_track("Regio 3"), "3")
+        self.assertEqual(exit_sides.normalize_track("Fern 5"), "5")
         self.assertIsNone(exit_sides.normalize_track("Bus"))
         self.assertIsNone(exit_sides.normalize_track("7ab"))
 
@@ -49,6 +51,7 @@ class NumbersTests(unittest.TestCase):
         self.assertEqual(exit_sides.platform_refs({"ref": "Gleis 7 und 8"}), ["7", "8"])
         self.assertEqual(exit_sides.platform_refs({"ref": "101 - 104"}), ["101", "102", "103", "104"])
         self.assertEqual(exit_sides.platform_refs({"local_ref": "3"}), ["3"])
+        self.assertEqual(exit_sides.platform_refs({"ref": "Fern 4;Fern 5"}), ["4", "5"])
         self.assertEqual(exit_sides.platform_refs({"ref": "A"}), [])
         # A long span is a name, not a list of tracks.
         self.assertEqual(exit_sides.platform_refs({"ref": "1-20"}), [])
