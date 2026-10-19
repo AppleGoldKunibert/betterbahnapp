@@ -371,7 +371,7 @@ in `project.pbxproj`: new files join their target automatically.
 - `Statistics/TrainStatistics.swift` (#316) – `TrainStatistics` (30 days per stop: delays, cancellations, platform
   moves), `TrainStatisticsClient`, `TrainStatisticsStore` (cache per train and day; off with
   `AppSettings.showTrainStatistics`; EVA via `BahnDeClient.evaNumber(for:)`). Shown from `minimumRuns` (5); launch arg
-  `-debugstats` enables `TrainStatistics.testMode` until the app is deleted (`enableTestModeIfRequested`: from 1 run,
+  `-debugstats` enables `TrainStatistics.testMode` for that launch only (`enableTestModeIfRequested`: from 1 run,
   plus debug rows). Views in `TrainStatisticsViews.swift`: "Erfahrungswerte" (`LegCard` "Mehr", `TripContent`), tight
   transfer warning (`Journey.tightTransfers`, `TrainStatistics.Stop.transferOutlook`) in `TransferRow` and `JourneyCard`.
 - `Support/HTTPClient.swift` – shared HTTP, `TransitError`, `JSONDecoding`; every request sends `identifyingUserAgent`
