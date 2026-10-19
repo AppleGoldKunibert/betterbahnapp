@@ -39,7 +39,8 @@ let apnsKey;
 async function environment() {
     if (!apnsKey) {
         const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
-        apnsKey = `-----BEGIN PRIVATE KEY-----\n${toBase64(new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey)))}\n-----END PRIVATE KEY-----`;
+        const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey));
+        apnsKey = `-----BEGIN PRIVATE KEY-----\n${toBase64(pkcs8)}\n-----END PRIVATE KEY-----`;
     }
     return {
         DB: new FakeD1(), TOKEN_SECRET: secret, INTERVAL_MINUTES: "1",
