@@ -44,10 +44,10 @@ import Testing
         let departing = train(numbers(31...37), from: 18, towardsEnd: false, platform: "11", sectors: Self.reversedSectors, name: "ICE 200")
         let advice = try #require(CoachAdvice.transfer(arriving: arriving, departing: departing, platforms: hannover, station: "Hannover Hbf"))
         // Opposite the middle of the connecting train.
-        #expect(advice.coaches == ["30", "31", "32"])
+        #expect(advice.coaches == ["31", "32"])
         #expect(advice.target == .connection(coach: nil))
-        #expect(advice.text() == "Steig in Wagen 30–32 ein, dann stehst du in Hannover Hbf direkt an deinem Anschluss.")
-        #expect(advice.text(boarded: true) == "Geh in Wagen 30–32, dann stehst du in Hannover Hbf direkt an deinem Anschluss.")
+        #expect(advice.text() == "In Wagen 31 oder 32 einsteigen, um in Hannover Hbf direkt an deinem Anschluss auszusteigen.")
+        #expect(advice.text(boarded: true) == "In Wagen 31 oder 32 wechseln, um in Hannover Hbf direkt an deinem Anschluss auszusteigen.")
         #expect(advice.legend == "Die markierten Wagen halten in Hannover Hbf direkt an deinem Anschluss.")
     }
 
@@ -57,9 +57,9 @@ import Testing
         let departing = train(numbers(31...37), from: 18, towardsEnd: false, platform: "11", sectors: Self.reversedSectors, name: "ICE 200")
         let advice = try #require(CoachAdvice.transfer(arriving: arriving, departing: departing, platforms: hannover,
                                                        station: "Hannover Hbf", reservation: (coach: "35", train: "ICE 200")))
-        #expect(advice.coaches == ["29", "30", "31"])
+        #expect(advice.coaches == ["30", "31"])
         #expect(advice.target == .connection(coach: "35"))
-        #expect(advice.text() == "Steig in Wagen 29–31 ein, dann stehst du in Hannover Hbf direkt an Wagen 35 deines Anschlusses.")
+        #expect(advice.text() == "In Wagen 30 oder 31 einsteigen, um in Hannover Hbf direkt an Wagen 35 deines Anschlusses auszusteigen.")
     }
 
     @Test func walksFromAReservedSeatBeforeArriving() throws {
@@ -68,11 +68,11 @@ import Testing
         // The seat in Wagen 22 stands 138 m short of the connecting train: walk to Wagen 30–32 before arriving.
         let advice = try #require(CoachAdvice.transfer(arriving: arriving, departing: departing, platforms: hannover,
                                                        station: "Hannover Hbf", seat: (coach: "22", train: "ICE 100")))
-        #expect(advice.coaches == ["30", "31", "32"])
+        #expect(advice.coaches == ["31", "32"])
         #expect(advice.walkBeforeArrival)
-        #expect(advice.text() == "Geh vor der Ankunft in Wagen 30–32, dann stehst du in Hannover Hbf direkt an deinem Anschluss.")
+        #expect(advice.text() == "Vor der Ankunft in Wagen 31 oder 32 wechseln, um in Hannover Hbf direkt an deinem Anschluss auszusteigen.")
         // Next to the transfer, which names the station already.
-        #expect(advice.text(boarded: true, namingStation: false) == "Geh vor der Ankunft in Wagen 30–32, dann stehst du direkt an deinem Anschluss.")
+        #expect(advice.text(boarded: true, namingStation: false) == "Vor der Ankunft in Wagen 31 oder 32 wechseln, um direkt an deinem Anschluss auszusteigen.")
         // The seat's coach is framed in the Wagenreihung too, so the note says which coaches.
         #expect(advice.legend == advice.text())
         // A seat 8 m short of it or opposite it is close enough, and one in a coach the train lacks says nothing.
@@ -87,7 +87,7 @@ import Testing
         let arriving = train(numbers(21...32), from: 10, towardsEnd: false)
         let departing = train(numbers(31...37), from: 200, towardsEnd: true, firstClass: ["31", "32"], name: "ICE 200")
         let second = try #require(CoachAdvice.transfer(arriving: arriving, departing: departing, platforms: nil, station: "Fulda", travelClass: 2))
-        #expect(second.coaches == ["29", "30", "31"])
+        #expect(second.coaches == ["30", "31"])
         // First class only has ICE 100's coaches 31 and 32 to choose from, which stand opposite each other anyway.
         let first = CoachAdvice.transfer(arriving: train(numbers(21...32), from: 10, towardsEnd: false, firstClass: ["31", "32"]),
                                          departing: departing, platforms: nil, station: "Fulda", travelClass: 1)
@@ -121,7 +121,7 @@ import Testing
         let advice = try #require(CoachAdvice.transfer(arriving: arriving, departing: departing, platforms: platforms, station: "Hannover Hbf"))
         #expect(advice.coaches == ["31", "32"])
         #expect(advice.target == .access(.stairs))
-        #expect(advice.text() == "Steig in Wagen 31 oder 32 ein, dann bist du in Hannover Hbf gleich an der Treppe.")
+        #expect(advice.text() == "In Wagen 31 oder 32 einsteigen, um in Hannover Hbf direkt an der Treppe auszusteigen.")
     }
 
     // MARK: Exit
@@ -141,8 +141,20 @@ import Testing
         // The stairs land at about 197 m, the lift at 220 m of bahn.de's platform.
         let sequence = train(numbers(21...32), from: 20, towardsEnd: true, platform: "4", sectors: sectors4)
         let advice = try #require(CoachAdvice.exit(sequence: sequence, platforms: platforms, station: "Hannover Hbf"))
-        #expect(advice.coaches == ["24", "25", "26"])
+        #expect(advice.coaches == ["25", "26"])
         #expect(advice.target == .access(.stairs))
+    }
+
+    @Test func namesBothStairsAlongALongTrain() throws {
+        // Köln Hbf has stairs at both underpasses: here at 60 m and 300 m, both within the train.
+        let track = StationPlatforms.Track(start: .init(latitude: 50.943, longitude: 6.958), end: .init(latitude: 50.9466, longitude: 6.958),
+                                           length: 400, accesses: [.init(kind: .stairs, position: 60), .init(kind: .stairs, position: 300)],
+                                           sectorSigns: Self.sectors.map { .init(name: $0.name, position: ($0.start + $0.end) / 2) })
+        let platforms = StationPlatforms(tracks: ["12": track])
+        let advice = try #require(CoachAdvice.exit(sequence: train(numbers(21...32), from: 10, towardsEnd: false),
+                                                   platforms: platforms, station: "Köln Hbf"))
+        #expect(advice.groups == [["22", "23"], ["31", "32"]])
+        #expect(advice.text() == "In Wagen 22–23 oder 31–32 einsteigen, um in Köln Hbf direkt an der Treppe auszusteigen.")
     }
 
     @Test func placesStairsByTheWayTheTrainRuns() throws {
@@ -171,8 +183,8 @@ import Testing
         let before = train(numbers(21...27), from: 50, towardsEnd: false, platform: "5")
         let advice = try #require(CoachAdvice.exit(endingAt: "13", before: before, platforms: platforms, station: "Frankfurt (Main) Hbf"))
         #expect(advice.coaches == ["21"])
-        #expect(advice.text() == "Steig in Wagen 21 ein, dann bist du in Frankfurt (Main) Hbf gleich am Ausgang.")
-        #expect(advice.legend == "Die markierten Wagen halten in Frankfurt (Main) Hbf gleich am Ausgang.")
+        #expect(advice.text() == "In Wagen 21 einsteigen, um in Frankfurt (Main) Hbf direkt am Ausgang auszusteigen.")
+        #expect(advice.legend == "Die markierten Wagen halten in Frankfurt (Main) Hbf direkt am Ausgang.")
     }
 
     @Test func transferAtATerminus() throws {
@@ -186,7 +198,7 @@ import Testing
         let before = train(numbers(21...32), from: 30, towardsEnd: true, platform: "7")
         let advice = try #require(CoachAdvice.transfer(endingAt: "12", before: before, departing: departing, platforms: platforms,
                                                        station: "Frankfurt (Main) Hbf", reservation: (coach: "33", train: "ICE 200")))
-        #expect(advice.coaches == ["24", "25", "26"])
+        #expect(advice.coaches == ["24", "25"])
         #expect(advice.target == .connection(coach: "33"))
         // Not where the tracks don't end at buffer stops.
         #expect(CoachAdvice.transfer(endingAt: "12", before: before, departing: departing, platforms: hannover, station: "Hannover Hbf") == nil)
@@ -253,7 +265,7 @@ import Testing
         }
         let journey = transferJourney
         let advice = await CoachAdvice.plan(for: journey, now: now, sequence: sequence, stops: { $0.tripId == "ICE 100" ? run : nil })
-        #expect(advice[journey.legs[0].id]?.coaches == ["30", "31", "32"])
+        #expect(advice[journey.legs[0].id]?.coaches == ["31", "32"])
         #expect(advice[journey.legs[0].id]?.station == "Hannover Hbf")
         // ICE 200's run is unknown, so there's nothing for getting off in Hamburg.
         #expect(advice[journey.legs[1].id] == nil)
@@ -261,7 +273,7 @@ import Testing
         // With a seat reserved on ICE 100 (Wagen 25, 60 m short of ICE 200), walk forward before arriving.
         let reserved = await CoachAdvice.plan(for: journey, reservations: [journey.legs[0].id: (coach: "25", train: "ICE 100")], now: now,
                                               sequence: sequence, stops: { _ in run })
-        #expect(reserved[journey.legs[0].id]?.coaches == ["30", "31", "32"])
+        #expect(reserved[journey.legs[0].id]?.coaches == ["31", "32"])
         #expect(reserved[journey.legs[0].id]?.walkBeforeArrival == true)
         // One on ICE 200 is where to get to.
         let connecting = await CoachAdvice.plan(for: journey, reservations: [journey.legs[1].id: (coach: "35", train: "ICE 200")], now: now,
@@ -338,7 +350,10 @@ import Testing
         #expect(CoachAdvice(coaches: ["21", "22"], target: .access(.lift), station: "Celle").coachList == "Wagen 21 oder 22")
         #expect(CoachAdvice(coaches: ["21", "22", "23"], target: .access(.lift), station: "Celle").coachList == "Wagen 21–23")
         #expect(CoachAdvice(coaches: ["25", "26", "28"], target: .access(.lift), station: "Celle").coachList == "Wagen 25, 26 oder 28")
-        #expect(CoachAdvice(coaches: ["5"], target: .access(.lift), station: "Celle").text() == "Steig in Wagen 5 ein, dann bist du in Celle gleich am Aufzug.")
+        // At two places.
+        #expect(CoachAdvice(groups: [["22", "23"], ["31", "32"]], target: .access(.stairs), station: "Köln Hbf").coachList == "Wagen 22–23 oder 31–32")
+        #expect(CoachAdvice(groups: [["24"], ["26"]], target: .access(.stairs), station: "Köln Hbf").coachList == "Wagen 24 oder 26")
+        #expect(CoachAdvice(coaches: ["5"], target: .access(.lift), station: "Celle").text() == "In Wagen 5 einsteigen, um in Celle direkt am Aufzug auszusteigen.")
     }
 
     @Test func marksTheCoachesOfTheRequestedTrain() {

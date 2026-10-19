@@ -13,37 +13,49 @@ public struct CoachAdvice: Sendable, Hashable {
         case access(StationPlatforms.Access.Kind)
     }
 
-    /// Coach numbers to board, from the front of the train.
-    public var coaches: [String]
+    /// Coach numbers to board, by place: one place, or two when there are stairs at both (Köln Hbf's
+    /// two underpasses); from the front of the train.
+    public var groups: [[String]]
     public var target: Target
     /// Where you get off, as shown: "Hannover Hbf".
     public var station: String
     /// Your reserved seat is in another coach: walk to these before the train arrives.
     public var walkBeforeArrival: Bool
 
-    public init(coaches: [String], target: Target, station: String, walkBeforeArrival: Bool = false) {
-        self.coaches = coaches
+    public init(groups: [[String]], target: Target, station: String, walkBeforeArrival: Bool = false) {
+        self.groups = groups
         self.target = target
         self.station = station
         self.walkBeforeArrival = walkBeforeArrival
     }
 
-    /// "Wagen 21–23", "Wagen 31 oder 32"
-    public var coachList: String {
-        let parts = CoachSequence.numberList(coaches).components(separatedBy: ", ")
-        guard let last = parts.last, parts.count > 1 else { return "Wagen \(parts.joined())" }
-        return "Wagen \(parts.dropLast().joined(separator: ", ")) oder \(last)"
+    public init(coaches: [String], target: Target, station: String, walkBeforeArrival: Bool = false) {
+        self.init(groups: [coaches], target: target, station: station, walkBeforeArrival: walkBeforeArrival)
     }
 
-    /// "Steig in Wagen 21–23 ein, dann stehst du in Hannover Hbf direkt an deinem Anschluss."; with a seat
-    /// elsewhere "Geh vor der Ankunft in Wagen 21–23, dann …".
+    /// Every coach to board, from the front of the train.
+    public var coaches: [String] { groups.flatMap(\.self) }
+
+    /// "Wagen 21", "Wagen 31 oder 32", at two places "Wagen 22–23 oder 31–32"
+    public var coachList: String {
+        guard groups.count > 1 else {
+            let parts = CoachSequence.numberList(coaches).components(separatedBy: ", ")
+            guard let last = parts.last, parts.count > 1 else { return "Wagen \(parts.joined())" }
+            return "Wagen \(parts.dropLast().joined(separator: ", ")) oder \(last)"
+        }
+        let places = groups.compactMap { group in group.first.map { first in group.count > 1 ? "\(first)–\(group.last!)" : first } }
+        return "Wagen \(places.dropLast().joined(separator: ", ")) oder \(places.last ?? "")"
+    }
+
+    /// "In Wagen 30 oder 31 einsteigen, um in Hannover Hbf direkt an deinem Anschluss auszusteigen."; on
+    /// the train "In Wagen … wechseln, um …", with a seat elsewhere "Vor der Ankunft in Wagen … wechseln, um …".
     /// - Parameters:
     ///   - boarded: already on the train, so the advice is to walk to those coaches.
     ///   - namingStation: false next to the transfer, which says where already.
     public func text(boarded: Bool = false, namingStation: Bool = true) -> String {
-        let first = walkBeforeArrival ? "Geh vor der Ankunft in \(coachList)" : boarded ? "Geh in \(coachList)" : "Steig in \(coachList) ein"
-        let verb = if case .connection = target { "stehst" } else { "bist" }
-        return "\(first), dann \(verb) du\(namingStation ? " in \(station)" : "") \(spot)."
+        let first = walkBeforeArrival ? "Vor der Ankunft in \(coachList) wechseln"
+            : boarded ? "In \(coachList) wechseln" : "In \(coachList) einsteigen"
+        return "\(first), um\(namingStation ? " in \(station)" : "") \(spot) auszusteigen."
     }
 
     /// Below the Wagenreihung with these coaches marked: "Die markierten Wagen halten in Hannover Hbf
@@ -52,14 +64,14 @@ public struct CoachAdvice: Sendable, Hashable {
         walkBeforeArrival ? text() : "Die markierten Wagen halten in \(station) \(spot)."
     }
 
-    /// "direkt an deinem Anschluss", "gleich an der Treppe"
+    /// "direkt an deinem Anschluss", "direkt an der Treppe"
     private var spot: String {
         switch target {
         case .connection(let coach?): "direkt an Wagen \(coach) deines Anschlusses"
         case .connection(nil): "direkt an deinem Anschluss"
-        case .access(.stairs): "gleich an der Treppe"
-        case .access(.lift): "gleich am Aufzug"
-        case .access(.exit): "gleich am Ausgang"
+        case .access(.stairs): "direkt an der Treppe"
+        case .access(.lift): "direkt am Aufzug"
+        case .access(.exit): "direkt am Ausgang"
         }
     }
 
@@ -80,7 +92,9 @@ public struct CoachAdvice: Sendable, Hashable {
     static let worthWalking: Double = 30
     /// Coaches this much farther from the spot than the nearest one still count as near (metres).
     static let nearSlack: Double = 12
-    static let maximumCoaches = 3
+    /// At most two coaches (about 50 m) at each place, and at most two places.
+    static let maximumCoaches = 2
+    static let maximumPlaces = 2
     /// A train stops this far short of the buffer stop at a terminus (metres).
     static let bufferGap: Double = 8
     /// Coach length when bahn.de gave no positions (metres), as in the Wagenreihung.
@@ -121,8 +135,8 @@ extension CoachAdvice {
             let a = mapping(span.lowerBound), b = mapping(span.upperBound)
             return min(a, b)...max(a, b)
         }
-        guard let coaches = nearest(in: arriving, travelClass: travelClass, to: mapped, seat: seat) else { return nil }
-        return CoachAdvice(coaches: coaches.compactMap(\.number), target: .connection(coach: reservedCoach), station: station,
+        guard let places = nearest(in: arriving, travelClass: travelClass, to: mapped, seat: seat) else { return nil }
+        return CoachAdvice(groups: places.map { $0.compactMap(\.number) }, target: .connection(coach: reservedCoach), station: station,
                            walkBeforeArrival: seat != nil)
     }
 
@@ -162,8 +176,9 @@ extension CoachAdvice {
         guard let name = sequence.platform, let track = platforms.track(name), !track.accesses.isEmpty,
               let mapping = sequence.mapping(from: track, course: course) else { return nil }
         let spots = track.accesses.map { access in mapping(access.position) }
-        guard let coaches = nearest(in: sequence, travelClass: travelClass, to: spots.map { $0...$0 }, seat: seat) else { return nil }
-        return CoachAdvice(coaches: coaches.compactMap(\.number), target: .access(kind(nearestTo: coaches, accesses: track.accesses, at: spots)),
+        guard let places = nearest(in: sequence, travelClass: travelClass, to: spots.map { $0...$0 }, seat: seat) else { return nil }
+        return CoachAdvice(groups: places.map { $0.compactMap(\.number) },
+                           target: .access(kind(nearestTo: places.flatMap(\.self), accesses: track.accesses, at: spots)),
                            station: station, walkBeforeArrival: seat != nil)
     }
 
@@ -177,8 +192,9 @@ extension CoachAdvice {
         let atStart = exit.position < track.length / 2
         let standing = before.standing(frontAt: atStart ? 0 : track.length, facingIncreasing: !atStart)
         let spots = track.accesses.map(\.position)
-        guard let coaches = nearest(in: standing, travelClass: travelClass, to: spots.map { $0...$0 }, seat: seat) else { return nil }
-        return CoachAdvice(coaches: coaches.compactMap(\.number), target: .access(kind(nearestTo: coaches, accesses: track.accesses, at: spots)),
+        guard let places = nearest(in: standing, travelClass: travelClass, to: spots.map { $0...$0 }, seat: seat) else { return nil }
+        return CoachAdvice(groups: places.map { $0.compactMap(\.number) },
+                           target: .access(kind(nearestTo: places.flatMap(\.self), accesses: track.accesses, at: spots)),
                            station: station, walkBeforeArrival: seat != nil)
     }
 
@@ -311,11 +327,12 @@ extension CoachAdvice {
 // MARK: - Picking the coaches
 
 extension CoachAdvice {
-    /// The boardable coaches nearest to any of `spots` (metres along `sequence`'s platform), up to three
-    /// next to each other; nil when they all stand about as near, so any coach does. With a `seat` on the
-    /// train, nil unless its coach stands `worthWalking` farther away than those.
+    /// The boardable coaches nearest to any of `spots` (metres along `sequence`'s platform), by place: up
+    /// to two next to each other, at up to two places as near (stairs at both ends of the train); nil
+    /// when they all stand about as near, so any coach does. With a `seat` on the train, nil unless its
+    /// coach stands `worthWalking` farther away than those.
     static func nearest(in sequence: CoachSequence, travelClass: Int?, to spots: [ClosedRange<Double>],
-                        seat: Reservation? = nil) -> [CoachSequence.Coach]? {
+                        seat: Reservation? = nil) -> [[CoachSequence.Coach]]? {
         let candidates = sequence.boardable(travelClass: travelClass).filter { $0.span != nil }
         guard !candidates.isEmpty, !spots.isEmpty else { return nil }
         let distances = candidates.map { coach in spots.map { gap(coach.span!, $0) }.min()! }
@@ -328,18 +345,29 @@ extension CoachAdvice {
             guard worst - best >= minimumSpread else { return nil }
         }
         // Among coaches about as near, the one whose middle is nearest a spot's middle (opposite the
-        // middle of the connecting train's part rather than at its end), then those next to it.
+        // middle of the connecting train's part rather than at its end) first.
         func offCentre(_ coach: CoachSequence.Coach) -> Double {
             spots.map { abs(coach.span!.middle - $0.middle) }.min()!
         }
-        let near = zip(candidates, distances).filter { $0.1 <= best + nearSlack }
+        let ranked = zip(candidates, distances).filter { $0.1 <= best + nearSlack }
             .sorted { ($0.1, offCentre($0.0), $0.0.id) < ($1.1, offCentre($1.0), $1.0.id) }.map(\.0)
-        guard let closest = near.first else { return nil }
-        var picked = [closest]
-        for coach in near.dropFirst() where picked.count < maximumCoaches {
-            if picked.contains(where: { abs($0.id - coach.id) == 1 }) { picked.append(coach) }
+        let rank = Dictionary(uniqueKeysWithValues: ranked.enumerated().map { ($1.id, $0) })
+        // Near coaches next to each other are one place; from each its best coach and the better neighbour.
+        var runs: [[CoachSequence.Coach]] = []
+        for coach in ranked.sorted(by: { $0.id < $1.id }) {
+            if let last = runs.last?.last, coach.id == last.id + 1 {
+                runs[runs.count - 1].append(coach)
+            } else {
+                runs.append([coach])
+            }
         }
-        return picked.sorted { $0.id < $1.id }
+        let places = runs.compactMap { run -> [CoachSequence.Coach]? in
+            guard let first = run.min(by: { rank[$0.id]! < rank[$1.id]! }) else { return nil }
+            let neighbours = run.filter { abs($0.id - first.id) == 1 }.sorted { rank[$0.id]! < rank[$1.id]! }
+            return ([first] + neighbours.prefix(maximumCoaches - 1)).sorted { $0.id < $1.id }
+        }
+        let chosen = places.sorted { a, b in a.map { rank[$0.id]! }.min()! < b.map { rank[$0.id]! }.min()! }.prefix(maximumPlaces)
+        return chosen.sorted { $0[0].id < $1[0].id }
     }
 
     /// Coaches standing next to each other as one stretch of platform each.

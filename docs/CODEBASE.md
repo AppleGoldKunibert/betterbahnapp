@@ -293,7 +293,9 @@ in `project.pbxproj`: new files join their target automatically.
   connecting train without a Wagenreihung (S-Bahn, bus) still counts by its platform. Tracks match by section
   ("3a/b" → "3a" → "3", `StationPlatforms.trackKeys`). A train
   ending at a terminus has no Wagenreihung there: laid out from the buffer stops in its order at the stop before
-  (`transfer(endingAt:…)`, `exit(endingAt:…)`). `CoachSequence.eva` is the EVA number it was asked for.
+  (`transfer(endingAt:…)`, `exit(endingAt:…)`). `CoachSequence.eva` is the EVA number it was asked for. At most
+  two coaches per place and two places (`groups`, stairs at both of Köln Hbf's underpasses): „In Wagen 22–23 oder
+  31–32 einsteigen, um … auszusteigen", on the train „In Wagen … wechseln", with a seat „Vor der Ankunft in …".
 - `Transit/Vagonweb/` – vagonweb.cz (with permission, #95): planned compositions for the timetable year from the train's
   HTML (`VagonwebComposition.scheduled`, fixtures `vagonweb-ice*.html`), used when bahn.de has none: `AppModel.trainType`
   and "Plan-Wagenreihung" (`CoachSequence.source == .vagonweb`). Cloudflare bot check → hidden `WebPage`
