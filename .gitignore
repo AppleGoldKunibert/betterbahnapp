@@ -93,4 +93,7 @@ AppStoreScreenshots/6.5-Zoll/03-reiseplan.png
 AppStoreScreenshots/6.5-Zoll/04-abfahrten.png
 AppStoreScreenshots/6.5-Zoll/05-zugansicht.png
 AppStoreScreenshots/6.5-Zoll/06-live-aktivitaet.png
-germany-latest.osm.pbf
+
+# OSM extracts for scripts/make-exit-sides.py (gigabytes) and Python caches
+*.osm.pbf
+__pycache__/

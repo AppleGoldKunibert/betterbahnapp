@@ -1,0 +1,16 @@
+{
+  "about": "Hand-made corrections to ExitSides.json (wrong or missing OpenStreetMap data), in its format: a station with name, lat, lon, optionally ril100 (DB code) and uic (EVA number), and its tracks. A track here replaces the generated one of the same number at that station (matched by ril100, else uic, else name within 1 km); a station the generated list lacks is added. heading: compass degrees (0 north, 90 east) of a train for which side holds; the other way round it is the other side. terminal: a buffer stop lies ahead on heading, so every arriving train travels on it. `example` is ignored by the app.",
+  "example": {
+    "name": "Teststadt Hbf",
+    "ril100": "TST",
+    "uic": "8000001",
+    "lat": 50.0,
+    "lon": 8.0,
+    "tracks": [
+      {"track": "7", "heading": 90, "side": "left", "terminal": true},
+      {"track": "8", "heading": 90, "side": "right"}
+    ]
+  },
+  "stations": [
+  ]
+}
