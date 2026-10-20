@@ -77,6 +77,20 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Picker(selection: $settings.bikeOption) {
+                        ForEach(BikeOption.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                    } label: {
+                        IconLabel(title: "Fahrrad", systemImage: "bicycle", color: .brand)
+                    }
+                } header: {
+                    Text("Fahrrad")
+                } footer: {
+                    Text(settings.bikeOption == .hidden
+                         ? "Mit Klapprad oder Fahrrad zeigt die Suche, wo es mitkommt und ob du eine Reservierung oder Fahrradkarte brauchst."
+                         : "In der Suche schaltest du ein, ob es diesmal mitkommt.")
+                }
+
+                Section {
                     Toggle(isOn: $settings.connectionWarnings) {
                         IconLabel(title: "Bei Problemen benachrichtigen", systemImage: "exclamationmark.triangle.fill", color: .orange)
                     }
