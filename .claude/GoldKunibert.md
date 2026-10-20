@@ -28,19 +28,16 @@ with the `ArtifactData` tool (load it with ToolSearch).
 - One document per PR in collection `prs`, id `pr<number>` (`pr413`): `number`, `title`, `branch`, `issues`
   (numbers), `state` (`draft`, `open`, `merged` or `closed`), `updatedAt` (ISO 8601), `sessions` (links of the
   chats that worked on the PR, oldest first) and `steps`, a map `s1`, `s2`, … of
-  `{order, text, expect, status, note, checkedAt, retest}`. Your own chat link is
+  `{order, text, expect, status, checkedAt, retest}`. `status` is `open` or `passed`. Your own chat link is
   `https://claude.ai/code/<id>` with the id from `get_session` (claude-code-remote, without `session_id`); add it
   when it isn't in `sessions` yet (`update` replaces the whole array). `text` (what to do, starting from where in
-  the app) and `expect` (what should happen) are German. A new step is `status: "open"`, `note: ""`,
-  `checkedAt: null`, `retest: false`.
+  the app) and `expect` (what should happen) are German. A new step is `status: "open"`, `checkedAt: null`,
+  `retest: false`.
 - When you open a PR, write the steps of your "What to test" there (`set`). After later pushes, `update` with
   the `if_version` you read: add steps for new behaviour, keep `title`, `state` and `updatedAt` current, and
   only when a push changes what a ticked step covers, set that step back to `status: "open"` with
-  `retest: true`. Don't touch `status`, `note` or `checkedAt` otherwise: they are GoldKunibert's results.
-- A step with `status: "failed"` and a `note` is a bug report for that PR: read the PR's document before
-  working on it again, fix it, then set the step to `open` with `retest: true`. Its screenshots are in
-  `images`, a map of asset id → `{addedAt}` (`null` = removed); download each with the `Artifact` tool
-  (`action: "read"`, the test list's `url`, `path` = the asset id) and look at it with Read.
+  `retest: true`. Don't touch `status` or `checkedAt` otherwise: they are GoldKunibert's results.
+- GoldKunibert reports problems in the chat, not on the page.
 - When a PR is merged or closed, set `state` to `merged` or `closed` (several PRs at once in one `batch`). The
   page also reads draft, merged and merge conflicts from GitHub when GoldKunibert opens it and writes `state`
   back.
