@@ -4746,6 +4746,190 @@ private final class TrainSearchProtocol: URLProtocol, @unchecked Sendable {
         #expect(try !details([bike, sleeper].joined(separator: ",")).requiresReservation)
     }
 
+    /// #398: bahn.de's bike attribute "FR" for a section of the train, in journey details built from what Nightjet NJ 471
+    /// carried on 2026-10-08 (RP, SW and FR for "Basel SBB - Zürich HB"; the stops are trimmed to four for the test).
+    @Test func readsTheBikeReservationForTheSectionRidden() throws {
+        let details = try fixture("bahnde-fahrt-bikes", as: BahnDeClient.JourneyDetails.self)
+        #expect(details.requiresReservation)
+        #expect(details.bikeAttributes == [.init(kind: .reservationRequired, section: .init(from: "Basel SBB", to: "Zürich HB"))])
+        let stops = details.halte.compactMap(JourneyStop.init)
+        let line = Line(name: "NJ 471", number: "471", product: .nightTrain, operatorName: "ÖBB")
+        func leg(_ from: Int, _ to: Int) throws -> Leg {
+            let origin = stops[from], destination = stops[to]
+            return Leg(origin: station(origin.evaNumber, origin.name), destination: station(destination.evaNumber, destination.name),
+                       departure: try #require(origin.departure), arrival: try #require(destination.arrival),
+                       departurePlatform: nil, arrivalPlatform: nil, tripId: "nj", line: line, direction: nil,
+                       isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+        }
+        // Riding only that section: a reservation, nothing more to say about where.
+        #expect(BahnDeClient.bikeTransport(details.bikeAttributes, riding: try leg(2, 3), stops: stops)
+                == BikeTransport(kind: .reservationRequired, isConfirmed: true))
+        // Riding through to Zürich: the reservation holds for the last part.
+        #expect(BahnDeClient.bikeTransport(details.bikeAttributes, riding: try leg(0, 3), stops: stops)
+                == BikeTransport(kind: .reservationRequired, section: "Basel SBB – Zürich HB", isConfirmed: true))
+        // Hamburg → Hannover doesn't touch it, and getting off in Basel neither.
+        #expect(BahnDeClient.bikeTransport(details.bikeAttributes, riding: try leg(0, 1), stops: stops) == nil)
+        #expect(BahnDeClient.bikeTransport(details.bikeAttributes, riding: try leg(0, 2), stops: stops) == nil)
+    }
+
+    /// Bike attributes by their key, else by their wording; other attributes are none.
+    @Test func readsBikeAttributes() {
+        #expect(BikeTransport.kind(ofAttribute: "FR", category: nil, value: nil) == .reservationRequired)
+        #expect(BikeTransport.kind(ofAttribute: "FB", category: "FAHRRADMITNAHME", value: "Fahrradmitnahme begrenzt möglich") == .limited)
+        #expect(BikeTransport.kind(ofAttribute: "XY", category: "FAHRRADMITNAHME", value: "Fahrradmitnahme möglich") == .allowed)
+        #expect(BikeTransport.kind(ofAttribute: "XY", category: nil, value: "Fahrradmitnahme nicht möglich") == .notAllowed)
+        #expect(BikeTransport.kind(ofAttribute: "XY", category: nil, value: "Fahrradmitnahme reservierungspflichtig") == .reservationRequired)
+        #expect(BikeTransport.kind(ofAttribute: "RP", category: "INFORMATION", value: "Reservierungspflicht") == nil)
+        #expect(BikeTransport.kind(ofAttribute: "BR", category: "BORDBISTRO", value: "Bordrestaurant") == nil)
+        // Of several sections the strictest counts.
+        #expect(BikeTransport.strictest([BikeTransport(kind: .allowed, isConfirmed: true),
+                                         BikeTransport(kind: .reservationRequired, section: "A – B", isConfirmed: true)])?.kind
+                == .reservationRequired)
+    }
+
+    static func bikeStation(_ dhid: String, _ name: String) -> Station {
+        Station(id: "de-DELFI_\(dhid)", name: name, coordinate: nil, evaNumber: nil, source: .transitous)
+    }
+
+    static func bikeLeg(_ name: String, _ product: Product, _ from: Station, _ to: Station, at departure: String = "2026-10-24T10:00:00+02:00",
+                        messages: [String] = []) -> Leg {
+        let time = TimeInfo(planned: JSONDecoding.parseISODate(departure)!, actual: nil)
+        return Leg(origin: from, destination: to, departure: time, arrival: time, departurePlatform: nil, arrivalPlatform: nil,
+                   tripId: "t", line: Line(name: name, number: nil, product: product, operatorName: nil), direction: nil,
+                   isWalking: false, cancelled: false, stopovers: [], remarks: [],
+                   messages: messages.map { TrainMessage(kind: .notice, text: $0, timestamp: nil) }, source: .transitous)
+    }
+
+    /// Where bahn.de has nothing: long-distance trains need the Fahrradkarte Fernverkehr with a reservation, regional
+    /// trains in Germany take bikes with the Verbund's ticket, regional trains abroad and buses get no guess. DB's
+    /// notices on the leg win.
+    @Test func bikeRules() {
+        let berlin = Self.bikeStation("de:11000:900003201", "Berlin Hbf")
+        let eberswalde = Self.bikeStation("de:12060:900350160", "Eberswalde Hbf")
+        let basel = Station(id: "ch_8500010", name: "Basel SBB", coordinate: nil, evaNumber: "8500010", source: .transitous)
+        let zurich = Station(id: "ch_8503000", name: "Zürich HB", coordinate: nil, evaNumber: "8503000", source: .transitous)
+        let re3 = Self.bikeLeg("RE 3", .regionalExpress, berlin, eberswalde)
+        #expect(BikeTransport.rule(for: re3) == BikeTransport(kind: .allowed, isConfirmed: false,
+                                                              ticket: "VBB 24-Stunden-Karte Fahrrad (ab 5,10 €)"))
+        #expect(BikeTransport.rule(for: re3)?.title == "Fahrrad mit Fahrradkarte")
+        #expect(BikeTransport.rule(for: Self.bikeLeg("ICE 1001", .highSpeed, berlin, eberswalde))
+                == BikeTransport(kind: .reservationRequired, isConfirmed: false, ticket: BikeTransport.fernverkehrTicket))
+        #expect(BikeTransport.rule(for: Self.bikeLeg("IC 2", .longDistance, basel, zurich))?.ticket == "Fahrradkarte")
+        #expect(BikeTransport.rule(for: Self.bikeLeg("IR 36", .regional, basel, zurich)) == nil)
+        #expect(BikeTransport.rule(for: Self.bikeLeg("200", .bus, berlin, eberswalde)) == nil)
+
+        #expect(BikeTransport.resolved(bahnDe: nil, for: re3)?.kind == .allowed)
+        #expect(BikeTransport.resolved(bahnDe: nil, for: Self.bikeLeg("RE 3", .regionalExpress, berlin, eberswalde,
+                                                                      messages: ["Fahrradmitnahme nicht möglich"]))
+                == BikeTransport(kind: .notAllowed, isConfirmed: true))
+        #expect(BikeTransport.resolved(bahnDe: nil, for: Self.bikeLeg("RE 3", .regionalExpress, berlin, eberswalde,
+                                                                      messages: ["Eingeschränkte Fahrradmitnahme"]))?.kind == .limited)
+        // A needed reservation stays one when bike spaces are limited, and keeps the rules' ticket.
+        let fr = BikeTransport(kind: .reservationRequired, isConfirmed: true)
+        let ice = Self.bikeLeg("ICE 1001", .highSpeed, berlin, eberswalde, messages: ["Eingeschränkte Fahrradmitnahme"])
+        #expect(BikeTransport.resolved(bahnDe: fr, for: ice)
+                == BikeTransport(kind: .reservationRequired, isConfirmed: true, ticket: BikeTransport.fernverkehrTicket))
+        // A train without bike spaces takes none, a folded folding bike always comes along.
+        #expect(BikeTransport.resolved(bahnDe: fr, for: ice, hasBikeSpaces: false)?.kind == .notAllowed)
+        #expect(BikeTransport.resolved(bahnDe: nil, for: ice, bike: .foldingBike, hasBikeSpaces: false)
+                == BikeTransport(kind: .luggage, isConfirmed: true))
+        #expect(BikeTransport.resolved(bahnDe: nil, for: re3, bike: .hidden) == nil)
+    }
+
+    /// The Verbund's bike ticket and Sperrzeiten, else the state's rule, else the nationwide ticket.
+    @Test func bikeTariffsByVerbund() {
+        let hamburg = Self.bikeStation("de:02000:10950", "Hamburg Hbf")
+        let altona = Self.bikeStation("de:02000:10951", "Hamburg-Altona")
+        let monday7 = "2026-10-19T07:00:00+02:00", monday10 = "2026-10-19T10:00:00+02:00", saturday7 = "2026-10-24T07:00:00+02:00"
+        // HVV: no bikes in the S-Bahn on weekdays 6–9, free otherwise; a ticket in RE/RB at any time.
+        let s1Peak = BikeTransport.rule(for: Self.bikeLeg("S1", .suburban, hamburg, altona, at: monday7))
+        #expect(s1Peak?.kind == .notAllowed)
+        #expect(s1Peak?.note == "Mo–Fr 6–9 und 16–18 Uhr keine Fahrräder in der S-Bahn")
+        let s1Weekend = BikeTransport.rule(for: Self.bikeLeg("S1", .suburban, hamburg, altona, at: saturday7))
+        #expect(s1Weekend?.kind == .allowed && s1Weekend?.ticket == nil)
+        #expect(BikeTransport.rule(for: Self.bikeLeg("RE 7", .regionalExpress, hamburg, altona, at: monday7))?.ticket
+                == "hvv Fahrradticket (3,50 €)")
+
+        // Baden-Württemberg outside the Verbünde: bwFAHRRAD only on weekdays 6–9.
+        let ulm = Self.bikeStation("de:08421:1008", "Ulm Hbf"), biberach = Self.bikeStation("de:08426:2000", "Biberach (Riß)")
+        let peak = BikeTransport.rule(for: Self.bikeLeg("RE 5", .regionalExpress, ulm, biberach, at: monday7))
+        #expect(peak?.ticket == "bwFAHRRAD (6 €)")
+        #expect(peak?.note == "Nur Mo–Fr 6–9 Uhr kostenpflichtig")
+        let later = BikeTransport.rule(for: Self.bikeLeg("RE 5", .regionalExpress, ulm, biberach, at: monday10))
+        #expect(later?.ticket == nil && later?.note == "Mo–Fr 6–9 Uhr: bwFAHRRAD (6 €)")
+
+        // Sachsen-Anhalt: free in every regional train. Berlin → Leipzig crosses states: the nationwide ticket.
+        let magdeburg = Self.bikeStation("de:15003:8010224", "Magdeburg Hbf")
+        let stendal = Self.bikeStation("de:15090:8010334", "Stendal Hbf")
+        #expect(BikeTransport.rule(for: Self.bikeLeg("RE 20", .regionalExpress, magdeburg, stendal))?.ticket == nil)
+        let leipzig = Self.bikeStation("de:14713:8010205", "Leipzig Hbf")
+        #expect(BikeTransport.rule(for: Self.bikeLeg("RE 3", .regionalExpress, Self.bikeStation("de:11000:900003201", "Berlin Hbf"), leipzig))?.ticket
+                == "Fahrradtageskarte Nahverkehr (7,50 €)")
+        // Within Niedersachsen, Bremen and Hamburg the Niedersachsen card.
+        #expect(BikeTariff.tariff(from: "03404", to: "04011").name == "Niedersachsen")
+        #expect(BikeTariff.tariff(from: "05315", to: "05334").name == "Rheinlandtarif")
+        #expect(BikeTariff.tariff(from: "05315", to: "05711").name == "Nordrhein-Westfalen")
+        // Every district is in Germany's 16 states, and no Verbund lists one twice.
+        let listed = BikeTariff.verbuende.filter { $0.name != "HVV" && $0.name != "VBB" }.flatMap(\.districts)
+        #expect(Set(listed).count == listed.count)
+        #expect(BikeTariff.verbuende.flatMap(\.districts).allSatisfy { $0.count == 5 && BikeTariff.states[String($0.prefix(2))] != nil })
+    }
+
+    /// ICE 1, ICE 2 and ICE 3 have no bike spaces; nor has an ICE whose Wagenreihung from bahn.de shows none.
+    @Test func knowsTrainsWithoutBikeSpaces() throws {
+        let ice = Line(name: "ICE 597", number: "597", product: .highSpeed, operatorName: nil)
+        #expect(BikeTransport.hasBikeSpaces(line: ice, families: ["ICE 1"], sequence: nil) == false)
+        #expect(BikeTransport.hasBikeSpaces(line: ice, families: ["ICE 3", "ICE 3"], sequence: nil) == false)
+        #expect(BikeTransport.hasBikeSpaces(line: ice, families: ["ICE 4"], sequence: nil) == nil)
+        #expect(BikeTransport.hasBikeSpaces(line: ice, families: ["ICE 3", "ICE 3neo"], sequence: nil) == nil)
+        #expect(BikeTransport.hasBikeSpaces(line: ice, families: [], sequence: nil) == nil)
+        let ic = Line(name: "IC 2045", number: "2045", product: .longDistance, operatorName: nil)
+        #expect(BikeTransport.hasBikeSpaces(line: ic, families: ["ICE 1"], sequence: nil) == nil)
+        let re = Line(name: "RE 1", number: nil, product: .regionalExpress, operatorName: nil)
+        #expect(BikeTransport.hasBikeSpaces(line: re, families: ["ICE 1"], sequence: nil) == nil)
+
+        func sequence(bikes: Bool) throws -> CoachSequence {
+            let amenity = bikes ? #", "amenities": [{"type": "BIKE_SPACE", "status": "AVAILABLE", "amount": 8}]"# : ""
+            let json = #"{"groups": [{"name": "ICE9012", "transport": {"category": "ICE", "number": 597}, "vehicles": [{"wagonIdentificationNumber": 1, "type": {"category": "PASSENGERCARRIAGE_ECONOMY_CLASS"}\#(amenity)}]}]}"#
+            let response = try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data(json.utf8))
+            return BahnDeClient.coachSequence(from: response, category: "ICE", number: 597)
+        }
+        #expect(BikeTransport.hasBikeSpaces(line: ice, families: [], sequence: try sequence(bikes: false)) == false)
+        #expect(BikeTransport.hasBikeSpaces(line: ice, families: ["ICE 1"], sequence: try sequence(bikes: true)) == true)
+        var planned = try sequence(bikes: false)
+        planned.source = .vagonweb(validFrom: nil, validUntil: nil)
+        #expect(BikeTransport.hasBikeSpaces(line: ice, families: [], sequence: planned) == nil)
+    }
+
+    /// In bike mode the Wagenreihung names the coaches with bike spaces and where they stop.
+    @Test func findsTheCoachesWithBikeSpaces() throws {
+        let json = #"""
+        {"platform": {"name": "7", "start": 0, "end": 400, "sectors": [
+            {"name": "A", "start": 0, "end": 100}, {"name": "B", "start": 100, "end": 200},
+            {"name": "C", "start": 200, "end": 300}, {"name": "D", "start": 300, "end": 400}]},
+         "groups": [
+            {"name": "ICE9012", "transport": {"category": "ICE", "number": 940},
+             "vehicles": [
+                {"wagonIdentificationNumber": 1, "type": {"category": "PASSENGERCARRIAGE_ECONOMY_CLASS"}, "platformPosition": {"start": 10, "end": 36},
+                 "amenities": [{"type": "BIKE_SPACE", "status": "AVAILABLE", "amount": 8}]},
+                {"wagonIdentificationNumber": 2, "type": {"category": "PASSENGERCARRIAGE_ECONOMY_CLASS"}, "platformPosition": {"start": 40, "end": 66}},
+                {"wagonIdentificationNumber": 7, "type": {"category": "PASSENGERCARRIAGE_ECONOMY_CLASS"}, "platformPosition": {"start": 290, "end": 316},
+                 "amenities": [{"type": "BIKE_SPACE", "status": "AVAILABLE", "amount": 0}]}]},
+            {"name": "ICE9013", "transport": {"category": "ICE", "number": 942},
+             "vehicles": [
+                {"wagonIdentificationNumber": 21, "type": {"category": "PASSENGERCARRIAGE_ECONOMY_CLASS"}, "platformPosition": {"start": 350, "end": 376},
+                 "amenities": [{"type": "BIKE_SPACE", "status": "AVAILABLE", "amount": 8}]}]}
+        ]}
+        """#
+        let response = try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data(json.utf8))
+        let sequence = BahnDeClient.coachSequence(from: response, category: "ICE", number: 940, coupledNumbers: [])
+        // Only the requested train's part: coach 21 runs as ICE 942 elsewhere.
+        #expect(sequence.bikeCoaches.map(\.number) == ["1", "7"])
+        #expect(sequence.bikeCoaches.first?.spaces == 8)
+        #expect(sequence.bikeSectors == ["A", "C", "D"])
+        #expect(sequence.bikeCoachSummary == "Wagen 1 und 7 · Abschnitt A, C, D")
+    }
+
     static func decodedDetails() throws -> BahnDeClient.JourneyDetails {
         try JSONDecoding.decoder.decode(BahnDeClient.JourneyDetails.self, from: Data(details.utf8))
     }

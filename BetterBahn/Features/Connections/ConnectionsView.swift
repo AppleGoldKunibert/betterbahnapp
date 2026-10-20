@@ -30,17 +30,20 @@ nonisolated struct ConnectionSearch: Hashable, Codable {
     var onlyValidTicket: Bool
     var products = Set(Product.allCases)
     var maxTransfers: Int?
+    /// "Mit Fahrrad" (#398): legs say whether a bike can come along, saving warns about bike reservations.
+    /// The results aren't filtered by it, since the feeds don't know which German trains take bikes.
+    var withBike = false
 
     var isFiltered: Bool { products != Set(Product.allCases) || maxTransfers != nil }
 
     /// Stored under the old "onlyBC100" key so journeys saved before the Deutschlandticket filter still load.
     enum CodingKeys: String, CodingKey {
-        case from, to, via, date, isArrival, products, maxTransfers, hasProductGroups
+        case from, to, via, date, isArrival, products, maxTransfers, hasProductGroups, withBike
         case onlyValidTicket = "onlyBC100"
     }
 
     init(from: Station, to: Station, via: [ViaWaypoint] = [], date: Date, isArrival: Bool, onlyValidTicket: Bool,
-         products: Set<Product> = Set(Product.allCases), maxTransfers: Int? = nil) {
+         products: Set<Product> = Set(Product.allCases), maxTransfers: Int? = nil, withBike: Bool = false) {
         self.from = from
         self.to = to
         self.via = via
@@ -49,6 +52,7 @@ nonisolated struct ConnectionSearch: Hashable, Codable {
         self.onlyValidTicket = onlyValidTicket
         self.products = products
         self.maxTransfers = maxTransfers
+        self.withBike = withBike
     }
 
     init(from decoder: Decoder) throws {
@@ -60,6 +64,7 @@ nonisolated struct ConnectionSearch: Hashable, Codable {
         isArrival = try container.decode(Bool.self, forKey: .isArrival)
         onlyValidTicket = try container.decode(Bool.self, forKey: .onlyValidTicket)
         maxTransfers = try container.decodeIfPresent(Int.self, forKey: .maxTransfers)
+        withBike = try container.decodeIfPresent(Bool.self, forKey: .withBike) ?? false
         let stored = try container.decodeIfPresent(Set<Product>.self, forKey: .products) ?? Set(Product.allCases)
         // Searches saved before night trains and IR/FLX were groups of their own lack the marker.
         let isCurrent = try container.decodeIfPresent(Bool.self, forKey: .hasProductGroups) == true
@@ -76,6 +81,7 @@ nonisolated struct ConnectionSearch: Hashable, Codable {
         try container.encode(onlyValidTicket, forKey: .onlyValidTicket)
         try container.encode(products, forKey: .products)
         try container.encodeIfPresent(maxTransfers, forKey: .maxTransfers)
+        try container.encode(withBike, forKey: .withBike)
         try container.encode(true, forKey: .hasProductGroups)
     }
 }
@@ -335,6 +341,17 @@ struct ConnectionsView: View {
 
                 Divider()
 
+                if let title = model.settings.bikeOption.searchTitle {
+                    Toggle(isOn: Bindable(model.settings).searchWithBike) {
+                        optionLabel(title, subtitle: model.settings.bikeOption == .foldingBike
+                                    ? "Zeigt, wo dein Klapprad mitkommt" : "Zeigt, ob dein Fahrrad mitkommt",
+                                    icon: "bicycle", color: .brand)
+                    }
+                    .tint(.brand)
+
+                    Divider()
+                }
+
                 transfersPicker
 
                 productsButton
@@ -503,7 +520,7 @@ struct ConnectionsView: View {
         path.append(.search(ConnectionSearch(from: from, to: to, via: via, date: useNow ? .now : date,
                                      isArrival: via.isEmpty ? isArrival : false, onlyValidTicket: onlyValidTicket,
                                      products: perLeg ? legProducts[Self.startLegID] ?? all : products,
-                                     maxTransfers: maxTransfers)))
+                                     maxTransfers: maxTransfers, withBike: model.settings.searchWithBike)))
     }
 }
 
