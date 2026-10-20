@@ -319,7 +319,8 @@ in `project.pbxproj`: new files join their target automatically.
   `Resources/Platforms.json` (`scripts/make-platforms.py`): tracks sharing a platform, per track the OSM platform
   edge (ends, length), stairs/lifts/terminus exit and sector signs in metres along it. `CoachAdvice.plan(for:…)` per
   journey (tight transfers up to 15 min, the exit at the end; with a seat reservation on the arriving train the
-  coaches to walk to before arriving, `walkBeforeArrival`, when that saves 30 m, none for the exit; the connecting
+  coaches to walk to before arriving, `walkBeforeArrival`, when that saves 30 m, else `alreadyThere` („Du sitzt schon im
+  richtigen Wagen, …", only when another coach would be wrong), none for the exit; the connecting
   train's reservation is the target; class from the ticket, else Settings → Reiseklasse, `TravelClass.number`; a seat
   saved on the train, `AppModel.savedSeats`, counts like a reservation): the arriving train's Wagenreihung at the transfer
   station (its departure there, from its run) against the connecting train's at the same platform
@@ -330,7 +331,8 @@ in `project.pbxproj`: new files join their target automatically.
   ending at a terminus has no Wagenreihung there: laid out from the buffer stops in its order at the stop before
   (`transfer(endingAt:…)`, `exit(endingAt:…)`). `CoachSequence.eva` is the EVA number it was asked for. At most
   two coaches per place and two places (`groups`, stairs at both of Köln Hbf's underpasses): „In Wagen 22–23 oder
-  31–32 einsteigen, um … auszusteigen", on the train „In Wagen … wechseln", with a seat „Vor der Ankunft in …".
+  31–32 einsteigen, um … auszusteigen", on the train „In Wagen … wechseln", with a seat „Vor der Ankunft in …". From a
+  seat, or on the train without one from the middle coach of the class (`aboard`, `middle(of:)`), only the nearest place.
 - `Transit/BahnDe/SavedSeat.swift` – a seat saved without a reservation (#410): by ride (train, first stop, planned
   departure; the feed's trip ID can change), `trainName` as reservations name it ("RE 3307" for a regional line's
   run), `offered(on:)` from 15 min before the departure until the arrival, `saving(_:for:in:)` keeps one per ride

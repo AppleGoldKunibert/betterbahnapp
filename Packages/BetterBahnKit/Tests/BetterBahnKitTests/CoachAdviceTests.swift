@@ -75,11 +75,18 @@ import Testing
         #expect(advice.text(boarded: true, namingStation: false) == "Vor der Ankunft in Wagen 31 oder 32 wechseln, um direkt an deinem Anschluss auszusteigen.")
         // The seat's coach is framed in the Wagenreihung too, so the note says which coaches.
         #expect(advice.legend == advice.text())
-        // A seat 8 m short of it or opposite it is close enough, and one in a coach the train lacks says nothing.
-        for coach in ["27", "31", "45"] {
-            #expect(CoachAdvice.transfer(arriving: arriving, departing: departing, platforms: hannover, station: "Hannover Hbf",
-                                         seat: (coach: coach, train: "ICE 100")) == nil)
+        // A seat 8 m short of it or opposite it is right already, and one in a coach the train lacks says nothing.
+        for coach in ["27", "31"] {
+            let right = try #require(CoachAdvice.transfer(arriving: arriving, departing: departing, platforms: hannover,
+                                                          station: "Hannover Hbf", seat: (coach: coach, train: "ICE 100")))
+            #expect(right.alreadyThere)
+            #expect(!right.walkBeforeArrival)
+            #expect(right.coaches == [coach])
+            #expect(right.text(boarded: true, namingStation: false) == "Du sitzt schon im richtigen Wagen, um direkt an deinem Anschluss auszusteigen.")
+            #expect(right.legend == "Du sitzt schon im richtigen Wagen, um in Hannover Hbf direkt an deinem Anschluss auszusteigen.")
         }
+        #expect(CoachAdvice.transfer(arriving: arriving, departing: departing, platforms: hannover, station: "Hannover Hbf",
+                                     seat: (coach: "45", train: "ICE 100")) == nil)
     }
 
     @Test func aimsForTheTravelClass() throws {
@@ -99,6 +106,9 @@ import Testing
         let arriving = train(numbers(21...27), from: 100, towardsEnd: false)
         let departing = train(numbers(31...42), from: 50, towardsEnd: true, name: "ICE 200")
         #expect(CoachAdvice.transfer(arriving: arriving, departing: departing, platforms: nil, station: "Fulda") == nil)
+        // Nor that a seat is right, when every one is.
+        #expect(CoachAdvice.transfer(arriving: arriving, departing: departing, platforms: nil, station: "Fulda",
+                                     seat: (coach: "24", train: "ICE 100")) == nil)
     }
 
     @Test func otherPlatformsDontCount() {
@@ -155,6 +165,22 @@ import Testing
                                                    platforms: platforms, station: "Köln Hbf"))
         #expect(advice.groups == [["22", "23"], ["31", "32"]])
         #expect(advice.text() == "In Wagen 22–23 oder 31–32 einsteigen, um in Köln Hbf direkt an der Treppe auszusteigen.")
+        // On the train, without a known seat, the stairs nearest the middle of the class (Wagen 27).
+        let aboard = try #require(CoachAdvice.exit(sequence: train(numbers(21...32), from: 10, towardsEnd: false),
+                                                   platforms: platforms, station: "Köln Hbf", aboard: true))
+        #expect(aboard.groups == [["22", "23"]])
+        #expect(aboard.text(boarded: true) == "In Wagen 22 oder 23 wechseln, um in Köln Hbf direkt an der Treppe auszusteigen.")
+        // From a seat towards the rear, the stairs there.
+        let seated = try #require(CoachAdvice.exit(sequence: train(numbers(21...32), from: 10, towardsEnd: false),
+                                                   platforms: platforms, station: "Köln Hbf", seat: (coach: "29", train: "ICE 100")))
+        #expect(seated.groups == [["31", "32"]])
+        #expect(seated.text() == "Vor der Ankunft in Wagen 31 oder 32 wechseln, um in Köln Hbf direkt an der Treppe auszusteigen.")
+    }
+
+    @Test func takesTheMiddleOfTheClass() {
+        let sequence = train(numbers(21...32), from: 10, towardsEnd: false, firstClass: ["30", "31", "32"])
+        #expect(CoachAdvice.middle(of: sequence.boardable(travelClass: 2))?.number == "25")
+        #expect(CoachAdvice.middle(of: sequence.boardable(travelClass: 1))?.number == "31")
     }
 
     @Test func placesStairsByTheWayTheTrainRuns() throws {
@@ -275,6 +301,14 @@ import Testing
                                               sequence: sequence, stops: { _ in run })
         #expect(reserved[journey.legs[0].id]?.coaches == ["31", "32"])
         #expect(reserved[journey.legs[0].id]?.walkBeforeArrival == true)
+        // One opposite it already: say so.
+        let opposite = await CoachAdvice.plan(for: journey, reservations: [journey.legs[0].id: (coach: "31", train: "ICE 100")], now: now,
+                                              sequence: sequence, stops: { _ in run })
+        #expect(opposite[journey.legs[0].id]?.alreadyThere == true)
+        // On the way without one, still the coaches opposite ICE 200.
+        let underway = await CoachAdvice.plan(for: journey, now: now.addingTimeInterval(90 * 60), sequence: sequence, stops: { _ in run })
+        #expect(underway[journey.legs[0].id]?.coaches == ["31", "32"])
+        #expect(underway[journey.legs[0].id]?.walkBeforeArrival == false)
         // One on ICE 200 is where to get to.
         let connecting = await CoachAdvice.plan(for: journey, reservations: [journey.legs[1].id: (coach: "35", train: "ICE 200")], now: now,
                                                 sequence: sequence, stops: { _ in run })

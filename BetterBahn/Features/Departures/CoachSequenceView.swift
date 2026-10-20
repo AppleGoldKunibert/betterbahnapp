@@ -136,10 +136,13 @@ struct CoachAdviceLabel: View {
     /// False next to the transfer, which says where already.
     var namesStation = true
 
-    static let symbol = "figure.walk.motion"
+    /// A check when your seat's coach is right already, else someone walking.
+    static func symbol(for advice: CoachAdvice) -> String {
+        advice.alreadyThere ? "checkmark.circle" : "figure.walk.motion"
+    }
 
     var body: some View {
-        Label(advice.text(boarded: boarded, namingStation: namesStation), systemImage: Self.symbol)
+        Label(advice.text(boarded: boarded, namingStation: namesStation), systemImage: Self.symbol(for: advice))
             .font(.caption)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
@@ -219,7 +222,7 @@ struct CoachSequencePanel: View {
                         }
                     }, suggestedCoachIDs: suggested)
                     if let coachAdvice, !suggested.isEmpty {
-                        Label(coachAdvice.legend, systemImage: CoachAdviceLabel.symbol)
+                        Label(coachAdvice.legend, systemImage: CoachAdviceLabel.symbol(for: coachAdvice))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
