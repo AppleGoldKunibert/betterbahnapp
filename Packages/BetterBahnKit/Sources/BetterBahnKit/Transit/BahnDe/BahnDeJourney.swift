@@ -283,9 +283,9 @@ extension BahnDeClient {
                            plannedDeparture: Date) async throws -> String {
         guard usesSharedCaches else { return try await findJourneyId(line: line, station: station, plannedDeparture: plannedDeparture) }
         // The journey ID of a run never changes, so resolving it (a departure board request) only
-        // happens once; the stops themselves are refreshed every few minutes.
+        // happens once, kept on the device; the stops themselves are refreshed every few minutes.
         let journeyKey = "\(ref.category) \(ref.number)|\(station.id)|\(plannedDeparture.timeIntervalSince1970)"
-        return try await Self.journeyIdCache.value(for: journeyKey, maxAge: 12 * 3600) {
+        return try await JourneyIdStore.shared.id(for: journeyKey) {
             try await self.findJourneyId(line: line, station: station, plannedDeparture: plannedDeparture)
         }
     }
@@ -348,7 +348,6 @@ extension BahnDeClient {
         return from...to
     }
 
-    private static let journeyIdCache = ExpiringCache<String>()
     private static let journeyCourseCache = ExpiringCache<JourneyCourse>()
     /// Matches `TimetablesClient.changesMaxAge`: short enough that a realtime refresh still sees
     /// changes soon, long enough that reopening the same view right after doesn't wait again.

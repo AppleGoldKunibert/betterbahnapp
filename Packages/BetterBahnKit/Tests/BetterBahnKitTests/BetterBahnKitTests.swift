@@ -4037,7 +4037,7 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [ProxyRoutingProtocol.self]
         let session = URLSession(configuration: config)
-        let proxy = BahnDeProxy(baseURL: URL(string: "https://\(proxyHost)")!)
+        let proxy = BahnDeProxy(baseURL: URL(string: "https://\(proxyHost)")!, retryDelay: .zero)
         return (BahnDeClient(http: HTTPClient(session: session), gate: BahnDeGate(), proxy: proxy),
                 proxy, session)
     }
@@ -4073,6 +4073,55 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(ProxyRoutingProtocol.count(query: "ServerDown", host: "betterbahn2.betterbahn.workers.dev") == 0)
     }
 
+    /// ICE 905, 2026-10-20: one 502 (the server cut a request off) paused every bahn.de request for 2 minutes.
+    @Test func triesAHiccupAgainBeforePausing() async throws {
+        ProxyRoutingProtocol.sequences.withLock { $0["proxy-hiccup.test"] = [502, 502] }
+        let (bahnDe, proxy, session) = client(proxyHost: "proxy-hiccup.test")
+        defer { session.invalidateAndCancel() }
+
+        #expect(try await bahnDe.searchStations("Hiccup").map(\.id) == ["8000105"])
+        #expect(ProxyRoutingProtocol.count(host: "proxy-hiccup.test") == 3)
+        #expect(await !proxy.gate.isBlocked)
+    }
+
+    @Test func pausesAfterThreeHiccups() async throws {
+        ProxyRoutingProtocol.answers.withLock { $0["proxy-broken.test"] = 502 }
+        let (bahnDe, proxy, session) = client(proxyHost: "proxy-broken.test")
+        defer { session.invalidateAndCancel() }
+
+        await #expect(throws: TransitError.rateLimited) { try await bahnDe.searchStations("Broken") }
+        #expect(ProxyRoutingProtocol.count(host: "proxy-broken.test") == 3)
+        #expect(await proxy.gate.isBlocked)
+    }
+
+    @Test func blocksArentTriedAgain() async throws {
+        ProxyRoutingProtocol.answers.withLock { $0["proxy-refused.test"] = 452 }
+        let (bahnDe, proxy, session) = client(proxyHost: "proxy-refused.test")
+        defer { session.invalidateAndCancel() }
+
+        await #expect(throws: TransitError.rateLimited) { try await bahnDe.searchStations("Refused") }
+        #expect(ProxyRoutingProtocol.count(host: "proxy-refused.test") == 1)
+        #expect(await proxy.gate.isBlocked)
+    }
+
+    @Test func aHiccupDoesntShortenABlocksPause() async {
+        let gate = BahnDeGate()
+        let url = BahnDeClient.baseURL.appending(path: "reiseloesung/abfahrten")
+        await gate.pause(after: TransitError.http(status: 452, body: nil), url: url)
+        await gate.pause(after: TransitError.http(status: 502, body: nil))
+        #expect(await gate.blockDescription?.contains("452") == true)
+        #expect(await gate.blockDescription?.contains("(…/abfahrten)") == true)
+    }
+
+    @Test func hiccupsAreTold() {
+        #expect(BahnDeClient.isHiccup(TransitError.http(status: 502, body: #"{"error": "upstream_unreachable"}"#)))
+        #expect(BahnDeClient.isHiccup(URLError(.networkConnectionLost)))
+        #expect(!BahnDeClient.isHiccup(TransitError.http(status: 503, body: #"{"error": "paused"}"#)))
+        #expect(!BahnDeClient.isHiccup(TransitError.rateLimited))
+        #expect(!BahnDeClient.isHiccup(TransitError.http(status: 403, body: nil)))
+        #expect(!BahnDeClient.isHiccup(URLError(.timedOut)))
+    }
+
     @Test func bahnDesOwnAnswersAndBlocksAreTold() {
         #expect(TransitError.http(status: 452, body: nil).isBlocked)
         #expect(!TransitError.http(status: 452, body: nil).isBahnDeAnswer)
@@ -4082,9 +4131,66 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
     }
 }
 
+/// #411: bahn.de's journey IDs survive a restart of the app, and a run bahn.de doesn't list isn't looked for
+/// on every refresh (each look is a departure board request).
+@Suite struct JourneyIdStoreTests {
+    actor Finds {
+        var count = 0
+        func add() { count += 1 }
+    }
+
+    let now = Date(timeIntervalSince1970: 1_792_445_760)
+
+    @Test func keepsIdsOverARestart() async throws {
+        let file = FileManager.default.temporaryDirectory.appending(path: "journey-ids-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let finds = Finds()
+        let first = try await JourneyIdStore(file: file).id(for: "ICE 905", now: now) {
+            await finds.add()
+            return "2|#VN#1"
+        }
+        #expect(first == "2|#VN#1")
+
+        let restarted = JourneyIdStore(file: file)
+        let again = try await restarted.id(for: "ICE 905", now: now.addingTimeInterval(3600)) {
+            await finds.add()
+            return "other"
+        }
+        #expect(again == "2|#VN#1")
+        #expect(await finds.count == 1)
+        #expect(await restarted.cached("ICE 905", now: now.addingTimeInterval(JourneyIdStore.maxAge + 1)) == nil)
+    }
+
+    @Test func remembersAMissingRunForAWhile() async {
+        let finds = Finds()
+        let store = JourneyIdStore(file: nil)
+        let find: @Sendable () async throws -> String = {
+            await finds.add()
+            throw TransitError.notFound("ICE 9911")
+        }
+        await #expect(throws: TransitError.notFound("ICE 9911")) { try await store.id(for: "k", now: now, find: find) }
+        await #expect(throws: TransitError.notFound("ICE 9911")) { try await store.id(for: "k", now: now.addingTimeInterval(60), find: find) }
+        #expect(await finds.count == 1)
+        let later = now.addingTimeInterval(JourneyIdStore.missingAge + 1)
+        await #expect(throws: TransitError.notFound("ICE 9911")) { try await store.id(for: "k", now: later, find: find) }
+        #expect(await finds.count == 2)
+    }
+
+    @Test func aFailureIsntRemembered() async throws {
+        let store = JourneyIdStore(file: nil)
+        await #expect(throws: TransitError.rateLimited) {
+            try await store.id(for: "k", now: now) { throw TransitError.rateLimited }
+        }
+        let id = try await store.id(for: "k", now: now) { "2|#VN#1" }
+        #expect(id == "2|#VN#1")
+    }
+}
+
 /// The Worker answers a station search; a test's server answers with the status in `answers` (by host).
 private final class ProxyRoutingProtocol: URLProtocol, @unchecked Sendable {
     static let answers = Mutex<[String: Int]>([:])
+    /// Statuses a host answers first, one per request, before `answers`.
+    static let sequences = Mutex<[String: [Int]]>([:])
     static let requests = Mutex<[URL]>([])
 
     static func count(query: String? = nil, host: String) -> Int {
@@ -4098,7 +4204,13 @@ private final class ProxyRoutingProtocol: URLProtocol, @unchecked Sendable {
     override func startLoading() {
         let url = request.url!
         Self.requests.withLock { $0.append(url) }
-        let status = Self.answers.withLock { $0[url.host() ?? ""] } ?? 200
+        let host = url.host() ?? ""
+        let next = Self.sequences.withLock { sequences -> Int? in
+            guard let first = sequences[host]?.first else { return nil }
+            sequences[host]?.removeFirst()
+            return first
+        }
+        let status = next ?? Self.answers.withLock { $0[host] } ?? 200
         let body = status == 200
             ? #"[{"extId":"8000105","name":"Frankfurt(Main)Hbf","type":"ST","products":["ICE"]}]"#
             : #"{"error":"paused"}"#
@@ -6607,6 +6719,60 @@ private final class TimetablesPlanProtocol: URLProtocol, @unchecked Sendable {
         let requested = HamburgSBahnLevelProtocol.requestedPaths.withLock { $0 }
         // Bus stops and other non-EVA ids in `meta` are never asked for.
         #expect(!requested.contains { $0.contains("140269") || $0.contains("692757") })
+    }
+}
+
+/// #411, ICE 905 on 2026-10-19: Transitous' stop for Berlin Südkreuz has no EVA number, and the offline list has
+/// two for its levels (8011113, 8089073). DB's delay must come without bahn.de's station search, which was paused.
+@Suite struct TimetablesMultiLevelStationTests {
+    @Test func findsTheDelayAtAStationWithSeveralLevelsWithoutBahnDe() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [SuedkreuzProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let timetables = TimetablesClient(http: HTTPClient(session: session))
+        let suedkreuz = Station(id: "de-DELFI_de:11000:900058101:3:54", name: "S Südkreuz Bhf (Berlin)",
+                                coordinate: Coordinate(latitude: 52.4757, longitude: 13.3655), evaNumber: nil, source: .transitous)
+        // 2026-10-19 23:36 in Berlin.
+        let departure = Date(timeIntervalSince1970: 1_792_445_760)
+        let stop = Stopover(station: suedkreuz, arrival: TimeInfo(planned: departure.addingTimeInterval(-120), actual: nil),
+                            departure: TimeInfo(planned: departure, actual: nil), arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+        let line = Line(name: "ICE 905", number: "905", product: .highSpeed, operatorName: nil)
+        let trip = Trip(id: "905", line: line, direction: "München Hbf", stopovers: [stop], cancelled: false, remarks: [], source: .transitous)
+
+        let live = await timetables.tripWithRealtime(trip, now: departure)
+
+        #expect(live.stopovers[0].departure?.actual == departure.addingTimeInterval(60))
+        #expect(live.stopovers[0].arrival?.actual == departure.addingTimeInterval(-60))
+        #expect(!SuedkreuzProtocol.requestedPaths.withLock { $0 }.contains { $0.contains("reiseloesung/orte") })
+    }
+}
+
+private final class SuedkreuzProtocol: URLProtocol, @unchecked Sendable {
+    static let requestedPaths = Mutex<[String]>([])
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+
+    override func startLoading() {
+        let path = request.url!.path
+        Self.requestedPaths.withLock { $0.append(path) }
+        // As IRIS answered (ids shortened); bahn.de's station search fails like during its pause.
+        let (status, body) = switch path {
+        case _ where path.hasSuffix("plan/8011113/261019/23"):
+            (200, #"<timetable station="Berlin Südkreuz"><s id="905-3"><tl c="ICE" n="905"/><ar pt="2610192334" pp="5"/><dp pt="2610192336" pp="5"/></s></timetable>"#)
+        case _ where path.hasSuffix("fchg/8011113"):
+            (200, #"<timetable station="Berlin Südkreuz"><s id="905-3" eva="8011113"><ar ct="2610192335"/><dp ct="2610192337"/></s></timetable>"#)
+        case _ where path.contains("reiseloesung/orte"):
+            (503, #"{"error":"paused"}"#)
+        default:
+            (200, "<timetable></timetable>")
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
     }
 }
 

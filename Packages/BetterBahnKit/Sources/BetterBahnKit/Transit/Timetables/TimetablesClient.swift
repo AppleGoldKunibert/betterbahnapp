@@ -209,8 +209,12 @@ public struct TimetablesClient: Sendable {
         return Dictionary(stops.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
+    /// A station with several levels (Leipzig Hbf, Berlin Südkreuz) has no single EVA number in the offline list;
+    /// its main one will do here, since `scheduledStop` tries the other levels too. Before, such a stop needed
+    /// bahn.de's station search on every refresh and lost DB's delays whenever bahn.de didn't answer (#411).
     private func eva(for station: Station) async -> String? {
         if let eva = station.evaNumber { return eva }
+        if let eva = StationNames.mainEvaNumber(for: station) { return eva }
         return try? await bahnDe.evaNumber(for: station)
     }
 
