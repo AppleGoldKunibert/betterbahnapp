@@ -38,8 +38,12 @@ with the `ArtifactData` tool (load it with ToolSearch).
   only when a push changes what a ticked step covers, set that step back to `status: "open"` with
   `retest: true`. Don't touch `status`, `note` or `checkedAt` otherwise: they are GoldKunibert's results.
 - A step with `status: "failed"` and a `note` is a bug report for that PR: read the PR's document before
-  working on it again, fix it, then set the step to `open` with `retest: true`.
-- When a PR is merged or closed, set `state` to `merged` or `closed` (several PRs at once in one `batch`).
+  working on it again, fix it, then set the step to `open` with `retest: true`. Its screenshots are in
+  `images`, a map of asset id → `{addedAt}` (`null` = removed); download each with the `Artifact` tool
+  (`action: "read"`, the test list's `url`, `path` = the asset id) and look at it with Read.
+- When a PR is merged or closed, set `state` to `merged` or `closed` (several PRs at once in one `batch`). The
+  page also reads draft, merged and merge conflicts from GitHub when GoldKunibert opens it and writes `state`
+  back.
 - "Tested PRs" in a release are the ones whose steps are all `passed`.
 
 ## Commit identity and signing
