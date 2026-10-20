@@ -629,6 +629,42 @@ struct PlannedPlatformNote: View {
     }
 }
 
+/// An arrow under the platform badge of the stop where the user gets off (#394): which side of the
+/// train the platform is on. Tapping it says so in words ("Ausstieg in Fahrtrichtung links").
+struct ExitSideArrow: View {
+    let side: ExitSide
+    @State private var showsNote = false
+
+    private var symbol: String { side == .left ? "arrow.left.to.line" : "arrow.right.to.line" }
+
+    var body: some View {
+        Button {
+            showsNote = true
+        } label: {
+            // Hugs its content: a wider frame would widen the column and push the badge off the
+            // other rows' badges.
+            Image(systemName: symbol)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 3)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(side.displayName)
+        .popover(isPresented: $showsNote) {
+            Label(side.displayName, systemImage: symbol)
+                .font(.subheadline.weight(.semibold))
+                .multilineTextAlignment(.center)
+                .padding()
+                // A fixed width, centred: the popover is wider than the text's own size anyway.
+                .frame(width: 300)
+                .fixedSize(horizontal: false, vertical: true)
+                .presentationCompactAdaptation(.popover)
+        }
+    }
+}
+
 struct InfoChip: View {
     let text: String
     let systemImage: String

@@ -17,6 +17,7 @@ enum ConnectionsRoute: Hashable {
     case search(ConnectionSearch)
     case journey(JourneyRoute)
     case pastTrips
+    case collection
 }
 
 nonisolated struct ConnectionSearch: Hashable, Codable {
@@ -133,13 +134,16 @@ struct ConnectionsView: View {
                     if !model.recentSearches.isEmpty {
                         recentSection
                     }
-                    NavigationLink(value: ConnectionsRoute.pastTrips) {
-                        Label("Vergangene Fahrten", systemImage: "clock.arrow.circlepath")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity)
+                    HStack(spacing: 10) {
+                        NavigationLink(value: ConnectionsRoute.pastTrips) {
+                            Label("Vergangene Fahrten", systemImage: "clock.arrow.circlepath")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.glass)
+                        .controlSize(.large)
+                        CollectionButton()
                     }
-                    .buttonStyle(.glass)
-                    .controlSize(.large)
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 32)
@@ -170,6 +174,8 @@ struct ConnectionsView: View {
                                       readOnly: journey.readOnly, title: journey.title, search: journey.search)
                 case .pastTrips:
                     PastTripsView()
+                case .collection:
+                    CollectionView()
                 }
             }
             .scrollDismissesKeyboard(.interactively)

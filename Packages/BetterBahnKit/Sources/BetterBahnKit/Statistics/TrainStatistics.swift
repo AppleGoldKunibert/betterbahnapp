@@ -14,17 +14,11 @@ public struct TrainStatistics: Sendable, Hashable, Decodable {
         set { testModeFlag.store(newValue, ordering: .relaxed) }
     }
     private static let testModeFlag = Atomic<Bool>(false)
-    /// Remembers in `UserDefaults` that the app was once launched with `-debugstats`.
-    static let testModeDefaultsKey = "debugStatsEnabled"
 
-    /// Turns on `testMode` when the app is launched with `-debugstats` (or `debugstats`). The choice is kept in
-    /// `defaults`, so it stays on for later launches without the argument until the app is deleted.
-    public static func enableTestModeIfRequested(arguments: [String] = ProcessInfo.processInfo.arguments,
-                                                 defaults: UserDefaults = .standard) {
-        if arguments.dropFirst().contains(where: { $0 == "-debugstats" || $0 == "debugstats" }) {
-            defaults.set(true, forKey: testModeDefaultsKey)
-        }
-        testMode = defaults.bool(forKey: testModeDefaultsKey)
+    /// Turns on `testMode` only for a launch with `-debugstats` (or `debugstats`); nothing is kept, so a
+    /// launch without the argument has it off again.
+    public static func enableTestModeIfRequested(arguments: [String] = ProcessInfo.processInfo.arguments) {
+        testMode = arguments.dropFirst().contains { $0 == "-debugstats" || $0 == "debugstats" }
     }
     /// A train counts as on time up to this many minutes late.
     public static let onTimeMinutes = 5
