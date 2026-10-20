@@ -18,8 +18,8 @@ public enum StationNames {
         /// Its EVA numbers, sorted, so the main station's comes first ("8011160" before Berlin Hbf's lower
         /// level "8098160").
         var evas: [String] = []
-        /// The stop area's DHID ("de:11000:900003201"), empty for the few without one.
-        var dhid = ""
+        /// Its stop area's DHID ("de:11000:900003201"); empty for the few without one.
+        var dhid: String = ""
     }
 
     /// A train stop of another railway's feed that is this German station under another name, e.g.
@@ -151,6 +151,18 @@ public enum StationNames {
         germanStation(for: station, in: index).flatMap { index.stations[$0].evas.first }
     }
 
+    /// The DHID of DB's station for `station` ("de:11000:900003201" for any level of Berlin Hbf), matched like
+    /// its name; nil abroad or when no DB station fits.
+    public static func dhid(for station: Station) -> String? {
+        dhid(for: station, in: index)
+    }
+
+    static func dhid(for station: Station, in index: Index) -> String? {
+        guard let number = germanStation(for: station, in: index) else { return nil }
+        let dhid = index.stations[number].dhid
+        return dhid.isEmpty ? nil : dhid
+    }
+
     static func evaNumber(for station: Station, in index: Index) -> String? {
         guard let number = germanStation(for: station, in: index) else { return nil }
         let evas = index.stations[number].evas
@@ -161,8 +173,7 @@ public enum StationNames {
     /// Berlin, "12060" for Barnim. From the stop ID, else from DB's station matched by EVA number or name and place;
     /// nil abroad. Codes of districts merged since then (Göttingen, Osterode, Eisenach) give today's.
     public static func district(of station: Station) -> String? {
-        let dhid = dhid(in: station.id) ?? germanStation(for: station, in: index).map { index.stations[$0].dhid }
-        guard let dhid, dhid.hasPrefix("de:") else { return nil }
+        guard let dhid = dhid(in: station.id) ?? dhid(for: station), dhid.hasPrefix("de:") else { return nil }
         let code = String(dhid.dropFirst(3).prefix(5))
         guard code.count == 5, code.allSatisfy(\.isNumber) else { return nil }
         return mergedDistricts[code] ?? code
