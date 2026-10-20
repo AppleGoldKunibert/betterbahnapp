@@ -1071,8 +1071,10 @@ extension BahnDeClient {
     /// inserted at its rightful place, so an unscheduled stop shows up in the UI instead of silently
     /// being missing — found by walking `stops` in bahn.de's own order and using every stop that
     /// *isn't* additional to re-anchor the position in `stopovers`, which already carries whatever
-    /// realtime overlay (delay, cancellation) a caller applied. `stopovers` is returned unchanged if
-    /// it's empty (stopovers were never loaded for this leg/trip) or `stops` has no Zusatzhalt at all.
+    /// realtime overlay (delay, cancellation) a caller applied. `stops` is the train's whole run, so a
+    /// Zusatzhalt before the first or after the last of `stopovers` (outside a leg) is left out.
+    /// `stopovers` is returned unchanged if it's empty (stopovers were never loaded for this leg/trip)
+    /// or `stops` has no Zusatzhalt at all.
     public static func inserting(_ stops: [JourneyStop], into stopovers: [Stopover]) -> [Stopover] {
         // Callers re-run this on every realtime refresh against a stop list that may already carry a
         // Zusatzhalt this same function spliced in last time — drop it first so it isn't duplicated.
@@ -1081,8 +1083,11 @@ extension BahnDeClient {
         var result: [Stopover] = []
         var index = 0
         for stop in stops {
+            // Past the last stopover: the rest of the run lies beyond this leg.
+            if index == stopovers.endIndex { break }
             if stop.isAdditional {
-                result.append(Stopover(stop))
+                // Not anchored yet: the train calls here before this leg (or trip) begins.
+                if index > 0 { result.append(Stopover(stop)) }
                 continue
             }
             guard let match = stopovers[index...].firstIndex(where: { isSamePlace(stop, $0.station) }) else { continue }
