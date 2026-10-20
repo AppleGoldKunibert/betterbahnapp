@@ -15,6 +15,14 @@ public enum TravelClass: String, Codable, CaseIterable, Sendable, Hashable {
         }
     }
 
+    /// 1 or 2, as tickets and the Wagenreihung count classes.
+    public var number: Int {
+        switch self {
+        case .first: 1
+        case .second: 2
+        }
+    }
+
     /// bahn.de's name for it in `auslastungsmeldungen`.
     var bahnDeKey: String {
         switch self {

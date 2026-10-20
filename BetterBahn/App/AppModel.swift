@@ -834,7 +834,8 @@ final class AppModel {
         for leg in journey.legs {
             if let seat = reservation(for: leg, in: journey) { reservations[leg.id] = (seat.coach, seat.trainName) }
         }
-        let travelClass = tickets(for: journey).lazy.compactMap(\.ticket.travelClass).first
+        // A saved ticket says which class; else the one picked in the settings.
+        let travelClass = tickets(for: journey).lazy.compactMap(\.ticket.travelClass).first ?? settings.travelClass.number
         return await CoachAdvice.plan(for: journey, reservations: reservations, travelClass: travelClass,
                                       sequence: { [weak self] request in try? await self?.coachSequence(for: request) },
                                       stops: { [weak self] leg in await self?.runStops(of: leg) })
