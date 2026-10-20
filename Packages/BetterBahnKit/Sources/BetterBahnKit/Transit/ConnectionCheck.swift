@@ -209,7 +209,9 @@ public struct JourneyRefresher: Sendable {
     /// (a delay seen earlier, a platform, a Zusatzhalt) stays.
     private func refresh(_ originalLeg: Leg, now: Date) async -> Leg {
         guard !Self.isLongOver(originalLeg, now: now) else { return originalLeg }
-        let leg = await refreshEnds(of: originalLeg, now: now)
+        var leg = await refreshEnds(of: originalLeg, now: now)
+        // Repaired here too, as bahn.de below isn't always asked or doesn't always answer.
+        leg.stopovers = BahnDeClient.droppingOutlyingZusatzhalte(from: leg.stopovers)
         guard !leg.isWalking, let run = Self.run(of: leg) else { return leg }
         let baseline = Self.run(of: Self.droppingInferredOnTime(originalLeg, now: now))
         let live = await LiveRun(provider: provider, timetables: timetables).refresh(run, baseline: baseline, wholeRun: false, now: now)

@@ -10,8 +10,8 @@ struct BetterBahnApp: App {
     @State private var model: AppModel
 
     init() {
-        // Train statistics from one run on, with their raw values (TrainStatisticsRows): launch once with
-        // `-debugstats`, stays on until the app is deleted.
+        // Train statistics from one run on, with their raw values (TrainStatisticsRows): only for launches with
+        // `-debugstats`.
         TrainStatistics.enableTestModeIfRequested()
         let model = AppModel()
         _model = State(initialValue: model)
@@ -209,7 +209,8 @@ struct RootView: View {
             case .route(let from, let to):
                 selectedTab = .connections
                 model.searchToOpen = ConnectionSearch(from: from, to: to, date: .now, isArrival: false,
-                                                      onlyValidTicket: model.settings.ticketFilterByDefault)
+                                                      onlyValidTicket: model.settings.ticketFilterByDefault,
+                                                      withBike: model.settings.searchWithBike)
             }
             return
         }

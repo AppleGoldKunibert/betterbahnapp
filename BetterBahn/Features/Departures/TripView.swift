@@ -281,6 +281,8 @@ struct TripContent: View {
     /// Where a train run by several railways changes hands (stopover ID → operators), e.g. DB at the
     /// start and at Bad Schandau, ČD at Děčín; empty for one railway throughout.
     @State private var operatorStops: [String: [String]] = [:]
+    /// Which side the platform is on at the picked exit (#394), if the offline list knows.
+    @State private var exitSide: ExitSide?
     /// What past runs of this train say at the stops that matter (#316).
     @State private var statistics = TrainStatisticsModel()
     /// The platform changes of the stops ahead, shown at the stop 30 minutes before it and always at the next one.
@@ -426,6 +428,11 @@ struct TripContent: View {
             await statistics.load(line: trip.line, stops: statisticsStops, date: trip.stopovers.first?.departure?.planned ?? .now,
                                   bahnDe: model.provider.bahnDe)
         }
+        .task(id: [exitID ?? "", trip.stopovers.compactMap { $0.arrivalPlatform?.best }.joined(separator: "|")]) {
+            guard let index = exitIndex else { exitSide = nil; return }
+            let trip = trip
+            exitSide = await Task.detached(priority: .userInitiated) { ExitSides.side(leaving: trip, at: index) }.value
+        }
     }
 
     /// Loads the lap before / after the one shown, at the top / bottom of the stops.
@@ -523,7 +530,12 @@ struct TripContent: View {
                     .buttonStyle(.plain)
                     .disabled(!interactive)
 
-                    platformButton(stop)
+                    VStack(spacing: 2) {
+                        platformButton(stop)
+                        if isExit, let exitSide {
+                            ExitSideArrow(side: exitSide)
+                        }
+                    }
                 }
                 if sequenceStopID == stop.id, let request = coachSequenceRequest(at: stop) {
                     CoachSequencePanel(request: request)

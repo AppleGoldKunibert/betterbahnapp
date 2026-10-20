@@ -181,7 +181,8 @@ public struct LiveRun: Sendable {
                 run.stopovers[index].departurePlatform = known.departurePlatform
             }
         }
-        run = run.keepingAdditionalStops(of: baseline.stopovers)
+        // A Zusatzhalt before the run's first or after its last regular stop was never part of it.
+        run.stopovers = BahnDeClient.droppingOutlyingZusatzhalte(from: run.keepingAdditionalStops(of: baseline.stopovers).stopovers)
         if baseline.line?.nightRail == true, run.line != nil { run.line?.nightRail = true }
         return run
     }

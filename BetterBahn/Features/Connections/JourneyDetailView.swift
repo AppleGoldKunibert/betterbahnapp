@@ -181,6 +181,7 @@ struct JourneyDetailView: View {
         }
         .padding(.horizontal)
         .padding(.bottom, 32)
+        .environment(\.bikeMode, model.settings.bike(searchingWithBike: replanSearch?.withBike ?? model.settings.searchWithBike))
     }
 
     /// Which tight transfers the incoming train usually misses (#316); not for a journey that is over.
@@ -589,7 +590,10 @@ struct LegCard: View {
     @State private var showFullTrip = false
     /// What past runs of this train say (#316), shown in the details.
     @State private var statistics = TrainStatisticsModel()
+    /// Which side the platform is on where this leg ends (#394), if the offline list knows.
+    @State private var exitSide: ExitSide?
     @Environment(AppModel.self) private var model
+    @Environment(\.bikeMode) private var bikeMode
 
     private var color: Color { leg.line?.color ?? .gray }
     private var statisticsStops: [StatisticsStop] {
@@ -607,7 +611,7 @@ struct LegCard: View {
             return (stop.station.displayName, hint)
         }
     }
-    private var intermediate: [Stopover] { Array(leg.stopovers.dropFirst().dropLast()) }
+    private var intermediate: [Stopover] { Array(BahnDeClient.droppingOutlyingZusatzhalte(from: leg.stopovers).dropFirst().dropLast()) }
 
     var body: some View {
         Card {
@@ -706,7 +710,7 @@ struct LegCard: View {
 
                     TimelineNode(kind: .major, color: color, lineAbove: color) {
                         stationRow(time: leg.arrival, name: leg.destination.displayName, platform: leg.arrivalPlatform,
-                                   weather: arrivalWeather)
+                                   weather: arrivalWeather, exitSide: exitSide)
                     }
 
                     // Between the stops and "Mehr"; unfolds by itself around the departure.
@@ -731,6 +735,10 @@ struct LegCard: View {
 
                 if let reservation {
                     ReservationRow(reservation: reservation, request: BahnDeClient.formationRequest(for: leg))
+                }
+
+                if let bikeMode, !leg.cancelled {
+                    BikeTransportRow(leg: leg, bike: bikeMode)
                 }
 
                 if leg.line?.operatorName != nil || statistics.rows != nil || onReplace != nil || onReplan != nil || onCheckin != nil || onShowCheckin != nil {
@@ -786,9 +794,15 @@ struct LegCard: View {
         .task(id: leg.id) {
             await statistics.load(line: leg.line, stops: statisticsStops, date: leg.departure.planned, bahnDe: model.provider.bahnDe)
         }
+        .task(id: [leg.id, leg.arrivalPlatform?.best ?? ""]) {
+            // The list loads and the lookup runs off the main thread.
+            let leg = leg
+            exitSide = await Task.detached(priority: .userInitiated) { ExitSides.side(leaving: leg) }.value
+        }
     }
 
-    private func stationRow(time: TimeInfo, name: String, platform: PlatformInfo?, weather: LegArrivalWeather? = nil) -> some View {
+    private func stationRow(time: TimeInfo, name: String, platform: PlatformInfo?, weather: LegArrivalWeather? = nil,
+                            exitSide: ExitSide? = nil) -> some View {
         HStack(alignment: .top, spacing: 10) {
             TimeStack(time: time, cancelled: leg.cancelled, font: .headline)
                 .frame(width: 54, alignment: .leading)
@@ -803,7 +817,13 @@ struct LegCard: View {
                 }
             }
             Spacer()
-            PlatformBadge(platform: platform)
+            VStack(spacing: 2) {
+                PlatformBadge(platform: platform)
+                if let exitSide {
+                    ExitSideArrow(side: exitSide)
+                        .transition(.fold)
+                }
+            }
         }
     }
 }

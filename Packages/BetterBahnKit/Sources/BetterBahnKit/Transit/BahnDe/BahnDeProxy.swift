@@ -17,10 +17,16 @@ public struct BahnDeProxy: Sendable {
     let baseURL: URL
     /// Leaves the server alone for a while after it failed: blocked by bahn.de, down or paused.
     let gate: BahnDeGate
+    /// How long to wait before trying a hiccup again, times the attempt (`BahnDeClient.isHiccup`).
+    let retryDelay: Duration
 
-    public init(baseURL: URL, gate: BahnDeGate = BahnDeGate()) {
+    /// Tries a request this often when it hits a hiccup, before every request pauses.
+    static let attempts = 3
+
+    public init(baseURL: URL, gate: BahnDeGate = BahnDeGate(), retryDelay: Duration = .milliseconds(500)) {
         self.baseURL = baseURL
         self.gate = gate
+        self.retryDelay = retryDelay
     }
 
     /// The server's address for a request to the Worker (same path and query), nil for anything else.

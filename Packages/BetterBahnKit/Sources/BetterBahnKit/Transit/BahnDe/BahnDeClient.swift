@@ -659,25 +659,39 @@ public struct BahnDeClient: Sendable {
         ]
     }
 
+    /// Until when every bahn.de request pauses (`BahnDeGate`), so a view can ask again after; nil while none does.
+    public func pausedUntil() async -> Date? {
+        await (proxy?.gate ?? gate).pausedUntil
+    }
+
     /// GET from bahn.de. The app asks only our server (`BahnDeProxy`): bahn.de refuses every other way in since
-    /// October 2026, the Worker's included. While the server fails (down, paused, refused) it is left alone for
-    /// a while and every request throws `rateLimited`, so the app says the live data isn't available.
+    /// October 2026, the Worker's included. A hiccup (`isHiccup`: a 502, a dropped connection) is tried again up
+    /// to `BahnDeProxy.attempts` times. While the server fails (down, paused, refused) it is left alone for a
+    /// while and every request throws `rateLimited`, so the app says the live data isn't available.
     /// Without a server (tests) the request goes to `url` itself, with `gate`'s cooldown after a block.
     func get<T: Decodable>(_ url: URL, as type: T.Type) async throws -> T {
         if let proxy, let proxied = proxy.url(for: url) {
-            if await proxy.gate.isBlocked { throw TransitError.rateLimited }
-            do {
-                return try await http.get(proxied, as: type, headers: Self.headers(), auth: auth)
-            } catch let error as TransitError where error.isBahnDeAnswer {
-                // bahn.de's own answer (404 etc.).
-                throw error
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch let error as URLError where error.code == .cancelled {
-                throw error
-            } catch {
-                await proxy.gate.pause(after: error, url: url)
-                throw TransitError.rateLimited
+            var attempt = 1
+            while true {
+                if await proxy.gate.isBlocked { throw TransitError.rateLimited }
+                do {
+                    return try await http.get(proxied, as: type, headers: Self.headers(), auth: auth)
+                } catch let error as TransitError where error.isBahnDeAnswer {
+                    // bahn.de's own answer (404 etc.).
+                    throw error
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch let error as URLError where error.code == .cancelled {
+                    throw error
+                } catch {
+                    if attempt < BahnDeProxy.attempts, Self.isHiccup(error) {
+                        try await Task.sleep(for: proxy.retryDelay * attempt)
+                        attempt += 1
+                        continue
+                    }
+                    await proxy.gate.pause(after: error, url: url)
+                    throw TransitError.rateLimited
+                }
             }
         }
         if await gate.isBlocked { throw TransitError.rateLimited }
@@ -686,6 +700,23 @@ public struct BahnDeClient: Sendable {
         } catch let error as TransitError {
             await gate.report(error)
             throw error.isBlocked ? TransitError.rateLimited : error
+        }
+    }
+}
+
+extension BahnDeClient {
+    /// A failure of our server or the connection that is likely gone a moment later: a 5xx (a 502 when
+    /// the server cut a request off), a dropped or refused connection. Not bahn.de refusing us (403, 429,
+    /// 452: asking again makes it worse), not the server's own pause (a 503 "paused", it is refused itself)
+    /// and not a timeout, which already waited long.
+    static func isHiccup(_ error: Error) -> Bool {
+        switch error {
+        case TransitError.http(let status, let body):
+            (500..<600).contains(status) && !(status == 503 && body?.contains("\"paused\"") == true)
+        case let error as URLError:
+            [.networkConnectionLost, .cannotConnectToHost, .badServerResponse, .secureConnectionFailed].contains(error.code)
+        default:
+            false
         }
     }
 }
@@ -704,6 +735,9 @@ public actor BahnDeGate {
 
     /// Whether bahn.de is currently being left alone after a block.
     public var isBlocked: Bool { blockedUntil.map { $0 > .now } ?? false }
+
+    /// Until when bahn.de is being left alone; nil while it isn't.
+    public var pausedUntil: Date? { isBlocked ? blockedUntil : nil }
 
     /// Why bahn.de is being left alone and until when; nil while it isn't.
     public var blockDescription: String? {
@@ -725,20 +759,35 @@ public actor BahnDeGate {
             report(error, url: url)
             return
         }
-        blockedUntil = Date.now.addingTimeInterval(Self.failurePause)
-        let time = Date.now.formatted(Date.FormatStyle(timeZone: BahnDeClient.berlin).hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
-        blockReason = "\((error as? LocalizedError)?.errorDescription ?? String(describing: error)) um \(time)"
+        let answer = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+        extend(by: Self.failurePause, reason: "\(answer) um \(Self.time(.now))\(Self.path(url))")
     }
 
     func report(_ error: TransitError, url: URL? = nil) {
         guard error.isBlocked else { return }
-        blockedUntil = Date.now.addingTimeInterval(Self.cooldown)
-        let time = Date.now.formatted(Date.FormatStyle(timeZone: BahnDeClient.berlin).hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
         let answer = switch error {
         case .http(let status, let body): "\(status)\(body.map { " " + Self.excerpt($0) } ?? "")"
         default: "429"
         }
-        blockReason = "\(answer) um \(time)\(url.map { " (…/\($0.lastPathComponent))" } ?? "")"
+        extend(by: Self.cooldown, reason: "\(answer) um \(Self.time(.now))\(Self.path(url))")
+    }
+
+    /// Pauses for `duration` from now, unless a longer pause is already running: a hiccup right after a block
+    /// must not cut the block's cooldown short.
+    private func extend(by duration: TimeInterval, reason: String) {
+        let until = Date.now.addingTimeInterval(duration)
+        guard until > blockedUntil ?? .distantPast else { return }
+        blockedUntil = until
+        blockReason = reason
+    }
+
+    private static func time(_ date: Date) -> String {
+        date.formatted(Date.FormatStyle(timeZone: BahnDeClient.berlin).hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+    }
+
+    /// " (…/vehicle-sequence)": what the request that started the pause asked for.
+    private static func path(_ url: URL?) -> String {
+        url.map { " (…/\($0.lastPathComponent))" } ?? ""
     }
 
     /// The start of an error body on one line, e.g. bahn.de's `{"code":"OPS_BLOCKED",…}`.
