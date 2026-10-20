@@ -276,6 +276,14 @@ in `project.pbxproj`: new files join their target automatically.
   "Plan-Wagenreihung · Aktuelle nicht verfügbar" / "Aktuelle Wagenreihung nicht verfügbar". No other way to bahn.de:
   the Worker and the phone's hidden browser were refused. `requiresReservation(for:)` (attribute `RP`, also other
   railways via `lookupReference`; shares the `journeyCourse` cache).
+- `Transit/BahnDe/Occupancy.swift` – DB's occupancy forecast (#399): the journey details' `auslastungsmeldungen` per stop
+  (`JourneyStop.occupancy`, per `TravelClass`; a stop's level is for the train leaving it, level 0 = none) →
+  `OccupancyForecast` (highest level from boarding up to the exit). Levels and texts as bahn.de's own `auslastungstexte`:
+  1 gering, 2 mittel, 3 hoch, 4/99 außergewöhnlich hoch (`OccupancyLevel`). `occupancy(for: leg)` / `(for: trip, boarding:exit:)`
+  share the `journeyCourse` cache (30 min old is fine); `cachedOccupancy(for:)` never asks bahn.de (search results).
+  Shown for the class in Settings → Reiseklasse (`AppSettings.travelClass`, default 2nd, synced): `OccupancyButton`
+  (icon, tap → words) by the train name in `LegCard` and `TripContent`, `OccupancyDetails` in `LegCard` "Mehr",
+  `OccupancyIcon` in `JourneyCard`. DEBUG builds log the raw field per stop (category `occupancy`).
 - `Transit/BahnDe/SeatMap.swift` – DB's seat map per ICE coach (#365, `Resources/SeatMaps.json`): coach numbers, type,
   each seat number's box as fractions of the drawing (lower coach numbers on the left on every sheet).
   `CoachSequence.Group.seatMapSheet` per trainset from its UIC numbers (`TrainModel.detectSubtype`) and coach count

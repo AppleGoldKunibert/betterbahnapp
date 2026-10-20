@@ -796,4 +796,10 @@ actor ExpiringCache<Value: Sendable> {
         entries[key] = Entry(date: .now, value: value)
         return value
     }
+
+    /// The stored value if it is younger than `maxAge`; never fetches.
+    func cachedValue(for key: String, maxAge: TimeInterval) -> Value? {
+        guard let entry = entries[key], Date.now.timeIntervalSince(entry.date) < maxAge else { return nil }
+        return entry.value
+    }
 }
