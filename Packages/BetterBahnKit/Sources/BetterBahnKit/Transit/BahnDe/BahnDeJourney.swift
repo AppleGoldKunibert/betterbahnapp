@@ -290,9 +290,8 @@ extension BahnDeClient {
                            plannedDeparture: Date) async throws -> String {
         guard usesSharedCaches else { return try await findJourneyId(line: line, station: station, plannedDeparture: plannedDeparture) }
         // The journey ID of a run never changes, so resolving it (a departure board request) only
-        // happens once; the stops themselves are refreshed every few minutes.
-        return try await Self.journeyIdCache.value(for: Self.journeyKey(ref, station: station, plannedDeparture: plannedDeparture),
-                                                   maxAge: 12 * 3600) {
+        // happens once, kept on the device; the stops themselves are refreshed every few minutes.
+        return try await JourneyIdStore.shared.id(for: Self.journeyKey(ref, station: station, plannedDeparture: plannedDeparture)) {
             try await self.findJourneyId(line: line, station: station, plannedDeparture: plannedDeparture)
         }
     }
@@ -311,8 +310,7 @@ extension BahnDeClient {
     /// or they are older than `maxAge`).
     func cachedJourneyCourse(line: Line?, station: Station, plannedDeparture: Date, maxAge: TimeInterval) async -> JourneyCourse? {
         guard usesSharedCaches, let ref = Self.lookupReference(for: line),
-              let id = await Self.journeyIdCache.cachedValue(for: Self.journeyKey(ref, station: station, plannedDeparture: plannedDeparture),
-                                                             maxAge: 12 * 3600)
+              let id = await JourneyIdStore.shared.cached(Self.journeyKey(ref, station: station, plannedDeparture: plannedDeparture))
         else { return nil }
         return await Self.journeyCourseCache.cachedValue(for: id, maxAge: maxAge)
     }
@@ -369,7 +367,6 @@ extension BahnDeClient {
         return from...to
     }
 
-    private static let journeyIdCache = ExpiringCache<String>()
     private static let journeyCourseCache = ExpiringCache<JourneyCourse>()
     /// Matches `TimetablesClient.changesMaxAge`: short enough that a realtime refresh still sees
     /// changes soon, long enough that reopening the same view right after doesn't wait again.
@@ -1098,8 +1095,10 @@ extension BahnDeClient {
     /// inserted at its rightful place, so an unscheduled stop shows up in the UI instead of silently
     /// being missing — found by walking `stops` in bahn.de's own order and using every stop that
     /// *isn't* additional to re-anchor the position in `stopovers`, which already carries whatever
-    /// realtime overlay (delay, cancellation) a caller applied. `stopovers` is returned unchanged if
-    /// it's empty (stopovers were never loaded for this leg/trip) or `stops` has no Zusatzhalt at all.
+    /// realtime overlay (delay, cancellation) a caller applied. `stops` is the train's whole run, so a
+    /// Zusatzhalt before the first or after the last of `stopovers` (outside a leg) is left out.
+    /// `stopovers` is returned unchanged if it's empty (stopovers were never loaded for this leg/trip)
+    /// or `stops` has no Zusatzhalt at all.
     public static func inserting(_ stops: [JourneyStop], into stopovers: [Stopover]) -> [Stopover] {
         // Callers re-run this on every realtime refresh against a stop list that may already carry a
         // Zusatzhalt this same function spliced in last time — drop it first so it isn't duplicated.
@@ -1108,8 +1107,11 @@ extension BahnDeClient {
         var result: [Stopover] = []
         var index = 0
         for stop in stops {
+            // Past the last stopover: the rest of the run lies beyond this leg.
+            if index == stopovers.endIndex { break }
             if stop.isAdditional {
-                result.append(Stopover(stop))
+                // Not anchored yet: the train calls here before this leg (or trip) begins.
+                if index > 0 { result.append(Stopover(stop)) }
                 continue
             }
             guard let match = stopovers[index...].firstIndex(where: { isSamePlace(stop, $0.station) }) else { continue }
@@ -1119,6 +1121,14 @@ extension BahnDeClient {
         }
         result.append(contentsOf: stopovers[index...])
         return result
+    }
+
+    /// `stopovers` without the Zusatzhalte before its first or after its last regular stop: journeys
+    /// saved before `inserting(_:into:)` kept to a leg's own stops carry ones from the train's whole run.
+    public static func droppingOutlyingZusatzhalte(from stopovers: [Stopover]) -> [Stopover] {
+        guard let first = stopovers.firstIndex(where: { !$0.isAdditional }),
+              let last = stopovers.lastIndex(where: { !$0.isAdditional }) else { return stopovers }
+        return Array(stopovers[first...last])
     }
 
     // MARK: Berlin local time
