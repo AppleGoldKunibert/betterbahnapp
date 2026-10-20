@@ -210,7 +210,8 @@ struct RootView: View {
             case .route(let from, let to):
                 selectedTab = .connections
                 model.searchToOpen = ConnectionSearch(from: from, to: to, date: .now, isArrival: false,
-                                                      onlyValidTicket: model.settings.ticketFilterByDefault)
+                                                      onlyValidTicket: model.settings.ticketFilterByDefault,
+                                                      withBike: model.settings.searchWithBike)
             }
             return
         }

@@ -193,6 +193,7 @@ struct JourneyDetailView: View {
         }
         .padding(.horizontal)
         .padding(.bottom, 32)
+        .environment(\.bikeMode, model.settings.bike(searchingWithBike: replanSearch?.withBike ?? model.settings.searchWithBike))
     }
 
     /// Where to board for each tight transfer and the exit (#383); not for old plans or a journey that is over.
@@ -633,6 +634,7 @@ struct LegCard: View {
     /// DB's occupancy forecast for this ride (#399): an icon by the name, the words in the details.
     @State private var occupancy: OccupancyForecast?
     @Environment(AppModel.self) private var model
+    @Environment(\.bikeMode) private var bikeMode
 
     private var color: Color { leg.line?.color ?? .gray }
     private var statisticsStops: [StatisticsStop] {
@@ -784,6 +786,10 @@ struct LegCard: View {
 
                 if let reservation {
                     ReservationRow(reservation: reservation, request: BahnDeClient.formationRequest(for: leg))
+                }
+
+                if let bikeMode, !leg.cancelled {
+                    BikeTransportRow(leg: leg, bike: bikeMode)
                 }
 
                 if leg.line?.operatorName != nil || occupancy != nil || statistics.rows != nil || onReplace != nil || onReplan != nil || onCheckin != nil || onShowCheckin != nil {

@@ -234,7 +234,8 @@ struct JourneyReplanSheet: View {
     /// The remaining route as a normal search, for the sheets that take one.
     private var continuationSearch: ConnectionSearch {
         ConnectionSearch(from: exitStation, to: target, via: viaRows.waypoints(), date: exitArrival,
-                         isArrival: false, onlyValidTicket: onlyValidTicket, products: products, maxTransfers: maxTransfers)
+                         isArrival: false, onlyValidTicket: onlyValidTicket, products: products, maxTransfers: maxTransfers,
+                         withBike: search?.withBike ?? model.settings.searchWithBike)
     }
 
     // MARK: Configure
