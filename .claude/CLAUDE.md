@@ -55,6 +55,9 @@ iOS app (SwiftUI, iOS 26, Swift 6) for German train travel. UI text is German, c
   - Komplett neues, unabhängiges Feature: per AskUserQuestion fragen – neuer Branch von `indevelopment`
     oder auf dem aktuellen Branch weiter.
 - Issue ohne Label: `bug` oder `enhancement` vergeben, wenn eindeutig, sonst ohne Label lassen.
+- Wer mit einem Issue anfängt, setzt das Label `in progress` (der Workflow „Label done issues" tauscht es beim
+  Merge gegen `ready`). Mehrere Issues auf einmal startet `/issues-starten 420 421` (oder ohne Nummern: alle
+  neuen), je eine Session pro Issue.
 - Nach dem Push **sofort, ohne Nachfrage**, einen Draft-PR in den Ziel-Branch öffnen (`indevelopment`, oder
   der Basis-Feature-Branch von oben) – diese Projektregel hat Vorrang vor „keinen PR ohne ausdrückliche Bitte".
   CI-Fehler beheben, bis alles grün ist, dann auf „ready" stellen. Dem Nutzer den Branch nennen
