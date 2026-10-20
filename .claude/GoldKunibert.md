@@ -16,6 +16,8 @@ CLAUDE.md still applies; this file only adds GoldKunibert's own preferences and 
   `externaltester` and redeploying the `betterbahn` Worker via the Cloudflare dashboard are GoldKunibert's calls.
 - When bahn.de data is needed (see "Privacy and data sources" in CLAUDE.md), give GoldKunibert the complete
   `curl_cffi` command to run on the Mac and ask for the output to be pasted.
+- GoldKunibert tests only on the iPhone: write "What to test" (in the reply and in the test list) for the
+  iPhone, not the Simulator. A step that needs a launch argument says to run the debug build from Xcode on it.
 
 ## Test list
 
@@ -26,11 +28,11 @@ with the `ArtifactData` tool (load it with ToolSearch).
 - One document per PR in collection `prs`, id `pr<number>` (`pr413`): `number`, `title`, `branch`, `issues`
   (numbers), `state` (`draft`, `open`, `merged` or `closed`), `updatedAt` (ISO 8601), `sessions` (links of the
   chats that worked on the PR, oldest first) and `steps`, a map `s1`, `s2`, … of
-  `{order, where, text, expect, status, note, checkedAt, retest}`. Your own chat link is
+  `{order, text, expect, status, note, checkedAt, retest}`. Your own chat link is
   `https://claude.ai/code/<id>` with the id from `get_session` (claude-code-remote, without `session_id`); add it
-  when it isn't in `sessions` yet (`update` replaces the whole array). `where` is `Simulator`, `iPhone` or
-  `Simulator oder iPhone`; `text` (what to do, starting from where in the app) and `expect` (what should happen)
-  are German. A new step is `status: "open"`, `note: ""`, `checkedAt: null`, `retest: false`.
+  when it isn't in `sessions` yet (`update` replaces the whole array). `text` (what to do, starting from where in
+  the app) and `expect` (what should happen) are German. A new step is `status: "open"`, `note: ""`,
+  `checkedAt: null`, `retest: false`.
 - When you open a PR, write the steps of your "What to test" there (`set`). After later pushes, `update` with
   the `if_version` you read: add steps for new behaviour, keep `title`, `state` and `updatedAt` current, and
   only when a push changes what a ticked step covers, set that step back to `status: "open"` with
