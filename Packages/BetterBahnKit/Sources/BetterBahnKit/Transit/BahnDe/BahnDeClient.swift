@@ -301,6 +301,19 @@ public struct BahnDeClient: Sendable {
         return request
     }
 
+    /// The request at the last stop `leg`'s train left, once it departs nowhere ahead before you get off (the
+    /// last stretch to a terminus), so the Wagenreihung stays shown until the arrival; nil otherwise.
+    public static func lastFormationRequest(for leg: Leg, now: Date = .now) -> FormationRequest? {
+        guard !leg.cancelled, now < leg.arrival.best, formationRequest(for: leg, now: now, lookahead: nil) == nil else { return nil }
+        let stops = [(station: leg.origin, departure: Optional(leg.departure))]
+            + leg.stopovers.filter { !$0.cancelled }.map { (station: $0.station, departure: $0.departure) }
+        guard let last = stops.last(where: { $0.departure != nil }), let departure = last.departure else { return nil }
+        var request = formationRequest(line: leg.line, stops: [last], now: departure.best, lookahead: nil)
+        request?.tripId = leg.tripId
+        request?.tripSource = leg.source
+        return request
+    }
+
     public static func formationRequest(for trip: Trip, now: Date = .now, lookahead: TimeInterval? = formationLookahead) -> FormationRequest? {
         formationRequest(line: trip.line, stops: trip.stopovers.filter { !$0.cancelled }.map { (station: $0.station, departure: $0.departure) },
                          wholeRun: true, now: now, lookahead: lookahead)

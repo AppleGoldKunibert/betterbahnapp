@@ -30,8 +30,10 @@ struct CoachSequenceDisclosure: View {
         self.reservation = reservation
         self.coachAdvice = coachAdvice
         seatLeg = savesSeat ? leg : nil
-        request = BahnDeClient.formationRequest(for: leg)
-        plannedRequest = BahnDeClient.formationRequest(for: leg, lookahead: nil)
+        // On the last stretch to a terminus, the one from the last stop it left.
+        let last = BahnDeClient.lastFormationRequest(for: leg)
+        request = BahnDeClient.formationRequest(for: leg) ?? last
+        plannedRequest = BahnDeClient.formationRequest(for: leg, lookahead: nil) ?? last
         departure = leg.departure.best
     }
 

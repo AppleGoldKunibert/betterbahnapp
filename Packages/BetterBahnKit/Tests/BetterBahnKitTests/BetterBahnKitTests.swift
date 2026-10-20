@@ -3992,6 +3992,33 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(BahnDeClient.formationRequest(line: regional, stops: stops, now: now) == nil)
     }
 
+    /// ICE 9913 to Frankfurt (Main) Hbf, a terminus: once it left the stop before, it departs nowhere ahead, and
+    /// the Wagenreihung vanished on the last stretch. It stays, from the stop it left last, until the arrival.
+    @Test func lastFormationRequestKeepsTheLastStretch() throws {
+        let now = try #require(JSONDecoding.parseISODate("2026-09-29T12:00:00Z"))
+        let at = { (minutes: Double) in TimeInfo(planned: now.addingTimeInterval(minutes * 60), actual: nil) }
+        let mannheim = station("8000244", "Mannheim Hbf"), weinheim = station("8000377", "Weinheim"),
+            frankfurt = station("8000105", "Frankfurt (Main) Hbf")
+        var leg = Leg(origin: mannheim, destination: frankfurt, departure: at(-30), arrival: at(15),
+                      departurePlatform: nil, arrivalPlatform: nil, tripId: "9913",
+                      line: Line(name: "ICE 9913", number: "9913", product: .highSpeed, operatorName: nil),
+                      direction: nil, isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .bahnDe)
+        leg.stopovers = [Stopover(station: mannheim, arrival: nil, departure: at(-30), arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+                         Stopover(station: weinheim, arrival: at(-12), departure: at(-10), arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+                         Stopover(station: frankfurt, arrival: at(15), departure: nil, arrivalPlatform: nil, departurePlatform: nil, cancelled: false)]
+        #expect(BahnDeClient.formationRequest(for: leg, now: now) == nil)
+        let last = try #require(BahnDeClient.lastFormationRequest(for: leg, now: now))
+        #expect(last.station.name == "Weinheim")
+        #expect(last.plannedDeparture == now.addingTimeInterval(-10 * 60))
+        #expect(last.tripId == "9913")
+        // Before that the next stop's is the one, and after the arrival there's none.
+        #expect(BahnDeClient.lastFormationRequest(for: leg, now: now.addingTimeInterval(-15 * 60)) == nil)
+        #expect(BahnDeClient.lastFormationRequest(for: leg, now: now.addingTimeInterval(20 * 60)) == nil)
+        // Without its stops, the departure where you got on.
+        leg.stopovers = []
+        #expect(BahnDeClient.lastFormationRequest(for: leg, now: now)?.station.name == "Mannheim Hbf")
+    }
+
     @Test func browserHeadersLikeDBRIS() {
         let headers = BahnDeClient.headers()
         #expect(headers["Origin"] == "https://www.bahn.de")
