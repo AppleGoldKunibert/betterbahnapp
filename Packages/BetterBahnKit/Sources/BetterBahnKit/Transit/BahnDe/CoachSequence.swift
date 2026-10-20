@@ -145,6 +145,12 @@ extension CoachSequence {
         guard let coach = coaches.first(where: { $0.number == wanted && (parts.isEmpty || parts.contains($0.group)) })
         else { return .coachMissing }
 
+        let names = sectors(of: coach)
+        return names.isEmpty ? .noSectors(coachID: coach.id) : .sectors(names, coachID: coach.id)
+    }
+
+    /// The platform sectors `coach` stands in; empty without platform positions.
+    func sectors(of coach: Coach) -> [String] {
         var names: [String] = []
         if let start = coach.start, let end = coach.end, !sectors.isEmpty {
             let low = min(start, end), high = max(start, end)
@@ -152,7 +158,7 @@ extension CoachSequence {
             names = sectors.filter { min($0.end, high) - max($0.start, low) > (high - low) * 0.25 }.map(\.name)
         }
         if names.isEmpty, let sector = coach.sector, !sector.isEmpty { names = [sector] }
-        return names.isEmpty ? .noSectors(coachID: coach.id) : .sectors(names, coachID: coach.id)
+        return names
     }
 
     /// "940" from "ICE 940" or "EUROSTAR 9149".
