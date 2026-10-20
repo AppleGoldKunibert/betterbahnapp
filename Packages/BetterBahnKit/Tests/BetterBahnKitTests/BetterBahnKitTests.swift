@@ -5145,6 +5145,11 @@ private final class TrainSearchProtocol: URLProtocol, @unchecked Sendable {
 
         #expect(merged.map(\.station.name) == ["Berlin Hbf", "Berlin Südkreuz", "Bitterfeld", "Leipzig Hbf"])
         #expect(merged[2].isAdditional)
+
+        // A journey saved before keeps the outlying ones until it is repaired.
+        let saved = [Stopover(stops[1]), Stopover(stops[2])] + merged + [Stopover(stops[8])]
+        #expect(BahnDeClient.droppingOutlyingZusatzhalte(from: saved) == merged)
+        #expect(BahnDeClient.droppingOutlyingZusatzhalte(from: merged) == merged)
     }
 
     /// Transitous calls the ČD Railjet Hamburg–Dresden "ICE 171"; bahn.de's board has "RJ 171".

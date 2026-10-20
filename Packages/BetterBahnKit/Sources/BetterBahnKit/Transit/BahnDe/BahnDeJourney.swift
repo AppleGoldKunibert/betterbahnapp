@@ -1099,6 +1099,14 @@ extension BahnDeClient {
         return result
     }
 
+    /// `stopovers` without the Zusatzhalte before its first or after its last regular stop: journeys
+    /// saved before `inserting(_:into:)` kept to a leg's own stops carry ones from the train's whole run.
+    public static func droppingOutlyingZusatzhalte(from stopovers: [Stopover]) -> [Stopover] {
+        guard let first = stopovers.firstIndex(where: { !$0.isAdditional }),
+              let last = stopovers.lastIndex(where: { !$0.isAdditional }) else { return stopovers }
+        return Array(stopovers[first...last])
+    }
+
     // MARK: Berlin local time
 
     /// `HH:mm:00` in Europe/Berlin, as the departure board wants it.
