@@ -5115,6 +5115,43 @@ private final class TrainSearchProtocol: URLProtocol, @unchecked Sendable {
         #expect(merged[2].isAdditional)
     }
 
+    /// bahn.de's journey details cover the train's whole run, a leg only part of it: ICE 601 diverted
+    /// via Büchen, Ludwigslust and Wittenberge before Berlin showed those Zusatzhalte on a leg boarding
+    /// at Berlin Hbf. Only the ones between the leg's first and last stop belong to it.
+    @Test func leavesOutZusatzhalteOutsideTheLeg() throws {
+        func stopover(_ eva: String, _ name: String) -> Stopover {
+            Stopover(station: Station(id: "de-DELFI_\(eva)", name: name, coordinate: nil, evaNumber: eva, source: .transitous),
+                     arrival: nil, departure: nil, arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+        }
+        let existing = [
+            stopover("8011160", "Berlin Hbf"),
+            stopover("8011113", "Berlin Südkreuz"),
+            stopover("8010205", "Leipzig Hbf"),
+        ]
+        let stops = [
+            JourneyStop(evaNumber: "8002549", name: "Hamburg Hbf"),
+            JourneyStop(evaNumber: "8000058", name: "Büchen", isAdditional: true),
+            JourneyStop(evaNumber: "8010216", name: "Ludwigslust", isAdditional: true),
+            JourneyStop(evaNumber: "8010382", name: "Wittenberge", isAdditional: true),
+            JourneyStop(evaNumber: "8011160", name: "Berlin Hbf"),
+            JourneyStop(evaNumber: "8011113", name: "Berlin Südkreuz"),
+            JourneyStop(evaNumber: "8010050", name: "Bitterfeld", isAdditional: true),
+            JourneyStop(evaNumber: "8010205", name: "Leipzig Hbf"),
+            JourneyStop(evaNumber: "8010101", name: "Erfurt Hbf", isAdditional: true),
+            JourneyStop(evaNumber: "8000261", name: "München Hbf"),
+        ]
+
+        let merged = BahnDeClient.inserting(stops, into: existing)
+
+        #expect(merged.map(\.station.name) == ["Berlin Hbf", "Berlin Südkreuz", "Bitterfeld", "Leipzig Hbf"])
+        #expect(merged[2].isAdditional)
+
+        // A journey saved before keeps the outlying ones until it is repaired.
+        let saved = [Stopover(stops[1]), Stopover(stops[2])] + merged + [Stopover(stops[8])]
+        #expect(BahnDeClient.droppingOutlyingZusatzhalte(from: saved) == merged)
+        #expect(BahnDeClient.droppingOutlyingZusatzhalte(from: merged) == merged)
+    }
+
     /// Transitous calls the ČD Railjet Hamburg–Dresden "ICE 171"; bahn.de's board has "RJ 171".
     @Test func findsJourneyIdByNumberWhenBrandsDiffer() throws {
         let json = #"{"entries": [{"journeyId": "rj", "zeit": "2026-09-30T05:34:00", "verkehrmittel": {"name": "RJ 171"}}]}"#

@@ -611,7 +611,7 @@ struct LegCard: View {
             return (stop.station.displayName, hint)
         }
     }
-    private var intermediate: [Stopover] { Array(leg.stopovers.dropFirst().dropLast()) }
+    private var intermediate: [Stopover] { Array(BahnDeClient.droppingOutlyingZusatzhalte(from: leg.stopovers).dropFirst().dropLast()) }
 
     var body: some View {
         Card {
