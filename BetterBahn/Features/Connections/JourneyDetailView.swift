@@ -634,14 +634,21 @@ struct LegCard: View {
                     }
                     Spacer()
                     HStack(spacing: 10) {
-                        if !leg.cancelled {
-                            OccupancyButton(forecast: occupancy, travelClass: model.settings.travelClass)
-                        }
-                        TrainMessagesButton(messages: leg.messages)
-                        if leg.cancelled {
-                            InfoChip(text: "Fällt aus", systemImage: "xmark.octagon.fill", tint: .heavyDelay)
-                        } else {
-                            DelayPill(minutes: leg.departure.delayMinutes)
+                        // Side by side while they fit; otherwise the occupancy icon goes below the delay
+                        // rather than the delay wrapping over several lines.
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 10) {
+                                occupancyButton
+                                TrainMessagesButton(messages: leg.messages)
+                                status
+                            }
+                            VStack(alignment: .trailing, spacing: 4) {
+                                HStack(spacing: 10) {
+                                    TrainMessagesButton(messages: leg.messages)
+                                    status
+                                }
+                                occupancyButton
+                            }
                         }
                         if leg.tripId != nil {
                             Image(systemName: "chevron.right")
@@ -815,6 +822,21 @@ struct LegCard: View {
             // The list loads and the lookup runs off the main thread.
             let leg = leg
             exitSide = await Task.detached(priority: .userInitiated) { ExitSides.side(leaving: leg) }.value
+        }
+    }
+
+    @ViewBuilder private var occupancyButton: some View {
+        if !leg.cancelled {
+            OccupancyButton(forecast: occupancy, travelClass: model.settings.travelClass)
+        }
+    }
+
+    /// "Fällt aus" or the departure delay, always on one line.
+    @ViewBuilder private var status: some View {
+        if leg.cancelled {
+            InfoChip(text: "Fällt aus", systemImage: "xmark.octagon.fill", tint: .heavyDelay).fixedSize()
+        } else {
+            DelayPill(minutes: leg.departure.delayMinutes).fixedSize()
         }
     }
 
