@@ -100,6 +100,10 @@ final class AppModel {
     var checkinStatusIDs: [String: Int] {
         didSet { Storage.save(checkinStatusIDs, key: "checkinStatusIDs") }
     }
+    /// Seats saved on the trains being ridden, without a reservation (#410); forgotten a while after the ride.
+    private(set) var savedSeats: [SavedSeat] {
+        didSet { Storage.save(savedSeats, key: "savedSeats") }
+    }
     /// Explicit choice (from the route view) of which saved journey's Live Activity to show,
     /// overriding the automatic pick until that journey finishes or another one is chosen.
     /// Journeys whose Live Activity was switched off by hand, so the automatic pick skips them.
@@ -147,6 +151,8 @@ final class AppModel {
         savedJourneys = Storage.load(key: "savedJourneys") ?? []
         trackedManualCheckins = Storage.load(key: "trackedManualCheckins") ?? []
         checkinStatusIDs = Storage.load(key: "checkinStatusIDs") ?? [:]
+        let seats: [SavedSeat] = Storage.load(key: "savedSeats") ?? []
+        savedSeats = seats.filter { !$0.isOver() }
         liveJourneys = Storage.load(key: "liveJourneys") ?? LiveDataCache()
         liveTrips = Storage.load(key: "liveTrips") ?? LiveDataCache()
         loadedLaps = Storage.load(key: "loadedLaps") ?? LoadedLaps()
@@ -827,12 +833,27 @@ final class AppModel {
         return try await bahnDe.coachSequence(request)
     }
 
+    /// The seat saved on the train `leg` rides (#410), if any.
+    func savedSeat(for leg: Leg) -> SavedSeat? {
+        savedSeats.first { $0.belongs(to: leg) }
+    }
+
+    /// Saves `seat` for `leg`, or forgets the one there when nil.
+    func saveSeat(_ seat: SavedSeat?, for leg: Leg) {
+        savedSeats = SavedSeat.saving(seat, for: leg, in: savedSeats)
+    }
+
     /// Where to board each leg of `journey` for a quick transfer or exit (#383), by leg ID (see
-    /// `CoachAdvice.plan`): the journey's tickets give the seat reservations and the class.
+    /// `CoachAdvice.plan`): the journey's tickets give the seat reservations and the class, a saved seat
+    /// counts like a reserved one.
     func coachAdvice(for journey: Journey) async -> [String: CoachAdvice] {
         var reservations: [String: CoachAdvice.Reservation] = [:]
         for leg in journey.legs {
-            if let seat = reservation(for: leg, in: journey) { reservations[leg.id] = (seat.coach, seat.trainName) }
+            if let seat = reservation(for: leg, in: journey) {
+                reservations[leg.id] = (seat.coach, seat.trainName)
+            } else if let saved = savedSeat(for: leg) {
+                reservations[leg.id] = (saved.coach, saved.trainName)
+            }
         }
         // A saved ticket says which class; else the one picked in the settings.
         let travelClass = tickets(for: journey).lazy.compactMap(\.ticket.travelClass).first ?? settings.travelClass.number

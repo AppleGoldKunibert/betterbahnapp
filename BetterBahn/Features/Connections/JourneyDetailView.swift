@@ -64,6 +64,8 @@ struct JourneyDetailView: View {
             await loadDispositions()
             await loadCoachAdvice()
         }
+        // A seat saved on the way changes where to walk before a transfer.
+        .onChange(of: model.savedSeats) { Task { await loadCoachAdvice() } }
         .task {
             if !readOnly, model.savedEntry(for: journey) == nil, let seen = model.liveJourneys.value(for: journey.id) {
                 journey = seen
@@ -173,6 +175,7 @@ struct JourneyDetailView: View {
                             ? model.checkinStatusIDs[leg.id].map { id -> () -> Void in { shownCheckin = ShownCheckin(leg: leg, statusId: id) } }
                             : nil,
                         reservation: model.reservation(for: leg, in: journey),
+                        savesSeat: !readOnly,
                         coachAdvice: coachAdvice[leg.id],
                         // Next to the transfer when there is one.
                         showsCoachAdvice: transferInfo(after: leg) == nil,
@@ -610,6 +613,8 @@ struct LegCard: View {
     var onShowCheckin: (() -> Void)?
     /// The seat reserved on this train (from the journey's ticket), if any.
     var reservation: SeatReservation?
+    /// Offers saving your own seat on the way when there's no reservation (#410).
+    var savesSeat = false
     /// Where to board for a quick transfer or exit (#383): its coaches are marked in the Wagenreihung.
     var coachAdvice: CoachAdvice?
     /// Whether the card says it too (getting off at the end); a transfer's row says it otherwise.
@@ -751,7 +756,8 @@ struct LegCard: View {
                     }
 
                     // Between the stops and "Mehr"; unfolds by itself around the departure.
-                    CoachSequenceDisclosure(leg: leg, reservation: reservation, coachAdvice: coachAdvice, spacing: 14)
+                    CoachSequenceDisclosure(leg: leg, reservation: reservation ?? model.savedSeat(for: leg).map(SeatReservation.init),
+                                            savesSeat: savesSeat && reservation == nil, coachAdvice: coachAdvice, spacing: 14)
 
                     if showsCoachAdvice, let coachAdvice {
                         CoachAdviceLabel(advice: coachAdvice, boarded: leg.departure.best < .now)

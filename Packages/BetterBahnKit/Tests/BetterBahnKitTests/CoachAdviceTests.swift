@@ -343,6 +343,53 @@ import Testing
         #expect(await CoachAdvice.arrival(of: first, now: now, stops: { _ in nil }) == nil)
     }
 
+    // MARK: A saved seat (#410)
+
+    @Test func savesASeatForTheRide() {
+        var ride = leg("ICE 100", from: goettingen, at: 60, to: hannoverHbf, at: 120)
+        let seat = SavedSeat(leg: ride, coach: "23", seat: " 45 ")
+        #expect(seat.description == "Wagen 23 · Platz 45")
+        #expect(seat.trainName == "ICE 100")
+        #expect(SavedSeat(leg: ride, coach: "23", seat: "").description == "Wagen 23")
+        // The feed's trip ID can change on the way; the ride stays the same.
+        ride.tripId = "another ID"
+        #expect(seat.belongs(to: ride))
+        #expect(!seat.belongs(to: leg("ICE 200", from: hannoverHbf, at: 128, to: hamburg, at: 210)))
+        // A regional line's run, as reservations name it.
+        ride.line = Line(name: "RE 5", number: "5", product: .regional, operatorName: nil, tripNumber: "3307")
+        #expect(SavedSeat(leg: ride, coach: "2").trainName == "RE 3307")
+    }
+
+    @Test func offersSavingWhileRiding() {
+        let ride = leg("ICE 100", from: goettingen, at: 60, to: hannoverHbf, at: 120)
+        #expect(!SavedSeat.offered(on: ride, now: now.addingTimeInterval(40 * 60)))
+        #expect(SavedSeat.offered(on: ride, now: now.addingTimeInterval(50 * 60)))
+        #expect(SavedSeat.offered(on: ride, now: now.addingTimeInterval(100 * 60)))
+        #expect(!SavedSeat.offered(on: ride, now: now.addingTimeInterval(120 * 60)))
+    }
+
+    @Test func keepsOneSeatPerRideUntilAfterIt() {
+        let first = leg("ICE 100", from: goettingen, at: 60, to: hannoverHbf, at: 120)
+        let second = leg("ICE 200", from: hannoverHbf, at: 128, to: hamburg, at: 210)
+        let old = SavedSeat(leg: first, coach: "23")
+        let moved = SavedSeat(leg: first, coach: "31", seat: "12")
+        let next = SavedSeat(leg: second, coach: "7")
+        let during = now.addingTimeInterval(100 * 60)
+        #expect(SavedSeat.saving(moved, for: first, in: [old, next], now: during) == [next, moved])
+        #expect(SavedSeat.saving(nil, for: first, in: [old, next], now: during) == [next])
+        // Hours after ICE 100 arrived its seat goes; ICE 200's stays a while longer.
+        let later = now.addingTimeInterval((120 + 6 * 60 + 1) * 60)
+        #expect(SavedSeat.saving(nil, for: second, in: [old, next], now: later).isEmpty)
+        #expect(SavedSeat.saving(nil, for: first, in: [old, next], now: later) == [next])
+    }
+
+    @Test func listsTheCoachesToSaveASeatIn() {
+        var sequence = train(["32", "21", "22", "BR"], from: 10, towardsEnd: true)
+        sequence.coaches[3].kind = .diningCar
+        sequence.coaches[2].closed = true
+        #expect(sequence.seatCoachNumbers == ["21", "32"])
+    }
+
     // MARK: Pieces
 
     @Test func listsCoaches() {

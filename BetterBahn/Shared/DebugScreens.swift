@@ -180,11 +180,12 @@ extension AppModel {
 }
 
 extension AppModel {
-    /// Launch with `-seedCoachAdviceTrips YES` to save three made-up journeys leaving in 20 minutes with made-up
+    /// Launch with `-seedCoachAdviceTrips YES` to save made-up journeys leaving in 20 minutes with made-up
     /// Wagenreihungen, for trying the coach advice (#383): ICE 9911 Göttingen → Hannover Hbf (Gleis 12), going on
     /// to Hamburg, and ICE 9912 leaving 6 minutes later across the platform (Gleis 11, shorter, at the far end);
     /// the same as ICE 9921/9922 with a seat reserved in the front coach of ICE 9921, far from the connection;
-    /// ICE 9913 Mannheim → Frankfurt(Main)Hbf, ending at Gleis 13 of the terminus. Re-seeds once they have left;
+    /// ICE 9913 Mannheim → Frankfurt(Main)Hbf, ending at Gleis 13 of the terminus. ICE 9931/9932 run like
+    /// 9911/9912 but left 10 minutes ago, for saving your own seat (#410). Re-seeds once they have left;
     /// remove them by hand afterwards.
     func seedCoachAdviceTripsIfRequested() {
         guard UserDefaults.standard.bool(forKey: "seedCoachAdviceTrips") else { return }
@@ -208,11 +209,19 @@ extension AppModel {
         save(Journey(legs: [leg("9921", s.goettingen, 10, s.hannover, 70, from: "8", to: "12"),
                             leg("9922", s.hannover, 76, s.berlin, 170, from: "11", to: "14")], source: .bahnDe))
         save(Journey(legs: [leg("9913", s.mannheim, 5, s.frankfurt, 45, from: "3", to: "13")], source: .bahnDe))
+        // Under way: its stops tell the Wagenreihung to show the one in Hannover, where it goes on.
+        var riding = leg("9931", s.goettingen, -30, s.hannover, 30, from: "8", to: "12")
+        riding.stopovers = [
+            Stopover(station: s.goettingen, arrival: nil, departure: riding.departure, arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+            Stopover(station: s.hannover, arrival: riding.arrival, departure: TimeInfo(planned: riding.arrival.planned.addingTimeInterval(180), actual: nil),
+                     arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+        ]
+        save(Journey(legs: [riding, leg("9932", s.hannover, 36, s.berlin, 130, from: "11", to: "14")], source: .bahnDe))
     }
 
-    /// ICE 9921 and 9922 run like ICE 9911 and 9912.
+    /// ICE 9921/9922 and 9931/9932 run like ICE 9911 and 9912.
     private static func adviceDemoTrain(_ number: String) -> String {
-        ["9921": "9911", "9922": "9912"][number] ?? number
+        ["9921": "9911", "9922": "9912", "9931": "9911", "9932": "9912"][number] ?? number
     }
 
     /// The seat reserved in the front coach of the seeded ICE 9921.

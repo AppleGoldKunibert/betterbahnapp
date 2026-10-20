@@ -114,6 +114,10 @@ in `project.pbxproj`: new files join their target automatically.
   drawing, so both stay upright; the leg's reserved seat highlighted. Coach advice (#383): `CoachTile.suggested`
   (dashed frame) for `CoachSequence.coachIDs(for:)`, `CoachAdvice.legend` below; `CoachAdviceLabel` in `TransferRow`
   (its own full-width line, without the station) and, for the exit, in the last `LegCard` (`JourneyDetailView.loadCoachAdvice`, `AppModel.coachAdvice(for:)`).
+  Saving your own seat (#410): `SaveSeatButton` at the end of the "Wagenreihung" row (`CoachSequenceDisclosure(savesSeat:)`,
+  only without a reservation, from 15 min before the departure until the arrival) opens a sheet with the coaches
+  (`CoachSequence.seatCoachNumbers`) and an optional seat; the saved seat is passed on like a reservation
+  (`SeatReservation(_: SavedSeat)`: coach highlighted, seat in the seat map) and counts as one for the coach advice.
 - `Features/TrainSearch/` – `TrainSearchOverlay` (#183): Spotlight-style bar over every tab
   (`AppModel.showsTrainSearch`, from the train button on Verbindungen and the map's search button), searches while
   typing, day behind a calendar button, filtered by `AppSettings.trainSearchKinds` (all but "Sonstiges" by default)
@@ -139,7 +143,7 @@ in `project.pbxproj`: new files join their target automatically.
   aufgehoben"), `TicketButton` (in `JourneyDetailView` once the journey has tickets), `AddTicketButton`,
   `TicketsListView` (Settings → Gespeicherte Tickets; "Zeitkarten" like the Deutschland-Ticket from a screenshot via
   `PhotosPicker`, `TravelPassView`), `SeatReservationViews` (`ReservationRow` in `LegCard`;
-  `AppModel.reservations(for:)`, only on the leg whose train matches).
+  `AppModel.reservations(for:)`, only on the leg whose train matches; `SaveSeatButton`/`SaveSeatSheet`, #410).
 - `Features/Trips/TripsView.swift` – upcoming/past journeys, `SaveJourneyButton` (warns "Zug ist
   reservierungspflichtig" via `AppModel.reservationRequiredLegs`; ticket/reservation imports never warn).
 - `Features/Traewelling/` – `CheckinSheet` (`MenuPickerRow` with constant width; keyboard hides on submit and only
@@ -175,7 +179,7 @@ in `project.pbxproj`: new files join their target automatically.
   content (journey details, Settings, check-in): an open menu otherwise slides along while the content scrolls.
   `.resetsWhenMenusCloseOnScroll()` rebuilds a glass menu button (`JourneyShareButton`) that stayed where its menu was.
 - `Shared/StationPicker.swift` (`StationInput`, `TimeSelector`), `LocationService`, `PreviewData`, `VagonwebBrowser`.
-  `Shared/DebugScreens.swift` (DEBUG): `-debugScreen <name>`, `-seedDemoTrips YES`, `-seedStressTrips <count>`, `-seedSeatMapTrips YES` (two made-up ICEs leaving in 20 min with a reservation and a made-up Wagenreihung, `CoachSequence.seatMapDemo`: ICE 1 turned round, Wagen 12 Platz 43; ICE 3neo Wagen 24 Platz 78), `-seedCoachAdviceTrips YES` (coach advice, #383: ICE 9911 → Hannover Hbf Gleis 12 with ICE 9912 6 min later on Gleis 11, again as ICE 9921/9922 with a seat in the front coach; ICE 9913 ending at Frankfurt(Main)Hbf Gleis 13).
+  `Shared/DebugScreens.swift` (DEBUG): `-debugScreen <name>`, `-seedDemoTrips YES`, `-seedStressTrips <count>`, `-seedSeatMapTrips YES` (two made-up ICEs leaving in 20 min with a reservation and a made-up Wagenreihung, `CoachSequence.seatMapDemo`: ICE 1 turned round, Wagen 12 Platz 43; ICE 3neo Wagen 24 Platz 78), `-seedCoachAdviceTrips YES` (coach advice, #383: ICE 9911 → Hannover Hbf Gleis 12 with ICE 9912 6 min later on Gleis 11, again as ICE 9921/9922 with a seat in the front coach; ICE 9913 ending at Frankfurt(Main)Hbf Gleis 13; ICE 9931/9932 like 9911/9912 but left 10 min ago, for saving a seat, #410).
 
 ## BetterBahnKit (`Packages/BetterBahnKit/Sources/BetterBahnKit/`)
 
@@ -295,7 +299,8 @@ in `project.pbxproj`: new files join their target automatically.
   edge (ends, length), stairs/lifts/terminus exit and sector signs in metres along it. `CoachAdvice.plan(for:…)` per
   journey (tight transfers up to 15 min, the exit at the end; with a seat reservation on the arriving train the
   coaches to walk to before arriving, `walkBeforeArrival`, when that saves 30 m, none for the exit; the connecting
-  train's reservation is the target; class from the ticket): the arriving train's Wagenreihung at the transfer
+  train's reservation is the target; class from the ticket, else Settings → Reiseklasse, `TravelClass.number`; a seat
+  saved on the train, `AppModel.savedSeats`, counts like a reservation): the arriving train's Wagenreihung at the transfer
   station (its departure there, from its run) against the connecting train's at the same platform
   (`transfer(arriving:…)`, positions of the other track by shared sector names), else the stairs
   (`exit(sequence:…)`: OSM positions onto bahn.de's by the sector signs, else by the way the train runs); a
@@ -305,6 +310,10 @@ in `project.pbxproj`: new files join their target automatically.
   (`transfer(endingAt:…)`, `exit(endingAt:…)`). `CoachSequence.eva` is the EVA number it was asked for. At most
   two coaches per place and two places (`groups`, stairs at both of Köln Hbf's underpasses): „In Wagen 22–23 oder
   31–32 einsteigen, um … auszusteigen", on the train „In Wagen … wechseln", with a seat „Vor der Ankunft in …".
+- `Transit/BahnDe/SavedSeat.swift` – a seat saved without a reservation (#410): by ride (train, first stop, planned
+  departure; the feed's trip ID can change), `trainName` as reservations name it ("RE 3307" for a regional line's
+  run), `offered(on:)` from 15 min before the departure until the arrival, `saving(_:for:in:)` keeps one per ride
+  and drops those 6 h past their arrival. `AppModel.savedSeats` (`savedSeats.json`, this device only).
 - `Transit/Vagonweb/` – vagonweb.cz (with permission, #95): planned compositions for the timetable year from the train's
   HTML (`VagonwebComposition.scheduled`, fixtures `vagonweb-ice*.html`), used when bahn.de has none: `AppModel.trainType`
   and "Plan-Wagenreihung" (`CoachSequence.source == .vagonweb`). Cloudflare bot check → hidden `WebPage`

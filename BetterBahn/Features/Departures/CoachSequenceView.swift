@@ -20,11 +20,15 @@ struct CoachSequenceDisclosure: View {
     var reservation: SeatReservation?
     /// Where to board for a quick transfer or exit (#383); its coaches are marked.
     var coachAdvice: CoachAdvice?
+    /// The leg to save your own seat on while riding it (#410), next to the title.
+    var seatLeg: Leg?
 
-    init(leg: Leg, reservation: SeatReservation? = nil, coachAdvice: CoachAdvice? = nil, spacing: CGFloat = 0) {
+    init(leg: Leg, reservation: SeatReservation? = nil, savesSeat: Bool = false, coachAdvice: CoachAdvice? = nil,
+         spacing: CGFloat = 0) {
         self.spacing = spacing
         self.reservation = reservation
         self.coachAdvice = coachAdvice
+        seatLeg = savesSeat ? leg : nil
         request = BahnDeClient.formationRequest(for: leg)
         plannedRequest = BahnDeClient.formationRequest(for: leg, lookahead: nil)
         departure = leg.departure.best
@@ -65,8 +69,16 @@ struct CoachSequenceDisclosure: View {
                 TimelineView(.everyMinute) { context in
                     let open = expanded ?? CoachSequence.unfoldsByItself(departure: departure, now: context.date)
                     VStack(alignment: .leading, spacing: 12) {
-                        CoachSequenceToggle(title: title(of: sequence), open: open) {
-                            withAnimation(.snappy) { expanded = !open }
+                        HStack(spacing: 8) {
+                            CoachSequenceToggle(title: title(of: sequence), open: open) {
+                                withAnimation(.snappy) { expanded = !open }
+                            }
+                            .layoutPriority(1)
+                            Spacer(minLength: 0)
+                            let coaches = sequence.seatCoachNumbers
+                            if let seatLeg, !coaches.isEmpty, SavedSeat.offered(on: seatLeg, now: context.date) {
+                                SaveSeatButton(leg: seatLeg, coaches: coaches)
+                            }
                         }
                         if open {
                             CoachSequencePanel(request: shown, sequence: sequence, reservation: reservation, coachAdvice: coachAdvice)
