@@ -13,13 +13,17 @@ it small:
 - **Rate limit:** at most `RATE_LIMIT` requests a minute per app install.
 - **One at a time:** at most `MAX_PARALLEL` requests go to bahn.de at once. A burst of 17 parallel requests got the
   server refused (403) on 2026-10-15, while single requests from the same address went through.
+- **Spread out:** requests to bahn.de start at least `MIN_INTERVAL` seconds apart. Ten departure boards within a second
+  got the server refused (429) on 2026-10-20, although no more than four ran at once.
 - **Like bahn.de's page:** a new session first loads the search page (which sets bahn.de's cookies), then asks the API
   with the headers of the page's background requests. Sessions are renewed every hour. Measured 2026-10-16 from a home
   connection: Safari this way 200 for departures and Wagenreihung, from the Oracle VM 403 (a data center address).
 - **`Accept-Encoding: gzip, br`**, as DB's RIS API team asks: with the browser's `gzip, deflate, br` bahn.de held each
   answer back for 1–3 s (2026-10-16: the same coach sequence in 3.3 s, with `gzip, br` in 0.23 s).
 - **Pause:** after bahn.de refused a request, the server starts a new session (fresh cookies) and nothing goes
-  there for `FIRST_PAUSE` seconds; each refusal soon after the last pause doubles it, up to `BLOCK_PAUSE`.
+  there for `FIRST_PAUSE` seconds; each refusal soon after the last pause doubles it, up to `BLOCK_PAUSE`. Requests
+  already running finish on the old session: closing it at once cut them off (curl reported status 0, logged as
+  `bahn.de 0 …`, which Tailscale Funnel turned into a 502 that paused the app).
 
 It mirrors the Worker: the same `/web/api/…` paths (GET only, the list in `proxy.py`) and the same App Attest
 tokens (`X-BetterBahn-Token`, signed with `TOKEN_SECRET`). The app asks it first (`BahnDeProxy` in
@@ -36,6 +40,7 @@ The `betterbahn` Worker also asks it for the live times of shared arrivals when 
 | `FIRST_PAUSE` | `60` | Seconds without bahn.de requests after a 403/429/452. |
 | `BLOCK_PAUSE` | `600` | The longest pause, reached when refusals keep coming. |
 | `MAX_PARALLEL` | `4` | Requests going to bahn.de at the same time. |
+| `MIN_INTERVAL` | `0.25` | Seconds between the starts of two requests to bahn.de. |
 | `RATE_LIMIT` | `120` | Requests per minute per app install. |
 | `ALLOW_UNATTESTED` | — | `true` lets requests without a token through. Only for a quick test, never in production. |
 

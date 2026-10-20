@@ -6,7 +6,8 @@ import SwiftUI
 /// with a tap. Shown once bahn.de has a coach sequence for the train (the same request
 /// `TrainFormationLabel` makes, so it is only sent once), or else vagonweb.cz has the planned one
 /// ("Plan-Wagenreihung"). While our bahn.de server doesn't answer, it says the current one is missing:
-/// "Plan-Wagenreihung · Aktuelle nicht verfügbar", or without a plan "Aktuelle Wagenreihung nicht verfügbar".
+/// "Plan-Wagenreihung · Aktuelle nicht verfügbar", or without a plan "Aktuelle Wagenreihung nicht verfügbar", and asks
+/// again once the pause is over.
 struct CoachSequenceDisclosure: View {
     /// bahn.de's request, only for departures within `BahnDeClient.formationLookahead`.
     let request: BahnDeClient.FormationRequest?
@@ -99,22 +100,30 @@ struct CoachSequenceDisclosure: View {
         .task(id: plannedRequest) {
             sequence = nil
             liveMissing = false
-            var missing = false
-            if let request {
-                do {
-                    if let live = try await model.coachSequence(for: request), !live.coaches.isEmpty {
-                        sequence = live
-                        return
-                    }
-                } catch TransitError.rateLimited {
-                    missing = true
-                } catch {}
+            // While our server is left alone the plan shows; the current one is asked for again once the
+            // pause is over, not only at the next stop (#411).
+            while !Task.isCancelled {
+                var missing = false
+                if let request {
+                    do {
+                        if let live = try await model.coachSequence(for: request), !live.coaches.isEmpty {
+                            sequence = live
+                            liveMissing = false
+                            return
+                        }
+                    } catch TransitError.rateLimited {
+                        missing = true
+                    } catch {}
+                }
+                if sequence == nil, let plannedRequest {
+                    sequence = await model.plannedCoachSequence(for: plannedRequest)
+                }
+                // Only once the plan has answered, so the notice doesn't flash before it.
+                liveMissing = missing
+                guard missing else { return }
+                let until = await model.provider.bahnDe?.pausedUntil() ?? .now
+                try? await Task.sleep(for: .seconds(max(until.timeIntervalSinceNow, 25) + 5))
             }
-            if let plannedRequest {
-                sequence = await model.plannedCoachSequence(for: plannedRequest)
-            }
-            // Only once the plan has answered, so the notice doesn't flash before it.
-            liveMissing = missing
         }
     }
 }

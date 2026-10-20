@@ -15,7 +15,7 @@ only the files you change. Keep it current when structure changes. Build, test a
 | `Config/` | xcconfigs, Info.plists, entitlements. `Signing.xcconfig` holds the team ID; gitignored `Local.xcconfig` overrides it. |
 | `Cloudflare/` | Worker `betterbahn` (`wrangler.toml`): Träwelling OAuth bounce to `betterbahn://oauth`, privacy policy `/datenschutz`, support page `/support`, short links (`/share`, `/s/<id>`, `apple-app-site-association`, KV 30 days, App Attest + rate limit). "Ankunft teilen" (#317, `arrival.mjs`): with the last train attached, `/s/<id>` is a pickup page (arrival, delay, platform, stops), live from IRIS per stop, else bahn.de's `fahrt` via `Server/bahnde-proxy` (refusals logged as `arrival upstream`), refreshing via `/share/<id>/live`; such links expire 2 h after the arrival. |
 | `Cloudflare/bahnde-proxy/` | Worker `betterbahn2`: DB Timetables (`/timetables/v1/…`, API key as secret) and App Attest tokens (`/auth/…`). Its bahn.de paths (`/web/api/…`) are refused by bahn.de since October 2026. `BahnDeClient.baseURL`, `TimetablesClient.baseURL`. |
-| `Server/bahnde-proxy/` | Docker server (Python, curl_cffi) asking bahn.de with a browser's TLS fingerprint, which Akamai demands and Workers can't make (#342): the Worker's `/web/api/…` paths and App Attest tokens, cache, rate limit, pause after a block. The app asks it first (`BahnDeProxy.baseURL`; game-server host behind Tailscale Funnel, `panel_boot.py`; bahn.de refuses Oracle Cloud). `python3 -m unittest Server/bahnde-proxy/proxy_test.py`. |
+| `Server/bahnde-proxy/` | Docker server (Python, curl_cffi) asking bahn.de with a browser's TLS fingerprint, which Akamai demands and Workers can't make (#342): the Worker's `/web/api/…` paths and App Attest tokens, cache, rate limit, requests to bahn.de spaced `MIN_INTERVAL` apart, pause after a block (a new session; requests running on the old one finish there, #411). The app asks it first (`BahnDeProxy.baseURL`; game-server host behind Tailscale Funnel, `panel_boot.py`; bahn.de refuses Oracle Cloud). `python3 -m unittest Server/bahnde-proxy/proxy_test.py`. |
 | `Cloudflare/pass-signer/` | Worker `betterbahn-pass`: signs Wallet passes for DB tickets (Pass Type ID certificate as secrets). Needs App Attest, only UIC `#UT` barcodes whose issuer signature verifies (`uicsignature.mjs`). `npm install && npm test`. |
 | `Cloudflare/stats/` | Worker `betterbahn-stats` (D1) answering `POST /train-stats` (#316): per train number and stop the delays, cancellations and platform moves of 30 days, one row per train and day (`schema.sql`, `train_days`). Filled daily by `importer.py` from piebro/deutsche-bahn-data (CC BY 4.0; Action `train-stats-import.yml`), so nothing asks bahn.de and the app reports nothing (#336). `node --test Cloudflare/stats/worker.test.mjs`, `python3 -m unittest Cloudflare/stats/importer_test.py`. |
 | `Cloudflare/checkin-push/` | Worker `betterbahn-push` (D1, cron every minute): own read-only Träwelling login per device (AES-GCM), checks the dashboard every 2 min, sends APNs pushes (`followedStatusID`). `node --test Cloudflare/checkin-push/worker.test.mjs`. |
@@ -219,7 +219,8 @@ in `project.pbxproj`: new files join their target automatically.
   stay the feed's. Headsigns: `MPlace.displayName(ofHeadsign:)`, else `StationNames.displayName(forName:)`.
   `Station.displayName(for:)` shortens "hlavní nádraží"/"hlavná stanica". `StationNames.preload()` at launch.
   `StationNames.evaNumber(for:)` (stations with a single EVA only) is used by `BahnDeClient.evaNumber(for:)` before
-  bahn.de's search, so statistics, Timetables and Wagenreihung don't ask bahn.de per stop.
+  bahn.de's search, so statistics, Timetables and Wagenreihung don't ask bahn.de per stop. Timetables also takes
+  `mainEvaNumber(for:)` of a station with several levels (Leipzig Hbf, Berlin Südkreuz, #411).
 - `OperatorBrand` (#166) – feed agency → EVU logo (`Assets.xcassets/Operators/Operator-<brand>`, `OperatorLabel`,
   light plate in dark mode if `needsPlateInDarkMode`; named DB S-Bahns show the "S", other "DB Regio AG …" the DB Regio
   logo), `OperatorBrand.displayName` ("ODEG", "Transdev"). International trains: `BahnDeClient.trainOperators(for:)`
@@ -291,9 +292,13 @@ in `project.pbxproj`: new files join their target automatically.
   Zusatzhalte (`inserting`, `nextRegularStop`), `fillingMissingPlatforms` (e.g. Hamburg Hbf), `correctingTrainNames`
   ("RJ 171" Transitous calls "ICE 171"). Live times (`ezZeit`; `correctingFromBoard`, `applyingLiveTimes`,
   `applyingLiveTimes(from:to:)`) beat DELFI's forecasts, but not a delay/early time DB Timetables set (`keepingDelays`),
-  and never turn 2+ min early into on time (`turnsEarlyIntoOnTime`). Responses cached. On failure the server is left
-  alone (`BahnDeProxy.gate`: 10 min after 403/429/452, 2 min when down) and requests throw `rateLimited`, shown as
-  "Plan-Wagenreihung · Aktuelle nicht verfügbar" / "Aktuelle Wagenreihung nicht verfügbar". No other way to bahn.de:
+  and never turn 2+ min early into on time (`turnsEarlyIntoOnTime`). Responses cached; journey IDs (one departure
+  board each) kept on the device for 12 h, a run bahn.de doesn't list remembered for 10 min (`JourneyIdStore`, #411).
+  A hiccup (`isHiccup`: 5xx but the server's own 503 "paused", a dropped connection) is tried up to 3 times
+  (`BahnDeProxy.attempts`). On failure the server is left alone (`BahnDeProxy.gate`: 10 min after 403/429/452, 2 min
+  when down; a shorter pause never cuts a longer one short) and requests throw `rateLimited`, shown as
+  "Plan-Wagenreihung · Aktuelle nicht verfügbar" / "Aktuelle Wagenreihung nicht verfügbar"; `CoachSequenceDisclosure`
+  asks again once the pause is over (`pausedUntil()`). No other way to bahn.de:
   the Worker and the phone's hidden browser were refused. `requiresReservation(for:)` (attribute `RP`, also other
   railways via `lookupReference`; shares the `journeyCourse` cache) and `bikeTransport(for:)` (bike attributes, same cache).
 - `Transit/BahnDe/Occupancy.swift` – DB's occupancy forecast (#399): the journey details' `auslastungsmeldungen` per stop
