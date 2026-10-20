@@ -17,6 +17,26 @@ CLAUDE.md still applies; this file only adds GoldKunibert's own preferences and 
 - When bahn.de data is needed (see "Privacy and data sources" in CLAUDE.md), give GoldKunibert the complete
   `curl_cffi` command to run on the Mac and ask for the output to be pasted.
 
+## Test list
+
+GoldKunibert ticks off manual tests on a page in the Claude app, the test list:
+https://claude.ai/artifact/XjniwecXJwksebeNGk7xuh (only GoldKunibert can open it). Read and write its database
+with the `ArtifactData` tool (load it with ToolSearch).
+
+- One document per PR in collection `prs`, id `pr<number>` (`pr413`): `number`, `title`, `branch`, `issues`
+  (numbers), `state` (`draft`, `open`, `merged` or `closed`), `updatedAt` (ISO 8601) and `steps`, a map `s1`,
+  `s2`, … of `{order, where, text, expect, status, note, checkedAt, retest}`. `where` is `Simulator`, `iPhone` or
+  `Simulator oder iPhone`; `text` (what to do, starting from where in the app) and `expect` (what should happen)
+  are German. A new step is `status: "open"`, `note: ""`, `checkedAt: null`, `retest: false`.
+- When you open a PR, write the steps of your "What to test" there (`set`). After later pushes, `update` with
+  the `if_version` you read: add steps for new behaviour, keep `title`, `state` and `updatedAt` current, and
+  only when a push changes what a ticked step covers, set that step back to `status: "open"` with
+  `retest: true`. Don't touch `status`, `note` or `checkedAt` otherwise: they are GoldKunibert's results.
+- A step with `status: "failed"` and a `note` is a bug report for that PR: read the PR's document before
+  working on it again, fix it, then set the step to `open` with `retest: true`.
+- When a PR is merged or closed, set `state` to `merged` or `closed` (several PRs at once in one `batch`).
+- "Tested PRs" in a release are the ones whose steps are all `passed`.
+
 ## Commit identity and signing
 
 Commits carry only this identity: `goldkunibert <212144512+goldkunibert@users.noreply.github.com>`.
