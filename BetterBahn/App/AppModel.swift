@@ -225,6 +225,8 @@ final class AppModel {
     }
 
     var journeyRefresher: JourneyRefresher { JourneyRefresher(provider: provider, timetables: timetablesClient) }
+    /// Loads a train run's live data for the trip views, the same way `journeyRefresher` does for a leg.
+    var liveRun: LiveRun { LiveRun(provider: provider, timetables: timetablesClient) }
 
     /// Whether `journey` was already loaded with live data: saved (refreshed in the background, also
     /// right after launch) or opened or prepared before. Only an unseen one waits for live data.
