@@ -238,6 +238,7 @@ extension AppModel {
         }
         return (goettingen: station("8000128", "Göttingen", 51.536, 9.927), hannover: station("8000152", "Hannover Hbf", 52.376, 9.741),
                 hamburg: station("8002549", "Hamburg Hbf", 53.553, 10.007), berlin: station("8011160", "Berlin Hbf", 52.525, 13.369),
+                ostbahnhof: station("8010255", "Berlin Ostbahnhof", 52.510, 13.435),
                 mannheim: station("8000244", "Mannheim Hbf", 49.479, 8.469), frankfurt: station("8000105", "Frankfurt(Main)Hbf", 50.107, 8.663))
     }()
 
@@ -251,6 +252,7 @@ extension AppModel {
         else { return nil }
         sequence.eva = request.station.evaNumber
         sequence.platform = switch (number, request.station.id) {
+        case ("9912", "8011160"): "14"
         case ("9912", _): "11"
         case ("9911", "8000152"): "12"
         case ("9911", _): "8"
@@ -271,7 +273,8 @@ extension AppModel {
         return sequence
     }
 
-    /// The made-up runs of the seeded coach-advice trains: ICE 9911 goes on to Hamburg, ICE 9913 ends in Frankfurt.
+    /// The made-up runs of the seeded coach-advice trains: ICE 9911 goes on to Hamburg, ICE 9912 from Berlin Hbf (Gleis 14)
+    /// to Berlin Ostbahnhof, ICE 9913 ends in Frankfurt.
     func debugRunStops(of leg: Leg) -> [Stopover]? {
         guard leg.tripId?.hasPrefix("adviceseed-") == true else { return nil }
         func stop(_ station: Station, _ arrival: Date?, _ departure: Date?) -> Stopover {
@@ -282,6 +285,8 @@ extension AppModel {
         switch leg.line?.number.map(Self.adviceDemoTrain) {
         case "9911": return [stop(s.goettingen, nil, leg.departure.planned), stop(s.hannover, leg.arrival.planned, leg.arrival.planned.addingTimeInterval(180)),
                              stop(s.hamburg, leg.arrival.planned.addingTimeInterval(80 * 60), nil)]
+        case "9912": return [stop(s.hannover, nil, leg.departure.planned), stop(s.berlin, leg.arrival.planned, leg.arrival.planned.addingTimeInterval(300)),
+                             stop(s.ostbahnhof, leg.arrival.planned.addingTimeInterval(12 * 60), nil)]
         case "9913": return [stop(s.mannheim, nil, leg.departure.planned), stop(s.frankfurt, leg.arrival.planned, nil)]
         default: return nil
         }
