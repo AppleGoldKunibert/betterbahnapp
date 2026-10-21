@@ -5494,17 +5494,17 @@ private final class TrainSearchProtocol: URLProtocol, @unchecked Sendable {
         defer { defaults.removePersistentDomain(forName: suite) }
         let learned = try #require(JSONDecoding.parseISODate("2026-10-21T14:34:00Z"))
 
-        let memory = TrainNameMemory(defaults: defaults)
+        let memory = TrainNameMemory(defaultsSuite: suite)
         #expect(memory.name(for: "ICE 176", now: learned) == nil)
         memory.remember("RJ 176", for: "ICE 176", now: learned)
         #expect(memory.name(for: "ICE176", now: learned) == "RJ 176")
         // Kept on the device, forgotten after a few weeks.
-        let reopened = TrainNameMemory(defaults: defaults)
+        let reopened = TrainNameMemory(defaultsSuite: suite)
         #expect(reopened.name(for: "ICE 176", now: learned.addingTimeInterval(7 * 24 * 3600)) == "RJ 176")
         #expect(reopened.name(for: "ICE 176", now: learned.addingTimeInterval(TrainNameMemory.maxAge + 1)) == nil)
         // bahn.de calling it like Transitous again forgets it.
         reopened.remember("ICE 176", for: "ICE 176", now: learned)
-        #expect(TrainNameMemory(defaults: defaults).name(for: "ICE 176", now: learned) == nil)
+        #expect(TrainNameMemory(defaultsSuite: suite).name(for: "ICE 176", now: learned) == nil)
 
         memory.remember("RJ 176", for: "ICE 176", now: learned)
         let departure = learned

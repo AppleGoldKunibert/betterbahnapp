@@ -18,11 +18,15 @@ public final class TrainNameMemory: Sendable {
         var learned: Date
     }
 
-    private let defaults: UserDefaults
+    /// Where the names are kept (the standard defaults when nil); a name, since `UserDefaults` isn't `Sendable`.
+    private let defaultsSuite: String?
     private let entries: Mutex<[String: Entry]>
 
-    public init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
+    private var defaults: UserDefaults { defaultsSuite.flatMap(UserDefaults.init(suiteName:)) ?? .standard }
+
+    public init(defaultsSuite: String? = nil) {
+        self.defaultsSuite = defaultsSuite
+        let defaults = defaultsSuite.flatMap(UserDefaults.init(suiteName:)) ?? .standard
         let stored = defaults.data(forKey: Self.key).flatMap { try? JSONDecoder().decode([String: Entry].self, from: $0) }
         entries = Mutex(stored ?? [:])
     }
