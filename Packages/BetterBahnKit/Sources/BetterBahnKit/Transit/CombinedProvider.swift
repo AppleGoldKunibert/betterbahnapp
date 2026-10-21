@@ -149,9 +149,11 @@ public final class CombinedProvider: TransitProvider {
         async let coupled = coupledTrains(in: journeys, deadline: .seconds(3))
         async let czechStops = czechTimetableStops(in: journeys, deadline: .seconds(3))
         async let twinStops = twinStops(in: journeys, deadline: .seconds(3))
-        // bahn.de's own names beat Transitous' generic ones for cross-border trains, like on boards.
+        // bahn.de's own names beat Transitous' generic ones for cross-border trains, like on boards. The
+        // ones it gave before count right away; a late answer comes through `correctingTrainNames(in:deadline:)`.
         if let bahnDe {
-            page.journeys = (try? await Self.withDeadline(.seconds(3)) { await bahnDe.correctingTrainNames(in: journeys) }) ?? journeys
+            let remembered = bahnDe.applyingRememberedTrainNames(to: journeys)
+            page.journeys = (try? await Self.withDeadline(.seconds(3)) { await bahnDe.correctingTrainNames(in: remembered) }) ?? remembered
         }
         page.journeys = Self.applying(await coupled, to: page.journeys)
         page.journeys = Self.applying(twinStops: await twinStops, to: page.journeys)
@@ -159,6 +161,14 @@ public final class CombinedProvider: TransitProvider {
         // The same train from two feeds now reads alike: show it once.
         page.journeys = page.journeys.removingSameTrainDuplicates()
         return page
+    }
+
+    /// `journeys` (as `journeys(_:)` returned them) with the train names bahn.de gives, waiting up to `deadline`:
+    /// for the names `journeys(_:)` gave up waiting for. Its requests keep running and are cached, so this
+    /// mostly waits for them. Unchanged without bahn.de or when it doesn't answer in time.
+    public func correctingTrainNames(in journeys: [Journey], deadline: Duration) async -> [Journey] {
+        guard let bahnDe else { return journeys }
+        return (try? await Self.withDeadline(deadline) { await bahnDe.correctingTrainNames(in: journeys) }) ?? journeys
     }
 
     /// `journey` with the stops its trains' own feeds leave out and the platforms they lack in Czechia

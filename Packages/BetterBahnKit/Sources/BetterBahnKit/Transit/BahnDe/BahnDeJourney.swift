@@ -487,7 +487,12 @@ extension BahnDeClient {
             guard let latest = page.entries.compactMap({ $0.zeit.flatMap(Self.parseBerlinTime) }).max(), latest < last else { break }
             start = latest.addingTimeInterval(60)
         }
-        return Self.applyingLiveTimes(Self.correctingTrainNames(entries, using: board, kind: kind), using: board, kind: kind)
+        let named = Self.correctingTrainNames(entries, using: board, kind: kind)
+        // A board seen is a name learned for the next journey search (`TrainNameMemory`).
+        for (entry, corrected) in zip(entries, named) where entry.line.name != corrected.line.name {
+            trainNameMemory?.remember(corrected.line.name, for: entry.line.name)
+        }
+        return Self.applyingLiveTimes(named, using: board, kind: kind)
     }
 
     /// Renames each entry of `kind` whose train number bahn.de's board of the same kind lists at the
@@ -638,9 +643,50 @@ extension BahnDeClient {
         return line
     }
 
+    /// Where bahn.de's names are remembered across searches (`TrainNameMemory`); none for test sessions.
+    var trainNameMemory: TrainNameMemory? { usesSharedCaches ? .shared : nil }
+
+    /// `journeys` with every long-distance leg named as bahn.de named its train before (`TrainNameMemory`),
+    /// without asking it: right even when bahn.de answers too late for `correctingTrainNames(in:)`.
+    public func applyingRememberedTrainNames(to journeys: [Journey]) -> [Journey] {
+        guard let trainNameMemory else { return journeys }
+        return Self.applyingRememberedTrainNames(to: journeys, from: trainNameMemory)
+    }
+
+    static func applyingRememberedTrainNames(to journeys: [Journey], from memory: TrainNameMemory, now: Date = .now) -> [Journey] {
+        journeys.map { journey in
+            var journey = journey
+            journey.legs = journey.legs.map { leg in
+                guard !leg.isWalking, let line = leg.line, trainReference(for: line) != nil,
+                      let name = memory.name(for: line.name, now: now), normalizedTrainName(name) != normalizedTrainName(line.name) else { return leg }
+                var leg = leg
+                leg.line = renamed(line, to: name)
+                return leg
+            }
+            return journey
+        }
+    }
+
+    /// `current` with the train names of the same legs in `corrected` (a `correctingTrainNames(in:)` that
+    /// finished after `current` was shown), leaving everything else as it is now.
+    public static func takingTrainNames(from corrected: [Journey], into current: [Journey]) -> [Journey] {
+        let lines = Dictionary(corrected.flatMap(\.legs).compactMap { leg in leg.line.map { (leg.id, $0) } },
+                               uniquingKeysWith: { first, _ in first })
+        return current.map { journey in
+            var journey = journey
+            for index in journey.legs.indices {
+                guard let line = lines[journey.legs[index].id], journey.legs[index].line?.name != line.name else { continue }
+                journey.legs[index].line?.name = line.name
+                journey.legs[index].line?.alternateName = line.alternateName
+            }
+            return journey
+        }
+    }
+
     /// `journeys` with every DB long-distance leg renamed to what bahn.de's departure board at the
     /// leg's origin calls the train (see `correctingFromBoard(_:at:)`). One board request per
     /// distinct train and origin, cached for the day; unchanged legs if bahn.de can't be asked.
+    /// The names are remembered for the next search (`applyingRememberedTrainNames(to:)`).
     public func correctingTrainNames(in journeys: [Journey]) async -> [Journey] {
         struct Key: Hashable { let station: Station; let planned: Date; let line: Line }
         var keys = Set<Key>()
@@ -671,18 +717,22 @@ extension BahnDeClient {
     }
 
     private func bahnDeName(for line: Line, at station: Station, plannedDeparture: Date) async -> String? {
+        guard let number = Self.trainReference(for: line)?.number else { return nil }
         let fetch: @Sendable () async throws -> String? = {
             guard let eva = try await self.evaNumber(for: station) else { return nil }
             let board = try await self.get(Self.boardURL(eva: eva, at: plannedDeparture), as: Board.self)
-            // "" for "same name" so that answer is cached too.
-            return Self.bahnDeName(for: line, plannedDeparture: plannedDeparture, in: board.entries) ?? ""
+            // "" for "not on the board" so that answer is cached too.
+            return Self.boardEntry(for: line, plannedDeparture: plannedDeparture, in: board.entries)?.verkehrmittel?.name ?? ""
         }
-        let key = "\(line.name)|\(station.id)|\(plannedDeparture.timeIntervalSince1970)"
-        let name = usesSharedCaches
+        // By number, not name: a train already renamed (remembered, or by the search before a late
+        // `correctingTrainNames`) asks nothing new.
+        let key = "\(number)|\(station.id)|\(plannedDeparture.timeIntervalSince1970)"
+        guard let name = usesSharedCaches
             ? try? await Self.trainNameCache.value(for: key, maxAge: 12 * 3600, fetch: fetch)
-            : try? await fetch()
-        guard let name, !name.isEmpty else { return nil }
-        return name
+            : try? await fetch(), !name.isEmpty else { return nil }
+        // Remembered by Transitous' own name: the alternate one once a remembered name was applied.
+        trainNameMemory?.remember(name, for: line.alternateName ?? line.name)
+        return Self.normalizedTrainName(name) != Self.normalizedTrainName(line.name) ? name : nil
     }
 
     private static let trainNameCache = ExpiringCache<String?>()

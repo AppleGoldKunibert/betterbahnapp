@@ -5486,6 +5486,51 @@ private final class TrainSearchProtocol: URLProtocol, @unchecked Sendable {
         #expect(corrected[1] == journeys[1])
     }
 
+    /// DB's feed calls the ČD Railjet Berlin–Hamburg "ICE 176", bahn.de "RJ 176". When bahn.de answered too late,
+    /// the search showed "ICE 176": a name bahn.de gave once is remembered on the device and used right away.
+    @Test func remembersBahnDeTrainNames() throws {
+        let suite = "TrainNameMemoryTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let learned = try #require(JSONDecoding.parseISODate("2026-10-21T14:34:00Z"))
+
+        let memory = TrainNameMemory(defaults: defaults)
+        #expect(memory.name(for: "ICE 176", now: learned) == nil)
+        memory.remember("RJ 176", for: "ICE 176", now: learned)
+        #expect(memory.name(for: "ICE176", now: learned) == "RJ 176")
+        // Kept on the device, forgotten after a few weeks.
+        let reopened = TrainNameMemory(defaults: defaults)
+        #expect(reopened.name(for: "ICE 176", now: learned.addingTimeInterval(7 * 24 * 3600)) == "RJ 176")
+        #expect(reopened.name(for: "ICE 176", now: learned.addingTimeInterval(TrainNameMemory.maxAge + 1)) == nil)
+        // bahn.de calling it like Transitous again forgets it.
+        reopened.remember("ICE 176", for: "ICE 176", now: learned)
+        #expect(TrainNameMemory(defaults: defaults).name(for: "ICE 176", now: learned) == nil)
+
+        memory.remember("RJ 176", for: "ICE 176", now: learned)
+        let departure = learned
+        func leg(_ name: String, _ number: String, product: Product = .highSpeed, trip: String) -> Leg {
+            Leg(origin: station("8011160", "Berlin Hbf"), destination: station("8002549", "Hamburg Hbf"),
+                departure: TimeInfo(planned: departure, actual: nil),
+                arrival: TimeInfo(planned: departure.addingTimeInterval(6600), actual: nil),
+                departurePlatform: nil, arrivalPlatform: nil, tripId: trip,
+                line: Line(name: name, number: number, product: product, operatorName: nil),
+                direction: "Hamburg-Altona", isWalking: false, cancelled: false, stopovers: [], remarks: [],
+                source: .transitous)
+        }
+        let journeys = [Journey(legs: [leg("RE 3", "3", product: .regionalExpress, trip: "re"), leg("ICE 176", "176", trip: "rj")],
+                                source: .transitous)]
+        let named = BahnDeClient.applyingRememberedTrainNames(to: journeys, from: memory, now: learned)
+        #expect(named[0].legs.map { $0.line?.name } == ["RE 3", "RJ 176"])
+        #expect(named[0].legs[1].line?.alternateName == "ICE 176")
+
+        // A late answer renames the legs of the list as it is by then, nothing else.
+        var shown = journeys
+        shown[0].legs[0].departurePlatform = PlatformInfo(planned: "5", actual: nil, source: nil)
+        let taken = BahnDeClient.takingTrainNames(from: named, into: shown)
+        #expect(taken[0].legs.map { $0.line?.name } == ["RE 3", "RJ 176"])
+        #expect(taken[0].legs[0].departurePlatform?.planned == "5")
+    }
+
     @Test func requestURLs() throws {
         let journey = BahnDeClient.journeyURL("2|#VN#1#ST#1759#PI#0#ZI#1#TA#0#DA#290926#").absoluteString
         #expect(journey == "https://betterbahn2.betterbahn.workers.dev/web/api/reiseloesung/fahrt?journeyId=2%7C%23VN%231%23ST%231759%23PI%230%23ZI%231%23TA%230%23DA%23290926%23&poly=false")
