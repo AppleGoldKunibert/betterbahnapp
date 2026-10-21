@@ -766,7 +766,9 @@ struct LegCard: View {
 
                     // Between the stops and "Mehr"; unfolds by itself around the departure.
                     CoachSequenceDisclosure(leg: leg, reservation: reservation ?? model.savedSeat(for: leg).map(SeatReservation.init),
-                                            savesSeat: savesSeat && reservation == nil, coachAdvice: coachAdvice, spacing: 14)
+                                            savesSeat: savesSeat && reservation == nil, coachAdvice: coachAdvice,
+                                            // Said right below for getting off at the end.
+                                            notesCoachAdvice: !showsCoachAdvice, spacing: 14)
 
                     if showsCoachAdvice, let coachAdvice {
                         CoachAdviceLabel(advice: coachAdvice, boarded: leg.departure.best < .now)

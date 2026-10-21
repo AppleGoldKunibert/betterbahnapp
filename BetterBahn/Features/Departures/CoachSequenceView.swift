@@ -23,14 +23,17 @@ struct CoachSequenceDisclosure: View {
     var reservation: SeatReservation?
     /// Where to board for a quick transfer or exit (#383); its coaches are marked.
     var coachAdvice: CoachAdvice?
+    /// Whether a note below the Wagenreihung says the advice too; not where the card says it right below.
+    var notesCoachAdvice = true
     /// The leg to save your own seat on while riding it (#410), next to the title.
     var seatLeg: Leg?
 
     init(leg: Leg, reservation: SeatReservation? = nil, savesSeat: Bool = false, coachAdvice: CoachAdvice? = nil,
-         spacing: CGFloat = 0) {
+         notesCoachAdvice: Bool = true, spacing: CGFloat = 0) {
         self.spacing = spacing
         self.reservation = reservation
         self.coachAdvice = coachAdvice
+        self.notesCoachAdvice = notesCoachAdvice
         seatLeg = savesSeat ? leg : nil
         // The stop just left until its Wagenreihung would close, then the next one; to a terminus the last one.
         let requests = BahnDeClient.formationRequests(for: leg)
@@ -89,7 +92,8 @@ struct CoachSequenceDisclosure: View {
                             }
                         }
                         if open {
-                            CoachSequencePanel(request: shown, sequence: sequence, reservation: reservation, coachAdvice: coachAdvice)
+                            CoachSequencePanel(request: shown, sequence: sequence, reservation: reservation, coachAdvice: coachAdvice,
+                                               notesCoachAdvice: notesCoachAdvice)
                                 .transition(.fold)
                         }
                     }
@@ -197,15 +201,18 @@ struct CoachSequencePanel: View {
     @State private var sequence: CoachSequence?
     /// The seat reserved on this train: its coach is highlighted, the seat in the seat map.
     let reservation: SeatReservation?
-    /// Where to board for a quick transfer or exit (#383): its coaches are marked, with a note below.
+    /// Where to board for a quick transfer or exit (#383): its coaches are marked, with a note below
+    /// (`notesCoachAdvice`).
     let coachAdvice: CoachAdvice?
+    let notesCoachAdvice: Bool
 
     /// - Parameter sequence: already loaded by the caller; fetched here otherwise (e.g. from a stop's platform).
     init(request: BahnDeClient.FormationRequest, sequence: CoachSequence? = nil, reservation: SeatReservation? = nil,
-         coachAdvice: CoachAdvice? = nil) {
+         coachAdvice: CoachAdvice? = nil, notesCoachAdvice: Bool = true) {
         self.request = request
         self.reservation = reservation
         self.coachAdvice = coachAdvice
+        self.notesCoachAdvice = notesCoachAdvice
         _sequence = State(initialValue: sequence)
     }
 
@@ -238,7 +245,7 @@ struct CoachSequencePanel: View {
                         case .coachMissing: nil
                         }
                     }, suggestedCoachIDs: suggested)
-                    if let coachAdvice, !suggested.isEmpty {
+                    if let coachAdvice, notesCoachAdvice, !suggested.isEmpty {
                         Label(coachAdvice.legend, systemImage: CoachAdviceLabel.symbol(for: coachAdvice))
                             .font(.caption)
                             .foregroundStyle(.secondary)

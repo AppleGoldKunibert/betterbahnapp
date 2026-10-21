@@ -118,7 +118,8 @@ in `project.pbxproj`: new files join their target automatically.
   above in the diagram's order, each turned round when its trainset stands with the higher numbers on the left
   (`SeatMap.isTurned`), seat numbers drawn on top and the pictograms (`SeatMap.icons`) drawn again from the unturned
   drawing, so both stay upright; the leg's reserved seat highlighted. Coach advice (#383): `CoachTile.suggested`
-  (dashed frame) for `CoachSequence.coachIDs(for:)`, `CoachAdvice.legend` below; `CoachAdviceLabel` in `TransferRow`
+  (dashed frame) for `CoachSequence.coachIDs(for:)`, `CoachAdvice.legend` below (not for the exit, `notesCoachAdvice`,
+  as the card says it right below); `CoachAdviceLabel` in `TransferRow`
   (its own full-width line, without the station) and, for the exit, in the last `LegCard` (`JourneyDetailView.loadCoachAdvice`, `AppModel.coachAdvice(for:)`).
   Saving your own seat (#410): `SaveSeatButton` at the end of the "Wagenreihung" row (`CoachSequenceDisclosure(savesSeat:)`,
   only without a reservation, from 15 min before the departure until the arrival) opens a sheet with the coaches
