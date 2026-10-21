@@ -30,6 +30,8 @@ struct JourneyDetailView: View {
     @State private var dispositions: [String: TransferDisposition] = [:]
     /// Transfers whose incoming train is often too late there (#316), keyed by the incoming leg's id.
     @State private var transferWarnings: [String: String] = [:]
+    /// Where to board for a quick transfer or exit (#383), keyed by the leg to board.
+    @State private var coachAdvice: [String: CoachAdvice] = [:]
     /// The forecast on arrival and at long transfers (#385).
     @State private var weather = JourneyWeather()
     /// CO₂ compared with car and plane (#386), once the track geometry is in.
@@ -60,7 +62,10 @@ struct JourneyDetailView: View {
             await TimetablesClient.invalidateDelays()
             await refreshRealtime()
             await loadDispositions()
+            await loadCoachAdvice()
         }
+        // A seat saved on the way changes where to walk before a transfer.
+        .onChange(of: model.savedSeats) { Task { await loadCoachAdvice() } }
         .task {
             if !readOnly, model.savedEntry(for: journey) == nil, let seen = model.liveJourneys.value(for: journey.id) {
                 journey = seen
@@ -74,12 +79,14 @@ struct JourneyDetailView: View {
             liveDataLoaded = true
             await loadDispositions()
             await loadTransferWarnings()
+            await loadCoachAdvice()
             // Keep a saved journey's delays current while it's open.
             while !Task.isCancelled {
                 try? await Task.sleep(for: AppModel.realtimeRefreshInterval)
                 guard !Task.isCancelled else { return }
                 if model.savedEntry(for: journey) != nil { await refreshRealtime() }
                 await loadDispositions()
+                await loadCoachAdvice()
             }
         }
         .task(id: journey.transitLegs.map(\.id)) { await loadCO2() }
@@ -168,11 +175,16 @@ struct JourneyDetailView: View {
                             ? model.checkinStatusIDs[leg.id].map { id -> () -> Void in { shownCheckin = ShownCheckin(leg: leg, statusId: id) } }
                             : nil,
                         reservation: model.reservation(for: leg, in: journey),
+                        savesSeat: !readOnly,
+                        coachAdvice: coachAdvice[leg.id],
+                        // Next to the transfer when there is one.
+                        showsCoachAdvice: transferInfo(after: leg) == nil,
                         arrivalWeather: weather.arrival(of: leg, in: journey)
                     )
                     if let info = transferInfo(after: leg) {
                         TransferRow(from: leg, to: info.next, walk: info.walk, isPast: journey.isOver(),
-                                    disposition: dispositions[info.next.id], warning: transferWarnings[leg.id])
+                                    disposition: dispositions[info.next.id], warning: transferWarnings[leg.id],
+                                    coachAdvice: coachAdvice[leg.id])
                     }
                 }
             }
@@ -182,6 +194,14 @@ struct JourneyDetailView: View {
         .padding(.horizontal)
         .padding(.bottom, 32)
         .environment(\.bikeMode, model.settings.bike(searchingWithBike: replanSearch?.withBike ?? model.settings.searchWithBike))
+    }
+
+    /// Where to board for each tight transfer and the exit (#383); not for old plans or a journey that is over.
+    private func loadCoachAdvice() async {
+        guard !readOnly, !journey.isOver() else { return }
+        let advice = await model.coachAdvice(for: journey)
+        guard advice != coachAdvice else { return }
+        withAnimation { coachAdvice = advice }
     }
 
     /// Which tight transfers the incoming train usually misses (#316); not for a journey that is over.
@@ -501,6 +521,8 @@ struct TransferRow: View {
     var disposition: TransferDisposition?
     /// Says the incoming train is often too late for this transfer, from past runs (#316).
     var warning: String?
+    /// Where to board the incoming train to be quick here (#383).
+    var coachAdvice: CoachAdvice?
 
     private var minutes: Int {
         Int((to.departure.best.timeIntervalSince(from.arrival.best) / 60).rounded())
@@ -509,6 +531,19 @@ struct TransferRow: View {
     private var color: Color { isPast && minutes < 0 ? .secondary : transferColor(minutes) }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            summary
+            // Its own line across the row, below the platforms, so it doesn't wrap into a narrow column.
+            if let coachAdvice, !isPast, !broken {
+                CoachAdviceLabel(advice: coachAdvice, boarded: from.departure.best < .now, namesStation: false)
+                    .padding(.leading, 40)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 4)
+    }
+
+    private var summary: some View {
         // Centered, so a taller platform badge doesn't push the transfer text off the middle.
         HStack(spacing: 10) {
             Image(systemName: walk != nil ? "figure.walk" : "arrow.triangle.2.circlepath")
@@ -548,8 +583,6 @@ struct TransferRow: View {
                 .layoutPriority(1)
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 4)
     }
 
     /// The platform, or the line (e.g. "Bus 825") when that leg has none, so the arrow never points at nothing.
@@ -582,6 +615,12 @@ struct LegCard: View {
     var onShowCheckin: (() -> Void)?
     /// The seat reserved on this train (from the journey's ticket), if any.
     var reservation: SeatReservation?
+    /// Offers saving your own seat on the way when there's no reservation (#410).
+    var savesSeat = false
+    /// Where to board for a quick transfer or exit (#383): its coaches are marked in the Wagenreihung.
+    var coachAdvice: CoachAdvice?
+    /// Whether the card says it too (getting off at the end); a transfer's row says it otherwise.
+    var showsCoachAdvice = false
     /// The forecast where this leg arrives: at the destination, or at a transfer with more than 15 minutes
     /// until the next train (#385).
     var arrivalWeather: LegArrivalWeather?
@@ -727,7 +766,16 @@ struct LegCard: View {
                     }
 
                     // Between the stops and "Mehr"; unfolds by itself around the departure.
-                    CoachSequenceDisclosure(leg: leg, reservation: reservation, spacing: 14)
+                    CoachSequenceDisclosure(leg: leg, reservation: reservation ?? model.savedSeat(for: leg).map(SeatReservation.init),
+                                            savesSeat: savesSeat && reservation == nil, coachAdvice: coachAdvice,
+                                            // Said right below for getting off at the end.
+                                            notesCoachAdvice: !showsCoachAdvice, spacing: 14)
+
+                    if showsCoachAdvice, let coachAdvice {
+                        CoachAdviceLabel(advice: coachAdvice, boarded: leg.departure.best < .now)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 14)
+                    }
 
                     let platformChanges = platformChangeHints
                     if !platformChanges.isEmpty {

@@ -21,8 +21,8 @@ only the files you change. Keep it current when structure changes. Build, test a
 | `Cloudflare/checkin-push/` | Worker `betterbahn-push` (D1, cron every minute): own read-only Träwelling login per device (AES-GCM), checks the dashboard every 2 min, sends APNs pushes (`followedStatusID`). Also regular trips (#397, `commute.mjs`, table `commutes`): `PUT /commutes/<id>` with the day's trains (category + number, EVA + planned times), found in IRIS' `plan`, then `fchg` every 2 min from 2 h before departure → cancellation, delay from the threshold (again +5), platform change, tight transfer (`commuteJourneyID`); never bahn.de. APNs in `apns.mjs`. `node --test Cloudflare/checkin-push/*.test.mjs`. |
 | `Cloudflare/live-activity/` | Worker `betterbahn-live` (D1, cron every minute): keeps the Live Activity current while the app is closed (#315). The app hands over the activity's push token and the journey (Kit `LiveActivityPushJourney`) when it goes to the background (`PUT /activities/<id>`) and takes it back when opened (`DELETE`). On `LiveActivityRefreshSchedule`'s times it asks DB's keyless IRIS about the current train (`../shared/iris.mjs`: `plan` once per stop, then `fchg`), works out the state like `ContentState.from` (`state.mjs`, checked against the Kit fixture `live-activity-push.json`) and pushes it when it changed; ends the activity after the arrival. `node --test Cloudflare/live-activity/worker.test.mjs`. |
 | `Cloudflare/shared/` | `appattest.mjs`: App Attest verification and the `X-BetterBahn-Token` the Workers check. `node --test Cloudflare/shared/appattest.test.mjs`. `apns.mjs`: APNs with the provider token (`betterbahn-push`, `betterbahn-live`). |
-| `.github/workflows/` | `pr-build.yml` (macOS: Kit tests + unsigned app build on code PRs), `pr-secrets.yml` (gitleaks + guard against `DefaultCredentials.swift`), `sync-prod.yml` (merges prod into every branch but `appstorerelease`), `train-stats-import.yml` (daily, into D1), `monthly-data-update.yml` (1st of the month: rebuilds the three station lists, PR into prod on `monthlyupdate-<MM>/<YY>`; `scripts/check-data-update.py` stops it when a list is empty or 10 % smaller; the PR gets no CI by itself, push an empty commit). |
-| `scripts/` | `make-station-hints.py` (offline search hints), `make-ril100.py` (`Ril100.swift`, also DB's XLSX for codes abroad, needs `openpyxl`), `make-station-names.py` (`StationNames.swift` from OpenStation NeTEx, DB RIS names via bahn.expert and Transitous; run after `make-ril100.py`; `--refresh` re-asks bahn.expert, ~1 h), `make-big-stations.py` (`Models/BigStations.swift`: price class 1 and 2 from OpenStation NeTEx, run after `make-station-names.py`), `check-data-update.py`, `make-exit-sides.py` (#394: `ExitSides.json`, which side of the track each platform is on, from OpenStreetMap: `--pbf germany-latest.osm.pbf` reads Geofabrik's extract with pyosmium in four passes, else Overpass tile by tile with a cache, which often answers 502; run on a Mac, both are blocked from cloud sessions. A platform edge takes the track it touches on its level, a platform the track numbered like it or the only one next to it; S-Bahn tracks are `light_rail`; tests `python3 scripts/make-exit-sides-test.py`), `make-seat-maps.py` (ICE seat maps from DB's Wagenreihungspläne via bahn.expert `/WRSheets/<sheet>.pdf`: images in `Assets.xcassets/SeatMaps/`, seat positions in `SeatMaps.json`; needs poppler, Pillow, numpy). `searchsim/`: Linux package (`./sync.sh`, `swift test`; `swift run SearchSim scenarios.txt` runs ~1150 live station-search scenarios, rerun after changing search ranking). |
+| `.github/workflows/` | `pr-build.yml` (macOS: Kit tests + unsigned app build on code PRs), `pr-secrets.yml` (gitleaks + guard against `DefaultCredentials.swift`), `sync-prod.yml` (merges prod into every branch but `appstorerelease`), `train-stats-import.yml` (daily, into D1), `monthly-data-update.yml` (1st of the month: rebuilds the three station lists and `Platforms.json`, PR into prod on `monthlyupdate-<MM>/<YY>`; `scripts/check-data-update.py` stops it when a list is empty or 10 % smaller; the PR gets no CI by itself, push an empty commit). |
+| `scripts/` | `make-station-hints.py` (offline search hints), `make-ril100.py` (`Ril100.swift`, also DB's XLSX for codes abroad, needs `openpyxl`), `make-station-names.py` (`StationNames.swift` from OpenStation NeTEx, DB RIS names via bahn.expert and Transitous; run after `make-ril100.py`; `--refresh` re-asks bahn.expert, ~1 h), `make-big-stations.py` (`Models/BigStations.swift`: price class 1 and 2 from OpenStation NeTEx, run after `make-station-names.py`), `check-data-update.py`, `make-exit-sides.py` (#394: `ExitSides.json`, which side of the track each platform is on, from OpenStreetMap: `--pbf germany-latest.osm.pbf` reads Geofabrik's extract with pyosmium in four passes, else Overpass tile by tile with a cache, which often answers 502; run on a Mac, both are blocked from cloud sessions. A platform edge takes the track it touches on its level, a platform the track numbered like it or the only one next to it; S-Bahn tracks are `light_rail`; tests `python3 scripts/make-exit-sides-test.py`), `make-platforms.py` (`Platforms.json` for the coach advice, #383: tracks sharing a platform and lifts from OpenStation, platform edges/areas (also multipolygons), stairs, lifts, sector signs, buffer stops and tracks above ground (termini: no track runs on past the buffer stops) from OSM's Germany extract via pyosmium, `pip install osmium`, ~7 min; ODbL), `make-seat-maps.py` (ICE seat maps from DB's Wagenreihungspläne via bahn.expert `/WRSheets/<sheet>.pdf`: images in `Assets.xcassets/SeatMaps/`, seat positions in `SeatMaps.json`; needs poppler, Pillow, numpy). `searchsim/`: Linux package (`./sync.sh`, `swift test`; `swift run SearchSim scenarios.txt` runs ~1150 live station-search scenarios, rerun after changing search ranking). |
 | `docs/` | `transit-providers.md` (data sources), `app-review-notes.md` (App Store checklist and review notes). |
 
 Targets: `BetterBahn`, `BetterBahnWidgetsExtension`, `BetterBahnShareExtension`, `BetterBahnKit`. Bundle IDs
@@ -104,7 +104,10 @@ in `project.pbxproj`: new files join their target automatically.
   in planned-time mode only with a live time (no "0" for a plain timetable). `CoachSequenceView.swift`: the Wagenreihung
   unfolds in place, no sheet. `CoachSequenceDisclosure` (row in `LegCard` and `TripContent`'s header) uses bahn.de's
   sequence, else vagonweb's plan, opens by itself 30 min before to 15 min after departure
-  (`CoachSequence.unfoldsByItself`) or by tap; tapping a stop's platform in `TripContent` unfolds that stop's.
+  (`CoachSequence.unfoldsByItself`) or by tap; tapping a stop's platform in `TripContent` unfolds that stop's. A leg's
+  shows the stop the train just left until it would close (`CoachSequence.shownAfterDeparture`, 15 min), then the next
+  one, on the last stretch to a terminus the last one it left, until the arrival; where bahn.de has none, one of the two
+  stops before (asked again after `formationMaxAge`), so the marked coaches stay (`BahnDeClient.formationRequests(for:)`).
   `CoachSequencePanel`: notes (debug builds only: grey "bahn.de: …" line from `BahnDeClient.coachSequenceNote(for:)`,
   for the server's pause also `BahnDeGate.blockDescription`), one `TrainCard` per series (`TrainFormation.partsBySeries`,
   "2× ICE 4") with "BR …", each Tz with Taufname and the series' side view `Assets.xcassets/Trains/Train-<BR>` (401,
@@ -114,7 +117,14 @@ in `project.pbxproj`: new files join their target automatically.
   Tapping an ICE coach (bahn.de's sequence only) opens `SeatMapSheet` (`SeatMapView.swift`, #365): the coaches from
   above in the diagram's order, each turned round when its trainset stands with the higher numbers on the left
   (`SeatMap.isTurned`), seat numbers drawn on top and the pictograms (`SeatMap.icons`) drawn again from the unturned
-  drawing, so both stay upright; the leg's reserved seat highlighted.
+  drawing, so both stay upright; the leg's reserved seat highlighted. Coach advice (#383): `CoachTile.suggested`
+  (dashed frame) for `CoachSequence.coachIDs(for:)`, `CoachAdvice.legend` below (not for the exit, `notesCoachAdvice`,
+  as the card says it right below); `CoachAdviceLabel` in `TransferRow`
+  (its own full-width line, without the station) and, for the exit, in the last `LegCard` (`JourneyDetailView.loadCoachAdvice`, `AppModel.coachAdvice(for:)`).
+  Saving your own seat (#410): `SaveSeatButton` at the end of the "Wagenreihung" row (`CoachSequenceDisclosure(savesSeat:)`,
+  only without a reservation, from 15 min before the departure until the arrival) opens a sheet with the coaches
+  (`CoachSequence.seatCoachNumbers`) and an optional seat; the saved seat is passed on like a reservation
+  (`SeatReservation(_: SavedSeat)`: coach highlighted, seat in the seat map) and counts as one for the coach advice.
 - `Features/TrainSearch/` – `TrainSearchOverlay` (#183): Spotlight-style bar over every tab
   (`AppModel.showsTrainSearch`, from the train button on Verbindungen and the map's search button), searches while
   typing, day behind a calendar button, filtered by `AppSettings.trainSearchKinds` (all but "Sonstiges" by default)
@@ -140,7 +150,7 @@ in `project.pbxproj`: new files join their target automatically.
   aufgehoben"), `TicketButton` (in `JourneyDetailView` once the journey has tickets), `AddTicketButton`,
   `TicketsListView` (Settings → Gespeicherte Tickets; "Zeitkarten" like the Deutschland-Ticket from a screenshot via
   `PhotosPicker`, `TravelPassView`), `SeatReservationViews` (`ReservationRow` in `LegCard`;
-  `AppModel.reservations(for:)`, only on the leg whose train matches).
+  `AppModel.reservations(for:)`, only on the leg whose train matches; `SaveSeatButton`/`SaveSeatSheet`, #410).
 - `Features/Trips/TripsView.swift` – upcoming/past journeys, `SaveJourneyButton` (warns "Zug ist
   reservierungspflichtig", in bike mode also "Fahrradreservierung nötig" / "Keine Fahrradmitnahme", via
   `AppModel.saveWarnings`; ticket/reservation imports never warn).
@@ -199,7 +209,7 @@ in `project.pbxproj`: new files join their target automatically.
   content (journey details, Settings, check-in): an open menu otherwise slides along while the content scrolls.
   `.resetsWhenMenusCloseOnScroll()` rebuilds a glass menu button (`JourneyShareButton`) that stayed where its menu was.
 - `Shared/StationPicker.swift` (`StationInput`, `TimeSelector`), `LocationService`, `PreviewData`, `VagonwebBrowser`.
-  `Shared/DebugScreens.swift` (DEBUG): `-debugScreen <name>`, `-seedDemoTrips YES`, `-seedStressTrips <count>`, `-seedSeatMapTrips YES` (two made-up ICEs leaving in 20 min with a reservation and a made-up Wagenreihung, `CoachSequence.seatMapDemo`: ICE 1 turned round, Wagen 12 Platz 43; ICE 3neo Wagen 24 Platz 78).
+  `Shared/DebugScreens.swift` (DEBUG): `-debugScreen <name>`, `-seedDemoTrips YES`, `-seedStressTrips <count>`, `-seedSeatMapTrips YES` (two made-up ICEs leaving in 20 min with a reservation and a made-up Wagenreihung, `CoachSequence.seatMapDemo`: ICE 1 turned round, Wagen 12 Platz 43; ICE 3neo Wagen 24 Platz 78), `-seedCoachAdviceTrips YES` (coach advice, #383: ICE 9911 → Hannover Hbf Gleis 12 with ICE 9912 6 min later on Gleis 11, again as ICE 9921/9922 with a seat in the front coach; ICE 9913 ending at Frankfurt(Main)Hbf Gleis 13, leaving a minute after seeding and 20 min long; ICE 9931/9932 like 9911/9912 but left 10 min ago, for saving a seat, #410).
 
 ## BetterBahnKit (`Packages/BetterBahnKit/Sources/BetterBahnKit/`)
 
@@ -322,6 +332,34 @@ in `project.pbxproj`: new files join their target automatically.
   (`SeatMap.sheet`: ICE 1 with 12 or, modernised, 9 middle coaches; ICE 4 with 7, 12 or 13; all BR 403 on the Redesign
   sheet); `CoachSequence.seatMap(for:)` by coach number. Misprints on DB's sheets are fixed in the
   script's `CORRECTIONS` (408 Wagen 24: 76–78 printed as 75–77; 401.LDV Wagen 6: 42 printed as 43).
+- `Transit/BahnDe/CoachAdvice.swift`, `StationPlatforms.swift` – where to board (#383). `StationPlatforms.at(eva:)` from
+  `Resources/Platforms.json` (`scripts/make-platforms.py`): tracks sharing a platform, per track the OSM platform
+  edge (ends, length), stairs/lifts/terminus exit and sector signs in metres along it. `CoachAdvice.plan(for:…)` per
+  journey (tight transfers up to 15 min, longer ones to another platform only the stairs, the exit at the end; with a seat reservation on the arriving train the
+  coaches to walk to before arriving, `walkBeforeArrival`, when that saves 30 m, else `alreadyThere` („Du sitzt schon im
+  richtigen Wagen, …", only when another coach would be wrong), for the exit only at a terminus; where the journey ends at
+  a terminus only its exit counts (`toExit`, `Track.ways(out:)`: the front of the train, not the underpasses along the
+  platform): from a seat walking there through any class (`otherClass`, „In Wagen 21 (2. Klasse) wechseln"), without
+  one, where your class stops 60 m short of it, its nearest coach („… möglichst nah am Ausgang", `nearestOfClass`)
+  and from `approachTime` (15 min) before arriving the front in any class (`pickOut`); the connecting
+  train's reservation is the target; class from a seat's coach, else the ticket, else Settings → Reiseklasse,
+  `TravelClass.number`; a seat saved on the train, `AppModel.savedSeats`, counts like a reservation; said only when some
+  coach of the train stands 60 m worse than the best of your class, so also when all of your class fit): the arriving train's Wagenreihung at the transfer
+  station (its departure there, from its run) against the connecting train's at the same platform
+  (`transfer(arriving:…)`, positions of the other track by shared sector names), else the stairs
+  (`exit(sequence:…)`: OSM positions onto bahn.de's by the sector signs, else by the way the train runs, at a terminus it
+  goes on from, reversing, away from the buffer stops, Stralsund Hbf); a
+  connecting train without a Wagenreihung (S-Bahn, bus) still counts by its platform. Tracks match by section
+  ("3a/b" → "3a" → "3", `StationPlatforms.trackKeys`). A train
+  ending at a terminus has no Wagenreihung there: laid out from the buffer stops in its order at the stop before
+  (`transfer(endingAt:…)`, `exit(endingAt:…)`). `CoachSequence.eva` is the EVA number it was asked for. At most
+  two coaches per place and two places (`groups`, stairs at both of Köln Hbf's underpasses): „In Wagen 22–23 oder
+  31–32 einsteigen, um … auszusteigen", on the train „In Wagen … wechseln", with a seat „Vor der Ankunft in …". From a
+  seat, or on the train without one from the middle coach of the class (`aboard`, `middle(of:)`), only the nearest place.
+- `Transit/BahnDe/SavedSeat.swift` – a seat saved without a reservation (#410): by ride (train, first stop, planned
+  departure; the feed's trip ID can change), `trainName` as reservations name it ("RE 3307" for a regional line's
+  run), `offered(on:)` from 15 min before the departure until the arrival, `saving(_:for:in:)` keeps one per ride
+  and drops those 6 h past their arrival. `AppModel.savedSeats` (`savedSeats.json`, this device only).
 - `Transit/Vagonweb/` – vagonweb.cz (with permission, #95): planned compositions for the timetable year from the train's
   HTML (`VagonwebComposition.scheduled`, fixtures `vagonweb-ice*.html`), used when bahn.de has none: `AppModel.trainType`
   and "Plan-Wagenreihung" (`CoachSequence.source == .vagonweb`). Cloudflare bot check → hidden `WebPage`

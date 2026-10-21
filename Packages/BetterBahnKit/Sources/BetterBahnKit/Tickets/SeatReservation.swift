@@ -18,6 +18,11 @@ public struct SeatReservation: Codable, Sendable, Hashable, Identifiable {
         self.init(trainName: seat.train, coach: seat.coach, seats: seat.seats)
     }
 
+    /// A seat saved without a reservation (#410), shown like one.
+    public init(_ saved: SavedSeat) {
+        self.init(trainName: saved.trainName, coach: saved.coach, seats: saved.seat.map { [$0] } ?? [])
+    }
+
     /// "Wagen 2 · Platz 37, 38"
     public var description: String {
         var parts: [String] = []

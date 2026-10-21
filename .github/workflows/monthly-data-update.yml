@@ -1,4 +1,4 @@
-# Rebuilds the offline station lists (Ril100.json, StationNames.json, StationHints.json) once a month
+# Rebuilds the offline station lists (Ril100.json, StationNames.json, StationHints.json, Platforms.json) once a month
 # and opens a PR into prod on a branch named monthlyupdate-<month>/<year> (e.g. monthlyupdate-08/26).
 # Nothing is merged automatically: the PR is meant to be reviewed for odd changes first. Runs only
 # when something changed, and stops without a PR when a list came out empty or much smaller
@@ -27,6 +27,8 @@ env:
   INFRA_URL: https://mobilithek.info/mdp-api/files/aux/922109165921083392/Infrastrukturdaten.zip
   ABBREVIATIONS_URL: https://www.dbinfrago.com/resource/blob/12593004/d363d64ef7ecc1792c1518075d8ea769/Download-betriebsstellen-data.xlsx
   NETEX_URL: https://bahnhof.de/daten/netex
+  # OpenStreetMap's Germany extract (ODbL) for the stairs and lifts on the platforms (Platforms.json).
+  OSM_URL: https://download.geofabrik.de/europe/germany-latest.osm.pbf
 
 jobs:
   update:
@@ -56,12 +58,13 @@ jobs:
       - name: Download the sources
         if: steps.branch.outputs.exists != 'true'
         run: |
-          pip install openpyxl
+          pip install openpyxl osmium
           mkdir "$RUNNER_TEMP/data" && cd "$RUNNER_TEMP/data"
           curl -fsSL --retry 3 -o infra.zip "$INFRA_URL"
           unzip -q infra.zip
           curl -fsSL --retry 3 -o betriebsstellen.xlsx "$ABBREVIATIONS_URL"
           curl -fsSL --retry 3 --compressed -o netex.xml "$NETEX_URL"
+          curl -fsSL --retry 3 -o germany.osm.pbf "$OSM_URL"
           ls -l
 
       - name: Rebuild the lists
@@ -74,6 +77,7 @@ jobs:
           # The collection's big stations (#384), named as in the new StationNames.json.
           python3 scripts/make-big-stations.py "$data/netex.xml"
           python3 scripts/make-station-hints.py
+          python3 scripts/make-platforms.py "$data/netex.xml" "$data/germany.osm.pbf"
 
       - name: Check the result
         id: check
@@ -103,7 +107,7 @@ jobs:
           git push -u origin "$BRANCH"
           {
             echo "Monthly rebuild of the offline station lists with \`scripts/make-ril100.py\`,"
-            echo "\`make-station-names.py\`, \`make-big-stations.py\` and \`make-station-hints.py\`."
+            echo "\`make-station-names.py\`, \`make-big-stations.py\`, \`make-station-hints.py\` and \`make-platforms.py\`."
             echo
             cat "$RUNNER_TEMP/table.md"
             echo

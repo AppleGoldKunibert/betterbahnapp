@@ -211,6 +211,7 @@ struct RootView: View {
             model.seedBrokenTripIfRequested()
             model.seedLateTripsIfRequested()
             model.seedSeatMapTripsIfRequested()
+            model.seedCoachAdviceTripsIfRequested()
             await model.seedStressTripsIfRequested()
             await model.seedDemoTripsIfRequested()
         }
