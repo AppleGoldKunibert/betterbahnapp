@@ -4133,6 +4133,28 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(await proxy.gate.isBlocked)
     }
 
+    /// ICE 838, 2026-10-21: one journey request that timed out paused the Wagenreihung for 2 minutes.
+    @Test func triesATimeoutOnceMore() async throws {
+        ProxyRoutingProtocol.sequences.withLock { $0["proxy-slow.test"] = [ProxyRoutingProtocol.timedOut] }
+        let (bahnDe, proxy, session) = client(proxyHost: "proxy-slow.test")
+        defer { session.invalidateAndCancel() }
+
+        #expect(try await bahnDe.searchStations("Slow").map(\.id) == ["8000105"])
+        #expect(ProxyRoutingProtocol.count(host: "proxy-slow.test") == 2)
+        #expect(await !proxy.gate.isBlocked)
+    }
+
+    @Test func aTimeoutDoesntPauseTheOthers() async throws {
+        ProxyRoutingProtocol.sequences.withLock { $0["proxy-stuck.test"] = [ProxyRoutingProtocol.timedOut, ProxyRoutingProtocol.timedOut] }
+        let (bahnDe, proxy, session) = client(proxyHost: "proxy-stuck.test")
+        defer { session.invalidateAndCancel() }
+
+        await #expect(throws: TransitError.timeout) { try await bahnDe.searchStations("Stuck") }
+        #expect(ProxyRoutingProtocol.count(host: "proxy-stuck.test") == 2)
+        #expect(await !proxy.gate.isBlocked)
+        #expect(try await bahnDe.searchStations("Stuck").map(\.id) == ["8000105"])
+    }
+
     @Test func blocksArentTriedAgain() async throws {
         ProxyRoutingProtocol.answers.withLock { $0["proxy-refused.test"] = 452 }
         let (bahnDe, proxy, session) = client(proxyHost: "proxy-refused.test")
@@ -4159,6 +4181,8 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(!BahnDeClient.isHiccup(TransitError.rateLimited))
         #expect(!BahnDeClient.isHiccup(TransitError.http(status: 403, body: nil)))
         #expect(!BahnDeClient.isHiccup(URLError(.timedOut)))
+        #expect(BahnDeClient.isTimeout(URLError(.timedOut)))
+        #expect(!BahnDeClient.isTimeout(URLError(.networkConnectionLost)))
     }
 
     @Test func bahnDesOwnAnswersAndBlocksAreTold() {
@@ -4228,7 +4252,8 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
 /// The Worker answers a station search; a test's server answers with the status in `answers` (by host).
 private final class ProxyRoutingProtocol: URLProtocol, @unchecked Sendable {
     static let answers = Mutex<[String: Int]>([:])
-    /// Statuses a host answers first, one per request, before `answers`.
+    /// Statuses a host answers first, one per request, before `answers`. `timedOut` answers nothing in time.
+    static let timedOut = 0
     static let sequences = Mutex<[String: [Int]]>([:])
     static let requests = Mutex<[URL]>([])
 
@@ -4250,6 +4275,10 @@ private final class ProxyRoutingProtocol: URLProtocol, @unchecked Sendable {
             return first
         }
         let status = next ?? Self.answers.withLock { $0[host] } ?? 200
+        if status == Self.timedOut {
+            client?.urlProtocol(self, didFailWithError: URLError(.timedOut))
+            return
+        }
         let body = status == 200
             ? #"[{"extId":"8000105","name":"Frankfurt(Main)Hbf","type":"ST","products":["ICE"]}]"#
             : #"{"error":"paused"}"#

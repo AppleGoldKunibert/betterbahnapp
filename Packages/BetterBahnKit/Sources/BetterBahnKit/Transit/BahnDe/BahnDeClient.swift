@@ -699,7 +699,8 @@ public struct BahnDeClient: Sendable {
 
     /// GET from bahn.de. The app asks only our server (`BahnDeProxy`): bahn.de refuses every other way in since
     /// October 2026, the Worker's included. A hiccup (`isHiccup`: a 502, a dropped connection) is tried again up
-    /// to `BahnDeProxy.attempts` times. While the server fails (down, paused, refused) it is left alone for a
+    /// to `BahnDeProxy.attempts` times, a timeout once more; a request that times out again throws `timeout`
+    /// without pausing the others. While the server fails (down, paused, refused) it is left alone for a
     /// while and every request throws `rateLimited`, so the app says the live data isn't available.
     /// Without a server (tests) the request goes to `url` itself, with `gate`'s cooldown after a block.
     func get<T: Decodable>(_ url: URL, as type: T.Type) async throws -> T {
@@ -722,6 +723,15 @@ public struct BahnDeClient: Sendable {
                         attempt += 1
                         continue
                     }
+                    if Self.isTimeout(error) {
+                        // One slow answer (bahn.de or the server busy for a moment) says nothing about the next
+                        // request: ask once more, then give up on this one only.
+                        if attempt < BahnDeProxy.timeoutAttempts {
+                            attempt += 1
+                            continue
+                        }
+                        throw TransitError.timeout
+                    }
                     await proxy.gate.pause(after: error, url: url)
                     throw TransitError.rateLimited
                 }
@@ -741,7 +751,7 @@ extension BahnDeClient {
     /// A failure of our server or the connection that is likely gone a moment later: a 5xx (a 502 when
     /// the server cut a request off), a dropped or refused connection. Not bahn.de refusing us (403, 429,
     /// 452: asking again makes it worse), not the server's own pause (a 503 "paused", it is refused itself)
-    /// and not a timeout, which already waited long.
+    /// and not a timeout, which already waited long (`isTimeout`).
     static func isHiccup(_ error: Error) -> Bool {
         switch error {
         case TransitError.http(let status, let body):
@@ -750,6 +760,16 @@ extension BahnDeClient {
             [.networkConnectionLost, .cannotConnectToHost, .badServerResponse, .secureConnectionFailed].contains(error.code)
         default:
             false
+        }
+    }
+
+    /// A request that got no answer in time. Tried once more but never pauses the others: the next one
+    /// usually answers (ICE 838, 2026-10-21: one slow journey request paused the Wagenreihung for 2 minutes).
+    static func isTimeout(_ error: Error) -> Bool {
+        switch error {
+        case TransitError.timeout: true
+        case let error as URLError: error.code == .timedOut
+        default: false
         }
     }
 }
