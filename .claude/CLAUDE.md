@@ -113,9 +113,9 @@ they say no, continue as usual.
   User-Agent (see `BahnExpertClient`); `journey/find` then `journey/detailsByJourneyId` give DB's own times per
   stop, the reference for real delays.
 - bahn.de (`www.bahn.de/web/api/...`) answers `403`/`452 OPS_BLOCKED` to anything without a browser's TLS
-  handshake (cloud session, plain curl, Cloudflare Workers): don't ask it directly. With `TOKEN_SECRET` in the
-  environment, ask it through our server yourself: `python3 scripts/bahnde.py '<path below /web/api/ with query>'`
-  (signs a short-lived app token; never print, log or commit the secret; a few requests, not loops). Without it, give
+  handshake (cloud session, plain curl, Cloudflare Workers): don't ask it directly. Ask it through our server
+  yourself: `python3 scripts/bahnde.py '<path below /web/api/ with query>'` (the environment's network secret adds
+  the app token; a few requests, not loops). If that answers `401` or fails, give
   the user a complete `curl_cffi` command for the Mac (`impersonate="safari"`, `Accept-Encoding: gzip, br`, else
   answers lag 1-3 s; `python3 -m venv /tmp/cffi && /tmp/cffi/bin/pip install curl_cffi`) and ask them to paste the output.
 - The app reaches bahn.de only through our server `Server/bahnde-proxy` (browser TLS fingerprint, behind Tailscale
