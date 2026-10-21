@@ -321,7 +321,7 @@ in `project.pbxproj`: new files join their target automatically.
 - `Transit/BahnDe/CoachAdvice.swift`, `StationPlatforms.swift` – where to board (#383). `StationPlatforms.at(eva:)` from
   `Resources/Platforms.json` (`scripts/make-platforms.py`): tracks sharing a platform, per track the OSM platform
   edge (ends, length), stairs/lifts/terminus exit and sector signs in metres along it. `CoachAdvice.plan(for:…)` per
-  journey (tight transfers up to 15 min, the exit at the end; with a seat reservation on the arriving train the
+  journey (tight transfers up to 15 min, longer ones to another platform only the stairs, the exit at the end; with a seat reservation on the arriving train the
   coaches to walk to before arriving, `walkBeforeArrival`, when that saves 30 m, else `alreadyThere` („Du sitzt schon im
   richtigen Wagen, …", only when another coach would be wrong), for the exit only at a terminus; where the journey ends at
   a terminus only its exit counts (`toExit`, `Track.ways(out:)`: the front of the train, not the underpasses along the
@@ -331,7 +331,8 @@ in `project.pbxproj`: new files join their target automatically.
   coach of the train stands 60 m worse than the best of your class, so also when all of your class fit): the arriving train's Wagenreihung at the transfer
   station (its departure there, from its run) against the connecting train's at the same platform
   (`transfer(arriving:…)`, positions of the other track by shared sector names), else the stairs
-  (`exit(sequence:…)`: OSM positions onto bahn.de's by the sector signs, else by the way the train runs); a
+  (`exit(sequence:…)`: OSM positions onto bahn.de's by the sector signs, else by the way the train runs, at a terminus it
+  goes on from, reversing, away from the buffer stops, Stralsund Hbf); a
   connecting train without a Wagenreihung (S-Bahn, bus) still counts by its platform. Tracks match by section
   ("3a/b" → "3a" → "3", `StationPlatforms.trackKeys`). A train
   ending at a terminus has no Wagenreihung there: laid out from the buffer stops in its order at the stop before

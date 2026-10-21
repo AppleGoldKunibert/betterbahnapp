@@ -2,9 +2,9 @@ import Foundation
 
 /// Which coaches to board so you get off at the right spot (#383): at a tight transfer to a train at
 /// the same platform, opposite the connecting train (its reserved coach, else its part going your way
-/// in your class); else next to the stairs, a lift or, at a terminus, the exit. Positions come from
-/// bahn.de's Wagenreihung at that stop; the stairs from `StationPlatforms`, placed on bahn.de's
-/// platform by the sector signs or, without them, by the way the train runs.
+/// in your class); else (also at a longer transfer) next to the stairs, a lift or, at a terminus, the
+/// exit. Positions come from bahn.de's Wagenreihung at that stop; the stairs from `StationPlatforms`,
+/// placed on bahn.de's platform by the sector signs or, without them, by the way the train runs.
 public struct CoachAdvice: Sendable, Hashable {
     public enum Target: Sendable, Hashable {
         /// The connecting train at the same platform; `coach` is the reserved one in it.
@@ -239,14 +239,16 @@ extension CoachAdvice {
 // MARK: - A journey
 
 extension CoachAdvice {
-    /// Transfers up to this many minutes get advice, as for the "oft verpasst" warning.
+    /// Transfers up to this many minutes get advice on where the connecting train stops, as for the "oft verpasst"
+    /// warning; longer ones only the way off the platform.
     public static let tightTransfer = 15
 
     /// A seat reserved on a train: "12" in "ICE 940".
     public typealias Reservation = (coach: String, train: String)
 
     /// Advice for each leg of `journey` still ahead (by leg ID): where to board for each tight transfer
-    /// (up to `tightTransfer` minutes) and for getting off at the end. With a seat reservation on a leg
+    /// (up to `tightTransfer` minutes) and for getting off at the end. A longer transfer to another platform
+    /// gets the stairs, as for the end. With a seat reservation on a leg
     /// (`reservations`, by leg ID) it boards at the seat: for a transfer, where to walk before arriving or
     /// that it is right already; for getting off at the end only at a terminus. Getting off at a terminus aims
     /// for its exit (the front of the train), not the stairs along the platform. On the train without one, the place
@@ -274,8 +276,10 @@ extension CoachAdvice {
             let stationEVA = leg.destination.evaNumber ?? StationNames.evaNumber(for: leg.destination)
             if let next {
                 let minutes = Int((next.departure.best.timeIntervalSince(leg.arrival.best) / 60).rounded())
-                guard minutes > 0, minutes <= tightTransfer, next.origin.isSamePlace(as: leg.destination),
+                guard minutes > 0, next.origin.isSamePlace(as: leg.destination),
                       let arrival = await arrival(of: leg, now: now, stops: stops) else { continue }
+                // A longer transfer leaves time to find the connecting train: only the way off the platform.
+                let tight = minutes <= tightTransfer
                 var departing: CoachSequence?
                 if let request = BahnDeClient.formationRequest(for: next, now: now), request.station.isSamePlace(as: next.origin) {
                     departing = await sequence(request)
@@ -285,7 +289,7 @@ extension CoachAdvice {
                 case .continuing(let request, let course):
                     guard let arriving = await sequence(request) else { continue }
                     let here = (departing?.eva ?? arriving.eva ?? stationEVA).flatMap(platformsAt)
-                    if let departing {
+                    if tight, let departing {
                         advice[leg.id] = transfer(arriving: arriving, departing: departing, platforms: here, station: station,
                                                   reservation: reservations[next.id], travelClass: travelClass, course: course,
                                                   seat: seat, aboard: aboard)
@@ -296,7 +300,7 @@ extension CoachAdvice {
                 case .ending(let request):
                     guard let here = (departing?.eva ?? stationEVA).flatMap(platformsAt), let track = leg.arrivalPlatform?.best,
                           let before = await sequence(request) else { continue }
-                    if let departing {
+                    if tight, let departing {
                         advice[leg.id] = transfer(endingAt: track, before: before, departing: departing, platforms: here,
                                                   station: station, reservation: reservations[next.id], travelClass: travelClass,
                                                   seat: seat, aboard: aboard)
@@ -565,14 +569,19 @@ extension CoachSequence {
 
     /// Turns positions along OpenStreetMap's platform edge into positions on bahn.de's platform: by the
     /// sector signs both have, else by which end of the platform the train heads for (the next stop
-    /// lies that way, the previous one the other), with both platforms' middles at the same place.
+    /// lies that way, the previous one the other), with both platforms' middles at the same place. At a
+    /// terminus the train leaves away from the buffer stops, wherever its next stop lies (Stralsund Hbf,
+    /// with Bergen auf Rügen off to the side), so there positions count from them.
     func mapping(from track: StationPlatforms.Track, course: CoachAdvice.Course?) -> ((Double) -> Double)? {
         let pairs = track.sectorSigns.compactMap { sign -> (Double, Double)? in
             sectors.first { $0.name == sign.name }.map { (sign.position, ($0.start + $0.end) / 2) }
         }
         if let fitted = Self.fit(pairs) { return fitted }
-        guard let course, let towardsEnd = travelsTowardsPlatformEnd, let length = platformLength ?? sectors.last?.end
-        else { return nil }
+        guard let towardsEnd = travelsTowardsPlatformEnd, let length = platformLength ?? sectors.last?.end else { return nil }
+        if let buffers = track.accesses.first(where: { $0.kind == .exit }) {
+            return { towardsEnd ? abs($0 - buffers.position) : length - abs($0 - buffers.position) }
+        }
+        guard let course else { return nil }
         // Which end of the edge the train heads for.
         let headsForEnd: Bool
         if let next = course.next {

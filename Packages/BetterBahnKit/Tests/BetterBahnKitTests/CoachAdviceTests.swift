@@ -206,6 +206,24 @@ import Testing
         #expect(CoachAdvice.exit(sequence: sequence, platforms: platforms, station: "Celle") == nil)
     }
 
+    @Test func placesTheExitOfATerminusTheTrainGoesOnFrom() throws {
+        // Stralsund Hbf: track 2 runs 322 m south from the buffer stops at its northern start. The train came
+        // from the south and goes on, reversing, to Bergen auf Rügen, which lies east: no help in telling the ends apart.
+        let track = StationPlatforms.Track(start: .init(latitude: 54.3085, longitude: 13.078), end: .init(latitude: 54.3056, longitude: 13.078),
+                                           length: 322, accesses: [.init(kind: .exit, position: 0)])
+        let platforms = StationPlatforms(tracks: ["2": track])
+        let bergen = CoachAdvice.Course(previous: .init(latitude: 54.09, longitude: 13.38), next: .init(latitude: 54.307, longitude: 13.42))
+        // It leaves away from the buffer stops: towards bahn.de's end, its rear coach (9) at the buffer stops by bahn.de's start …
+        let leaving = train(numbers(1...9), from: 8, towardsEnd: true, platform: "2", sectors: [])
+        let advice = try #require(CoachAdvice.exit(sequence: leaving, platforms: platforms, station: "Stralsund Hbf", course: bergen,
+                                                   toExit: true))
+        #expect(advice.coaches == ["9"])
+        #expect(advice.text() == "In Wagen 9 einsteigen, um in Stralsund Hbf direkt am Ausgang auszusteigen.")
+        // … or towards bahn.de's start, the buffer stops by its end.
+        let other = train(numbers(1...9), from: 400 - 8 - 9 * Self.coachLength, towardsEnd: false, platform: "2", sectors: [])
+        #expect(CoachAdvice.exit(sequence: other, platforms: platforms, station: "Stralsund Hbf", course: bergen, toExit: true)?.coaches == ["9"])
+    }
+
     @Test func endsAtTheExitOfATerminus() throws {
         // Track 13 ends at the buffer stops at 300 m, where the platform meets the station hall.
         let track = StationPlatforms.Track(start: .init(latitude: 50.105, longitude: 8.659), end: .init(latitude: 50.107, longitude: 8.663),
@@ -349,7 +367,7 @@ import Testing
                                                 sequence: sequence, stops: { _ in run })
         #expect(connecting[journey.legs[0].id]?.target == .connection(coach: "35"))
 
-        // 20 minutes is time enough.
+        // 20 minutes at the same platform is time enough to find ICE 200.
         var relaxed = journey
         relaxed.legs[1] = leg("ICE 200", from: hannoverHbf, at: 140, to: hamburg, at: 220)
         #expect(await CoachAdvice.plan(for: relaxed, now: now, sequence: sequence, stops: { _ in run }).isEmpty)
@@ -376,6 +394,11 @@ import Testing
         let advice = await CoachAdvice.plan(for: journey, now: now, sequence: sequence, stops: { _ in run }, platformsAt: { _ in platforms })
         #expect(advice[journey.legs[0].id]?.coaches == ["31", "32"])
         #expect(advice[journey.legs[0].id]?.target == .access(.stairs))
+        // 25 minutes later still the stairs: only the connecting train's spot is left out.
+        var later = journey
+        later.legs[1].departure = TimeInfo(planned: now.addingTimeInterval(145 * 60), actual: nil)
+        let relaxed = await CoachAdvice.plan(for: later, now: now, sequence: sequence, stops: { _ in run }, platformsAt: { _ in platforms })
+        #expect(relaxed[later.legs[0].id]?.coaches == ["31", "32"])
         // Getting off there at the end: the stairs too, but nothing with a seat reserved, which decides there.
         let ending = Journey(legs: [journey.legs[0]], source: .bahnDe)
         let exit = await CoachAdvice.plan(for: ending, now: now, sequence: sequence, stops: { _ in run }, platformsAt: { _ in platforms })
