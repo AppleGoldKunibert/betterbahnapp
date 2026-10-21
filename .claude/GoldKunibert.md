@@ -14,8 +14,9 @@ CLAUDE.md still applies; this file only adds GoldKunibert's own preferences and 
 
 - GoldKunibert owns the project: changes that would send the user's location to a server, merging into
   `externaltester` and redeploying the `betterbahn` Worker via the Cloudflare dashboard are GoldKunibert's calls.
-- When bahn.de data is needed (see "Privacy and data sources" in CLAUDE.md), give GoldKunibert the complete
-  `curl_cffi` command to run on the Mac and ask for the output to be pasted.
+- When bahn.de data is needed (see "Privacy and data sources" in CLAUDE.md), ask it through our server with
+  `scripts/bahnde.py` (`TOKEN_SECRET` is set in the cloud environment). Only if that fails, give GoldKunibert the
+  complete `curl_cffi` command to run on the Mac and ask for the output to be pasted.
 - GoldKunibert tests only on the iPhone: write "What to test" (in the reply and in the test list) for the
   iPhone, not the Simulator. A step that needs a launch argument says to run the debug build from Xcode on it.
 
