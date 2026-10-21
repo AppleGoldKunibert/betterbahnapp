@@ -545,6 +545,7 @@ struct JourneyResultsView: View {
                 if !Task.isCancelled { withAnimation(.snappy) { journeys = applying(found, to: journeys) } }
             }
             await fillMissingPlatforms(in: result)
+            await correctLateTrainNames(in: result)
         } catch is CancellationError {
             lookup?.cancel()
         } catch {
@@ -617,6 +618,14 @@ struct JourneyResultsView: View {
 
     /// Transitous leaves some trains' Gleis out (whole regional feeds, but now and then ICEs and RJs
     /// too); fills those in from DB's own schedule once the results are already on screen.
+    /// The search waits only 3 s for bahn.de's train names ("RJ 176" for DB's "ICE 176"); a later answer
+    /// renames the trains in the list.
+    private func correctLateTrainNames(in loaded: [Journey]) async {
+        let corrected = await model.provider.correctingTrainNames(in: loaded, deadline: .seconds(20))
+        guard !Task.isCancelled, corrected != loaded else { return }
+        withAnimation(.snappy) { journeys = BahnDeClient.takingTrainNames(from: corrected, into: journeys) }
+    }
+
     private func fillMissingPlatforms(in loaded: [Journey]) async {
         guard let timetables = model.timetablesClient else { return }
         await withTaskGroup(of: Journey?.self) { group in

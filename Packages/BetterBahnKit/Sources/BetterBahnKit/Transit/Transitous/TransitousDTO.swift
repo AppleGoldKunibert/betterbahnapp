@@ -126,7 +126,7 @@ struct MLineInfo {
     var routeColor: String?
 
     func toLine() -> Line {
-        let name = trainNameInsteadOfLine ?? displayName ?? tripShortName ?? routeShortName ?? mode
+        let name = MLineInfo.uppercasingTrainCategory(trainNameInsteadOfLine ?? displayName ?? tripShortName ?? routeShortName ?? mode)
         // Only the letters: DELFI writes the line number right after the category, "RE3 (3349)", "RB10".
         let prefix = String(name.prefix { $0.isLetter }).uppercased()
         let product = MLineInfo.product(mode: mode, prefix: prefix)
@@ -164,6 +164,15 @@ struct MLineInfo {
         let category = parts[0].uppercased()
         guard Self.bracketedTrainCategories.contains(category) else { return nil }
         return "\(category) \(parts[1])"
+    }
+
+    /// `name` with a lowercase long-distance category written the way bahn.de does: the Slovak feed
+    /// (ZSSK) names ČD's Railjet "rj 174", which read as a different train next to DB's "RJ 174".
+    static func uppercasingTrainCategory(_ name: String) -> String {
+        let parts = name.split(separator: " ", maxSplits: 1)
+        guard parts.count == 2, parts[0].allSatisfy(\.isLowercase), parts[1].allSatisfy(\.isNumber),
+              bracketedTrainCategories.contains(parts[0].uppercased()) else { return name }
+        return "\(parts[0].uppercased()) \(parts[1])"
     }
 
     /// Whether this is a train (as opposed to bus, tram, subway, ferry, …).
