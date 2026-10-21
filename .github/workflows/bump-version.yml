@@ -1,8 +1,9 @@
 # Bumps the app version on indevelopment when a PR is merged into it: +0.1 (patch reset to 0) for every
 # feature, +0.0.1 for every bug fix, and the build number +1 once per bumped PR. A feature or bug is an issue
 # the PR fixes ("Fixed #15", "Closes #15", … in the PR body) labeled "enhancement" or "bug" (an issue with
-# both counts as a feature), so a PR fixing two bugs bumps the patch twice. The PR's own "enhancement" or
-# "bug" label counts once more, but only when none of its fixed issues already carries that label.
+# both counts as a feature), so a PR fixing two bugs bumps the patch twice. Changes without an issue are
+# listed in the PR body as "Feature without Issue" or "Bug without Issue" lines, each counting once. The
+# PR's own "enhancement" or "bug" label counts once more, but only when nothing above counted that kind.
 # Minors are applied before patches: 1.0.3 + one feature and one bug → 1.1.1. No label, no bump.
 name: Bump version
 
@@ -59,13 +60,19 @@ jobs:
               }
             }
 
-            const issueFeatures = features;
-            const issueBugs = bugs;
-            if (has(pr.labels, "enhancement") && issueFeatures === 0) {
+            for (const [, kind] of body.matchAll(/\b(feature|bug)\s+without\s+issue\b/gi)) {
+              if (kind.toLowerCase() === "feature") features++;
+              else bugs++;
+              core.info(`${kind} without issue`);
+            }
+
+            const listedFeatures = features;
+            const listedBugs = bugs;
+            if (has(pr.labels, "enhancement") && listedFeatures === 0) {
               features++;
               core.info("PR label: feature");
             }
-            if (has(pr.labels, "bug") && issueBugs === 0) {
+            if (has(pr.labels, "bug") && listedBugs === 0) {
               bugs++;
               core.info("PR label: bug fix");
             }
