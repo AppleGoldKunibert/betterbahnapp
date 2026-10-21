@@ -438,6 +438,7 @@ struct JourneyDetailView: View {
                 JourneyShareButton(journey: journey, title: shareTitle)
                 if !readOnly, let entry = model.savedEntry(for: journey) {
                     CalendarButton(entry: entry)
+                    RegularTripButton(journey: journey)
                 }
                 if model.settings.editJourneyEnabled {
                     Button {

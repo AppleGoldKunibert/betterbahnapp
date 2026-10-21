@@ -61,7 +61,7 @@ ${PAGE_STYLE}
 <body>
 <main>
 <h1>Datenschutz</h1>
-<p class="muted">BetterBahn für iPhone · Stand: 18. Oktober 2026</p>
+<p class="muted">BetterBahn für iPhone · Stand: 19. Oktober 2026</p>
 
 <p>BetterBahn ist ein privates Projekt und steht in keiner Verbindung zur Deutschen Bahn AG. Die App hat
 keine Benutzerkonten, keine Werbung, kein Tracking und keine Analyse-Werkzeuge. Was du in der App speicherst,
@@ -165,7 +165,7 @@ deinem Träwelling-Konto verbunden ist, sonst von <a href="https://zug.network">
 nichts über dich gesendet außer deiner IP-Adresse, die jeder Abruf im Internet mitschickt.</p>
 
 <h2>Mitteilungen</h2>
-<p>Hinweise zu Verspätungen und Gleiswechseln erzeugt die App selbst auf deinem Gerät.</p>
+<p>Hinweise zu Verspätungen und Gleiswechseln erzeugt die App selbst auf deinem Gerät, außer bei regelmäßigen Fahrten (siehe unten).</p>
 <p>Nur wenn du „Check-ins von Gefolgten melden“ einschaltest, kommen Mitteilungen über den Server von BetterBahn:
 Du meldest dich dafür ein zweites Mal bei Träwelling an, und zwar nur mit Leserechten für Check-ins. Diese
 Anmeldung bekommt der Server, nicht die App. Er speichert dafür verschlüsselt die Träwelling-Anmeldung, deine
@@ -174,6 +174,12 @@ gemeldet hat. Alle 2 Minuten fragt er bei Träwelling die Check-ins der Leute ab
 über Apples Push-Dienst (APNs) eine Mitteilung mit Name, Zug und Strecke eines neuen Check-ins. Schaltest du es
 aus oder meldest dich in der App bei Träwelling ab, löscht der Server diese Daten und beendet seine Anmeldung.
 Das passiert auch, wenn Träwelling die Anmeldung beendet oder die App gelöscht wurde.</p>
+<p>Bei regelmäßigen Fahrten fragt die App kurz vor der Abfahrt, ob du heute fährst; diese Frage plant sie
+selbst auf deinem Gerät. Sagst du Ja, schickt sie für diesen Tag Zugnummern, Ein- und Ausstiegsbahnhof mit den
+geplanten Zeiten, deine Verspätungsschwelle und die Push-Kennung deines Geräts von Apple an den Server von
+BetterBahn. Er fragt damit die Fahrplandaten der Deutschen Bahn ab und schickt über APNs eine Mitteilung bei
+Verspätung, Ausfall, Gleiswechsel oder knappem Umstieg. Kurz nach der Ankunft löscht er diese Angaben. Dein
+Standort und dein Name sind nicht dabei.</p>
 
 <h2>Live-Aktivität</h2>
 <p>Solange „Live-Aktivität über Server aktualisieren“ in den Einstellungen eingeschaltet ist (Standard), übergibt

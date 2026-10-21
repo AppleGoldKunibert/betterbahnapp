@@ -13,6 +13,20 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 );
 CREATE INDEX IF NOT EXISTS subscriptions_slot ON subscriptions (slot);
 
+-- Regular trips (#397): the journeys a device's user said yes to for today, looked at in DB's timetable feed.
+-- One row per device; deleted once its journeys have arrived.
+CREATE TABLE IF NOT EXISTS commutes (
+    id TEXT PRIMARY KEY,              -- made by the app
+    secret_hash TEXT NOT NULL,        -- SHA-256 (hex) of the secret only the app knows
+    device_token TEXT NOT NULL,       -- APNs device token (hex)
+    sandbox INTEGER NOT NULL DEFAULT 0, -- 1: development build (APNs sandbox)
+    journeys TEXT NOT NULL,           -- JSON: trains (category, number), stations (EVA, name), planned times,
+                                      -- the stop IDs found in IRIS and what was reported
+    slot INTEGER NOT NULL,            -- minute (0–59) the look is due in, modulo INTERVAL_MINUTES
+    updated INTEGER NOT NULL          -- unix seconds
+);
+CREATE INDEX IF NOT EXISTS commutes_slot ON commutes (slot);
+
 -- The APNs provider token, reused for 50 minutes (Apple refuses new ones more often than every 20).
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,

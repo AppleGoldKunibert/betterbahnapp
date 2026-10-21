@@ -3,6 +3,7 @@ import BackgroundTasks
 import BetterBahnKit
 import CoreSpotlight
 import SwiftUI
+import UserNotifications
 
 @main
 struct BetterBahnApp: App {
@@ -46,6 +47,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             model.handleLiveActivityBackgroundTask(refreshTask)
         }
         UNUserNotificationCenter.current().delegate = self
+        // "Fährst du heute?" with its answers (#397).
+        UNUserNotificationCenter.current().setNotificationCategories([CommuteNotifier.notificationCategory])
         return true
     }
 
@@ -58,20 +61,55 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         model?.didRegisterForPush(deviceToken: nil)
     }
 
-    /// Exit reminders (#313) also show while the app is open; the others don't, as before.
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
-                                            withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        completionHandler(notification.request.identifier.hasPrefix(AppModel.exitReminderPrefix) ? [.banner, .list, .sound] : [])
-    }
-
-    /// A followed user's check-in notification (#266) opens that check-in; the others just open the app.
+    /// A followed user's check-in notification (#266) opens that check-in, a regular trip's question (#397) is
+    /// answered (iOS waits for the journey to be saved after "Ja"), a push about a regular trip's journey opens it;
+    /// the others just open the app.
+    ///
+    /// Not the `async` variant: its generated wrapper calls iOS's completion handler off the main thread, and iOS
+    /// then stops the app ("Call must be made on main thread") as soon as a notification is tapped.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                             withCompletionHandler completionHandler: @escaping () -> Void) {
-        let statusID = FollowedCheckinNotifier.statusID(in: response.notification.request.content.userInfo)
-        completionHandler()
-        guard let statusID else { return }
-        Task { @MainActor in await self.model?.openFollowedCheckin(id: statusID) }
+        let userInfo = response.notification.request.content.userInfo
+        let statusID = FollowedCheckinNotifier.statusID(in: userInfo)
+        let question = CommuteNotifier.question(in: userInfo)
+        let retry = CommuteNotifier.isRetry(userInfo)
+        let journeyID = CommuteNotifier.journeyID(in: userInfo)
+        let action = response.actionIdentifier
+        let done = MainThreadCompletion(completionHandler)
+        Task { @MainActor in
+            await self.handleNotification(action: action, statusID: statusID, question: question, retry: retry, journeyID: journeyID)
+            done.call()
+        }
     }
+
+    private func handleNotification(action: String, statusID: Int?, question: CommuteQuestion?, retry: Bool, journeyID: String?) async {
+        if let question {
+            await model?.answerCommuteQuestion(question, action: action, retry: retry)
+        } else if let journeyID {
+            model?.openCommuteJourney(id: journeyID)
+        } else if let statusID {
+            await model?.openFollowedCheckin(id: statusID)
+        }
+    }
+
+    /// Exit reminders (#313), a regular trip's question and the pushes about its journey (#397) also show while
+    /// the app is open; the others don't, as before.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                            withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        let userInfo = notification.request.content.userInfo
+        let shows = notification.request.identifier.hasPrefix(AppModel.exitReminderPrefix)
+            || CommuteNotifier.question(in: userInfo) != nil || CommuteNotifier.journeyID(in: userInfo) != nil
+        completionHandler(shows ? [.banner, .list, .sound] : [])
+    }
+}
+
+/// iOS's completion handler for a tapped notification, carried to the main actor and called there.
+nonisolated private struct MainThreadCompletion: @unchecked Sendable {
+    let handler: () -> Void
+
+    init(_ handler: @escaping () -> Void) { self.handler = handler }
+
+    @MainActor func call() { handler() }
 }
 
 struct RootView: View {
@@ -140,6 +178,8 @@ struct RootView: View {
                 model.scheduleCalendarSync()
                 // Journeys that ended meanwhile leave the iOS search.
                 model.scheduleSpotlightSync()
+                model.scheduleCommuteQuestions()
+                Task { await model.syncCommutePush() }
                 // Build the travel map's heatmap in the background so its tab opens instantly.
                 model.prewarmTravelMap()
             } else if phase == .background {
@@ -149,6 +189,15 @@ struct RootView: View {
                 withBackgroundTime("LiveActivityHandOver") { await model.handOverLiveActivity() }
             }
         }
+        // A saved journey to show (the Live Activity or a regular trip's notification): on the Verbindungen tab.
+        .onChange(of: model.journeyToOpen) { _, entry in
+            guard entry != nil else { return }
+            incomingSharedJourney = nil
+            incomingDBShare = nil
+            linkedTrainMap = nil
+            selectedTab = .connections
+        }
+        .commuteQuestionAlert()
         // A followed user's check-in notification was tapped (#266): its list is on the Verbindungen tab.
         .onChange(of: model.followedCheckinToOpen) { _, id in
             guard id != nil else { return }

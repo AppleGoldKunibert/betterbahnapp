@@ -97,6 +97,7 @@ struct SettingsView: View {
                     .tint(.brand)
                     .onChange(of: settings.connectionWarnings) { _, enabled in
                         if enabled { Task { await ConnectionNotifier.requestAuthorization() } }
+                        Task { await model.syncCommutePush() }
                     }
                     Toggle(isOn: $settings.exitReminders) {
                         IconLabel(title: "Ans Aussteigen erinnern", systemImage: "bell.badge.fill", color: .red)
@@ -132,6 +133,11 @@ struct SettingsView: View {
                                 model.syncLiveActivity()
                             }
                         }
+                    }
+                    NavigationLink {
+                        RegularTripsView()
+                    } label: {
+                        IconLabel(title: "Regelmäßige Fahrten", systemImage: "repeat", color: .brand)
                     }
                 } header: {
                     Text("Meine Reisen")
