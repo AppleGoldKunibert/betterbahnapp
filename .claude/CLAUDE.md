@@ -16,7 +16,7 @@ iOS app (SwiftUI, iOS 26, Swift 6) for German train travel. UI text is German, c
 | `Cloudflare/` | Workers: `betterbahn`, `bahnde-proxy` (`betterbahn2`), `pass-signer`, `stats`, `checkin-push`, `live-activity`, `shared`. |
 | `Server/` | `bahnde-proxy`: Docker server asking bahn.de with a browser's TLS fingerprint (the app asks it before `betterbahn2`). |
 | `scripts/` | Offline data rebuilds; `searchsim/` runs Kit tests on Linux. |
-| `.github/workflows/` | `pr-build.yml`, `pr-secrets.yml`, `sync-prod.yml`, `monthly-data-update.yml` (monthly PR into `prod` with rebuilt station data). |
+| `.github/workflows/` | `pr-build.yml`, `pr-secrets.yml`, `sync-prod.yml`, `bump-version.yml` (version bump per merged feature/bug), `monthly-data-update.yml` (monthly PR into `prod` with rebuilt station data). |
 
 - Details per feature and type: `docs/CODEBASE.md`. Don't read it whole: grep it for the feature or type name
   and read that section, then open only the files you change. Read `docs/app-review-notes.md` (App Store,

@@ -1,0 +1,119 @@
+# Bumps the app version on indevelopment when a PR is merged into it: +0.1 (patch reset to 0) for every
+# feature, +0.0.1 for every bug fix, and the build number +1 once per bumped PR. A feature or bug is an issue
+# the PR fixes ("Fixed #15", "Closes #15", … in the PR body) labeled "enhancement" or "bug" (an issue with
+# both counts as a feature), so a PR fixing two bugs bumps the patch twice. The PR's own "enhancement" or
+# "bug" label counts once more, but only when none of its fixed issues already carries that label.
+# Minors are applied before patches: 1.0.3 + one feature and one bug → 1.1.1. No label, no bump.
+name: Bump version
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [indevelopment]
+
+permissions:
+  contents: write
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: bump-version
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Count features and bug fixes
+        id: count
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const pr = context.payload.pull_request;
+            const body = pr.body ?? "";
+            const has = (labels, name) => labels.some((l) => (typeof l === "string" ? l : l.name) === name);
+
+            const pattern = /\b(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?)\s*:?\s+#(\d+)/gi;
+            const numbers = [...new Set([...body.matchAll(pattern)].map((m) => Number(m[1])))];
+
+            let features = 0;
+            let bugs = 0;
+            for (const issue_number of numbers) {
+              let issue;
+              try {
+                ({ data: issue } = await github.rest.issues.get({ owner, repo, issue_number }));
+              } catch (error) {
+                core.warning(`Could not read #${issue_number}: ${error.message}`);
+                continue;
+              }
+              if (issue.pull_request) continue;
+              if (has(issue.labels, "enhancement")) {
+                features++;
+                core.info(`#${issue_number}: feature`);
+              } else if (has(issue.labels, "bug")) {
+                bugs++;
+                core.info(`#${issue_number}: bug fix`);
+              }
+            }
+
+            const issueFeatures = features;
+            const issueBugs = bugs;
+            if (has(pr.labels, "enhancement") && issueFeatures === 0) {
+              features++;
+              core.info("PR label: feature");
+            }
+            if (has(pr.labels, "bug") && issueBugs === 0) {
+              bugs++;
+              core.info("PR label: bug fix");
+            }
+
+            core.info(`${features} feature(s), ${bugs} bug fix(es)`);
+            core.setOutput("features", features);
+            core.setOutput("bugs", bugs);
+
+      - uses: actions/checkout@v4
+        if: steps.count.outputs.features != '0' || steps.count.outputs.bugs != '0'
+        with:
+          ref: indevelopment
+
+      - name: Bump MARKETING_VERSION and build number
+        if: steps.count.outputs.features != '0' || steps.count.outputs.bugs != '0'
+        env:
+          FEATURES: ${{ steps.count.outputs.features }}
+          BUGS: ${{ steps.count.outputs.bugs }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          project=BetterBahn.xcodeproj/project.pbxproj
+
+          versions=$(grep -oE 'MARKETING_VERSION = [0-9.]+;' "$project" | sort -u)
+          builds=$(grep -oE 'CURRENT_PROJECT_VERSION = [0-9]+;' "$project" | sort -u)
+          if [ "$(wc -l <<< "$versions")" -ne 1 ] || [ "$(wc -l <<< "$builds")" -ne 1 ]; then
+            echo "::error::Targets don't share one version: $versions / $builds"
+            exit 1
+          fi
+
+          old=$(sed -E 's/.*= ([0-9.]+);/\1/' <<< "$versions")
+          build=$(sed -E 's/.*= ([0-9]+);/\1/' <<< "$builds")
+          IFS=. read -r major minor patch <<< "$old"
+          minor=${minor:-0}
+          patch=${patch:-0}
+          if [ "$FEATURES" -gt 0 ]; then
+            minor=$((minor + FEATURES))
+            patch=0
+          fi
+          patch=$((patch + BUGS))
+          new="$major.$minor.$patch"
+          new_build=$((build + 1))
+
+          sed -i -E "s/MARKETING_VERSION = [0-9.]+;/MARKETING_VERSION = $new;/; s/CURRENT_PROJECT_VERSION = [0-9]+;/CURRENT_PROJECT_VERSION = $new_build;/" "$project"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -qam "Version $new ($new_build) for #$PR_NUMBER"
+          git push origin HEAD:indevelopment
+
+          echo "Version $old ($build) → $new ($new_build): $FEATURES feature(s), $BUGS bug fix(es) in #$PR_NUMBER" >> "$GITHUB_STEP_SUMMARY"
