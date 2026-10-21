@@ -324,8 +324,9 @@ in `project.pbxproj`: new files join their target automatically.
   journey (tight transfers up to 15 min, the exit at the end; with a seat reservation on the arriving train the
   coaches to walk to before arriving, `walkBeforeArrival`, when that saves 30 m, else `alreadyThere` („Du sitzt schon im
   richtigen Wagen, …", only when another coach would be wrong), none for the exit; the connecting
-  train's reservation is the target; class from the ticket, else Settings → Reiseklasse, `TravelClass.number`; a seat
-  saved on the train, `AppModel.savedSeats`, counts like a reservation): the arriving train's Wagenreihung at the transfer
+  train's reservation is the target; class from a seat's coach, else the ticket, else Settings → Reiseklasse,
+  `TravelClass.number`; a seat saved on the train, `AppModel.savedSeats`, counts like a reservation; said only when some
+  coach of the train stands 60 m worse than the best of your class, so also when all of your class fit): the arriving train's Wagenreihung at the transfer
   station (its departure there, from its run) against the connecting train's at the same platform
   (`transfer(arriving:…)`, positions of the other track by shared sector names), else the stairs
   (`exit(sequence:…)`: OSM positions onto bahn.de's by the sector signs, else by the way the train runs); a

@@ -95,10 +95,16 @@ import Testing
         let departing = train(numbers(31...37), from: 200, towardsEnd: true, firstClass: ["31", "32"], name: "ICE 200")
         let second = try #require(CoachAdvice.transfer(arriving: arriving, departing: departing, platforms: nil, station: "Fulda", travelClass: 2))
         #expect(second.coaches == ["30", "31"])
-        // First class only has ICE 100's coaches 31 and 32 to choose from, which stand opposite each other anyway.
-        let first = CoachAdvice.transfer(arriving: train(numbers(21...32), from: 10, towardsEnd: false, firstClass: ["31", "32"]),
-                                         departing: departing, platforms: nil, station: "Fulda", travelClass: 1)
-        #expect(first == nil)
+        // First class only has ICE 100's coaches 31 and 32, both near ICE 200's first class: the nearer one still.
+        let firstClass = train(numbers(21...32), from: 10, towardsEnd: false, firstClass: ["31", "32"])
+        let first = try #require(CoachAdvice.transfer(arriving: firstClass, departing: departing, platforms: nil, station: "Fulda",
+                                                      travelClass: 1))
+        #expect(first.coaches == ["32"])
+        // A seat in second class tells the class, whatever the settings say.
+        let seated = try #require(CoachAdvice.transfer(arriving: firstClass, departing: departing, platforms: nil, station: "Fulda",
+                                                       travelClass: 1, seat: (coach: "22", train: "ICE 100")))
+        #expect(seated.coaches == ["29", "30"])
+        #expect(seated.walkBeforeArrival)
     }
 
     @Test func saysNothingWhenAnyCoachDoes() {

@@ -134,6 +134,8 @@ extension CoachAdvice {
                                             course: course, seat: seat, aboard: aboard) }
         }
         guard let mapping = arriving.mapping(from: departing) else { return nil }
+        // A seat tells your class better than the settings.
+        let travelClass = seat.flatMap { arriving.coach(seat: $0)?.travelClass } ?? travelClass
         var reservedCoach: String?
         var spots: [ClosedRange<Double>] = []
         if let reservation, let id = departing.position(ofCoach: reservation.coach, train: reservation.train).coachID,
@@ -353,27 +355,32 @@ extension CoachAdvice {
         var alreadyThere = false
     }
 
-    /// The boardable coaches nearest to any of `spots` (metres along `sequence`'s platform), by place: up
-    /// to two next to each other, at up to two places as near (stairs at both ends of the train); nil
-    /// when they all stand about as near, so any coach does. With a `seat` on the train, its coach when it
-    /// is within `worthWalking` of those, else only the place nearest to it; `aboard` without a seat, the
-    /// place nearest the middle coach of your class (you could be sitting anywhere).
+    /// The boardable coaches in your class nearest to any of `spots` (metres along `sequence`'s platform), by
+    /// place: up to two next to each other, at up to two places as near (stairs at both ends of the train);
+    /// nil when every coach of the train stands about as near, so any one does. When all of your class stand
+    /// right, the best of them (opposite the middle of the spot). With a `seat` on the train (its class counts),
+    /// its coach when it is within `worthWalking` of those, else only the place nearest to it; `aboard`
+    /// without a seat, the place nearest the middle coach of your class (you could be sitting anywhere).
     static func nearest(in sequence: CoachSequence, travelClass: Int?, to spots: [ClosedRange<Double>],
                         seat: Reservation? = nil, aboard: Bool = false) -> Pick? {
+        let seatCoach = seat.flatMap { sequence.coach(seat: $0) }
+        if seat != nil, seatCoach?.span == nil { return nil }
+        let travelClass = seatCoach?.travelClass ?? travelClass
         let candidates = sequence.boardable(travelClass: travelClass).filter { $0.span != nil }
         guard !candidates.isEmpty, !spots.isEmpty else { return nil }
-        let distances = candidates.map { coach in spots.map { gap(coach.span!, $0) }.min()! }
-        let best = distances.min()!, worst = distances.max()!
+        func distance(_ coach: CoachSequence.Coach) -> Double { spots.map { gap(coach.span!, $0) }.min()! }
+        let distances = candidates.map(distance)
+        let best = distances.min()!
+        // Any coach of the train, in whichever class: is one of them wrong?
+        let worst = sequence.boardable(travelClass: nil).filter { $0.span != nil }.map(distance).max() ?? best
         // Where you sit, to walk from.
         var sitting: ClosedRange<Double>?
-        if let seat {
-            guard let id = sequence.position(ofCoach: seat.coach, train: seat.train).coachID,
-                  let coach = sequence.coaches.first(where: { $0.id == id }), let span = coach.span else { return nil }
-            if spots.map({ gap(span, $0) }).min()! - best < worthWalking {
+        if let seatCoach {
+            if distance(seatCoach) - best < worthWalking {
                 // Only worth saying when another coach would be wrong.
-                return worst - best >= minimumSpread ? Pick(places: [[coach]], alreadyThere: true) : nil
+                return worst - best >= minimumSpread ? Pick(places: [[seatCoach]], alreadyThere: true) : nil
             }
-            sitting = span
+            sitting = seatCoach.span
         } else {
             guard worst - best >= minimumSpread else { return nil }
             if aboard { sitting = middle(of: candidates)?.span }
@@ -436,6 +443,20 @@ extension CoachAdvice {
 
 extension ClosedRange<Double> {
     var middle: Double { (lowerBound + upperBound) / 2 }
+}
+
+extension CoachSequence {
+    /// The coach of `seat`, if the sequence has it.
+    func coach(seat: CoachAdvice.Reservation) -> Coach? {
+        position(ofCoach: seat.coach, train: seat.train).coachID.flatMap { id in coaches.first { $0.id == id } }
+    }
+}
+
+extension CoachSequence.Coach {
+    /// 1 or 2 for a coach of one class only.
+    var travelClass: Int? {
+        firstClass == secondClass ? nil : firstClass ? 1 : 2
+    }
 }
 
 extension CoachSequence.SeatPosition {

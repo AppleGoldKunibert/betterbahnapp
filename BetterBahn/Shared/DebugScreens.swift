@@ -246,7 +246,7 @@ extension AppModel {
     func debugAdviceSequence(for request: BahnDeClient.FormationRequest) -> CoachSequence? {
         let number = Self.adviceDemoTrain(request.number)
         guard request.category == "ICE", ["9911", "9912", "9913"].contains(number),
-              var sequence = CoachSequence.seatMapDemo(sheet: number == "9913" ? "408" : "412", trainName: "ICE \(request.number)",
+              var sequence = CoachSequence.seatMapDemo(sheet: ["9912": "412.7", "9913": "408"][number] ?? "412", trainName: "ICE \(request.number)",
                                                        unit: TrainFormation.Unit(model: "ICE 4", number: "9\(request.number.suffix(3))"))
         else { return nil }
         sequence.eva = request.station.evaNumber
@@ -258,8 +258,8 @@ extension AppModel {
         }
         if number == "9912", let long = CoachSequence.seatMapDemo(sheet: "412", trainName: "ICE 9911",
                                                                         unit: TrainFormation.Unit(model: "ICE 4", number: "9911")) {
-            // Seven coaches standing at the far end of the long train's platform, with its sectors.
-            sequence.coaches = Array(sequence.coaches.prefix(7)).map { coach in
+            // A seven-car ICE 4 (first class at its end) standing at the far end of the long train's platform, with its sectors.
+            sequence.coaches = sequence.coaches.map { coach in
                 var coach = coach
                 coach.start = coach.start.map { $0 + 130 }
                 coach.end = coach.end.map { $0 + 130 }
