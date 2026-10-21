@@ -629,10 +629,10 @@ struct LegCard: View {
     @State private var showFullTrip = false
     /// What past runs of this train say (#316), shown in the details.
     @State private var statistics = TrainStatisticsModel()
-    /// Which side the platform is on where this leg ends (#394), if the offline list knows.
-    @State private var exitSide: ExitSide?
     /// DB's occupancy forecast for this ride (#399): an icon by the name, the words in the details.
     @State private var occupancy: OccupancyForecast?
+    /// Which side the platform is on where this leg ends (#394), if the offline list knows.
+    @State private var exitSide: ExitSide?
     @Environment(AppModel.self) private var model
     @Environment(\.bikeMode) private var bikeMode
 
@@ -673,14 +673,21 @@ struct LegCard: View {
                     }
                     Spacer()
                     HStack(spacing: 10) {
-                        if !leg.cancelled {
-                            OccupancyButton(forecast: occupancy, travelClass: model.settings.travelClass)
-                        }
-                        TrainMessagesButton(messages: leg.messages)
-                        if leg.cancelled {
-                            InfoChip(text: "Fällt aus", systemImage: "xmark.octagon.fill", tint: .heavyDelay)
-                        } else {
-                            DelayPill(minutes: leg.departure.delayMinutes)
+                        // Side by side while they fit; otherwise the occupancy icon goes below the delay
+                        // rather than the delay wrapping over several lines.
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 10) {
+                                occupancyButton
+                                TrainMessagesButton(messages: leg.messages)
+                                status
+                            }
+                            VStack(alignment: .trailing, spacing: 4) {
+                                HStack(spacing: 10) {
+                                    TrainMessagesButton(messages: leg.messages)
+                                    status
+                                }
+                                occupancyButton
+                            }
                         }
                         if leg.tripId != nil {
                             Image(systemName: "chevron.right")
@@ -851,16 +858,31 @@ struct LegCard: View {
         .task(id: leg.id) {
             await statistics.load(line: leg.line, stops: statisticsStops, date: leg.departure.planned, bahnDe: model.provider.bahnDe)
         }
-        .task(id: [leg.id, leg.arrivalPlatform?.best ?? ""]) {
-            // The list loads and the lookup runs off the main thread.
-            let leg = leg
-            exitSide = await Task.detached(priority: .userInitiated) { ExitSides.side(leaving: leg) }.value
-        }
         .task(id: leg.id) {
             // Shares bahn.de's journey details with the live refresh and the operators; over once arrived.
             guard leg.arrival.best > .now, let bahnDe = model.provider.bahnDe,
                   let found = try? await bahnDe.occupancy(for: leg) else { return }
             occupancy = found
+        }
+        .task(id: [leg.id, leg.arrivalPlatform?.best ?? ""]) {
+            // The list loads and the lookup runs off the main thread.
+            let leg = leg
+            exitSide = await Task.detached(priority: .userInitiated) { ExitSides.side(leaving: leg) }.value
+        }
+    }
+
+    @ViewBuilder private var occupancyButton: some View {
+        if !leg.cancelled {
+            OccupancyButton(forecast: occupancy, travelClass: model.settings.travelClass)
+        }
+    }
+
+    /// "Fällt aus" or the departure delay, always on one line.
+    @ViewBuilder private var status: some View {
+        if leg.cancelled {
+            InfoChip(text: "Fällt aus", systemImage: "xmark.octagon.fill", tint: .heavyDelay).fixedSize()
+        } else {
+            DelayPill(minutes: leg.departure.delayMinutes).fixedSize()
         }
     }
 

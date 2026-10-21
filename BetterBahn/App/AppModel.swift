@@ -231,6 +231,8 @@ final class AppModel {
     }
 
     var journeyRefresher: JourneyRefresher { JourneyRefresher(provider: provider, timetables: timetablesClient) }
+    /// Loads a train run's live data for the trip views, the same way `journeyRefresher` does for a leg.
+    var liveRun: LiveRun { LiveRun(provider: provider, timetables: timetablesClient) }
 
     /// Whether `journey` was already loaded with live data: saved (refreshed in the background, also
     /// right after launch) or opened or prepared before. Only an unseen one waits for live data.
@@ -1850,9 +1852,9 @@ final class AppSettings {
         var exitReminderLead: ExitReminderLead?
         var liveActivityServerUpdates: Bool?
         var showWeather: Bool?
-        var travelClass: TravelClass?
         var searchWithBike: Bool?
         var bikeOption: BikeOption?
+        var travelClass: TravelClass?
     }
 
     /// What iCloud stores: the settings and when they were last changed.
@@ -1869,8 +1871,7 @@ final class AppSettings {
         expertTrainChoice: false, expertIgnoreBoardingRules: false, expertRil100: false,
         trainSearchKinds: TrainSearchKind.defaults.sorted(by: { $0.rawValue < $1.rawValue }),
         trainSearchCountries: TrainSearchCountry.defaults.sorted(), exitReminders: true, exitReminderLead: .five,
-        liveActivityServerUpdates: true, showWeather: true, travelClass: .second,
-        searchWithBike: false, bikeOption: .hidden)
+        liveActivityServerUpdates: true, showWeather: true, searchWithBike: false, bikeOption: .hidden, travelClass: .second)
 
     @ObservationIgnored private var isApplyingCloudValue = false
 
@@ -1885,8 +1886,8 @@ final class AppSettings {
                    trainSearchKinds: trainSearchKinds.sorted(by: { $0.rawValue < $1.rawValue }),
                    trainSearchCountries: trainSearchCountries.sorted(), exitReminders: exitReminders,
                    exitReminderLead: exitReminderLead, liveActivityServerUpdates: liveActivityServerUpdates,
-                   showWeather: showWeather, travelClass: travelClass,
-                   searchWithBike: searchWithBike, bikeOption: bikeOption)
+                   showWeather: showWeather, searchWithBike: searchWithBike, bikeOption: bikeOption,
+                   travelClass: travelClass)
     }
 
     /// When the settings were last changed on this device or taken over from iCloud. Before
@@ -1939,9 +1940,9 @@ final class AppSettings {
         exitReminderLead = value.exitReminderLead ?? exitReminderLead
         liveActivityServerUpdates = value.liveActivityServerUpdates ?? liveActivityServerUpdates
         showWeather = value.showWeather ?? showWeather
-        travelClass = value.travelClass ?? travelClass
         searchWithBike = value.searchWithBike ?? searchWithBike
         bikeOption = value.bikeOption ?? bikeOption
+        travelClass = value.travelClass ?? travelClass
     }
 }
 

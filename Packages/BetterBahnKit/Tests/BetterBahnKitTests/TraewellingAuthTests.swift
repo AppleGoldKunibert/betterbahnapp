@@ -934,6 +934,31 @@ private final class RefreshTokenProtocol: URLProtocol, @unchecked Sendable {
         #expect(TraewellingClient.boardTravelTypes(for: leg(.other), alsoUnfiltered: true) == [nil])
         #expect(TraewellingClient.boardTravelTypes(for: leg(.other), alsoUnfiltered: false) == [nil])
     }
+
+    /// The RE2 21:06 from Berlin-Spandau comes from VBB's feed: Träwelling lists it as "RE2" with the
+    /// trip short name "03134", we as "RE2 (3134)". The checkin offered a manual trip.
+    @Test func matchesATrainNumberWithLeadingZeros() throws {
+        let planned = try Date("2026-10-20T19:06:00Z", strategy: .iso8601)
+        let leg = Leg(origin: station("de-VBB_de:11000:900029101:3:55", "S Spandau Bhf (Berlin)", 52.5345, 13.1971, source: .transitous),
+                      destination: station("de-VBB_de:11000:900007102", "S+U Gesundbrunnen Bhf (Berlin)", 52.5486, 13.3884, source: .transitous),
+                      departure: TimeInfo(planned: planned, actual: nil),
+                      arrival: TimeInfo(planned: planned.addingTimeInterval(12 * 60), actual: nil),
+                      departurePlatform: nil, arrivalPlatform: nil, tripId: "t",
+                      line: Line(name: "RE2 (3134)", number: "3134", product: .regionalExpress, operatorName: "ODEG",
+                                 tripNumber: "3134"),
+                      direction: "S Königs Wusterhausen Bhf", isWalking: false, cancelled: false,
+                      stopovers: [], remarks: [], source: .transitous)
+        func departure(_ trip: String, _ name: String, _ fahrtNr: String, minutes: Double) -> TraewellingDeparture {
+            TraewellingDeparture(tripId: trip, plannedWhen: planned.addingTimeInterval(minutes * 60), when: nil,
+                                 line: .init(name: name, fahrtNr: fahrtNr), direction: nil, station: nil)
+        }
+        let board = [departure("rb21", "RB21", "05912", minutes: 8), departure("re2", "RE2", "03134", minutes: 0)]
+        #expect(TraewellingClient.bestMatch(board, for: leg, tolerance: 120)?.tripId == "re2")
+        // Another RE2 run is still not this train.
+        #expect(TraewellingClient.bestMatch([departure("other", "RE2", "03136", minutes: 1)], for: leg, tolerance: 120) == nil)
+        // Nor is a missing trip short name.
+        #expect(TraewellingClient.bestMatch([departure("none", "RE2", "", minutes: 0)], for: leg, tolerance: 120) == nil)
+    }
 }
 
 private final class LateTrainCheckinProtocol: URLProtocol, @unchecked Sendable {

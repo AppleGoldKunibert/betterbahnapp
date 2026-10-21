@@ -852,14 +852,6 @@ extension BahnDeClient {
         return unique.count == 1 ? [TrainOperator(name: unique[0].name)] : riding
     }
 
-    /// Where `leg` boards and leaves in bahn.de's `stops` (indices), by planned time and place.
-    static func section(of leg: Leg, in stops: [JourneyStop]) -> (start: Int, end: Int)? {
-        guard let start = stops.firstIndex(where: { isAt($0, leg.origin, planned: leg.departure.planned, side: \.departure) }),
-              let end = stops.indices.last(where: { $0 > start && isAt(stops[$0], leg.destination, planned: leg.arrival.planned, side: \.arrival) })
-        else { return nil }
-        return (start, end)
-    }
-
     /// Whether `stop` is at `station` with its `side` planned at `planned` (within a minute), by `isNear`.
     static func isAt(_ stop: JourneyStop, _ station: Station, planned: Date, side: KeyPath<JourneyStop, TimeInfo?>) -> Bool {
         stop[keyPath: side].map { abs($0.planned.timeIntervalSince(planned)) < 60 } == true && isNear(stop, station)

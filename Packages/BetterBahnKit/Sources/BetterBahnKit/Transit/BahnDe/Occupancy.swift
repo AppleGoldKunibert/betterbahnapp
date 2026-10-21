@@ -151,8 +151,8 @@ extension BahnDeClient {
     public static let occupancyMaxAge: TimeInterval = 30 * 60
 
     static func occupancy(of leg: Leg, stops: [JourneyStop]) -> OccupancyForecast? {
-        guard let ride = section(of: leg, in: stops) else { return nil }
-        return OccupancyForecast(stops: stops[ride.start..<ride.end])
+        guard let ride = legRange(of: leg, in: stops) else { return nil }
+        return OccupancyForecast(stops: stops[ride.lowerBound..<ride.upperBound])
     }
 
     static func occupancy(in stops: [JourneyStop], boarding: Stopover?, exit: Stopover?) -> OccupancyForecast? {

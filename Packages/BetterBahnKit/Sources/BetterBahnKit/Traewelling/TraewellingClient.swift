@@ -965,7 +965,9 @@ public actor TraewellingClient {
                   abs(planned.timeIntervalSince(leg.departure.planned)) <= tolerance else { return false }
             if let name = dep.line.name, Line.normalize(name) == wantedName { return true }
             if let number = line.number {
-                if let fahrtNr = dep.line.fahrtNr, number == fahrtNr { return true }
+                // Träwelling passes on MOTIS' trip short name as is: VBB's "03134" for our "RE2 (3134)".
+                if let fahrtNr = dep.line.fahrtNr, !Self.trainNumber(fahrtNr).isEmpty,
+                   Self.trainNumber(fahrtNr) == Self.trainNumber(number) { return true }
                 // Cross-border trains are sometimes carried under a different product brand once they
                 // switch networks (e.g. an ÖBB "RJ 177" is DB's "ICE 177" while still in Germany) — the
                 // shared train number still identifies it even when the name/product prefix doesn't match.
@@ -977,6 +979,11 @@ public actor TraewellingClient {
             abs(($0.plannedWhen ?? .distantPast).timeIntervalSince(leg.departure.planned))
                 < abs(($1.plannedWhen ?? .distantPast).timeIntervalSince(leg.departure.planned))
         }
+    }
+
+    /// A train number without leading zeros ("003135" → "3135").
+    static func trainNumber(_ number: String) -> String {
+        String(number.drop { $0 == "0" })
     }
 
     /// The run of digits at the end of a line name (e.g. "ICE 177" → "177"), used to match a train
