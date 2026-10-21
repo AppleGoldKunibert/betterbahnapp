@@ -1603,6 +1603,16 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(regional.product == .regionalExpress)
     }
 
+    /// The Slovak feed (ZSSK) names the Railjet Praha → Hamburg "rj 174": shown as bahn.de writes it.
+    @Test func lowercaseRailjetFromSlovakFeed() {
+        let zssk = MLineInfo(mode: "LONG_DISTANCE", displayName: "rj 174", routeShortName: "rj 174", tripShortName: "174",
+                             agencyName: "Železničná spoločnosť Slovensko, a.s.").toLine()
+        #expect(zssk.name == "RJ 174")
+        #expect(zssk.number == "174")
+        #expect(MLineInfo.uppercasingTrainCategory("bus 7") == "bus 7")
+        #expect(MLineInfo.uppercasingTrainCategory("S1") == "S1")
+    }
+
     /// DELFI has every German RE and RB as "REGIONAL_RAIL", named "RE3 (…)"/"RB10 (…)" without a space:
     /// the "Nur RB" filter must not show the REs.
     @Test func regionalExpressWithoutSpaceAfterCategory() {
