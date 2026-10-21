@@ -219,6 +219,35 @@ import Testing
         #expect(advice.legend == "Die markierten Wagen halten in Frankfurt (Main) Hbf direkt am Ausgang.")
     }
 
+    @Test func endsAtTheFrontOfATerminusPastItsUnderpass() throws {
+        // Stairs down to an underpass at 150 m and the exit to the station hall at the buffer stops, 300 m.
+        let track = StationPlatforms.Track(start: .init(latitude: 50.105, longitude: 8.659), end: .init(latitude: 50.107, longitude: 8.663),
+                                           length: 300, accesses: [.init(kind: .stairs, position: 150), .init(kind: .exit, position: 300)])
+        let platforms = StationPlatforms(tracks: ["13": track])
+        let before = train(numbers(21...27), from: 50, towardsEnd: false, platform: "5")
+        // Where the journey ends, out through the hall: the front of the train.
+        let out = try #require(CoachAdvice.exit(endingAt: "13", before: before, platforms: platforms, station: "Frankfurt (Main) Hbf",
+                                                toExit: true))
+        #expect(out.coaches == ["21"])
+        #expect(out.target == .access(.exit))
+        // With a seat at the rear, walk to the front before arriving.
+        let seated = try #require(CoachAdvice.exit(endingAt: "13", before: before, platforms: platforms, station: "Frankfurt (Main) Hbf",
+                                                   seat: (coach: "26", train: "ICE 100"), toExit: true))
+        #expect(seated.text() == "Vor der Ankunft in Wagen 21 wechseln, um in Frankfurt (Main) Hbf direkt am Ausgang auszusteigen.")
+        // Changing trains, the underpass counts too.
+        let changing = try #require(CoachAdvice.exit(endingAt: "13", before: before, platforms: platforms, station: "Frankfurt (Main) Hbf"))
+        #expect(changing.groups.count == 2)
+        // On the train, first class at the rear: getting off, any coach will do, so to the front.
+        let rearFirst = train(numbers(21...27), from: 50, towardsEnd: false, platform: "5", firstClass: ["26", "27"])
+        let fromFirst = try #require(CoachAdvice.exit(endingAt: "13", before: rearFirst, platforms: platforms, station: "Frankfurt (Main) Hbf",
+                                                      travelClass: 1, seat: (coach: "27", train: "ICE 100"), toExit: true))
+        #expect(fromFirst.coaches == ["21"])
+        #expect(fromFirst.walkBeforeArrival)
+        let aboard = try #require(CoachAdvice.exit(endingAt: "13", before: rearFirst, platforms: platforms, station: "Frankfurt (Main) Hbf",
+                                                   travelClass: 1, aboard: true, toExit: true))
+        #expect(aboard.coaches == ["21"])
+    }
+
     @Test func transferAtATerminus() throws {
         // Both tracks end at the buffer stops; ICE 200 on track 13 leaves away from them (towards 325 m),
         // its Wagen 33 at 112–138 m from them. ICE 100 comes in on track 12 and stops at the buffer stops.
@@ -381,6 +410,25 @@ import Testing
         #expect(before.plannedDeparture == now.addingTimeInterval(60 * 60))
         // Without the run it's unknown whether the train goes on.
         #expect(await CoachAdvice.arrival(of: first, now: now, stops: { _ in nil }) == nil)
+    }
+
+    /// Getting off where the journey ends at a terminus: the front, also from a seat.
+    @Test func walksToTheFrontForATerminus() async throws {
+        let frankfurt = station("8000105", "Frankfurt (Main) Hbf", 50.107, 8.663)
+        let track = StationPlatforms.Track(start: .init(latitude: 50.105, longitude: 8.659), end: .init(latitude: 50.107, longitude: 8.663),
+                                           length: 300, accesses: [.init(kind: .stairs, position: 150), .init(kind: .exit, position: 300)])
+        let ride = leg("ICE 100", from: goettingen, at: 60, to: frankfurt, at: 200, platform: "13")
+        let journey = Journey(legs: [ride], source: .bahnDe)
+        let run = [stop(goettingen, arrival: nil, departure: 60), stop(frankfurt, arrival: 200, departure: nil)]
+        let before = train(numbers(21...27), from: 50, towardsEnd: false, platform: "5")
+        let sequence: @Sendable (BahnDeClient.FormationRequest) async -> CoachSequence? = { _ in before }
+        let platformsAt: (String) -> StationPlatforms? = { $0 == "8000105" ? StationPlatforms(tracks: ["13": track]) : nil }
+        let free = await CoachAdvice.plan(for: journey, now: now, sequence: sequence, stops: { _ in run }, platformsAt: platformsAt)
+        #expect(free[ride.id]?.coaches == ["21"])
+        let seated = await CoachAdvice.plan(for: journey, reservations: [ride.id: (coach: "26", train: "ICE 100")], now: now,
+                                            sequence: sequence, stops: { _ in run }, platformsAt: platformsAt)
+        #expect(seated[ride.id]?.coaches == ["21"])
+        #expect(seated[ride.id]?.walkBeforeArrival == true)
     }
 
     // MARK: A saved seat (#410)

@@ -323,7 +323,9 @@ in `project.pbxproj`: new files join their target automatically.
   edge (ends, length), stairs/lifts/terminus exit and sector signs in metres along it. `CoachAdvice.plan(for:…)` per
   journey (tight transfers up to 15 min, the exit at the end; with a seat reservation on the arriving train the
   coaches to walk to before arriving, `walkBeforeArrival`, when that saves 30 m, else `alreadyThere` („Du sitzt schon im
-  richtigen Wagen, …", only when another coach would be wrong), none for the exit; the connecting
+  richtigen Wagen, …", only when another coach would be wrong), for the exit only at a terminus; where the journey ends at
+  a terminus only its exit counts (`toExit`, `Track.ways(out:)`: the front of the train, not the underpasses along the
+  platform), and once on the train any class will do to walk there; the connecting
   train's reservation is the target; class from a seat's coach, else the ticket, else Settings → Reiseklasse,
   `TravelClass.number`; a seat saved on the train, `AppModel.savedSeats`, counts like a reservation; said only when some
   coach of the train stands 60 m worse than the best of your class, so also when all of your class fit): the arriving train's Wagenreihung at the transfer
