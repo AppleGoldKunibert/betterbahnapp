@@ -45,6 +45,11 @@ struct SettingsView: View {
                     } label: {
                         IconLabel(title: "Mein Ticket", systemImage: settings.ticketType.symbolName, color: .brand)
                     }
+                    Picker(selection: $settings.travelClass) {
+                        ForEach(TravelClass.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                    } label: {
+                        IconLabel(title: "Reiseklasse", systemImage: "person.2.fill", color: .brand)
+                    }
                     Toggle(isOn: $settings.ticketFilterByDefault) {
                         IconLabel(title: "Nur passende Züge zeigen",
                                   systemImage: "line.3.horizontal.decrease.circle.fill", color: .brand)
@@ -65,9 +70,10 @@ struct SettingsView: View {
                 } header: {
                     Text("Ticket")
                 } footer: {
-                    Text(settings.ticketType == .deutschlandticket
-                         ? "Blendet Fernzüge wie ICE und IC aus, in denen das Deutschlandticket nicht gilt."
-                         : "Blendet Züge aus, in denen die BahnCard 100 nicht gilt, z. B. FlixTrain.")
+                    Text((settings.ticketType == .deutschlandticket
+                          ? "Blendet Fernzüge wie ICE und IC aus, in denen das Deutschlandticket nicht gilt."
+                          : "Blendet Züge aus, in denen die BahnCard 100 nicht gilt, z. B. FlixTrain.")
+                         + " Die erwartete Auslastung wird für deine Reiseklasse gezeigt.")
                 }
 
                 Section {

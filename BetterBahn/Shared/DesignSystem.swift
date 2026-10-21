@@ -736,6 +736,80 @@ struct TrainMessagesButton: View {
     }
 }
 
+/// DB's occupancy forecast as a small icon (#399): one to three figures, red when exceptionally high.
+struct OccupancyIcon: View {
+    let level: OccupancyLevel
+    var font: Font = .caption
+
+    var body: some View {
+        Image(systemName: level.symbolName)
+            .font(font)
+            .foregroundStyle(level.tint)
+            .accessibilityLabel(level.text)
+    }
+}
+
+/// The occupancy icon of the class travelled in, next to a train's name; a tap shows the forecast in words.
+/// Nothing when DB has no forecast for that class.
+struct OccupancyButton: View {
+    let forecast: OccupancyForecast?
+    let travelClass: TravelClass
+    @State private var showDetails = false
+
+    var body: some View {
+        if let forecast, let level = forecast.level(for: travelClass) {
+            Button {
+                showDetails = true
+            } label: {
+                OccupancyIcon(level: level, font: .body)
+                    .padding(4)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(level.text), \(travelClass.displayName)")
+            .popover(isPresented: $showDetails) {
+                OccupancyDetails(forecast: forecast, travelClass: travelClass)
+                    .padding()
+                    .presentationCompactAdaptation(.popover)
+            }
+        }
+    }
+}
+
+/// The forecast in words: the class travelled in first, the other one below it.
+struct OccupancyDetails: View {
+    let forecast: OccupancyForecast
+    let travelClass: TravelClass
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if let level = forecast.level(for: travelClass) {
+                Label {
+                    Text("\(level.text) · \(travelClass.displayName)")
+                } icon: {
+                    OccupancyIcon(level: level)
+                }
+            }
+            ForEach(forecast.otherLevels(than: travelClass), id: \.travelClass) { other in
+                Text("\(other.travelClass.displayName): Auslastung \(other.level.shortText)")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .font(.caption)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+extension OccupancyLevel {
+    var tint: Color {
+        switch self {
+        case .low, .medium: .secondary
+        case .high: .slightDelay
+        case .exceptional, .exceptionalInBothClasses: .heavyDelay
+        }
+    }
+}
+
 struct TrainMessageList: View {
     let messages: [TrainMessage]
 

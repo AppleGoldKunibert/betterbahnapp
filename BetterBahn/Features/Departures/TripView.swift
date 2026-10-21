@@ -287,6 +287,8 @@ struct TripContent: View {
     @State private var statistics = TrainStatisticsModel()
     /// The platform changes of the stops ahead, shown at the stop 30 minutes before it and always at the next one.
     @State private var platformStatistics = TrainStatisticsModel()
+    /// DB's occupancy forecast (#399) from the picked boarding stop to the exit, else for the whole run.
+    @State private var occupancy: OccupancyForecast?
     @Environment(AppModel.self) private var model
 
     private var color: Color { trip.line?.color ?? .gray }
@@ -361,6 +363,7 @@ struct TripContent: View {
                             TrainFormationLabel(trip: trip, savedLeg: savedLeg)
                         }
                         Spacer()
+                        OccupancyButton(forecast: occupancy, travelClass: model.settings.travelClass)
                         TrainMessagesButton(messages: trip.messages)
                     }
                     // At the next stop; any other stop's unfolds below it with a tap on its platform.
@@ -419,6 +422,15 @@ struct TripContent: View {
         .task(id: trip.stopovers.map(\.id)) {
             guard let bahnDe = model.provider.bahnDe, let found = try? await bahnDe.operatorStops(for: trip) else { return }
             operatorStops = found
+        }
+        .task(id: [trip.id, boardingID ?? "", exitID ?? ""]) {
+            let boarding = trip.stopovers.first { $0.id == boardingID }, exit = trip.stopovers.first { $0.id == exitID }
+            // Over once the ride (or the train) has arrived.
+            guard ((exit ?? trip.stopovers.last)?.arrival?.best).map({ $0 > .now }) ?? true, let bahnDe = model.provider.bahnDe else {
+                occupancy = nil
+                return
+            }
+            occupancy = try? await bahnDe.occupancy(for: trip, boarding: boarding, exit: exit)
         }
         .task(id: [trip.stopovers.first?.id ?? "", String(nextStopIndex ?? -1)]) {
             await platformStatistics.load(line: trip.line, stops: platformHintStops, date: trip.stopovers.first?.departure?.planned ?? .now,

@@ -1550,6 +1550,13 @@ final class AppSettings {
             uploadToCloud()
         }
     }
+    /// The class the user travels in: DB's occupancy forecast is shown for it (#399).
+    var travelClass: TravelClass {
+        didSet {
+            UserDefaults.standard.set(travelClass.rawValue, forKey: "travelClass")
+            uploadToCloud()
+        }
+    }
     var traewellingVisibility: TraewellingVisibility {
         didSet {
             UserDefaults.standard.set(traewellingVisibility.rawValue, forKey: "traewellingVisibility")
@@ -1738,6 +1745,7 @@ final class AppSettings {
         searchWithBike = defaults.bool(forKey: "searchWithBike")
         bikeOption = defaults.string(forKey: "bikeOption").flatMap(BikeOption.init) ?? .hidden
         ticketType = defaults.string(forKey: "ticketType").flatMap(TicketType.init) ?? .deutschlandticket
+        travelClass = defaults.string(forKey: "travelClass").flatMap(TravelClass.init) ?? .second
         liveActivitiesEnabled = defaults.object(forKey: "liveActivitiesEnabled") as? Bool ?? true
         liveActivityServerUpdates = defaults.object(forKey: "liveActivityServerUpdates") as? Bool ?? true
         trainPositionRefresh = defaults.string(forKey: "trainPositionRefresh").flatMap(TrainPositionRefresh.init) ?? .automatic
@@ -1801,6 +1809,7 @@ final class AppSettings {
         var showWeather: Bool?
         var searchWithBike: Bool?
         var bikeOption: BikeOption?
+        var travelClass: TravelClass?
     }
 
     /// What iCloud stores: the settings and when they were last changed.
@@ -1817,7 +1826,7 @@ final class AppSettings {
         expertTrainChoice: false, expertIgnoreBoardingRules: false, expertRil100: false,
         trainSearchKinds: TrainSearchKind.defaults.sorted(by: { $0.rawValue < $1.rawValue }),
         trainSearchCountries: TrainSearchCountry.defaults.sorted(), exitReminders: true, exitReminderLead: .five,
-        liveActivityServerUpdates: true, showWeather: true, searchWithBike: false, bikeOption: .hidden)
+        liveActivityServerUpdates: true, showWeather: true, searchWithBike: false, bikeOption: .hidden, travelClass: .second)
 
     @ObservationIgnored private var isApplyingCloudValue = false
 
@@ -1832,7 +1841,8 @@ final class AppSettings {
                    trainSearchKinds: trainSearchKinds.sorted(by: { $0.rawValue < $1.rawValue }),
                    trainSearchCountries: trainSearchCountries.sorted(), exitReminders: exitReminders,
                    exitReminderLead: exitReminderLead, liveActivityServerUpdates: liveActivityServerUpdates,
-                   showWeather: showWeather, searchWithBike: searchWithBike, bikeOption: bikeOption)
+                   showWeather: showWeather, searchWithBike: searchWithBike, bikeOption: bikeOption,
+                   travelClass: travelClass)
     }
 
     /// When the settings were last changed on this device or taken over from iCloud. Before
@@ -1887,6 +1897,7 @@ final class AppSettings {
         showWeather = value.showWeather ?? showWeather
         searchWithBike = value.searchWithBike ?? searchWithBike
         bikeOption = value.bikeOption ?? bikeOption
+        travelClass = value.travelClass ?? travelClass
     }
 }
 

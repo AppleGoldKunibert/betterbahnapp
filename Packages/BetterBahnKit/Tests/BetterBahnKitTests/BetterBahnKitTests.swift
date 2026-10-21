@@ -7731,6 +7731,69 @@ private final class RE3318CancelledProtocol: RE3318Protocol, @unchecked Sendable
         // A leg bahn.de's stops don't show keeps every operator rather than guessing.
         #expect(BahnDeClient.operators(operators, riding: leg("Wien Hbf", 0, "Praha hl.n.", 250), stops: stops) == operators)
     }
+
+    /// ICE 101 Berlin Hbf → Dortmund Hbf: real bahn.de stops (`halte` of a journey search on 2024-12-18, from
+    /// db-vendo-client's `dbweb-refresh-journey.json` fixture, ISC license), with one change: Hannover Hbf's
+    /// 2nd class raised from 1 to 3, so the section matters. Each stop's level is for the train leaving it.
+    @Test func occupancyForTheLegsSection() throws {
+        let details = try fixture("bahnde-fahrt-ice101", as: BahnDeClient.JourneyDetails.self)
+        let stops = details.halte.compactMap(JourneyStop.init)
+        #expect(stops.first?.occupancy.isEmpty == true)  // level 0: no forecast
+        #expect(stops[2].occupancy == [.first: .low, .second: .low])
+
+        func time(_ text: String) throws -> TimeInfo { TimeInfo(planned: try #require(BahnDeClient.parseBerlinTime(text)), actual: nil) }
+        func station(_ name: String) -> Station { Station(id: "t:\(name)", name: name, coordinate: nil, evaNumber: nil, source: .transitous) }
+        func leg(_ from: String, _ departure: String, _ to: String, _ arrival: String) throws -> Leg {
+            Leg(origin: station(from), destination: station(to), departure: try time(departure), arrival: try time(arrival),
+                departurePlatform: nil, arrivalPlatform: nil, tripId: "ice", line: Line(name: "ICE 101", number: "101", product: .highSpeed, operatorName: nil),
+                direction: nil, isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+        }
+
+        // Only level 0 on the way: nothing to show.
+        #expect(BahnDeClient.occupancy(of: try leg("Berlin Hbf", "2024-12-18T00:22:00", "Berlin Zoologischer Garten", "2024-12-18T00:26:00"),
+                                       stops: stops) == nil)
+        // The exit's own level is for the ride after it.
+        let toHannover = try #require(BahnDeClient.occupancy(of: try leg("Berlin Hbf", "2024-12-18T00:22:00", "Hannover Hbf", "2024-12-18T03:09:00"),
+                                                             stops: stops))
+        #expect(toHannover.level(for: .second) == .low)
+        let toBielefeld = try #require(BahnDeClient.occupancy(of: try leg("Berlin Hbf", "2024-12-18T00:22:00", "Bielefeld Hbf", "2024-12-18T04:26:00"),
+                                                              stops: stops))
+        #expect(toBielefeld.level(for: .second) == .high)
+        #expect(toBielefeld.level(for: .first) == .low)
+        #expect(toBielefeld.otherLevels(than: .second).map(\.level) == [.low])
+        // A leg bahn.de's stops don't show gets no forecast rather than the whole train's.
+        #expect(BahnDeClient.occupancy(of: try leg("Köln Hbf", "2024-12-18T00:22:00", "Bielefeld Hbf", "2024-12-18T04:26:00"), stops: stops) == nil)
+
+        // The train view: the whole run, or from the picked stops.
+        #expect(BahnDeClient.occupancy(in: stops, boarding: nil, exit: nil)?.level(for: .second) == .high)
+        let minden = Stopover(station: station("Minden(Westf)"), arrival: try time("2024-12-18T03:59:00"), departure: try time("2024-12-18T04:00:00"),
+                              arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+        #expect(BahnDeClient.occupancy(in: stops, boarding: minden, exit: nil)?.level(for: .second) == .low)
+        let elsewhere = Stopover(station: station("Köln Hbf"), arrival: nil, departure: try time("2024-12-18T04:00:00"),
+                                 arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+        #expect(BahnDeClient.occupancy(in: stops, boarding: elsewhere, exit: nil) == nil)
+
+        // A journey shows its fullest leg.
+        #expect(OccupancyForecast.highest([toHannover, nil, toBielefeld], in: .second) == .high)
+        #expect(OccupancyForecast.highest([nil], in: .second) == nil)
+    }
+
+    /// DB's levels and texts (bahn.de's `auslastungstexte`): 0 is no forecast, 99 is the highest.
+    @Test func occupancyLevels() throws {
+        #expect(OccupancyLevel(stufe: 0) == nil)
+        #expect(OccupancyLevel(stufe: nil) == nil)
+        #expect(OccupancyLevel(stufe: 5) == nil)
+        #expect(OccupancyLevel(stufe: 3)?.text == "Hohe Auslastung erwartet")
+        #expect(OccupancyLevel(stufe: 99) == .exceptionalInBothClasses)
+        #expect(OccupancyLevel.exceptionalInBothClasses > .exceptional)
+        #expect(OccupancyLevel.exceptional.text == "Außergewöhnlich hohe Auslastung erwartet")
+        #expect(OccupancyLevel.exceptional.isExceptional && !OccupancyLevel.high.isExceptional)
+
+        // Journey details without the field (RJ 383, 2026-10-07) have no forecast.
+        let details = try fixture("bahnde-fahrt-rj383", as: BahnDeClient.JourneyDetails.self)
+        #expect(details.halte.compactMap(JourneyStop.init).allSatisfy { $0.occupancy.isEmpty })
+        #expect(BahnDeClient.occupancy(in: details.halte.compactMap(JourneyStop.init), boarding: nil, exit: nil) == nil)
+    }
 }
 
 private final class RE3318NoChangesProtocol: RE3318Protocol, @unchecked Sendable {

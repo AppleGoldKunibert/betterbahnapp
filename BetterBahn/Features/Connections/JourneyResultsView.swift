@@ -644,6 +644,8 @@ struct JourneyCard: View {
 
     @Environment(AppModel.self) private var model
     @State private var transferWarning: String?
+    /// DB's occupancy forecasts of the legs (#399), only those already loaded: a result never asks bahn.de.
+    @State private var occupancies: [OccupancyForecast] = []
 
     var body: some View {
         Card {
@@ -691,6 +693,9 @@ struct JourneyCard: View {
                         InfoChip(text: "Gleis \(platform)", systemImage: "signpost.right.fill",
                                  tint: journey.transitLegs.first?.departurePlatform?.hasChanged == true ? .heavyDelay : .secondary)
                     }
+                    if !journey.isCancelled, let level = OccupancyForecast.highest(occupancies, in: model.settings.travelClass) {
+                        OccupancyIcon(level: level)
+                    }
                     Spacer()
                     if journey.isCancelled {
                         InfoChip(text: "Fällt aus", systemImage: "xmark.octagon.fill", tint: .heavyDelay)
@@ -719,6 +724,14 @@ struct JourneyCard: View {
             let warnings = await TrainStatisticsModel.transferWarnings(for: journey, upTo: 10, here: false, bahnDe: model.provider.bahnDe)
             // The first of them, in the order of the journey.
             transferWarning = journey.tightTransfers(upTo: 10).lazy.compactMap { warnings[$0.id] }.first
+        }
+        .task(id: journey.id) {
+            guard let bahnDe = model.provider.bahnDe, journey.arrival.map({ $0.best > .now }) ?? false else { return }
+            var found: [OccupancyForecast] = []
+            for leg in journey.transitLegs {
+                if let forecast = await bahnDe.cachedOccupancy(for: leg) { found.append(forecast) }
+            }
+            occupancies = found
         }
     }
 }
