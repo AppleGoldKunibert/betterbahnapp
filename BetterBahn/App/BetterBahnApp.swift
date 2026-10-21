@@ -64,14 +64,22 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     /// A followed user's check-in notification (#266) opens that check-in, a regular trip's question (#397) is
     /// answered (iOS waits for the journey to be saved after "Ja"), a push about a regular trip's journey opens it;
     /// the others just open the app.
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+    ///
+    /// Not the `async` variant: its generated wrapper calls iOS's completion handler off the main thread, and iOS
+    /// then stops the app ("Call must be made on main thread") as soon as a notification is tapped.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                            withCompletionHandler completionHandler: @escaping () -> Void) {
         let userInfo = response.notification.request.content.userInfo
         let statusID = FollowedCheckinNotifier.statusID(in: userInfo)
         let question = CommuteNotifier.question(in: userInfo)
         let retry = CommuteNotifier.isRetry(userInfo)
         let journeyID = CommuteNotifier.journeyID(in: userInfo)
-        await handleNotification(action: response.actionIdentifier, statusID: statusID, question: question, retry: retry,
-                                 journeyID: journeyID)
+        let action = response.actionIdentifier
+        let done = MainThreadCompletion(completionHandler)
+        Task { @MainActor in
+            await self.handleNotification(action: action, statusID: statusID, question: question, retry: retry, journeyID: journeyID)
+            done.call()
+        }
     }
 
     private func handleNotification(action: String, statusID: Int?, question: CommuteQuestion?, retry: Bool, journeyID: String?) async {
@@ -93,6 +101,15 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             || CommuteNotifier.question(in: userInfo) != nil || CommuteNotifier.journeyID(in: userInfo) != nil
         completionHandler(shows ? [.banner, .list, .sound] : [])
     }
+}
+
+/// iOS's completion handler for a tapped notification, carried to the main actor and called there.
+nonisolated private struct MainThreadCompletion: @unchecked Sendable {
+    let handler: () -> Void
+
+    init(_ handler: @escaping () -> Void) { self.handler = handler }
+
+    @MainActor func call() { handler() }
 }
 
 struct RootView: View {
