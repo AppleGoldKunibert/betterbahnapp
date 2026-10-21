@@ -184,14 +184,17 @@ extension AppModel {
     /// Wagenreihungen, for trying the coach advice (#383): ICE 9911 Göttingen → Hannover Hbf (Gleis 12), going on
     /// to Hamburg, and ICE 9912 leaving 6 minutes later across the platform (Gleis 11, shorter, at the far end);
     /// the same as ICE 9921/9922 with a seat reserved in the front coach of ICE 9921, far from the connection;
-    /// ICE 9913 Mannheim → Frankfurt(Main)Hbf, ending at Gleis 13 of the terminus. ICE 9931/9932 run like
-    /// 9911/9912 but left 10 minutes ago, for saving your own seat (#410). Re-seeds once they have left;
-    /// remove them by hand afterwards.
+    /// ICE 9913 Mannheim → Frankfurt(Main)Hbf, ending at Gleis 13 of the terminus: it leaves a minute after
+    /// seeding and takes 20 minutes, so its exit hint turns to the front (15 minutes before arriving) 5 minutes
+    /// into the ride. ICE 9931/9932 run like 9911/9912 but left 10 minutes ago, for saving your own seat (#410).
+    /// Re-seeds once they have left or when these change (`adviceSeedVersion`); remove them by hand afterwards.
     func seedCoachAdviceTripsIfRequested() {
         guard UserDefaults.standard.bool(forKey: "seedCoachAdviceTrips") else { return }
         let seeded = savedJourneys.filter { $0.journey.legs.first?.tripId?.hasPrefix("adviceseed-") == true }
-        guard seeded.isEmpty || seeded.allSatisfy({ $0.journey.legs[0].departure.planned < .now }) else { return }
+        let current = UserDefaults.standard.integer(forKey: "coachAdviceSeedVersion") == Self.adviceSeedVersion
+        guard seeded.isEmpty || !current || seeded.allSatisfy({ $0.journey.legs[0].departure.planned < .now }) else { return }
         seeded.forEach { unsave($0.journey) }
+        UserDefaults.standard.set(Self.adviceSeedVersion, forKey: "coachAdviceSeedVersion")
         let start = Date.now.addingTimeInterval(20 * 60)
         func leg(_ number: String, _ from: Station, _ departure: Double, _ to: Station, _ arrival: Double,
                  from fromTrack: String, to toTrack: String) -> Leg {
@@ -208,7 +211,7 @@ extension AppModel {
                             leg("9912", s.hannover, 66, s.berlin, 160, from: "11", to: "14")], source: .bahnDe))
         save(Journey(legs: [leg("9921", s.goettingen, 10, s.hannover, 70, from: "8", to: "12"),
                             leg("9922", s.hannover, 76, s.berlin, 170, from: "11", to: "14")], source: .bahnDe))
-        save(Journey(legs: [leg("9913", s.mannheim, 5, s.frankfurt, 45, from: "3", to: "13")], source: .bahnDe))
+        save(Journey(legs: [leg("9913", s.mannheim, -19, s.frankfurt, 1, from: "3", to: "13")], source: .bahnDe))
         // Under way: its stops tell the Wagenreihung to show the one in Hannover, where it goes on.
         var riding = leg("9931", s.goettingen, -30, s.hannover, 30, from: "8", to: "12")
         riding.stopovers = [
@@ -218,6 +221,9 @@ extension AppModel {
         ]
         save(Journey(legs: [riding, leg("9932", s.hannover, 36, s.berlin, 130, from: "11", to: "14")], source: .bahnDe))
     }
+
+    /// Raised when the seeded journeys change, so a device seeded before gets the new ones on the next launch.
+    private static let adviceSeedVersion = 2
 
     /// ICE 9921/9922 and 9931/9932 run like ICE 9911 and 9912.
     private static func adviceDemoTrain(_ number: String) -> String {
