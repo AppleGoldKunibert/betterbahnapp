@@ -102,8 +102,9 @@ in `project.pbxproj`: new files join their target automatically.
   unfolds in place, no sheet. `CoachSequenceDisclosure` (row in `LegCard` and `TripContent`'s header) uses bahn.de's
   sequence, else vagonweb's plan, opens by itself 30 min before to 15 min after departure
   (`CoachSequence.unfoldsByItself`) or by tap; tapping a stop's platform in `TripContent` unfolds that stop's. A leg's
-  shows the next stop the train leaves, on the last stretch to a terminus the last one it left
-  (`BahnDeClient.lastFormationRequest(for:)`), until the arrival.
+  shows the stop the train just left until it would close (`CoachSequence.shownAfterDeparture`, 15 min), then the next
+  one, on the last stretch to a terminus the last one it left, until the arrival; where bahn.de has none, one of the two
+  stops before (asked again after `formationMaxAge`), so the marked coaches stay (`BahnDeClient.formationRequests(for:)`).
   `CoachSequencePanel`: notes (debug builds only: grey "bahn.de: …" line from `BahnDeClient.coachSequenceNote(for:)`,
   for the server's pause also `BahnDeGate.blockDescription`), one `TrainCard` per series (`TrainFormation.partsBySeries`,
   "2× ICE 4") with "BR …", each Tz with Taufname and the series' side view `Assets.xcassets/Trains/Train-<BR>` (401,

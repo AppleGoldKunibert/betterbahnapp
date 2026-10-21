@@ -11,6 +11,8 @@ import SwiftUI
 struct CoachSequenceDisclosure: View {
     /// bahn.de's request, only for departures within `BahnDeClient.formationLookahead`.
     let request: BahnDeClient.FormationRequest?
+    /// Stops before `request`'s, latest first, whose Wagenreihung shows while bahn.de has none there.
+    var fallbacks: [BahnDeClient.FormationRequest] = []
     /// The same for any later departure, for vagonweb's planned Wagenreihung days ahead.
     let plannedRequest: BahnDeClient.FormationRequest?
     /// Live departure at the request's station; the Wagenreihung unfolds around it.
@@ -30,10 +32,11 @@ struct CoachSequenceDisclosure: View {
         self.reservation = reservation
         self.coachAdvice = coachAdvice
         seatLeg = savesSeat ? leg : nil
-        // On the last stretch to a terminus, the one from the last stop it left.
-        let last = BahnDeClient.lastFormationRequest(for: leg)
-        request = BahnDeClient.formationRequest(for: leg) ?? last
-        plannedRequest = BahnDeClient.formationRequest(for: leg, lookahead: nil) ?? last
+        // The stop just left until its Wagenreihung would close, then the next one; to a terminus the last one.
+        let requests = BahnDeClient.formationRequests(for: leg)
+        request = requests.first
+        fallbacks = Array(requests.dropFirst())
+        plannedRequest = BahnDeClient.formationRequests(for: leg, lookahead: nil).first
         departure = leg.departure.best
     }
 
@@ -55,6 +58,8 @@ struct CoachSequenceDisclosure: View {
 
     @Environment(AppModel.self) private var model
     @State private var sequence: CoachSequence?
+    /// The request `sequence` answered, an earlier stop's when bahn.de has none for `request`.
+    @State private var shownRequest: BahnDeClient.FormationRequest?
     /// Our bahn.de server didn't answer, so the current Wagenreihung is missing.
     @State private var liveMissing = false
     /// Opened or closed by hand; nil follows the departure time.
@@ -68,7 +73,7 @@ struct CoachSequenceDisclosure: View {
     var body: some View {
         // A ZStack rather than Group: `.task` never fires on a view that is empty.
         ZStack {
-            if let sequence, !sequence.coaches.isEmpty, let shown = request ?? plannedRequest {
+            if let sequence, !sequence.coaches.isEmpty, let shown = shownRequest ?? request ?? plannedRequest {
                 TimelineView(.everyMinute) { context in
                     let open = expanded ?? CoachSequence.unfoldsByItself(departure: departure, now: context.date)
                     VStack(alignment: .leading, spacing: 12) {
@@ -99,23 +104,33 @@ struct CoachSequenceDisclosure: View {
                     .padding(.top, spacing)
             }
         }
-        .task(id: plannedRequest) {
+        .task(id: [request, plannedRequest]) {
             sequence = nil
+            shownRequest = nil
             liveMissing = false
             // While our server is left alone the plan shows; the current one is asked for again once the
             // pause is over, not only at the next stop (#411).
             while !Task.isCancelled {
                 var missing = false
-                if let request {
+                // Without one at that stop, an earlier stop's: the same coaches, which keeps the marked ones.
+                for candidate in [request].compactMap(\.self) + fallbacks {
                     do {
-                        if let live = try await model.coachSequence(for: request), !live.coaches.isEmpty {
+                        if let live = try await model.coachSequence(for: candidate), !live.coaches.isEmpty {
                             sequence = live
+                            shownRequest = candidate
                             liveMissing = false
-                            return
+                            break
                         }
                     } catch TransitError.rateLimited {
                         missing = true
+                        break
                     } catch {}
+                }
+                if let shownRequest, !missing {
+                    // An earlier stop's: ask again once bahn.de may have the one for this stop.
+                    guard shownRequest != request else { return }
+                    try? await Task.sleep(for: .seconds(BahnDeClient.formationMaxAge))
+                    continue
                 }
                 if sequence == nil, let plannedRequest {
                     sequence = await model.plannedCoachSequence(for: plannedRequest)

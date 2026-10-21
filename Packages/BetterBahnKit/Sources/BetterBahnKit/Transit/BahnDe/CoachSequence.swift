@@ -119,8 +119,11 @@ public struct CoachSequence: Sendable, Hashable {
     /// departure until 15 minutes after it, while you look for your coach and board.
     public static func unfoldsByItself(departure: Date?, now: Date = .now) -> Bool {
         guard let departure else { return false }
-        return now >= departure.addingTimeInterval(-30 * 60) && now <= departure.addingTimeInterval(15 * 60)
+        return now >= departure.addingTimeInterval(-30 * 60) && now <= departure.addingTimeInterval(shownAfterDeparture)
     }
+
+    /// How long after a departure its Wagenreihung stays open, and stays the one shown with a leg.
+    public static let shownAfterDeparture: TimeInterval = 15 * 60
 }
 
 // MARK: - Reserved seat

@@ -301,18 +301,37 @@ public struct BahnDeClient: Sendable {
         return request
     }
 
-    /// The request at the last stop `leg`'s train left, once it departs nowhere ahead before you get off (the
-    /// last stretch to a terminus), so the Wagenreihung stays shown until the arrival; nil otherwise.
-    public static func lastFormationRequest(for leg: Leg, now: Date = .now) -> FormationRequest? {
-        guard !leg.cancelled, now < leg.arrival.best, formationRequest(for: leg, now: now, lookahead: nil) == nil else { return nil }
-        let stops = [(station: leg.origin, departure: Optional(leg.departure))]
+    /// The requests for the Wagenreihung shown with `leg`, the one to show first: at the stop the train leaves
+    /// next, or left up to `CoachSequence.shownAfterDeparture` ago (until it closes by itself), on the last
+    /// stretch to a terminus the last one it left, until the arrival. Then up to `fallbackStops` stops before it
+    /// on the leg, latest first, for when bahn.de has none at that stop. Empty when there's nothing to show.
+    public static func formationRequests(for leg: Leg, now: Date = .now, lookahead: TimeInterval? = formationLookahead) -> [FormationRequest] {
+        guard !leg.cancelled, let ref = sequenceReference(for: leg.line) else { return [] }
+        let all = [(station: leg.origin, departure: Optional(leg.departure))]
             + leg.stopovers.filter { !$0.cancelled }.map { (station: $0.station, departure: $0.departure) }
-        guard let last = stops.last(where: { $0.departure != nil }), let departure = last.departure else { return nil }
-        var request = formationRequest(line: leg.line, stops: [last], now: departure.best, lookahead: nil)
-        request?.tripId = leg.tripId
-        request?.tripSource = leg.source
-        return request
+        // The leg's stops usually start with its origin again.
+        var stops: [(station: Station, departure: TimeInfo)] = []
+        for case let (station, departure?) in all
+        where !stops.contains(where: { $0.departure.planned == departure.planned && $0.station.isSamePlace(as: station) }) {
+            stops.append((station, departure))
+        }
+        let kept = now.addingTimeInterval(-CoachSequence.shownAfterDeparture)
+        let index: Int
+        if let next = stops.firstIndex(where: { $0.departure.best >= kept }) {
+            guard lookahead.map({ stops[next].departure.planned <= now.addingTimeInterval($0) }) ?? true else { return [] }
+            index = next
+        } else {
+            guard now < leg.arrival.best, !stops.isEmpty else { return [] }
+            index = stops.count - 1
+        }
+        return stops[...index].reversed().prefix(1 + fallbackStops).map { stop in
+            FormationRequest(category: ref.category, number: ref.number, station: stop.station, plannedDeparture: stop.departure.planned,
+                             coupledNumbers: leg.line?.coupledNumbers ?? [], tripId: leg.tripId, tripSource: leg.source)
+        }
     }
+
+    /// Stops before the one shown whose Wagenreihung `formationRequests(for:)` falls back to.
+    static let fallbackStops = 2
 
     public static func formationRequest(for trip: Trip, now: Date = .now, lookahead: TimeInterval? = formationLookahead) -> FormationRequest? {
         formationRequest(line: trip.line, stops: trip.stopovers.filter { !$0.cancelled }.map { (station: $0.station, departure: $0.departure) },
@@ -386,7 +405,7 @@ public struct BahnDeClient: Sendable {
     private static let sequenceCache = ExpiringCache<CoachSequence?>()
     private static let sequenceNotes = SequenceNotes()
     /// A formation rarely changes once published; 10 minutes still catches a late swap.
-    static let formationMaxAge: TimeInterval = 10 * 60
+    public static let formationMaxAge: TimeInterval = 10 * 60
 
     private func fetchCoachSequence(_ request: FormationRequest) async throws -> CoachSequence? {
         let key = Self.sequenceKey(request)
