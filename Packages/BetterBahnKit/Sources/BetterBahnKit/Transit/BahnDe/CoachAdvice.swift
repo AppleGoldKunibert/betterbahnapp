@@ -23,13 +23,20 @@ public struct CoachAdvice: Sendable, Hashable {
     public var walkBeforeArrival: Bool
     /// Your seat's coach (`coaches`) already stops at the spot.
     public var alreadyThere: Bool
+    /// The class of `coaches` when it isn't yours: walking through the train to the exit of a terminus.
+    public var otherClass: Int?
+    /// Your class stops well short of the spot: these are its coaches nearest to it.
+    public var nearestOfClass: Bool
 
-    public init(groups: [[String]], target: Target, station: String, walkBeforeArrival: Bool = false, alreadyThere: Bool = false) {
+    public init(groups: [[String]], target: Target, station: String, walkBeforeArrival: Bool = false, alreadyThere: Bool = false,
+                otherClass: Int? = nil, nearestOfClass: Bool = false) {
         self.groups = groups
         self.target = target
         self.station = station
         self.walkBeforeArrival = walkBeforeArrival
         self.alreadyThere = alreadyThere
+        self.otherClass = otherClass
+        self.nearestOfClass = nearestOfClass
     }
 
     public init(coaches: [String], target: Target, station: String, walkBeforeArrival: Bool = false, alreadyThere: Bool = false) {
@@ -39,7 +46,8 @@ public struct CoachAdvice: Sendable, Hashable {
     /// From what `nearest` picked; `seat` tells whether it was from a known seat.
     init(_ pick: Pick, target: Target, station: String, seat: Bool) {
         self.init(groups: pick.places.map { $0.compactMap(\.number) }, target: target, station: station,
-                  walkBeforeArrival: seat && !pick.alreadyThere, alreadyThere: pick.alreadyThere)
+                  walkBeforeArrival: seat && !pick.alreadyThere, alreadyThere: pick.alreadyThere, otherClass: pick.otherClass,
+                  nearestOfClass: pick.nearestOfClass)
     }
 
     /// Every coach to board, from the front of the train.
@@ -58,15 +66,17 @@ public struct CoachAdvice: Sendable, Hashable {
 
     /// "In Wagen 30 oder 31 einsteigen, um in Hannover Hbf direkt an deinem Anschluss auszusteigen."; on
     /// the train "In Wagen … wechseln, um …", with a seat elsewhere "Vor der Ankunft in Wagen … wechseln, um …",
-    /// with one in the right coach "Du sitzt schon im richtigen Wagen, um …".
+    /// with one in the right coach "Du sitzt schon im richtigen Wagen, um …". Into another class "In Wagen 21
+    /// (2. Klasse) wechseln, um …"; your class far from the spot "In Wagen 28 einsteigen, um … möglichst nah am Ausgang …".
     /// - Parameters:
     ///   - boarded: already on the train, so the advice is to walk to those coaches.
     ///   - namingStation: false next to the transfer, which says where already.
     public func text(boarded: Bool = false, namingStation: Bool = true) -> String {
         let place = namingStation ? " in \(station)" : ""
         if alreadyThere { return "Du sitzt schon im richtigen Wagen, um\(place) \(spot) auszusteigen." }
-        let first = walkBeforeArrival ? "Vor der Ankunft in \(coachList) wechseln"
-            : boarded ? "In \(coachList) wechseln" : "In \(coachList) einsteigen"
+        let coaches = coachList + (otherClass.map { " (\($0). Klasse)" } ?? "")
+        let first = walkBeforeArrival ? "Vor der Ankunft in \(coaches) wechseln"
+            : boarded ? "In \(coaches) wechseln" : "In \(coaches) einsteigen"
         return "\(first), um\(place) \(spot) auszusteigen."
     }
 
@@ -76,14 +86,15 @@ public struct CoachAdvice: Sendable, Hashable {
         walkBeforeArrival || alreadyThere ? text() : "Die markierten Wagen halten in \(station) \(spot)."
     }
 
-    /// "direkt an deinem Anschluss", "direkt an der Treppe"
+    /// "direkt an deinem Anschluss", "direkt an der Treppe", "möglichst nah am Ausgang"
     private var spot: String {
-        switch target {
-        case .connection(let coach?): "direkt an Wagen \(coach) deines Anschlusses"
-        case .connection(nil): "direkt an deinem Anschluss"
-        case .access(.stairs): "direkt an der Treppe"
-        case .access(.lift): "direkt am Aufzug"
-        case .access(.exit): "direkt am Ausgang"
+        let how = nearestOfClass ? "möglichst nah" : "direkt"
+        return switch target {
+        case .connection(let coach?): "\(how) an Wagen \(coach) deines Anschlusses"
+        case .connection(nil): "\(how) an deinem Anschluss"
+        case .access(.stairs): "\(how) an der Treppe"
+        case .access(.lift): "\(how) am Aufzug"
+        case .access(.exit): "\(how) am Ausgang"
         }
     }
 
@@ -187,17 +198,18 @@ extension CoachAdvice {
     /// platform the train stops at (`sequence` is its Wagenreihung there); with your `seat` elsewhere,
     /// those to walk to before arriving (as for `transfer(arriving:…)`, also `aboard`). `toExit` where your
     /// journey ends: at a terminus only its exit at the buffer stops counts, as the way out is through the
-    /// station hall (the stairs along the platform, Frankfurt Hbf's underpasses, are for changing trains).
+    /// station hall (the stairs along the platform, Frankfurt Hbf's underpasses, are for changing trains);
+    /// see `pickOut` for `approaching`.
     public static func exit(sequence: CoachSequence, platforms: StationPlatforms, station: String,
                             travelClass: Int? = nil, course: Course? = nil, seat: Reservation? = nil,
-                            aboard: Bool = false, toExit: Bool = false) -> CoachAdvice? {
+                            aboard: Bool = false, approaching: Bool = false, toExit: Bool = false) -> CoachAdvice? {
         guard let name = sequence.platform, let track = platforms.track(name),
               let mapping = sequence.mapping(from: track, course: course) else { return nil }
         let accesses = track.ways(out: toExit)
         guard !accesses.isEmpty else { return nil }
         let spots = accesses.map { access in mapping(access.position) }
-        guard let pick = nearest(in: sequence, travelClass: travelClass, to: spots.map { $0...$0 }, seat: seat, aboard: aboard,
-                                 anyClass: walksOut(toExit, track: track, seat: seat, aboard: aboard))
+        guard let pick = pickOut(in: sequence, travelClass: travelClass, to: spots.map { $0...$0 }, seat: seat, aboard: aboard,
+                                 approaching: approaching, out: toExit && track.hasExit)
         else { return nil }
         return CoachAdvice(pick, target: .access(kind(nearestTo: pick.places.flatMap(\.self), accesses: accesses, at: spots)),
                            station: station, seat: seat != nil)
@@ -208,23 +220,45 @@ extension CoachAdvice {
     /// order at `before`, its last stop before.
     public static func exit(endingAt trackName: String, before: CoachSequence, platforms: StationPlatforms,
                             station: String, travelClass: Int? = nil, seat: Reservation? = nil, aboard: Bool = false,
-                            toExit: Bool = false) -> CoachAdvice? {
+                            approaching: Bool = false, toExit: Bool = false) -> CoachAdvice? {
         guard let track = platforms.track(trackName),
               let exit = track.accesses.first(where: { $0.kind == .exit }) else { return nil }
         let atStart = exit.position < track.length / 2
         let standing = before.standing(frontAt: atStart ? 0 : track.length, facingIncreasing: !atStart)
         let accesses = track.ways(out: toExit)
         let spots = accesses.map(\.position)
-        guard let pick = nearest(in: standing, travelClass: travelClass, to: spots.map { $0...$0 }, seat: seat, aboard: aboard,
-                                 anyClass: walksOut(toExit, track: track, seat: seat, aboard: aboard))
+        guard let pick = pickOut(in: standing, travelClass: travelClass, to: spots.map { $0...$0 }, seat: seat, aboard: aboard,
+                                 approaching: approaching, out: toExit)
         else { return nil }
         return CoachAdvice(pick, target: .access(kind(nearestTo: pick.places.flatMap(\.self), accesses: accesses, at: spots)),
                            station: station, seat: seat != nil)
     }
 
-    /// Already on the train, getting off at a terminus: walking to its front to get out, through any class.
-    private static func walksOut(_ toExit: Bool, track: StationPlatforms.Track, seat: Reservation?, aboard: Bool) -> Bool {
-        toExit && track.hasExit && (seat != nil || aboard)
+    /// The coaches for getting off where the journey ends at a terminus (`out`): its exit is at the front of the
+    /// train, and the walk there goes through any class (`otherClass`), from a seat at any time, on the train
+    /// without one once `approaching` the terminus. Until then, where your class stops well short of the exit
+    /// (another coach 60 m nearer), its coaches nearest to it (`nearestOfClass`), from where the walk is short.
+    /// Elsewhere as `nearest`.
+    static func pickOut(in sequence: CoachSequence, travelClass: Int?, to spots: [ClosedRange<Double>], seat: Reservation?,
+                        aboard: Bool, approaching: Bool, out: Bool) -> Pick? {
+        guard out else { return nearest(in: sequence, travelClass: travelClass, to: spots, seat: seat, aboard: aboard) }
+        let ownClass = seat.flatMap { sequence.coach(seat: $0)?.travelClass } ?? travelClass
+        if seat != nil || approaching {
+            guard var pick = nearest(in: sequence, travelClass: travelClass, to: spots, seat: seat, aboard: aboard, anyClass: true)
+            else { return nil }
+            let classes = Set(pick.places.joined().map(\.travelClass))
+            if !pick.alreadyThere, classes.count == 1, let other = classes.first ?? nil, other != ownClass { pick.otherClass = other }
+            return pick
+        }
+        func closest(_ travelClass: Int?) -> Double? {
+            sequence.boardable(travelClass: travelClass).compactMap(\.span).flatMap { span in spots.map { gap(span, $0) } }.min()
+        }
+        guard let own = closest(ownClass), let any = closest(nil), own - any >= minimumSpread else {
+            return nearest(in: sequence, travelClass: travelClass, to: spots, aboard: aboard)
+        }
+        var pick = nearest(in: sequence, travelClass: travelClass, to: spots, aboard: aboard, always: true)
+        pick?.nearestOfClass = true
+        return pick
     }
 
     /// The kind of the way off the platform nearest to `coaches` (`spots` are the accesses' positions on their platform).
@@ -242,6 +276,9 @@ extension CoachAdvice {
     /// Transfers up to this many minutes get advice on where the connecting train stops, as for the "oft verpasst"
     /// warning; longer ones only the way off the platform.
     public static let tightTransfer = 15
+    /// On the train this long before arriving at a terminus where the journey ends, the walk to its front is
+    /// named also through another class.
+    static let approachTime: TimeInterval = 15 * 60
 
     /// A seat reserved on a train: "12" in "ICE 940".
     public typealias Reservation = (coach: String, train: String)
@@ -251,8 +288,9 @@ extension CoachAdvice {
     /// gets the stairs, as for the end. With a seat reservation on a leg
     /// (`reservations`, by leg ID) it boards at the seat: for a transfer, where to walk before arriving or
     /// that it is right already; for getting off at the end only at a terminus. Getting off at a terminus aims
-    /// for its exit (the front of the train), not the stairs along the platform. On the train without one, the place
-    /// nearest the middle of your class is named. The connecting train's reservation is where to get to. A
+    /// for its exit (the front of the train), not the stairs along the platform; with your class far from it, its
+    /// nearest coaches, and on the train from `approachTime` before arriving the front in any class. On the train
+    /// without one, the place nearest the middle of your class is named. The connecting train's reservation is where to get to. A
     /// connecting train without a Wagenreihung (an S-Bahn, a bus) still tells by its platform whether to
     /// make for the stairs.
     /// - Parameters:
@@ -312,17 +350,18 @@ extension CoachAdvice {
             } else {
                 // Getting off at the end: with a seat only at a terminus, where the front of the train is at the
                 // exit and walking there before arriving pays off.
+                let approaching = aboard && leg.arrival.best.timeIntervalSince(now) <= approachTime
                 switch await arrival(of: leg, now: now, stops: stops) {
                 case .continuing(let request, let course):
                     guard let here = await sequence(request), let platforms = (here.eva ?? stationEVA).flatMap(platformsAt),
                           seat == nil || here.platform.flatMap(platforms.track)?.hasExit == true else { continue }
                     advice[leg.id] = exit(sequence: here, platforms: platforms, station: station, travelClass: travelClass, course: course,
-                                          seat: seat, aboard: aboard, toExit: true)
+                                          seat: seat, aboard: aboard, approaching: approaching, toExit: true)
                 case .ending(let request):
                     guard let platforms = stationEVA.flatMap(platformsAt), let track = leg.arrivalPlatform?.best,
                           let before = await sequence(request) else { continue }
                     advice[leg.id] = exit(endingAt: track, before: before, platforms: platforms, station: station, travelClass: travelClass,
-                                          seat: seat, aboard: aboard, toExit: true)
+                                          seat: seat, aboard: aboard, approaching: approaching, toExit: true)
                 case nil:
                     continue
                 }
@@ -374,6 +413,8 @@ extension CoachAdvice {
     struct Pick {
         var places: [[CoachSequence.Coach]]
         var alreadyThere = false
+        var otherClass: Int?
+        var nearestOfClass = false
     }
 
     /// The boardable coaches in your class nearest to any of `spots` (metres along `sequence`'s platform), by
@@ -382,9 +423,9 @@ extension CoachAdvice {
     /// right, the best of them (opposite the middle of the spot). With a `seat` on the train (its class counts),
     /// its coach when it is within `worthWalking` of those, else only the place nearest to it; `aboard`
     /// without a seat, the place nearest the middle coach of your class (you could be sitting anywhere).
-    /// `anyClass`: walking through the train to get off, any coach will do.
+    /// `anyClass`: walking through the train to get off, any coach will do. `always`: also when any coach would do.
     static func nearest(in sequence: CoachSequence, travelClass: Int?, to spots: [ClosedRange<Double>],
-                        seat: Reservation? = nil, aboard: Bool = false, anyClass: Bool = false) -> Pick? {
+                        seat: Reservation? = nil, aboard: Bool = false, anyClass: Bool = false, always: Bool = false) -> Pick? {
         let seatCoach = seat.flatMap { sequence.coach(seat: $0) }
         if seat != nil, seatCoach?.span == nil { return nil }
         let travelClass = anyClass ? nil : seatCoach?.travelClass ?? travelClass
@@ -404,7 +445,7 @@ extension CoachAdvice {
             }
             sitting = seatCoach.span
         } else {
-            guard worst - best >= minimumSpread else { return nil }
+            guard always || worst - best >= minimumSpread else { return nil }
             if aboard { sitting = middle(of: candidates)?.span }
         }
         // Among coaches about as near, the one whose middle is nearest a spot's middle (opposite the

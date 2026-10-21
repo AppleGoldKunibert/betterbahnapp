@@ -255,15 +255,29 @@ import Testing
         // Changing trains, the underpass counts too.
         let changing = try #require(CoachAdvice.exit(endingAt: "13", before: before, platforms: platforms, station: "Frankfurt (Main) Hbf"))
         #expect(changing.groups.count == 2)
-        // On the train, first class at the rear: getting off, any coach will do, so to the front.
+        // First class at the rear: from a seat there, walk through second class to the front.
         let rearFirst = train(numbers(21...27), from: 50, towardsEnd: false, platform: "5", firstClass: ["26", "27"])
         let fromFirst = try #require(CoachAdvice.exit(endingAt: "13", before: rearFirst, platforms: platforms, station: "Frankfurt (Main) Hbf",
                                                       travelClass: 1, seat: (coach: "27", train: "ICE 100"), toExit: true))
         #expect(fromFirst.coaches == ["21"])
-        #expect(fromFirst.walkBeforeArrival)
+        #expect(fromFirst.text() == "Vor der Ankunft in Wagen 21 (2. Klasse) wechseln, um in Frankfurt (Main) Hbf direkt am Ausgang auszusteigen.")
+        // Without one: first class's coach nearest the front, before departure and on the way …
+        let boarding = try #require(CoachAdvice.exit(endingAt: "13", before: rearFirst, platforms: platforms, station: "Frankfurt (Main) Hbf",
+                                                     travelClass: 1, toExit: true))
+        #expect(boarding.coaches == ["26"])
+        #expect(boarding.text() == "In Wagen 26 einsteigen, um in Frankfurt (Main) Hbf möglichst nah am Ausgang auszusteigen.")
+        #expect(boarding.legend == "Die markierten Wagen halten in Frankfurt (Main) Hbf möglichst nah am Ausgang.")
         let aboard = try #require(CoachAdvice.exit(endingAt: "13", before: rearFirst, platforms: platforms, station: "Frankfurt (Main) Hbf",
                                                    travelClass: 1, aboard: true, toExit: true))
-        #expect(aboard.coaches == ["21"])
+        #expect(aboard.coaches == ["26"])
+        // … and shortly before arriving the front, in second class.
+        let approaching = try #require(CoachAdvice.exit(endingAt: "13", before: rearFirst, platforms: platforms, station: "Frankfurt (Main) Hbf",
+                                                        travelClass: 1, aboard: true, approaching: true, toExit: true))
+        #expect(approaching.text(boarded: true) == "In Wagen 21 (2. Klasse) wechseln, um in Frankfurt (Main) Hbf direkt am Ausgang auszusteigen.")
+        // In second class the front is right: no class to name.
+        let second = try #require(CoachAdvice.exit(endingAt: "13", before: rearFirst, platforms: platforms, station: "Frankfurt (Main) Hbf",
+                                                   travelClass: 2, aboard: true, approaching: true, toExit: true))
+        #expect(second.text(boarded: true) == "In Wagen 21 wechseln, um in Frankfurt (Main) Hbf direkt am Ausgang auszusteigen.")
     }
 
     @Test func transferAtATerminus() throws {
@@ -452,6 +466,15 @@ import Testing
                                             sequence: sequence, stops: { _ in run }, platformsAt: platformsAt)
         #expect(seated[ride.id]?.coaches == ["21"])
         #expect(seated[ride.id]?.walkBeforeArrival == true)
+        // In first class at the rear: its coach nearest the front, until 15 minutes before arriving.
+        let rearFirst = train(numbers(21...27), from: 50, towardsEnd: false, platform: "5", firstClass: ["26", "27"])
+        let first: @Sendable (BahnDeClient.FormationRequest) async -> CoachSequence? = { _ in rearFirst }
+        for (minutes, coaches) in [(0.0, ["26"]), (150, ["26"]), (190, ["21"])] {
+            let advice = await CoachAdvice.plan(for: journey, travelClass: 1, now: now.addingTimeInterval(minutes * 60), sequence: first,
+                                                stops: { _ in run }, platformsAt: platformsAt)
+            #expect(advice[ride.id]?.coaches == coaches)
+            #expect(advice[ride.id]?.otherClass == (minutes == 190 ? 2 : nil))
+        }
     }
 
     // MARK: A saved seat (#410)
