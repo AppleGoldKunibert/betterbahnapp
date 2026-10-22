@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { signToken, toBase64 } from "../shared/appattest.mjs";
-import { IRIS, categoryOf, changedStop, matchStop, parseStops, parseTime, planPath } from "./iris.mjs";
+import { IRIS, categoryOf, changedStop, matchStop, parseStops, parseTime, planPath } from "../shared/iris.mjs";
 import { contentState, encodeState, nextRefresh } from "./state.mjs";
 import { handleRequest, liveEvents, processDueActivities, sanitizeJourney } from "./worker.mjs";
 

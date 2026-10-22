@@ -33,6 +33,8 @@ extension AppModel {
 
     /// Schedules, moves and removes the exit reminders so they match the saved journeys' latest data.
     private func syncExitReminders(now: Date = .now) async {
+        // The reminders name the exit side (#394); the list loads off the main thread, once.
+        await ExitSides.preload()
         let center = UNUserNotificationCenter.current()
         var scheduled = ExitReminderLog.load()
         var wanted: [String: (reminder: ExitReminder, journey: Journey)] = [:]

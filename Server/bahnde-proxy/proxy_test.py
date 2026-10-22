@@ -170,18 +170,37 @@ class ProxyTests(unittest.IsolatedAsyncioTestCase):
         await self.start(failing)
         self.assertEqual((await self.get(ORTE)).status, 502)
 
+    async def test_requests_to_bahn_de_start_apart(self):
+        waits = []
+
+        async def sleep(seconds):
+            waits.append(seconds)
+
+        await self.start(min_interval=0.25, sleep=sleep)
+        answers = await asyncio.gather(*(self.get(f"{ORTE}&n={n}") for n in range(4)))
+        self.assertEqual([a.status for a in answers], [200] * 4)
+        self.assertEqual(sorted(waits), [0.25, 0.5, 0.75])
+        self.clock.now += 10
+        await self.get(f"{ORTE}&n=4")
+        self.assertEqual(len(waits), 3, "no wait once the last request is long enough ago")
+
 
 class FakeSession:
     """curl_cffi session stand-in: records each GET with its headers."""
 
-    def __init__(self, log):
+    def __init__(self, log, status=200, delay=0.01):
         self.log = log
+        self.status = status
+        self.delay = delay
         self.closed = False
 
     async def get(self, url, headers=None):
         self.log.append((self, url, headers or {}))
-        await asyncio.sleep(0.01)
-        return type("Response", (), {"status_code": 200, "content": b"{}", "headers": {}})()
+        await asyncio.sleep(self.delay)
+        if self.closed:
+            # What curl_cffi answers for a request its closed session cut off.
+            return type("Response", (), {"status_code": 0, "content": b"", "headers": {}})()
+        return type("Response", (), {"status_code": self.status, "content": b"{}", "headers": {}})()
 
     async def close(self):
         self.closed = True
@@ -216,6 +235,25 @@ class BrowserFetchTests(unittest.IsolatedAsyncioTestCase):
         await self.fetch(proxy.UPSTREAM + "c")
         self.assertIsNot(self.log[-1][0], second)
         self.assertEqual([url for _, url, _ in self.log].count(proxy.PAGE), 3)
+        await asyncio.sleep(0)
+        self.assertTrue(first.closed and second.closed, "an idle replaced session is closed")
+
+    async def test_a_new_session_lets_running_requests_finish(self):
+        await self.fetch(proxy.UPSTREAM + "a")
+        first = self.log[0][0]
+        first.delay = 0.05
+        running = asyncio.ensure_future(self.fetch(proxy.UPSTREAM + "slow"))
+        await asyncio.sleep(0.01)
+        self.fetch.reset()
+        self.assertFalse(first.closed, "kept open while a request runs on it")
+        self.assertEqual((await running).status, 200)
+        await asyncio.sleep(0)
+        self.assertTrue(first.closed, "closed once its last request is done")
+
+    async def test_no_answer_is_an_error_not_status_0(self):
+        self.fetch.make_session = lambda: FakeSession(self.log, status=0)
+        with self.assertRaises(ConnectionError):
+            await self.fetch(proxy.UPSTREAM + "a")
 
 
 if __name__ == "__main__":

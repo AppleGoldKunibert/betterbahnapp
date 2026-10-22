@@ -1,5 +1,6 @@
 import BackgroundTasks
 import BetterBahnKit
+import EventKit
 import Foundation
 import Network
 import Observation
@@ -19,6 +20,7 @@ final class AppModel {
             Storage.save(favoriteStations, key: "favoriteStations")
             favoriteStationsCloud.localChange(from: oldValue, to: favoriteStations)
             updateWidgetStations()
+            scheduleSpotlightSync()
         }
     }
     var recentSearches: [RecentSearch] {
@@ -42,8 +44,36 @@ final class AppModel {
             savedJourneysCloud.localChange(from: oldValue, to: savedJourneys)
             syncLiveActivity()
             scheduleExitReminderSync()
+            scheduleCalendarSync()
+            scheduleSpotlightSync()
+            commuteJourneysChanged(from: oldValue)
         }
     }
+    /// Journeys the user takes on the same weekdays (#397): on each of those days the app asks shortly before
+    /// the departure whether they ride today, and a yes saves that day's journey (see `CommuteModel.swift`).
+    var regularTrips: [RegularTrip] {
+        didSet {
+            Storage.save(regularTrips, key: "regularTrips")
+            regularTripsCloud.localChange(from: oldValue, to: regularTrips)
+            if regularTrips != oldValue { scheduleCommuteQuestions() }
+        }
+    }
+    /// "Fährst du heute?" to ask in the app, after its notification was tapped.
+    var commuteQuestionToAsk: CommuteQuestion?
+    /// This device at the push Worker for regular trips, made on the first sign-up.
+    @ObservationIgnored var commutePushRegistration: CommutePushRegistration? = Storage.load(key: "commutePushRegistration") {
+        didSet { Storage.save(commutePushRegistration, key: "commutePushRegistration") }
+    }
+    /// The saved journeys (by `SavedJourney.id`) the Worker reports problems of; the app leaves those to it.
+    @ObservationIgnored var commutePushWatched: Set<String> = Storage.load(key: "commutePushWatched") ?? [] {
+        didSet { Storage.save(commutePushWatched, key: "commutePushWatched") }
+    }
+    /// What the Worker was last sent, so an unchanged list isn't sent again on every start.
+    @ObservationIgnored var commutePushSent: Data? = Storage.load(key: "commutePushSent") {
+        didSet { Storage.save(commutePushSent, key: "commutePushSent") }
+    }
+    @ObservationIgnored var commuteQuestionsTask: Task<Void, Never>?
+    @ObservationIgnored var commutePushTask: Task<Void, Never>?
     /// Tickets fetched from bahn.de, kept on this device only (see `TicketStore`).
     var tickets: [SavedTicket] {
         didSet { TicketStore.save(tickets) }
@@ -63,11 +93,25 @@ final class AppModel {
     @ObservationIgnored var transferDispositions: [String: TransferDisposition] = [:]
     @ObservationIgnored var exitReminderSync: Task<Void, Never>?
     @ObservationIgnored var exitReminderGeneration = 0
+    /// Calendar events of saved journeys on this device (#382), see `CalendarEvents.swift`.
+    var calendarEventIDs: [UUID: String] = CalendarEventLog.load() {
+        didSet { CalendarEventLog.save(calendarEventIDs) }
+    }
+    @ObservationIgnored var calendarStore: EKEventStore?
+    /// Counts the times calendar access was granted, so the calendar setting reloads its list.
+    var calendarAccessChanges = 0
+    @ObservationIgnored var calendarSync: Task<Void, Never>?
     /// Saved journey to open on the Verbindungen tab (set when the Live Activity is tapped);
     /// `ConnectionsView` pushes it and clears this.
     var journeyToOpen: SavedJourney?
     /// Shows the train search (`TrainSearchOverlay`) over every tab.
     var showsTrainSearch = false
+    /// A deep link to open, set when a station or journey is opened from Spotlight (#387);
+    /// `RootView` opens it and clears this.
+    var linkToOpen: URL?
+    /// The waiting Spotlight update and what Spotlight was last given (see `SpotlightSync`).
+    @ObservationIgnored var spotlightSync: Task<Void, Never>?
+    @ObservationIgnored var lastSpotlightEntries: [SpotlightEntry]?
     /// Recently picked stations, newest first (used as suggestions).
     var recentStations: [Station] {
         didSet { Storage.save(recentStations, key: "recentStations") }
@@ -81,6 +125,10 @@ final class AppModel {
     /// offers "Check-in ansehen" instead of checking in again.
     var checkinStatusIDs: [String: Int] {
         didSet { Storage.save(checkinStatusIDs, key: "checkinStatusIDs") }
+    }
+    /// Seats saved on the trains being ridden, without a reservation (#410); forgotten a while after the ride.
+    private(set) var savedSeats: [SavedSeat] {
+        didSet { Storage.save(savedSeats, key: "savedSeats") }
     }
     /// Explicit choice (from the route view) of which saved journey's Live Activity to show,
     /// overriding the automatic pick until that journey finishes or another one is chosen.
@@ -127,8 +175,11 @@ final class AppModel {
         recentSearches = Storage.load(key: "recentSearches") ?? []
         recentStations = Storage.load(key: "recentStations") ?? []
         savedJourneys = Storage.load(key: "savedJourneys") ?? []
+        regularTrips = Storage.load(key: "regularTrips") ?? []
         trackedManualCheckins = Storage.load(key: "trackedManualCheckins") ?? []
         checkinStatusIDs = Storage.load(key: "checkinStatusIDs") ?? [:]
+        let seats: [SavedSeat] = Storage.load(key: "savedSeats") ?? []
+        savedSeats = seats.filter { !$0.isOver() }
         liveJourneys = Storage.load(key: "liveJourneys") ?? LiveDataCache()
         liveTrips = Storage.load(key: "liveTrips") ?? LiveDataCache()
         loadedLaps = Storage.load(key: "loadedLaps") ?? LoadedLaps()
@@ -136,6 +187,7 @@ final class AppModel {
         travelPasses = TicketStore.loadPasses()
         manualLiveActivityJourneyID = UserDefaults.standard.string(forKey: "manualLiveActivityJourneyID").flatMap(UUID.init)
         updateWidgetStations()
+        scheduleSpotlightSync()
         // The check-in history can run to thousands of trips, so it's decoded off the main thread
         // instead of blocking the launch.
         traewellingTripsLoadTask = Task { [weak self] in
@@ -158,11 +210,12 @@ final class AppModel {
     @ObservationIgnored private let favoriteStationsCloud = CloudList<Station>(key: "favoriteStations")
     @ObservationIgnored private let recentSearchesCloud = CloudList<RecentSearch>(key: "recentSearches")
     @ObservationIgnored private let savedJourneysCloud = CloudList<SavedJourney>(key: "savedJourneys")
+    @ObservationIgnored private let regularTripsCloud = CloudList<RegularTrip>(key: "regularTrips")
 
     /// Merges with what iCloud already has (uploading what only exists here, e.g. on the first
     /// launch after updating) and takes over changes made on the user's other devices.
     private func startCloudSync() {
-        applyCloudChange(keys: ["favoriteStations", "recentSearches", "savedJourneys", AppSettings.cloudKey])
+        applyCloudChange(keys: ["favoriteStations", "recentSearches", "savedJourneys", "regularTrips", AppSettings.cloudKey])
         cloudObserver = CloudSync.observe { [weak self] keys in
             self?.applyCloudChange(keys: keys)
         }
@@ -177,6 +230,9 @@ final class AppModel {
         }
         if keys.contains("savedJourneys") {
             savedJourneysCloud.receive(local: savedJourneys) { savedJourneys = $0 }
+        }
+        if keys.contains("regularTrips") {
+            regularTripsCloud.receive(local: regularTrips) { regularTrips = $0 }
         }
         if keys.contains(AppSettings.cloudKey) { settings.receiveCloudValue() }
     }
@@ -206,6 +262,8 @@ final class AppModel {
     }
 
     var journeyRefresher: JourneyRefresher { JourneyRefresher(provider: provider, timetables: timetablesClient) }
+    /// Loads a train run's live data for the trip views, the same way `journeyRefresher` does for a leg.
+    var liveRun: LiveRun { LiveRun(provider: provider, timetables: timetablesClient) }
 
     /// Whether `journey` was already loaded with live data: saved (refreshed in the background, also
     /// right after launch) or opened or prepared before. Only an unseen one waits for live data.
@@ -622,31 +680,76 @@ final class AppModel {
         savedJourneys = updated
     }
 
-    /// The trains of `journey` that bahn.de lists as reservation-only (a seat reservation is mandatory).
-    /// Answers within `limit`: a train bahn.de doesn't know, or doesn't answer for in time, counts as free,
-    /// so saving never waits long. The answers stay cached, so a second try is instant.
-    func reservationRequiredLegs(in journey: Journey, within limit: Duration = .seconds(3)) async -> [Leg] {
-        guard let bahnDe = provider.bahnDe else { return [] }
+    /// What saving `journey` warns about: the trains bahn.de lists as reservation-only (a seat reservation is
+    /// mandatory) and, with a normal `bike`, those it only comes along on with a bike reservation or not at all (#398).
+    /// Answers within `limit`: a train bahn.de doesn't know, or doesn't answer for in time, counts as free of a seat
+    /// reservation and gets the bike rules alone (`BikeTransport.resolved`), so saving never waits long. The lookups
+    /// stay cached, so a second try is instant.
+    func saveWarnings(for journey: Journey, bike: BikeOption?, within limit: Duration = .seconds(3)) async -> SaveWarnings {
         let legs = journey.transitLegs
-        return await withTaskGroup(of: [Leg]?.self) { group in
-            group.addTask {
-                await withTaskGroup(of: Leg?.self) { lookups in
-                    for leg in legs {
-                        lookups.addTask { (try? await bahnDe.requiresReservation(for: leg)) == true ? leg : nil }
+        let checksBike = bike == .bike
+        var answers: [String: (seat: Bool, bike: BikeTransport?)] = [:]
+        if let bahnDe = provider.bahnDe {
+            answers = await withTaskGroup(of: [String: (seat: Bool, bike: BikeTransport?)]?.self) { group in
+                group.addTask {
+                    await withTaskGroup(of: (String, Bool, BikeTransport?).self) { lookups in
+                        for leg in legs {
+                            lookups.addTask {
+                                let seat = (try? await bahnDe.requiresReservation(for: leg)) == true
+                                var transport: BikeTransport?
+                                if checksBike { transport = await self.bikeTransport(for: leg, bike: .bike) }
+                                return (leg.id, seat, transport)
+                            }
+                        }
+                        var found: [String: (seat: Bool, bike: BikeTransport?)] = [:]
+                        for await (id, seat, transport) in lookups { found[id] = (seat, transport) }
+                        return found
                     }
-                    var required: [Leg] = []
-                    for await leg in lookups { if let leg { required.append(leg) } }
-                    return legs.filter { leg in required.contains { $0.id == leg.id } }
                 }
+                group.addTask {
+                    try? await Task.sleep(for: limit)
+                    return nil
+                }
+                let first = await group.next() ?? nil
+                group.cancelAll()
+                return first ?? [:]
             }
-            group.addTask {
-                try? await Task.sleep(for: limit)
-                return nil
-            }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first ?? []
         }
+        var warnings = SaveWarnings()
+        for leg in legs {
+            if answers[leg.id]?.seat == true { warnings.seatReservation.append(leg) }
+            guard checksBike else { continue }
+            switch (answers[leg.id]?.bike ?? BikeTransport.resolved(bahnDe: nil, for: leg))?.kind {
+            case .reservationRequired: warnings.bikeReservation.append(leg)
+            case .notAllowed: warnings.noBikes.append(leg)
+            default: break
+            }
+        }
+        return warnings
+    }
+
+    /// Whether `bike` can come along on `leg` (#398): bahn.de's answer (cached with the reservation check), whether the
+    /// train has bike spaces at all (its Wagenreihung or series, the same lookups the leg shows anyway), else the rules.
+    func bikeTransport(for leg: Leg, bike: BikeOption) async -> BikeTransport? {
+        guard bike == .bike else { return BikeTransport.resolved(bahnDe: nil, for: leg, bike: bike) }
+        let bahnDe = try? await provider.bahnDe?.bikeTransport(for: leg)
+        var sequence: CoachSequence?
+        var families: [String] = []
+        if leg.line?.product.isLongDistance == true {
+            if let request = BahnDeClient.formationRequest(for: leg) {
+                sequence = try? await coachSequence(for: request)
+                families = sequence?.formation.units.compactMap(\.model) ?? []
+            }
+            if families.isEmpty { families = rememberedFormation(for: leg)?.units.compactMap(\.model) ?? [] }
+            if families.isEmpty, let lookup = await trainType(for: leg.line, on: leg.departure.planned) {
+                families = lookup.families
+            }
+            if sequence?.coaches.isEmpty != false, let request = BahnDeClient.formationRequest(for: leg, lookahead: nil) {
+                sequence = await plannedCoachSequence(for: request, direction: false)
+            }
+        }
+        let hasSpaces = BikeTransport.hasBikeSpaces(line: leg.line, families: families, sequence: sequence)
+        return BikeTransport.resolved(bahnDe: bahnDe, for: leg, bike: bike, hasBikeSpaces: hasSpaces)
     }
 
     func unsave(_ journey: Journey) {
@@ -806,6 +909,45 @@ final class AppModel {
         #endif
         guard let bahnDe = provider.bahnDe else { return nil }
         return try await bahnDe.coachSequence(request)
+    }
+
+    /// The seat saved on the train `leg` rides (#410), if any.
+    func savedSeat(for leg: Leg) -> SavedSeat? {
+        savedSeats.first { $0.belongs(to: leg) }
+    }
+
+    /// Saves `seat` for `leg`, or forgets the one there when nil.
+    func saveSeat(_ seat: SavedSeat?, for leg: Leg) {
+        savedSeats = SavedSeat.saving(seat, for: leg, in: savedSeats)
+    }
+
+    /// Where to board each leg of `journey` for a quick transfer or exit (#383), by leg ID (see
+    /// `CoachAdvice.plan`): the journey's tickets give the seat reservations and the class, a saved seat
+    /// counts like a reserved one.
+    func coachAdvice(for journey: Journey) async -> [String: CoachAdvice] {
+        var reservations: [String: CoachAdvice.Reservation] = [:]
+        for leg in journey.legs {
+            if let seat = reservation(for: leg, in: journey) {
+                reservations[leg.id] = (seat.coach, seat.trainName)
+            } else if let saved = savedSeat(for: leg) {
+                reservations[leg.id] = (saved.coach, saved.trainName)
+            }
+        }
+        // A saved ticket says which class; else the one picked in the settings.
+        let travelClass = tickets(for: journey).lazy.compactMap(\.ticket.travelClass).first ?? settings.travelClass.number
+        return await CoachAdvice.plan(for: journey, reservations: reservations, travelClass: travelClass,
+                                      sequence: { [weak self] request in try? await self?.coachSequence(for: request) },
+                                      stops: { [weak self] leg in await self?.runStops(of: leg) })
+    }
+
+    /// Every stop of `leg`'s train run, from the trips seen live or loaded; nil when it can't be loaded.
+    private func runStops(of leg: Leg) async -> [Stopover]? {
+        #if DEBUG
+        if let demo = debugRunStops(of: leg) { return demo }
+        #endif
+        guard let tripId = leg.tripId else { return nil }
+        if let trip = liveTrips.value(for: tripId) { return trip.stopovers }
+        return try? await provider.trip(id: tripId, source: leg.source).stopovers
     }
 
     /// The formation remembered for a saved journey's leg, if any.
@@ -1092,7 +1234,7 @@ final class AppModel {
     }
 
     /// Fetches realtime data for one saved journey, stores it and sends notifications for new issues.
-    private func refresh(_ entry: SavedJourney, using refresher: JourneyRefresher) async {
+    func refresh(_ entry: SavedJourney, using refresher: JourneyRefresher) async {
         let refreshed = await refresher.refresh(entry.journey)
         // The refresh takes seconds; if the user replanned meanwhile (same entry ID, new journey),
         // this result belongs to the old plan and must neither overwrite nor notify. The next
@@ -1107,20 +1249,33 @@ final class AppModel {
         for update in dispositions { transferDispositions[update.departing.id] = update.disposition }
         if settings.connectionWarnings {
             let known = Set(updated.notifiedIssues ?? [])
-            let newIssues = refreshed.connectionIssues().filter { !known.contains($0.id) }
+            // A regular trip's day (#397) stays quiet while its trains run fine; when the push Worker looks
+            // after it, cancellations, delays, platform changes and transfers come from there instead.
+            let commute = updated.commute
+            let reportedByWorker = commute != nil && commutePushWatched.contains(updated.id.uuidString)
+            let newIssues = reportedByWorker ? [] : refreshed.connectionIssues().filter { !known.contains($0.id) }
             for issue in newIssues {
                 await ConnectionNotifier.notify(issue, journey: refreshed)
+            }
+            var newDelays: [CommuteDelay] = []
+            if let commute, !reportedByWorker {
+                newDelays = CommuteAlerts.delays(in: refreshed, threshold: commute.delayThreshold, notified: Array(known))
+            }
+            for delay in newDelays {
+                await ConnectionNotifier.notify(delay)
             }
             // New delay reasons from DB ("Reparatur an einem Signal") get a notification too;
             // plain notices (no WLAN, missing coach) only show as the yellow triangle.
             let newReasons = refreshed.transitLegs.flatMap { leg in
                 leg.messages.filter { $0.kind == .delay }.map { (id: "reason|\(leg.id)|\($0.text)", leg: leg, message: $0) }
-            }.filter { !known.contains($0.id) }
+            }.filter { reason in
+                !known.contains(reason.id) && (commute.map { CommuteAlerts.isLateEnough(reason.leg, threshold: $0.delayThreshold) } ?? true)
+            }
             for reason in newReasons {
                 await ConnectionNotifier.notify(reason.message, leg: reason.leg, id: reason.id)
             }
             // Platform changes for departures and arrivals within the next two hours, incl. transfers.
-            let newPlatforms = refreshed.platformChanges(since: previous).filter { !known.contains($0.id) }
+            let newPlatforms = reportedByWorker ? [] : refreshed.platformChanges(since: previous).filter { !known.contains($0.id) }
             for change in newPlatforms {
                 await ConnectionNotifier.notify(change, journey: refreshed)
             }
@@ -1130,7 +1285,8 @@ final class AppModel {
                 await ConnectionNotifier.notify(update, journey: refreshed)
             }
             updated.notifiedIssues = Array(known.union(newIssues.map(\.id)).union(newReasons.map(\.id))
-                .union(newPlatforms.map(\.id)).union(newDispositions.compactMap(\.notificationID)))
+                .union(newPlatforms.map(\.id)).union(newDispositions.compactMap(\.notificationID))
+                .union(newDelays.map(\.notificationID)))
         }
         // The notifications above await too, so check again before storing.
         guard let storeIndex = stillSavedIndex(of: entry) else { return }
@@ -1368,6 +1524,8 @@ nonisolated struct SavedJourney: Codable, Hashable, Identifiable {
     var recordedClaim: PassengerRightsClaim?
     /// The exit reminders (#313) are switched off for this journey (optional so older saved data still decodes).
     var exitRemindersOff: Bool?
+    /// Set when the journey is a regular trip's day (#397): it then only reports problems.
+    var commute: CommuteDay?
 
     var issues: [ConnectionIssue] { journey.currentIssues() }
 
@@ -1457,10 +1615,37 @@ final class AppSettings {
             uploadToCloud()
         }
     }
+    /// What the user takes along (#398): the search option "Mit Fahrrad"/"Mit Klapprad" only shows for a
+    /// folding or normal bike. Hidden by default.
+    var bikeOption: BikeOption {
+        didSet {
+            UserDefaults.standard.set(bikeOption.rawValue, forKey: "bikeOption")
+            uploadToCloud()
+        }
+    }
+    /// The bike to show whether it comes along on a search's legs, nil while the search option is off or bikes are hidden.
+    func bike(searchingWithBike: Bool) -> BikeOption? {
+        searchingWithBike && bikeOption != .hidden ? bikeOption : nil
+    }
+    /// The search option "Mit Fahrrad" (#398): legs say whether a bike can come along, saving warns about bike
+    /// reservations. Kept from one search to the next, off by default.
+    var searchWithBike: Bool {
+        didSet {
+            UserDefaults.standard.set(searchWithBike, forKey: "searchWithBike")
+            uploadToCloud()
+        }
+    }
     /// The ticket those filters check against.
     var ticketType: TicketType {
         didSet {
             UserDefaults.standard.set(ticketType.rawValue, forKey: "ticketType")
+            uploadToCloud()
+        }
+    }
+    /// The class the user travels in: DB's occupancy forecast is shown for it (#399).
+    var travelClass: TravelClass {
+        didSet {
+            UserDefaults.standard.set(travelClass.rawValue, forKey: "travelClass")
             uploadToCloud()
         }
     }
@@ -1500,6 +1685,19 @@ final class AppSettings {
             UserDefaults.standard.set(exitReminderLead.rawValue, forKey: "exitReminderLead")
             uploadToCloud()
         }
+    }
+    /// What the app may do with the calendar events of saved journeys (#382); nil until the user chose.
+    /// Per device, like the calendar access itself.
+    var calendarAccess: CalendarAccessMode? {
+        didSet { UserDefaults.standard.set(calendarAccess?.rawValue, forKey: "calendarAccess") }
+    }
+    /// The calendar new journey events go to; nil for the default calendar. Per device, like `calendarAccess`.
+    var calendarID: String? {
+        didSet { UserDefaults.standard.set(calendarID, forKey: "calendarID") }
+    }
+    /// Adds saved journeys to the calendar by themselves (off by default). Per device, like `calendarAccess`.
+    var calendarAutoAdd: CalendarAutoAdd {
+        didSet { UserDefaults.standard.set(calendarAutoAdd.rawValue, forKey: "calendarAutoAdd") }
     }
     /// Notifications when someone the user follows checks in on Träwelling (#266). Per device, like
     /// the permission to show notifications.
@@ -1574,6 +1772,14 @@ final class AppSettings {
         }
     }
 
+    /// The weather on arrival and at long transfers in a journey (#385), from Open-Meteo. On by default.
+    var showWeather: Bool {
+        didSet {
+            UserDefaults.standard.set(showWeather, forKey: "showWeather")
+            uploadToCloud()
+        }
+    }
+
     /// Unlocks the features below; each one still has to be switched on by itself.
     var expertMode: Bool {
         didSet {
@@ -1628,7 +1834,10 @@ final class AppSettings {
     init() {
         let defaults = UserDefaults.standard
         ticketFilterByDefault = defaults.bool(forKey: "onlyBC100ByDefault")
+        searchWithBike = defaults.bool(forKey: "searchWithBike")
+        bikeOption = defaults.string(forKey: "bikeOption").flatMap(BikeOption.init) ?? .hidden
         ticketType = defaults.string(forKey: "ticketType").flatMap(TicketType.init) ?? .deutschlandticket
+        travelClass = defaults.string(forKey: "travelClass").flatMap(TravelClass.init) ?? .second
         liveActivitiesEnabled = defaults.object(forKey: "liveActivitiesEnabled") as? Bool ?? true
         liveActivityServerUpdates = defaults.object(forKey: "liveActivityServerUpdates") as? Bool ?? true
         trainPositionRefresh = defaults.string(forKey: "trainPositionRefresh").flatMap(TrainPositionRefresh.init) ?? .automatic
@@ -1638,6 +1847,7 @@ final class AppSettings {
         self.showTrainStatistics = showTrainStatistics
         defaults.removeObject(forKey: "shareTrainStatistics")
         Task { await TrainStatisticsStore.shared.setEnabled(showTrainStatistics) }
+        showWeather = defaults.object(forKey: "showWeather") as? Bool ?? true
         expertMode = defaults.bool(forKey: "expertMode")
         expertTraewelling = defaults.bool(forKey: "expertTraewelling")
         expertEditJourney = defaults.bool(forKey: "expertEditJourney")
@@ -1653,6 +1863,9 @@ final class AppSettings {
         connectionWarnings = defaults.object(forKey: "connectionWarnings") as? Bool ?? true
         exitReminders = defaults.object(forKey: "exitReminders") as? Bool ?? true
         exitReminderLead = ExitReminderLead(rawValue: defaults.integer(forKey: "exitReminderLead")) ?? .five
+        calendarAccess = defaults.string(forKey: "calendarAccess").flatMap(CalendarAccessMode.init)
+        calendarID = defaults.string(forKey: "calendarID")
+        calendarAutoAdd = defaults.string(forKey: "calendarAutoAdd").flatMap(CalendarAutoAdd.init) ?? .off
         quickTags = Storage.load(key: "quickTags") ?? QuickTag.defaults
         trainSearchKinds = defaults.stringArray(forKey: "trainSearchKinds").map { Set($0.compactMap(TrainSearchKind.init)) }
             ?? TrainSearchKind.defaults
@@ -1685,6 +1898,10 @@ final class AppSettings {
         var exitReminders: Bool?
         var exitReminderLead: ExitReminderLead?
         var liveActivityServerUpdates: Bool?
+        var showWeather: Bool?
+        var searchWithBike: Bool?
+        var bikeOption: BikeOption?
+        var travelClass: TravelClass?
     }
 
     /// What iCloud stores: the settings and when they were last changed.
@@ -1701,7 +1918,7 @@ final class AppSettings {
         expertTrainChoice: false, expertIgnoreBoardingRules: false, expertRil100: false,
         trainSearchKinds: TrainSearchKind.defaults.sorted(by: { $0.rawValue < $1.rawValue }),
         trainSearchCountries: TrainSearchCountry.defaults.sorted(), exitReminders: true, exitReminderLead: .five,
-        liveActivityServerUpdates: true)
+        liveActivityServerUpdates: true, showWeather: true, searchWithBike: false, bikeOption: .hidden, travelClass: .second)
 
     @ObservationIgnored private var isApplyingCloudValue = false
 
@@ -1715,7 +1932,9 @@ final class AppSettings {
                    expertRil100: expertRil100,
                    trainSearchKinds: trainSearchKinds.sorted(by: { $0.rawValue < $1.rawValue }),
                    trainSearchCountries: trainSearchCountries.sorted(), exitReminders: exitReminders,
-                   exitReminderLead: exitReminderLead, liveActivityServerUpdates: liveActivityServerUpdates)
+                   exitReminderLead: exitReminderLead, liveActivityServerUpdates: liveActivityServerUpdates,
+                   showWeather: showWeather, searchWithBike: searchWithBike, bikeOption: bikeOption,
+                   travelClass: travelClass)
     }
 
     /// When the settings were last changed on this device or taken over from iCloud. Before
@@ -1767,6 +1986,10 @@ final class AppSettings {
         exitReminders = value.exitReminders ?? exitReminders
         exitReminderLead = value.exitReminderLead ?? exitReminderLead
         liveActivityServerUpdates = value.liveActivityServerUpdates ?? liveActivityServerUpdates
+        showWeather = value.showWeather ?? showWeather
+        searchWithBike = value.searchWithBike ?? searchWithBike
+        bikeOption = value.bikeOption ?? bikeOption
+        travelClass = value.travelClass ?? travelClass
     }
 }
 
@@ -1808,6 +2031,17 @@ enum ConnectionNotifier {
         try? await UNUserNotificationCenter.current().add(request)
     }
 
+    /// A regular trip's train is late enough to say so (#397).
+    static func notify(_ delay: CommuteDelay) async {
+        let content = UNMutableNotificationContent()
+        content.title = delay.title
+        content.body = delay.message
+        content.sound = .default
+        content.interruptionLevel = .timeSensitive
+        let request = UNNotificationRequest(identifier: delay.notificationID, content: content, trigger: nil)
+        try? await UNUserNotificationCenter.current().add(request)
+    }
+
     static func notify(_ message: TrainMessage, leg: Leg, id: String) async {
         let content = UNMutableNotificationContent()
         let line = leg.line?.name ?? "Zug"
@@ -1823,4 +2057,16 @@ enum ConnectionNotifier {
         let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
         try? await UNUserNotificationCenter.current().add(request)
     }
+}
+
+/// What `AppModel.saveWarnings(for:withBike:)` found before saving a journey.
+struct SaveWarnings {
+    /// Trains where a seat reservation is mandatory.
+    var seatReservation: [Leg] = []
+    /// In bike mode: trains a bike only comes along on with a bike reservation.
+    var bikeReservation: [Leg] = []
+    /// In bike mode: trains that take no bikes.
+    var noBikes: [Leg] = []
+
+    var isEmpty: Bool { seatReservation.isEmpty && bikeReservation.isEmpty && noBikes.isEmpty }
 }

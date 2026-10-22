@@ -1,6 +1,9 @@
+import AppIntents
 import BackgroundTasks
 import BetterBahnKit
+import CoreSpotlight
 import SwiftUI
+import UserNotifications
 
 @main
 struct BetterBahnApp: App {
@@ -8,12 +11,14 @@ struct BetterBahnApp: App {
     @State private var model: AppModel
 
     init() {
-        // Train statistics from one run on, with their raw values (TrainStatisticsRows): launch once with
-        // `-debugstats`, stays on until the app is deleted.
+        // Train statistics from one run on, with their raw values (TrainStatisticsRows): only for launches with
+        // `-debugstats`.
         TrainStatistics.enableTestModeIfRequested()
         let model = AppModel()
         _model = State(initialValue: model)
         appDelegate.model = model
+        // For the Spotlight entities and their intents (`SpotlightSync`), also when iOS starts the app for one.
+        AppDependencyManager.shared.add(dependency: model)
     }
 
     var body: some Scene {
@@ -42,6 +47,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             model.handleLiveActivityBackgroundTask(refreshTask)
         }
         UNUserNotificationCenter.current().delegate = self
+        // "Fährst du heute?" with its answers (#397).
+        UNUserNotificationCenter.current().setNotificationCategories([CommuteNotifier.notificationCategory])
         return true
     }
 
@@ -54,20 +61,55 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         model?.didRegisterForPush(deviceToken: nil)
     }
 
-    /// Exit reminders (#313) also show while the app is open; the others don't, as before.
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
-                                            withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        completionHandler(notification.request.identifier.hasPrefix(AppModel.exitReminderPrefix) ? [.banner, .list, .sound] : [])
-    }
-
-    /// A followed user's check-in notification (#266) opens that check-in; the others just open the app.
+    /// A followed user's check-in notification (#266) opens that check-in, a regular trip's question (#397) is
+    /// answered (iOS waits for the journey to be saved after "Ja"), a push about a regular trip's journey opens it;
+    /// the others just open the app.
+    ///
+    /// Not the `async` variant: its generated wrapper calls iOS's completion handler off the main thread, and iOS
+    /// then stops the app ("Call must be made on main thread") as soon as a notification is tapped.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                             withCompletionHandler completionHandler: @escaping () -> Void) {
-        let statusID = FollowedCheckinNotifier.statusID(in: response.notification.request.content.userInfo)
-        completionHandler()
-        guard let statusID else { return }
-        Task { @MainActor in await self.model?.openFollowedCheckin(id: statusID) }
+        let userInfo = response.notification.request.content.userInfo
+        let statusID = FollowedCheckinNotifier.statusID(in: userInfo)
+        let question = CommuteNotifier.question(in: userInfo)
+        let retry = CommuteNotifier.isRetry(userInfo)
+        let journeyID = CommuteNotifier.journeyID(in: userInfo)
+        let action = response.actionIdentifier
+        let done = MainThreadCompletion(completionHandler)
+        Task { @MainActor in
+            await self.handleNotification(action: action, statusID: statusID, question: question, retry: retry, journeyID: journeyID)
+            done.call()
+        }
     }
+
+    private func handleNotification(action: String, statusID: Int?, question: CommuteQuestion?, retry: Bool, journeyID: String?) async {
+        if let question {
+            await model?.answerCommuteQuestion(question, action: action, retry: retry)
+        } else if let journeyID {
+            model?.openCommuteJourney(id: journeyID)
+        } else if let statusID {
+            await model?.openFollowedCheckin(id: statusID)
+        }
+    }
+
+    /// Exit reminders (#313), a regular trip's question and the pushes about its journey (#397) also show while
+    /// the app is open; the others don't, as before.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                            withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        let userInfo = notification.request.content.userInfo
+        let shows = notification.request.identifier.hasPrefix(AppModel.exitReminderPrefix)
+            || CommuteNotifier.question(in: userInfo) != nil || CommuteNotifier.journeyID(in: userInfo) != nil
+        completionHandler(shows ? [.banner, .list, .sound] : [])
+    }
+}
+
+/// iOS's completion handler for a tapped notification, carried to the main actor and called there.
+nonisolated private struct MainThreadCompletion: @unchecked Sendable {
+    let handler: () -> Void
+
+    init(_ handler: @escaping () -> Void) { self.handler = handler }
+
+    @MainActor func call() { handler() }
 }
 
 struct RootView: View {
@@ -132,6 +174,12 @@ struct RootView: View {
                 model.startRefreshing()
                 Task { await model.syncTraewelling() }
                 Task { await model.syncFollowedCheckinPush() }
+                // Picks up events deleted in the calendar and a switch to full access in iOS Settings.
+                model.scheduleCalendarSync()
+                // Journeys that ended meanwhile leave the iOS search.
+                model.scheduleSpotlightSync()
+                model.scheduleCommuteQuestions()
+                Task { await model.syncCommutePush() }
                 // Build the travel map's heatmap in the background so its tab opens instantly.
                 model.prewarmTravelMap()
             } else if phase == .background {
@@ -141,6 +189,15 @@ struct RootView: View {
                 withBackgroundTime("LiveActivityHandOver") { await model.handOverLiveActivity() }
             }
         }
+        // A saved journey to show (the Live Activity or a regular trip's notification): on the Verbindungen tab.
+        .onChange(of: model.journeyToOpen) { _, entry in
+            guard entry != nil else { return }
+            incomingSharedJourney = nil
+            incomingDBShare = nil
+            linkedTrainMap = nil
+            selectedTab = .connections
+        }
+        .commuteQuestionAlert()
         // A followed user's check-in notification was tapped (#266): its list is on the Verbindungen tab.
         .onChange(of: model.followedCheckinToOpen) { _, id in
             guard id != nil else { return }
@@ -154,65 +211,23 @@ struct RootView: View {
             model.seedBrokenTripIfRequested()
             model.seedLateTripsIfRequested()
             model.seedSeatMapTripsIfRequested()
+            model.seedCoachAdviceTripsIfRequested()
             await model.seedStressTripsIfRequested()
             await model.seedDemoTripsIfRequested()
         }
         #endif
-        .onOpenURL { url in
-            // The departure board widget was tapped: its station's board, or its route in the search (#314).
-            if let target = BoardWidgetLink.target(from: url) {
-                incomingSharedJourney = nil
-                incomingDBShare = nil
-                linkedTrainMap = nil
-                switch target {
-                case .board(let station):
-                    selectedTab = .departures
-                    model.boardStationToOpen = station
-                case .route(let from, let to):
-                    selectedTab = .connections
-                    model.searchToOpen = ConnectionSearch(from: from, to: to, date: .now, isArrival: false,
-                                                          onlyValidTicket: model.settings.ticketFilterByDefault)
-                }
-                return
+        .onOpenURL(perform: open)
+        // A favourite station or saved journey picked in the iOS search (#387).
+        .onContinueUserActivity(CSSearchableItemActionType) { activity in
+            if let id = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String, let url = SpotlightEntry.url(forID: id) {
+                open(url)
             }
-            // A live widget was tapped: show its train on the live map.
-            if let target = TrainMapLink.target(from: url) {
-                if let entry = model.savedJourneys.first(where: { $0.journey.id == target.journeyID }),
-                   entry.journey.legs.indices.contains(target.legIndex) {
-                    incomingSharedJourney = nil
-                    incomingDBShare = nil
-                    linkedTrainMap = LinkedTrainMap(route: LiveTrainRoute(leg: entry.journey.legs[target.legIndex]))
-                }
-                return
-            }
-            // The Live Activity was tapped: show its journey (if it's still saved).
-            if let journeyID = LiveActivityLink.journeyID(from: url) {
-                if let entry = model.savedJourneys.first(where: { $0.journey.id == journeyID }) {
-                    incomingSharedJourney = nil
-                    incomingDBShare = nil
-                    selectedTab = .connections
-                    model.journeyToOpen = entry
-                }
-                return
-            }
-            // A connection shared from the DB Navigator / bahn.de, handed over by the share extension.
-            if let text = DBShare.text(fromAppURL: url) {
-                incomingSharedJourney = nil
-                incomingDBShare = DBShareText(text: text)
-                return
-            }
-            // A short link (`https://…/s/<id>` as Universal Link, or the fallback page's button):
-            // the journey is fetched from BetterBahn's Worker.
-            if let id = JourneyShareLink.shortLinkID(from: url) {
-                Task { await openShortShareLink(id: id) }
-                return
-            }
-            guard let journey = JourneyShareLink.journey(from: url) else {
-                showInvalidShareLinkAlert = true
-                return
-            }
-            incomingDBShare = nil
-            incomingSharedJourney = journey
+        }
+        // The same, opened through the entity's intent (`SpotlightSync`).
+        .onChange(of: model.linkToOpen, initial: true) { _, url in
+            guard let url else { return }
+            model.linkToOpen = nil
+            open(url)
         }
         .sheet(item: $incomingSharedJourney) { SharedJourneyPreviewView(journey: $0) }
         .sheet(item: $incomingDBShare) { ImportedJourneyView(text: $0.text) }
@@ -228,6 +243,66 @@ struct RootView: View {
         } message: {
             Text(shareLinkError ?? "")
         }
+    }
+
+    /// Opens a deep link: from a widget, the Live Activity, Spotlight, a share or a shared journey.
+    private func open(_ url: URL) {
+        // The departure board widget was tapped: its station's board, or its route in the search (#314).
+        if let target = BoardWidgetLink.target(from: url) {
+            incomingSharedJourney = nil
+            incomingDBShare = nil
+            linkedTrainMap = nil
+            switch target {
+            case .board(let station):
+                selectedTab = .departures
+                model.boardStationToOpen = station
+            case .route(let from, let to):
+                selectedTab = .connections
+                model.searchToOpen = ConnectionSearch(from: from, to: to, date: .now, isArrival: false,
+                                                      onlyValidTicket: model.settings.ticketFilterByDefault,
+                                                      withBike: model.settings.searchWithBike)
+            }
+            return
+        }
+        // A live widget was tapped: show its train on the live map.
+        if let target = TrainMapLink.target(from: url) {
+            if let entry = model.savedJourneys.first(where: { $0.journey.id == target.journeyID }),
+               entry.journey.legs.indices.contains(target.legIndex) {
+                incomingSharedJourney = nil
+                incomingDBShare = nil
+                linkedTrainMap = LinkedTrainMap(route: LiveTrainRoute(leg: entry.journey.legs[target.legIndex]))
+            }
+            return
+        }
+        // The Live Activity or a calendar event was tapped: show its journey (if it's still saved).
+        if let journeyID = LiveActivityLink.journeyID(from: url) {
+            // Calendar events link by the saved journey's ID, which survives replanning.
+            if let entry = model.savedJourneys.first(where: { $0.journey.id == journeyID || $0.id.uuidString == journeyID }) {
+                incomingSharedJourney = nil
+                incomingDBShare = nil
+                selectedTab = .connections
+                model.journeyToOpen = entry
+            }
+            return
+        }
+        // A connection shared from the DB Navigator / bahn.de, handed over by the share extension.
+        if let text = DBShare.text(fromAppURL: url) {
+            incomingSharedJourney = nil
+            incomingDBShare = DBShareText(text: text)
+            return
+        }
+        // A short link (`https://…/s/<id>` as Universal Link, or the fallback page's button):
+        // the journey is fetched from BetterBahn's Worker.
+        if let id = JourneyShareLink.shortLinkID(from: url) {
+            Task { await openShortShareLink(id: id) }
+            return
+        }
+        guard let journey = JourneyShareLink.journey(from: url) else {
+            showInvalidShareLinkAlert = true
+            return
+        }
+        incomingDBShare = nil
+        incomingSharedJourney = journey
     }
 
     private func openShortShareLink(id: String) async {

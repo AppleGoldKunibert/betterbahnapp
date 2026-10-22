@@ -16,7 +16,7 @@ iOS app (SwiftUI, iOS 26, Swift 6) for German train travel. UI text is German, c
 | `Cloudflare/` | Workers: `betterbahn`, `bahnde-proxy` (`betterbahn2`), `pass-signer`, `stats`, `checkin-push`, `live-activity`, `shared`. |
 | `Server/` | `bahnde-proxy`: Docker server asking bahn.de with a browser's TLS fingerprint (the app asks it before `betterbahn2`). |
 | `scripts/` | Offline data rebuilds; `searchsim/` runs Kit tests on Linux. |
-| `.github/workflows/` | `pr-build.yml`, `pr-secrets.yml`, `sync-prod.yml`, `monthly-data-update.yml` (monthly PR into `prod` with rebuilt station data). |
+| `.github/workflows/` | `pr-build.yml`, `pr-secrets.yml`, `sync-prod.yml`, `bump-version.yml` (version bump per merged feature/bug), `monthly-data-update.yml` (monthly PR into `prod` with rebuilt station data). |
 
 - Details per feature and type: `docs/CODEBASE.md`. Don't read it whole: grep it for the feature or type name
   and read that section, then open only the files you change. Read `docs/app-review-notes.md` (App Store,
@@ -55,6 +55,13 @@ iOS app (SwiftUI, iOS 26, Swift 6) for German train travel. UI text is German, c
   - Komplett neues, unabhängiges Feature: per AskUserQuestion fragen – neuer Branch von `indevelopment`
     oder auf dem aktuellen Branch weiter.
 - Issue ohne Label: `bug` oder `enhancement` vergeben, wenn eindeutig, sonst ohne Label lassen.
+- Jeder PR bekommt das Label `bug` oder `enhancement` (bei beidem beide). `bump-version.yml` erhöht danach beim Merge
+  die Version: +0.1 je Feature, +0.0.1 je Bugfix. Gezählt werden die gefixten Issues („Fixed #15"); für jedes Feature
+  bzw. jeden Bugfix im PR ohne eigenes Issue eine eigene Zeile `Feature without Issue: <kurz was>` bzw.
+  `Bug without Issue: <kurz was>` in die PR-Beschreibung schreiben.
+- Wer mit einem Issue anfängt, setzt das Label `in progress` (der Workflow „Label done issues" tauscht es beim
+  Merge gegen `ready`). Mehrere Issues auf einmal startet `/issues-starten 420 421` (oder ohne Nummern: alle
+  neuen), je eine Session pro Issue.
 - Nach dem Push **sofort, ohne Nachfrage**, einen Draft-PR in den Ziel-Branch öffnen (`indevelopment`, oder
   der Basis-Feature-Branch von oben) – diese Projektregel hat Vorrang vor „keinen PR ohne ausdrückliche Bitte".
   CI-Fehler beheben, bis alles grün ist, dann auf „ready" stellen. Dem Nutzer den Branch nennen
@@ -110,9 +117,11 @@ they say no, continue as usual.
   User-Agent (see `BahnExpertClient`); `journey/find` then `journey/detailsByJourneyId` give DB's own times per
   stop, the reference for real delays.
 - bahn.de (`www.bahn.de/web/api/...`) answers `403`/`452 OPS_BLOCKED` to anything without a browser's TLS
-  handshake (cloud session, plain curl, Cloudflare Workers): don't try it from here. Give the user a complete
-  `curl_cffi` command for the Mac (`impersonate="safari"`, `Accept-Encoding: gzip, br`, else answers lag 1-3 s;
-  `python3 -m venv /tmp/cffi && /tmp/cffi/bin/pip install curl_cffi`) and ask them to paste the output.
+  handshake (cloud session, plain curl, Cloudflare Workers): don't ask it directly. Ask it through our server
+  yourself: `python3 scripts/bahnde.py '<path below /web/api/ with query>'` (the environment's network secret adds
+  the app token; a few requests, not loops). If that answers `401` or fails, give
+  the user a complete `curl_cffi` command for the Mac (`impersonate="safari"`, `Accept-Encoding: gzip, br`, else
+  answers lag 1-3 s; `python3 -m venv /tmp/cffi && /tmp/cffi/bin/pip install curl_cffi`) and ask them to paste the output.
 - The app reaches bahn.de only through our server `Server/bahnde-proxy` (browser TLS fingerprint, behind Tailscale
   Funnel; bahn.de refuses Oracle Cloud's addresses). `betterbahn2` is refused by bahn.de since October 2026 and only
   serves App Attest and DB Timetables; don't touch it.

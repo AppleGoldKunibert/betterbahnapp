@@ -161,22 +161,18 @@ struct TripView: View {
             }
             guard tripId == self.tripId else { return }
             error = nil
-            // DB's delays and the platforms Transitous lacks (e.g. for the S15's own first/last stop at
-            // Berlin Hbf) before showing a trip not seen before, so it doesn't jump from the timetable to
-            // the live times; one already showing (seen before, or a reload) stays meanwhile.
-            if let timetables = model.timetablesClient {
-                let timetable = loaded
-                let live = await LoadingDeadline.run({ await timetables.liveTrip(timetable) }, showingAfter: LoadingDeadline.liveData) {
-                    if trip == nil, tripId == self.tripId { show(timetable) }
-                }
+            // Every source's live data in one go (`LiveRun`), shown as it comes: a run not seen before waits a
+            // little for DB's delays so it doesn't jump from the timetable to the live times; one already showing
+            // (seen before, or a reload) is the baseline, so nothing it knows goes missing meanwhile.
+            let baseline = trip ?? model.liveTrips.value(for: tripId)
+            let live = await model.liveRun.refresh(loaded, baseline: baseline, wholeRun: true) { partial in
                 // Switched to another train meanwhile.
                 guard tripId == self.tripId else { return }
-                show(live)
-            } else {
-                show(loaded)
+                show(partial)
             }
-            await insertZusatzhalte()
-            if let trip { model.rememberLive(trip) }
+            guard tripId == self.tripId else { return }
+            show(live)
+            model.rememberLive(live)
         } catch is CancellationError {
         } catch {
             self.error = error
@@ -215,32 +211,6 @@ struct TripView: View {
         } else {
             boardingID = here
         }
-    }
-
-    /// Only bahn.de's journey details report a Zusatzhalt (an unscheduled stop the train additionally
-    /// picked up today) at all — Transitous and DB Timetables above only ever overlay onto stops already there.
-    /// Their live times also beat both where bahn.de has one (`BahnDeClient.applyingLiveTimes`).
-    private func insertZusatzhalte() async {
-        guard let shown = trip else { return }
-        // The run beyond a border and the Czech stops' platforms and live times take a few requests: after the first paint.
-        let trip = await model.provider.completing(shown)
-        guard self.trip?.id == trip.id else { return }
-        if trip != shown { self.trip = trip }
-        if let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: trip), self.trip?.id == trip.id {
-            let keepingDelays = model.timetablesClient != nil
-            let inserted = BahnDeClient.inserting(stops, into: trip.stopovers)
-            self.trip?.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: inserted, keepingDelays: keepingDelays)
-            // Where bahn.de and DB Timetables disagree on a stop, bahn.expert is asked which is right; shown once it answers.
-            let refereed = await BahnDeClient.applyingLiveTimes(from: stops, to: inserted, line: trip.line, keepingDelays: keepingDelays,
-                                                                referee: model.provider.bahnExpert)
-            guard self.trip?.id == trip.id else { return }
-            self.trip?.stopovers = refereed
-            if (try? await bahnDe.hasSleepingCars(for: trip)) == true, self.trip?.id == trip.id { self.trip?.line?.nightRail = true }
-        }
-        // Platforms bahn.de lacks, e.g. in Switzerland and Austria or for a Nightjet, from bahn.expert.
-        guard let expert = model.provider.bahnExpert, let current = self.trip, current.id == trip.id else { return }
-        let filled = await expert.fillingMissingPlatforms(in: current.stopovers, line: current.line)
-        if self.trip?.id == trip.id { self.trip?.stopovers = filled }
     }
 }
 
@@ -311,10 +281,14 @@ struct TripContent: View {
     /// Where a train run by several railways changes hands (stopover ID → operators), e.g. DB at the
     /// start and at Bad Schandau, ČD at Děčín; empty for one railway throughout.
     @State private var operatorStops: [String: [String]] = [:]
+    /// Which side the platform is on at the picked exit (#394), if the offline list knows.
+    @State private var exitSide: ExitSide?
     /// What past runs of this train say at the stops that matter (#316).
     @State private var statistics = TrainStatisticsModel()
     /// The platform changes of the stops ahead, shown at the stop 30 minutes before it and always at the next one.
     @State private var platformStatistics = TrainStatisticsModel()
+    /// DB's occupancy forecast (#399) from the picked boarding stop to the exit, else for the whole run.
+    @State private var occupancy: OccupancyForecast?
     @Environment(AppModel.self) private var model
 
     private var color: Color { trip.line?.color ?? .gray }
@@ -389,6 +363,7 @@ struct TripContent: View {
                             TrainFormationLabel(trip: trip, savedLeg: savedLeg)
                         }
                         Spacer()
+                        OccupancyButton(forecast: occupancy, travelClass: model.settings.travelClass)
                         TrainMessagesButton(messages: trip.messages)
                     }
                     // At the next stop; any other stop's unfolds below it with a tap on its platform.
@@ -448,6 +423,15 @@ struct TripContent: View {
             guard let bahnDe = model.provider.bahnDe, let found = try? await bahnDe.operatorStops(for: trip) else { return }
             operatorStops = found
         }
+        .task(id: [trip.id, boardingID ?? "", exitID ?? ""]) {
+            let boarding = trip.stopovers.first { $0.id == boardingID }, exit = trip.stopovers.first { $0.id == exitID }
+            // Over once the ride (or the train) has arrived.
+            guard ((exit ?? trip.stopovers.last)?.arrival?.best).map({ $0 > .now }) ?? true, let bahnDe = model.provider.bahnDe else {
+                occupancy = nil
+                return
+            }
+            occupancy = try? await bahnDe.occupancy(for: trip, boarding: boarding, exit: exit)
+        }
         .task(id: [trip.stopovers.first?.id ?? "", String(nextStopIndex ?? -1)]) {
             await platformStatistics.load(line: trip.line, stops: platformHintStops, date: trip.stopovers.first?.departure?.planned ?? .now,
                                           bahnDe: model.provider.bahnDe)
@@ -455,6 +439,11 @@ struct TripContent: View {
         .task(id: [boardingID ?? "", exitID ?? "", trip.stopovers.first?.id ?? ""]) {
             await statistics.load(line: trip.line, stops: statisticsStops, date: trip.stopovers.first?.departure?.planned ?? .now,
                                   bahnDe: model.provider.bahnDe)
+        }
+        .task(id: [exitID ?? "", trip.stopovers.compactMap { $0.arrivalPlatform?.best }.joined(separator: "|")]) {
+            guard let index = exitIndex else { exitSide = nil; return }
+            let trip = trip
+            exitSide = await Task.detached(priority: .userInitiated) { ExitSides.side(leaving: trip, at: index) }.value
         }
     }
 
@@ -553,7 +542,12 @@ struct TripContent: View {
                     .buttonStyle(.plain)
                     .disabled(!interactive)
 
-                    platformButton(stop)
+                    VStack(spacing: 2) {
+                        platformButton(stop)
+                        if isExit, let exitSide {
+                            ExitSideArrow(side: exitSide)
+                        }
+                    }
                 }
                 if sequenceStopID == stop.id, let request = coachSequenceRequest(at: stop) {
                     CoachSequencePanel(request: request)
@@ -642,9 +636,9 @@ private struct DelayTimeText: View {
                     .lineLimit(1)
                     .fixedSize()
                     .foregroundStyle(Color.heavyDelay)
-            } else if showPlanned {
-                // Original/planned time is shown, so the delay isn't reflected above — always show it, even +0.
-                let delayMinutes = time.delayMinutes ?? 0
+            } else if showPlanned, let delayMinutes = time.delayMinutes {
+                // Original/planned time is shown, so the delay isn't reflected above — show it, even +0; without a
+                // live time there is no delay to show, not a made-up "0".
                 Text(delayMinutes > 0 ? "+\(delayMinutes)" : "\(delayMinutes)")
                     .font(.caption2.weight(.bold))
                     .lineLimit(1)
@@ -806,20 +800,21 @@ struct LegTripSheet: View {
             }
             error = nil
             showsSavedStops = false
-            // Live data first, like `TripView.load()`.
-            if let timetables = model.timetablesClient {
-                let timetable = loaded
-                let live = await LoadingDeadline.run({ await timetables.liveTrip(timetable) }, showingAfter: LoadingDeadline.liveData) {
-                    if trip == nil, tripId == self.tripId { trip = timetable }
-                }
+            // Every source's live data in one go (`LiveRun`), like `TripView.load()`. The leg's own train also
+            // starts from what the saved journey remembers: its Zusatzhalte (bahn.de only reports them while the
+            // train runs) and the delays and platforms last seen, where nothing answers any more.
+            var baseline = trip ?? model.liveTrips.value(for: tripId)
+            if tripId == leg.tripId, let saved = leg.savedTrip {
+                baseline = baseline.map { LiveRun.keepingKnown(from: saved, in: $0) } ?? saved
+            }
+            let live = await model.liveRun.refresh(loaded, baseline: baseline, wholeRun: true) { partial in
                 // Switched to another train meanwhile.
                 guard tripId == self.tripId else { return }
-                trip = live
-            } else {
-                trip = loaded
+                trip = partial
             }
-            await insertZusatzhalte()
-            if let trip { model.rememberLive(trip) }
+            guard tripId == self.tripId else { return }
+            trip = live
+            model.rememberLive(live)
         } catch is CancellationError {
         } catch {
             // The leg's own train, gone from Transitous (long past) or not reachable: its saved stops
@@ -831,37 +826,6 @@ struct LegTripSheet: View {
                 self.error = error
             }
         }
-    }
-
-    /// Only bahn.de's journey details report a Zusatzhalt (an unscheduled stop the train additionally
-    /// picked up today) at all — Transitous and DB Timetables above only ever overlay onto stops already there.
-    /// bahn.de only reports them while the train runs, so the leg's own train also keeps the ones the
-    /// saved journey remembered (where you may have got on, off or changed). bahn.de's live times also
-    /// beat Transitous' and DB Timetables' where it has one (`BahnDeClient.applyingLiveTimes`).
-    private func insertZusatzhalte() async {
-        guard let shown = trip else { return }
-        // The run beyond a border and the Czech stops' platforms and live times take a few requests: after the first paint.
-        var updated = await model.provider.completing(shown)
-        let ownTrain = shownTripId == nil
-        var hasSleepingCars = false
-        if let bahnDe = model.provider.bahnDe, let stops = try? await bahnDe.journeyStops(for: updated) {
-            let keepingDelays = model.timetablesClient != nil
-            let inserted = BahnDeClient.inserting(stops, into: updated.stopovers)
-            updated.stopovers = BahnDeClient.applyingLiveTimes(from: stops, to: inserted, keepingDelays: keepingDelays)
-            // Shown right away; where bahn.de and DB Timetables disagree on a stop, bahn.expert is asked which is right.
-            if ownTrain, self.trip?.id == updated.id, shownTripId == nil { self.trip?.stopovers = updated.keepingAdditionalStops(of: leg).stopovers }
-            updated.stopovers = await BahnDeClient.applyingLiveTimes(from: stops, to: inserted, line: updated.line,
-                                                                     keepingDelays: keepingDelays, referee: model.provider.bahnExpert)
-            hasSleepingCars = (try? await bahnDe.hasSleepingCars(for: updated)) == true
-        }
-        if ownTrain { updated = updated.keepingAdditionalStops(of: leg) }
-        // Platforms bahn.de lacks, e.g. in Switzerland and Austria or for a Nightjet, from bahn.expert.
-        if let expert = model.provider.bahnExpert {
-            updated.stopovers = await expert.fillingMissingPlatforms(in: updated.stopovers, line: updated.line)
-        }
-        guard self.trip?.id == updated.id, ownTrain == (shownTripId == nil) else { return }
-        self.trip?.stopovers = updated.stopovers
-        if hasSleepingCars { self.trip?.line?.nightRail = true }
     }
 }
 

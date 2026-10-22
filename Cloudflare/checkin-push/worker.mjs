@@ -9,9 +9,12 @@
 // Every minute the cron trigger looks at the subscriptions due in that minute: Träwelling's dashboard,
 // then an APNs notification for each check-in that is new since the last look. The first look only
 // remembers what runs already.
+//
+// It also looks after the journeys of regular trips (#397, `/commutes`, see commute.mjs).
 
 import { APNs } from "../shared/apns.mjs";
 import { TOKEN_HEADER, fromBase64, toBase64, unauthorized, verifyToken } from "../shared/appattest.mjs";
+import { handleCommute, processDueCommutes } from "./commute.mjs";
 
 export { signProviderToken } from "../shared/apns.mjs";
 
@@ -25,19 +28,21 @@ const REMEMBERED = 200;
 const BOARDING_WINDOW = 20 * MINUTE;
 const DEVICE_TOKEN_PATTERN = /^[0-9a-f]{64,200}$/;
 const ID_PATTERN = /^[0-9a-f]{32}$/;
-const MAX_BODY_BYTES = 8 * 1024;
+const MAX_BODY_BYTES = 16 * 1024;
 
 // MARK: - HTTP
 
 /// POST   /subscriptions      { code, codeVerifier, deviceToken, sandbox, userId } → 201 { id, secret }
 /// PUT    /subscriptions/<id> { secret, deviceToken, sandbox }                     → 200 {} (404: gone)
 /// DELETE /subscriptions/<id> { secret }                                            → 204
+/// PUT    /commutes/<id>      { secret, deviceToken, sandbox, journeys }            → 200 { watched } (see commute.mjs)
 export async function handleRequest(request, env = {}, now = Date.now(), deps = {}) {
     const url = new URL(request.url);
     if (url.pathname === "/health") return json(200, { ok: true });
+    const commute = url.pathname.match(/^\/commutes\/([^/]+)$/);
     const match = url.pathname.match(/^\/subscriptions(?:\/([^/]+))?$/);
-    if (!match) return json(404, { error: "not_found" });
-    if (!env.DB || !env.TOKEN_KEY) return json(503, { error: "not_configured" });
+    if (!match && !commute) return json(404, { error: "not_found" });
+    if (!env.DB || (match && !env.TOKEN_KEY)) return json(503, { error: "not_configured" });
 
     // Only the genuine app: an App Attest token (same TOKEN_SECRET as the other Workers), or no token
     // while ALLOW_UNATTESTED is "true" (see ../shared/appattest.mjs).
@@ -59,6 +64,10 @@ export async function handleRequest(request, env = {}, now = Date.now(), deps = 
         return json(400, { error: "invalid_json" });
     }
     if (typeof body !== "object" || body === null) return json(400, { error: "invalid_json" });
+    if (commute) {
+        if (request.method !== "PUT") return json(405, { error: "method_not_allowed" }, { Allow: "PUT" });
+        return handleCommute(commute[1], body, env, now, deps.fetch ?? fetch);
+    }
 
     const [, id] = match;
     if (!id) {
@@ -347,5 +356,6 @@ export default {
     },
     scheduled(event, env, ctx) {
         ctx.waitUntil(processDueSubscriptions(env, event.scheduledTime));
+        ctx.waitUntil(processDueCommutes(env, event.scheduledTime));
     },
 };
