@@ -54,7 +54,9 @@ struct JourneyDetailView: View {
                 ProgressView("Lade Echtzeitdaten …")
                     .containerRelativeFrame([.horizontal, .vertical])
             } else {
-                plan
+                // Exactly as wide as the screen: anything too wide would otherwise let the whole
+                // page be dragged sideways.
+                plan.containerRelativeFrame(.horizontal)
             }
         }
         .closesMenusOnScroll()
@@ -450,28 +452,30 @@ struct JourneyDetailView: View {
 
     private var liveActivityButton: some View {
         VStack(spacing: 8) {
-            HStack(spacing: 10) {
+            SaveActionsLayout(spacing: 10) {
                 SaveJourneyButton(journey: journey, search: search, shortLabel: true)
-                if !model.tickets(for: journey).isEmpty {
-                    TicketButton(tickets: model.tickets(for: journey), journey: journey)
-                }
-                JourneyShareButton(journey: journey, title: shareTitle)
-                if !readOnly, let entry = model.savedEntry(for: journey) {
-                    CalendarButton(entry: entry)
-                    RegularTripButton(journey: journey)
-                }
-                if model.settings.editJourneyEnabled {
-                    Button {
-                        showJourneyEditor = true
-                    } label: {
-                        Image(systemName: "pencil")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(width: 40, height: 40)
+                HStack(spacing: 10) {
+                    if !model.tickets(for: journey).isEmpty {
+                        TicketButton(tickets: model.tickets(for: journey), journey: journey)
                     }
-                    .buttonStyle(.plain)
-                    .glassEffect(.regular, in: .circle)
-                    .tint(.brand)
-                    .accessibilityLabel("Reise bearbeiten")
+                    JourneyShareButton(journey: journey, title: shareTitle)
+                    if !readOnly, let entry = model.savedEntry(for: journey) {
+                        CalendarButton(entry: entry)
+                        RegularTripButton(journey: journey)
+                    }
+                    if model.settings.editJourneyEnabled {
+                        Button {
+                            showJourneyEditor = true
+                        } label: {
+                            Image(systemName: "pencil")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(width: 40, height: 40)
+                        }
+                        .buttonStyle(.plain)
+                        .glassEffect(.regular, in: .circle)
+                        .tint(.brand)
+                        .accessibilityLabel("Reise bearbeiten")
+                    }
                 }
             }
             if model.isSaved(journey), model.settings.liveActivitiesEnabled {
@@ -504,6 +508,50 @@ struct JourneyDetailView: View {
                 }
                 .tint(.brand)
             }
+        }
+    }
+}
+
+/// The save button with the round actions beside it while its label fits in full; otherwise (a saved
+/// journey with a ticket on a smaller iPhone, large text) the actions go below it instead of pushing
+/// the row wider than the screen. A layout rather than `ViewThatFits`, so the buttons and their
+/// sheets and alerts stay the same views when the row wraps.
+private struct SaveActionsLayout: Layout {
+    var spacing: CGFloat
+    var lineSpacing: CGFloat = 8
+
+    private func sizes(_ proposal: ProposedViewSize, _ subviews: Subviews) -> (save: CGSize, actions: CGSize, beside: Bool) {
+        let actions = subviews[1].sizeThatFits(.unspecified)
+        guard let width = proposal.width else { return (subviews[0].sizeThatFits(.unspecified), actions, true) }
+        let idealSave = subviews[0].sizeThatFits(.unspecified)
+        if idealSave.width + spacing + actions.width <= width {
+            let save = subviews[0].sizeThatFits(ProposedViewSize(width: width - spacing - actions.width, height: nil))
+            return (save, actions, true)
+        }
+        return (subviews[0].sizeThatFits(ProposedViewSize(width: width, height: nil)), actions, false)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard subviews.count == 2 else { return subviews.first?.sizeThatFits(proposal) ?? .zero }
+        let (save, actions, beside) = sizes(proposal, subviews)
+        return beside
+            ? CGSize(width: save.width + spacing + actions.width, height: max(save.height, actions.height))
+            : CGSize(width: max(save.width, actions.width), height: save.height + lineSpacing + actions.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 2 else {
+            subviews.first?.place(at: bounds.origin, proposal: proposal)
+            return
+        }
+        let (save, actions, beside) = sizes(ProposedViewSize(width: bounds.width, height: nil), subviews)
+        if beside {
+            subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading, proposal: ProposedViewSize(save))
+            subviews[1].place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .trailing, proposal: ProposedViewSize(actions))
+        } else {
+            subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.minY), proposal: ProposedViewSize(save))
+            subviews[1].place(at: CGPoint(x: bounds.midX, y: bounds.minY + save.height + lineSpacing), anchor: .top,
+                              proposal: ProposedViewSize(actions))
         }
     }
 }
