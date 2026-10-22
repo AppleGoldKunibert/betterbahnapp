@@ -481,11 +481,15 @@ in `project.pbxproj`: new files join their target automatically.
 ### Statistics, support
 
 - `Statistics/TrainStatistics.swift` (#316) – `TrainStatistics` (30 days per stop: delays, cancellations, platform
-  moves), `TrainStatisticsClient`, `TrainStatisticsStore` (cache per train and day; off with
-  `AppSettings.showTrainStatistics`; EVA via `BahnDeClient.evaNumber(for:)`). Shown from `minimumRuns` (5); launch arg
-  `-debugstats` enables `TrainStatistics.testMode` for that launch only (`enableTestModeIfRequested`: from 1 run,
-  plus debug rows). Views in `TrainStatisticsViews.swift`: "Erfahrungswerte" (`LegCard` "Mehr", `TripContent`), tight
-  transfer warning (`Journey.tightTransfers`, `TrainStatistics.Stop.transferOutlook`) in `TransferRow` and `JourneyCard`.
+  moves), `TrainStatisticsClient`, `TrainStatisticsStore` (cache per train and day, kept until the day is over, also in
+  `Caches/TrainStatistics.json`; state behind a `Mutex`, so `cachedLookup` answers synchronously and
+  `TrainStatisticsModel.showCached` fills a reopened screen in `onAppear`; off with `AppSettings.showTrainStatistics`,
+  which also deletes the file; EVA via `BahnDeClient.evaNumber(for:)`, a failed one retried after `retryAfter`). Shown
+  from `minimumRuns` (5); launch arg `-debugstats` enables `TrainStatistics.testMode` for that launch only
+  (`enableTestModeIfRequested`: from 1 run, plus debug rows). Views in `TrainStatisticsViews.swift`: "Erfahrungswerte"
+  (`TrainStatisticsSection` in `LegCard` "Mehr"; in `TripContent` folded into one line, `TrainStatisticsDisclosure`
+  with `TrainStatisticsRows.headline`, so the stops don't jump when the figures arrive), tight transfer warning
+  (`Journey.tightTransfers`, `TrainStatistics.Stop.transferOutlook`) in `TransferRow` and `JourneyCard`.
 - `Support/HTTPClient.swift` – shared HTTP, `TransitError`, `JSONDecoding`; every request sends `identifyingUserAgent`
   (only `BahnDeClient` sends browser agents). `ProductStyle`: `Line.color` = product color, or `Line.lineColorHex`
   (S-/U-Bahn Berlin tables, #206), else `Line.feedColorHex` (Transitous `routeColor` if white text stays readable,

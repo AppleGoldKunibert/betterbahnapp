@@ -27,14 +27,28 @@ struct TrainStatisticsRows {
         var tint: Color = .secondary
     }
 
+    /// The figure the folded "Erfahrungswerte" line shows: how punctual the train is at the last stop with
+    /// enough runs (the exit, when picked), else how often it is cancelled.
+    struct Headline {
+        let text: String
+        let tint: Color
+    }
+
     let rows: [Row]
     let subtitle: String
+    let headline: Headline?
 
     init?(lookup: TrainStatisticsLookup?, stops: [StatisticsStop]) {
         guard let lookup else { return nil }
         var rows: [Row] = []
+        var headline: Headline?, cancellations: Headline?
         func add(_ systemImage: String, _ text: String, detail: String? = nil, tint: Color = .secondary) {
             rows.append(Row(id: rows.count, systemImage: systemImage, text: text, detail: detail, tint: tint))
+        }
+        func addCancellations(_ text: String, share: Double, percent: String) {
+            let tint: Color = share >= 0.1 ? .heavyDelay : .slightDelay
+            add("xmark.octagon.fill", text, tint: tint)
+            if cancellations == nil { cancellations = Headline(text: "\(percent) Ausfälle", tint: tint) }
         }
 
         for stop in stops {
@@ -45,16 +59,17 @@ struct TrainStatisticsRows {
                 let verb = stop.role == .departure ? "Abfahrt" : "Ankunft"
                 add("clock.fill", "\(verb) in \(name): im Schnitt \(Self.minutes(summary.average)), \(Self.percentText(summary.onTimeShare)) pünktlich",
                     tint: delayColor(summary.average))
+                headline = Headline(text: "\(Self.percentText(summary.onTimeShare)) pünktlich", tint: delayColor(summary.average))
             }
             if let share = figures.cancelledShare, share >= 0.01, let text = Self.percent(share) {
-                add("xmark.octagon.fill", "Fällt in \(name) bei \(text) der Fahrten aus", tint: share >= 0.1 ? .heavyDelay : .slightDelay)
+                addCancellations("Fällt in \(name) bei \(text) der Fahrten aus", share: share, percent: text)
             }
         }
 
         // The whole run cancelled only matters when no stop said it already.
         if !rows.contains(where: { $0.systemImage == "xmark.octagon.fill" }),
            let share = lookup.statistics.cancelledShare, let text = Self.percent(share), share >= 0.01 {
-            add("xmark.octagon.fill", "Fällt bei \(text) der Fahrten aus", tint: share >= 0.1 ? .heavyDelay : .slightDelay)
+            addCancellations("Fällt bei \(text) der Fahrten aus", share: share, percent: text)
         }
 
         if TrainStatistics.testMode { rows += Self.testRows(lookup: lookup, stops: stops, from: rows.count) }
@@ -62,6 +77,7 @@ struct TrainStatisticsRows {
         guard !rows.isEmpty else { return nil }
         self.rows = rows
         self.subtitle = "Letzte \(lookup.statistics.days) Tage · \(lookup.statistics.runs) Fahrten"
+        self.headline = headline ?? cancellations
     }
 
     /// Test mode (launch argument `-debugstats`): what the app asked for and the raw values the server answered, per stop.
@@ -144,12 +160,16 @@ struct PlatformChangeLabel: View {
 /// "Erfahrungswerte" in a card's details: past runs of this train, see `TrainStatisticsRows`.
 struct TrainStatisticsSection: View {
     let content: TrainStatisticsRows
+    /// Off below `TrainStatisticsDisclosure`'s line, which says it already.
+    var showsTitle = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                Label("Erfahrungswerte", systemImage: "chart.bar.fill")
-                    .font(.caption.weight(.semibold))
+                if showsTitle {
+                    Label("Erfahrungswerte", systemImage: "chart.bar.fill")
+                        .font(.caption.weight(.semibold))
+                }
                 Text(content.subtitle).font(.caption2).foregroundStyle(.secondary)
             }
             ForEach(content.rows) { row in
@@ -172,6 +192,43 @@ struct TrainStatisticsSection: View {
     }
 }
 
+/// "Erfahrungswerte · 87 % pünktlich" as one line at the top of a train's page, unfolding
+/// `TrainStatisticsSection` with a tap: the stops below move by one line at most when the figures arrive.
+struct TrainStatisticsDisclosure: View {
+    let content: TrainStatisticsRows
+    @State private var open = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                withAnimation(.snappy) { open.toggle() }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "chart.bar.fill")
+                    Text("Erfahrungswerte")
+                    if let headline = content.headline {
+                        Text("·")
+                        Text(headline.text).foregroundStyle(headline.tint)
+                    }
+                    Image(systemName: "chevron.down")
+                        .rotationEffect(.degrees(open ? 180 : 0))
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityValue(open ? "Ausgeklappt" : "Eingeklappt")
+
+            if open {
+                TrainStatisticsSection(content: content, showsTitle: false)
+                    .transition(.fold)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 /// A warning line for a transfer the incoming train often misses.
 struct TransferWarning: View {
     let text: String
@@ -190,17 +247,34 @@ struct TransferWarning: View {
 final class TrainStatisticsModel {
     private(set) var rows: TrainStatisticsRows?
     private(set) var lookup: TrainStatisticsLookup?
+    /// The stops `rows` were made for.
+    @ObservationIgnored private var shownStops: [StatisticsStop] = []
 
     /// How likely the train uses another platform than `planned` at `station`, if that is worth saying.
     func platformChange(at station: Station, planned: String?) -> PlatformChangeHint? {
         PlatformChangeHint(outlook: lookup?.stop(at: station)?.platformOutlook(planned: planned))
     }
 
+    /// What the store knows already for these stops, without waiting: called in `onAppear`, so a train
+    /// opened again has its figures in the first frame instead of moving the page once they are there.
+    func showCached(line: Line?, stops: [StatisticsStop], date: Date) {
+        guard let cached = TrainStatisticsStore.shared.cachedLookup(line: line, at: stops.map(\.station), on: date) else { return }
+        show(cached, stops: stops)
+    }
+
     func load(line: Line?, stops: [StatisticsStop], date: Date, bahnDe: BahnDeClient?) async {
+        showCached(line: line, stops: stops, date: date)
         var resolve: TrainStatisticsStore.EVAResolver?
         if let bahnDe { resolve = { station in try? await bahnDe.evaNumber(for: station) } }
         let lookup = await TrainStatisticsStore.shared.lookup(line: line, at: stops.map(\.station), on: date, resolve: resolve)
+        // Figures that had to be asked for fade in rather than pushing the page down at once.
+        withAnimation(.snappy) { show(lookup, stops: stops) }
+    }
+
+    private func show(_ lookup: TrainStatisticsLookup?, stops: [StatisticsStop]) {
+        guard lookup != self.lookup || stops != shownStops else { return }
         self.lookup = lookup
+        shownStops = stops
         rows = TrainStatisticsRows(lookup: lookup, stops: stops)
     }
 }
