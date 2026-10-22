@@ -30,6 +30,12 @@ struct JourneyDetailView: View {
     @State private var dispositions: [String: TransferDisposition] = [:]
     /// Transfers whose incoming train is often too late there (#316), keyed by the incoming leg's id.
     @State private var transferWarnings: [String: String] = [:]
+    /// Where to board for a quick transfer or exit (#383), keyed by the leg to board.
+    @State private var coachAdvice: [String: CoachAdvice] = [:]
+    /// The forecast on arrival and at long transfers (#385).
+    @State private var weather = JourneyWeather()
+    /// CO₂ compared with car and plane (#386), once the track geometry is in.
+    @State private var co2: CO2Comparison?
 
     /// Where the journey is going now.
     private var goal: Station { editedDestination ?? finalDestination }
@@ -51,11 +57,15 @@ struct JourneyDetailView: View {
                 plan
             }
         }
+        .closesMenusOnScroll()
         .refreshable {
             await TimetablesClient.invalidateDelays()
             await refreshRealtime()
             await loadDispositions()
+            await loadCoachAdvice()
         }
+        // A seat saved on the way changes where to walk before a transfer.
+        .onChange(of: model.savedSeats) { Task { await loadCoachAdvice() } }
         .task {
             if !readOnly, model.savedEntry(for: journey) == nil, let seen = model.liveJourneys.value(for: journey.id) {
                 journey = seen
@@ -69,13 +79,22 @@ struct JourneyDetailView: View {
             liveDataLoaded = true
             await loadDispositions()
             await loadTransferWarnings()
+            await loadCoachAdvice()
             // Keep a saved journey's delays current while it's open.
             while !Task.isCancelled {
                 try? await Task.sleep(for: AppModel.realtimeRefreshInterval)
                 guard !Task.isCancelled else { return }
                 if model.savedEntry(for: journey) != nil { await refreshRealtime() }
                 await loadDispositions()
+                await loadCoachAdvice()
             }
+        }
+        .task(id: journey.transitLegs.map(\.id)) { await loadCO2() }
+        .task(id: weatherPoints) {
+            var loaded = JourneyWeather()
+            if !weatherPoints.isEmpty { loaded = await WeatherClient.shared.weather(for: journey) }
+            guard !Task.isCancelled, loaded != weather else { return }
+            withAnimation { weather = loaded }
         }
         .tabBarSafePadding()
         .background { AppBackground() }
@@ -155,24 +174,59 @@ struct JourneyDetailView: View {
                         onShowCheckin: model.settings.traewellingEnabled
                             ? model.checkinStatusIDs[leg.id].map { id -> () -> Void in { shownCheckin = ShownCheckin(leg: leg, statusId: id) } }
                             : nil,
-                        reservation: model.reservation(for: leg, in: journey)
+                        reservation: model.reservation(for: leg, in: journey),
+                        savesSeat: !readOnly,
+                        coachAdvice: coachAdvice[leg.id],
+                        // Next to the transfer when there is one.
+                        showsCoachAdvice: transferInfo(after: leg) == nil,
+                        arrivalWeather: weather.arrival(of: leg, in: journey)
                     )
                     if let info = transferInfo(after: leg) {
                         TransferRow(from: leg, to: info.next, walk: info.walk, isPast: journey.isOver(),
-                                    disposition: dispositions[info.next.id], warning: transferWarnings[leg.id])
+                                    disposition: dispositions[info.next.id], warning: transferWarnings[leg.id],
+                                    coachAdvice: coachAdvice[leg.id])
                     }
                 }
             }
+            if let co2, co2.savedComparedToCar >= 0.1 { CO2SavingButton(comparison: co2) }
             if !readOnly { historySection }
         }
         .padding(.horizontal)
         .padding(.bottom, 32)
+        .environment(\.bikeMode, model.settings.bike(searchingWithBike: replanSearch?.withBike ?? model.settings.searchWithBike))
+    }
+
+    /// Where to board for each tight transfer and the exit (#383); not for old plans or a journey that is over.
+    private func loadCoachAdvice() async {
+        guard !readOnly, !journey.isOver() else { return }
+        let advice = await model.coachAdvice(for: journey)
+        guard advice != coachAdvice else { return }
+        withAnimation { coachAdvice = advice }
     }
 
     /// Which tight transfers the incoming train usually misses (#316); not for a journey that is over.
     private func loadTransferWarnings() async {
         guard !journey.isOver() else { return }
         transferWarnings = await TrainStatisticsModel.transferWarnings(for: journey, upTo: 15, here: true, bahnDe: model.provider.bahnDe)
+    }
+
+    /// Measures the legs along their tracks (cached, like the journey map) for the CO₂ comparison.
+    private func loadCO2() async {
+        let legs = journey.transitLegs, model = model
+        let geometries = await withTaskGroup(of: (String, [Coordinate]?).self) { group in
+            for leg in legs { group.addTask { await (leg.id, model.geometry(for: leg)) } }
+            var found: [String: [Coordinate]] = [:]
+            for await (id, geometry) in group { found[id] = geometry }
+            return found
+        }
+        guard !Task.isCancelled else { return }
+        co2 = CO2Comparison(legs: legs, geometries: geometries)
+    }
+
+    /// Where the weather is looked up; reloads when a delay moves an arrival (the forecasts stay cached).
+    /// None for old plans or with the setting off.
+    private var weatherPoints: [WeatherPoint] {
+        readOnly || !model.settings.showWeather ? [] : journey.weatherPoints
     }
 
     /// Whether opening waits for live data (see the `.task` above): only for a journey not seen live yet.
@@ -341,6 +395,10 @@ struct JourneyDetailView: View {
                             TimeStack(time: arrival, alignment: .trailing, font: .largeTitle.weight(.bold))
                             Text(last.destination.displayName).font(.subheadline.weight(.semibold)).lineLimit(2)
                                 .multilineTextAlignment(.trailing)
+                            if let forecast = weather.destination {
+                                WeatherLabel(forecast: forecast, context: "bei Ankunft", station: last.destination.displayName)
+                                    .transition(.fold)
+                            }
                         }
                     }
                 }
@@ -398,6 +456,10 @@ struct JourneyDetailView: View {
                     TicketButton(tickets: model.tickets(for: journey), journey: journey)
                 }
                 JourneyShareButton(journey: journey, title: shareTitle)
+                if !readOnly, let entry = model.savedEntry(for: journey) {
+                    CalendarButton(entry: entry)
+                    RegularTripButton(journey: journey)
+                }
                 if model.settings.editJourneyEnabled {
                     Button {
                         showJourneyEditor = true
@@ -459,6 +521,8 @@ struct TransferRow: View {
     var disposition: TransferDisposition?
     /// Says the incoming train is often too late for this transfer, from past runs (#316).
     var warning: String?
+    /// Where to board the incoming train to be quick here (#383).
+    var coachAdvice: CoachAdvice?
 
     private var minutes: Int {
         Int((to.departure.best.timeIntervalSince(from.arrival.best) / 60).rounded())
@@ -467,6 +531,19 @@ struct TransferRow: View {
     private var color: Color { isPast && minutes < 0 ? .secondary : transferColor(minutes) }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            summary
+            // Its own line across the row, below the platforms, so it doesn't wrap into a narrow column.
+            if let coachAdvice, !isPast, !broken {
+                CoachAdviceLabel(advice: coachAdvice, boarded: from.departure.best < .now, namesStation: false)
+                    .padding(.leading, 40)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 4)
+    }
+
+    private var summary: some View {
         // Centered, so a taller platform badge doesn't push the transfer text off the middle.
         HStack(spacing: 10) {
             Image(systemName: walk != nil ? "figure.walk" : "arrow.triangle.2.circlepath")
@@ -506,8 +583,6 @@ struct TransferRow: View {
                 .layoutPriority(1)
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 4)
     }
 
     /// The platform, or the line (e.g. "Bus 825") when that leg has none, so the arrow never points at nothing.
@@ -540,13 +615,27 @@ struct LegCard: View {
     var onShowCheckin: (() -> Void)?
     /// The seat reserved on this train (from the journey's ticket), if any.
     var reservation: SeatReservation?
+    /// Offers saving your own seat on the way when there's no reservation (#410).
+    var savesSeat = false
+    /// Where to board for a quick transfer or exit (#383): its coaches are marked in the Wagenreihung.
+    var coachAdvice: CoachAdvice?
+    /// Whether the card says it too (getting off at the end); a transfer's row says it otherwise.
+    var showsCoachAdvice = false
+    /// The forecast where this leg arrives: at the destination, or at a transfer with more than 15 minutes
+    /// until the next train (#385).
+    var arrivalWeather: LegArrivalWeather?
 
     @State private var showStops = false
     @State private var showDetails = false
     @State private var showFullTrip = false
     /// What past runs of this train say (#316), shown in the details.
     @State private var statistics = TrainStatisticsModel()
+    /// DB's occupancy forecast for this ride (#399): an icon by the name, the words in the details.
+    @State private var occupancy: OccupancyForecast?
+    /// Which side the platform is on where this leg ends (#394), if the offline list knows.
+    @State private var exitSide: ExitSide?
     @Environment(AppModel.self) private var model
+    @Environment(\.bikeMode) private var bikeMode
 
     private var color: Color { leg.line?.color ?? .gray }
     private var statisticsStops: [StatisticsStop] {
@@ -564,7 +653,7 @@ struct LegCard: View {
             return (stop.station.displayName, hint)
         }
     }
-    private var intermediate: [Stopover] { Array(leg.stopovers.dropFirst().dropLast()) }
+    private var intermediate: [Stopover] { Array(BahnDeClient.droppingOutlyingZusatzhalte(from: leg.stopovers).dropFirst().dropLast()) }
 
     var body: some View {
         Card {
@@ -585,11 +674,21 @@ struct LegCard: View {
                     }
                     Spacer()
                     HStack(spacing: 10) {
-                        TrainMessagesButton(messages: leg.messages)
-                        if leg.cancelled {
-                            InfoChip(text: "Fällt aus", systemImage: "xmark.octagon.fill", tint: .heavyDelay)
-                        } else {
-                            DelayPill(minutes: leg.departure.delayMinutes)
+                        // Side by side while they fit; otherwise the occupancy icon goes below the delay
+                        // rather than the delay wrapping over several lines.
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 10) {
+                                occupancyButton
+                                TrainMessagesButton(messages: leg.messages)
+                                status
+                            }
+                            VStack(alignment: .trailing, spacing: 4) {
+                                HStack(spacing: 10) {
+                                    TrainMessagesButton(messages: leg.messages)
+                                    status
+                                }
+                                occupancyButton
+                            }
                         }
                         if leg.tripId != nil {
                             Image(systemName: "chevron.right")
@@ -662,11 +761,21 @@ struct LegCard: View {
                     }
 
                     TimelineNode(kind: .major, color: color, lineAbove: color) {
-                        stationRow(time: leg.arrival, name: leg.destination.displayName, platform: leg.arrivalPlatform)
+                        stationRow(time: leg.arrival, name: leg.destination.displayName, platform: leg.arrivalPlatform,
+                                   weather: arrivalWeather, exitSide: exitSide)
                     }
 
                     // Between the stops and "Mehr"; unfolds by itself around the departure.
-                    CoachSequenceDisclosure(leg: leg, reservation: reservation, spacing: 14)
+                    CoachSequenceDisclosure(leg: leg, reservation: reservation ?? model.savedSeat(for: leg).map(SeatReservation.init),
+                                            savesSeat: savesSeat && reservation == nil, coachAdvice: coachAdvice,
+                                            // Said right below for getting off at the end.
+                                            notesCoachAdvice: !showsCoachAdvice, spacing: 14)
+
+                    if showsCoachAdvice, let coachAdvice {
+                        CoachAdviceLabel(advice: coachAdvice, boarded: leg.departure.best < .now)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 14)
+                    }
 
                     let platformChanges = platformChangeHints
                     if !platformChanges.isEmpty {
@@ -689,7 +798,11 @@ struct LegCard: View {
                     ReservationRow(reservation: reservation, request: BahnDeClient.formationRequest(for: leg))
                 }
 
-                if leg.line?.operatorName != nil || statistics.rows != nil || onReplace != nil || onReplan != nil || onCheckin != nil || onShowCheckin != nil {
+                if let bikeMode, !leg.cancelled {
+                    BikeTransportRow(leg: leg, bike: bikeMode)
+                }
+
+                if leg.line?.operatorName != nil || occupancy != nil || statistics.rows != nil || onReplace != nil || onReplan != nil || onCheckin != nil || onShowCheckin != nil {
                     Button {
                         withAnimation(.snappy) { showDetails.toggle() }
                     } label: {
@@ -708,6 +821,12 @@ struct LegCard: View {
                             TrainOperatorsLabel(source: .leg(leg))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                        }
+
+                        if let occupancy, !leg.cancelled {
+                            OccupancyDetails(forecast: occupancy, travelClass: model.settings.travelClass)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .transition(.fold)
                         }
 
                         if let rows = statistics.rows {
@@ -742,17 +861,57 @@ struct LegCard: View {
         .task(id: leg.id) {
             await statistics.load(line: leg.line, stops: statisticsStops, date: leg.departure.planned, bahnDe: model.provider.bahnDe)
         }
+        .task(id: leg.id) {
+            // Shares bahn.de's journey details with the live refresh and the operators; over once arrived.
+            guard leg.arrival.best > .now, let bahnDe = model.provider.bahnDe,
+                  let found = try? await bahnDe.occupancy(for: leg) else { return }
+            occupancy = found
+        }
+        .task(id: [leg.id, leg.arrivalPlatform?.best ?? ""]) {
+            // The list loads and the lookup runs off the main thread.
+            let leg = leg
+            exitSide = await Task.detached(priority: .userInitiated) { ExitSides.side(leaving: leg) }.value
+        }
     }
 
-    private func stationRow(time: TimeInfo, name: String, platform: PlatformInfo?) -> some View {
+    @ViewBuilder private var occupancyButton: some View {
+        if !leg.cancelled {
+            OccupancyButton(forecast: occupancy, travelClass: model.settings.travelClass)
+        }
+    }
+
+    /// "Fällt aus" or the departure delay, always on one line.
+    @ViewBuilder private var status: some View {
+        if leg.cancelled {
+            InfoChip(text: "Fällt aus", systemImage: "xmark.octagon.fill", tint: .heavyDelay).fixedSize()
+        } else {
+            DelayPill(minutes: leg.departure.delayMinutes).fixedSize()
+        }
+    }
+
+    private func stationRow(time: TimeInfo, name: String, platform: PlatformInfo?, weather: LegArrivalWeather? = nil,
+                            exitSide: ExitSide? = nil) -> some View {
         HStack(alignment: .top, spacing: 10) {
             TimeStack(time: time, cancelled: leg.cancelled, font: .headline)
                 .frame(width: 54, alignment: .leading)
-            Text(name)
-                .font(.headline)
-                .fullTextPopup(name, lines: 2)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name)
+                    .font(.headline)
+                    .fullTextPopup(name, lines: 2)
+                if let weather {
+                    WeatherLabel(forecast: weather.forecast, context: weather.atDestination ? "bei Ankunft" : "beim Umstieg",
+                                 station: name)
+                        .transition(.fold)
+                }
+            }
             Spacer()
-            PlatformBadge(platform: platform)
+            VStack(spacing: 2) {
+                PlatformBadge(platform: platform)
+                if let exitSide {
+                    ExitSideArrow(side: exitSide)
+                        .transition(.fold)
+                }
+            }
         }
     }
 }

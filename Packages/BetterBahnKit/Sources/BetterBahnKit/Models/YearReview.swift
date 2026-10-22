@@ -77,6 +77,8 @@ public struct YearReview: Sendable, Hashable {
     /// Busiest month (1…12) and its rides.
     public var busiestMonth: Entry?
     public var activeDays: Int
+    /// The year's CO₂ by train compared with car and plane (#386).
+    public var co2: CO2Comparison
 
     /// How many entries the ranked lists keep.
     public static let listLength = 5
@@ -149,6 +151,7 @@ public struct YearReview: Sendable, Hashable {
         busiestMonth = Self.ranked(Self.counts(rides.map { String(calendar.component(.month, from: $0.leg.departure.planned)) }),
                                    limit: 1).first
         activeDays = Set(rides.map { calendar.startOfDay(for: $0.leg.departure.planned) }).count
+        co2 = CO2Comparison(rides: rides.map { ($0.leg, $0.kilometers) })
     }
 
     /// The years with at least one ride, newest first.

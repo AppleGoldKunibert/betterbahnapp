@@ -2,6 +2,7 @@
 // by category, number and planned time in the station's schedule for that hour (`plan`), its live times, platform
 // and cancellation come from the station's change list (`fchg`), keyed by the stop's ID. As the app's
 // `TimetablesClient` (Packages/BetterBahnKit/Sources/BetterBahnKit/Transit/Timetables/TimetablesClient.swift).
+// Used by `betterbahn-live` (Live Activities) and `betterbahn-push` (regular trips).
 
 export const IRIS = "https://iris.noncd.db.de/iris-tts/timetable/";
 const TIMEOUT = 8000;
@@ -154,7 +155,8 @@ function parseStop(element) {
 function event(attributes) {
     const planned = parseTime(attributes.pt), actual = parseTime(attributes.ct);
     const cancelled = attributes.cs === "c";
-    if (planned === null && actual === null && !cancelled) return null;
+    // A platform change alone comes without a time.
+    if (planned === null && actual === null && !cancelled && !nonBlank(attributes.cp)) return null;
     return { planned, actual, plannedPlatform: nonBlank(attributes.pp), actualPlatform: nonBlank(attributes.cp), cancelled };
 }
 

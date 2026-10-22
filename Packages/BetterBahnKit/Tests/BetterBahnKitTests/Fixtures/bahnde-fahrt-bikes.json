@@ -1,0 +1,21 @@
+{
+  "reisetag": "2026-10-08",
+  "zugName": "NJ 471",
+  "halte": [
+    {"id": "A=1@O=Hamburg Hbf@X=10006909@Y=53552733@U=80@L=8002549@", "name": "Hamburg Hbf", "extId": "8002549",
+     "abfahrt": {"sollzeit": "2026-10-08T19:30:00"}, "gleis": "14"},
+    {"id": "A=1@O=Hannover Hbf@X=9741017@Y=52376764@U=80@L=8000152@", "name": "Hannover Hbf", "extId": "8000152",
+     "ankunft": {"sollzeit": "2026-10-08T20:50:00"}, "abfahrt": {"sollzeit": "2026-10-08T20:55:00"}, "gleis": "4"},
+    {"id": "A=1@O=Basel SBB@X=7589563@Y=47547408@U=85@L=8500010@", "name": "Basel SBB", "extId": "8500010",
+     "ankunft": {"sollzeit": "2026-10-09T06:40:00"}, "abfahrt": {"sollzeit": "2026-10-09T06:52:00"}, "gleis": "9"},
+    {"id": "A=1@O=Zürich HB@X=8540192@Y=47378177@U=85@L=8503000@", "name": "Zürich HB", "extId": "8503000",
+     "ankunft": {"sollzeit": "2026-10-09T08:00:00"}, "gleis": "16"}
+  ],
+  "zugattribute": [
+    {"kategorie": "INFORMATION", "key": "RP", "value": "Reservierungspflicht"},
+    {"kategorie": "SCHLAFWAGEN", "key": "SW", "value": "Schlafwagen"},
+    {"kategorie": "FAHRRADMITNAHME", "key": "FR", "value": "Fahrradmitnahme reservierungspflichtig",
+     "teilstreckenHinweis": "(Basel SBB - Zürich HB)"}
+  ],
+  "cancelled": false
+}

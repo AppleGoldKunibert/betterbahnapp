@@ -51,16 +51,10 @@ public extension Leg {
 
 public extension Trip {
     /// This run with the Zusatzhalte `leg` remembered (bahn.de only reports them while the train runs),
-    /// each put in by its planned time, unless the run already has that stop.
+    /// each put in by its planned time, unless the run already has that stop (see `keepingAdditionalStops(of:)`
+    /// for a stop list).
     func keepingAdditionalStops(of leg: Leg) -> Trip {
-        func time(_ stop: Stopover) -> Date? { stop.arrival?.planned ?? stop.departure?.planned }
-        var trip = self
-        for extra in leg.stopovers where extra.isAdditional {
-            guard let at = time(extra), !trip.stopovers.contains(where: { $0.station.isSamePlace(as: extra.station) }) else { continue }
-            let index = trip.stopovers.firstIndex { stop in time(stop).map { $0 > at } ?? false } ?? trip.stopovers.endIndex
-            trip.stopovers.insert(extra, at: index)
-        }
-        return trip
+        keepingAdditionalStops(of: leg.stopovers)
     }
 }
 

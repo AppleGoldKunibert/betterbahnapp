@@ -1,0 +1,237 @@
+{
+ "zugName": "ICE 101",
+ "halte": [
+  {
+   "id": "A=1@O=Berlin Hbf@X=13369549@Y=52525589@U=81@L=8011160@i=U×008065969@",
+   "abfahrtsZeitpunkt": "2024-12-18T00:22:00",
+   "auslastungsmeldungen": [
+    {
+     "klasse": "KLASSE_1",
+     "stufe": 0
+    },
+    {
+     "klasse": "KLASSE_2",
+     "stufe": 0
+    }
+   ],
+   "gleis": "13",
+   "name": "Berlin Hbf",
+   "extId": "8011160"
+  },
+  {
+   "id": "A=1@O=Berlin Zoologischer Garten@X=13332441@Y=52507341@U=81@L=8010406@i=U×008003036@",
+   "abfahrtsZeitpunkt": "2024-12-18T00:28:00",
+   "ankunftsZeitpunkt": "2024-12-18T00:26:00",
+   "auslastungsmeldungen": [
+    {
+     "klasse": "KLASSE_1",
+     "stufe": 0
+    },
+    {
+     "klasse": "KLASSE_2",
+     "stufe": 0
+    }
+   ],
+   "gleis": "4",
+   "name": "Berlin Zoologischer Garten",
+   "extId": "8010406"
+  },
+  {
+   "id": "A=1@O=Berlin-Wannsee@X=13179526@Y=52420973@U=81@L=8010405@i=U×008003037@",
+   "abfahrtsZeitpunkt": "2024-12-18T00:40:00",
+   "ankunftsZeitpunkt": "2024-12-18T00:38:00",
+   "auslastungsmeldungen": [
+    {
+     "klasse": "KLASSE_1",
+     "stufe": 1
+    },
+    {
+     "klasse": "KLASSE_2",
+     "stufe": 1
+    }
+   ],
+   "gleis": "5",
+   "name": "Berlin-Wannsee",
+   "extId": "8010405"
+  },
+  {
+   "id": "A=1@O=Potsdam Hbf@X=13066702@Y=52391506@U=81@L=8012666@i=U×008003479@",
+   "abfahrtsZeitpunkt": "2024-12-18T00:48:00",
+   "ankunftsZeitpunkt": "2024-12-18T00:46:00",
+   "auslastungsmeldungen": [
+    {
+     "klasse": "KLASSE_1",
+     "stufe": 1
+    },
+    {
+     "klasse": "KLASSE_2",
+     "stufe": 1
+    }
+   ],
+   "gleis": "3",
+   "name": "Potsdam Hbf",
+   "extId": "8012666"
+  },
+  {
+   "id": "A=1@O=Brandenburg Hbf@X=12566138@Y=52400558@U=81@L=8010060@i=U×008024019@",
+   "abfahrtsZeitpunkt": "2024-12-18T01:06:00",
+   "ankunftsZeitpunkt": "2024-12-18T01:04:00",
+   "auslastungsmeldungen": [
+    {
+     "klasse": "KLASSE_1",
+     "stufe": 1
+    },
+    {
+     "klasse": "KLASSE_2",
+     "stufe": 1
+    }
+   ],
+   "gleis": "2",
+   "name": "Brandenburg Hbf",
+   "extId": "8010060"
+  },
+  {
+   "id": "A=1@O=Magdeburg Hbf@X=11626963@Y=52130513@U=81@L=8010224@i=U×008024001@",
+   "abfahrtsZeitpunkt": "2024-12-18T01:48:00",
+   "ankunftsZeitpunkt": "2024-12-18T01:46:00",
+   "auslastungsmeldungen": [
+    {
+     "klasse": "KLASSE_1",
+     "stufe": 1
+    },
+    {
+     "klasse": "KLASSE_2",
+     "stufe": 1
+    }
+   ],
+   "gleis": "4",
+   "name": "Magdeburg Hbf",
+   "extId": "8010224"
+  },
+  {
+   "id": "A=1@O=Braunschweig Hbf@X=10540293@Y=52252218@U=81@L=8000049@i=U×008013240@",
+   "abfahrtsZeitpunkt": "2024-12-18T02:36:00",
+   "ankunftsZeitpunkt": "2024-12-18T02:34:00",
+   "auslastungsmeldungen": [
+    {
+     "klasse": "KLASSE_1",
+     "stufe": 1
+    },
+    {
+     "klasse": "KLASSE_2",
+     "stufe": 1
+    }
+   ],
+   "gleis": "6",
+   "name": "Braunschweig Hbf",
+   "extId": "8000049"
+  },
+  {
+   "id": "A=1@O=Hannover Hbf@X=9741017@Y=52376764@U=81@L=8000152@i=U×008013552@",
+   "abfahrtsZeitpunkt": "2024-12-18T03:13:00",
+   "ankunftsZeitpunkt": "2024-12-18T03:09:00",
+   "auslastungsmeldungen": [
+    {
+     "klasse": "KLASSE_1",
+     "stufe": 1
+    },
+    {
+     "klasse": "KLASSE_2",
+     "stufe": 3
+    }
+   ],
+   "gleis": "12",
+   "name": "Hannover Hbf",
+   "extId": "8000152"
+  },
+  {
+   "id": "A=1@O=Minden(Westf)@X=8934729@Y=52290135@U=81@L=8000252@i=U×008013578@",
+   "abfahrtsZeitpunkt": "2024-12-18T04:00:00",
+   "ankunftsZeitpunkt": "2024-12-18T03:59:00",
+   "auslastungsmeldungen": [
+    {
+     "klasse": "KLASSE_1",
+     "stufe": 1
+    },
+    {
+     "klasse": "KLASSE_2",
+     "stufe": 1
+    }
+   ],
+   "gleis": "11",
+   "name": "Minden(Westf)",
+   "extId": "8000252"
+  },
+  {
+   "id": "A=1@O=Bielefeld Hbf@X=8532723@Y=52029259@U=81@L=8000036@i=U×008013597@",
+   "abfahrtsZeitpunkt": "2024-12-18T04:28:00",
+   "ankunftsZeitpunkt": "2024-12-18T04:26:00",
+   "auslastungsmeldungen": [
+    {
+     "klasse": "KLASSE_1",
+     "stufe": 1
+    },
+    {
+     "klasse": "KLASSE_2",
+     "stufe": 1
+    }
+   ],
+   "gleis": "4",
+   "name": "Bielefeld Hbf",
+   "extId": "8000036"
+  },
+  {
+   "id": "A=1@O=Gütersloh Hbf@X=8385075@Y=51906943@U=81@L=8002461@i=U×008013606@",
+   "abfahrtsZeitpunkt": "2024-12-18T04:37:00",
+   "ankunftsZeitpunkt": "2024-12-18T04:36:00",
+   "auslastungsmeldungen": [
+    {
+     "klasse": "KLASSE_1",
+     "stufe": 1
+    },
+    {
+     "klasse": "KLASSE_2",
+     "stufe": 1
+    }
+   ],
+   "gleis": "2",
+   "name": "Gütersloh Hbf",
+   "extId": "8002461"
+  },
+  {
+   "id": "A=1@O=Hamm(Westf)Hbf@X=7807824@Y=51678077@U=81@L=8000149@i=U×008010002@",
+   "abfahrtsZeitpunkt": "2024-12-18T05:03:00",
+   "ankunftsZeitpunkt": "2024-12-18T05:01:00",
+   "auslastungsmeldungen": [
+    {
+     "klasse": "KLASSE_1",
+     "stufe": 1
+    },
+    {
+     "klasse": "KLASSE_2",
+     "stufe": 1
+    }
+   ],
+   "gleis": "10",
+   "name": "Hamm(Westf)Hbf",
+   "extId": "8000149"
+  },
+  {
+   "id": "A=1@O=Dortmund Hbf@X=7459294@Y=51517899@U=81@L=8000080@i=U×008010053@",
+   "ankunftsZeitpunkt": "2024-12-18T05:21:00",
+   "auslastungsmeldungen": [
+    {
+     "klasse": "KLASSE_1",
+     "stufe": 0
+    },
+    {
+     "klasse": "KLASSE_2",
+     "stufe": 0
+    }
+   ],
+   "gleis": "16",
+   "name": "Dortmund Hbf",
+   "extId": "8000080"
+  }
+ ]
+}

@@ -91,6 +91,9 @@ public struct CoachSequence: Sendable, Hashable {
     /// vagonweb's plan only: the stations up to this stop where the train changes direction (it is
     /// shown turned round after an odd number of them).
     public var reversals: [String] = []
+    /// bahn.de's sequence only: the EVA number of the station it was asked for, to find its platforms
+    /// (`StationPlatforms`).
+    public var eva: String?
 
     /// A group with nothing but locomotives. bahn.de lists a locomotive as its own group with the
     /// station where it is changed as destination, which is no part of the train passengers ride on.
@@ -116,8 +119,11 @@ public struct CoachSequence: Sendable, Hashable {
     /// departure until 15 minutes after it, while you look for your coach and board.
     public static func unfoldsByItself(departure: Date?, now: Date = .now) -> Bool {
         guard let departure else { return false }
-        return now >= departure.addingTimeInterval(-30 * 60) && now <= departure.addingTimeInterval(15 * 60)
+        return now >= departure.addingTimeInterval(-30 * 60) && now <= departure.addingTimeInterval(shownAfterDeparture)
     }
+
+    /// How long after a departure its Wagenreihung stays open, and stays the one shown with a leg.
+    public static let shownAfterDeparture: TimeInterval = 15 * 60
 }
 
 // MARK: - Reserved seat
@@ -145,6 +151,12 @@ extension CoachSequence {
         guard let coach = coaches.first(where: { $0.number == wanted && (parts.isEmpty || parts.contains($0.group)) })
         else { return .coachMissing }
 
+        let names = sectors(of: coach)
+        return names.isEmpty ? .noSectors(coachID: coach.id) : .sectors(names, coachID: coach.id)
+    }
+
+    /// The platform sectors `coach` stands in; empty without platform positions.
+    func sectors(of coach: Coach) -> [String] {
         var names: [String] = []
         if let start = coach.start, let end = coach.end, !sectors.isEmpty {
             let low = min(start, end), high = max(start, end)
@@ -152,7 +164,7 @@ extension CoachSequence {
             names = sectors.filter { min($0.end, high) - max($0.start, low) > (high - low) * 0.25 }.map(\.name)
         }
         if names.isEmpty, let sector = coach.sector, !sector.isEmpty { names = [sector] }
-        return names.isEmpty ? .noSectors(coachID: coach.id) : .sectors(names, coachID: coach.id)
+        return names
     }
 
     /// "940" from "ICE 940" or "EUROSTAR 9149".

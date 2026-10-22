@@ -1,3 +1,5 @@
 # False positives of gitleaks' generic-api-key rule (one fingerprint per line).
 # DB's public ticket-signing key 1080/7 from UIC's public key list, used as a test fixture.
 3346165c0417841af33b2eee689da02438b2c533:Cloudflare/pass-signer/uicsignature.test.mjs:generic-api-key:26
+# A test's APNs key, made at runtime (`crypto.subtle.generateKey`): gitleaks read the template literal as a key.
+48ebd2e6ee7f216836037eb1311fdee6c9b52f9b:Cloudflare/checkin-push/commute.test.mjs:private-key:41

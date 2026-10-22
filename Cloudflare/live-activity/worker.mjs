@@ -10,7 +10,7 @@
 
 import { APNs } from "../shared/apns.mjs";
 import { TOKEN_HEADER, unauthorized, verifyToken } from "../shared/appattest.mjs";
-import { Iris, findStop, liveChange } from "./iris.mjs";
+import { Iris, findStop, liveChange } from "../shared/iris.mjs";
 import {
     ARRIVED_DISPLAY_DURATION, best, canonical, contentState, encodeState, followUpDate, isArrived, movedOnAsPlanned, nextRefresh,
 } from "./state.mjs";

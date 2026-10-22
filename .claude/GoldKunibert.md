@@ -14,8 +14,35 @@ CLAUDE.md still applies; this file only adds GoldKunibert's own preferences and 
 
 - GoldKunibert owns the project: changes that would send the user's location to a server, merging into
   `externaltester` and redeploying the `betterbahn` Worker via the Cloudflare dashboard are GoldKunibert's calls.
-- When bahn.de data is needed (see "Privacy and data sources" in CLAUDE.md), give GoldKunibert the complete
-  `curl_cffi` command to run on the Mac and ask for the output to be pasted.
+- When bahn.de data is needed (see "Privacy and data sources" in CLAUDE.md), ask it through our server with
+  `scripts/bahnde.py` (a network secret in the cloud environment adds the token). Only if that fails, give GoldKunibert the
+  complete `curl_cffi` command to run on the Mac and ask for the output to be pasted.
+- GoldKunibert tests only on the iPhone: write "What to test" (in the reply and in the test list) for the
+  iPhone, not the Simulator. A step that needs a launch argument says to run the debug build from Xcode on it.
+
+## Test list
+
+GoldKunibert ticks off manual tests on a page in the Claude app, the test list:
+https://claude.ai/artifact/XjniwecXJwksebeNGk7xuh (only GoldKunibert can open it). Read and write its database
+with the `ArtifactData` tool (load it with ToolSearch).
+
+- One document per PR in collection `prs`, id `pr<number>` (`pr413`): `number`, `title`, `branch`, `issues`
+  (numbers), `state` (`draft`, `open`, `merged` or `closed`), `updatedAt` (ISO 8601), `sessions` (links of the
+  chats that worked on the PR, oldest first) and `steps`, a map `s1`, `s2`, … of
+  `{order, text, expect, status, checkedAt, retest}`. `status` is `open` or `passed`. Your own chat link is
+  `https://claude.ai/code/<id>` with the id from `get_session` (claude-code-remote, without `session_id`); add it
+  when it isn't in `sessions` yet (`update` replaces the whole array). `text` (what to do, starting from where in
+  the app) and `expect` (what should happen) are German. A new step is `status: "open"`, `checkedAt: null`,
+  `retest: false`.
+- When you open a PR, write the steps of your "What to test" there (`set`). After later pushes, `update` with
+  the `if_version` you read: add steps for new behaviour, keep `title`, `state` and `updatedAt` current, and
+  only when a push changes what a ticked step covers, set that step back to `status: "open"` with
+  `retest: true`. Don't touch `status` or `checkedAt` otherwise: they are GoldKunibert's results.
+- GoldKunibert reports problems in the chat, not on the page.
+- When a PR is merged or closed, set `state` to `merged` or `closed` (several PRs at once in one `batch`). The
+  page also reads draft, merged and merge conflicts from GitHub when GoldKunibert opens it and writes `state`
+  back.
+- "Tested PRs" in a release are the ones whose steps are all `passed`.
 
 ## Commit identity and signing
 

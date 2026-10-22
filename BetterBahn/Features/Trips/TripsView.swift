@@ -142,8 +142,8 @@ struct SaveJourneyButton: View {
     var shortLabel = false
     @Environment(AppModel.self) private var model
     @State private var journeyToRemove: Journey?
-    /// Trains of the journey that need a reservation, while the warning is up.
-    @State private var reservationTrains: [String] = []
+    /// What the journey's trains need (a reservation, in bike mode a bike reservation), while the warning is up.
+    @State private var warnings = SaveWarnings()
     @State private var showsReservationWarning = false
     @State private var isCheckingReservation = false
 
@@ -167,12 +167,34 @@ struct SaveJourneyButton: View {
         .sensoryFeedback(.success, trigger: saved)
         .disabled(isCheckingReservation)
         .checkoutPrompt($journeyToRemove)
-        .alert("Achtung: Zug ist reservierungspflichtig", isPresented: $showsReservationWarning) {
+        .alert(warningTitle, isPresented: $showsReservationWarning) {
             Button("Abbrechen", role: .cancel) {}
             Button("Verstanden, weiter") { save() }
         } message: {
-            Text("\(reservationTrains.formatted(.list(type: .and))): Nur mit Reservierung. Du kannst sie über „Via Ticket hinzufügen“ importieren.")
+            Text(warningMessage)
         }
+    }
+
+    private var warningTitle: String {
+        if warnings.seatReservation.isEmpty {
+            return warnings.bikeReservation.isEmpty ? "Achtung: Keine Fahrradmitnahme" : "Achtung: Fahrradreservierung nötig"
+        }
+        return warnings.bikeReservation.isEmpty && warnings.noBikes.isEmpty ? "Achtung: Zug ist reservierungspflichtig" : "Achtung: Reservierung nötig"
+    }
+
+    private var warningMessage: String {
+        func trains(_ legs: [Leg]) -> String { legs.compactMap { $0.line?.displayName }.formatted(.list(type: .and)) }
+        var lines: [String] = []
+        if !warnings.seatReservation.isEmpty {
+            lines.append("\(trains(warnings.seatReservation)): Nur mit Reservierung. Du kannst sie über „Via Ticket hinzufügen“ importieren.")
+        }
+        if !warnings.bikeReservation.isEmpty {
+            lines.append("\(trains(warnings.bikeReservation)): Fahrrad nur mit Fahrradreservierung.")
+        }
+        if !warnings.noBikes.isEmpty {
+            lines.append("\(trains(warnings.noBikes)): Keine Fahrradmitnahme.")
+        }
+        return lines.joined(separator: "\n")
     }
 
     private func toggle(_ saved: Bool) {
@@ -184,12 +206,13 @@ struct SaveJourneyButton: View {
         // gets here, so every journey saved with this button still lacks a reservation.
         isCheckingReservation = true
         Task {
-            let legs = await model.reservationRequiredLegs(in: journey)
+            let bike = model.settings.bike(searchingWithBike: search?.withBike ?? model.settings.searchWithBike)
+            let found = await model.saveWarnings(for: journey, bike: bike)
             isCheckingReservation = false
-            if legs.isEmpty {
+            if found.isEmpty {
                 save()
             } else {
-                reservationTrains = legs.compactMap { $0.line?.displayName }
+                warnings = found
                 showsReservationWarning = true
             }
         }

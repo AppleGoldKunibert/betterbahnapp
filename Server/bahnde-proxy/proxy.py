@@ -12,14 +12,16 @@ bahn.de tolerates this as long as the traffic stays small, so the server keeps i
 - each app install may make `RATE_LIMIT` requests a minute;
 - at most `MAX_PARALLEL` requests go to bahn.de at the same time; a burst of parallel requests got the
   server refused (403) while single ones from the same address went through;
+- requests to bahn.de start at least `MIN_INTERVAL` seconds apart: ten departure boards within a second got
+  the server refused (429) although no more than four ran at once;
 - after bahn.de refused a request (403, 429, 452), the server starts a new session (bahn.de's bot cookies
   of the old one may be flagged) and nothing goes there for a while: `FIRST_PAUSE` seconds, doubling with
   each refusal soon after the last one up to `BLOCK_PAUSE`. Meanwhile the app gets 503 and says the live
-  data is missing.
+  data is missing. Requests already running finish on the old session.
 
 Environment: TOKEN_SECRET (required, same as in the Workers), PORT (8080), IMPERSONATE (safari),
-FIRST_PAUSE (60), BLOCK_PAUSE (600), MAX_PARALLEL (4), RATE_LIMIT (120), ALLOW_UNATTESTED ("true" lets
-requests without a token through, for testing only).
+FIRST_PAUSE (60), BLOCK_PAUSE (600), MAX_PARALLEL (4), MIN_INTERVAL (0.25), RATE_LIMIT (120),
+ALLOW_UNATTESTED ("true" lets requests without a token through, for testing only).
 """
 
 import asyncio
@@ -128,12 +130,16 @@ class Proxy:
     first_pause: float = 60
     block_pause: float = 600
     max_parallel: int = 4
+    # Seconds between the starts of two requests to bahn.de (`MIN_INTERVAL`, 0.25 in production).
+    min_interval: float = 0
     rate_limit: int = 120
     clock: object = time.monotonic
+    sleep: object = asyncio.sleep
     cache: OrderedDict = field(default_factory=OrderedDict)
     running: dict = field(default_factory=dict)
     paused_until: float = 0
     last_pause: float = 0
+    next_start: float = 0
     requests: dict = field(default_factory=dict)
     slots: asyncio.Semaphore = None
 
@@ -194,8 +200,9 @@ class Proxy:
 
     async def _ask(self, url, ttl):
         async with self.slots:
+            await self._wait_turn()
             if self.paused:
-                # Refused while this request waited for a slot.
+                # Refused while this request waited for a slot or its turn.
                 return paused_answer()
             answer = await self.fetch(url)
         if 200 <= answer.status < 300:
@@ -204,6 +211,14 @@ class Proxy:
             # Requests already running when bahn.de refused come back refused too; one pause covers them.
             self.block(answer.status, url)
         return answer
+
+    async def _wait_turn(self):
+        """Starts requests to bahn.de `min_interval` apart, so a burst reaches it spread out."""
+        now = self.clock()
+        start = max(now, self.next_start)
+        self.next_start = start + self.min_interval
+        if start > now:
+            await self.sleep(start - now)
 
     def block(self, status, url):
         now = self.clock()
@@ -286,7 +301,9 @@ class BrowserFetch:
     `impersonate` and sends its User-Agent. Like bahn.de's own page: a new session first loads the search
     page (which sets bahn.de's cookies), then asks the API with the headers of the page's background
     requests. Sessions are renewed after `SESSION_MAX_AGE`; `reset()` drops the session and its cookies at
-    once, so the next request starts a new one. `make_session` is replaced in tests."""
+    once, so the next request starts a new one, while the requests still running on the old one finish there
+    (closing it cut them off: curl reported status 0, which Tailscale Funnel turned into a 502 for the app).
+    `make_session` is replaced in tests."""
 
     def __init__(self, impersonate, make_session=None, clock=time.monotonic):
         self.impersonate = impersonate
@@ -295,6 +312,8 @@ class BrowserFetch:
         self.session = None
         self.started = 0
         self.starting = None
+        # Requests running per session (by id); a session `reset()` replaced is closed after its last one.
+        self.running = {}
 
     def _curl_session(self):
         from curl_cffi.const import CurlInfo
@@ -306,7 +325,12 @@ class BrowserFetch:
     def reset(self):
         old, self.session = self.session, None
         if old is not None:
-            asyncio.ensure_future(old.close())
+            self._close_when_done(old)
+
+    def _close_when_done(self, session):
+        if session is not self.session and not self.running.get(id(session)):
+            self.running.pop(id(session), None)
+            asyncio.ensure_future(session.close())
 
     async def _session(self):
         if self.session is not None and self.clock() - self.started > SESSION_MAX_AGE:
@@ -335,19 +359,27 @@ class BrowserFetch:
 
     async def __call__(self, url):
         session = await self._session()
+        self.running[id(session)] = self.running.get(id(session), 0) + 1
         began = time.perf_counter()
-        response = await session.get(url, headers={
-            "Accept": "application/json",
-            "Accept-Encoding": ACCEPT_ENCODING,
-            "Accept-Language": "de",
-            "Referer": PAGE,
-            "Sec-Fetch-Site": "same-origin",
-            "Sec-Fetch-Mode": "cors",
-            "Sec-Fetch-Dest": "empty",
-            "x-correlation-id": f"{uuid.uuid4()}_{uuid.uuid4()}",
-        })
+        try:
+            response = await session.get(url, headers={
+                "Accept": "application/json",
+                "Accept-Encoding": ACCEPT_ENCODING,
+                "Accept-Language": "de",
+                "Referer": PAGE,
+                "Sec-Fetch-Site": "same-origin",
+                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Dest": "empty",
+                "x-correlation-id": f"{uuid.uuid4()}_{uuid.uuid4()}",
+            })
+        finally:
+            self.running[id(session)] -= 1
+            self._close_when_done(session)
         log.info("bahn.de %s %s in %d ms%s", response.status_code, url[len(UPSTREAM):].split("?")[0],
                  (time.perf_counter() - began) * 1000, timings(response))
+        if not 100 <= response.status_code < 600:
+            # No answer at all (status 0): a 502 with a body the app can read, not an invalid status line.
+            raise ConnectionError(f"no answer (status {response.status_code})")
         return Answer(response.status_code, response.content,
                       response.headers.get("Content-Type") or "application/json; charset=utf-8")
 
@@ -373,6 +405,7 @@ def main():
         first_pause=float(os.environ.get("FIRST_PAUSE", "60")),
         block_pause=float(os.environ.get("BLOCK_PAUSE", "600")),
         max_parallel=int(os.environ.get("MAX_PARALLEL", "4")),
+        min_interval=float(os.environ.get("MIN_INTERVAL", "0.25")),
         rate_limit=int(os.environ.get("RATE_LIMIT", "120")),
     )
     web.run_app(make_app(proxy), port=int(os.environ.get("PORT", "8080")), access_log=None)

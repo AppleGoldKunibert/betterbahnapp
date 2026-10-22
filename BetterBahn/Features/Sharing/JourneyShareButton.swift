@@ -42,6 +42,7 @@ struct JourneyShareButton: View {
         .menuStyle(.button)
         .buttonStyle(.plain)
         .glassEffect(.regular, in: .circle)
+        .resetsWhenMenusCloseOnScroll()
         .disabled(isPreparing)
         .accessibilityLabel("Teilen")
         .alert("Ankunft konnte nicht geteilt werden", isPresented: $arrivalFailed) {

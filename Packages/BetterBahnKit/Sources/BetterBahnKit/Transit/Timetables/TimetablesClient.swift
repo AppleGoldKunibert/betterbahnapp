@@ -209,8 +209,12 @@ public struct TimetablesClient: Sendable {
         return Dictionary(stops.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
+    /// A station with several levels (Leipzig Hbf, Berlin Südkreuz) has no single EVA number in the offline list;
+    /// its main one will do here, since `scheduledStop` tries the other levels too. Before, such a stop needed
+    /// bahn.de's station search on every refresh and lost DB's delays whenever bahn.de didn't answer (#411).
     private func eva(for station: Station) async -> String? {
         if let eva = station.evaNumber { return eva }
+        if let eva = StationNames.mainEvaNumber(for: station) { return eva }
         return try? await bahnDe.evaNumber(for: station)
     }
 
@@ -292,8 +296,12 @@ public struct TimetablesClient: Sendable {
     /// Whether `realtime(for:)` can even try to look `leg` up (a train with a
     /// category and number).
     public func canLookUp(_ leg: Leg) -> Bool {
-        !leg.isWalking && leg.line?.dispatchNumber != nil
-            && leg.line.flatMap { Self.category(from: $0.name) } != nil
+        !leg.isWalking && canLookUp(leg.line)
+    }
+
+    /// Whether `line` is a train DB Timetables can be asked about (one with a category and number).
+    public func canLookUp(_ line: Line?) -> Bool {
+        line?.dispatchNumber != nil && line.flatMap { Self.category(from: $0.name) } != nil
     }
 
     /// Live data for `leg`'s departure and arrival, matched by category, train number and planned
@@ -436,8 +444,8 @@ public struct TimetablesClient: Sendable {
     /// platform, so a long route doesn't fire a lookup per stop; a stopover that already has one is
     /// left untouched (see `realtime(for:)` for overlaying live Gleisänderungen onto an existing leg).
     /// `trip` with DB's delays (`tripWithRealtime(_:)`) and missing platforms (`fillMissingPlatforms(in:)`).
-    public func liveTrip(_ trip: Trip) async -> Trip {
-        await fillMissingPlatforms(in: await tripWithRealtime(trip))
+    public func liveTrip(_ trip: Trip, now: Date = .now) async -> Trip {
+        await fillMissingPlatforms(in: await tripWithRealtime(trip, now: now))
     }
 
     public func fillMissingPlatforms(in trip: Trip) async -> Trip {

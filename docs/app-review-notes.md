@@ -30,7 +30,10 @@ features or data flows change (and update the privacy policy in `Cloudflare/work
   Live Activity updates (`Cloudflare/live-activity`, Settings → Meine Reisen "Live-Aktivität über Server
   aktualisieren", on by default) keep the running journey (trains, stations, times, platforms) and the activity's
   push token from leaving the app until the arrival or reopening it – likely "Other User Content", not linked to
-  the user, not tracking, purpose "App Functionality".
+  the user, not tracking, purpose "App Functionality". Also: regular
+  trips (#397, `/commutes` on `betterbahn-push`) keep the APNs device token with the day's trains, stations and
+  planned times until shortly after arrival – "Device ID", not linked to an account, not tracking, "App
+  Functionality".
   Check this against the current code before
   answering "Data Not Collected"; Träwelling check-ins go to the user's own Träwelling account at
   their request.
@@ -65,7 +68,8 @@ features or data flows change (and update the privacy policy in `Cloudflare/work
   keep that email in case App Review asks. The app credits it ("Daten: vagonweb.cz").
 - Attribution (#103): Settings → Datenquellen lists every service with links (Transitous sources,
   DB Timetables under CC BY 4.0, OpenStreetMap, OpenRailwayMap, bahn.de, vagonweb, bahn.expert,
-  bahn.jetzt, Träwelling, zug.network for check-in emojis); the map legend links OSM and OpenRailwayMap. All requests except the
+  bahn.jetzt, Träwelling, zug.network for check-in emojis, Open-Meteo under CC BY 4.0 for the weather, #385, also credited in
+  the weather popover); the map legend links OSM and OpenRailwayMap. All requests except the
   bahn.de proxy send `HTTPClient.identifyingUserAgent` (app version + `/support` contact).
 - The share extension opens the app through the responder chain (`ShareViewController.openApp`),
   which Apple only officially allows for widgets. Common practice, but a possible review question.
