@@ -2,6 +2,7 @@ import ActivityKit
 import BetterBahnKit
 import Foundation
 import Observation
+import UIKit
 
 /// Projects a single journey onto the (one) Live Activity. State is derived locally from the
 /// journey every time `show` is called — `AppModel` is responsible for calling it often enough
@@ -14,6 +15,11 @@ final class LiveActivityManager {
     private(set) var activeJourneyID: String?
 
     var areActivitiesEnabled: Bool { ActivityAuthorizationInfo().areActivitiesEnabled }
+
+    /// Live Activities exist only on the iPhone: on the iPad and the Mac their settings are hidden.
+    static var isSupported: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone && !ProcessInfo.processInfo.isiOSAppOnMac
+    }
 
     func isActive(_ journey: Journey) -> Bool { activeJourneyID == journey.id }
 

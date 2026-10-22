@@ -124,6 +124,7 @@ struct PastTripsView: View {
             }
             .padding(.horizontal)
             .padding(.bottom, 24)
+            .readableWidth()
         }
         .tabBarSafePadding()
         .background { AppBackground() }

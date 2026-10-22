@@ -28,6 +28,7 @@ struct StationBoardView: View {
     @State private var loadingPage = false
     @State private var scrollPosition = ScrollPosition()
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @FocusState private var stationFocused: Bool?
 
     private var filter: BoardFilter {
@@ -55,7 +56,7 @@ struct StationBoardView: View {
     private var baseTime: Date { useNow ? Date.now.addingTimeInterval(-5 * 60) : date }
 
     var body: some View {
-        NavigationStack(path: $path) {
+        SplitNavigationStack(path: $path) {
             ScrollView {
                 LazyVStack(spacing: 12, pinnedViews: []) {
                     headerCard
@@ -181,9 +182,14 @@ struct StationBoardView: View {
                     resumeAfterAbsence()
                 }
             }
-            .navigationDestination(for: BoardEntry.self) { TripView(entry: $0) }
+        } destination: { entry in
+            TripView(entry: entry)
+        } placeholder: {
+            SplitPlaceholder(title: "Bahnhofstafel", systemImage: "clock.arrow.2.circlepath",
+                             message: "Wähl einen Zug, um seinen Fahrtverlauf zu sehen.")
         }
-        .toolbar(path.isEmpty ? .automatic : .hidden, for: .tabBar)
+        // The tab bar stays next to the board on the iPad.
+        .toolbar(path.isEmpty || sizeClass == .regular ? .automatic : .hidden, for: .tabBar)
     }
 
     private var headerCard: some View {
