@@ -950,10 +950,19 @@ final class AppModel {
         return try? await provider.trip(id: tripId, source: leg.source).stopovers
     }
 
-    /// The formation remembered for a saved journey's leg, if any.
+    /// The formation remembered for a saved journey's leg, or for a Träwelling check-in of the same
+    /// train, if any.
     func rememberedFormation(for leg: Leg) -> TrainFormation? {
-        let key = leg.formationKey
-        return savedJourneys.lazy.compactMap { $0.formations?[key] }.first
+        rememberedFormations(for: [leg])[0]
+    }
+
+    /// `rememberedFormation(for:)` for each of `legs`, collecting the saved formations once.
+    func rememberedFormations(for legs: [Leg]) -> [TrainFormation?] {
+        let remembered: [(legs: [Leg], formations: [String: TrainFormation])] = savedJourneys.compactMap { saved in
+            guard let formations = saved.formations, !formations.isEmpty else { return nil }
+            return (legs: saved.journey.legs, formations: formations)
+        }
+        return legs.map { RideMatch.rememberedFormation(for: $0, in: remembered) }
     }
 
     /// Keeps a leg's formation in every saved journey riding it, so its Tz and Taufname stay known
