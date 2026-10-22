@@ -8,8 +8,9 @@ import SwiftUI
 /// search after a missed transfer.
 struct JourneyReplanSheet: View {
     let journey: Journey
-    /// The leg the user tapped. `nil` opens the sheet on the whole journey, where the train to
-    /// leave is picked here instead – the exit stays as planned until it is changed by hand.
+    /// The leg the user tapped. `nil` opens the sheet on the whole journey at the train being ridden
+    /// (or the next one), where the train to leave can be picked instead – the exit stays as planned
+    /// until it is changed by hand.
     let startLeg: Leg?
     let finalDestination: Station
     /// Options the journey was searched with, so they can be edited instead of set up again.
@@ -24,7 +25,7 @@ struct JourneyReplanSheet: View {
         self.finalDestination = finalDestination
         self.search = search
         self.onApply = onApply
-        _selectedLegID = State(initialValue: (startLeg ?? journey.transitLegs.first)?.id)
+        _selectedLegID = State(initialValue: (startLeg ?? JourneyReplanner.currentTrain(of: journey))?.id)
         // Opened from a train: the exit is what this is about, so its stop list starts open.
         _showStops = State(initialValue: startLeg != nil)
     }
@@ -43,7 +44,10 @@ struct JourneyReplanSheet: View {
     @State private var showManualStopSheet = false
 
     @State private var destination: Station?
+    /// Every via, also the ones already passed (see `passedViaCount`).
     @State private var viaRows: [ViaRow] = []
+    /// The rows taken from the search; only these can lie behind, one added here is always ahead.
+    @State private var searchedViaIDs: Set<UUID> = []
     @State private var products = Set(Product.allCases)
     @State private var maxTransfers: Int?
     @State private var onlyValidTicket = false
@@ -100,7 +104,7 @@ struct JourneyReplanSheet: View {
     /// The train the journey is re-planned from.
     private var leg: Leg {
         if let selectedLegID, let match = journey.legs.first(where: { $0.id == selectedLegID }) { return match }
-        return startLeg ?? journey.transitLegs.first ?? journey.legs[0]
+        return startLeg ?? JourneyReplanner.currentTrain(of: journey) ?? journey.legs[0]
     }
 
     /// Where that leg sits in the current journey, `nil` once it is no longer part of it.
@@ -136,9 +140,20 @@ struct JourneyReplanSheet: View {
 
     private var target: Station { destination ?? finalDestination }
 
+    /// How many via rows the trip up to the exit has already reached. They stay in `viaRows`, since
+    /// another train picked above may still come before them, but are neither shown nor searched with.
+    private var passedViaCount: Int {
+        guard let legIndex else { return 0 }
+        let searched = viaRows.prefix { searchedViaIDs.contains($0.id) && $0.station != nil }.compactMap(\.station)
+        return JourneyReplanner.passedViaCount(searched, in: journey, leavingLegAt: legIndex, after: exitLeg ?? leg)
+    }
+
+    /// The vias still ahead: the ones shown and searched with.
+    private var viasAhead: [ViaRow] { Array(viaRows.dropFirst(passedViaCount)) }
+
     /// Whether the user asked to spend time somewhere – then a later arrival is the point, not a problem.
     private var wantsToLinger: Bool {
-        minTransferMinutes > Self.defaultTransferMinutes || viaRows.contains { $0.minStayMinutes > 0 }
+        minTransferMinutes > Self.defaultTransferMinutes || viasAhead.contains { $0.minStayMinutes > 0 }
     }
 
     /// How much later than the current plan the best option on screen reaches the goal, if that is
@@ -155,7 +170,7 @@ struct JourneyReplanSheet: View {
     }
 
     /// No continuation is needed when the new exit is already the destination.
-    private var endsAtExit: Bool { exitStation.isSamePlace(as: target) && viaRows.isEmpty }
+    private var endsAtExit: Bool { exitStation.isSamePlace(as: target) && viasAhead.isEmpty }
 
     var body: some View {
         NavigationStack {
@@ -222,7 +237,7 @@ struct JourneyReplanSheet: View {
     /// A new exit on the last train while the goal is still the old one: whether to end the journey
     /// there or go on is asked right below the exit, instead of having to change the goal further up.
     private var asksEndOrContinue: Bool {
-        isLastTrain && exitChanged && !endsAtExit && target.isSamePlace(as: finalDestination) && viaRows.isEmpty
+        isLastTrain && exitChanged && !endsAtExit && target.isSamePlace(as: finalDestination) && viasAhead.isEmpty
             && !hasSearched && !isSearching && applyingID == nil
     }
 
@@ -233,7 +248,7 @@ struct JourneyReplanSheet: View {
 
     /// The remaining route as a normal search, for the sheets that take one.
     private var continuationSearch: ConnectionSearch {
-        ConnectionSearch(from: exitStation, to: target, via: viaRows.waypoints(), date: exitArrival,
+        ConnectionSearch(from: exitStation, to: target, via: viasAhead.waypoints(), date: exitArrival,
                          isArrival: false, onlyValidTicket: onlyValidTicket, products: products, maxTransfers: maxTransfers,
                          withBike: search?.withBike ?? model.settings.searchWithBike)
     }
@@ -305,29 +320,37 @@ struct JourneyReplanSheet: View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
                 OptionLabel(title: "Ab welchem Zug?", subtitle: "Alles davor bleibt gleich", icon: "tram.fill")
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(journey.transitLegs) { option in
-                            let isOn = option.id == leg.id
-                            Button {
-                                withAnimation(.snappy) { selectedLegID = option.id }
-                            } label: {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(option.line?.name ?? "Zug").font(.caption.weight(.bold))
-                                    Text("\(option.origin.displayName) → \(option.destination.displayName)")
-                                        .font(.caption2)
-                                        .lineLimit(1)
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(journey.transitLegs) { option in
+                                let isOn = option.id == leg.id
+                                Button {
+                                    withAnimation(.snappy) { selectedLegID = option.id }
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(option.line?.name ?? "Zug").font(.caption.weight(.bold))
+                                        Text("\(option.origin.displayName) → \(option.destination.displayName)")
+                                            .font(.caption2)
+                                            .lineLimit(1)
+                                    }
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .foregroundStyle(isOn ? Color.white : Color.primary)
+                                    .background(isOn ? Color.brand : Color.secondary.opacity(0.15),
+                                                in: .rect(cornerRadius: 12, style: .continuous))
                                 }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                                .foregroundStyle(isOn ? Color.white : Color.primary)
-                                .background(isOn ? Color.brand : Color.secondary.opacity(0.15),
-                                            in: .rect(cornerRadius: 12, style: .continuous))
+                                .buttonStyle(.plain)
+                                .id(option.id)
                             }
-                            .buttonStyle(.plain)
                         }
+                        .padding(.vertical, 2)
                     }
-                    .padding(.vertical, 2)
+                    // On a day trip the current train is often far to the right.
+                    .task {
+                        try? await Task.sleep(for: .milliseconds(200))
+                        proxy.scrollTo(leg.id, anchor: .center)
+                    }
                 }
             }
         }
@@ -621,9 +644,10 @@ struct JourneyReplanSheet: View {
     }
 
     /// Where the journey should go from the new exit, with the via points of the original search
-    /// still editable.
+    /// still editable – those not passed yet.
     private var routeCard: some View {
-        Card(padding: 0) {
+        let passed = Set(viaRows.prefix(passedViaCount).map(\.id))
+        return Card(padding: 0) {
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
                     IconTile(systemImage: "smallcircle.filled.circle", color: .secondary, size: 32)
@@ -639,16 +663,18 @@ struct JourneyReplanSheet: View {
                 Divider().padding(.leading, 54)
 
                 ForEach($viaRows) { $row in
-                    ViaRowView(row: $row, focus: $focused, focusValue: .via(row.id)) {
-                        withAnimation(.snappy) { viaRows.removeAll { $0.id == row.id } }
+                    if !passed.contains(row.id) {
+                        ViaRowView(row: $row, focus: $focused, focusValue: .via(row.id)) {
+                            withAnimation(.snappy) { viaRows.removeAll { $0.id == row.id } }
+                        }
+                        Divider().padding(.leading, 54)
                     }
-                    Divider().padding(.leading, 54)
                 }
 
                 StationInput(label: "Ziel", placeholder: "Wohin?", systemImage: "mappin.circle.fill",
                              station: $destination, focus: $focused, focusValue: .destination)
 
-                if viaRows.count < Self.maxViaPoints {
+                if viaRows.count - passed.count < Self.maxViaPoints {
                     Divider().padding(.leading, 54)
                     Button {
                         withAnimation(.snappy) { viaRows.append(ViaRow()) }
@@ -776,7 +802,7 @@ struct JourneyReplanSheet: View {
             .tint(.brand)
             .controlSize(.large)
             .disabled(isSearching || products.isEmpty || destination == nil
-                      || viaRows.contains { $0.station == nil })
+                      || viasAhead.contains { $0.station == nil })
         }
     }
 
@@ -922,7 +948,7 @@ struct JourneyReplanSheet: View {
     }
 
     private func searchOnwards() {
-        guard destination != nil, !products.isEmpty, !viaRows.contains(where: { $0.station == nil }) else { return }
+        guard destination != nil, !products.isEmpty, !viasAhead.contains(where: { $0.station == nil }) else { return }
         Task {
             await runSearch()
             await scanForFasterExit()
@@ -940,15 +966,10 @@ struct JourneyReplanSheet: View {
     private func setUp() async {
         destination = finalDestination
         viaRows = (search?.via ?? []).map(ViaRow.init)
+        searchedViaIDs = Set(viaRows.map(\.id))
         products = search?.products ?? Set(Product.allCases)
         maxTransfers = search?.maxTransfers
         onlyValidTicket = search?.onlyValidTicket ?? model.settings.ticketFilterByDefault
-        // Via stops already passed are no longer part of the remaining route.
-        let ridden = journey.legs.prefix((legIndex ?? 0) + 1)
-        viaRows.removeAll { row in
-            guard let station = row.station else { return false }
-            return ridden.contains { $0.destination.isSamePlace(as: station) }
-        }
     }
 
     /// Starts over for the train that is now selected.
@@ -1002,7 +1023,7 @@ struct JourneyReplanSheet: View {
         do {
             var found: [Journey]
             if requirements.isEmpty {
-                let options = ReplanOptions(destination: destination, via: viaRows.waypoints(),
+                let options = ReplanOptions(destination: destination, via: viasAhead.waypoints(),
                                             products: products, maxTransfers: maxTransfers,
                                             minTransferMinutes: minTransferMinutes)
                 found = try await model.journeyReplanner.continuations(
@@ -1045,7 +1066,7 @@ struct JourneyReplanSheet: View {
         guard requirements.isEmpty, let destination, let trip = shownTrip else { return }
         isScanningExits = true
         defer { isScanningExits = false }
-        let options = ReplanOptions(destination: destination, via: viaRows.waypoints(),
+        let options = ReplanOptions(destination: destination, via: viasAhead.waypoints(),
                                     products: products, maxTransfers: maxTransfers,
                                     minTransferMinutes: minTransferMinutes)
         let found = await model.journeyReplanner.exitOptions(
@@ -1082,6 +1103,7 @@ struct JourneyReplanSheet: View {
     private var updatedSearch: ConnectionSearch? {
         guard let destination, var updated = search else { return nil }
         updated.to = destination
+        // Passed vias too: a later re-plan from an earlier train still needs them.
         updated.via = viaRows.waypoints()
         updated.products = products
         updated.maxTransfers = maxTransfers
