@@ -992,6 +992,11 @@ extension View {
     func tabBarSafePadding() -> some View {
         safeAreaPadding(.bottom, 24)
     }
+
+    /// Keeps a page's cards at a readable width, centred, on the iPad and the Mac; on the iPhone it changes nothing.
+    func readableWidth() -> some View {
+        frame(maxWidth: 720).frame(maxWidth: .infinity)
+    }
 }
 
 // MARK: - Full text popup

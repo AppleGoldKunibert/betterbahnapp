@@ -193,6 +193,7 @@ struct JourneyDetailView: View {
         }
         .padding(.horizontal)
         .padding(.bottom, 32)
+        .readableWidth()
         .environment(\.bikeMode, model.settings.bike(searchingWithBike: replanSearch?.withBike ?? model.settings.searchWithBike))
     }
 
@@ -475,12 +476,14 @@ struct JourneyDetailView: View {
                 }
             }
             if model.isSaved(journey), model.settings.liveActivitiesEnabled {
-                Label(model.liveActivities.isActive(journey)
-                      ? "Läuft als Live-Aktivität"
-                      : "Startet 30 Min. vor Abfahrt als Live-Aktivität",
-                      systemImage: "bolt.badge.clock.fill")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if LiveActivityManager.isSupported {
+                    Label(model.liveActivities.isActive(journey)
+                          ? "Läuft als Live-Aktivität"
+                          : "Startet 30 Min. vor Abfahrt als Live-Aktivität",
+                          systemImage: "bolt.badge.clock.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 if let entry = model.savedEntry(for: journey),
                    model.isLiveActivityEligible(journey) || model.dismissedLiveActivityJourneyIDs.contains(entry.id) {
                     Toggle(isOn: Binding(
@@ -488,7 +491,7 @@ struct JourneyDetailView: View {
                             && (model.manualLiveActivityJourneyID == entry.id || model.liveActivities.isActive(journey)) },
                         set: { model.setLiveActivity($0, for: entry.id) }
                     )) {
-                        Label("Als Widget und Live-Aktivität zeigen", systemImage: "arrow.left.arrow.right.circle.fill")
+                        Label(LiveActivityManager.isSupported ? "Als Widget und Live-Aktivität zeigen" : "Als Widget zeigen", systemImage: "arrow.left.arrow.right.circle.fill")
                             .font(.caption.weight(.semibold))
                     }
                     .tint(.brand)

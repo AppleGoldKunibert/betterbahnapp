@@ -154,6 +154,8 @@ struct RootView: View {
                 SettingsView()
             }
         }
+        // On the iPad and the Mac the tabs can also be shown as a sidebar.
+        .tabViewStyle(.sidebarAdaptable)
         .tint(.brand)
         .overlay {
             if model.showsTrainSearch {
