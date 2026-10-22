@@ -41,10 +41,11 @@ in `project.pbxproj`: new files join their target automatically.
   through `RootView.open(_:)`, also Spotlight results (`CSSearchableItemActionType`, `AppModel.linkToOpen`). Scene-phase
   refresh start/stop.
 - iPad and Mac ("Designed for iPad", #425): `TARGETED_DEVICE_FAMILY = 1,2`, all orientations on the iPad, tabs
-  `.sidebarAdaptable`. `Shared/SplitNavigation.swift`: `SplitNavigationStack` (Verbindungen, Abfahrten) keeps the
-  tab's first page on the left in regular width and pushes the path on the right (the left stack's path binding
-  always reads empty and forwards what links set; width from Kit `SplitLayout`), `SplitNavigationView` (settings) is a
-  `NavigationSplitView`; both are a plain `NavigationStack` on the iPhone. `readableWidth()` caps detail pages at 720 pt.
+  `.sidebarAdaptable`. `Shared/SplitNavigation.swift`: `SplitNavigationStack` (Verbindungen, Abfahrten) is a
+  `NavigationSplitView` in regular width with the tab's first page in its own stack on the left (path binding always
+  reads empty and forwards what links set to the right column's path; no sidebar toggle) – two plain stacks side by
+  side moved the iPad's tab bar into the left column. `SplitNavigationView` (settings) is a `NavigationSplitView`
+  with view links; both are a plain `NavigationStack` on the iPhone. `readableWidth()` caps detail pages at 720 pt.
   Live Activity settings are hidden off the iPhone (`LiveActivityManager.isSupported`).
 - `App/AppModel.swift` – the single `@Observable` app state (`.environment(model)`). Owns `CombinedProvider`,
   `TraewellingClient`, `TrainPicker`, `JourneyReplanner`, `DBShareImporter`, `TrainRoutePlanner`, `TicketFilter`,

@@ -1,4 +1,3 @@
-import BetterBahnKit
 import SwiftUI
 
 /// A tab's navigation stack that becomes two columns on the iPad and the Mac (regular width): the tab's first page
@@ -15,23 +14,25 @@ struct SplitNavigationStack<Route: Hashable, Root: View, Destination: View, Plac
 
     var body: some View {
         if sizeClass == .regular {
-            GeometryReader { proxy in
-                HStack(spacing: 0) {
-                    NavigationStack(path: Binding(get: { [Route]() }, set: { opened in
-                        if !opened.isEmpty { path = opened }
-                    })) {
-                        root()
-                            .navigationDestination(for: Route.self) { _ in EmptyView() }
-                    }
-                    .frame(width: SplitLayout.sidebarWidth(for: proxy.size.width))
-                    Divider()
-                        .ignoresSafeArea()
-                    NavigationStack(path: $path) {
-                        placeholder()
-                            .navigationDestination(for: Route.self, destination: destination)
-                    }
+            // A split view, not two stacks side by side: the iPad's tab bar then stays centred over the window
+            // when the sidebar is switched back to tabs, instead of moving into the left column.
+            NavigationSplitView(columnVisibility: .constant(.all)) {
+                NavigationStack(path: Binding(get: { [Route]() }, set: { opened in
+                    if !opened.isEmpty { path = opened }
+                })) {
+                    root()
+                        .navigationDestination(for: Route.self) { _ in EmptyView() }
+                }
+                .navigationSplitViewColumnWidth(min: 320, ideal: 400, max: 460)
+                // The search stays visible: hiding it would leave nothing to open from.
+                .toolbar(removing: .sidebarToggle)
+            } detail: {
+                NavigationStack(path: $path) {
+                    placeholder()
+                        .navigationDestination(for: Route.self, destination: destination)
                 }
             }
+            .navigationSplitViewStyle(.balanced)
         } else {
             NavigationStack(path: $path) {
                 root()
