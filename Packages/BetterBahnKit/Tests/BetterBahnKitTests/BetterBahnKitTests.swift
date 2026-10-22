@@ -5858,6 +5858,21 @@ private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
                                        against: [Journey(legs: [saved], source: .transitous)]).isEmpty)
     }
 
+    @Test func checkinGetsTheTzRememberedForItsSavedLeg() {
+        let saved = leg("ICE 645", from: "Köln Hbf", to: "Hannover Hbf",
+                        departure: "2026-03-04T09:00:00Z", arrival: "2026-03-04T11:30:00Z")
+        let checkin = leg("ICE645", from: "Köln Messe/Deutz", to: "Hannover Hbf",
+                          departure: "2026-03-04T09:12:00Z", arrival: "2026-03-04T11:30:00Z")
+        let other = leg("ICE 647", from: "Köln Hbf", to: "Hannover Hbf",
+                        departure: "2026-03-04T09:15:00Z", arrival: "2026-03-04T11:45:00Z")
+        let tz = TrainFormation(units: [TrainFormation.Unit(model: "ICE 4", number: "9018")])
+        let remembered = [(legs: [saved], formations: [saved.formationKey: tz])]
+        #expect(RideMatch.rememberedFormation(for: saved, in: remembered) == tz)
+        #expect(RideMatch.rememberedFormation(for: checkin, in: remembered) == tz)
+        // Another train on the same stretch at the same time isn't the one the Tz was seen on.
+        #expect(RideMatch.rememberedFormation(for: other, in: remembered) == nil)
+    }
+
     @Test func differentNameButSameStretchMatches() {
         let saved = leg("RE 5", from: "Koblenz Hbf", to: "Bonn Hbf",
                         departure: "2026-03-04T14:00:00Z", arrival: "2026-03-04T15:00:00Z")

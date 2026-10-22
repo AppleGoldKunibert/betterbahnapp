@@ -143,7 +143,8 @@ in `project.pbxproj`: new files join their target automatically.
 - `Features/Collection/` – `CollectionView` (#384, "Sammlung", `CollectionButton` next to "Vergangene Fahrten" on
   Verbindungen): progress per category, `CollectionCategoryView` grid (not collected greyed out), sheet with the first and
   all rides. Kit `TravelCollection` from the travel map's rides (`AppModel.travelCollection()`); trains only from
-  `rememberedFormation`, so Träwelling check-ins count only for stations. "Neu" badges: IDs collected since the last
+  `rememberedFormations` (Kit `RideMatch.rememberedFormation`: a Träwelling check-in gets the Tz remembered for the
+  saved leg of the same train it replaced), so other check-ins count only for stations. "Neu" badges: IDs collected since the last
   visit (`newCollectionIDs`, UserDefaults `collectionSeenIDs`, the first computation is the starting point).
 - `Features/Tickets/` – `TicketLookupView` (bahn.de's "Auftragssuche" in a hidden SwiftUI `WebView`:
   `DBOrderPage.fillScript` fills the form, `fetchScript` fetches order + PDFs inside the page; shown only when bahn.de
