@@ -18,9 +18,13 @@ public struct TransitousProvider: TransitProvider {
     /// `continuationID(of:)` answers per trip: the trip ID that goes on, "" for none (see `TripContinuation.swift`).
     let continuationCache = ExpiringCache<String>()
 
-    public init(baseURL: URL = TransitousProvider.defaultBaseURL, http: HTTPClient = HTTPClient()) {
+    /// `extraQueryDeadline`: how long the extra geocoder queries may take; tests with mocked answers that
+    /// expect every hit pass a generous one, so a busy test runner can't drop a hit.
+    public init(baseURL: URL = TransitousProvider.defaultBaseURL, http: HTTPClient = HTTPClient(),
+                extraQueryDeadline: Duration = TransitousProvider.defaultExtraQueryDeadline) {
         self.baseURL = baseURL
         self.http = http
+        self.extraQueryDeadline = extraQueryDeadline
     }
 
     func url(_ path: String, _ items: [URLQueryItem]) -> URL {
@@ -52,7 +56,7 @@ public struct TransitousProvider: TransitProvider {
                 // A typed code has its own lookup above, which the plain search for the letters ("xszh"
                 // finds nothing) mustn't hold up: `CombinedProvider` gives up on the whole search after
                 // 2.5 s and would take the station with it.
-                matches = try await CombinedProvider.withDeadline(Self.extraQueryDeadline) {
+                matches = try await CombinedProvider.withDeadline(extraQueryDeadline) {
                     try await geocode(search.text, addingMainStation: true, near: location, modes: modes)
                 }
             }
@@ -94,7 +98,7 @@ public struct TransitousProvider: TransitProvider {
         let matches = await withTaskGroup(of: [MGeocodeMatch].self) { group in
             for text in Ril100.searchTexts(for: ril.name) {
                 group.addTask {
-                    (try? await CombinedProvider.withDeadline(Self.extraQueryDeadline) { try await geocodeRequest(text) }) ?? []
+                    (try? await CombinedProvider.withDeadline(extraQueryDeadline) { try await geocodeRequest(text) }) ?? []
                 }
             }
             return await group.reduce(into: []) { $0 += $1 }
@@ -1044,7 +1048,7 @@ public struct TransitousProvider: TransitProvider {
                     }
                     // Only an extra: if it fails or is slow, the search still works without it. Waiting
                     // for it longer would run into `CombinedProvider`'s deadline and lose every hit.
-                    let found = (try? await CombinedProvider.withDeadline(Self.extraQueryDeadline) {
+                    let found = (try? await CombinedProvider.withDeadline(extraQueryDeadline) {
                         try await geocodeRequest(text, modes: modes)
                     }) ?? []
                     // The main station only of the place typed: "nord Hbf" also finds "Hamburg Hbf Nord".
@@ -1115,7 +1119,8 @@ public struct TransitousProvider: TransitProvider {
 
     /// How long the extra geocoder queries (main station, nearby town and stations, …) may take,
     /// well within `CombinedProvider`'s 2.5 s for the whole station search.
-    static let extraQueryDeadline: Duration = .milliseconds(1800)
+    public static let defaultExtraQueryDeadline: Duration = .milliseconds(1800)
+    let extraQueryDeadline: Duration
 
     /// `modes`: only stops where any of these stop.
     private func geocodeRequest(_ text: String, modes: Set<String> = []) async throws -> [MGeocodeMatch] {
@@ -1203,7 +1208,7 @@ public struct TransitousProvider: TransitProvider {
               !Self.namedStations.values.contains(where: { $0.id == station.id }) else { return station }
         let busier = try? await stopCache.value(for: station.id, maxAge: 24 * 3600) {
             [station] in
-            let matches = try await CombinedProvider.withDeadline(Self.extraQueryDeadline) {
+            let matches = try await CombinedProvider.withDeadline(extraQueryDeadline) {
                 try await geocode(Station.displayName(for: station.name))
             }
             return Self.busierStop(for: station, among: matches)?.toStation()
