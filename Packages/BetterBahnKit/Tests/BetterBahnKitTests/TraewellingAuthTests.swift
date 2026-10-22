@@ -794,6 +794,55 @@ private final class CollidingCheckinProtocol: URLProtocol, @unchecked Sendable {
         #expect(store.load()?.refreshToken == "next")
     }
 
+    @Test func renewsATokenRunningOutSoonAfterAQuickAnswer() async throws {
+        let store = TokenStore(service: "BetterBahnKitTests.\(UUID().uuidString)")
+        defer { store.clear() }
+        store.save(OAuthToken(accessToken: "ending", refreshToken: "early", expiresAt: .now.addingTimeInterval(10 * 60)))
+        RefreshTokenProtocol.mode = .slowSuccess
+        RefreshTokenProtocol.tokenRequests.withLock { $0 = [] }
+        let keptAlive = Mutex<[String]>([])
+        let client = client(store, fastAnswer: .seconds(3600)) {
+            keptAlive.withLock { $0.append("begin") }
+            return { keptAlive.withLock { $0.append("end") } }
+        }
+
+        _ = try await client.currentUser()
+        await client.refreshFinished()
+
+        #expect(RefreshTokenProtocol.tokenRequests.withLock { $0 } == ["early"])
+        #expect(store.load()?.accessToken == "fresh")
+        // The app is kept running until Träwelling's answer with the new token has arrived.
+        #expect(keptAlive.withLock { $0 } == ["begin", "end"])
+    }
+
+    @Test func keepsTheTokenAfterASlowAnswer() async throws {
+        let store = TokenStore(service: "BetterBahnKitTests.\(UUID().uuidString)")
+        defer { store.clear() }
+        store.save(OAuthToken(accessToken: "ending", refreshToken: "early", expiresAt: .now.addingTimeInterval(10 * 60)))
+        RefreshTokenProtocol.tokenRequests.withLock { $0 = [] }
+        // No answer is quicker than zero: every one counts as poor reception.
+        let client = client(store, fastAnswer: .zero)
+
+        _ = try await client.currentUser()
+        await client.refreshFinished()
+
+        #expect(RefreshTokenProtocol.tokenRequests.withLock { $0 }.isEmpty)
+        #expect(store.load()?.accessToken == "ending")
+    }
+
+    @Test func keepsATokenWithMostOfItsHourLeft() async throws {
+        let store = TokenStore(service: "BetterBahnKitTests.\(UUID().uuidString)")
+        defer { store.clear() }
+        store.save(OAuthToken(accessToken: "new", refreshToken: "later", expiresAt: .now.addingTimeInterval(50 * 60)))
+        RefreshTokenProtocol.tokenRequests.withLock { $0 = [] }
+        let client = client(store, fastAnswer: .seconds(3600))
+
+        _ = try await client.currentUser()
+        await client.refreshFinished()
+
+        #expect(RefreshTokenProtocol.tokenRequests.withLock { $0 }.isEmpty)
+    }
+
     @Test func onlyAnInvalidGrantCountsAsRejected() {
         #expect(TraewellingClient.isRejectedGrant(#"{"error":"invalid_grant","error_description":"The refresh token is invalid."}"#))
         #expect(!TraewellingClient.isRejectedGrant(#"{"error":"invalid_request"}"#))
@@ -807,11 +856,13 @@ private final class CollidingCheckinProtocol: URLProtocol, @unchecked Sendable {
         return store
     }
 
-    private func client(_ store: TokenStore) -> TraewellingClient {
+    private func client(_ store: TokenStore, fastAnswer: Duration = .milliseconds(1500),
+                        keepAlive: TraewellingClient.KeepAlive? = nil) -> TraewellingClient {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [RefreshTokenProtocol.self]
         return TraewellingClient(config: TraewellingConfig(clientID: "public-client"),
-                                 http: HTTPClient(session: URLSession(configuration: configuration)), store: store)
+                                 http: HTTPClient(session: URLSession(configuration: configuration)), store: store,
+                                 fastAnswer: fastAnswer, keepAlive: keepAlive)
     }
 }
 
