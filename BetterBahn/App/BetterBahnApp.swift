@@ -156,8 +156,7 @@ struct RootView: View {
                 SettingsView()
             }
         }
-        // On the iPad and the Mac the tabs can also be shown as a sidebar.
-        .tabViewStyle(.sidebarAdaptable)
+        .adaptiveTabStyle()
         .tint(.brand)
         .overlay {
             if model.showsTrainSearch {
@@ -319,6 +318,18 @@ struct RootView: View {
             shareLinkError = error.localizedDescription
         } catch {
             shareLinkError = "Die Reise konnte nicht geladen werden. Prüf deine Internetverbindung und öffne den Link noch einmal."
+        }
+    }
+}
+
+private extension View {
+    /// On the iPad the tabs can also be shown as a sidebar. Not on the Mac: switching back from the sidebar there
+    /// left the tab bar over the sidebar's old place, cut off by the window's edge.
+    @ViewBuilder func adaptiveTabStyle() -> some View {
+        if ProcessInfo.processInfo.isiOSAppOnMac {
+            tabViewStyle(.tabBarOnly)
+        } else {
+            tabViewStyle(.sidebarAdaptable)
         }
     }
 }

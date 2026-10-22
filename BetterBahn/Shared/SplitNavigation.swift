@@ -14,8 +14,7 @@ struct SplitNavigationStack<Route: Hashable, Root: View, Destination: View, Plac
 
     var body: some View {
         if sizeClass == .regular {
-            // A split view, not two stacks side by side: the iPad's tab bar then stays centred over the window
-            // when the sidebar is switched back to tabs, instead of moving into the left column.
+            // A split view rather than two stacks side by side, so the system lays out both columns like elsewhere.
             NavigationSplitView(columnVisibility: .constant(.all)) {
                 NavigationStack(path: Binding(get: { [Route]() }, set: { opened in
                     if !opened.isEmpty { path = opened }
