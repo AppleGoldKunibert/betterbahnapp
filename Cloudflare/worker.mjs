@@ -76,8 +76,9 @@ deinem Gerät gespeichert. Tickets und Zeitkarten sind verschlüsselt, solange d
 Wenn du die App löschst, sind diese Daten weg.</p>
 
 <h2>iCloud</h2>
-<p>Favoriten, Suchverlauf, gespeicherte Reisen und Einstellungen werden über den iCloud-Schlüssel-Wert-Speicher
-mit deinen anderen Geräten abgeglichen, eine Träwelling-Anmeldung über den iCloud-Schlüsselbund. Das läuft
+<p>Favoriten, Suchverlauf und Einstellungen werden über den iCloud-Schlüssel-Wert-Speicher mit deinen anderen
+Geräten abgeglichen, gespeicherte Reisen über deine private iCloud-Datenbank, eine Träwelling-Anmeldung über den
+iCloud-Schlüsselbund. Das läuft
 über dein Apple-Konto bei Apple; ich habe darauf keinen Zugriff. Tickets und Zeitkarten werden nicht über
 iCloud abgeglichen.</p>
 

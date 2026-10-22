@@ -1,8 +1,9 @@
 import BetterBahnKit
 import Foundation
 
-/// Mirrors settings, favourite stations, recent searches and saved journeys to the iCloud
-/// key-value store so they show up on the user's other devices. The Träwelling login syncs
+/// Mirrors settings, favourite stations, recent searches and regular trips to the iCloud
+/// key-value store so they show up on the user's other devices. Saved journeys sync through CloudKit
+/// (`JourneyCloudSync`). The Träwelling login syncs
 /// separately through iCloud Keychain (`TokenStore`).
 ///
 /// Values are stored as compressed JSON under `cloud.<key>`. The store holds 1 MB in total, so

@@ -58,8 +58,14 @@ in `project.pbxproj`: new files join their target automatically.
 - **Persistence:** `Storage.save/load(key:)` → `Application Support/BetterBahn/<key>.json` (migrates old
   UserDefaults); `AppSettings` uses UserDefaults. Saved data must stay decodable across versions (e.g.
   `DataSource.dbRest` kept only for decoding).
-- `App/CloudSync.swift` – iCloud KV mirror: favorites, recents and saved journeys per item via `CloudList` (Kit
+- `App/CloudSync.swift` – iCloud KV mirror: favorites, recents and regular trips per item via `CloudList` (Kit
   `SyncedList`: newest change per item wins, removals kept as dates); `AppSettings` as one snapshot, newer wins.
+- `App/JourneyCloudSync.swift` (#427) – saved journeys through CloudKit (`CKSyncEngine`, private database, zone
+  `SavedJourneys`, one `SavedJourney` record per journey: lzfse JSON in `journey`, `changedAt`); the KV store's 1 MB
+  was outgrown. Kit `RecordSync`: local diff → saves/deletes, the later `changedAt` wins (`serverRecordChanged` too).
+  Engine state, dates and record system fields in `Storage` (`cloudKit-journey*`); first start uploads all; fetched on
+  foreground and by silent push (`remote-notification`). Container `iCloud.<bundle ID>`: deploy the schema in the
+  CloudKit Console before a release.
   Träwelling token via iCloud Keychain (`TokenStore`); a 401 retries with a token another device refreshed.
 - `App/TicketStore.swift` – `SavedTicket` (`DBTicket` + its `SavedJourney.id`), only on this device in
   `Application Support/BetterBahn/Tickets/` (list + PDFs, file protection, **not** synced). `importTickets` matches

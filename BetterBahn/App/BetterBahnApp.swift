@@ -49,6 +49,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         UNUserNotificationCenter.current().delegate = self
         // "Fährst du heute?" with its answers (#397).
         UNUserNotificationCenter.current().setNotificationCategories([CommuteNotifier.notificationCategory])
+        // Silent pushes, needing no permission, tell the saved journeys' CloudKit sync about changes elsewhere (#427).
+        application.registerForRemoteNotifications()
         return true
     }
 
@@ -175,6 +177,7 @@ struct RootView: View {
                 model.syncLiveActivity()
                 model.startRefreshing()
                 Task { await model.syncTraewelling() }
+                model.fetchCloudJourneys()
                 Task { await model.syncFollowedCheckinPush() }
                 // Picks up events deleted in the calendar and a switch to full access in iOS Settings.
                 model.scheduleCalendarSync()
