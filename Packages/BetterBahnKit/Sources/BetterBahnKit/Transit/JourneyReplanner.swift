@@ -135,6 +135,34 @@ public struct JourneyReplanner: Sendable {
         }
         return Journey(legs: legs + rest, source: journey.source)
     }
+
+    /// The train a re-plan of the whole journey starts from at `now`: the one being ridden, else the
+    /// next one to board, else the last one once the journey is over – not the first of the day, which
+    /// on a day trip lies long behind.
+    public static func currentTrain(of journey: Journey, at now: Date = .now) -> Leg? {
+        let trains = journey.transitLegs
+        return trains.first { $0.arrival.best > now } ?? trains.last
+    }
+
+    /// How many of `vias`, in their order, are behind someone who leaves the train at `legIndex` after
+    /// `ride` (that train from boarding to the exit picked): reached on a train before or on the ride,
+    /// at a transfer or just passing through. Matched in order along the stops, so on a round trip a
+    /// late via the outward train already runs through still counts as ahead.
+    public static func passedViaCount(_ vias: [Station], in journey: Journey, leavingLegAt legIndex: Int,
+                                      after ride: Leg) -> Int {
+        guard !vias.isEmpty else { return 0 }
+        let travelled = rebuild(journey, replacingLegAt: legIndex, with: ride, continuation: nil).legs.flatMap { leg in
+            leg.stopovers.count >= 2 ? leg.stopovers.map(\.station) : [leg.origin, leg.destination]
+        }
+        var position = travelled.startIndex
+        var count = 0
+        for via in vias {
+            guard let hit = travelled[position...].firstIndex(where: { $0.isSamePlace(as: via) }) else { break }
+            count += 1
+            position = hit + 1
+        }
+        return count
+    }
 }
 
 /// One way of finishing the journey: leave the train at `exit` and carry on from there.

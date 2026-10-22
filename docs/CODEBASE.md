@@ -95,7 +95,8 @@ in `project.pbxproj`: new files join their target automatically.
   with the legs' cached track geometry; `WeatherLabel` "☀ 18° bei Ankunft" under the destination (summary card and the
   last leg) and "beim Umstieg" under a transfer station with more than 15 min to the next train
   (`JourneyWeather.arrival(of:in:)`), tap → `WeatherDetails` popover with rain, wind and
-  the Open-Meteo credit, #385, `WeatherViews.swift`, off with `AppSettings.showWeather`), `JourneyMapView`, `JourneyReplanSheet` (replan mid-journey; "Halt hinzufügen" via
+  the Open-Meteo credit, #385, `WeatherViews.swift`, off with `AppSettings.showWeather`), `JourneyMapView`, `JourneyReplanSheet` (replan mid-journey; keeps all vias of the search but shows and searches only those
+  ahead of the picked train's exit, #430; "Halt hinzufügen" via
   `ManualStopSheet` adds an off-timetable exit, a check-in then becomes a manual trip via
   `AppModel.replaceCheckinWithManualTrip`; a new exit on the last train asks "Reise … beenden" / "Weiter nach …").
 - `Features/Departures/` – `StationBoardView`/`BoardRow`, `TripView` (and `LegTripSheet`, the read-only run of a journey's
@@ -417,7 +418,8 @@ in `project.pbxproj`: new files join their target automatically.
   nothing), never overriding fresh data; its inferred "on time" is dropped hours ahead. `progress` paints the screen as
   the sources answer (the timetable after `LoadingDeadline.liveData` if DB is slow, bahn.de before and after the
   referee), each version with the baseline.
-- `JourneyReplanner` (`continuations`, `fastestFirst`), `ConnectionCheck` (`ConnectionIssue`, `JourneyRefresher`: `refreshEnds`
+- `JourneyReplanner` (`continuations`, `fastestFirst`; `currentTrain`: the train "Reise bearbeiten" starts on, the one ridden or
+  the next; `passedViaCount`: vias behind the exit, matched in order along all stops so a round trip's late via stays ahead), `ConnectionCheck` (`ConnectionIssue`, `JourneyRefresher`: `refreshEnds`
   for every result on screen, `refresh` through `LiveRun`), `ExitReminder`, `PlatformChange` (push,
   ignores sectors/bus bays), `TrainRoutePlanner`, `ViaRoutePlanner` (vias without stay keep a through train as one
   leg), `TrainPicker` ("Anderer Zug": `replacing` + `MissedConnection` #226, `reroutes` "Andere Routenführung",
