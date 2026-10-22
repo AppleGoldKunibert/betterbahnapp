@@ -4,7 +4,7 @@ import Synchronization
 /// What the statistics server (`Cloudflare/stats`, `POST /train-stats`) knows about one train from its
 /// runs of the last days: delays, cancellations and platform moves (#316), from DB's open timetable data
 /// (#336). Every figure is an experience value, shown only from `minimumRuns` runs on.
-public struct TrainStatistics: Sendable, Hashable, Decodable {
+public struct TrainStatistics: Sendable, Hashable, Codable {
     /// Fewer runs say too little to show anything; 1 in `testMode`.
     public static var minimumRuns: Int { testMode ? 1 : 5 }
     /// Shows figures from a single run on, to check what the server answers (the app turns it on with the
@@ -43,7 +43,7 @@ public struct TrainStatistics: Sendable, Hashable, Decodable {
     }
 
     /// One planned platform and the one the train really used, with the runs that did.
-    public struct PlatformMove: Sendable, Hashable, Decodable {
+    public struct PlatformMove: Sendable, Hashable, Codable {
         public var from: String
         public var to: String
         public var n: Int
@@ -56,7 +56,7 @@ public struct TrainStatistics: Sendable, Hashable, Decodable {
     }
 
     /// One stop of the train in the runs.
-    public struct Stop: Sendable, Hashable, Decodable {
+    public struct Stop: Sendable, Hashable, Codable {
         /// Runs that had the stop in their schedule, and how many of them skipped it (or didn't run).
         public var runs: Int
         public var cancelled: Int
@@ -81,7 +81,7 @@ public struct TrainStatistics: Sendable, Hashable, Decodable {
         runs >= Self.minimumRuns ? Double(cancelledRuns) / Double(runs) : nil
     }
 
-    // MARK: - Decoding
+    // MARK: - Coding
 
     private enum CodingKeys: String, CodingKey {
         case category, number, days, runs, cancelled, stops
@@ -95,6 +95,17 @@ public struct TrainStatistics: Sendable, Hashable, Decodable {
         runs = try c.decode(Int.self, forKey: .runs)
         cancelledRuns = try c.decode(Int.self, forKey: .cancelled)
         stops = try c.decodeIfPresent([String: Stop].self, forKey: .stops) ?? [:]
+    }
+
+    /// As the server sends them, for `TrainStatisticsStore`'s file.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(category, forKey: .category)
+        try c.encode(number, forKey: .number)
+        try c.encode(days, forKey: .days)
+        try c.encode(runs, forKey: .runs)
+        try c.encode(cancelledRuns, forKey: .cancelled)
+        try c.encode(stops, forKey: .stops)
     }
 }
 
@@ -319,43 +330,79 @@ public struct TrainStatisticsLookup: Sendable, Hashable {
 
 // MARK: - Cache
 
-/// Looks the figures up once per train and day and keeps them: a journey with a few trains costs one
-/// request, and showing it again costs none. Off (nothing asked, nothing shown) while the user has
-/// switched the statistics off ("Zugstatistik anzeigen").
+/// Looks the figures up once per train and day and keeps them until the day is over, also in a file
+/// (`cacheURL`): a journey with a few trains costs one request, and showing it again, even after iOS closed
+/// the app, costs none. `cachedLookup` reads what is known without waiting, so a screen opened again shows
+/// the figures in its first frame. Off (nothing asked, nothing shown) while the user has switched the
+/// statistics off ("Zugstatistik anzeigen").
 public actor TrainStatisticsStore {
-    public static let shared = TrainStatisticsStore()
-    /// After a failed lookup the Worker isn't asked again for a train this long.
+    public static let shared = TrainStatisticsStore(
+        cacheURL: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.appending(path: "TrainStatistics.json"))
+    /// After a failed lookup the Worker isn't asked again for a train this long, nor bahn.de for a station's EVA number.
     static let retryAfter: TimeInterval = 5 * 60
 
     public typealias Fetcher = @Sendable ([TrainStatisticsQuery]) async throws -> [TrainStatistics]
     /// Finds the EVA number of a station the feed gave none for (`BahnDeClient.evaNumber(for:)`).
     public typealias EVAResolver = @Sendable (Station) async -> String?
 
+    /// What was asked on one day: the server takes in each day's runs once a day, so the next day asks again.
+    struct Memory: Sendable, Codable {
+        /// "2026-10-14", in Germany's time.
+        var day = ""
+        var entries: [String: TrainStatistics] = [:]
+        /// The stops asked for per train and day, answered or not.
+        var asked: [String: Set<String>] = [:]
+        /// Station ID → EVA number, for the stations that needed a lookup.
+        var resolved: [String: String] = [:]
+    }
+
+    private struct State: Sendable {
+        var isEnabled = false
+        var memory = Memory()
+
+        /// Starts over on another day.
+        mutating func begin(_ day: String) {
+            if memory.day != day { memory = Memory(day: day) }
+        }
+    }
+
     private let fetcher: Fetcher
     private let now: @Sendable () -> Date
-    private var isEnabled = false
-    private var entries: [String: TrainStatistics] = [:]
-    /// The stops asked for per train and day, answered or not.
-    private var asked: [String: Set<String>] = [:]
+    private let cacheURL: URL?
+    /// Behind a lock rather than the actor, so `cachedLookup` answers right away.
+    private let state = Mutex(State())
     private var failures: [String: Date] = [:]
-    /// Station ID → EVA number, for the stations that needed a lookup.
-    private var resolved: [String: String] = [:]
+    /// Station ID → when finding its EVA number last failed.
+    private var resolveFailures: [String: Date] = [:]
+    private var hasReadCache = false
 
-    public init(now: @escaping @Sendable () -> Date = { Date() }, fetcher: Fetcher? = nil) {
+    /// - Parameter cacheURL: the file the figures are kept in for the day; nil keeps them in memory only.
+    public init(now: @escaping @Sendable () -> Date = { Date() }, cacheURL: URL? = nil, fetcher: Fetcher? = nil) {
         self.now = now
+        self.cacheURL = cacheURL
         self.fetcher = fetcher ?? { queries in try await TrainStatisticsClient().statistics(for: queries) }
     }
 
+    private nonisolated var isEnabled: Bool { state.withLock { $0.isEnabled } }
+
+    /// Also reads the day's figures from the file, the first time (the app calls it at launch); switched
+    /// off, nothing is kept.
     public func setEnabled(_ enabled: Bool) {
-        isEnabled = enabled
+        readCacheIfNeeded()
+        state.withLock { state in
+            state.isEnabled = enabled
+            if !enabled { state.memory = Memory() }
+        }
+        if !enabled, let cacheURL { try? FileManager.default.removeItem(at: cacheURL) }
     }
 
     /// "2026-10-14": the day figures are kept for, in Germany's time.
     public static func day(of date: Date) -> String { BahnDeClient.berlinDay(date) }
 
     /// The figures for `line`'s train on `date`'s day at `stations`. A station without an EVA number is
-    /// looked up with `resolve`, once.
+    /// looked up with `resolve`, once (again after `retryAfter` when that failed).
     public func lookup(line: Line?, at stations: [Station], on date: Date, resolve: EVAResolver? = nil) async -> TrainStatisticsLookup? {
+        readCacheIfNeeded()
         guard isEnabled, let line, line.product.hasTrainStatistics else { return nil }
         let evas = await evaNumbers(of: stations, resolve: resolve)
         guard let query = TrainStatisticsQuery(line: line, evas: Array(evas.values.sorted())) else { return nil }
@@ -364,8 +411,22 @@ public actor TrainStatisticsStore {
         return TrainStatisticsLookup(statistics: statistics, evas: evas)
     }
 
+    /// What `lookup` gives from what is known already, without asking anything or waiting: for showing the
+    /// figures in a screen's first frame. Stations whose EVA number is still to be found are left out.
+    public nonisolated func cachedLookup(line: Line?, at stations: [Station], on date: Date) -> TrainStatisticsLookup? {
+        guard let line, line.product.hasTrainStatistics, let memory = todaysMemory() else { return nil }
+        var evas: [String: String] = [:]
+        for station in stations {
+            if let eva = Self.knownEVA(of: station, resolved: memory.resolved) { evas[station.id] = eva }
+        }
+        guard let query = TrainStatisticsQuery(line: line, evas: Array(evas.values.sorted())),
+              let statistics = memory.entries[query.key(day: Self.day(of: date))] else { return nil }
+        return TrainStatisticsLookup(statistics: statistics, evas: evas)
+    }
+
     /// What the incoming trains of `transfers` usually do at the transfer stations, by `TightTransfer.id`.
     public func outlooks(for transfers: [TightTransfer], resolve: EVAResolver? = nil) async -> [String: TrainStatistics.Stop.TransferOutlook] {
+        readCacheIfNeeded()
         guard isEnabled else { return [:] }
         var queries: [(transfer: TightTransfer, eva: String, query: TrainStatisticsQuery)] = []
         for transfer in transfers {
@@ -385,32 +446,55 @@ public actor TrainStatisticsStore {
         return result
     }
 
+    /// The offline list's main station first: the server files every level under it, and it needs no
+    /// bahn.de request (which fails while bahn.de is refusing ours).
+    private static func knownEVA(of station: Station, resolved: [String: String]) -> String? {
+        station.statisticsEVA ?? StationNames.mainEvaNumber(for: station) ?? resolved[station.id]
+    }
+
     private func evaNumbers(of stations: [Station], resolve: EVAResolver?) async -> [String: String] {
         var evas: [String: String] = [:]
         for station in stations {
-            // The offline list's main station first: the server files every level under it, and it needs no
-            // bahn.de request (which fails while bahn.de is refusing ours).
-            if let eva = station.statisticsEVA ?? StationNames.mainEvaNumber(for: station) ?? resolved[station.id] {
+            let resolved = state.withLock { $0.memory.resolved }
+            if let eva = Self.knownEVA(of: station, resolved: resolved) {
                 evas[station.id] = eva
-            } else if let resolve, let eva = await resolve(station), !eva.isEmpty, eva.allSatisfy(\.isNumber) {
-                resolved[station.id] = eva
+                continue
+            }
+            // Not again right away when bahn.de found none or didn't answer: opening the train again shouldn't wait for it.
+            guard let resolve, resolveFailures[station.id].map({ now().timeIntervalSince($0) >= Self.retryAfter }) ?? true else { continue }
+            if let eva = await resolve(station), !eva.isEmpty, eva.allSatisfy(\.isNumber) {
+                state.withLock { $0.memory.resolved[station.id] = eva }
+                resolveFailures[station.id] = nil
                 evas[station.id] = eva
+            } else {
+                resolveFailures[station.id] = now()
             }
         }
         return evas
     }
 
     /// The figures for `query` on `day` ("2026-10-14") if they are known already, without asking.
-    public func cached(_ query: TrainStatisticsQuery, day: String) -> TrainStatistics? {
-        isEnabled ? entries[query.key(day: day)] : nil
+    public nonisolated func cached(_ query: TrainStatisticsQuery, day: String) -> TrainStatistics? {
+        todaysMemory()?.entries[query.key(day: day)]
+    }
+
+    /// What is known today; nil while switched off.
+    private nonisolated func todaysMemory() -> Memory? {
+        let today = Self.day(of: now())
+        return state.withLock { $0.isEnabled && $0.memory.day == today ? $0.memory : nil }
     }
 
     /// The figures for these trains on `day`, asking the server only for what isn't known yet. Trains
     /// the server has nothing on are missing from the result.
     @discardableResult
     public func statistics(for queries: [TrainStatisticsQuery], day: String) async -> [String: TrainStatistics] {
-        guard isEnabled else { return [:] }
-        let current = now()
+        readCacheIfNeeded()
+        let current = now(), today = Self.day(of: current)
+        guard let asked = state.withLock({ state -> [String: Set<String>]? in
+            guard state.isEnabled else { return nil }
+            state.begin(today)
+            return state.memory.asked
+        }) else { return [:] }
         var missing: [TrainStatisticsQuery] = []
         for query in queries {
             let key = query.key(day: day)
@@ -421,23 +505,46 @@ public actor TrainStatisticsStore {
         if !missing.isEmpty {
             do {
                 let answers = try await fetcher(missing)
-                for query in missing {
-                    let key = query.key(day: day)
-                    asked[key, default: []].formUnion(query.evas)
-                    failures[key] = nil
-                    guard let answer = answers.first(where: { $0.category == query.category && $0.number == query.number }) else { continue }
-                    var merged = answer
-                    merged.stops = (entries[key]?.stops ?? [:]).merging(answer.stops) { $1 }
-                    entries[key] = merged
+                state.withLock { state in
+                    state.begin(today)
+                    for query in missing {
+                        let key = query.key(day: day)
+                        state.memory.asked[key, default: []].formUnion(query.evas)
+                        guard let answer = answers.first(where: { $0.category == query.category && $0.number == query.number }) else { continue }
+                        var merged = answer
+                        merged.stops = (state.memory.entries[key]?.stops ?? [:]).merging(answer.stops) { $1 }
+                        state.memory.entries[key] = merged
+                    }
                 }
+                for query in missing { failures[query.key(day: day)] = nil }
+                writeCache()
             } catch {
                 for query in missing { failures[query.key(day: day)] = current }
             }
         }
+        let entries = state.withLock { $0.memory.entries }
         var result: [String: TrainStatistics] = [:]
         for query in queries {
             if let entry = entries[query.key(day: day)] { result[query.key(day: day)] = entry }
         }
         return result
+    }
+
+    // MARK: File
+
+    /// Takes over today's figures from the file, once; an earlier day's are left behind.
+    private func readCacheIfNeeded() {
+        guard !hasReadCache else { return }
+        hasReadCache = true
+        guard let cacheURL, let data = try? Data(contentsOf: cacheURL),
+              let saved = try? JSONDecoder().decode(Memory.self, from: data), saved.day == Self.day(of: now()) else { return }
+        state.withLock { state in
+            if state.memory.day.isEmpty { state.memory = saved }
+        }
+    }
+
+    private func writeCache() {
+        guard let cacheURL, let data = try? JSONEncoder().encode(state.withLock({ $0.memory })) else { return }
+        try? data.write(to: cacheURL, options: .atomic)
     }
 }
