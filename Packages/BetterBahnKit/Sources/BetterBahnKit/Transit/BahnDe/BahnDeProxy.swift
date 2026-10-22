@@ -22,6 +22,8 @@ public struct BahnDeProxy: Sendable {
 
     /// Tries a request this often when it hits a hiccup, before every request pauses.
     static let attempts = 3
+    /// Tries a request this often when it times out; each attempt already waited the full timeout.
+    static let timeoutAttempts = 2
 
     public init(baseURL: URL, gate: BahnDeGate = BahnDeGate(), retryDelay: Duration = .milliseconds(500)) {
         self.baseURL = baseURL

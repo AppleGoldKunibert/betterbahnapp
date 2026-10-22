@@ -313,7 +313,8 @@ in `project.pbxproj`: new files join their target automatically.
   other railways' night trains (`takesOnlyPlatforms`). Responses cached; journey IDs (one departure
   board each) kept on the device for 12 h, a run bahn.de doesn't list remembered for 10 min (`JourneyIdStore`, #411).
   A hiccup (`isHiccup`: 5xx but the server's own 503 "paused", a dropped connection) is tried up to 3 times
-  (`BahnDeProxy.attempts`). On failure the server is left alone (`BahnDeProxy.gate`: 10 min after 403/429/452, 2 min
+  (`BahnDeProxy.attempts`), a timeout twice (`isTimeout`, `timeoutAttempts`); a request timing out again throws
+  `timeout` without pausing the others. On failure the server is left alone (`BahnDeProxy.gate`: 10 min after 403/429/452, 2 min
   when down; a shorter pause never cuts a longer one short) and requests throw `rateLimited`, shown as
   "Plan-Wagenreihung · Aktuelle nicht verfügbar" / "Aktuelle Wagenreihung nicht verfügbar"; `CoachSequenceDisclosure`
   asks again once the pause is over (`pausedUntil()`). No other way to bahn.de:
