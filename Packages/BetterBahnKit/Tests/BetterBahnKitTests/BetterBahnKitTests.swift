@@ -1353,6 +1353,30 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
                                                          in: Array(stopTimes[1...])) == nil)
     }
 
+    /// EC 55 Berlin → Kraków (2026-10-24): DELFI's trip ends at Rzepin and carries on as "96", trip "000055".
+    /// PKP's "IC 55 Odra" leaves Rzepin at the same time but comes from Frankfurt (Oder), so it can't be joined.
+    @Test func findsTheContinuationByTripNumberStartingAtTheBorder() throws {
+        let json = """
+        {"stopTimes": [
+            {"place": {"name": "Rzepin", "stopId": "pl-PKP-Intercity_25809_5_32", "lat": 52.35, "lon": 14.815,
+                       "scheduledArrival": "2026-10-24T16:09:00Z", "scheduledDeparture": "2026-10-24T16:11:00Z"},
+             "mode": "LONG_DISTANCE", "headsign": "Kraków Główny", "tripId": "pkp55", "displayName": "IC 55 Odra",
+             "tripShortName": "55", "agencyName": "PKP Intercity"},
+            {"place": {"name": "Rzepin", "stopId": "de-DELFI_pl:unknown:EVANR-5100082", "lat": 52.35, "lon": 14.815,
+                       "scheduledDeparture": "2026-10-24T16:11:00Z"},
+             "mode": "LONG_DISTANCE", "headsign": "Krakow Glowny", "tripId": "delfi96", "displayName": "96",
+             "tripShortName": "000055", "agencyName": "PKP Intercity"}
+        ]}
+        """
+        let stopTimes = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(json.utf8)).stopTimes
+        let arrival = ISO8601DateFormatter().date(from: "2026-10-24T16:09:00Z")!
+        let found = TransitousProvider.continuationCandidate(of: "ec55", number: "55", product: .longDistance, arrivingAt: arrival, in: stopTimes)
+        #expect(found?.tripId == "delfi96")
+        // Without it, the train under its number alone is still found.
+        #expect(TransitousProvider.continuationCandidate(of: "ec55", number: "55", product: .longDistance, arrivingAt: arrival,
+                                                         in: Array(stopTimes.prefix(1)))?.tripId == "pkp55")
+    }
+
     /// ICE 146 Berlin–Amsterdam at Berlin Hbf: DB's feed has it ending in Hengelo (with realtime),
     /// NS's feed starting in Berlin and ending in Amsterdam (without). Neither headsign goes beyond
     /// its own trip, but same number, time and track are the same train: one row, the live one.
