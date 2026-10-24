@@ -43,7 +43,10 @@ extension TransitousProvider {
         return Self.continuationCandidate(of: trip.id, number: number, product: trip.line?.product, arrivingAt: arrival, in: stopTimes)?.tripId
     }
 
-    /// The row of train `number` leaving within `continuationDwell` of `arrival`, the earliest one.
+    /// The row of train `number` leaving within `continuationDwell` of `arrival`, the earliest one. The number
+    /// may be only the trip's: DELFI's EC 55 Berlin → Kraków carries on from Rzepin as "96", trip "000055".
+    /// A trip starting there wins over one that only passes (PKP's "IC 55 Odra" from Frankfurt (Oder) at the
+    /// same time), as only that one can be joined.
     static func continuationCandidate(of tripId: String, number: String, product: Product?, arrivingAt arrival: Date,
                                       in stopTimes: [MStopTime]) -> MStopTime? {
         stopTimes.filter { stopTime in
@@ -51,9 +54,13 @@ extension TransitousProvider {
                   let departure = stopTime.place.scheduledDeparture else { return false }
             let line = stopTime.lineInfo.toLine()
             let sameKind = product.map { isSameKind($0, line.product) } ?? true
-            return line.number == number && sameKind
+            return (line.number == number || line.tripNumber == number) && sameKind
                 && departure >= arrival.addingTimeInterval(-60) && departure <= arrival.addingTimeInterval(continuationDwell)
-        }.min { ($0.place.scheduledDeparture ?? .distantFuture) < ($1.place.scheduledDeparture ?? .distantFuture) }
+        }.min { a, b in
+            let (departureA, departureB) = (a.place.scheduledDeparture ?? .distantFuture, b.place.scheduledDeparture ?? .distantFuture)
+            guard departureA == departureB else { return departureA < departureB }
+            return a.place.scheduledArrival == nil && b.place.scheduledArrival != nil
+        }
     }
 
     /// `first` and `next` as one run: the stop where `first` ends arrives with `first` and leaves with
