@@ -906,6 +906,7 @@ struct LegCard: View {
         .sheet(isPresented: $showFullTrip) {
             LegTripSheet(leg: leg)
         }
+        .onAppear { statistics.showCached(line: leg.line, stops: statisticsStops, date: leg.departure.planned) }
         .task(id: leg.id) {
             await statistics.load(line: leg.line, stops: statisticsStops, date: leg.departure.planned, bahnDe: model.provider.bahnDe)
         }
