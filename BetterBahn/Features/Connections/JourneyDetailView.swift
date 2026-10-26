@@ -993,6 +993,11 @@ struct AlternativeTrainsSheet: View {
     @State private var error: Error?
     /// A picked train that misses the next planned one, waiting for the user's choice.
     @State private var pending: LegReplacement?
+    @State private var showTrainSheet = false
+    /// Routes riding the train the user named under "Zug vorgeben", fastest first.
+    @State private var pinnedRoutes: [Journey] = []
+    @State private var pinnedName: String?
+    @State private var isPlanning = false
 
     var body: some View {
         NavigationStack {
@@ -1025,8 +1030,23 @@ struct AlternativeTrainsSheet: View {
                         }
                     }
 
+                    trainButton
+
                     if let error {
                         ErrorBanner(error: error)
+                    }
+
+                    if isPlanning {
+                        ProgressView("Plane mit diesem Zug …").frame(maxWidth: .infinity).padding(.vertical, 8)
+                    } else if let pinnedName, !pinnedRoutes.isEmpty {
+                        SectionHeader(title: "Mit \(pinnedName)", systemImage: "pin.fill")
+                            .padding(.top, 6)
+                        ForEach(pinnedRoutes) { route in
+                            optionButton(journey: route, legs: route.legs, id: "pinned|" + route.id,
+                                         note: route.transitLegs.count > 1 ? "Mit Umstieg" : "Direkt",
+                                         symbolName: route.transitLegs.count > 1 ? "arrow.triangle.swap" : "arrow.right",
+                                         next: nextLeg)
+                        }
                     }
 
                     if !options.isEmpty {
@@ -1037,24 +1057,8 @@ struct AlternativeTrainsSheet: View {
 
                     // One list by arrival; a note on each says how it gets there.
                     ForEach(options) { option in
-                        Button {
-                            apply(option.legs, id: option.id)
-                        } label: {
-                            // Direct trains too as a connection card, so all options look alike.
-                            let next = option.isReroute ? rerouteNextLeg : nextLeg
-                            VStack(alignment: .leading, spacing: 6) {
-                                JourneyCard(journey: option.journey)
-                                    .overlay(alignment: .topTrailing) {
-                                        if applyingID == option.id { ProgressView().padding(14) }
-                                    }
-                                RouteNote(text: option.note, systemImage: option.symbolName).padding(.horizontal, 14)
-                                if let next, let last = option.legs.last, !last.catches(next) {
-                                    MissedConnectionHint(next: next).padding(.horizontal, 14)
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(applyingID != nil)
+                        optionButton(journey: option.journey, legs: option.legs, id: option.id, note: option.note,
+                                     symbolName: option.symbolName, next: option.isReroute ? rerouteNextLeg : nextLeg)
                     }
                 }
                 .padding()
@@ -1063,7 +1067,8 @@ struct AlternativeTrainsSheet: View {
             .overlay {
                 if isLoading {
                     ProgressView("Suche Züge …")
-                } else if alternatives.isEmpty, connections.isEmpty, reroutes.isEmpty, error == nil {
+                } else if alternatives.isEmpty, connections.isEmpty, reroutes.isEmpty, pinnedRoutes.isEmpty,
+                          !isPlanning, error == nil {
                     ContentUnavailableView("Keine anderen Züge", systemImage: "tram.fill",
                                            description: Text("Gerade fährt kein anderer Zug von \(leg.origin.displayName) nach \(leg.destination.displayName)."))
                 }
@@ -1077,6 +1082,12 @@ struct AlternativeTrainsSheet: View {
             }
             .task(id: onlyValidTicket) { await load() }
             .onAppear { onlyValidTicket = model.settings.ticketFilterByDefault }
+            .sheet(isPresented: $showTrainSheet) {
+                TrainNumberSheet(search: trainSearch, suggestions: trainSuggestions, defaultBoarding: leg.origin,
+                                 date: trainSearch.date, allowsEarlier: notBefore == nil) { requirement in
+                    Task { await plan(requirement) }
+                }
+            }
             .alert("Anschluss nicht erreichbar", isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }),
                    presenting: pending) { replacement in
                 Button("Alternativen zeigen") { onApply(replacement, true) }
@@ -1093,6 +1104,108 @@ struct AlternativeTrainsSheet: View {
                         schon um \(missed.leg.departure.best.timeString). Andere Züge dafür anzeigen oder den Plan so lassen?
                         """)
                 }
+            }
+        }
+    }
+
+    /// Names one train for this stretch, like "Zug vorgeben" in the connection search.
+    private var trainButton: some View {
+        HStack(spacing: 10) {
+            Button {
+                showTrainSheet = true
+            } label: {
+                Label(pinnedName == nil ? "Zug vorgeben" : "Anderen Zug vorgeben", systemImage: "number")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.glass)
+            .controlSize(.large)
+            .tint(.brand)
+
+            if pinnedName != nil {
+                Button {
+                    withAnimation(.snappy) {
+                        pinnedName = nil
+                        pinnedRoutes = []
+                    }
+                } label: {
+                    Label("Zurücksetzen", systemImage: "xmark")
+                        .font(.subheadline.weight(.semibold))
+                        .labelStyle(.iconOnly)
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
+                .controlSize(.large)
+                .accessibilityLabel("Zugvorgabe entfernen")
+            }
+        }
+        .disabled(applyingID != nil || isPlanning)
+    }
+
+    /// One entry of the list, direct trains too as a connection card, so all options look alike.
+    private func optionButton(journey: Journey, legs: [Leg], id: String, note: String, symbolName: String,
+                              next: Leg?) -> some View {
+        Button {
+            apply(legs, id: id)
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                JourneyCard(journey: journey)
+                    .overlay(alignment: .topTrailing) {
+                        if applyingID == id { ProgressView().padding(14) }
+                    }
+                RouteNote(text: note, systemImage: symbolName).padding(.horizontal, 14)
+                if let next, let last = legs.last, !last.catches(next) {
+                    MissedConnectionHint(next: next).padding(.horizontal, 14)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(applyingID != nil)
+    }
+
+    /// The stretch of `leg`, from when the list starts.
+    private var trainSearch: ConnectionSearch {
+        ConnectionSearch(from: leg.origin, to: leg.destination, date: notBefore ?? leg.departure.planned,
+                         isArrival: false, onlyValidTicket: onlyValidTicket)
+    }
+
+    private var trainSuggestions: [String] {
+        var names: [String] = []
+        for option in options.flatMap(\.legs) where option.line?.product.isTrain == true {
+            if let name = option.line?.name, !names.contains(name) { names.append(name) }
+        }
+        return Array(names.prefix(12))
+    }
+
+    /// Plans the stretch with the named train; the routes show above the other trains.
+    private func plan(_ requirement: TrainRequirement) async {
+        isPlanning = true
+        defer { isPlanning = false }
+        do {
+            let search = trainSearch
+            let result = try await model.trainRoutePlanner.plan(
+                [requirement], from: search.from, to: search.to, date: search.date,
+                pickedEarlier: notBefore == nil ? TrainCandidateFinder.earlierWindow : 0)
+            var routes = await model.journeyReplanner.withRealtime(result.journeys).filter { route in
+                notBefore.map { (route.departure?.best ?? .distantPast) >= $0 } ?? true
+            }
+            if onlyValidTicket {
+                // Don't leave the user with nothing if the named train itself isn't valid with the ticket.
+                let valid = routes.filter(model.ticketFilter.isValid)
+                if !valid.isEmpty { routes = valid }
+            }
+            withAnimation(.snappy) {
+                pinnedName = result.resolvedNames[requirement.id] ?? requirement.trainName.uppercased()
+                pinnedRoutes = routes
+                error = routes.isEmpty ? TransitError.invalidInput("Mit diesem Zug gibt es keine passende Verbindung.") : nil
+            }
+        } catch is CancellationError {
+        } catch {
+            withAnimation(.snappy) {
+                pinnedName = nil
+                pinnedRoutes = []
+                self.error = error
             }
         }
     }
