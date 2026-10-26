@@ -49,6 +49,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         UNUserNotificationCenter.current().delegate = self
         // "Fährst du heute?" with its answers (#397).
         UNUserNotificationCenter.current().setNotificationCategories([CommuteNotifier.notificationCategory])
+        // Silent pushes, needing no permission, tell the saved journeys' CloudKit sync about changes elsewhere (#427).
+        application.registerForRemoteNotifications()
         return true
     }
 
@@ -154,6 +156,7 @@ struct RootView: View {
                 SettingsView()
             }
         }
+        .adaptiveTabStyle()
         .tint(.brand)
         .overlay {
             if model.showsTrainSearch {
@@ -173,6 +176,7 @@ struct RootView: View {
                 model.syncLiveActivity()
                 model.startRefreshing()
                 Task { await model.syncTraewelling() }
+                model.fetchCloudJourneys()
                 Task { await model.syncFollowedCheckinPush() }
                 // Picks up events deleted in the calendar and a switch to full access in iOS Settings.
                 model.scheduleCalendarSync()
@@ -314,6 +318,18 @@ struct RootView: View {
             shareLinkError = error.localizedDescription
         } catch {
             shareLinkError = "Die Reise konnte nicht geladen werden. Prüf deine Internetverbindung und öffne den Link noch einmal."
+        }
+    }
+}
+
+private extension View {
+    /// On the iPad the tabs can also be shown as a sidebar. Not on the Mac: switching back from the sidebar there
+    /// left the tab bar over the sidebar's old place, cut off by the window's edge.
+    @ViewBuilder func adaptiveTabStyle() -> some View {
+        if ProcessInfo.processInfo.isiOSAppOnMac {
+            tabViewStyle(.tabBarOnly)
+        } else {
+            tabViewStyle(.sidebarAdaptable)
         }
     }
 }

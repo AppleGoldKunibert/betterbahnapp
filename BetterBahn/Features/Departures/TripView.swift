@@ -54,6 +54,7 @@ struct TripView: View {
             }
             .padding(.horizontal)
             .padding(.bottom, 16)
+            .readableWidth()
         }
         .background { AppBackground() }
         .safeAreaInset(edge: .bottom) {

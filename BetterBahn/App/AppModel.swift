@@ -41,7 +41,7 @@ final class AppModel {
             // Every saved journey with all its stops is encoded here, which takes noticeably long
             // once there are many, so it happens off the main thread.
             Storage.saveInBackground(savedJourneys, key: "savedJourneys")
-            savedJourneysCloud.localChange(from: oldValue, to: savedJourneys)
+            journeyCloud.localChange(from: oldValue, to: savedJourneys)
             syncLiveActivity()
             scheduleExitReminderSync()
             scheduleCalendarSync()
@@ -174,7 +174,8 @@ final class AppModel {
         favoriteStations = Storage.load(key: "favoriteStations") ?? []
         recentSearches = Storage.load(key: "recentSearches") ?? []
         recentStations = Storage.load(key: "recentStations") ?? []
-        savedJourneys = Storage.load(key: "savedJourneys") ?? []
+        // Sorted again: journeys an earlier build took over from iCloud were stored unsorted.
+        savedJourneys = (Storage.load(key: "savedJourneys") ?? []).sorted(by: SavedJourney.departsEarlier)
         regularTrips = Storage.load(key: "regularTrips") ?? []
         trackedManualCheckins = Storage.load(key: "trackedManualCheckins") ?? []
         checkinStatusIDs = Storage.load(key: "checkinStatusIDs") ?? [:]
@@ -209,13 +210,15 @@ final class AppModel {
     @ObservationIgnored private var cloudObserver: NSObjectProtocol?
     @ObservationIgnored private let favoriteStationsCloud = CloudList<Station>(key: "favoriteStations")
     @ObservationIgnored private let recentSearchesCloud = CloudList<RecentSearch>(key: "recentSearches")
-    @ObservationIgnored private let savedJourneysCloud = CloudList<SavedJourney>(key: "savedJourneys")
+    /// Saved journeys sync through CloudKit instead (#427): as one key-value store value they outgrew its 1 MB.
+    @ObservationIgnored private let journeyCloud = JourneyCloudSync()
     @ObservationIgnored private let regularTripsCloud = CloudList<RegularTrip>(key: "regularTrips")
 
     /// Merges with what iCloud already has (uploading what only exists here, e.g. on the first
     /// launch after updating) and takes over changes made on the user's other devices.
     private func startCloudSync() {
-        applyCloudChange(keys: ["favoriteStations", "recentSearches", "savedJourneys", "regularTrips", AppSettings.cloudKey])
+        applyCloudChange(keys: ["favoriteStations", "recentSearches", "regularTrips", AppSettings.cloudKey])
+        journeyCloud.start(model: self)
         cloudObserver = CloudSync.observe { [weak self] keys in
             self?.applyCloudChange(keys: keys)
         }
@@ -228,13 +231,15 @@ final class AppModel {
         if keys.contains("recentSearches") {
             recentSearchesCloud.receive(local: recentSearches) { recentSearches = $0 }
         }
-        if keys.contains("savedJourneys") {
-            savedJourneysCloud.receive(local: savedJourneys) { savedJourneys = $0 }
-        }
         if keys.contains("regularTrips") {
             regularTripsCloud.receive(local: regularTrips) { regularTrips = $0 }
         }
         if keys.contains(AppSettings.cloudKey) { settings.receiveCloudValue() }
+    }
+
+    /// Takes over journeys changed on the other devices (when the app comes to the foreground).
+    func fetchCloudJourneys() {
+        journeyCloud.fetch()
     }
 
     var trainPicker: TrainPicker { TrainPicker(provider: provider) }
@@ -676,7 +681,7 @@ final class AppModel {
         // One assignment, so the list is persisted and synced once rather than twice.
         var updated = savedJourneys
         updated.append(SavedJourney(journey: journey, search: search))
-        updated.sort { ($0.journey.departure?.planned ?? .distantPast) < ($1.journey.departure?.planned ?? .distantPast) }
+        updated.sort(by: SavedJourney.departsEarlier)
         savedJourneys = updated
     }
 
@@ -1313,7 +1318,7 @@ final class AppModel {
     /// Past journeys; once their live data is gone (`SavedJourney.liveDataLifetime`) shown as planned,
     /// without any delay.
     var pastJourneys: [SavedJourney] {
-        savedJourneys.filter(\.isFinished).reversed().map { entry in
+        savedJourneys.filter(\.isFinished).sorted { SavedJourney.departsEarlier($1, $0) }.map { entry in
             guard let arrival = entry.journey.arrival?.planned,
                   arrival.addingTimeInterval(SavedJourney.liveDataLifetime) < .now else { return entry }
             var entry = entry
@@ -1543,6 +1548,11 @@ nonisolated struct SavedJourney: Codable, Hashable, Identifiable {
 
     /// Finished 10 minutes after the (realtime) arrival.
     var isFinished: Bool { journey.isOver() }
+
+    /// The order of `AppModel.savedJourneys`: by planned departure.
+    static func departsEarlier(_ a: SavedJourney, _ b: SavedJourney) -> Bool {
+        (a.journey.departure?.planned ?? .distantPast) < (b.journey.departure?.planned ?? .distantPast)
+    }
 }
 
 /// Where a saved journey's train is right now.

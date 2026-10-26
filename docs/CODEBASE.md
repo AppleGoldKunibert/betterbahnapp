@@ -40,6 +40,14 @@ in `project.pbxproj`: new files join their target automatically.
   tab (`AppModel.boardStationToOpen`) or the route search on Verbindungen (`AppModel.searchToOpen`). All links go
   through `RootView.open(_:)`, also Spotlight results (`CSSearchableItemActionType`, `AppModel.linkToOpen`). Scene-phase
   refresh start/stop.
+- iPad and Mac ("Designed for iPad", #425): `TARGETED_DEVICE_FAMILY = 1,2`, all orientations on the iPad, tabs
+  `.sidebarAdaptable` on the iPad, `.tabBarOnly` on the Mac (switching back from the sidebar left the tab bar over
+  the sidebar's old place there). `Shared/SplitNavigation.swift`: `SplitNavigationStack` (Verbindungen, Abfahrten) is a
+  `NavigationSplitView` in regular width with the tab's first page in its own stack on the left (no sidebar toggle);
+  its links are `RouteLink`s, which there set the right column's path (`openSplitRoute`) and elsewhere are
+  `NavigationLink(value:)`. `SplitNavigationView` (settings) is a `NavigationSplitView`
+  with view links; both are a plain `NavigationStack` on the iPhone. `readableWidth()` caps detail pages at 720 pt.
+  Live Activity settings are hidden off the iPhone (`LiveActivityManager.isSupported`).
 - `App/AppModel.swift` – the single `@Observable` app state (`.environment(model)`). Owns `CombinedProvider`,
   `TraewellingClient`, `TrainPicker`, `JourneyReplanner`, `DBShareImporter`, `TrainRoutePlanner`, `TicketFilter`,
   `TimetablesClient`, `JourneyRefresher`; persisted lists (favorites, recents, `savedJourneys`, `traewellingTrips`,
@@ -52,8 +60,14 @@ in `project.pbxproj`: new files join their target automatically.
 - **Persistence:** `Storage.save/load(key:)` → `Application Support/BetterBahn/<key>.json` (migrates old
   UserDefaults); `AppSettings` uses UserDefaults. Saved data must stay decodable across versions (e.g.
   `DataSource.dbRest` kept only for decoding).
-- `App/CloudSync.swift` – iCloud KV mirror: favorites, recents and saved journeys per item via `CloudList` (Kit
+- `App/CloudSync.swift` – iCloud KV mirror: favorites, recents and regular trips per item via `CloudList` (Kit
   `SyncedList`: newest change per item wins, removals kept as dates); `AppSettings` as one snapshot, newer wins.
+- `App/JourneyCloudSync.swift` (#427) – saved journeys through CloudKit (`CKSyncEngine`, private database, zone
+  `SavedJourneys`, one `SavedJourney` record per journey: lzfse JSON in `journey`, `changedAt`); the KV store's 1 MB
+  was outgrown. Kit `RecordSync`: local diff → saves/deletes, the later `changedAt` wins (`serverRecordChanged` too).
+  Engine state, dates and record system fields in `Storage` (`cloudKit-journey*`); first start uploads all; fetched on
+  foreground and by silent push (`remote-notification`). Container `iCloud.<bundle ID>`: deploy the schema in the
+  CloudKit Console before a release.
   Träwelling token via iCloud Keychain (`TokenStore`); a 401 retries with a token another device refreshed.
   Access tokens last an hour: a quick answer in the token's last 20 min renews it early (`renewEarlyIfFast`), and a
   refresh runs in a background task (`App/BackgroundTime.swift`, `TraewellingClient.KeepAlive`).

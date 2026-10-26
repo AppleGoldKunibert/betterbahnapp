@@ -88,6 +88,7 @@ nonisolated struct ConnectionSearch: Hashable, Codable {
 
 struct ConnectionsView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var from: Station?
     @State private var to: Station?
     @State private var viaRows: [ViaRow] = []
@@ -122,7 +123,7 @@ struct ConnectionsView: View {
     }
 
     var body: some View {
-        NavigationStack(path: $path) {
+        SplitNavigationStack(path: $path) {
             ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 20) {
@@ -141,7 +142,7 @@ struct ConnectionsView: View {
                         recentSection
                     }
                     HStack(spacing: 10) {
-                        NavigationLink(value: ConnectionsRoute.pastTrips) {
+                        RouteLink(value: ConnectionsRoute.pastTrips) {
                             Label("Vergangene Fahrten", systemImage: "clock.arrow.circlepath")
                                 .font(.subheadline.weight(.semibold))
                                 .frame(maxWidth: .infinity)
@@ -171,19 +172,6 @@ struct ConnectionsView: View {
                     Button("Zug suchen", systemImage: "train.side.front.car") { model.showsTrainSearch = true }
                 }
             }
-            .navigationDestination(for: ConnectionsRoute.self) { route in
-                switch route {
-                case .search(let search):
-                    JourneyResultsView(search: search)
-                case .journey(let journey):
-                    JourneyDetailView(journey: journey.journey, finalDestination: journey.finalDestination,
-                                      readOnly: journey.readOnly, title: journey.title, search: journey.search)
-                case .pastTrips:
-                    PastTripsView()
-                case .collection:
-                    CollectionView()
-                }
-            }
             .scrollDismissesKeyboard(.interactively)
             .closesStationSearchOnOutsideTap($focused)
             .onAppear { onlyValidTicket = model.settings.ticketFilterByDefault }
@@ -208,11 +196,28 @@ struct ConnectionsView: View {
             .onChange(of: model.followedCheckinToOpen, initial: true) { _, id in
                 if id != nil { path = [] }
             }
+        } destination: { route in
+            switch route {
+            case .search(let search):
+                JourneyResultsView(search: search)
+            case .journey(let journey):
+                JourneyDetailView(journey: journey.journey, finalDestination: journey.finalDestination,
+                                  readOnly: journey.readOnly, title: journey.title, search: journey.search)
+            case .pastTrips:
+                PastTripsView()
+            case .collection:
+                CollectionView()
+            }
+        } placeholder: {
+            SplitPlaceholder(title: "Verbindungen", systemImage: "arrow.triangle.swap",
+                             message: "Such eine Verbindung oder wähl eine deiner Reisen.")
         }
         .toolbar(showsJourney ? .hidden : .automatic, for: .tabBar)
     }
 
+    /// A journey hides the tab bar on the iPhone; next to the search on the iPad it stays.
     private var showsJourney: Bool {
+        guard sizeClass != .regular else { return false }
         if case .journey = path.last { return true }
         return false
     }
@@ -517,10 +522,11 @@ struct ConnectionsView: View {
         let via = viaRows.compactMap { row in row.station.map { ViaWaypoint(station: $0, minStayMinutes: row.minStayMinutes, products: perLeg ? legProducts[row.id] ?? all : nil) } }
         model.remember(from: from, to: to)
         // Via routing only supports "depart at" — an arrival deadline doesn't compose with per-stop minimum stays.
-        path.append(.search(ConnectionSearch(from: from, to: to, via: via, date: useNow ? .now : date,
+        // Replaces what is open: on the iPad the search stays visible next to earlier results.
+        path = [.search(ConnectionSearch(from: from, to: to, via: via, date: useNow ? .now : date,
                                      isArrival: via.isEmpty ? isArrival : false, onlyValidTicket: onlyValidTicket,
                                      products: perLeg ? legProducts[Self.startLegID] ?? all : products,
-                                     maxTransfers: maxTransfers, withBike: model.settings.searchWithBike)))
+                                     maxTransfers: maxTransfers, withBike: model.settings.searchWithBike))]
     }
 }
 

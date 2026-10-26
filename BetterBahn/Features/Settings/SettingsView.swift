@@ -17,7 +17,7 @@ struct SettingsView: View {
 
     var body: some View {
         @Bindable var settings = model.settings
-        NavigationStack {
+        SplitNavigationView {
             Form {
                 Section {
                     HStack(spacing: 14) {
@@ -115,22 +115,24 @@ struct SettingsView: View {
                         }
                         .onChange(of: settings.exitReminderLead) { model.scheduleExitReminderSync() }
                     }
-                    Toggle(isOn: $settings.liveActivitiesEnabled) {
-                        IconLabel(title: "Live-Aktivitäten", systemImage: "bolt.badge.clock.fill", color: .indigo)
-                    }
-                    .tint(.brand)
-                    .onChange(of: settings.liveActivitiesEnabled) { model.syncLiveActivity() }
-                    if settings.liveActivitiesEnabled {
-                        Toggle(isOn: $settings.liveActivityServerUpdates) {
-                            IconLabel(title: "Live-Aktivität über Server aktualisieren", systemImage: "arrow.trianglehead.2.clockwise",
-                                      color: .indigo)
+                    if LiveActivityManager.isSupported {
+                        Toggle(isOn: $settings.liveActivitiesEnabled) {
+                            IconLabel(title: "Live-Aktivitäten", systemImage: "bolt.badge.clock.fill", color: .indigo)
                         }
                         .tint(.brand)
-                        .onChange(of: settings.liveActivityServerUpdates) {
-                            // Whether an activity gets updates from our server is fixed when it starts.
-                            Task {
-                                await model.liveActivities.restart()
-                                model.syncLiveActivity()
+                        .onChange(of: settings.liveActivitiesEnabled) { model.syncLiveActivity() }
+                        if settings.liveActivitiesEnabled {
+                            Toggle(isOn: $settings.liveActivityServerUpdates) {
+                                IconLabel(title: "Live-Aktivität über Server aktualisieren", systemImage: "arrow.trianglehead.2.clockwise",
+                                          color: .indigo)
+                            }
+                            .tint(.brand)
+                            .onChange(of: settings.liveActivityServerUpdates) {
+                                // Whether an activity gets updates from our server is fixed when it starts.
+                                Task {
+                                    await model.liveActivities.restart()
+                                    model.syncLiveActivity()
+                                }
                             }
                         }
                     }
@@ -142,7 +144,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Meine Reisen")
                 } footer: {
-                    Text(settings.liveActivitiesEnabled
+                    Text(settings.liveActivitiesEnabled && LiveActivityManager.isSupported
                          ? "Wir sagen dir Bescheid bei Ausfällen, Gleiswechseln und verpassten Anschlüssen – und kurz bevor du aussteigen musst. Über unseren Server zeigt die Live-Aktivität auch bei geschlossener App aktuelle Zeiten und Gleise. Er bekommt dafür deine Reise bis zur Ankunft."
                          : "Wir sagen dir Bescheid bei Ausfällen, Gleiswechseln und verpassten Anschlüssen – und kurz bevor du aussteigen musst.")
                 }
@@ -346,6 +348,9 @@ struct SettingsView: View {
             } message: {
                 Text("Favoriten, gespeicherte Reisen und deine Anmeldung bleiben erhalten.")
             }
+        } placeholder: {
+            SplitPlaceholder(title: "Einstellungen", systemImage: "gearshape",
+                             message: "Wähl links einen Bereich.")
         }
     }
 
