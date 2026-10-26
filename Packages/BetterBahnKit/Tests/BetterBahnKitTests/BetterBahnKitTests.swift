@@ -1287,6 +1287,45 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(TransitousProvider.joining(first, with: elsewhere) == nil)
     }
 
+    /// EC 47 Berlin → Warszawa (2026-10-26): DB's trip ends at Rzepin, PKP's "EIC 47" runs from Frankfurt (Oder).
+    /// It is joined from Rzepin on, and the train keeps DB's name.
+    @Test func joinsAContinuationThatStartsBeforeTheBorder() throws {
+        func date(_ value: String) -> Date { ISO8601DateFormatter().date(from: value)! }
+        func stop(_ id: String, _ name: String, arrival: String?, departure: String?, at coordinate: Coordinate? = nil) -> Stopover {
+            Stopover(station: Station(id: id, name: name, coordinate: coordinate, evaNumber: nil, source: .transitous),
+                     arrival: arrival.map { TimeInfo(planned: date($0), actual: nil) },
+                     departure: departure.map { TimeInfo(planned: date($0), actual: nil) },
+                     arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+        }
+        let frankfurt = Coordinate(latitude: 52.336, longitude: 14.546), rzepin = Coordinate(latitude: 52.350, longitude: 14.815)
+        let warszawa = Coordinate(latitude: 52.251, longitude: 21.052)
+        let first = Trip(id: "20261026_11:44_de-DELFI_1", line: Line(name: "EC 47", number: "47", product: .longDistance, operatorName: "DB Fernverkehr AG"),
+                         direction: "Rzepin", stopovers: [
+            stop("de-DELFI_de:11000:8011102", "Berlin Gesundbrunnen", arrival: nil, departure: "2026-10-26T10:44:00Z"),
+            stop("de-DELFI_de:12053:8010113", "Frankfurt (Oder)", arrival: "2026-10-26T11:47:00Z", departure: "2026-10-26T11:50:00Z"),
+            stop("de-DELFI_pl:unknown:EVANR-5100082", "Rzepin", arrival: "2026-10-26T12:07:00Z", departure: nil, at: rzepin),
+        ], cancelled: false, remarks: [], source: .transitous)
+        var next = Trip(id: "pkp-eic47", line: Line(name: "EIC 47 Berlin-Warszawa-Express", number: "47", product: .longDistance, operatorName: "PKP Intercity"),
+                        direction: "Warszawa Wschodnia", stopovers: [
+            stop("pl-PKP-Intercity_1", "Frankfurt (Oder)", arrival: nil, departure: "2026-10-26T11:50:00Z", at: frankfurt),
+            stop("pl-PKP-Intercity_2", "Rzepin", arrival: "2026-10-26T12:07:00Z", departure: "2026-10-26T12:11:00Z", at: rzepin),
+            stop("pl-PKP-Intercity_3", "Warszawa Wschodnia", arrival: "2026-10-26T16:30:00Z", departure: nil, at: warszawa),
+        ], cancelled: false, remarks: [], source: .transitous)
+        next.geometry = [frankfurt, rzepin, warszawa]
+
+        let joined = try #require(TransitousProvider.joining(first, with: next))
+        #expect(joined.stopovers.map(\.station.name) == ["Berlin Gesundbrunnen", "Frankfurt (Oder)", "Rzepin", "Warszawa Wschodnia"])
+        #expect(joined.stopovers[2].departure?.planned == date("2026-10-26T12:11:00Z"))
+        #expect(joined.line?.name == "EC 47")
+        #expect(joined.direction == "Warszawa Wschodnia")
+        // The map line goes on from Rzepin, not back to Frankfurt (Oder).
+        #expect(joined.geometry == [rzepin, warszawa])
+        // One ending at the border carries nothing on.
+        var ending = next
+        ending.stopovers = Array(next.stopovers.prefix(2))
+        #expect(TransitousProvider.joining(first, with: ending) == nil)
+    }
+
     /// RJ 171 (2026-10-17): DB's data has the delay in Czechia (Děčín +11, Praha +10), Transitous' trip of the Czech
     /// railways has no live time at all. bahn.expert's fills the Czech stops, and only those.
     @Test func fillsCzechLiveTimesFromBahnExpert() {
@@ -3607,6 +3646,29 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(formation.units == [.init(model: "IC 1", number: nil, name: nil)])
         let sequence = BahnDeClient.coachSequence(from: response, category: "IC", number: 1189)
         #expect(sequence.groups.map(\.unit) == [nil])
+    }
+
+    /// EC 47 Berlin → Warszawa (2026-10-26) showed "3× IC 1": its PKP coaches come in three groups with UIC
+    /// classes and no numbers. They are no DB series; DB's own IC 1 coaches still are.
+    @Test func foreignCoachesAreNoIC1() throws {
+        let json = #"""
+        {"groups": [
+            {"name": "Zug_47_EC_Lok_1", "transport": {"category": "EC", "number": 47},
+             "vehicles": [{"vehicleID": "PP_PKP 193-00012", "type": {"category": "LOCOMOTIVE", "constructionType": "193"}}]},
+            {"name": "Zug_47_EC_265_267", "transport": {"category": "EC", "number": 47},
+             "vehicles": [{"vehicleID": "", "type": {"category": "PASSENGERCARRIAGE_ECONOMY_CLASS", "constructionType": "Bvmz"}},
+                          {"vehicleID": "", "type": {"category": "PASSENGERCARRIAGE_ECONOMY_CLASS", "constructionType": "Bvmz"}}]},
+            {"name": "Zug_47_EC_268_270", "transport": {"category": "EC", "number": 47},
+             "vehicles": [{"vehicleID": "", "type": {"category": "PASSENGERCARRIAGE_ECONOMY_CLASS", "constructionType": "Bvmz"}}]},
+            {"name": "Zug_47_EC_271_272", "transport": {"category": "EC", "number": 47},
+             "vehicles": [{"vehicleID": "", "type": {"category": "DININGCAR", "constructionType": "WRm"}},
+                          {"vehicleID": "", "type": {"category": "PASSENGERCARRIAGE_FIRST_CLASS", "constructionType": "Avmz"}}]}
+        ]}
+        """#
+        let response = try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data(json.utf8))
+        let formation = BahnDeClient.formation(from: response, category: "EC", number: 47)
+        #expect(formation.modelSummary == nil)
+        #expect(BahnDeClient.model(constructionTypes: ["B2091", "A1091"], groupName: "IC450007", category: "EC") == "IC 1")
     }
 
     /// #312: a reserved coach is looked up within the part that runs as the reserved train, and

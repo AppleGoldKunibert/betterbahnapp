@@ -65,28 +65,40 @@ extension TransitousProvider {
 
     /// `first` and `next` as one run: the stop where `first` ends arrives with `first` and leaves with
     /// `next`. The train goes by the continuation's name when that names it otherwise (the Czech "RJ 171"
-    /// for DB's "ICE 171"), the first's staying as `alternateName`. Nil when `next` doesn't start where
-    /// `first` ends.
+    /// for DB's "ICE 171"), the first's staying as `alternateName`. `next` may start before that stop (PKP's
+    /// "EIC 47" from Frankfurt (Oder), where DB's EC 47 ends at Rzepin): it is joined from there. Nil when
+    /// `next` doesn't call where `first` ends or ends there.
     static func joining(_ first: Trip, with next: Trip) -> Trip? {
-        guard var border = first.stopovers.last, let start = next.stopovers.first, border.station.isSamePlace(as: start.station),
-              next.stopovers.count >= 2 else { return nil }
+        guard var border = first.stopovers.last,
+              let startIndex = next.stopovers.firstIndex(where: { $0.station.isSamePlace(as: border.station) }),
+              startIndex < next.stopovers.count - 1 else { return nil }
+        let start = next.stopovers[startIndex]
         border.departure = start.departure
         border.departurePlatform = start.departurePlatform
         border.departureCancelled = start.departureCancelled
         if border.access == .exitOnly { border.access = start.access }
         var joined = first
-        joined.stopovers = Array(first.stopovers.dropLast()) + [border] + next.stopovers.dropFirst()
+        joined.stopovers = Array(first.stopovers.dropLast()) + [border] + next.stopovers.dropFirst(startIndex + 1)
         joined.direction = next.direction ?? next.destination?.displayName
         joined.cancelled = first.cancelled || next.cancelled
         joined.remarks = first.remarks + next.remarks.filter { !first.remarks.contains($0) }
         joined.line = lineAfterBorder(first.line, next.line)
-        switch (first.geometry, next.geometry) {
+        let onward = startIndex == 0 ? next.geometry : next.geometry.map { geometry(of: $0, from: border.station) }
+        switch (first.geometry, onward) {
         case let (a?, b?): joined.geometry = a + b
         case let (a?, nil): joined.geometry = a
         case let (nil, b?): joined.geometry = b
         case (nil, nil): joined.geometry = nil
         }
         return joined
+    }
+
+    /// `geometry` from its point nearest to `station`; whole when the station has no coordinate.
+    static func geometry(of geometry: [Coordinate], from station: Station) -> [Coordinate] {
+        guard let coordinate = station.coordinate,
+              let nearest = geometry.indices.min(by: { geometry[$0].distance(to: coordinate) < geometry[$1].distance(to: coordinate) })
+        else { return geometry }
+        return Array(geometry[nearest...])
     }
 
     /// The continuation's line when it is a long-distance train of another name, else `first`'s.
