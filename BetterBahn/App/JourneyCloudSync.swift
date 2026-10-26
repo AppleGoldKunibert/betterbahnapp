@@ -42,12 +42,20 @@ final class JourneyCloudSync {
         let configuration = CKSyncEngine.Configuration(database: CKContainer.default().privateCloudDatabase,
                                                        stateSerialization: state, delegate: self)
         engine = CKSyncEngine(configuration)
+        Self.log.info("Started (\(state == nil ? "first start" : "resumed", privacy: .public)) with \(model.savedJourneys.count) journeys")
         if state == nil {
             uploadAll()
         } else {
             queue(waiting)
         }
         waiting = RecordSync.Changes(saved: [], removed: [])
+        Task {
+            let status = try? await CKContainer.default().accountStatus()
+            // 1 available, 3 no account, 2 restricted, 4 temporarily unavailable, 0 unknown.
+            Self.log.info("iCloud account status: \(status?.rawValue ?? -1)")
+        }
+        // The scene was already active before the engine existed: take over what changed meanwhile right away.
+        fetch()
     }
 
     /// Looks for journeys changed on the other devices (when the app comes to the foreground).
@@ -249,6 +257,7 @@ extension JourneyCloudSync: nonisolated CKSyncEngineDelegate {
         case .stateUpdate(let update):
             Storage.save(update.stateSerialization, key: Self.stateKey)
         case .accountChange(let change):
+            Self.log.info("Account change: \(String(describing: change.changeType), privacy: .public)")
             switch change.changeType {
             case .signIn:
                 await accountChanged(signedIn: true)
@@ -261,7 +270,13 @@ extension JourneyCloudSync: nonisolated CKSyncEngineDelegate {
             for deletion in changes.deletions where deletion.zoneID.zoneName == Self.zoneName {
                 await zoneDeleted(reupload: deletion.reason == .encryptedDataReset)
             }
+        case .sentDatabaseChanges(let sent):
+            Self.log.info("Sent zones: \(sent.savedZones.count) saved, \(sent.failedZoneSaves.count) failed")
+            for failure in sent.failedZoneSaves {
+                Self.log.error("Saving zone failed: \(String(describing: failure.error), privacy: .public)")
+            }
         case .fetchedRecordZoneChanges(let changes):
+            Self.log.info("Fetched \(changes.modifications.count) journeys, \(changes.deletions.count) deletions")
             let fetched = changes.modifications.map { RemoteJourney($0.record) }
             let deleted = changes.deletions.map(\.recordID.recordName)
             let pendingSaves = Set(syncEngine.state.pendingRecordZoneChanges.compactMap { change -> String? in
@@ -270,6 +285,7 @@ extension JourneyCloudSync: nonisolated CKSyncEngineDelegate {
             })
             await apply(fetched, deleted: deleted, pendingSaves: pendingSaves)
         case .sentRecordZoneChanges(let sent):
+            Self.log.info("Sent \(sent.savedRecords.count) journeys, \(sent.failedRecordSaves.count) failed, \(sent.deletedRecordIDs.count) deleted")
             let saved = sent.savedRecords.map { RemoteJourney($0) }
             await didSend(saved: saved, deleted: sent.deletedRecordIDs.map(\.recordName))
             for failure in sent.failedRecordSaves {
@@ -285,6 +301,8 @@ extension JourneyCloudSync: nonisolated CKSyncEngineDelegate {
                     Self.log.error("Saving \(name, privacy: .public) failed: \(String(describing: failure.error), privacy: .public)")
                 }
             }
+        case .didFetchChanges:
+            Self.log.info("Fetch done")
         default:
             break
         }
