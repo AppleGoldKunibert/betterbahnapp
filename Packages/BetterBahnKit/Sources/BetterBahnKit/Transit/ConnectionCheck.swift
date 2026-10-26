@@ -185,6 +185,7 @@ public struct JourneyRefresher: Sendable {
         if !leg.isWalking, leg.tripId != nil, leg.source != .traewelling,
            let trip = try? await provider.trip(for: leg) {
             leg = Self.apply(trip, to: leg)
+            if let beyond = await provider.directionBeyondBorder(of: trip, deadline: .seconds(3)) { leg.direction = beyond }
         }
         let timetables = TimetablesClient.knowsChanges(until: leg.arrival.planned, now: now) ? self.timetables : nil
         // DB Timetables wins wherever it knows the stop; the trip data above only fills in
@@ -312,7 +313,8 @@ public struct JourneyRefresher: Sendable {
             // "Hengelo" for a Berlin–Amsterdam ICE), while the trip runs through to the real end.
             // Only taken from a trip that covers the whole leg, so a trip cut short at a border can't
             // undo the direction of a leg merged across it.
-            if let direction = trip.direction, !direction.isEmpty { leg.direction = direction }
+            // Nor one DB's feed ends at a border ("Rzepin" for the EC 47 to Warszawa): its own end is no direction.
+            if let direction = trip.direction, !direction.isEmpty, !TransitousProvider.mayEndAtBorder(trip) { leg.direction = direction }
         }
         // Keep the intermediate stops as current as the endpoints.
         for index in leg.stopovers.indices {

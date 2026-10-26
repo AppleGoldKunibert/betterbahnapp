@@ -517,8 +517,18 @@ public struct BahnDeClient: Sendable {
         let vehicles = group.vehicles ?? []
         let carriages = vehicles.map { Carriage(vehicleID: $0.vehicleID, constructionType: $0.type?.constructionType) }
         let types = vehicles.compactMap { $0.type?.constructionType }
-        return TrainModel.detect(carriages, category: category).map(\.name)
-            ?? model(constructionTypes: types, groupName: group.name ?? "", category: category)
+        if let detected = TrainModel.detect(carriages, category: category) { return detected.name }
+        // Another railway's coaches (PKP's "Bvmz" on the EC 47 to Warszawa) are no DB series, so no "IC 1" for them.
+        guard vehicles.isEmpty || vehicles.contains(where: isDBVehicle) else { return nil }
+        return model(constructionTypes: types, groupName: group.name ?? "", category: category)
+    }
+
+    /// A DB vehicle: its UIC number is registered in Germany ("61 80 …"), or its construction type is
+    /// DB's code ("B2091", "I4081"). Other railways' coaches come with a UIC class ("Bvmz") and no number.
+    static func isDBVehicle(_ vehicle: SequenceResponse.Group.Vehicle) -> Bool {
+        if let id = vehicle.vehicleID, id.count == 12, id.allSatisfy(\.isNumber) { return id.dropFirst(2).hasPrefix("80") }
+        guard let type = vehicle.type?.constructionType, type.count == 5, type.first?.isLetter == true else { return false }
+        return type.dropFirst().allSatisfy(\.isNumber)
     }
 
     /// The seat-map sheet of one trainset (`SeatMap.sheet`), from its vehicles' UIC numbers and coach numbers.

@@ -329,6 +329,14 @@ public final class CombinedProvider: TransitProvider {
         }) ?? whole
     }
 
+    /// Where `trip` goes when its feed ends it at a border (see `TransitousProvider.directionBeyondBorder(of:)`),
+    /// as far as found within `deadline`.
+    public func directionBeyondBorder(of trip: Trip, deadline: Duration) async -> String? {
+        guard let transitous = primary as? TransitousProvider, trip.source == transitous.source,
+              TransitousProvider.mayEndAtBorder(trip) else { return nil }
+        return (try? await Self.withDeadline(deadline) { await transitous.directionBeyondBorder(of: trip) }) ?? nil
+    }
+
     /// The run of a journey's leg. Transitous' trip IDs only last until the feed is next imported
     /// (DELFI renumbers its trips), so a saved journey's leg then gets a 404 for its train. Such a run
     /// is looked up again on the board at the leg's origin, as the same train leaving at the same planned
