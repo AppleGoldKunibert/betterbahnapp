@@ -1326,6 +1326,43 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(TransitousProvider.joining(first, with: ending) == nil)
     }
 
+    /// EC 47 in a search Berlin Gesundbrunnen → Frankfurt (Oder): DB's feed says "Rzepin", where its trip ends.
+    /// The leg goes where the trip carrying on there goes, looked up once per train.
+    @Test func searchLegsGoBeyondTheBorder() async throws {
+        let json = """
+        [{"mode": "LONG_DISTANCE", "startTime": "2026-10-27T10:44:00Z", "endTime": "2026-10-27T11:47:00Z",
+          "from": {"name": "Berlin Gesundbrunnen", "stopId": "de-DELFI_de:11000:900007102", "lat": 52.55, "lon": 13.39},
+          "to": {"name": "Frankfurt (Oder)", "stopId": "de-DELFI_de:12053:900360000", "lat": 52.34, "lon": 14.55},
+          "tripTo": {"name": "Rzepin", "stopId": "de-DELFI_pl:unknown:EVANR-5100082", "lat": 52.35, "lon": 14.815,
+                     "scheduledArrival": "2026-10-27T12:07:00Z"},
+          "headsign": "Rzepin", "tripId": "20261027_11:44_de-DELFI_3448697619", "displayName": "IC 47", "tripShortName": "IC 47"},
+         {"mode": "LONG_DISTANCE", "startTime": "2026-10-27T10:44:00Z", "endTime": "2026-10-27T11:47:00Z",
+          "from": {"name": "Berlin Gesundbrunnen", "stopId": "de-DELFI_de:11000:900007102", "lat": 52.55, "lon": 13.39},
+          "to": {"name": "Frankfurt (Oder)", "stopId": "de-DELFI_de:12053:900360000", "lat": 52.34, "lon": 14.55},
+          "tripTo": {"name": "Rzepin", "stopId": "de-DELFI_pl:unknown:EVANR-5100082", "lat": 52.35, "lon": 14.815,
+                     "scheduledArrival": "2026-10-27T12:07:00Z"},
+          "headsign": "Rzepin", "tripId": "20261027_11:44_de-DELFI_3448697619", "displayName": "IC 47", "tripShortName": "IC 47"},
+         {"mode": "LONG_DISTANCE", "startTime": "2026-10-27T09:00:00Z", "endTime": "2026-10-27T10:00:00Z",
+          "from": {"name": "Berlin Hbf", "stopId": "de-DELFI_de:11000:900003201", "lat": 52.52, "lon": 13.37},
+          "to": {"name": "Hamburg Hbf", "stopId": "de-DELFI_de:02000:8002549", "lat": 53.55, "lon": 10.0},
+          "tripTo": {"name": "Hamburg-Altona", "stopId": "de-DELFI_de:02000:8002553", "lat": 53.55, "lon": 9.93,
+                     "scheduledArrival": "2026-10-27T10:10:00Z"},
+          "headsign": "Hamburg-Altona", "tripId": "20261027_10:00_de-DELFI_1", "displayName": "ICE 802", "tripShortName": "ICE 802"}]
+        """
+        let legs = try JSONDecoding.decoder.decode([MLeg].self, from: Data(json.utf8))
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [RzepinStopTimesProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let provider = TransitousProvider(http: HTTPClient(session: session))
+        let directions = await provider.directionsBeyondBorder(of: legs)
+        #expect(directions == ["20261027_11:44_de-DELFI_3448697619": "Warszawa Wschodnia"])
+        // One request for the train; a German one is left alone, and the answer is remembered.
+        #expect(RzepinStopTimesProtocol.requests.withLock { $0 } == 1)
+        _ = await provider.directionsBeyondBorder(of: legs)
+        #expect(RzepinStopTimesProtocol.requests.withLock { $0 } == 1)
+    }
+
     /// RJ 171 (2026-10-17): DB's data has the delay in Czechia (Děčín +11, Praha +10), Transitous' trip of the Czech
     /// railways has no live time at all. bahn.expert's fills the Czech stops, and only those.
     @Test func fillsCzechLiveTimesFromBahnExpert() {
@@ -1781,6 +1818,29 @@ private final class RecordingStopTimesProtocol: URLProtocol, @unchecked Sendable
         let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(#"{"stopTimes": []}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+/// Rzepin's departures for the EC 47 (2026-10-27): PKP's "EIC 47" from Frankfurt (Oder) on to Warszawa. Counts the requests.
+private final class RzepinStopTimesProtocol: URLProtocol, @unchecked Sendable {
+    static let requests = Mutex(0)
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.requests.withLock { $0 += 1 }
+        let body = """
+        {"stopTimes": [
+            {"place": {"name": "Rzepin", "stopId": "pl-PKP-Intercity_25809_1_2", "lat": 52.35, "lon": 14.815,
+                       "scheduledArrival": "2026-10-27T12:07:00Z", "scheduledDeparture": "2026-10-27T12:11:00Z"},
+             "mode": "LONG_DISTANCE", "headsign": "Warszawa Wschodnia", "tripId": "pkp-eic47",
+             "displayName": "EIC 47 Berlin-Warszawa-Express", "tripShortName": "47 Berlin-Warszawa-Express"}
+        ]}
+        """
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}

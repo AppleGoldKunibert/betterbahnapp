@@ -15,8 +15,8 @@ public struct TransitousProvider: TransitProvider {
     let czechTimetableCache = ExpiringCache<[Stopover]?>()
     /// `twinStops(for:)` answers per leg (see `TwinTrainStops.swift`).
     let twinStopsCache = ExpiringCache<[Stopover]?>()
-    /// `continuationID(of:)` answers per trip: the trip ID that goes on, "" for none (see `TripContinuation.swift`).
-    let continuationCache = ExpiringCache<String>()
+    /// `borderContinuation(of:…)` answers per trip: the trip that goes on at the border and where it goes (see `TripContinuation.swift`).
+    let continuationCache = ExpiringCache<BorderContinuation>()
 
     public init(baseURL: URL = TransitousProvider.defaultBaseURL, http: HTTPClient = HTTPClient()) {
         self.baseURL = baseURL
@@ -1246,9 +1246,18 @@ public struct TransitousProvider: TransitProvider {
             if !modes.isEmpty { items.append(.init(name: "transitModes", value: modes.sorted().joined(separator: ","))) }
         }
         let response = try await http.get(url("v5/plan", items), as: MPlanResponse.self, headers: ["User-Agent": HTTPClient.identifyingUserAgent])
+        // A train DB's feed ends at the border (EC 47 "Rzepin") goes where the trip carrying on there goes.
+        let beyondBorder = await directionsBeyondBorder(of: response.itineraries.flatMap(\.legs))
         return JourneyPage(
             journeys: response.itineraries
-                .map { Journey(legs: Self.mergeThroughTrainLegs($0.legs.map { $0.toLeg() }), source: .transitous) }
+                .map { itinerary in
+                    let legs = itinerary.legs.map { leg in
+                        var converted = leg.toLeg()
+                        if let id = leg.tripId, let direction = beyondBorder[id] { converted.direction = direction }
+                        return converted
+                    }
+                    return Journey(legs: Self.mergeThroughTrainLegs(legs), source: .transitous)
+                }
                 .filter(query.allows),
             earlierCursor: response.previousPageCursor,
             laterCursor: response.nextPageCursor,
@@ -1478,13 +1487,18 @@ public struct TransitousProvider: TransitProvider {
         let candidates = entries.enumerated().filter { $0.element.line.product == .highSpeed || $0.element.line.product == .longDistance }
         guard !candidates.isEmpty else { return entries }
         var result = entries
-        await withTaskGroup(of: (Int, Trip?).self) { group in
+        await withTaskGroup(of: (Int, Trip?, String?).self) { group in
             for (index, entry) in candidates {
-                group.addTask { (index, try? await self.trip(id: entry.tripId)) }
+                group.addTask {
+                    let trip = try? await self.trip(id: entry.tripId)
+                    // A trip DB's feed ends at the border (EC 47 "Rzepin") goes where the one carrying on goes.
+                    guard kind == .departures, let trip else { return (index, trip, nil) }
+                    return (index, trip, await self.directionBeyondBorder(of: trip))
+                }
             }
-            for await (index, trip) in group {
+            for await (index, trip, beyondBorder) in group {
                 guard let trip else { continue }
-                if kind == .departures, let direction = trip.direction, !direction.isEmpty {
+                if kind == .departures, let direction = beyondBorder ?? trip.direction, !direction.isEmpty {
                     result[index].otherEnd = direction
                 } else if kind == .arrivals, let origin = trip.origin {
                     result[index].otherEnd = origin.displayName
