@@ -654,7 +654,7 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         config.protocolClasses = [MainStationGeocodeProtocol.self]
         let session = URLSession(configuration: config)
         defer { session.invalidateAndCancel() }
-        let provider = TransitousProvider(http: HTTPClient(session: session))
+        let provider = TransitousProvider(http: HTTPClient(session: session), extraQueryDeadline: .seconds(60))
 
         let stations = try await provider.searchStations("Potsdam")
 
@@ -968,7 +968,7 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(TransitousProvider.sizeScore(forImportance: 1) == 8)
     }
 
-    /// A slow extra query ("Po Bahnhof") is dropped after `extraQueryDeadline` instead of holding up
+    /// A slow extra query ("Po Bahnhof") is dropped after `defaultExtraQueryDeadline` instead of holding up
     /// the whole search until `CombinedProvider` gives up on it and falls back to bahn.de's noise.
     @Test func slowExtraQueriesDontHoldUpTheSearch() async throws {
         let config = URLSessionConfiguration.ephemeral
@@ -1151,7 +1151,7 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         config.protocolClasses = [NearbyGeocodeProtocol.self]
         let session = URLSession(configuration: config)
         defer { session.invalidateAndCancel() }
-        let provider = TransitousProvider(http: HTTPClient(session: session))
+        let provider = TransitousProvider(http: HTTPClient(session: session), extraQueryDeadline: .seconds(60))
         let berlin = Coordinate(latitude: 52.52, longitude: 13.405)
 
         let ost = try await provider.searchStations("ost", near: berlin)
@@ -2470,7 +2470,7 @@ private final class TwinTrainProtocol: URLProtocol, @unchecked Sendable {
         config.protocolClasses = [Ril100GeocodeProtocol.self]
         let session = URLSession(configuration: config)
         defer { session.invalidateAndCancel() }
-        let provider = TransitousProvider(http: HTTPClient(session: session))
+        let provider = TransitousProvider(http: HTTPClient(session: session), extraQueryDeadline: .seconds(60))
 
         let stations = try await provider.searchStations(StationSearch(parsing: "ff"), near: nil)
 
@@ -2500,7 +2500,7 @@ private final class TwinTrainProtocol: URLProtocol, @unchecked Sendable {
         config.protocolClasses = [AbroadGeocodeProtocol.self]
         let session = URLSession(configuration: config)
         defer { session.invalidateAndCancel() }
-        let provider = TransitousProvider(http: HTTPClient(session: session))
+        let provider = TransitousProvider(http: HTTPClient(session: session), extraQueryDeadline: .seconds(60))
 
         let stations = try await provider.searchStations(StationSearch(parsing: "xnac"), near: nil)
 

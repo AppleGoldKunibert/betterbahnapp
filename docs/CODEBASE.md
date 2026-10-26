@@ -269,7 +269,7 @@ in `project.pbxproj`: new files join their target automatically.
   position and name (`matches`), shortest code shown, option `AppSettings.ril100Enabled`. Abroad (X + country letter,
   Z for eastern Europe, from DB's XLSX) entries have no positions (`Entry.isAbroad`): matched by `exactNameKey`, or
   `looseNameKey` inside `countryBounds`; position beats name. `Ril100.preload()` and `Ril100.codes(for:)` run off the
-  main thread (#301). A typed code's plain search gets `extraQueryDeadline`, so it can't hit `CombinedProvider`'s 2.5 s.
+  main thread (#301). A typed code's plain search gets `extraQueryDeadline` (an init parameter, 1.8 s by default; mocked tests that expect every hit pass a generous one), so it can't hit `CombinedProvider`'s 2.5 s.
 - `Transit/Transitous/` – MOTIS client + `M*` DTOs, station-name cleanup, board dedup. Departures add arrivals going
   on as "Nur Ausstieg" (`continuingWithoutBoarding`, #105). Search ranking `searchRank`: text match vs. nearness/size;
   also asks "<nearby town> <query>" (`NearbyTowns`, offline, so coordinates never leave the device), nearby stations
