@@ -254,7 +254,7 @@ struct CollectionButton: View {
     @State private var newCount = 0
 
     var body: some View {
-        NavigationLink(value: ConnectionsRoute.collection) {
+        RouteLink(value: ConnectionsRoute.collection) {
             Label("Sammlung", systemImage: "square.grid.3x3.fill")
                 .font(.subheadline.weight(.semibold))
                 .frame(maxWidth: .infinity)

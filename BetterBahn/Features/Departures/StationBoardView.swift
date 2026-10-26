@@ -86,7 +86,7 @@ struct StationBoardView: View {
                             VStack(spacing: 0) {
                                 ForEach(Array(visible.enumerated()), id: \.element.id) { index, entry in
                                     if index > 0 { Divider().padding(.leading, 84) }
-                                    NavigationLink(value: entry) {
+                                    RouteLink(value: entry) {
                                         BoardRow(entry: entry)
                                     }
                                     .buttonStyle(.plain)

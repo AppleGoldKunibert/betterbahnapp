@@ -43,8 +43,9 @@ in `project.pbxproj`: new files join their target automatically.
 - iPad and Mac ("Designed for iPad", #425): `TARGETED_DEVICE_FAMILY = 1,2`, all orientations on the iPad, tabs
   `.sidebarAdaptable` on the iPad, `.tabBarOnly` on the Mac (switching back from the sidebar left the tab bar over
   the sidebar's old place there). `Shared/SplitNavigation.swift`: `SplitNavigationStack` (Verbindungen, Abfahrten) is a
-  `NavigationSplitView` in regular width with the tab's first page in its own stack on the left (path binding always
-  reads empty and forwards what links set to the right column's path; no sidebar toggle). `SplitNavigationView` (settings) is a `NavigationSplitView`
+  `NavigationSplitView` in regular width with the tab's first page in its own stack on the left (no sidebar toggle);
+  its links are `RouteLink`s, which there set the right column's path (`openSplitRoute`) and elsewhere are
+  `NavigationLink(value:)`. `SplitNavigationView` (settings) is a `NavigationSplitView`
   with view links; both are a plain `NavigationStack` on the iPhone. `readableWidth()` caps detail pages at 720 pt.
   Live Activity settings are hidden off the iPhone (`LiveActivityManager.isSupported`).
 - `App/AppModel.swift` – the single `@Observable` app state (`.environment(model)`). Owns `CombinedProvider`,

@@ -142,7 +142,7 @@ struct ConnectionsView: View {
                         recentSection
                     }
                     HStack(spacing: 10) {
-                        NavigationLink(value: ConnectionsRoute.pastTrips) {
+                        RouteLink(value: ConnectionsRoute.pastTrips) {
                             Label("Vergangene Fahrten", systemImage: "clock.arrow.circlepath")
                                 .font(.subheadline.weight(.semibold))
                                 .frame(maxWidth: .infinity)
