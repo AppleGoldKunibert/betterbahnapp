@@ -174,7 +174,8 @@ final class AppModel {
         favoriteStations = Storage.load(key: "favoriteStations") ?? []
         recentSearches = Storage.load(key: "recentSearches") ?? []
         recentStations = Storage.load(key: "recentStations") ?? []
-        savedJourneys = Storage.load(key: "savedJourneys") ?? []
+        // Sorted again: journeys an earlier build took over from iCloud were stored unsorted.
+        savedJourneys = (Storage.load(key: "savedJourneys") ?? []).sorted(by: SavedJourney.departsEarlier)
         regularTrips = Storage.load(key: "regularTrips") ?? []
         trackedManualCheckins = Storage.load(key: "trackedManualCheckins") ?? []
         checkinStatusIDs = Storage.load(key: "checkinStatusIDs") ?? [:]
@@ -1308,7 +1309,7 @@ final class AppModel {
     /// Past journeys; once their live data is gone (`SavedJourney.liveDataLifetime`) shown as planned,
     /// without any delay.
     var pastJourneys: [SavedJourney] {
-        savedJourneys.filter(\.isFinished).reversed().map { entry in
+        savedJourneys.filter(\.isFinished).sorted { SavedJourney.departsEarlier($1, $0) }.map { entry in
             guard let arrival = entry.journey.arrival?.planned,
                   arrival.addingTimeInterval(SavedJourney.liveDataLifetime) < .now else { return entry }
             var entry = entry
