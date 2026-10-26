@@ -226,12 +226,21 @@ public actor TraewellingClient {
     let searchBudget: TraewellingSearchBudget
     /// How long the last station search that reached Träwelling took, to tell a slow connection.
     private var lastStationSearch: Duration?
+    /// An answer at least this quick means good reception, so the token is renewed early (`renewEarlyIfFast`).
+    let fastAnswer: Duration
+    /// Asks the system for time to finish a token refresh and hands back what ends it again.
+    public typealias KeepAlive = @Sendable () async -> @Sendable () async -> Void
+    let keepAlive: KeepAlive?
 
+    /// `keepAlive` keeps the app running while a token refresh waits for its answer (a background task in the app).
     public init(config: TraewellingConfig, http: HTTPClient = HTTPClient(timeout: 30), store: TokenStore = TokenStore(),
-                searchBudget: TraewellingSearchBudget = TraewellingSearchBudget()) {
+                searchBudget: TraewellingSearchBudget = TraewellingSearchBudget(),
+                fastAnswer: Duration = .milliseconds(1500), keepAlive: KeepAlive? = nil) {
         self.config = config
         self.http = http
         self.searchBudget = searchBudget
+        self.fastAnswer = fastAnswer
+        self.keepAlive = keepAlive
         self.store = store
         store.migrateToSynchronizable()
         self.token = store.load()
@@ -301,11 +310,44 @@ public actor TraewellingClient {
 
     private func refreshToken(_ refresh: String) async throws {
         if refresh == rejectedRefreshToken { throw OAuthError.sessionExpired }
-        if let refreshing { return try await refreshing.value }
-        let task = Task { try await self.exchangeRefreshToken(refresh) }
+        try await startRefresh(refresh).value
+    }
+
+    /// Träwelling has issued the new token before its answer arrives, so a refresh cut off by iOS
+    /// suspending the app ends the login: `keepAlive` asks for the time to finish it.
+    private func startRefresh(_ refresh: String) -> Task<Void, Error> {
+        if let refreshing { return refreshing }
+        let task = Task {
+            defer { refreshing = nil }
+            let endKeepAlive = await keepAlive?()
+            do {
+                try await exchangeRefreshToken(refresh)
+            } catch {
+                await endKeepAlive?()
+                throw error
+            }
+            await endKeepAlive?()
+        }
         refreshing = task
-        defer { refreshing = nil }
-        try await task.value
+        return task
+    }
+
+    /// How long before the access token runs out a quick answer renews it.
+    static let earlyRenewal: TimeInterval = 20 * 60
+
+    /// Access tokens last an hour and every refresh token works once, so a refresh whose answer is lost
+    /// (a tunnel, a dead spot) ends the login. Renewing in the token's last 20 minutes right after a quick
+    /// answer does it while the reception is good, and requests in a dead spot later find a valid token.
+    private func renewEarlyIfFast(answeredIn elapsed: Duration) {
+        guard elapsed < fastAnswer, refreshing == nil, let token, !token.isExpired,
+              token.expiresAt.timeIntervalSinceNow < Self.earlyRenewal,
+              let refresh = token.refreshToken, refresh != rejectedRefreshToken else { return }
+        _ = startRefresh(refresh)
+    }
+
+    /// Waits for a refresh in progress, for tests of the early renewal.
+    func refreshFinished() async {
+        _ = try? await refreshing?.value
     }
 
     /// Träwelling answers a refresh token it no longer accepts with 400 `invalid_grant`. Access tokens last
@@ -376,9 +418,14 @@ public actor TraewellingClient {
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue(HTTPClient.identifyingUserAgent, forHTTPHeaderField: "User-Agent")
         do {
-            return try await http.sendRaw(request)
+            let started = ContinuousClock.now
+            let data = try await http.sendRaw(request)
+            renewEarlyIfFast(answeredIn: ContinuousClock.now - started)
+            return data
         } catch TransitError.http(let status, let responseBody) {
             if status == 401 {
+                // An early renewal finishing meanwhile revokes the token this request was sent with.
+                if !isRetry, let refreshing { _ = try? await refreshing.value }
                 // Another device may have refreshed the token meanwhile (it syncs via iCloud
                 // Keychain): retry with that one instead of deleting it for every device.
                 if !isRetry, let stored = store.load(), stored.accessToken != accessToken {

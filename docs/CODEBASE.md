@@ -55,6 +55,8 @@ in `project.pbxproj`: new files join their target automatically.
 - `App/CloudSync.swift` – iCloud KV mirror: favorites, recents and saved journeys per item via `CloudList` (Kit
   `SyncedList`: newest change per item wins, removals kept as dates); `AppSettings` as one snapshot, newer wins.
   Träwelling token via iCloud Keychain (`TokenStore`); a 401 retries with a token another device refreshed.
+  Access tokens last an hour: a quick answer in the token's last 20 min renews it early (`renewEarlyIfFast`), and a
+  refresh runs in a background task (`App/BackgroundTime.swift`, `TraewellingClient.KeepAlive`).
 - `App/TicketStore.swift` – `SavedTicket` (`DBTicket` + its `SavedJourney.id`), only on this device in
   `Application Support/BetterBahn/Tickets/` (list + PDFs, file protection, **not** synced). `importTickets` matches
   a saved journey or imports the booking via `DBShareImporter.journey(from:)`.
