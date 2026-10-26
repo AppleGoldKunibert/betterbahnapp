@@ -17,8 +17,9 @@ public struct BigStation: Sendable, Hashable {
 
 /// The collection ("Sammlung", #384): special liveries, series, named trainsets and big stations the user
 /// has travelled with or been at, from the same rides as the travel map (saved journeys and Träwelling
-/// check-ins). Trains only count where the trainset that ran is known (a formation remembered for a saved
-/// journey); stations count for boarding, alighting and changing there.
+/// check-ins). Trains only count where a formation is remembered for a saved journey: liveries and
+/// trainsets need the Tz that ran, series also count the planned series; stations count for boarding,
+/// alighting and changing there.
 public struct TravelCollection: Sendable, Hashable {
     public enum Category: String, CaseIterable, Sendable, Hashable, Identifiable {
         case liveries, series, trainsets, stations

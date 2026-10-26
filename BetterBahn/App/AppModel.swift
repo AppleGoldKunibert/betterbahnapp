@@ -965,8 +965,8 @@ final class AppModel {
         return legs.map { RideMatch.rememberedFormation(for: $0, in: remembered) }
     }
 
-    /// Keeps a leg's formation in every saved journey riding it, so its Tz and Taufname stay known
-    /// (and sync through iCloud) once the train has run.
+    /// Keeps a leg's formation in every saved journey riding it, so its Tz and Taufname (or at least
+    /// its planned series) stay known (and sync through iCloud) once the train has run.
     func rememberFormation(_ formation: TrainFormation, for leg: Leg) {
         let key = leg.formationKey
         var updated = savedJourneys
