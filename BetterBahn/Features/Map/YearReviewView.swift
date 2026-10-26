@@ -483,7 +483,7 @@ extension AppModel {
         let (lines, _) = await cachedGeometries(for: legs)
         guard !Task.isCancelled else { return nil }
         let geometries = Dictionary(lines.map { ($0.leg.id, $0.coordinates) }, uniquingKeysWith: { first, _ in first })
-        let formations = legs.map { rememberedFormation(for: $0) }
+        let formations = rememberedFormations(for: legs)
         let review = await Task.detached(priority: .userInitiated) {
             YearReview(year: year, rides: zip(legs, formations).map { leg, formation in
                 YearReview.Ride(leg: leg, geometry: geometries[leg.id], formation: formation)

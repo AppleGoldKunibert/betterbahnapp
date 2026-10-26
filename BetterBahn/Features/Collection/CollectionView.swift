@@ -276,12 +276,13 @@ extension AppModel {
     private static let collectionSeenKey = "collectionSeenIDs"
 
     /// The collection from every ride the travel map draws; trainsets from the formations remembered for
-    /// saved journeys.
+    /// saved journeys, also where a Träwelling check-in replaced the saved leg.
     func travelCollection() async -> TravelCollection {
         await loadTraewellingTrips()
         let all = TravelMapSelection(range: .all, includeTraewelling: settings.traewellingEnabled)
-        let rides = travelledLegs(of: mapJourneys(for: all)).map { entry in
-            TravelCollection.Ride(leg: entry.leg, formation: rememberedFormation(for: entry.leg))
+        let legs = travelledLegs(of: mapJourneys(for: all)).map(\.leg)
+        let rides = zip(legs, rememberedFormations(for: legs)).map { leg, formation in
+            TravelCollection.Ride(leg: leg, formation: formation)
         }
         return await Task.detached(priority: .userInitiated) { TravelCollection(rides: rides) }.value
     }

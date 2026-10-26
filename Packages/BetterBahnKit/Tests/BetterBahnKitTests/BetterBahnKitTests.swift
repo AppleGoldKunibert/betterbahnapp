@@ -3422,7 +3422,7 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
 }
 
 @Suite struct BahnDeFormationTests {
-    /// A saved journey keeps the Tz once seen; formations without one, or unchanged ones, change nothing.
+    /// A saved journey keeps the Tz once seen; formations without one, or unchanged ones, don't replace it.
     @Test func remembersFormationsNamingATz() {
         let tz = TrainFormation(units: [TrainFormation.Unit(model: "ICE 4", number: "9457", name: "Bundesrepublik Deutschland")])
         let modelOnly = TrainFormation(units: [TrainFormation.Unit(model: "ICE 4", number: nil)])
@@ -3433,6 +3433,19 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         let swapped = TrainFormation(units: [TrainFormation.Unit(model: "ICE 4", number: "9018")])
         #expect(TrainFormation.remembering(swapped, for: "a", in: stored) == ["a": swapped])
         #expect(TrainFormation.remembering(swapped, for: "b", in: stored) == ["a": tz, "b": swapped])
+    }
+
+    /// The planned series is kept for the collection while no Tz is known, and a Tz seen later replaces it.
+    @Test func remembersPlannedSeriesUntilATzIsSeen() {
+        let planned = TrainFormation(units: [TrainFormation.Unit(model: "ICE 3neo", number: nil)])
+        let other = TrainFormation(units: [TrainFormation.Unit(model: "ICE 3 Velaro", number: nil)])
+        let tz = TrainFormation(units: [TrainFormation.Unit(model: "ICE 3neo", number: "8005")])
+        let stored = TrainFormation.remembering(planned, for: "a", in: nil)
+        #expect(stored == ["a": planned])
+        #expect(TrainFormation.remembering(other, for: "a", in: stored) == nil)
+        #expect(TrainFormation.remembering(tz, for: "a", in: stored) == ["a": tz])
+        #expect(TrainFormation.remembering(TrainFormation(units: [TrainFormation.Unit(model: nil, number: nil)]),
+                                           for: "a", in: nil) == nil)
     }
 
     /// IC 1189 kept showing "Tz 450007" remembered by an older version once bahn.de named it an IC 1.
@@ -5856,6 +5869,21 @@ private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
         #expect(RideMatch.isSameRide(checkin, saved))
         #expect(RideMatch.deduplicated([Journey(legs: [checkin], source: .traewelling)],
                                        against: [Journey(legs: [saved], source: .transitous)]).isEmpty)
+    }
+
+    @Test func checkinGetsTheTzRememberedForItsSavedLeg() {
+        let saved = leg("ICE 645", from: "Köln Hbf", to: "Hannover Hbf",
+                        departure: "2026-03-04T09:00:00Z", arrival: "2026-03-04T11:30:00Z")
+        let checkin = leg("ICE645", from: "Köln Messe/Deutz", to: "Hannover Hbf",
+                          departure: "2026-03-04T09:12:00Z", arrival: "2026-03-04T11:30:00Z")
+        let other = leg("ICE 647", from: "Köln Hbf", to: "Hannover Hbf",
+                        departure: "2026-03-04T09:15:00Z", arrival: "2026-03-04T11:45:00Z")
+        let tz = TrainFormation(units: [TrainFormation.Unit(model: "ICE 4", number: "9018")])
+        let remembered = [(legs: [saved], formations: [saved.formationKey: tz])]
+        #expect(RideMatch.rememberedFormation(for: saved, in: remembered) == tz)
+        #expect(RideMatch.rememberedFormation(for: checkin, in: remembered) == tz)
+        // Another train on the same stretch at the same time isn't the one the Tz was seen on.
+        #expect(RideMatch.rememberedFormation(for: other, in: remembered) == nil)
     }
 
     @Test func differentNameButSameStretchMatches() {

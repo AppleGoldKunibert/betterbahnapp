@@ -57,16 +57,20 @@ public struct TrainFormation: Codable, Sendable, Hashable {
     public var isIC1: Bool { !units.isEmpty && units.allSatisfy { $0.model == "IC 1" && $0.number == nil } }
 
     /// `stored` with `formation` kept for `key` (see `Leg.formationKey`), so a saved journey still
-    /// shows which trainsets ran once bahn.de and bahn.expert no longer answer for the train. Only a
-    /// formation naming a Tz is kept, and an IC 1 drops the bogus Tz remembered for it; nil when there
-    /// is nothing to change.
+    /// shows which trainsets ran once bahn.de and bahn.expert no longer answer for the train. A
+    /// formation naming a Tz always wins; one naming only the series (the plan) is kept only while
+    /// nothing is remembered yet, so the collection's series count a ride whose Tz was never seen. An
+    /// IC 1 drops the bogus Tz remembered for it; nil when there is nothing to change.
     public static func remembering(_ formation: TrainFormation, for key: String,
                                    in stored: [String: TrainFormation]?) -> [String: TrainFormation]? {
-        if formation.isIC1, var updated = stored, updated[key] != nil {
+        if formation.isIC1 {
+            guard var updated = stored, updated[key] != nil else { return nil }
             updated[key] = nil
             return updated
         }
-        guard formation.unitDescription != nil, stored?[key] != formation else { return nil }
+        let namesTz = formation.unitDescription != nil
+        let namesSeries = formation.units.contains { $0.model != nil }
+        guard namesTz || (namesSeries && stored?[key] == nil), stored?[key] != formation else { return nil }
         var updated = stored ?? [:]
         updated[key] = formation
         return updated
