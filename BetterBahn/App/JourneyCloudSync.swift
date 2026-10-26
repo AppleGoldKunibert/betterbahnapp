@@ -131,6 +131,8 @@ final class JourneyCloudSync {
             }
         }
         if changed {
+            // Kept in order of departure, like a journey saved here: the lists show it that way.
+            journeys.sort(by: SavedJourney.departsEarlier)
             isApplyingRemote = true
             model.savedJourneys = journeys
             isApplyingRemote = false

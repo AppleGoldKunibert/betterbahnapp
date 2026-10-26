@@ -680,7 +680,7 @@ final class AppModel {
         // One assignment, so the list is persisted and synced once rather than twice.
         var updated = savedJourneys
         updated.append(SavedJourney(journey: journey, search: search))
-        updated.sort { ($0.journey.departure?.planned ?? .distantPast) < ($1.journey.departure?.planned ?? .distantPast) }
+        updated.sort(by: SavedJourney.departsEarlier)
         savedJourneys = updated
     }
 
@@ -1538,6 +1538,11 @@ nonisolated struct SavedJourney: Codable, Hashable, Identifiable {
 
     /// Finished 10 minutes after the (realtime) arrival.
     var isFinished: Bool { journey.isOver() }
+
+    /// The order of `AppModel.savedJourneys`: by planned departure.
+    static func departsEarlier(_ a: SavedJourney, _ b: SavedJourney) -> Bool {
+        (a.journey.departure?.planned ?? .distantPast) < (b.journey.departure?.planned ?? .distantPast)
+    }
 }
 
 /// Where a saved journey's train is right now.
