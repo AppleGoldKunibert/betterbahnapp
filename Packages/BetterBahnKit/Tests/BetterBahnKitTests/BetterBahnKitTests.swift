@@ -6325,6 +6325,18 @@ private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
         var merged = leg("ICE 144", "Berlin", "Amsterdam Centraal", dep: 0, arr: 360)
         merged.direction = "Amsterdam Centraal"
         #expect(JourneyRefresher.apply(cutShort, to: merged).direction == "Amsterdam Centraal")
+
+        // Nor does DB's trip of the EC 47, which its feed ends at Rzepin: the search found Warszawa.
+        let rzepin = Station(id: "de-DELFI_pl:unknown:EVANR-5100082", name: "Rzepin", coordinate: nil, evaNumber: nil, source: .transitous)
+        let ec47 = Trip(id: "20261027_11:44_de-DELFI_1", line: Line(name: "IC 47", number: "47", product: .longDistance, operatorName: nil),
+                        direction: "Rzepin",
+                        stopovers: [stop("Berlin", 0), stop("Osnabrück", 180),
+                                    Stopover(station: rzepin, arrival: TimeInfo(planned: base.addingTimeInterval(200 * 60), actual: nil),
+                                             departure: nil, arrivalPlatform: nil, departurePlatform: nil, cancelled: false)],
+                        cancelled: false, remarks: [], source: .transitous)
+        var searched = leg("ICE 144", "Berlin", "Osnabrück", dep: 0, arr: 180)
+        searched.direction = "Warszawa Wschodnia"
+        #expect(JourneyRefresher.apply(ec47, to: searched).direction == "Warszawa Wschodnia")
     }
 }
 
