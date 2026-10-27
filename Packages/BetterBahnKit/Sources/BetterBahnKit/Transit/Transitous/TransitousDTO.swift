@@ -44,11 +44,42 @@ struct MPlace: Decodable {
         return description.hasPrefix("Steig") && !description.contains("Gleis")
     }
 
+    /// The track numbers `description` names: "Bahnsteig Gleis 2+3" -> 2 and 3, "Gleis 7-10 (DB)" -> 7 to 10,
+    /// "Gleis 2, Gleis 3", "Gleise 5+6", "Gleis1/11", "Gleis 2b" -> 2. Empty when it names none.
+    var descriptionTracks: Set<Int> {
+        guard let description else { return [] }
+        var tracks: Set<Int> = []
+        for list in description.matches(of: /Gleise?\s*(\d+[a-zA-Z]*(?:\s*[+\/,-]\s*\d+[a-zA-Z]*)*)/) {
+            for part in list.1.matches(of: /(\d+)[a-zA-Z]*(?:\s*-\s*(\d+))?/) {
+                guard let first = Int(part.1) else { continue }
+                let last = part.2.flatMap { Int($0) } ?? first
+                tracks.formUnion(first <= last && last - first <= 20 ? Array(first...last) : [first, last])
+            }
+        }
+        return tracks
+    }
+
+    /// Whether `scheduledTrack` is the feed's own number for the stop rather than its track: VRS's stops
+    /// around Köln carry "85" at Köln Hbf, "84" to "94" at Köln Messe/Deutz and so on, while `description`
+    /// names the real platform ("Bahnsteig Gleis 2+3"). Reported for the RE8 showing "Gleis 85" at Köln Hbf
+    /// instead of Gleis 3. Only a number the description doesn't name at all counts.
+    var hasStopNumberAsTrack: Bool {
+        let tracks = descriptionTracks
+        guard !tracks.isEmpty, let scheduledTrack,
+              let number = scheduledTrack.firstMatch(of: /^\s*(\d+)/).flatMap({ Int($0.1) }) else { return false }
+        return !tracks.contains(number)
+    }
+
     /// The platform as `PlatformInfo`; `actual` only when `realtime` is set. For a train (`isRail`)
-    /// a bus bay's letter is dropped, so DB's own Timetables schedule can fill in the real track
-    /// instead (see `TimetablesClient.fillMissingPlatforms`) rather than showing a wrong one.
+    /// a bus bay's letter (`isBusBay`) and a stop's own number (`hasStopNumberAsTrack`) are dropped,
+    /// so DB's own Timetables schedule can fill in the real track instead (see
+    /// `TimetablesClient.fillMissingPlatforms`) rather than showing a wrong one. A live track other
+    /// than that number stays: DB's live data puts the real one there (Siegburg/Bonn "80" -> "3").
     func platform(isRail: Bool, realtime: Bool = true) -> PlatformInfo {
         guard !(isRail && isBusBay) else { return PlatformInfo(planned: nil, actual: nil) }
+        if isRail && hasStopNumberAsTrack {
+            return PlatformInfo(planned: nil, actual: realtime && track != scheduledTrack ? track : nil)
+        }
         return PlatformInfo(planned: scheduledTrack ?? descriptionTrack,
                             actual: realtime ? (track ?? descriptionTrack) : nil)
     }
