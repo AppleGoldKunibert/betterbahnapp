@@ -136,7 +136,9 @@ extension AppModel {
         let user = try await traewelling.currentUser()
         let config = FollowedCheckinPush.config(from: traewelling.config)
         let pkce = PKCE()
-        let callback = try await authenticate(config.authorizeURL(pkce: pkce), config.callbackScheme)
+        // A webhook, when the Worker takes one, brings likes and fellow travellers right away.
+        let webhook = await FollowedCheckinPush().loginParameters()
+        let callback = try await authenticate(config.authorizeURL(pkce: pkce, extra: webhook), config.callbackScheme)
         let code = try TraewellingConfig.authorizationCode(in: callback, pkce: pkce)
         // A sign-up left from turning it off offline, or one whose login can't read notifications, ends
         // first, so its notifications don't come twice.
