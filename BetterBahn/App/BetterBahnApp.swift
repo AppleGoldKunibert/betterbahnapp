@@ -63,7 +63,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         model?.didRegisterForPush(deviceToken: nil)
     }
 
-    /// A followed user's check-in notification (#266) opens that check-in, a regular trip's question (#397) is
+    /// A followed user's check-in notification (#266) opens that check-in, a like or a fellow traveller (#447) the
+    /// check-in it is about, a regular trip's question (#397) is
     /// answered (iOS waits for the journey to be saved after "Ja"), a push about a regular trip's journey opens it;
     /// the others just open the app.
     ///
@@ -73,24 +74,32 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
                                             withCompletionHandler completionHandler: @escaping () -> Void) {
         let userInfo = response.notification.request.content.userInfo
         let statusID = FollowedCheckinNotifier.statusID(in: userInfo)
+        let ownStatusID = FollowedCheckinNotifier.ownStatusID(in: userInfo)
+        let companionStatusID = FollowedCheckinNotifier.companionStatusID(in: userInfo)
         let question = CommuteNotifier.question(in: userInfo)
         let retry = CommuteNotifier.isRetry(userInfo)
         let journeyID = CommuteNotifier.journeyID(in: userInfo)
         let action = response.actionIdentifier
         let done = MainThreadCompletion(completionHandler)
         Task { @MainActor in
-            await self.handleNotification(action: action, statusID: statusID, question: question, retry: retry, journeyID: journeyID)
+            await self.handleNotification(action: action, statusID: statusID, ownStatusID: ownStatusID, companionStatusID: companionStatusID,
+                                          question: question, retry: retry, journeyID: journeyID)
             done.call()
         }
     }
 
-    private func handleNotification(action: String, statusID: Int?, question: CommuteQuestion?, retry: Bool, journeyID: String?) async {
+    private func handleNotification(action: String, statusID: Int?, ownStatusID: Int?, companionStatusID: Int?,
+                                    question: CommuteQuestion?, retry: Bool, journeyID: String?) async {
         if let question {
             await model?.answerCommuteQuestion(question, action: action, retry: retry)
         } else if let journeyID {
             model?.openCommuteJourney(id: journeyID)
         } else if let statusID {
             await model?.openFollowedCheckin(id: statusID)
+        } else if let ownStatusID {
+            await model?.openOwnCheckin(id: ownStatusID)
+        } else if let companionStatusID {
+            await model?.openCompanionCheckin(id: companionStatusID)
         }
     }
 

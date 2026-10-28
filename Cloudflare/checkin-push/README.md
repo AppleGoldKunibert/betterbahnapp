@@ -1,29 +1,38 @@
 # Check-in notifications (`betterbahn-push`)
 
-Push notifications for new check-ins of the people a Träwelling user follows (#266, Settings →
-Träwelling "Check-ins von Gefolgten melden"). iOS decides on its own when an app may look in the
+Push notifications for new check-ins of the people a Träwelling user follows (#266) and about the
+user's own check-ins (#447: likes, people checking in on the same train), Settings → Träwelling →
+"Mitteilungen". iOS decides on its own when an app may look in the
 background, often hours later, so the app doesn't look itself; this Worker does.
 
-1. Turning the setting on signs in with Träwelling a second time, for this Worker only and with just
-   `read-statuses`. The app sends the authorization code with its PKCE verifier, its APNs device token
-   and the Träwelling user ID to `POST /subscriptions` (App Attest token) and gets `{ id, secret }`
-   back. The Worker exchanges the code itself, so this login never exists on the device. The app's own
+1. Turning the first of them on signs in with Träwelling a second time, for this Worker only and with
+   just `read-statuses` and `read-notifications` (logins from before #447 have only `read-statuses`; the
+   app signs in again when one of those turns on likes or fellow travellers). The app sends the
+   authorization code with its PKCE verifier, its APNs device token, the Träwelling user ID and `kinds`
+   (`followed`, `likes`, `companions`; missing means `followed`) to `POST /subscriptions` (App Attest
+   token) and gets `{ id, secret }` back. The Worker exchanges the code itself, so this login never exists on the device. The app's own
    login stays untouched: Träwelling's access tokens last an hour and each refresh token works once,
    so the two can't share one.
 2. Every minute the cron trigger looks at the subscriptions due in that minute (each one every
-   `INTERVAL_MINUTES`, default 2): it renews the login when it expired, loads the dashboard (first
-   page) and sends an APNs notification for each check-in of someone else that is new and under way
-   or leaving within 20 minutes (the app's rule). The first look only remembers what runs already.
-3. `PUT /subscriptions/<id> { secret, deviceToken, sandbox }` keeps the device token current (the app
-   sends it on every start); `DELETE /subscriptions/<id> { secret }` (setting off, Träwelling logout)
-   deletes the row and ends the Worker's Träwelling login.
+   `INTERVAL_MINUTES`, default 2): it renews the login when it expired. For `followed` it loads the
+   dashboard (first page) and sends an APNs notification for each check-in of someone else that is new
+   and under way or leaving within 20 minutes (the app's rule). For `likes` and `companions` it loads
+   Träwelling's notifications (first page) and sends one for each new `StatusLiked` ("Anna gefällt dein
+   Check-in", `ownStatusID`) and `UserJoinedConnection` ("Bob fährt mit dir", `companionStatusID`; it
+   replaces a followed push about the same check-in). The first look only remembers what is there
+   already; a kind turned on again starts over.
+3. `PUT /subscriptions/<id> { secret, deviceToken, sandbox, kinds }` keeps the device token and kinds
+   current (the app sends them on every start and when a setting changes); `DELETE /subscriptions/<id>
+   { secret }` (all settings off, Träwelling logout) deletes the row and ends the Worker's Träwelling login.
 
 When Träwelling ends the login or APNs says the app is gone, the row is deleted; the app then gets a
 404 and turns the setting off. Stored per device: device token, Träwelling user ID, the login
-(AES-GCM with `TOKEN_KEY`) and the IDs of the check-ins already seen. No location, no names.
+(AES-GCM with `TOKEN_KEY`), the kinds and the IDs of the check-ins and notifications already seen. No
+location, no names.
 
 A D1 write happens only when something changed (a renewed login about once an hour, new check-ins).
-Each look costs one Träwelling request (two when renewing) plus one per notification; the free plan
+Each look costs one Träwelling request per source (dashboard, notifications; one more when renewing)
+plus one per notification; the free plan
 allows 50 outgoing requests and 10 ms CPU per invocation, which fits a few dozen subscriptions per
 minute. Beyond that, switch to Workers Paid.
 
@@ -44,6 +53,10 @@ from 2 hours before the first departure until 10 minutes after the last arrival,
 next 2 hours, and a transfer at risk (as the app's `ConnectionIssue`). The journey is forgotten 30 minutes
 after its arrival and the row deleted when none is left. bahn.de is never asked (#334). Code and tests:
 `commute.mjs`, `node --test Cloudflare/checkin-push/commute.test.mjs`.
+
+A database made before #447 needs the new columns once:
+`npx wrangler d1 execute betterbahn-push --remote --file=migrations/0001_own_checkin_notifications.sql`,
+then `npx wrangler deploy` (before the app version that offers likes and fellow travellers ships).
 
 An existing database needs the new table once:
 `npx wrangler d1 execute betterbahn-push --remote --file=schema.sql` (everything in it is `IF NOT EXISTS`),

@@ -9,8 +9,9 @@ import Testing
 
     @Test func signsUpWithTheAuthorizationCode() async throws {
         PushWorkerProtocol.state = .init()
-        let result = try await push.subscribe(code: "the-code", codeVerifier: "verifier", deviceToken: "abcd", sandbox: true, userID: 42)
-        #expect(result == FollowedCheckinPushSubscription(id: "new-id", secret: "new-secret"))
+        let result = try await push.subscribe(code: "the-code", codeVerifier: "verifier", deviceToken: "abcd", sandbox: true, userID: 42,
+                                              kinds: [.companions, .followed])
+        #expect(result == FollowedCheckinPushSubscription(id: "new-id", secret: "new-secret", readsNotifications: true))
         let request = try #require(PushWorkerProtocol.state.requests.first)
         #expect(request.method == "POST")
         #expect(request.path == "/subscriptions")
@@ -19,20 +20,22 @@ import Testing
         #expect(request.body["deviceToken"] as? String == "abcd")
         #expect(request.body["sandbox"] as? Bool == true)
         #expect(request.body["userId"] as? Int == 42)
+        #expect(request.body["kinds"] as? [String] == ["followed", "companions"])
     }
 
     @Test func reportsASubscriptionTheWorkerNoLongerKnows() async throws {
         PushWorkerProtocol.state = .init()
-        #expect(try await push.update(subscription, deviceToken: "abcd", sandbox: false))
+        #expect(try await push.update(subscription, deviceToken: "abcd", sandbox: false, kinds: [.likes]))
         let request = try #require(PushWorkerProtocol.state.requests.first)
         #expect(request.method == "PUT")
         #expect(request.path == "/subscriptions/sub1")
         #expect(request.body["secret"] as? String == "s3cret")
+        #expect(request.body["kinds"] as? [String] == ["likes"])
 
         PushWorkerProtocol.state = .init(status: 404)
-        #expect(try await push.update(subscription, deviceToken: "abcd", sandbox: false) == false)
+        #expect(try await push.update(subscription, deviceToken: "abcd", sandbox: false, kinds: [.followed]) == false)
         PushWorkerProtocol.state = .init(status: 503)
-        await #expect(throws: TransitError.self) { try await push.update(subscription, deviceToken: "abcd", sandbox: false) }
+        await #expect(throws: TransitError.self) { try await push.update(subscription, deviceToken: "abcd", sandbox: false, kinds: [.followed]) }
     }
 
     @Test func signsOffAndCountsAGoneSubscriptionAsEnded() async throws {
@@ -44,9 +47,30 @@ import Testing
     @Test func asksTheWorkersLoginForReadingOnly() {
         let app = TraewellingConfig()
         let config = FollowedCheckinPush.config(from: app)
-        #expect(config.scopes == ["read-statuses"])
+        #expect(config.scopes == ["read-statuses", "read-notifications"])
         #expect(config.clientID == app.clientID)
         #expect(config.redirectURI == app.redirectURI)
+    }
+
+    /// Likes and fellow travellers need a login that reads notifications (#447); one from before signs in again.
+    @Test func signsInAgainOnlyWhenTheLoginCantReadWhatIsWanted() {
+        let old = FollowedCheckinPushSubscription(id: "a", secret: "b")
+        let new = FollowedCheckinPushSubscription(id: "a", secret: "b", readsNotifications: true)
+        #expect(FollowedCheckinPush.step(for: [.followed], subscription: nil) == .signUp)
+        #expect(FollowedCheckinPush.step(for: [.followed], subscription: old) == .update)
+        #expect(FollowedCheckinPush.step(for: [.followed, .likes], subscription: old) == .signUp)
+        #expect(FollowedCheckinPush.step(for: [.companions], subscription: new) == .update)
+        #expect(FollowedCheckinPush.step(for: [], subscription: new) == .signOff)
+        #expect(FollowedCheckinPush.step(for: [], subscription: nil) == .signOff)
+    }
+
+    /// Sign-ups saved before #447 have no `readsNotifications` yet.
+    @Test func readsSignUpsSavedBeforeLikesAndFellowTravellers() throws {
+        let saved = try JSONDecoder().decode(FollowedCheckinPushSubscription.self, from: Data(#"{"id":"a","secret":"b"}"#.utf8))
+        #expect(saved == FollowedCheckinPushSubscription(id: "a", secret: "b", readsNotifications: false))
+        let again = try JSONDecoder().decode(FollowedCheckinPushSubscription.self,
+                                             from: JSONEncoder().encode(FollowedCheckinPushSubscription(id: "a", secret: "b", readsNotifications: true)))
+        #expect(again.readsNotifications)
     }
 
     @Test func writesTheDeviceTokenAsLowercaseHex() {

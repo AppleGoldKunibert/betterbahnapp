@@ -1,14 +1,15 @@
 // Worker `betterbahn-push`: push notifications for new check-ins of the people a Träwelling user follows
-// (#266), so they arrive even while iOS doesn't let the app look itself.
+// (#266) and about the user's own check-ins (#447: likes, people joining the same train), so they arrive
+// even while iOS doesn't let the app look itself.
 //
 // Turning them on in the app signs in with Träwelling a second time, for this Worker only and with the
-// read-only scope `read-statuses`: the app sends the authorization code here and the Worker keeps that
-// login (encrypted), never the app's own. Träwelling's access tokens last an hour and each refresh token
-// works once, so sharing the app's login would log one of the two out.
+// read-only scopes `read-statuses` and `read-notifications`: the app sends the authorization code here and
+// the Worker keeps that login (encrypted), never the app's own. Träwelling's access tokens last an hour and
+// each refresh token works once, so sharing the app's login would log one of the two out.
 //
-// Every minute the cron trigger looks at the subscriptions due in that minute: Träwelling's dashboard,
-// then an APNs notification for each check-in that is new since the last look. The first look only
-// remembers what runs already.
+// Every minute the cron trigger looks at the subscriptions due in that minute: Träwelling's dashboard for
+// followed check-ins, its notifications for likes and fellow travellers, then an APNs notification for
+// each one that is new since the last look. The first look only remembers what is there already.
 //
 // It also looks after the journeys of regular trips (#397, `/commutes`, see commute.mjs).
 
@@ -20,7 +21,11 @@ export { signProviderToken } from "../shared/apns.mjs";
 
 const TRAEWELLING = "https://traewelling.de";
 const USER_AGENT = "BetterBahn-Push (+https://betterbahn.betterbahn.workers.dev/support)";
-export const SCOPE = "read-statuses";
+export const SCOPE = "read-statuses read-notifications";
+/// What a subscription is notified about: followed check-ins (dashboard), likes on the user's own check-ins
+/// and people checking in on the same train (Träwelling's notifications `StatusLiked`, `UserJoinedConnection`).
+export const KINDS = ["followed", "likes", "companions"];
+const NOTIFICATION_KINDS = ["likes", "companions"];
 const MINUTE = 60;
 /// How many status IDs are remembered: far more than the people followed are ever checked in at once.
 const REMEMBERED = 200;
@@ -32,8 +37,9 @@ const MAX_BODY_BYTES = 16 * 1024;
 
 // MARK: - HTTP
 
-/// POST   /subscriptions      { code, codeVerifier, deviceToken, sandbox, userId } → 201 { id, secret }
-/// PUT    /subscriptions/<id> { secret, deviceToken, sandbox }                     → 200 {} (404: gone)
+/// POST   /subscriptions      { code, codeVerifier, deviceToken, sandbox, userId, kinds } → 201 { id, secret }
+/// PUT    /subscriptions/<id> { secret, deviceToken, sandbox, kinds }                     → 200 {} (404: gone)
+/// `kinds` (see `KINDS`, at least one) defaults to ["followed"], what apps before #447 sign up for.
 /// DELETE /subscriptions/<id> { secret }                                            → 204
 /// PUT    /commutes/<id>      { secret, deviceToken, sandbox, journeys }            → 200 { watched } (see commute.mjs)
 export async function handleRequest(request, env = {}, now = Date.now(), deps = {}) {
@@ -75,14 +81,23 @@ export async function handleRequest(request, env = {}, now = Date.now(), deps = 
         return subscribe(body, env, now, deps.fetch ?? fetch);
     }
     if (!ID_PATTERN.test(id)) return json(404, { error: "not_found" });
-    const row = await env.DB.prepare("SELECT id, secret_hash, tokens FROM subscriptions WHERE id = ?").bind(id).first();
+    const row = await env.DB.prepare("SELECT id, secret_hash, tokens, kinds FROM subscriptions WHERE id = ?").bind(id).first();
     if (!row || typeof body.secret !== "string" || await sha256Hex(body.secret) !== row.secret_hash) {
         return json(404, { error: "not_found" });
     }
     if (request.method === "PUT") {
         if (!isDeviceToken(body.deviceToken)) return json(400, { error: "invalid_device_token" });
-        await env.DB.prepare("UPDATE subscriptions SET device_token = ?, sandbox = ? WHERE id = ?")
-            .bind(body.deviceToken, body.sandbox ? 1 : 0, id).run();
+        const kinds = body.kinds === undefined ? storedKinds(row.kinds) : parseKinds(body.kinds);
+        if (!kinds) return json(400, { error: "invalid_kinds" });
+        // What is turned on again starts over: its first look only remembers. Followed check-ins and the
+        // notifications are remembered apart; any notification seen counts, so only turning the first
+        // notification kind on starts those over.
+        const before = storedKinds(row.kinds);
+        const restartsFollowed = kinds.includes("followed") && !before.includes("followed");
+        const restartsNotifications = readsNotifications(kinds) && !readsNotifications(before);
+        await env.DB.prepare(
+            `UPDATE subscriptions SET device_token = ?, sandbox = ?, kinds = ?${restartsFollowed ? ", known = NULL" : ""}${restartsNotifications ? ", notified = NULL" : ""} WHERE id = ?`,
+        ).bind(body.deviceToken, body.sandbox ? 1 : 0, JSON.stringify(kinds), id).run();
         return json(200, {});
     }
     if (request.method === "DELETE") {
@@ -97,12 +112,14 @@ export async function handleRequest(request, env = {}, now = Date.now(), deps = 
 
 async function subscribe(body, env, now, fetchUpstream) {
     const { code, codeVerifier, deviceToken, sandbox, userId } = body;
+    const kinds = body.kinds === undefined ? ["followed"] : parseKinds(body.kinds);
     if (typeof code !== "string" || !code || code.length > 2048 || typeof codeVerifier !== "string"
         || !/^[A-Za-z0-9._~-]{43,128}$/.test(codeVerifier)) {
         return json(400, { error: "invalid_code" });
     }
     if (!isDeviceToken(deviceToken)) return json(400, { error: "invalid_device_token" });
     if (!Number.isSafeInteger(userId) || userId <= 0) return json(400, { error: "invalid_user" });
+    if (!kinds) return json(400, { error: "invalid_kinds" });
 
     let tokens;
     try {
@@ -121,9 +138,28 @@ async function subscribe(body, env, now, fetchUpstream) {
     const secret = randomHex(32);
     const slot = crypto.getRandomValues(new Uint8Array(1))[0] % 60;
     await env.DB.prepare(
-        "INSERT INTO subscriptions (id, secret_hash, device_token, sandbox, user_id, tokens, known, slot, created) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)",
-    ).bind(id, await sha256Hex(secret), deviceToken, sandbox ? 1 : 0, userId, await encryptTokens(tokens, id, env.TOKEN_KEY), slot, Math.floor(now / 1000)).run();
+        "INSERT INTO subscriptions (id, secret_hash, device_token, sandbox, user_id, tokens, known, kinds, notified, slot, created) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?)",
+    ).bind(id, await sha256Hex(secret), deviceToken, sandbox ? 1 : 0, userId, await encryptTokens(tokens, id, env.TOKEN_KEY),
+        JSON.stringify(kinds), slot, Math.floor(now / 1000)).run();
     return json(201, { id, secret });
+}
+
+/// The kinds asked for, each once in `KINDS`' order; null when one is unknown or none is given.
+export function parseKinds(value) {
+    if (!Array.isArray(value) || value.length === 0 || !value.every(kind => KINDS.includes(kind))) return null;
+    return KINDS.filter(kind => value.includes(kind));
+}
+
+function storedKinds(stored) {
+    try {
+        return parseKinds(JSON.parse(stored)) ?? ["followed"];
+    } catch {
+        return ["followed"];
+    }
+}
+
+function readsNotifications(kinds) {
+    return kinds.some(kind => NOTIFICATION_KINDS.includes(kind));
 }
 
 function isDeviceToken(value) {
@@ -145,7 +181,7 @@ export async function processDueSubscriptions(env, now = Date.now(), deps = {}) 
     const interval = Math.min(60, Math.max(1, Number(env.INTERVAL_MINUTES) || 2));
     const minute = Math.floor(now / 60000) % 60;
     const { results } = await env.DB.prepare(
-        "SELECT id, device_token, sandbox, user_id, tokens, known FROM subscriptions WHERE slot % ? = ?",
+        "SELECT id, device_token, sandbox, user_id, tokens, known, kinds, notified FROM subscriptions WHERE slot % ? = ?",
     ).bind(interval, minute % interval).all();
 
     const apns = new APNs(env, now, fetchUpstream);
@@ -160,10 +196,11 @@ export async function processDueSubscriptions(env, now = Date.now(), deps = {}) 
     return results?.length ?? 0;
 }
 
-/// One look for one subscription. Writes only when something changed (a refreshed login, new check-ins).
+/// One look for one subscription. Writes only when something changed (a refreshed login, new check-ins
+/// or notifications).
 async function check(subscription, env, now, fetchUpstream, apns) {
     const { id } = subscription;
-    const remove = () => env.DB.prepare("DELETE FROM subscriptions WHERE id = ?").bind(id).run();
+    const kinds = storedKinds(subscription.kinds);
     let tokens = await decryptTokens(subscription.tokens, id, env.TOKEN_KEY);
     let refreshed = false;
     const refresh = async () => {
@@ -177,25 +214,55 @@ async function check(subscription, env, now, fetchUpstream, apns) {
         await env.DB.prepare("UPDATE subscriptions SET tokens = ? WHERE id = ?")
             .bind(await encryptTokens(tokens, id, env.TOKEN_KEY), id).run();
     };
-
-    let page;
-    try {
-        if (tokens.expires <= now / 1000 + MINUTE) await refresh();
-        let response = await traewelling("api/v1/dashboard", tokens.access, {}, fetchUpstream);
+    /// A Träwelling page, null when it doesn't answer (the next look tries again). Throws `RejectedGrant`
+    /// when the login ended (revoked on Träwelling, unused too long).
+    const load = async (path) => {
+        if (tokens.expires <= now / 1000 + MINUTE && !refreshed) await refresh();
+        let response = await traewelling(path, tokens.access, {}, fetchUpstream);
         if (response.status === 401 && !refreshed) {
             await refresh();
-            response = await traewelling("api/v1/dashboard", tokens.access, {}, fetchUpstream);
+            response = await traewelling(path, tokens.access, {}, fetchUpstream);
         }
         if (response.status === 401) throw new RejectedGrant();
-        if (!response.ok) return;
-        page = await response.json();
+        return response.ok ? response.json() : null;
+    };
+    /// "sent", or "failed" to try again on the next look; throws `DeviceGone` when APNs no longer knows the app.
+    const send = async (payload, collapseID) => {
+        const result = await apns.send(subscription.device_token, subscription.sandbox, payload, {
+            "apns-topic": env.APNS_TOPIC,
+            "apns-push-type": "alert",
+            "apns-priority": "10",
+            "apns-collapse-id": collapseID,
+        });
+        if (result === "gone") throw new DeviceGone();
+        return result;
+    };
+
+    try {
+        if (kinds.includes("followed")) await checkFollowed(subscription, env, now, load, send);
+        if (readsNotifications(kinds)) await checkNotifications(subscription, kinds, env, load, send);
     } catch (error) {
-        // The login ended (revoked on Träwelling, unused too long): the app learns it from a 404 and
-        // turns the setting off.
-        if (error instanceof RejectedGrant) await remove();
+        // The app learns it from a 404 and turns the settings off.
+        if (error instanceof RejectedGrant || error instanceof DeviceGone) {
+            await env.DB.prepare("DELETE FROM subscriptions WHERE id = ?").bind(id).run();
+            return;
+        }
+        throw error;
+    }
+}
+
+/// New check-ins of the people followed, from the dashboard.
+async function checkFollowed(subscription, env, now, load, send) {
+    let page;
+    try {
+        page = await load("api/v1/dashboard");
+    } catch (error) {
+        if (error instanceof RejectedGrant) throw error;
         return;
     }
+    if (!page) return;
 
+    const { id } = subscription;
     const running = checkedIn(page?.data ?? [], subscription.user_id, now);
     const known = subscription.known ? JSON.parse(subscription.known) : null;
     if (known === null) {
@@ -211,23 +278,50 @@ async function check(subscription, env, now, fetchUpstream, apns) {
     const sent = [];
     for (const status of fresh) {
         const payload = notification(status);
-        const result = await apns.send(subscription.device_token, subscription.sandbox, payload, {
-            "apns-topic": env.APNS_TOPIC,
-            "apns-push-type": "alert",
-            "apns-priority": "10",
-            "apns-collapse-id": `followed-${payload.followedStatusID}`,
-        });
-        if (result === "gone") {
-            await remove();
-            return;
-        }
-        if (result === "sent") sent.push(status.id);
+        if (await send(payload, `followed-${payload.followedStatusID}`) === "sent") sent.push(status.id);
     }
     if (sent.length > 0) await saveKnown(env, id, [...known, ...sent]);
 }
 
+/// Likes on the user's own check-ins and people joining their train, from Träwelling's notifications
+/// (first page, newest first). Every notification seen is remembered, also those of kinds turned off.
+async function checkNotifications(subscription, kinds, env, load, send) {
+    let page;
+    try {
+        page = await load("api/v1/notifications");
+    } catch (error) {
+        if (error instanceof RejectedGrant) throw error;
+        return;
+    }
+    // A login from before #447 can't read them (403): it only gets followed check-ins.
+    if (!page) return;
+
+    const { id } = subscription;
+    const items = (page?.data ?? []).filter(item => typeof item?.id === "string" && item.id.length <= 64);
+    const notified = subscription.notified ? JSON.parse(subscription.notified) : null;
+    if (notified === null) {
+        await saveNotified(env, id, items.map(item => item.id));
+        return;
+    }
+    const seen = new Set(notified);
+    const fresh = items.filter(item => !seen.has(item.id)).reverse();
+    if (fresh.length === 0) return;
+
+    const handled = [];
+    for (const item of fresh) {
+        const push = ownCheckinNotification(item, kinds);
+        if (!push || await send(push.payload, push.collapseID) === "sent") handled.push(item.id);
+    }
+    if (handled.length > 0) await saveNotified(env, id, [...notified, ...handled]);
+}
+
 function saveKnown(env, id, ids) {
     return env.DB.prepare("UPDATE subscriptions SET known = ? WHERE id = ?")
+        .bind(JSON.stringify(ids.slice(-REMEMBERED)), id).run();
+}
+
+function saveNotified(env, id, ids) {
+    return env.DB.prepare("UPDATE subscriptions SET notified = ? WHERE id = ?")
         .bind(JSON.stringify(ids.slice(-REMEMBERED)), id).run();
 }
 
@@ -282,9 +376,54 @@ export function notification(status) {
     };
 }
 
+/// The push for one of Träwelling's notifications, if it is a like or a fellow traveller and that kind is on.
+/// A like opens the user's own check-in (`ownStatusID`), a fellow traveller theirs (`companionStatusID`);
+/// that one replaces a followed check-in's push about the same check-in (same collapse ID).
+export function ownCheckinNotification(item, kinds) {
+    const data = item?.data ?? {};
+    const text = (value) => typeof value === "string" ? value.trim() : "";
+    const person = (user) => text(user?.name) || (text(user?.username) ? `@${text(user.username)}` : "Jemand");
+    const ride = (line, origin, destination) => {
+        const route = `${text(origin) || "?"} → ${text(destination) || "?"}`;
+        return text(line) ? `${text(line)}: ${route}` : route;
+    };
+    const statusID = data.status?.id;
+    if (!Number.isSafeInteger(statusID)) return null;
+    if (item.type === "StatusLiked" && kinds.includes("likes")) {
+        const trip = data.trip ?? {};
+        return {
+            payload: {
+                aps: {
+                    alert: { title: `${person(data.liker)} gefällt dein Check-in`, body: ride(trip.lineName, trip.origin?.name, trip.destination?.name) },
+                    sound: "default",
+                    "thread-id": "own-checkins",
+                },
+                ownStatusID: statusID,
+            },
+            collapseID: `like-${item.id}`.slice(0, 64),
+        };
+    }
+    if (item.type === "UserJoinedConnection" && kinds.includes("companions")) {
+        const checkin = data.checkin ?? {};
+        return {
+            payload: {
+                aps: {
+                    alert: { title: `${person(data.user)} fährt mit dir`, body: ride(checkin.linename, checkin.origin, checkin.destination) },
+                    sound: "default",
+                    "thread-id": "own-checkins",
+                },
+                companionStatusID: statusID,
+            },
+            collapseID: `followed-${statusID}`,
+        };
+    }
+    return null;
+}
+
 // MARK: - Träwelling
 
 class RejectedGrant extends Error {}
+class DeviceGone extends Error {}
 
 function traewelling(path, accessToken, init, fetchUpstream) {
     return fetchUpstream(`${TRAEWELLING}/${path}`, {
