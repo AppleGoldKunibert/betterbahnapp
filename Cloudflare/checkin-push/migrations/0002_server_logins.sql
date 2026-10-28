@@ -11,7 +11,10 @@ CREATE TABLE IF NOT EXISTS logins (
     renewed INTEGER NOT NULL,
     renewing INTEGER,
     used INTEGER NOT NULL,
+    webhook_id INTEGER,
+    webhook TEXT,
     created INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS logins_renewed ON logins (renewed);
 CREATE INDEX IF NOT EXISTS logins_used ON logins (used);
+CREATE INDEX IF NOT EXISTS logins_webhook ON logins (webhook_id);

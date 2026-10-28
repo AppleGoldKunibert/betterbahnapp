@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { signToken, toBase64 } from "../shared/appattest.mjs";
 import { IDLE_RENEWAL, UNUSED, loginAAD, maintainLogins } from "./logins.mjs";
-import { checkedIn, decryptTokens, handleRequest, notification, ownCheckinNotification, parseKinds, processDueSubscriptions, signProviderToken } from "./worker.mjs";
+import { checkedIn, decryptTokens, handleRequest, notification, ownCheckinNotification, parseKinds, processDueSubscriptions, signProviderToken, WEBHOOK_PATH } from "./worker.mjs";
 
 const secret = "test-secret";
 const schema = readFileSync(new URL("./schema.sql", import.meta.url), "utf8");
@@ -354,6 +354,66 @@ test("names who liked or joined, with a fallback for missing names", () => {
     assert.equal(ownCheckinNotification({ id: "n", type: "StatusLiked", data: {} }, ["likes"]), null);
 });
 
+async function signed(body, secret) {
+    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    return Buffer.from(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body))).toString("hex");
+}
+
+async function deliver(env, upstream, { webhookID = 77, secret: webhookSecret = "hook-secret", item = liked("w1"), signature } = {}) {
+    const body = JSON.stringify({ event: "notification", notification: item });
+    return handleRequest(new Request(`https://betterbahn-push.example${WEBHOOK_PATH}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Trwl-Webhook-Id": String(webhookID), Signature: signature ?? await signed(body, webhookSecret) },
+        body,
+    }), env, now, upstream);
+}
+
+test("offers Träwelling's webhook to the login only while it is turned on", async () => {
+    const options = async (extra) => (await handleRequest(new Request("https://betterbahn-push.example/login-options"), await environment(extra), now)).json();
+    assert.deepEqual(await options({}), { authorize: {} });
+    assert.deepEqual(await options({ TRAEWELLING_WEBHOOKS: "true" }), {
+        authorize: { trwl_webhook_url: "https://betterbahn-push.example/traewelling/webhook", trwl_webhook_events: "notification" },
+    });
+});
+
+test("pushes a like from the webhook at once, only with a valid signature, and not again on the next look", async () => {
+    const env = await environment();
+    const signUp = fakeUpstream({ "oauth/token": { body: { ...tokenAnswer().body, webhook: { id: 77, secret: "hook-secret", url: "x" } } } });
+    await subscribed(env, signUp, ["likes"]);
+    const [row] = env.DB.rows();
+    assert.equal(row.webhook_id, 77);
+    assert.ok(!row.webhook.includes("hook-secret"));
+    env.DB.db.prepare("UPDATE subscriptions SET notified = '[]'").run();
+
+    const pushes = [];
+    const upstream = fakeUpstream({
+        "api/v1/notifications": { body: { data: [liked("w1")] } },
+        "push.apple.com": (url, init) => { pushes.push(JSON.parse(init.body)); return { body: {} }; },
+    });
+    assert.equal((await deliver(env, upstream, { signature: "00".repeat(32) })).status, 401);
+    assert.equal((await deliver(env, upstream, { webhookID: 78 })).status, 410);
+    assert.equal((await deliver(env, upstream, { item: joined("w2") })).status, 200);
+    assert.equal(pushes.length, 0);
+
+    assert.equal((await deliver(env, upstream)).status, 200);
+    assert.deepEqual(pushes.map(push => push.ownStatusID), [30]);
+    assert.deepEqual(JSON.parse(env.DB.rows()[0].notified), ["w1"]);
+    await deliver(env, upstream);
+    await processDueSubscriptions(env, now, upstream);
+    assert.equal(pushes.length, 1);
+});
+
+test("ends the webhook with the subscription", async () => {
+    const env = await environment();
+    const signUp = fakeUpstream({ "oauth/token": { body: { ...tokenAnswer().body, webhook: { id: 77, secret: "hook-secret", url: "x" } } } });
+    const { id, secret: subscriptionSecret } = await subscribed(env, signUp, ["likes"]);
+    const upstream = fakeUpstream({ "api/v1/webhooks/77": { body: {} }, "auth/logout": { body: {} } });
+    assert.equal((await request(env, `/subscriptions/${id}`, "DELETE", { secret: subscriptionSecret }, upstream)).status, 204);
+    assert.deepEqual(upstream.calls.map(call => [call.init.method, new URL(call.url).pathname]),
+        [["DELETE", "/api/v1/webhooks/77"], ["POST", "/api/v1/auth/logout"]]);
+    assert.equal((await deliver(env, upstream)).status, 410);
+});
+
 test("signs the APNs provider token with ES256", async () => {
     await environment();
     const token = await signProviderToken(apnsKey.pem, "KEY123", "TEAM123", 1_700_000_000);
@@ -559,4 +619,33 @@ test("renews logins nobody renewed for 20 days and ends those no device fetched 
 
     await maintainLogins(env, later + 60000, upstream);
     assert.equal(upstream.calls.length, 2);
+});
+
+test("the app's login keeps Träwelling's webhook and pushes its likes to every device signed up on it", async () => {
+    const env = await environment();
+    const withHook = fakeUpstream({ "oauth/token": { body: { ...tokenAnswer().body, webhook: { id: 77, secret: "hook-secret", url: "x" } } } });
+    const login = await loggedIn(env, withHook);
+    const [row] = env.DB.logins();
+    assert.equal(row.webhook_id, 77);
+    assert.ok(!row.webhook.includes("hook-secret"));
+    assert.equal((await decryptTokens(row.tokens, loginAAD(login.id), tokenKey)).webhook, undefined);
+
+    const other = "cd".repeat(32);
+    for (const token of [deviceToken, other]) {
+        await request(env, "/subscriptions", "POST", { loginId: login.id, loginSecret: login.secret, deviceToken: token, userId: 1, kinds: ["likes"] }, fakeUpstream({}));
+    }
+    env.DB.db.prepare("UPDATE subscriptions SET notified = '[]'").run();
+    const pushes = [];
+    const upstream = fakeUpstream({ "push.apple.com": (url) => { pushes.push(url); return { body: {} }; } });
+    assert.equal((await deliver(env, upstream, { secret: "wrong" })).status, 401);
+    assert.equal((await deliver(env, upstream)).status, 200);
+    assert.deepEqual(pushes.sort(), [deviceToken, other].map(token => `https://api.push.apple.com/3/device/${token}`).sort());
+    assert.ok(env.DB.rows().every(subscription => subscription.notified === '["w1"]'));
+
+    // Logging out deletes the webhook at Träwelling.
+    const logout = fakeUpstream({ "api/v1/webhooks/77": { body: {} }, "auth/logout": { body: {} } });
+    assert.equal((await request(env, `/logins/${login.id}`, "DELETE", { secret: login.secret }, logout)).status, 204);
+    assert.deepEqual(logout.calls.map(call => [call.init.method, new URL(call.url).pathname]),
+        [["DELETE", "/api/v1/webhooks/77"], ["POST", "/api/v1/auth/logout"]]);
+    assert.equal((await deliver(env, upstream)).status, 410);
 });

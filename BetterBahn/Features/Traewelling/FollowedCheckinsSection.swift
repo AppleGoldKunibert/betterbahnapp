@@ -141,7 +141,9 @@ extension AppModel {
     private func signInToTraewellingAgain(authenticate: (URL, String) async throws -> URL) async throws {
         let config = traewelling.config
         let pkce = PKCE()
-        let callback = try await authenticate(config.authorizeURL(pkce: pkce), config.callbackScheme)
+        // A webhook, when the Worker takes one, brings likes and fellow travellers right away.
+        let webhook = await FollowedCheckinPush().loginParameters()
+        let callback = try await authenticate(config.authorizeURL(pkce: pkce, extra: webhook), config.callbackScheme)
         try await traewelling.completeLogin(callbackURL: callback, pkce: pkce)
     }
 

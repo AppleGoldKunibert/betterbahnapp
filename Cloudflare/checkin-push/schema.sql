@@ -12,11 +12,14 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     known TEXT,                       -- JSON array of the status IDs reported or seen; NULL until the first look
     kinds TEXT,                       -- JSON array: "followed", "likes", "companions" (#447); NULL: only "followed"
     notified TEXT,                    -- JSON array of Träwelling's notification IDs reported or seen; NULL until the first look
+    webhook_id INTEGER,               -- Träwelling's webhook for the user's notifications (#447), if the login made one
+    webhook TEXT,                     -- its signing secret, AES-GCM with TOKEN_KEY
     slot INTEGER NOT NULL,            -- minute (0–59) the look is due in, modulo INTERVAL_MINUTES
     created INTEGER NOT NULL          -- unix seconds
 );
 CREATE INDEX IF NOT EXISTS subscriptions_slot ON subscriptions (slot);
 CREATE INDEX IF NOT EXISTS subscriptions_login ON subscriptions (login_id);
+CREATE INDEX IF NOT EXISTS subscriptions_webhook ON subscriptions (webhook_id);
 
 -- The app's Träwelling login (#452): one per user, renewed only here; devices fetch its access token.
 CREATE TABLE IF NOT EXISTS logins (
@@ -27,10 +30,13 @@ CREATE TABLE IF NOT EXISTS logins (
     renewed INTEGER NOT NULL,         -- unix seconds of the last renewal
     renewing INTEGER,                 -- unix seconds until which one request renews it; NULL otherwise
     used INTEGER NOT NULL,            -- unix seconds a device last fetched a token
+    webhook_id INTEGER,               -- Träwelling's webhook for the user's notifications (#447), if the login made one
+    webhook TEXT,                     -- its signing secret, AES-GCM with TOKEN_KEY
     created INTEGER NOT NULL          -- unix seconds
 );
 CREATE INDEX IF NOT EXISTS logins_renewed ON logins (renewed);
 CREATE INDEX IF NOT EXISTS logins_used ON logins (used);
+CREATE INDEX IF NOT EXISTS logins_webhook ON logins (webhook_id);
 
 -- Regular trips (#397): the journeys a device's user said yes to for today, looked at in DB's timetable feed.
 -- One row per device; deleted once its journeys have arrived.

@@ -20,6 +20,10 @@
 // Renewed when less than `RENEW_BEFORE` is left, and saved before answering. Only one request renews at a
 // time (`renewing` holds it for `LEASE` seconds); the others wait for its new tokens. The cron trigger
 // renews logins nobody renewed for `IDLE_RENEWAL` and ends those no device fetched for `UNUSED` days.
+//
+// A login made while the Worker offers a webhook (`/login-options`) brings Träwelling's webhook for the user's
+// notifications; its secret is kept sealed with the login, and `/traewelling/webhook` (worker.mjs) pushes to
+// every sign-up on the login.
 
 import { fromBase64, toBase64 } from "../shared/appattest.mjs";
 
@@ -75,9 +79,10 @@ export async function handleLogin(path, method, body, env, now, deps = {}) {
     if (method === "PUT") return signInAgain(id, body, env, now, fetchUpstream);
     if (method === "DELETE") {
         await endLogin(env, id);
-        // Ends the Träwelling login too; nothing is lost when that fails, it is forgotten here.
+        // Ends the webhook and the Träwelling login too; nothing is lost when that fails: it is forgotten here, and
+        // the webhook's next delivery gets a 410, on which Träwelling deletes it.
         const tokens = await decryptTokens(row.tokens, loginAAD(id), env.TOKEN_KEY).catch(() => null);
-        if (tokens) await traewelling("api/v1/auth/logout", tokens.access, { method: "POST" }, fetchUpstream).catch(() => {});
+        if (tokens) await endAtTraewelling(tokens, row.webhook_id, fetchUpstream);
         return new Response(null, { status: 204 });
     }
     return json(405, { error: "method_not_allowed" }, { Allow: "PUT, DELETE" });
@@ -107,11 +112,12 @@ async function createLogin(body, env, now, fetchUpstream) {
     const secret = randomHex(32);
     // A login made with the app's scopes since #452 can read Träwelling's notifications; one handed over can't.
     const notifications = byCode ? 1 : 0;
+    const { webhook = null, ...login } = tokens;
     await env.DB.prepare(
-        "INSERT INTO logins (id, secret_hash, tokens, notifications, renewed, renewing, used, created) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)",
-    ).bind(id, await sha256Hex(secret), await encryptTokens(tokens, loginAAD(id), env.TOKEN_KEY), notifications,
-        seconds(now), seconds(now), seconds(now)).run();
-    return json(201, { id, secret, ...answer(tokens, notifications) });
+        "INSERT INTO logins (id, secret_hash, tokens, notifications, renewed, renewing, used, webhook_id, webhook, created) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)",
+    ).bind(id, await sha256Hex(secret), await encryptTokens(login, loginAAD(id), env.TOKEN_KEY), notifications,
+        seconds(now), seconds(now), webhook?.id ?? null, await sealedWebhook(webhook, id, env), seconds(now)).run();
+    return json(201, { id, secret, ...answer(login, notifications) });
 }
 
 /// Signs in again in place, with the app's current scopes. The old Träwelling login is ended.
@@ -124,12 +130,28 @@ async function signInAgain(id, body, env, now, fetchUpstream) {
     } catch (error) {
         return json(error instanceof RejectedGrant ? 400 : 502, { error: error instanceof RejectedGrant ? "invalid_code" : "traewelling_unavailable" });
     }
-    const row = await env.DB.prepare("SELECT tokens FROM logins WHERE id = ?").bind(id).first();
-    await env.DB.prepare("UPDATE logins SET tokens = ?, notifications = 1, renewed = ?, renewing = NULL, used = ? WHERE id = ?")
-        .bind(await encryptTokens(tokens, loginAAD(id), env.TOKEN_KEY), seconds(now), seconds(now), id).run();
+    const row = await env.DB.prepare("SELECT tokens, webhook_id FROM logins WHERE id = ?").bind(id).first();
+    const { webhook = null, ...login } = tokens;
+    await env.DB.prepare(
+        "UPDATE logins SET tokens = ?, notifications = 1, renewed = ?, renewing = NULL, used = ?, webhook_id = ?, webhook = ? WHERE id = ?",
+    ).bind(await encryptTokens(login, loginAAD(id), env.TOKEN_KEY), seconds(now), seconds(now), webhook?.id ?? null,
+        await sealedWebhook(webhook, id, env), id).run();
     const old = row ? await decryptTokens(row.tokens, loginAAD(id), env.TOKEN_KEY).catch(() => null) : null;
-    if (old) await traewelling("api/v1/auth/logout", old.access, { method: "POST" }, fetchUpstream).catch(() => {});
-    return json(200, answer(tokens, 1));
+    if (old) await endAtTraewelling(old, row.webhook_id, fetchUpstream);
+    return json(200, answer(login, 1));
+}
+
+/// The webhook's secret, sealed like the tokens; null without a webhook.
+async function sealedWebhook(webhook, id, env) {
+    return webhook ? encryptTokens({ secret: webhook.secret }, loginAAD(id), env.TOKEN_KEY) : null;
+}
+
+/// Deletes the login's webhook and logs out at Träwelling; failures are ignored.
+async function endAtTraewelling(tokens, webhookID, fetchUpstream) {
+    if (Number.isSafeInteger(webhookID)) {
+        await traewelling(`api/v1/webhooks/${webhookID}`, tokens.access, { method: "DELETE" }, fetchUpstream).catch(() => {});
+    }
+    await traewelling("api/v1/auth/logout", tokens.access, { method: "POST" }, fetchUpstream).catch(() => {});
 }
 
 function codeForm(body, env) {
@@ -163,7 +185,7 @@ function failure(error) {
 /// The login with this ID if `secret` is its secret.
 export async function verifiedLogin(env, id, secret) {
     if (typeof id !== "string" || !ID_PATTERN.test(id) || typeof secret !== "string") return null;
-    const row = await env.DB.prepare("SELECT id, secret_hash, tokens, notifications FROM logins WHERE id = ?").bind(id).first();
+    const row = await env.DB.prepare("SELECT id, secret_hash, tokens, notifications, webhook_id FROM logins WHERE id = ?").bind(id).first();
     return row && await sha256Hex(secret) === row.secret_hash ? row : null;
 }
 
@@ -268,11 +290,18 @@ export async function requestTokens(form, now, fetchUpstream) {
         throw new Error(`token endpoint ${response.status}`);
     }
     if (typeof body?.access_token !== "string" || typeof body?.refresh_token !== "string") throw new Error("no token");
-    return {
+    const tokens = {
         access: body.access_token,
         refresh: body.refresh_token,
         expires: seconds(now) + (Number(body.expires_in) > 0 ? Number(body.expires_in) : 3600),
     };
+    // Träwelling adds the webhook it made for this login (only when exchanging an authorization code). Callers
+    // keep it apart from the tokens.
+    const webhook = body.webhook;
+    if (Number.isSafeInteger(webhook?.id) && typeof webhook?.secret === "string" && webhook.secret.length <= 256) {
+        tokens.webhook = { id: webhook.id, secret: webhook.secret };
+    }
+    return tokens;
 }
 
 // MARK: - Stored logins

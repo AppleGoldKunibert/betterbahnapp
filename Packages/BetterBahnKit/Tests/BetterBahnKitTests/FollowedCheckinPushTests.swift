@@ -76,6 +76,25 @@ import Testing
         #expect(again.usesAppLogin)
     }
 
+    /// Träwelling's webhook for likes and fellow travellers (#447): only its own parameters, nothing when the Worker
+    /// offers none or can't be reached.
+    @Test func addsTheWebhookTheWorkerOffersToTheLogin() async throws {
+        PushWorkerProtocol.state = .init(answer: Data(#"{"authorize":{"trwl_webhook_url":"https://w/hook","trwl_webhook_events":"notification","client_id":"evil"}}"#.utf8))
+        let parameters = await push.loginParameters()
+        #expect(parameters == [URLQueryItem(name: "trwl_webhook_events", value: "notification"),
+                               URLQueryItem(name: "trwl_webhook_url", value: "https://w/hook")])
+        #expect(PushWorkerProtocol.state.requests.first?.path == "/login-options")
+        let url = TraewellingConfig().authorizeURL(pkce: PKCE(), extra: parameters)
+        let items = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+        #expect(items.contains(URLQueryItem(name: "trwl_webhook_events", value: "notification")))
+        #expect(items.filter { $0.name == "client_id" }.map(\.value) == ["406"])
+
+        PushWorkerProtocol.state = .init(answer: Data(#"{"authorize":{}}"#.utf8))
+        #expect(await push.loginParameters().isEmpty)
+        PushWorkerProtocol.state = .init(status: 503)
+        #expect(await push.loginParameters().isEmpty)
+    }
+
     @Test func writesTheDeviceTokenAsLowercaseHex() {
         #expect(FollowedCheckinPush.hex(Data([0x0A, 0xFF, 0x00])) == "0aff00")
     }
@@ -92,9 +111,9 @@ final class PushWorkerProtocol: URLProtocol, @unchecked Sendable {
 
     struct State: @unchecked Sendable {
         var status = 0
-        /// What a 200 or 201 answers, else the sign-up's `{ id, secret }` or `{}`.
-        var answer: String?
         var requests: [Recorded] = []
+        /// Answer instead of the usual one.
+        var answer: Data?
     }
     private static let lock = NSLock()
     nonisolated(unsafe) private static var _state = State()
@@ -119,8 +138,7 @@ final class PushWorkerProtocol: URLProtocol, @unchecked Sendable {
         var status = Self.state.status
         Self.state.requests.append(Recorded(method: method, path: request.url?.path ?? "", body: body))
         if status == 0 { status = method == "POST" ? 201 : method == "DELETE" ? 204 : 200 }
-        let answer = Self.state.answer.map { Data($0.utf8) }
-            ?? (status == 201 ? Data(#"{"id":"new-id","secret":"new-secret"}"#.utf8) : Data("{}".utf8))
+        let answer = Self.state.answer ?? (status == 201 ? Data(#"{"id":"new-id","secret":"new-secret"}"#.utf8) : Data("{}".utf8))
         let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: answer)

@@ -19,6 +19,8 @@ background, often hours later, so the app doesn't look itself; this Worker does.
    Check-in", `ownStatusID`) and `UserJoinedConnection` ("Bob fährt mit dir", `companionStatusID`; it
    replaces a followed push about the same check-in). The first look only remembers what is there
    already; a kind turned on again starts over.
+   Likes and fellow travellers also come right away through Träwelling's webhook (below); the look every
+   2 minutes stays as the fallback and skips what the webhook already reported.
 3. `PUT /subscriptions/<id> { secret, deviceToken, sandbox, kinds }` keeps the device token and kinds
    current (the app sends them on every start and when a setting changes); `DELETE /subscriptions/<id>
    { secret }` (all settings off, Träwelling logout) deletes the row and ends the Worker's Träwelling login.
@@ -52,6 +54,23 @@ Each look costs one Träwelling request per source (dashboard, notifications; on
 plus one per notification; the free plan
 allows 50 outgoing requests and 10 ms CPU per invocation, which fits a few dozen subscriptions per
 minute. Beyond that, switch to Workers Paid.
+
+## Webhook for likes and fellow travellers (#447)
+
+While `TRAEWELLING_WEBHOOKS` is `"true"`, `GET /login-options` gives the app `trwl_webhook_url`
+(`https://betterbahn-push.betterbahn.workers.dev/traewelling/webhook`) and `trwl_webhook_events=notification` to
+add to the app's Träwelling login (`/logins`; before #452 the sign-up's own login). Träwelling then makes a webhook
+for the user's notifications and returns its ID and secret with the token; the Worker keeps the secret sealed with
+the login (AES-GCM, `TOKEN_KEY`) and pushes each delivery to every sign-up on that login. Each delivery
+(`X-Trwl-Webhook-Id`, `Signature`: HMAC-SHA256 of the body) is checked and answered at once (Träwelling waits only
+a second); the push follows. An unknown webhook gets `410`, on which Träwelling deletes it; signing off deletes it
+too (`DELETE /api/v1/webhooks/<id>`), as do logging out and signing in again. Träwelling turns a webhook off after 5 failed deliveries in a row; the look
+every 2 minutes then still finds everything.
+
+To turn it on (once): on traewelling.de → Einstellungen → Anwendungen, edit the app (client 406), turn webhooks on
+and enter the webhook URL above exactly. Then set `TRAEWELLING_WEBHOOKS = "true"` in `wrangler.toml` and
+`npx wrangler deploy`. Before that, a login asking for a webhook fails, which is why the app only asks while the
+Worker offers it. Only logins made after that get a webhook.
 
 ## Regular trips (`/commutes`, #397)
 

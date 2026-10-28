@@ -10,13 +10,17 @@
 // followed check-ins, its notifications for likes and fellow travellers, then an APNs notification for
 // each one that is new since the last look. The first look only remembers what is there already.
 //
+// Likes and fellow travellers also arrive right away through a Träwelling webhook (`/traewelling/webhook`),
+// made with the app's login while TRAEWELLING_WEBHOOKS is "true"; the look every 2 minutes stays as the
+// fallback (a webhook Träwelling turned off after failed deliveries, logins from before).
+//
 // It also looks after the journeys of regular trips (#397, `/commutes`, see commute.mjs).
 
 import { APNs } from "../shared/apns.mjs";
 import { TOKEN_HEADER, unauthorized, verifyToken } from "../shared/appattest.mjs";
 import { handleCommute, processDueCommutes } from "./commute.mjs";
 import {
-    LoginEnded, RejectedGrant, currentTokens, decryptTokens, encryptTokens, handleLogin, json, maintainLogins, randomHex,
+    LoginEnded, RejectedGrant, currentTokens, decryptTokens, encryptTokens, handleLogin, json, loginAAD, maintainLogins, randomHex,
     requestTokens, sha256Hex, traewelling, verifiedLogin,
 } from "./logins.mjs";
 
@@ -37,19 +41,29 @@ const BOARDING_WINDOW = 20 * MINUTE;
 const DEVICE_TOKEN_PATTERN = /^[0-9a-f]{64,200}$/;
 const ID_PATTERN = /^[0-9a-f]{32}$/;
 const MAX_BODY_BYTES = 16 * 1024;
+const MAX_WEBHOOK_BYTES = 64 * 1024;
+export const WEBHOOK_PATH = "/traewelling/webhook";
 
 // MARK: - HTTP
 
 /// POST   /subscriptions      { loginId, loginSecret, deviceToken, sandbox, userId, kinds } → 201 { id, secret }
 ///                            (before #452 `code`, `codeVerifier` in place of the login: a login of its own)
 /// PUT    /subscriptions/<id> { secret, deviceToken, sandbox, kinds }                     → 200 {} (404: gone)
-/// `kinds` (see `KINDS`, at least one) defaults to ["followed"], what apps before #447 sign up for.
 /// DELETE /subscriptions/<id> { secret }                                            → 204
 /// PUT    /commutes/<id>      { secret, deviceToken, sandbox, journeys }            → 200 { watched } (see commute.mjs)
+/// GET    /login-options                                                           → 200 { authorize } (see `loginOptions`)
+/// POST   /traewelling/webhook  (Träwelling, signed)                                → 200 (410: unknown webhook)
 /// /logins…: the app's Träwelling login (see logins.mjs)
+/// `kinds` (see `KINDS`, at least one) defaults to ["followed"], what apps before #447 sign up for.
 export async function handleRequest(request, env = {}, now = Date.now(), deps = {}) {
     const url = new URL(request.url);
     if (url.pathname === "/health") return json(200, { ok: true });
+    if (url.pathname === "/login-options") return json(200, loginOptions(env, url));
+    if (url.pathname === WEBHOOK_PATH) {
+        if (request.method !== "POST") return json(405, { error: "method_not_allowed" }, { Allow: "POST" });
+        if (!env.DB || !env.TOKEN_KEY) return json(503, { error: "not_configured" });
+        return handleWebhook(request, env, now, deps);
+    }
     const commute = url.pathname.match(/^\/commutes\/([^/]+)$/);
     const match = url.pathname.match(/^\/subscriptions(?:\/([^/]+))?$/);
     const login = /^\/logins(\/|$)/.test(url.pathname);
@@ -88,7 +102,7 @@ export async function handleRequest(request, env = {}, now = Date.now(), deps = 
         return subscribe(body, env, now, deps.fetch ?? fetch);
     }
     if (!ID_PATTERN.test(id)) return json(404, { error: "not_found" });
-    const row = await env.DB.prepare("SELECT id, secret_hash, tokens, kinds, login_id FROM subscriptions WHERE id = ?").bind(id).first();
+    const row = await env.DB.prepare("SELECT id, secret_hash, tokens, kinds, login_id, webhook_id FROM subscriptions WHERE id = ?").bind(id).first();
     if (!row || typeof body.secret !== "string" || await sha256Hex(body.secret) !== row.secret_hash) {
         return json(404, { error: "not_found" });
     }
@@ -109,10 +123,14 @@ export async function handleRequest(request, env = {}, now = Date.now(), deps = 
     }
     if (request.method === "DELETE") {
         await env.DB.prepare("DELETE FROM subscriptions WHERE id = ?").bind(id).run();
-        // The app's login stays; a login of the sign-up's own (before #452) is ended too. Nothing is lost
-        // when that fails, the token expires within the hour.
+        // The app's login (and its webhook) stays; a login of the sign-up's own (before #452) is ended too, with its
+        // webhook. Nothing is lost when that fails: the token expires within the hour, and the webhook's next
+        // delivery gets a 410, on which Träwelling deletes it.
         if (row.login_id) return new Response(null, { status: 204 });
         const tokens = await decryptTokens(row.tokens, id, env.TOKEN_KEY).catch(() => null);
+        if (tokens && Number.isSafeInteger(row.webhook_id)) {
+            await traewelling(`api/v1/webhooks/${row.webhook_id}`, tokens.access, { method: "DELETE" }, deps.fetch ?? fetch).catch(() => {});
+        }
         if (tokens) await traewelling("api/v1/auth/logout", tokens.access, { method: "POST" }, deps.fetch ?? fetch).catch(() => {});
         return new Response(null, { status: 204 });
     }
@@ -157,11 +175,86 @@ async function insertSubscription(env, now, { deviceToken, sandbox, userId, kind
     const id = randomHex(16);
     const secret = randomHex(32);
     const slot = crypto.getRandomValues(new Uint8Array(1))[0] % 60;
+    // Träwelling made a webhook when the login of its own asked for one (`loginOptions`); only its secret is kept,
+    // sealed. With the app's login, the webhook is the login's (logins.mjs).
+    const { webhook = null, ...login } = tokens ?? {};
     await env.DB.prepare(
-        "INSERT INTO subscriptions (id, secret_hash, device_token, sandbox, user_id, tokens, login_id, known, kinds, notified, slot, created) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?)",
-    ).bind(id, await sha256Hex(secret), deviceToken, sandbox ? 1 : 0, userId, tokens ? await encryptTokens(tokens, id, env.TOKEN_KEY) : "",
-        loginID, JSON.stringify(kinds), slot, Math.floor(now / 1000)).run();
+        "INSERT INTO subscriptions (id, secret_hash, device_token, sandbox, user_id, tokens, login_id, known, kinds, notified, webhook_id, webhook, slot, created) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?)",
+    ).bind(id, await sha256Hex(secret), deviceToken, sandbox ? 1 : 0, userId, tokens ? await encryptTokens(login, id, env.TOKEN_KEY) : "",
+        loginID, JSON.stringify(kinds), webhook?.id ?? null, webhook ? await encryptTokens({ secret: webhook.secret }, id, env.TOKEN_KEY) : null,
+        slot, Math.floor(now / 1000)).run();
     return json(201, { id, secret });
+}
+
+/// What the app adds to the Worker's Träwelling login: with TRAEWELLING_WEBHOOKS "true" (webhooks turned on
+/// for the OAuth client, with this Worker's URL as its webhook URL) Träwelling makes a webhook for the user's
+/// notifications. Without, a login asking for one would fail.
+export function loginOptions(env, url) {
+    if (env.TRAEWELLING_WEBHOOKS !== "true") return { authorize: {} };
+    return { authorize: { trwl_webhook_url: `${url.origin}${WEBHOOK_PATH}`, trwl_webhook_events: "notification" } };
+}
+
+/// A delivery of Träwelling's webhook: one of the user's notifications, signed with the webhook's secret
+/// (HMAC-SHA256 of the body, hex, header `Signature`). Träwelling waits only a second for the answer, so the
+/// push is sent after it (`deps.waitUntil`). An unknown webhook gets 410, on which Träwelling deletes it.
+async function handleWebhook(request, env, now, deps) {
+    const body = await request.text();
+    if (body.length > MAX_WEBHOOK_BYTES) return json(413, { error: "too_large" });
+    const webhookID = Number(request.headers.get("X-Trwl-Webhook-Id"));
+    if (!Number.isSafeInteger(webhookID) || webhookID <= 0) return json(400, { error: "invalid_webhook" });
+    // The webhook of a sign-up's own login (before #452), else of the app's login with every sign-up on it.
+    let owner = await env.DB.prepare("SELECT id, webhook FROM subscriptions WHERE webhook_id = ?").bind(webhookID).first();
+    let aad = owner?.id;
+    let rows = owner ? [owner] : [];
+    if (!owner) {
+        owner = await env.DB.prepare("SELECT id, webhook FROM logins WHERE webhook_id = ?").bind(webhookID).first();
+        aad = owner ? loginAAD(owner.id) : undefined;
+    }
+    if (!owner?.webhook) return json(410, { error: "gone" });
+    const { secret } = await decryptTokens(owner.webhook, aad, env.TOKEN_KEY);
+    if (!await validSignature(body, request.headers.get("Signature"), secret)) return json(401, { error: "invalid_signature" });
+
+    let payload;
+    try {
+        payload = JSON.parse(body);
+    } catch {
+        return json(400, { error: "invalid_json" });
+    }
+    const item = payload?.event === "notification" ? payload.notification : null;
+    if (typeof item?.id !== "string" || item.id.length > 64) return json(200, {});
+    const columns = "id, device_token, sandbox, kinds, notified";
+    rows = rows.length > 0
+        ? [await env.DB.prepare(`SELECT ${columns} FROM subscriptions WHERE id = ?`).bind(owner.id).first()]
+        : (await env.DB.prepare(`SELECT ${columns} FROM subscriptions WHERE login_id = ?`).bind(owner.id).all()).results ?? [];
+
+    const apns = new APNs(env, now, deps.fetch ?? fetch);
+    const deliver = Promise.all(rows.map(async row => {
+        const push = ownCheckinNotification(item, storedKinds(row.kinds));
+        const notified = row.notified ? JSON.parse(row.notified) : null;
+        if (!push || notified?.includes(item.id)) return;
+        const result = await apns.send(row.device_token, row.sandbox, push.payload, {
+            "apns-topic": env.APNS_TOPIC,
+            "apns-push-type": "alert",
+            "apns-priority": "10",
+            "apns-collapse-id": push.collapseID,
+        });
+        if (result === "gone") {
+            await env.DB.prepare("DELETE FROM subscriptions WHERE id = ?").bind(row.id).run();
+        } else if (result === "sent" && notified) {
+            // So the look every 2 minutes doesn't report it again. Before the first look nothing is remembered yet:
+            // that look takes in whatever is there.
+            await saveNotified(env, row.id, [...notified, item.id]);
+        }
+    })).catch(error => console.log(`webhook push failed: ${error?.message ?? error}`));
+    if (deps.waitUntil) deps.waitUntil(deliver); else await deliver;
+    return json(200, {});
+}
+
+async function validSignature(body, signature, secret) {
+    if (typeof signature !== "string" || !/^[0-9a-f]{64}$/i.test(signature) || typeof secret !== "string") return false;
+    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+    const bytes = new Uint8Array(signature.match(/../g).map(byte => parseInt(byte, 16)));
+    return crypto.subtle.verify("HMAC", key, bytes, new TextEncoder().encode(body));
 }
 
 /// The kinds asked for, each once in `KINDS`' order; null when one is unknown or none is given.
@@ -447,8 +540,8 @@ export function ownCheckinNotification(item, kinds) {
 class DeviceGone extends Error {}
 
 export default {
-    fetch(request, env) {
-        return handleRequest(request, env);
+    fetch(request, env, ctx) {
+        return handleRequest(request, env, Date.now(), { waitUntil: promise => ctx.waitUntil(promise) });
     },
     scheduled(event, env, ctx) {
         ctx.waitUntil(processDueSubscriptions(env, event.scheduledTime));

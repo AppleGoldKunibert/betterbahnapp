@@ -60,6 +60,19 @@ public struct FollowedCheckinPush: Sendable {
         self.baseURL = baseURL
     }
 
+    /// What to add to the app's Träwelling login (`TraewellingConfig.authorizeURL(pkce:extra:)`, kept by our
+    /// server since #452): a webhook for the user's notifications while the Worker takes one, so likes and fellow
+    /// travellers arrive right away. Nothing when the Worker can't be asked or doesn't take one yet (a login asking
+    /// for a webhook Träwelling doesn't allow fails): the Worker's look every 2 minutes still finds them. Only
+    /// Träwelling's own `trwl_` parameters, so nothing can replace the login's.
+    public func loginParameters() async -> [URLQueryItem] {
+        let request = URLRequest(url: baseURL.appending(path: "login-options"), timeoutInterval: http.timeout)
+        guard let data = try? await http.sendRaw(request),
+              let options = try? JSONDecoder().decode(LoginOptions.self, from: data) else { return [] }
+        return options.authorize.filter { $0.key.hasPrefix("trwl_") }.sorted { $0.key < $1.key }
+            .map { URLQueryItem(name: $0.key, value: $0.value) }
+    }
+
     /// What the Worker needs when the user wants `kinds`: signing in again when the login can't read the
     /// notifications a kind needs (`loginReadsNotifications`), a sign-up when there is none yet or one from
     /// before #452 with a login of its own.
@@ -128,6 +141,10 @@ public struct FollowedCheckinPush: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(body)
         return try await http.sendRaw(request, auth: http.workerAuth(nil))
+    }
+
+    private struct LoginOptions: Decodable {
+        var authorize: [String: String]
     }
 
     private struct SubscribeBody: Encodable {
