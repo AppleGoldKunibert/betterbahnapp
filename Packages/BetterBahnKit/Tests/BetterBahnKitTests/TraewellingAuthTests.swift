@@ -839,6 +839,22 @@ private final class CollidingCheckinProtocol: URLProtocol, @unchecked Sendable {
         #expect(await client.isLoggedIn == false)
     }
 
+    /// A server that doesn't offer logins yet answers 404: that is no ended login.
+    @Test func aServerWithoutLoginsIsUnavailableNotAnEndedLogin() async throws {
+        let store = store()
+        defer { store.clear() }
+        store.save(OAuthToken(accessToken: "expired", refreshToken: "old-refresh", expiresAt: .distantPast))
+        LoginServerProtocol.reset(loginEnded: true)
+        let client = client(store)
+        let pkce = PKCE(state: "state")
+
+        await #expect(throws: OAuthError.serverUnavailable) {
+            try await client.completeLogin(callbackURL: URL(string: "betterbahn://oauth?code=new-code&state=state")!, pkce: pkce)
+        }
+        await #expect(throws: OAuthError.serverUnavailable) { try await client.currentUser() }
+        #expect(store.load()?.refreshToken == "old-refresh")
+    }
+
     @Test func saysOurServerIsDownInsteadOfAServerError() async throws {
         let store = store()
         defer { store.clear() }

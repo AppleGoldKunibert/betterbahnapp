@@ -84,7 +84,7 @@ public struct TraewellingLoginServer: Sendable {
         }
     }
 
-    /// 404: the login has ended. No answer, or a server error: `OAuthError.serverUnavailable`.
+    /// 404: the login has ended. No answer, a server error or a server without logins: `OAuthError.serverUnavailable`.
     private func sendRaw(_ path: String, method: String, body: some Encodable) async throws -> Data {
         var request = URLRequest(url: baseURL.appending(path: path), timeoutInterval: http.timeout)
         request.httpMethod = method
@@ -93,7 +93,8 @@ public struct TraewellingLoginServer: Sendable {
         do {
             return try await http.sendRaw(request, auth: http.workerAuth(nil))
         } catch TransitError.http(status: 404, _) {
-            throw OAuthError.loginEnded
+            // A new login or handover can't have ended: the server doesn't offer logins (yet).
+            throw path == "logins" ? OAuthError.serverUnavailable : OAuthError.loginEnded
         } catch TransitError.http(let status, let answer) where (400..<500).contains(status) && status != 401 {
             throw TransitError.http(status: status, body: answer)
         } catch is CancellationError {
