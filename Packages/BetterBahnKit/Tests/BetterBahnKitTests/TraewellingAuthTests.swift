@@ -803,7 +803,7 @@ private final class CollidingCheckinProtocol: URLProtocol, @unchecked Sendable {
         #expect(LoginServerProtocol.requests().isEmpty)
 
         store.saveAccess(OAuthToken(accessToken: "ending", refreshToken: nil, expiresAt: .now.addingTimeInterval(5 * 60)), for: "L1")
-        let ending = client(store)
+        let ending = self.client(store)
         _ = try await ending.currentUser()
         await ending.prepareAccessToken()
 
