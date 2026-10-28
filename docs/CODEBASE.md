@@ -458,7 +458,9 @@ in `project.pbxproj`: new files join their target automatically.
   `checkinAsManualTrip` don't search again, #106); checks in as soon as found, gives up after
   `TraewellingSearchBudget` (15 s, 45 s when the station search took > 3 s), then offers the manual trip (#289).
   Träwelling's board is MOTIS' next 50 departures within 200 m, so it also loads only the leg's kind
-  (`travelType`, `boardTravelTypes`/`travelType(for:)`). `replaceWithManualTrip` (creates the trip, deletes, re-checks in).
+  (`travelType`, `boardTravelTypes`/`travelType(for:)`). The same train can be on the board twice at the same time (Austrian and
+  German data, #449): `matches` lists every candidate and `segments(for:departures:)` takes the first trip with both stops.
+  `replaceWithManualTrip` (creates the trip, deletes, re-checks in).
   `TraewellingCheckinEdit`: `status(id:)`, `updateStatus`, `deleteStatus`, `tags`, `applyTagChanges`/`StatusTagChanges`,
   exit moves, `earlyExit`, `fellowTravellers(of:)` (`trips/{id}/statuses`). `FollowedCheckinPush`
   (`subscribe`/`update`/`unsubscribe`, App Attest). `TraewellingFollowed`: `followedCheckins()` (dashboard back 12 h,

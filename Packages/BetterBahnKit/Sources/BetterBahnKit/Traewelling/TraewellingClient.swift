@@ -499,7 +499,7 @@ public actor TraewellingClient {
         guard let line = leg.line else { throw TraewellingError.tripNotFound("Fußweg") }
 
         if let match = try await findDeparture(for: leg) {
-            return try await checkin(draft, departure: match.departure)
+            return try await checkin(draft, departures: match.departures)
         }
         guard allowManualTrip else { throw TraewellingError.tripNotFound(line.name) }
         return try await checkinManualTrip(draft)
@@ -521,10 +521,10 @@ public actor TraewellingClient {
         var arrival: Date
     }
 
-    private func checkin(_ draft: CheckinDraft, departure: TraewellingDeparture) async throws -> CheckinResult {
+    private func checkin(_ draft: CheckinDraft, departures: [TraewellingDeparture]) async throws -> CheckinResult {
         // Resolve every part first so a train Träwelling only half knows doesn't leave a stray
         // checkin for the first part behind.
-        let segments = try await segments(for: draft.leg, departure: departure)
+        let segments = try await segments(for: draft.leg, departures: departures)
         var result: CheckinResult?
         for segment in segments {
             // The user's message/toot belong on the first part only, so a split train doesn't post
@@ -541,6 +541,23 @@ public actor TraewellingClient {
         }
         guard let result else { throw TraewellingError.tripNotFound(draft.leg.line?.name ?? "Fußweg") }
         return result
+    }
+
+    /// The Träwelling trips covering `leg`, from the first of `departures` whose trip has both ends of
+    /// the leg. The board can list the same train twice at the same time (#449: ICE 1206 from
+    /// Innsbruck once from Austrian data with only its main stops, once from German data with all
+    /// of them), so a trip missing our stop doesn't end the checkin while another one may have it.
+    private func segments(for leg: Leg, departures: [TraewellingDeparture], remainingSplits: Int = 3) async throws -> [Segment] {
+        var firstError: Error?
+        for departure in departures {
+            do {
+                return try await segments(for: leg, departure: departure, remainingSplits: remainingSplits)
+            } catch let error as TraewellingError {
+                guard case .stopNotOnTrip = error else { throw error }
+                firstError = firstError ?? error
+            }
+        }
+        throw firstError ?? TraewellingError.tripNotFound(leg.line?.name ?? "Fußweg")
     }
 
     /// The Träwelling trips covering `leg`, starting with `departure`'s. Usually just one, but
@@ -577,13 +594,14 @@ public actor TraewellingClient {
         guard remainingSplits > 0, let end = laterStops.last,
               let split = Self.splitStopover(tripEnd: end, in: leg.stopovers),
               let rest = Self.remainder(of: leg, from: split),
-              let next = try await findDeparture(for: rest)?.departure, next.tripId != departure.tripId else {
+              let next = try await findDeparture(for: rest)?.departures.filter({ $0.tripId != departure.tripId }),
+              !next.isEmpty else {
             throw TraewellingError.stopNotOnTrip(leg.destination.name, tripStops: trip.stopovers.map(\.name))
         }
         let first = Segment(tripId: departure.tripId, lineName: lineName, startID: origin.stationID,
                             destinationID: end.stationID, departure: departureTime,
                             arrival: end.arrivalPlanned ?? split.arrival?.planned ?? rest.departure.planned)
-        return [first] + (try await segments(for: rest, departure: next, remainingSplits: remainingSplits - 1))
+        return [first] + (try await segments(for: rest, departures: next, remainingSplits: remainingSplits - 1))
     }
 
     /// The intermediate stop of our leg where a Träwelling trip ending at `tripEnd` stops, if the
@@ -878,7 +896,7 @@ public actor TraewellingClient {
     /// Träwelling's own timetable data sometimes only has the train under a neighbouring stop or a
     /// fahrtNr/time that drifted a bit from our plan. All of it within `searchBudget`: then the boards
     /// still loading are given up on.
-    private func findDeparture(for leg: Leg) async throws -> (station: TraewellingStation, departure: TraewellingDeparture)? {
+    private func findDeparture(for leg: Leg) async throws -> (station: TraewellingStation, departures: [TraewellingDeparture])? {
         guard leg.line != nil else { return nil }
         let started = ContinuousClock.now
         let candidates = try await candidateStations(for: leg.origin)
@@ -962,19 +980,21 @@ public actor TraewellingClient {
         case deadline
     }
 
-    /// The best station (first in `stations`, see `ranked(_:for:)`) whose boards have `leg`'s train.
+    /// The best station (first in `stations`, see `ranked(_:for:)`) whose boards have `leg`'s train,
+    /// with every departure there that may be it, best first.
     /// A station whose boards are still loading is skipped, or with `waitingForBetter` ends the
     /// search, since it may yet have the train.
     private static func match(_ leg: Leg, on boards: [Result<[TraewellingDeparture], any Error>?], of requests: [BoardRequest],
                               at stations: [TraewellingStation], tolerance: TimeInterval,
-                              waitingForBetter: Bool) -> (station: TraewellingStation, departure: TraewellingDeparture)? {
+                              waitingForBetter: Bool) -> (station: TraewellingStation, departures: [TraewellingDeparture])? {
         for (index, station) in stations.enumerated() {
             let stationBoards = zip(requests, boards).filter { $0.0.station == index }.map(\.1)
             if waitingForBetter, stationBoards.contains(where: { $0 == nil }) { return nil }
             let departures = stationBoards.flatMap { board -> [TraewellingDeparture] in
                 if case .success(let departures)? = board { departures } else { [] }
             }
-            if let departure = bestMatch(departures, for: leg, tolerance: tolerance) { return (station, departure) }
+            let matches = Self.matches(departures, for: leg, tolerance: tolerance)
+            if !matches.isEmpty { return (station, matches) }
         }
         return nil
     }
@@ -1005,7 +1025,13 @@ public actor TraewellingClient {
     }
 
     static func bestMatch(_ departures: [TraewellingDeparture], for leg: Leg, tolerance: TimeInterval) -> TraewellingDeparture? {
-        guard let line = leg.line else { return nil }
+        matches(departures, for: leg, tolerance: tolerance).first
+    }
+
+    /// Every departure on the board that may be `leg`'s train, the closest to its planned time first
+    /// (the board's own order on a tie), each trip once.
+    static func matches(_ departures: [TraewellingDeparture], for leg: Leg, tolerance: TimeInterval) -> [TraewellingDeparture] {
+        guard let line = leg.line else { return [] }
         let wantedName = Line.normalize(line.name)
         let candidates = departures.filter { dep in
             guard let planned = dep.plannedWhen,
@@ -1022,10 +1048,14 @@ public actor TraewellingClient {
             }
             return false
         }
-        return candidates.min {
-            abs(($0.plannedWhen ?? .distantPast).timeIntervalSince(leg.departure.planned))
-                < abs(($1.plannedWhen ?? .distantPast).timeIntervalSince(leg.departure.planned))
+        var seen = Set<String>()
+        return candidates.enumerated().sorted { a, b in
+            let offsetA = abs((a.element.plannedWhen ?? .distantPast).timeIntervalSince(leg.departure.planned))
+            let offsetB = abs((b.element.plannedWhen ?? .distantPast).timeIntervalSince(leg.departure.planned))
+            return offsetA != offsetB ? offsetA < offsetB : a.offset < b.offset
         }
+        .map(\.element)
+        .filter { seen.insert($0.tripId).inserted }
     }
 
     /// A train number without leading zeros ("003135" → "3135").

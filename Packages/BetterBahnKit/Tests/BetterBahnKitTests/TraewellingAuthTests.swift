@@ -268,6 +268,114 @@ import Testing
     }
 }
 
+/// Real-world case (#449): Träwelling's board in Berlin Hbf lists ICE 1206 twice at 16:09, first
+/// from Austrian data with only the main stops, then from German data with all of them. The checkin
+/// to Büchen took the first and failed with `.stopNotOnTrip` instead of trying the second.
+@Suite struct TraewellingDuplicateDepartureCheckinTests {
+    static func time(_ value: String) -> Date { ISO8601DateFormatter().date(from: value)! }
+
+    static let berlin = station("8011160", "Berlin Hbf", 52.5251, 13.3694)
+    static let buechen = station("8001263", "Büchen", 53.4789, 10.6197)
+
+    static let leg = Leg(origin: berlin, destination: buechen,
+                         departure: TimeInfo(planned: time("2026-10-28T15:09:00Z"), actual: nil),
+                         arrival: TimeInfo(planned: time("2026-10-28T16:45:00Z"), actual: nil),
+                         departurePlatform: nil, arrivalPlatform: nil, tripId: "transitous-trip",
+                         line: Line(name: "ICE 1206", number: "1206", product: .highSpeed, operatorName: "DB Fernverkehr AG"),
+                         direction: "Hamburg-Altona", isWalking: false, cancelled: false,
+                         stopovers: [], remarks: [], source: .transitous)
+
+    @Test func checksIntoTheOtherTripOfTheSameTimeThatHasTheStop() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [DuplicateDepartureCheckinProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let store = TokenStore(service: "BetterBahnKitTests.\(UUID().uuidString)")
+        store.save(OAuthToken(accessToken: "test-token", refreshToken: nil, expiresAt: .distantFuture))
+        let client = TraewellingClient(config: TraewellingConfig(clientID: "public-client"), http: HTTPClient(session: session), store: store)
+
+        let result = try await client.checkin(CheckinDraft(leg: Self.leg))
+
+        #expect(result.statusId == 1206)
+    }
+
+    @Test func listsEveryTripThatMayBeTheTrainOnce() {
+        func departure(_ trip: String, minutes: Double) -> TraewellingDeparture {
+            TraewellingDeparture(tripId: trip, plannedWhen: Self.leg.departure.planned.addingTimeInterval(minutes * 60), when: nil,
+                                 line: .init(name: "ICE 1206", fahrtNr: "1206"), direction: nil, station: nil)
+        }
+        let board = [departure("late", minutes: 1), departure("at", minutes: 0), departure("de", minutes: 0), departure("at", minutes: 0)]
+        #expect(TraewellingClient.matches(board, for: Self.leg, tolerance: 120).map(\.tripId) == ["at", "de", "late"])
+        #expect(TraewellingClient.bestMatch(board, for: Self.leg, tolerance: 120)?.tripId == "at")
+    }
+}
+
+private final class DuplicateDepartureCheckinProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let url = request.url!
+        let path = url.path
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let json: String
+        switch true {
+        case path.contains("autocomplete"):
+            json = #"{"data":[{"id":100,"name":"Berlin Hbf","latitude":52.5251,"longitude":13.3694}]}"#
+        case path == "/api/v1/station/100/departures":
+            json = """
+            {"data":[{"tripId":"at-trip","plannedWhen":"2026-10-28T15:09:00Z","line":{"name":"ICE 1206","fahrtNr":"1206"},"direction":"Hamburg-Altona"},
+                     {"tripId":"de-trip","plannedWhen":"2026-10-28T15:09:00Z","line":{"name":"ICE 1206","fahrtNr":"1206"},"direction":"Hamburg-Altona"}]}
+            """
+        case path == "/api/v1/trains/trip" && query.contains(.init(name: "hafasTripId", value: "at-trip")):
+            json = """
+            {"data":{"id":1,"lineName":"ICE 1206","stopovers":[
+                {"id":100,"name":"Berlin Hbf","station":{"id":100,"name":"Berlin Hbf"},"departurePlanned":"2026-10-28T15:09:00Z"},
+                {"id":300,"name":"Hamburg Hbf","station":{"id":300,"name":"Hamburg Hbf"},"arrivalPlanned":"2026-10-28T17:10:00Z"}
+            ]}}
+            """
+        case path == "/api/v1/trains/trip" && query.contains(.init(name: "hafasTripId", value: "de-trip")):
+            json = """
+            {"data":{"id":2,"lineName":"ICE 1206","stopovers":[
+                {"id":100,"name":"Berlin Hbf","station":{"id":100,"name":"Berlin Hbf"},"departurePlanned":"2026-10-28T15:09:00Z"},
+                {"id":200,"name":"Büchen","station":{"id":200,"name":"Büchen"},"arrivalPlanned":"2026-10-28T16:45:00Z","departurePlanned":"2026-10-28T16:48:00Z"},
+                {"id":300,"name":"Hamburg Hbf","station":{"id":300,"name":"Hamburg Hbf"},"arrivalPlanned":"2026-10-28T17:10:00Z"}
+            ]}}
+            """
+        case path == "/api/v1/trains/checkin":
+            let body = Self.body(of: request)
+            #expect(body?["tripId"] as? String == "de-trip")
+            #expect(body?["start"] as? Int == 100)
+            #expect(body?["destination"] as? Int == 200)
+            json = #"{"data":{"status":{"id":1206},"points":{"points":20},"alsoOnThisConnection":[]}}"#
+        default:
+            client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
+            return
+        }
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(json.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+
+    private static func body(of request: URLRequest) -> [String: Any]? {
+        var data = request.httpBody ?? Data()
+        if let stream = request.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                guard count > 0 else { break }
+                data.append(contentsOf: buffer.prefix(count))
+            }
+        }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+}
+
 private final class SplitTrainCheckinProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
