@@ -291,7 +291,8 @@ in `project.pbxproj`: new files join their target automatically.
 - `Transit/Transitous/` – MOTIS client + `M*` DTOs, station-name cleanup, board dedup. Departures add arrivals going
   on as "Nur Ausstieg" (`continuingWithoutBoarding`, #105). A train drops a bus bay as its track (`MPlace.isBusBay`)
   and a VRS stop's own number ("85" at Köln Hbf; `hasStopNumberAsTrack`: not among the tracks `description` names,
-  #445), so DB Timetables fills the real one. Search ranking `searchRank`: text match vs. nearness/size;
+  #445), so DB Timetables fills the real one. Every `PlatformInfo` drops a "Gl." in front of the number (`cleaned`;
+  DELFI around Dresden, #451), also in saved journeys. Search ranking `searchRank`: text match vs. nearness/size;
   also asks "<nearby town> <query>" (`NearbyTowns`, offline, so coordinates never leave the device), nearby stations
   from `StationHints` (`Resources/StationHints.json`), aliases ("ber" → Flughafen BER), German names abroad
   (`germanNames`; "prag" places CZPTT's station first via `namedStations`/`placingNamedStation`). Bus stops' exact

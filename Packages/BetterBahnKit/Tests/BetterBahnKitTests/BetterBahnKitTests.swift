@@ -211,6 +211,34 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(MPlace(name: "x", lat: 0, lon: 0, description: "Gleise 5+6, Gleis1/11, Gleis 2b").descriptionTracks == [1, 2, 5, 6, 11])
     }
 
+    /// Real-world Transitous tracks around Dresden (#451): DELFI writes "Gl. 6" and "Gl.12", which showed
+    /// as "Gl. 6" in the badge, and with DB's live "6" over the planned "Gl. 6" as a platform change.
+    @Test func platformDropsGlPrefix() throws {
+        let json = """
+        {"stopTimes": [
+          {"place": {"name": "Dresden-Neustadt", "lat": 51.07, "lon": 13.74, "departure": "2026-10-28T08:00:00Z",
+                     "scheduledDeparture": "2026-10-28T08:00:00Z", "track": "6", "scheduledTrack": "Gl. 6"},
+           "mode": "HIGHSPEED_RAIL", "realTime": true, "tripId": "ice", "displayName": "ICE 1655"},
+          {"place": {"name": "Dresden-Neustadt", "lat": 51.07, "lon": 13.74, "departure": "2026-10-28T08:05:00Z",
+                     "scheduledDeparture": "2026-10-28T08:05:00Z", "track": "6", "scheduledTrack": "Gl. 5"},
+           "mode": "HIGHSPEED_RAIL", "realTime": true, "tripId": "ic", "displayName": "IC 2048"},
+          {"place": {"name": "Dresden Hbf", "lat": 51.04, "lon": 13.73, "departure": "2026-10-28T08:10:00Z",
+                     "scheduledDeparture": "2026-10-28T08:10:00Z", "track": "Gl.12", "scheduledTrack": "Gl.12"},
+           "mode": "REGIONAL_RAIL", "realTime": true, "tripId": "re", "displayName": "RE50 (16510)"}
+        ]}
+        """
+        let platforms = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(json.utf8))
+            .stopTimes.compactMap { $0.toEntry(kind: .departures)?.platform }
+        #expect(platforms.map(\.planned) == ["6", "5", "12"])
+        #expect(platforms.map(\.hasChanged) == [false, true, false])
+
+        #expect(PlatformInfo(planned: "Gleis 3a", actual: "Gl 4 A-C") == PlatformInfo(planned: "3a", actual: "4 A-C"))
+        #expect(PlatformInfo(planned: "F", actual: "Bstg. 1") == PlatformInfo(planned: "F", actual: "Bstg. 1"))
+        #expect(PlatformInfo(planned: "Gl.", actual: " ") == PlatformInfo(planned: "Gl.", actual: nil))
+        let saved = try JSONDecoder().decode(PlatformInfo.self, from: Data(#"{"planned": "Gl. 5"}"#.utf8))
+        #expect(saved.planned == "5")
+    }
+
     /// Real-world Transitous names for Stuttgart Hbf: DELFI splits it into "Hauptbahnhof (oben)"
     /// and "Hauptbahnhof (tief)" without the city, which showed up as "oben Hbf" and "tief Hbf".
     @Test func stuttgartHbfLevelsShowAsStuttgartHbf() throws {
@@ -2020,9 +2048,9 @@ private final class CrowdedHubStopTimesProtocol: URLProtocol, @unchecked Sendabl
         // CZPTT leaves Praha-Holešovice two minutes later than DELFI says; still the same stop.
         let holesovice = try #require(filled.stopovers.first { $0.station.name == "Praha-Holesovice" })
         #expect(holesovice.departurePlatform?.best == "1")
-        // DB's own platforms stay as they are.
+        // DB's own platforms stay as they are (the feed's "Gl. 1" without its "Gl.", #451).
         let dresden = try #require(filled.stopovers.first { $0.station.name == "Dresden Hauptbahnhof" })
-        #expect(dresden.departurePlatform?.best == "Gl. 1")
+        #expect(dresden.departurePlatform?.best == "1")
         #expect(dresden.departurePlatform?.source == nil)
         #expect(!TransitousProvider.lacksCzechPlatforms(filled))
     }

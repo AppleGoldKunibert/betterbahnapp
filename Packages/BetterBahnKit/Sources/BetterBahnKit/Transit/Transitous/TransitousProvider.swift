@@ -1568,7 +1568,8 @@ public struct TransitousProvider: TransitProvider {
         let longDistance: Set<Product> = [.highSpeed, .longDistance]
         guard longDistance.contains(a.lineInfo.toLine().product), longDistance.contains(b.lineInfo.toLine().product)
         else { return false }
-        if let trackA = a.place.scheduledTrack, let trackB = b.place.scheduledTrack {
+        // Cleaned: one feed writes "Gl. 5" where another has "5" (Dresden, #451).
+        if let trackA = PlatformInfo.cleaned(a.place.scheduledTrack), let trackB = PlatformInfo.cleaned(b.place.scheduledTrack) {
             return trackA == trackB
         }
         return true
@@ -1744,7 +1745,8 @@ public struct TransitousProvider: TransitProvider {
                   candidate.place.scheduledArrival == arrival,
                   candidate.cancelled != true, candidate.tripCancelled != true,
                   !name.isEmpty, seen.insert(name).inserted else { return false }
-            if let ownTrack = own.place.scheduledTrack, let track = candidate.place.scheduledTrack, ownTrack != track { return false }
+            if let ownTrack = PlatformInfo.cleaned(own.place.scheduledTrack), let track = PlatformInfo.cleaned(candidate.place.scheduledTrack),
+               ownTrack != track { return false }
             return true
         }
     }
