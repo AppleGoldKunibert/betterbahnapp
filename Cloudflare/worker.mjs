@@ -106,13 +106,13 @@ kurz zwischen (Sekunden bis höchstens einen Tag), damit nicht jede Anfrage erne
 <li>signieren Apple-Wallet-Pässe: Wenn du „Zu Apple Wallet hinzufügen“ tippst, werden die Daten des Passes
 (Barcode des Tickets, Namen der Reisenden, Verbindung, Sitzplätze, Auftragsnummer; bei Zeitkarten auch das
 Geburtsdatum aus dem Barcode) an den Server geschickt, dort signiert und sofort zurückgegeben,</li>
-<li>leiten die Anmeldung bei Träwelling an die App weiter,</li>
+<li>leiten die Anmeldung bei Träwelling an die App weiter und halten deine Träwelling-Anmeldung (siehe „Träwelling“),</li>
 <li>speichern Reisen, die du teilst (siehe „Reisen teilen“),</li>
 <li>beantworten Fragen der App nach der Zugstatistik (siehe „Zugstatistik“),</li>
-<li>melden neue Check-ins der Leute, denen du auf Träwelling folgst, wenn du das einschaltest (siehe „Mitteilungen“),</li>
+<li>melden neue Check-ins der Leute, denen du auf Träwelling folgst, Likes und Mitreisende, wenn du das einschaltest (siehe „Mitteilungen“),</li>
 <li>halten deine Live-Aktivität aktuell, während die App geschlossen ist (siehe „Live-Aktivität“).</li>
 </ul>
-<p>Abgesehen von geteilten Reisen, den Check-in-Meldungen und der Reise für die Live-Aktivität wird dabei nichts
+<p>Abgesehen von geteilten Reisen, der Träwelling-Anmeldung, den Check-in-Meldungen und der Reise für die Live-Aktivität wird dabei nichts
 gespeichert oder protokolliert. Cloudflare verarbeitet zur Absicherung des Dienstes
 IP-Adressen; Details stehen in der <a href="https://www.cloudflare.com/privacypolicy/">Datenschutzerklärung von Cloudflare</a>.</p>
 <p>Anfragen an bahn.de stellt die App über einen eigenen kleinen Server beim Hoster Infynix (Auftragsverarbeiter;
@@ -158,6 +158,10 @@ Namen mit dem Suchtext.</p>
 <p>Wenn du dich bei <a href="https://traewelling.de">Träwelling</a> anmeldest, schickt die App deine Check-ins
 (Zug, Strecke, Zeiten, Nachricht, Sichtbarkeit), deine Likes und Abfragen an Träwelling. Dafür gilt die
 Datenschutzerklärung von Träwelling. Du kannst dich in den Einstellungen jederzeit abmelden.</p>
+<p>Deine Träwelling-Anmeldung hält der Server von BetterBahn, damit sie nicht abläuft und bei schlechtem Empfang
+nicht verloren geht. Er speichert sie verschlüsselt und gibt sie nur an deine Geräte heraus. Meldest du dich ab,
+löscht er sie und beendet sie bei Träwelling. Hat 180 Tage lang keines deiner Geräte sie benutzt, löscht er sie
+ebenfalls.</p>
 <p>Die App zeigt dir, wer von den Leuten, denen du auf Träwelling folgst, gerade eingecheckt ist. Um deren Zug
 anzuzeigen, fragt sie Transitous nach den Abfahrten am Einstiegsbahnhof des Check-ins, mit Bahnhof und Uhrzeit,
 aber ohne Namen; die Live-Position kommt wie bei deinen eigenen Zügen von bahn.jetzt.</p>
@@ -167,14 +171,14 @@ nichts über dich gesendet außer deiner IP-Adresse, die jeder Abruf im Internet
 
 <h2>Mitteilungen</h2>
 <p>Hinweise zu Verspätungen und Gleiswechseln erzeugt die App selbst auf deinem Gerät, außer bei regelmäßigen Fahrten (siehe unten).</p>
-<p>Nur wenn du „Check-ins von Gefolgten melden“ einschaltest, kommen Mitteilungen über den Server von BetterBahn:
-Du meldest dich dafür ein zweites Mal bei Träwelling an, und zwar nur mit Leserechten für Check-ins. Diese
-Anmeldung bekommt der Server, nicht die App. Er speichert dafür verschlüsselt die Träwelling-Anmeldung, deine
-Träwelling-Nutzerkennung, die Push-Kennung deines Geräts von Apple und die Kennungen der Check-ins, die er schon
-gemeldet hat. Alle 2 Minuten fragt er bei Träwelling die Check-ins der Leute ab, denen du folgst, und schickt
-über Apples Push-Dienst (APNs) eine Mitteilung mit Name, Zug und Strecke eines neuen Check-ins. Schaltest du es
-aus oder meldest dich in der App bei Träwelling ab, löscht der Server diese Daten und beendet seine Anmeldung.
-Das passiert auch, wenn Träwelling die Anmeldung beendet oder die App gelöscht wurde.</p>
+<p>Nur wenn du unter Träwelling → „Mitteilungen“ etwas einschaltest (Check-ins von Gefolgten, Likes auf deine
+Check-ins, Mitreisende), kommen Mitteilungen über den Server von BetterBahn. Er nutzt dafür deine
+Träwelling-Anmeldung, die er ohnehin hält (siehe „Träwelling“), und speichert deine Träwelling-Nutzerkennung, die
+Push-Kennung deines Geräts von Apple und die Kennungen der Check-ins und Träwelling-Benachrichtigungen, die er
+schon gemeldet hat. Alle 2 Minuten fragt er bei Träwelling die Check-ins der Leute ab, denen du folgst, und deine
+Benachrichtigungen, und schickt über Apples Push-Dienst (APNs) eine Mitteilung mit Name, Zug und Strecke.
+Schaltest du alles aus oder meldest dich in der App bei Träwelling ab, löscht der Server diese Daten. Das passiert
+auch, wenn Träwelling die Anmeldung beendet oder die App gelöscht wurde.</p>
 <p>Bei regelmäßigen Fahrten fragt die App kurz vor der Abfahrt, ob du heute fährst; diese Frage plant sie
 selbst auf deinem Gerät. Sagst du Ja, schickt sie für diesen Tag Zugnummern, Ein- und Ausstiegsbahnhof mit den
 geplanten Zeiten, deine Verspätungsschwelle und die Push-Kennung deines Geräts von Apple an den Server von

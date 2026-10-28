@@ -7,7 +7,8 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     device_token TEXT NOT NULL,       -- APNs device token (hex)
     sandbox INTEGER NOT NULL DEFAULT 0, -- 1: development build (APNs sandbox)
     user_id INTEGER NOT NULL,         -- the Träwelling user, so their own check-ins aren't reported
-    tokens TEXT NOT NULL,             -- the Worker's own Träwelling login (read-only), AES-GCM with TOKEN_KEY
+    tokens TEXT NOT NULL,             -- before #452: a Träwelling login of its own (read-only), AES-GCM with TOKEN_KEY; '' with login_id
+    login_id TEXT,                    -- #452: the app's login (logins.id) the Worker reads with
     known TEXT,                       -- JSON array of the status IDs reported or seen; NULL until the first look
     kinds TEXT,                       -- JSON array: "followed", "likes", "companions" (#447); NULL: only "followed"
     notified TEXT,                    -- JSON array of Träwelling's notification IDs reported or seen; NULL until the first look
@@ -15,6 +16,21 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     created INTEGER NOT NULL          -- unix seconds
 );
 CREATE INDEX IF NOT EXISTS subscriptions_slot ON subscriptions (slot);
+CREATE INDEX IF NOT EXISTS subscriptions_login ON subscriptions (login_id);
+
+-- The app's Träwelling login (#452): one per user, renewed only here; devices fetch its access token.
+CREATE TABLE IF NOT EXISTS logins (
+    id TEXT PRIMARY KEY,              -- random, given to the app
+    secret_hash TEXT NOT NULL,        -- SHA-256 (hex) of the secret only the user's devices know
+    tokens TEXT NOT NULL,             -- access and refresh token, AES-GCM with TOKEN_KEY (bound to "login:<id>")
+    notifications INTEGER NOT NULL DEFAULT 0, -- 1: made with `read-notifications` (likes, fellow travellers)
+    renewed INTEGER NOT NULL,         -- unix seconds of the last renewal
+    renewing INTEGER,                 -- unix seconds until which one request renews it; NULL otherwise
+    used INTEGER NOT NULL,            -- unix seconds a device last fetched a token
+    created INTEGER NOT NULL          -- unix seconds
+);
+CREATE INDEX IF NOT EXISTS logins_renewed ON logins (renewed);
+CREATE INDEX IF NOT EXISTS logins_used ON logins (used);
 
 -- Regular trips (#397): the journeys a device's user said yes to for today, looked at in DB's timetable feed.
 -- One row per device; deleted once its journeys have arrived.

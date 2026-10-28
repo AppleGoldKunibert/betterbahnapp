@@ -42,7 +42,7 @@ import Testing
             "client_id": "public-client",
             "redirect_uri": redirectURI,
             "response_type": "code",
-            "scope": "read-statuses write-statuses read-search write-likes",
+            "scope": "read-statuses write-statuses read-search write-likes read-notifications",
             "state": pkce.state,
             "code_challenge": pkce.challenge,
             "code_challenge_method": "S256",
@@ -50,7 +50,8 @@ import Testing
         #expect(parameters["client_secret"] == nil)
     }
 
-    @Test func tokenExchangePreservesRedirectURIAndVerifier() async throws {
+    /// #452: our server exchanges the code and keeps the login.
+    @Test func ourServerExchangesTheCodeWithTheVerifier() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [OAuthTokenRequestProtocol.self]
         let session = URLSession(configuration: configuration)
@@ -61,7 +62,7 @@ import Testing
             store: TokenStore(service: "BetterBahnKitTests.\(UUID().uuidString)")
         )
         let callback = try #require(URL(string: "betterbahn://oauth?code=test-code&state=test-state"))
-        // The mock rejects the exchange after inspecting it, so no token is written to Keychain.
+        // The mock rejects the sign-in after inspecting it, so nothing is written to the Keychain.
         await #expect(throws: TransitError.http(status: 400, body: "{}")) {
             try await client.completeLogin(callbackURL: callback, pkce: PKCE(verifier: "test-verifier", state: "test-state"))
         }
@@ -415,9 +416,9 @@ private final class OAuthTokenRequestProtocol: URLProtocol, @unchecked Sendable 
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        #expect(request.url?.absoluteString == "https://traewelling.de/oauth/token")
+        #expect(request.url?.absoluteString == "https://betterbahn-push.betterbahn.workers.dev/logins")
         #expect(request.httpMethod == "POST")
-        #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/x-www-form-urlencoded")
+        #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
         #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
         var body = request.httpBody ?? Data()
         if let stream = request.httpBodyStream {
@@ -430,17 +431,8 @@ private final class OAuthTokenRequestProtocol: URLProtocol, @unchecked Sendable 
                 body.append(contentsOf: buffer.prefix(count))
             }
         }
-        var components = URLComponents()
-        components.percentEncodedQuery = String(data: body, encoding: .utf8)
-        let parameters = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
-        #expect(parameters == [
-            "grant_type": "authorization_code",
-            "client_id": "public-client",
-            "redirect_uri": "https://betterbahn.betterbahn.workers.dev/oauth/traewelling/callback",
-            "code_verifier": "test-verifier",
-            "code": "test-code",
-        ])
-        #expect(parameters["client_secret"] == nil)
+        let parameters = (try? JSONSerialization.jsonObject(with: body)) as? [String: String]
+        #expect(parameters == ["code": "test-code", "codeVerifier": "test-verifier"])
         guard let url = request.url,
               let response = HTTPURLResponse(url: url, statusCode: 400, httpVersion: nil, headerFields: nil) else {
             client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
@@ -741,167 +733,218 @@ private final class CollidingCheckinProtocol: URLProtocol, @unchecked Sendable {
     }
 }
 
-/// Träwelling accepts a refresh token once. Rejected ones (400 `invalid_grant`) used to surface as
-/// "Serverfehler (400)" on the travel map for good, until the user logged out and in again.
-@Suite(.serialized) struct TraewellingTokenRefreshTests {
-    @Test func aRejectedRefreshTokenKeepsTheStoredTokenAndIsNotSentAgain() async throws {
-        let store = expiredStore(refreshToken: "used-up")
+/// #452: our server keeps the login and renews it; the app only fetches access tokens there and hands a
+/// login from before over once.
+@Suite(.serialized) struct TraewellingServerLoginTests {
+    private let login = ServerLogin(id: "L1", secret: "S1", readsNotifications: true)
+
+    @Test func handsTheOldLoginOverOnceAndDeletesItsRefreshToken() async throws {
+        let store = store()
         defer { store.clear() }
-        RefreshTokenProtocol.mode = .rejected
-        RefreshTokenProtocol.tokenRequests.withLock { $0 = [] }
-        let client = client(store)
-
-        await #expect(throws: OAuthError.sessionExpired) { try await client.currentUser() }
-        await #expect(throws: OAuthError.sessionExpired) { try await client.currentUser() }
-        #expect(RefreshTokenProtocol.tokenRequests.withLock { $0 } == ["used-up"])
-        // Deleting it would delete the synced Keychain item on every device, a fresh token included.
-        #expect(store.load()?.refreshToken == "used-up")
-
-        // A token another device refreshed arrives through iCloud Keychain later.
-        store.save(OAuthToken(accessToken: "synced", refreshToken: "synced-next", expiresAt: .distantFuture))
-        let user = try await client.currentUser()
-        #expect(user.username == "gertrud")
-        #expect(RefreshTokenProtocol.tokenRequests.withLock { $0 } == ["used-up"])
-    }
-
-    @Test func usesTheTokenAnotherDeviceRefreshedMeanwhile() async throws {
-        let store = expiredStore(refreshToken: "used-up")
-        defer { store.clear() }
-        RefreshTokenProtocol.mode = .rotatedElsewhere(store)
-        RefreshTokenProtocol.tokenRequests.withLock { $0 = [] }
-        let client = client(store)
-
-        let user = try await client.currentUser()
-
-        #expect(user.username == "gertrud")
-        #expect(RefreshTokenProtocol.tokenRequests.withLock { $0 } == ["used-up"])
-        #expect(store.load()?.accessToken == "from-other-device")
-    }
-
-    @Test func callsRunningTogetherRefreshOnce() async throws {
-        let store = expiredStore(refreshToken: "single-use")
-        defer { store.clear() }
-        RefreshTokenProtocol.mode = .slowSuccess
-        RefreshTokenProtocol.tokenRequests.withLock { $0 = [] }
-        let client = client(store)
+        store.save(OAuthToken(accessToken: "expired", refreshToken: "old-refresh", expiresAt: .distantPast))
+        LoginServerProtocol.reset()
+        let keptAlive = Mutex<[String]>([])
+        let client = client(store) {
+            keptAlive.withLock { $0.append("begin") }
+            return { keptAlive.withLock { $0.append("end") } }
+        }
 
         async let first = client.currentUser()
         async let second = client.currentUser()
         let users = try await [first, second]
 
         #expect(users.map(\.username) == ["gertrud", "gertrud"])
-        #expect(RefreshTokenProtocol.tokenRequests.withLock { $0 } == ["single-use"])
-        #expect(store.load()?.refreshToken == "next")
-    }
-
-    @Test func renewsATokenRunningOutSoonAfterAQuickAnswer() async throws {
-        let store = TokenStore(service: "BetterBahnKitTests.\(UUID().uuidString)")
-        defer { store.clear() }
-        store.save(OAuthToken(accessToken: "ending", refreshToken: "early", expiresAt: .now.addingTimeInterval(10 * 60)))
-        RefreshTokenProtocol.mode = .slowSuccess
-        RefreshTokenProtocol.tokenRequests.withLock { $0 = [] }
-        let keptAlive = Mutex<[String]>([])
-        let client = client(store, fastAnswer: .seconds(3600)) {
-            keptAlive.withLock { $0.append("begin") }
-            return { keptAlive.withLock { $0.append("end") } }
-        }
-
-        _ = try await client.currentUser()
-        await client.refreshFinished()
-
-        #expect(RefreshTokenProtocol.tokenRequests.withLock { $0 } == ["early"])
-        #expect(store.load()?.accessToken == "fresh")
-        // The app is kept running until Träwelling's answer with the new token has arrived.
+        #expect(LoginServerProtocol.requests() == ["POST /logins refreshToken=old-refresh"])
+        #expect(LoginServerProtocol.bearers() == ["Bearer handed", "Bearer handed"])
+        #expect(store.loadLogin() == ServerLogin(id: "L1", secret: "S1", readsNotifications: false))
+        #expect(store.load() == nil)
+        // The app is kept running until the answer with the login has arrived.
         #expect(keptAlive.withLock { $0 } == ["begin", "end"])
     }
 
-    @Test func keepsTheTokenAfterASlowAnswer() async throws {
-        let store = TokenStore(service: "BetterBahnKitTests.\(UUID().uuidString)")
+    @Test func aRefusedHandoverKeepsTheOldTokenAndIsNotSentAgain() async throws {
+        let store = store()
         defer { store.clear() }
-        store.save(OAuthToken(accessToken: "ending", refreshToken: "early", expiresAt: .now.addingTimeInterval(10 * 60)))
-        RefreshTokenProtocol.tokenRequests.withLock { $0 = [] }
-        // No answer is quicker than zero: every one counts as poor reception.
-        let client = client(store, fastAnswer: .zero)
+        store.save(OAuthToken(accessToken: "expired", refreshToken: "used-up", expiresAt: .distantPast))
+        LoginServerProtocol.reset()
+        let client = client(store)
+
+        await #expect(throws: OAuthError.sessionExpired) { try await client.currentUser() }
+        await #expect(throws: OAuthError.sessionExpired) { try await client.currentUser() }
+        #expect(LoginServerProtocol.requests() == ["POST /logins refreshToken=used-up"])
+        // Deleting it would delete the synced Keychain item on every device; another may have handed it over.
+        #expect(store.load()?.refreshToken == "used-up")
+        #expect(await client.isLoggedIn)
+    }
+
+    @Test func usesTheOldTokenWhileOurServerCantTakeItOver() async throws {
+        let store = store()
+        defer { store.clear() }
+        store.save(OAuthToken(accessToken: "still-valid", refreshToken: "old-refresh", expiresAt: .now.addingTimeInterval(1800)))
+        LoginServerProtocol.reset(serverDown: true)
+        let client = client(store)
 
         _ = try await client.currentUser()
-        await client.refreshFinished()
 
-        #expect(RefreshTokenProtocol.tokenRequests.withLock { $0 }.isEmpty)
-        #expect(store.load()?.accessToken == "ending")
+        #expect(LoginServerProtocol.bearers() == ["Bearer still-valid"])
+        #expect(store.load()?.refreshToken == "old-refresh")
     }
 
-    @Test func keepsATokenWithMostOfItsHourLeft() async throws {
-        let store = TokenStore(service: "BetterBahnKitTests.\(UUID().uuidString)")
+    @Test func keepsTheTokenAndFetchesTheNextAheadInItsLastTenMinutes() async throws {
+        let store = store()
         defer { store.clear() }
-        store.save(OAuthToken(accessToken: "new", refreshToken: "later", expiresAt: .now.addingTimeInterval(50 * 60)))
-        RefreshTokenProtocol.tokenRequests.withLock { $0 = [] }
-        let client = client(store, fastAnswer: .seconds(3600))
+        store.saveLogin(login)
+        store.saveAccess(OAuthToken(accessToken: "fresh", refreshToken: nil, expiresAt: .now.addingTimeInterval(50 * 60)), for: "L1")
+        LoginServerProtocol.reset()
+        let client = client(store)
 
         _ = try await client.currentUser()
-        await client.refreshFinished()
+        await client.prepareAccessToken()
+        #expect(LoginServerProtocol.requests().isEmpty)
 
-        #expect(RefreshTokenProtocol.tokenRequests.withLock { $0 }.isEmpty)
+        store.saveAccess(OAuthToken(accessToken: "ending", refreshToken: nil, expiresAt: .now.addingTimeInterval(5 * 60)), for: "L1")
+        let ending = client(store)
+        _ = try await ending.currentUser()
+        await ending.prepareAccessToken()
+
+        #expect(LoginServerProtocol.bearers() == ["Bearer fresh", "Bearer ending"])
+        #expect(LoginServerProtocol.requests() == ["POST /logins/L1/token"])
+        #expect(store.loadAccess(for: "L1")?.accessToken == "fetched")
     }
 
-    @Test func onlyAnInvalidGrantCountsAsRejected() {
-        #expect(TraewellingClient.isRejectedGrant(#"{"error":"invalid_grant","error_description":"The refresh token is invalid."}"#))
-        #expect(!TraewellingClient.isRejectedGrant(#"{"error":"invalid_request"}"#))
-        #expect(!TraewellingClient.isRejectedGrant("<html>Bad Request</html>"))
-        #expect(!TraewellingClient.isRejectedGrant(nil))
+    @Test func asksForANewTokenWhenTraewellingRefusesOne() async throws {
+        let store = store()
+        defer { store.clear() }
+        store.saveLogin(login)
+        store.saveAccess(OAuthToken(accessToken: "refused", refreshToken: nil, expiresAt: .now.addingTimeInterval(50 * 60)), for: "L1")
+        LoginServerProtocol.reset()
+        let client = client(store)
+
+        let user = try await client.currentUser()
+
+        #expect(user.username == "gertrud")
+        #expect(LoginServerProtocol.requests() == ["POST /logins/L1/token rejected=refused"])
+        #expect(LoginServerProtocol.bearers() == ["Bearer refused", "Bearer fetched"])
     }
 
-    private func expiredStore(refreshToken: String) -> TokenStore {
-        let store = TokenStore(service: "BetterBahnKitTests.\(UUID().uuidString)")
-        store.save(OAuthToken(accessToken: "expired", refreshToken: refreshToken, expiresAt: .distantPast))
-        return store
+    @Test func logsOutWhenOurServerNoLongerHasTheLogin() async throws {
+        let store = store()
+        defer { store.clear() }
+        store.saveLogin(login)
+        LoginServerProtocol.reset(loginEnded: true)
+        let client = client(store)
+
+        await #expect(throws: OAuthError.loginEnded) { try await client.currentUser() }
+        #expect(store.loadLogin() == nil)
+        #expect(await client.isLoggedIn == false)
     }
 
-    private func client(_ store: TokenStore, fastAnswer: Duration = .milliseconds(1500),
-                        keepAlive: TraewellingClient.KeepAlive? = nil) -> TraewellingClient {
+    @Test func saysOurServerIsDownInsteadOfAServerError() async throws {
+        let store = store()
+        defer { store.clear() }
+        store.saveLogin(login)
+        LoginServerProtocol.reset(serverDown: true)
+        let client = client(store)
+
+        await #expect(throws: OAuthError.serverUnavailable) { try await client.currentUser() }
+        #expect(store.loadLogin() == login)
+    }
+
+    @Test func signingInWhileLoggedInKeepsTheLogin() async throws {
+        let store = store()
+        defer { store.clear() }
+        store.saveLogin(ServerLogin(id: "L1", secret: "S1", readsNotifications: false))
+        LoginServerProtocol.reset()
+        let client = client(store)
+        let pkce = PKCE(state: "state")
+
+        try await client.completeLogin(callbackURL: URL(string: "betterbahn://oauth?code=new-code&state=state")!, pkce: pkce)
+
+        #expect(LoginServerProtocol.requests() == ["PUT /logins/L1 code=new-code"])
+        #expect(store.loadLogin() == login)
+        #expect(await client.readsNotifications)
+    }
+
+    @Test func logsOutAndEndsTheLoginLaterWhenOurServerIsDown() async throws {
+        let store = store()
+        defer { store.clear() }
+        store.saveLogin(login)
+        LoginServerProtocol.reset(serverDown: true)
+        let client = client(store)
+
+        await client.logout()
+
+        #expect(LoginServerProtocol.requests() == ["DELETE /logins/L1"])
+        #expect(store.loadLogin() == nil)
+        #expect(store.loadPendingLogouts() == [login])
+    }
+
+    private func store() -> TokenStore {
+        TokenStore(service: "BetterBahnKitTests.\(UUID().uuidString)")
+    }
+
+    private func client(_ store: TokenStore, keepAlive: TraewellingClient.KeepAlive? = nil) -> TraewellingClient {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [RefreshTokenProtocol.self]
+        configuration.protocolClasses = [LoginServerProtocol.self]
         return TraewellingClient(config: TraewellingConfig(clientID: "public-client"),
-                                 http: HTTPClient(session: URLSession(configuration: configuration)), store: store,
-                                 fastAnswer: fastAnswer, keepAlive: keepAlive)
+                                 http: HTTPClient(session: URLSession(configuration: configuration)), store: store, keepAlive: keepAlive)
     }
 }
 
-/// Answers the token endpoint like `mode` says and every other request with a user.
-private final class RefreshTokenProtocol: URLProtocol, @unchecked Sendable {
-    enum Mode {
-        case rejected
-        /// Rejects the token, but only after another device has put a newer one into the store.
-        case rotatedElsewhere(TokenStore)
-        /// Hands out a new token after a moment, long enough for a second call to come in.
-        case slowSuccess
+/// Our login server (`betterbahn-push`) and Träwelling: hands over refresh tokens except "used-up", hands
+/// out "fetched" for login L1, and answers Träwelling's user to every token but "refused".
+private final class LoginServerProtocol: URLProtocol, @unchecked Sendable {
+    struct State {
+        var serverDown = false
+        var loginEnded = false
+        var requests: [String] = []
+        var bearers: [String] = []
     }
 
-    nonisolated(unsafe) static var mode = Mode.rejected
-    static let tokenRequests = Mutex<[String]>([])
+    static let state = Mutex(State())
+
+    static func reset(serverDown: Bool = false, loginEnded: Bool = false) {
+        state.withLock { $0 = State(serverDown: serverDown, loginEnded: loginEnded) }
+    }
+
+    static func requests() -> [String] { state.withLock { $0.requests } }
+    static func bearers() -> [String] { state.withLock { $0.bearers } }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        guard request.url?.path == "/oauth/token" else {
-            finish(status: 200, json: #"{"data":{"id":1,"displayName":"Gertrud","username":"gertrud"}}"#)
-            return
+        let path = request.url?.path ?? ""
+        guard request.url?.host == "betterbahn-push.betterbahn.workers.dev" else {
+            let bearer = request.value(forHTTPHeaderField: "Authorization") ?? ""
+            Self.state.withLock { $0.bearers.append(bearer) }
+            if bearer == "Bearer refused" { return finish(status: 401, json: "{}") }
+            return finish(status: 200, json: #"{"data":{"id":1,"displayName":"Gertrud","username":"gertrud"}}"#)
         }
-        var components = URLComponents()
-        components.percentEncodedQuery = String(data: Self.body(of: request), encoding: .utf8)
-        let refresh = components.queryItems?.first { $0.name == "refresh_token" }?.value ?? ""
-        Self.tokenRequests.withLock { $0.append(refresh) }
-        let rejection = #"{"error":"invalid_grant","error_description":"The refresh token is invalid."}"#
-        switch Self.mode {
-        case .rejected:
-            finish(status: 400, json: rejection)
-        case .rotatedElsewhere(let store):
-            store.save(OAuthToken(accessToken: "from-other-device", refreshToken: "other-device-next", expiresAt: .distantFuture))
-            finish(status: 400, json: rejection)
-        case .slowSuccess:
+        let body = (try? JSONSerialization.jsonObject(with: Self.body(of: request))) as? [String: String] ?? [:]
+        let detail = ["refreshToken", "code", "rejected"].compactMap { key in body[key].map { "\(key)=\($0)" } }
+        let method = request.httpMethod ?? "GET"
+        let state = Self.state.withLock { recorded in
+            recorded.requests.append(([method, path] + detail).joined(separator: " "))
+            return recorded
+        }
+        if state.serverDown { return finish(status: 503, json: #"{"error":"traewelling_unavailable"}"#) }
+        if state.loginEnded { return finish(status: 404, json: #"{"error":"not_found"}"#) }
+        let expires = Int(Date.now.timeIntervalSince1970) + 3600
+        switch (method, path) {
+        case ("POST", "/logins") where body["refreshToken"] == "used-up":
+            finish(status: 400, json: #"{"error":"invalid_grant"}"#)
+        case ("POST", "/logins"):
+            // Slow enough for a second call to come in meanwhile.
             DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) {
-                self.finish(status: 200, json: #"{"access_token":"fresh","refresh_token":"next","expires_in":3600}"#)
+                self.finish(status: 201, json: #"{"id":"L1","secret":"S1","accessToken":"handed","expiresAt":\#(expires),"readsNotifications":false}"#)
             }
+        case ("PUT", "/logins/L1"), ("POST", "/logins/L1/token"):
+            finish(status: 200, json: #"{"accessToken":"fetched","expiresAt":\#(expires),"readsNotifications":true}"#)
+        case ("DELETE", "/logins/L1"):
+            finish(status: 204, json: "")
+        default:
+            finish(status: 404, json: "{}")
         }
     }
 

@@ -91,10 +91,11 @@ extension AppModel {
         checkinPushKinds.contains(kind)
     }
 
-    /// Whether turning `kind` on signs in with Träwelling once more: the first kind, or likes and fellow
-    /// travellers on a sign-up from before #447, whose login can't read Träwelling's notifications.
-    func checkinPushNeedsLogin(for kind: CheckinPushKind) -> Bool {
-        FollowedCheckinPush.step(for: checkinPushKinds.union([kind]), subscription: followedCheckinPush) == .signUp
+    /// Whether turning `kind` on signs in with Träwelling again: likes and fellow travellers with a login
+    /// handed over from before #452, which can't read Träwelling's notifications.
+    func checkinPushNeedsLogin(for kind: CheckinPushKind) async -> Bool {
+        FollowedCheckinPush.step(for: checkinPushKinds.union([kind]), subscription: followedCheckinPush,
+                                 loginReadsNotifications: await traewelling.readsNotifications) == .signIn
     }
 
     private func setCheckinPushKinds(_ kinds: Set<CheckinPushKind>) {
@@ -104,45 +105,55 @@ extension AppModel {
     }
 
     /// Turns one kind of notification from the push Worker on or off (#266, #447). Turning one on asks for
-    /// permission and the device token and, when `checkinPushNeedsLogin`, signs in with Träwelling once more
-    /// (read-only, for the Worker; `authenticate` runs the browser session). Throws when something is
-    /// missing; a cancelled login throws too. Offline the change reaches the Worker on the next start.
+    /// permission and the device token and, when `checkinPushNeedsLogin`, signs in with Träwelling again
+    /// (`authenticate` runs the browser session); the Worker reads with the app's login (#452). Throws when
+    /// something is missing; a cancelled login throws too. Offline the change reaches the Worker on the next start.
     func setCheckinPush(_ kind: CheckinPushKind, on: Bool, authenticate: (URL, String) async throws -> URL) async throws {
         var kinds = checkinPushKinds
         if on { kinds.insert(kind) } else { kinds.remove(kind) }
-        switch FollowedCheckinPush.step(for: kinds, subscription: followedCheckinPush) {
+        if on, (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])) != true {
+            throw FollowedCheckinPushError.notificationsDenied
+        }
+        var step = FollowedCheckinPush.step(for: kinds, subscription: followedCheckinPush,
+                                            loginReadsNotifications: await traewelling.readsNotifications)
+        if step == .signIn {
+            try await signInToTraewellingAgain(authenticate: authenticate)
+            step = FollowedCheckinPush.step(for: kinds, subscription: followedCheckinPush,
+                                            loginReadsNotifications: await traewelling.readsNotifications)
+        }
+        switch step {
         case .signOff:
             await disableCheckinPush()
+        case .signIn:
+            // Träwelling didn't grant reading notifications.
+            throw OAuthError.sessionExpired
         case .signUp:
-            try await signUpForCheckinPush(kinds: kinds, authenticate: authenticate)
+            try await signUpForCheckinPush(kinds: kinds)
         case .update:
-            if on {
-                guard (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])) == true else {
-                    throw FollowedCheckinPushError.notificationsDenied
-                }
-            }
             setCheckinPushKinds(kinds)
             followedCheckinPushSentKinds = nil
             await syncFollowedCheckinPush()
         }
     }
 
-    private func signUpForCheckinPush(kinds: Set<CheckinPushKind>, authenticate: (URL, String) async throws -> URL) async throws {
-        let center = UNUserNotificationCenter.current()
-        guard (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) == true else {
-            throw FollowedCheckinPushError.notificationsDenied
-        }
-        guard let deviceToken = await pushDeviceTokenForFollowedCheckins() else { throw FollowedCheckinPushError.noDeviceToken }
-        let user = try await traewelling.currentUser()
-        let config = FollowedCheckinPush.config(from: traewelling.config)
+    /// Signs in with Träwelling again with the app's current scopes; our server keeps the login, so the
+    /// notifications already running carry on.
+    private func signInToTraewellingAgain(authenticate: (URL, String) async throws -> URL) async throws {
+        let config = traewelling.config
         let pkce = PKCE()
         let callback = try await authenticate(config.authorizeURL(pkce: pkce), config.callbackScheme)
-        let code = try TraewellingConfig.authorizationCode(in: callback, pkce: pkce)
-        // A sign-up left from turning it off offline, or one whose login can't read notifications, ends
+        try await traewelling.completeLogin(callbackURL: callback, pkce: pkce)
+    }
+
+    private func signUpForCheckinPush(kinds: Set<CheckinPushKind>) async throws {
+        guard let deviceToken = await pushDeviceTokenForFollowedCheckins() else { throw FollowedCheckinPushError.noDeviceToken }
+        guard let login = try await traewelling.serverLogin() else { throw OAuthError.notLoggedIn }
+        let user = try await traewelling.currentUser()
+        // A sign-up left from turning it off offline, or one with a login of its own (before #452), ends
         // first, so its notifications don't come twice.
         if let old = followedCheckinPush { try? await FollowedCheckinPush().unsubscribe(old) }
         followedCheckinPush = try await FollowedCheckinPush().subscribe(
-            code: code, codeVerifier: pkce.verifier, deviceToken: deviceToken, sandbox: Self.pushUsesSandbox, userID: user.id, kinds: kinds)
+            login: login, deviceToken: deviceToken, sandbox: Self.pushUsesSandbox, userID: user.id, kinds: kinds)
         followedCheckinPushSentToken = deviceToken
         followedCheckinPushSentKinds = kinds
         followedCheckinPushEnded = false
@@ -160,8 +171,8 @@ extension AppModel {
     }
 
     /// On every start and after a setting changed: sends the Worker the current device token (it can change)
-    /// and kinds, ends a sign-up that is no longer wanted (all off, logged out of Träwelling) and notices one
-    /// the Worker dropped.
+    /// and kinds, ends a sign-up that is no longer wanted (all off, logged out of Träwelling), notices one
+    /// the Worker dropped and moves one with a login of its own (before #452) to the app's login.
     func syncFollowedCheckinPush() async {
         guard let subscription = followedCheckinPush else {
             // Turned on in a build that looked in the background itself: there's no sign-up yet.
@@ -172,6 +183,14 @@ extension AppModel {
         guard !kinds.isEmpty, settings.traewellingEnabled, await traewelling.isLoggedIn else {
             await disableCheckinPush()
             return
+        }
+        if !subscription.usesAppLogin {
+            // Kept while the app's login can't read what the old one could (likes, fellow travellers).
+            if FollowedCheckinPush.step(for: kinds, subscription: subscription,
+                                        loginReadsNotifications: await traewelling.readsNotifications) == .signUp {
+                try? await signUpForCheckinPush(kinds: kinds)
+                if followedCheckinPush != subscription { return }
+            }
         }
         guard let deviceToken = await pushDeviceTokenForFollowedCheckins(),
               deviceToken != followedCheckinPushSentToken || kinds != followedCheckinPushSentKinds,

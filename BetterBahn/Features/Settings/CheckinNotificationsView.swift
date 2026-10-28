@@ -4,8 +4,8 @@ import SwiftUI
 
 /// Settings → Träwelling → Mitteilungen (#266, #447): pushes from our server about new check-ins of the
 /// people the user follows, likes on the user's own check-ins and people checking in on the same train.
-/// Each turns on alone; the first one (and likes or fellow travellers on a sign-up from before #447) signs
-/// in with Träwelling once more, in the same browser session as the app's own login.
+/// Each turns on alone; our server reads with the app's Träwelling login (#452). Likes and fellow travellers
+/// with a login from before #452 sign in with Träwelling again first.
 struct CheckinNotificationsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.webAuthenticationSession) private var webAuthenticationSession
@@ -49,10 +49,12 @@ struct CheckinNotificationsView: View {
             model.isCheckinPushOn(kind) || (changing == kind && turningOn)
         } set: { on in
             error = nil
-            if on, model.checkinPushNeedsLogin(for: kind) {
-                kindNeedingLogin = kind
-            } else {
-                change(kind, on: on)
+            Task {
+                if on, await model.checkinPushNeedsLogin(for: kind) {
+                    kindNeedingLogin = kind
+                } else {
+                    change(kind, on: on)
+                }
             }
         }) {
             HStack {
