@@ -1,0 +1,103 @@
+# Lets people with write access (and the review Routine, which comments as goldkunibert) approve a PR or
+# request changes through a GitHub App, since nobody can approve their own PR. Comment on a PR:
+#   @<app> approve [optional note]
+#   @<app> request changes <reason>
+# where <app> is the App's slug (e.g. @betterbahn-bot). The bot reacts 👍 when the review is submitted,
+# 👎 when the commenter has no write access and 😕 when it failed (details in the run log).
+# Lines quoted with ">" and code blocks are ignored, so quoting an old command doesn't run it again.
+# Setup: a GitHub App with the repository permission "Pull requests: Read and write", installed on this
+# repo; its App ID as the Actions variable REVIEW_BOT_APP_ID and a private key as the secret
+# REVIEW_BOT_PRIVATE_KEY. Comment workflows only run from the default branch (prod).
+name: Review bot
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+permissions: {}
+
+concurrency:
+  group: review-bot-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  review:
+    # Cheap filter before minting a token; the script checks the exact command and the permission.
+    if: >-
+      (github.event_name == 'pull_request_review_comment' || github.event.issue.pull_request) &&
+      github.event.comment.user.type != 'Bot' &&
+      contains(github.event.comment.body, '@') &&
+      (contains(github.event.comment.body, 'approve') || contains(github.event.comment.body, 'request'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Get the App token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.REVIEW_BOT_APP_ID }}
+          private-key: ${{ secrets.REVIEW_BOT_PRIVATE_KEY }}
+
+      - name: Submit the review
+        uses: actions/github-script@v7
+        env:
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+        with:
+          github-token: ${{ steps.app.outputs.token }}
+          script: |
+            const { owner, repo } = context.repo;
+            const comment = context.payload.comment;
+            const isReviewComment = context.eventName === "pull_request_review_comment";
+            const pull_number = isReviewComment ? context.payload.pull_request.number : context.payload.issue.number;
+            const commenter = comment.user.login;
+
+            const react = async (content) => {
+              try {
+                if (isReviewComment) {
+                  await github.rest.reactions.createForPullRequestReviewComment({ owner, repo, comment_id: comment.id, content });
+                } else {
+                  await github.rest.reactions.createForIssueComment({ owner, repo, comment_id: comment.id, content });
+                }
+              } catch (error) {
+                core.warning(`Could not react to the comment: ${error.message}`);
+              }
+            };
+
+            // Drop code blocks and quoted lines, then look for "@<slug> approve" or "@<slug> request changes".
+            const text = (comment.body ?? "")
+              .replace(/```[\s\S]*?```/g, "")
+              .split("\n")
+              .filter((line) => !line.trimStart().startsWith(">"))
+              .join("\n");
+            const slug = process.env.APP_SLUG.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            const command = new RegExp(`(?:^|\\s)@${slug}(?:\\[bot\\])?\\s+(approve|request[ -]?changes?)\\b`, "i");
+            const match = text.match(command);
+            if (!match) {
+              core.info(`No @${process.env.APP_SLUG} command in the comment.`);
+              return;
+            }
+            const event = match[1].toLowerCase() === "approve" ? "APPROVE" : "REQUEST_CHANGES";
+            const note = text.slice(match.index + match[0].length).replace(/^\s*:?/, "").trim();
+
+            const { data: access } = await github.rest.repos.getCollaboratorPermissionLevel({ owner, repo, username: commenter });
+            if (!["admin", "write"].includes(access.permission)) {
+              core.info(`${commenter} has "${access.permission}" access, needs write.`);
+              await react("-1");
+              return;
+            }
+
+            try {
+              const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number });
+              if (pr.state !== "open") throw new Error(`PR #${pull_number} is ${pr.state}.`);
+
+              const verb = event === "APPROVE" ? "Approved" : "Changes requested";
+              const body = note ? `${verb} for ${commenter}:\n\n${note}` : `${verb} for ${commenter}.`;
+              await github.rest.pulls.createReview({ owner, repo, pull_number, commit_id: pr.head.sha, event, body });
+              core.info(`${verb} on #${pull_number} at ${pr.head.sha} for ${commenter}.`);
+              await react("+1");
+            } catch (error) {
+              await react("confused");
+              core.setFailed(`Could not submit the review: ${error.message}`);
+            }
