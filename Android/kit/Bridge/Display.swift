@@ -62,12 +62,15 @@ struct LegDisplay: Encodable {
     /// The stops between departure and arrival as the iOS app lists them (bahn.de's outlying extra stops dropped).
     var intermediateStops: [Stopover]
     var hasDelayReason: Bool
+    /// "Ausstieg in Fahrtrichtung links" where the offline platform list knows it (`ExitSides`).
+    var exitSide: String?
 
     init(_ leg: Leg) {
         line = leg.line.map(LineDisplay.init)
         direction = leg.directionDescription
         intermediateStops = Array(BahnDeClient.droppingOutlyingZusatzhalte(from: leg.stopovers).dropFirst().dropLast())
         hasDelayReason = leg.messages.contains { $0.kind == .delay }
+        exitSide = ExitSides.side(leaving: leg)?.displayName
     }
 }
 

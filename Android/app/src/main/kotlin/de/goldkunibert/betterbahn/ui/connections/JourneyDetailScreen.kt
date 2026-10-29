@@ -53,6 +53,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import de.goldkunibert.betterbahn.AppModel
 import de.goldkunibert.betterbahn.Route
+import de.goldkunibert.betterbahn.data.ConnectionSearch
 import de.goldkunibert.betterbahn.kit.JourneyDisplay
 import de.goldkunibert.betterbahn.kit.Kit
 import de.goldkunibert.betterbahn.kit.Leg
@@ -119,7 +120,9 @@ fun JourneyDetailScreen(model: AppModel, route: Route.Detail) {
         )
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Summary(display, saved) { model.toggleSaved(display) }
-            if (display.issues.isNotEmpty()) Issues(display)
+            if (display.issues.isNotEmpty()) {
+                Issues(display) { alternativeSearch(display)?.let { model.push(Route.Results(it)) } }
+            }
             Legs(display) { index -> model.push(Route.TripFromLeg(display, index)) }
             Spacer(Modifier.height(24.dp))
         }
@@ -156,8 +159,30 @@ private fun Summary(display: JourneyDisplay, saved: Boolean, onSave: () -> Unit)
     }
 }
 
+/**
+ * A new search from where the journey breaks (`AlternativeJourneySheet`): from the station of the transfer that no
+ * longer works at the arrival there, or from the start of the first cancelled train; to the same destination.
+ */
+private fun alternativeSearch(display: JourneyDisplay): ConnectionSearch? {
+    val journey = display.journey
+    val destination = journey.legs.lastOrNull()?.destination ?: return null
+    val transit = journey.transitLegs
+    val broken = display.brokenTransferIndices.firstOrNull()?.let { transit.getOrNull(it - 1) }
+    val cancelled = transit.firstOrNull { it.cancelled }
+    return when {
+        broken != null -> ConnectionSearch(broken.destination, destination, date = broken.arrival.best)
+        cancelled != null -> ConnectionSearch(cancelled.origin, destination, date = cancelled.departure.planned)
+        else -> {
+            // A transfer too tight to make: from where the earlier train arrives.
+            val tight = (1 until transit.size).firstOrNull { transit[it].departure.best - transit[it - 1].arrival.best < 2 * 60_000 }
+                ?.let { transit[it - 1] }
+            tight?.let { ConnectionSearch(it.destination, destination, date = it.arrival.best) }
+        }
+    }
+}
+
 @Composable
-private fun Issues(display: JourneyDisplay) {
+private fun Issues(display: JourneyDisplay, onAlternative: () -> Unit) {
     Card(colors = CardDefaults.cardColors(containerColor = HeavyDelay.copy(alpha = 0.10f))) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             for (issue in display.issues) {
@@ -168,6 +193,9 @@ private fun Issues(display: JourneyDisplay) {
                         Text(issue.message, style = MaterialTheme.typography.bodySmall)
                     }
                 }
+            }
+            if (display.issues.any { it.isBlocking } && alternativeSearch(display) != null) {
+                FilledTonalButton(onClick = onAlternative, modifier = Modifier.fillMaxWidth()) { Text("Alternative suchen") }
             }
         }
     }
@@ -271,7 +299,7 @@ private fun LegCard(leg: Leg, extra: LegDisplay, onOpenTrain: () -> Unit) {
             } else {
                 Text(durationString((leg.arrival.planned - leg.departure.planned) / 1000.0), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            StopRow(leg.arrival, leg.destination.shownName, leg.cancelled, platform = { PlatformBadge(leg.arrivalPlatform, prominent = true) })
+            StopRow(leg.arrival, leg.destination.shownName, leg.cancelled, note = extra.exitSide, platform = { PlatformBadge(leg.arrivalPlatform, prominent = true) })
             if (leg.remarks.isNotEmpty() || leg.messages.isNotEmpty()) {
                 HorizontalDivider()
                 (leg.messages.map { it.text } + leg.remarks).distinct().forEach { Remark(it) }
@@ -281,10 +309,19 @@ private fun LegCard(leg: Leg, extra: LegDisplay, onOpenTrain: () -> Unit) {
 }
 
 @Composable
-private fun StopRow(time: de.goldkunibert.betterbahn.kit.TimeInfo, name: String, cancelled: Boolean, platform: @Composable () -> Unit) {
+private fun StopRow(
+    time: de.goldkunibert.betterbahn.kit.TimeInfo,
+    name: String,
+    cancelled: Boolean,
+    note: String? = null,
+    platform: @Composable () -> Unit,
+) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Column(Modifier.width(56.dp)) { TimeStack(time, cancelled = cancelled) }
-        Text(name, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+        Column(Modifier.weight(1f)) {
+            Text(name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+            note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
         platform()
     }
 }

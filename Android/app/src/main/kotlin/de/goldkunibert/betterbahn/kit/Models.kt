@@ -146,6 +146,8 @@ data class LegDisplay(
     val direction: String? = null,
     val intermediateStops: List<Stopover> = emptyList(),
     val hasDelayReason: Boolean = false,
+    /** "Ausstieg in Fahrtrichtung links", if known. */
+    val exitSide: String? = null,
 )
 
 @Serializable
