@@ -9,6 +9,8 @@ On Android so far:
 - journey details with stops, transfers, exit side, weather, CO₂, live data, "Alternative suchen"
 - departure board with filters and favourites; train view (saving a ride); train number search
 - saved journeys with notifications in the background (WorkManager, every 15 minutes)
+- widgets "Reiseübersicht" (next saved journey, `JourneyWidgetState`) and "Abfahrten" (a station's departures,
+  `BoardWidgetRows`), with Glance
 - connections shared from DB Navigator
 
 ## Layout
@@ -16,8 +18,8 @@ On Android so far:
 | Path | Contents |
 | --- | --- |
 | `Android/kit/` | Swift package building BetterBahnKit for Android. `build.sh` links the Kit's source folders into `Sources/BetterBahnKit/` (gitignored), `Package.swift` leaves out what needs Apple frameworks, `Shims/` holds the Android stand-ins (FoundationNetworking/FoundationXML re-exported, a no-op `WorkerAuth`). Output: `libBetterBahnKit.so` (Swift runtime linked in) + `libc++_shared.so` per ABI in `Android/app/src/main/jniLibs/`, the Kit's JSON data in `Android/app/src/main/assets/BetterBahnKit/` (both gitignored). |
-| `Android/kit/Bridge/` | The bridge. `KitBridge.swift`: one JNI function taking a method name and JSON (UTF-8 bytes both ways), run on Swift concurrency. `Methods.swift`: one handler per method (`searchStations`, `journeys` incl. via stations and ticket filter, `completeJourney`, `refreshJourney`, `describeJourneys`, `refreshSaved` (live data plus what to notify, as `AppModel.refresh` on iOS), `journeyExtras` (CO₂, weather), `board`, `trip`, `tripForLeg`, `tripLeg`, `searchTrains`, `trainRun`, `importShared`), calling the Kit as the iOS views do (same provider, same steps). `Display.swift`: Kit models go out as their own Codable JSON (dates in ms) plus what iOS computes from them (line display name and colour, journey duration, bar spans, issues, intermediate stops …); route shapes are dropped. `StationNames.swift`: adds `displayName` to every station. |
-| `Android/app/` | The Android app (Gradle, AGP 9, Kotlin, Compose, Material 3). `kit/`: `Kit.kt` loads the library, copies the JSON data out of the APK once per update and wraps the methods; `Models.kt` mirrors the Kit's JSON (journeys and trips keep it as `raw` to hand back); `KitJson.kt` reads answers (unit-tested against recorded answers in `src/test/resources/kit/`). `AppModel.kt`: tabs, a stack of screens per tab (state of results/detail lives in the route), saved journeys. `data/Store.kt`: favourites, recent stations and searches, saved journeys, the ticket, as JSON in SharedPreferences (one store per process). `data/SavedRefresh.kt`: refreshing saved journeys and notifying (in the app and in a `WorkManager` worker). `ui/`: the screens, `Theme.kt`/`Format.kt`/`Components.kt` port the iOS app's colours, formats and badges (`DesignSystem.swift`). |
+| `Android/kit/Bridge/` | The bridge. `KitBridge.swift`: one JNI function taking a method name and JSON (UTF-8 bytes both ways), run on Swift concurrency. `Methods.swift`: one handler per method (`searchStations`, `journeys` incl. via stations and ticket filter, `completeJourney`, `refreshJourney`, `describeJourneys`, `refreshSaved` (live data plus what to notify, as `AppModel.refresh` on iOS), `journeyExtras` (CO₂, weather), `widgetState`, `boardWidgetRows`, `board`, `trip`, `tripForLeg`, `tripLeg`, `searchTrains`, `trainRun`, `importShared`), calling the Kit as the iOS views do (same provider, same steps). `Display.swift`: Kit models go out as their own Codable JSON (dates in ms) plus what iOS computes from them (line display name and colour, journey duration, bar spans, issues, intermediate stops …); route shapes are dropped. `StationNames.swift`: adds `displayName` to every station. |
+| `Android/app/` | The Android app (Gradle, AGP 9, Kotlin, Compose, Material 3). `kit/`: `Kit.kt` loads the library, copies the JSON data out of the APK once per update and wraps the methods; `Models.kt` mirrors the Kit's JSON (journeys and trips keep it as `raw` to hand back); `KitJson.kt` reads answers (unit-tested against recorded answers in `src/test/resources/kit/`). `AppModel.kt`: tabs, a stack of screens per tab (state of results/detail lives in the route), saved journeys. `data/Store.kt`: favourites, recent stations and searches, saved journeys, the ticket, as JSON in SharedPreferences (one store per process). `data/SavedRefresh.kt`: refreshing saved journeys and notifying (in the app and in a `WorkManager` worker, which also reloads the widgets). `widget/`: the Glance widgets, the departures widget's station per widget ID and its config screen. `ui/`: the screens, `Theme.kt`/`Format.kt`/`Components.kt` port the iOS app's colours, formats and badges (`DesignSystem.swift`). |
 | `Android/gradle/libs.versions.toml` | Versions of AGP, Kotlin, Compose. |
 
 `applicationId` and package are `de.goldkunibert.betterbahn`. The ID is permanent once the app is on Google Play:
@@ -62,7 +64,7 @@ Left out of the Android Kit build (`Android/kit/Package.swift`) because they nee
 Kit code behind `#if canImport(SwiftUI|ActivityKit|PDFKit)` (product colours, Live Activity attributes, ticket
 scanning) compiles to nothing on Android.
 
-Not ported yet (app side): tickets and passenger rights, Träwelling, live map, widgets and Live Activity, bike
+Not ported yet (app side): tickets and passenger rights, Träwelling, live map, the live widgets and Live Activity, bike
 option, "Anderer Zug", regular trips, statistics and the collection, sharing a journey, iCloud sync. bahn.de's
 extras (train names, occupancy, coach sequence) and the train statistics arrive once Play Integrity is there.
 Wagenreihung: bahn.de needs Play Integrity; vagonweb.cz's plan needs its page loaded in a web view when its bot
