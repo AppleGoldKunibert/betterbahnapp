@@ -11,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import de.goldkunibert.betterbahn.data.ConnectionSearch
 import de.goldkunibert.betterbahn.data.Notifier
 import de.goldkunibert.betterbahn.data.SavedRefresh
+import de.goldkunibert.betterbahn.widget.JourneyWidget
 import de.goldkunibert.betterbahn.data.SavedJourney
 import de.goldkunibert.betterbahn.data.Store
 import de.goldkunibert.betterbahn.kit.BoardEntryDisplay
@@ -101,6 +102,7 @@ class AppModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
                 savedDisplays.keys.retainAll(saved.map { it.id }.toSet())
+                runCatching { JourneyWidget.update(getApplication()) }
             }
         }
     }

@@ -61,6 +61,7 @@ enum Methods {
         "importShared": handler(importShared),
         "refreshSaved": handler(refreshSaved),
         "journeyExtras": handler(journeyExtras),
+        "widgetState": handler(widgetState),
     ]
 
     // MARK: Stations
@@ -353,5 +354,50 @@ enum Methods {
                                                      weatherCode: forecast.weatherCode, isDay: forecast.isDay)
         }
         return JourneyExtras(co2SavedKilograms: co2.savedComparedToCar, arrivalWeather: arrivals)
+    }
+
+    // MARK: Widget
+
+    struct WidgetStateDisplay: Encodable {
+        /// beforeDeparture, riding, transfer, arrived
+        var phase: String
+        var trainName: String
+        var product: Product
+        var nextStopName: String
+        var nextStopTime: Date
+        var nextStopDelayMinutes: Int?
+        var platform: String?
+        var originName: String
+        var destinationName: String
+        var finalArrival: Date
+        var finalDelayMinutes: Int?
+        var cancelled: Bool
+        var warning: String?
+        /// At a transfer: where, the next train and its platform and departure.
+        var transferStation: String?
+        var transferTrain: String?
+        var transferPlatform: String?
+        var transferDeparture: Date?
+    }
+
+    /// What the "Reiseübersicht" widget shows now (`JourneyWidgetState`), for the next saved journey that isn't over.
+    @Sendable static func widgetState(_ input: JourneysInput) async throws -> WidgetStateDisplay? {
+        let now = Date.now
+        let next = input.journeys.filter { !$0.isOver(now: now) }
+            .min { ($0.departure?.planned ?? .distantFuture) < ($1.departure?.planned ?? .distantFuture) }
+        guard let journey = next, let state = JourneyWidgetState.from(journey, now: now) else { return nil }
+        let phase: String = switch state.phase {
+        case .beforeDeparture: "beforeDeparture"
+        case .riding: "riding"
+        case .transfer: "transfer"
+        case .arrived: "arrived"
+        }
+        return WidgetStateDisplay(
+            phase: phase, trainName: state.trainName, product: state.product, nextStopName: state.nextStopName,
+            nextStopTime: state.nextStopTime, nextStopDelayMinutes: state.nextStopDelayMinutes, platform: state.platform,
+            originName: state.originName, destinationName: state.destinationName, finalArrival: state.finalArrival,
+            finalDelayMinutes: state.finalDelayMinutes, cancelled: state.cancelled, warning: state.warning,
+            transferStation: state.transfer?.station, transferTrain: state.transfer?.toTrain,
+            transferPlatform: state.transfer?.toPlatform, transferDeparture: state.transfer?.departure)
     }
 }

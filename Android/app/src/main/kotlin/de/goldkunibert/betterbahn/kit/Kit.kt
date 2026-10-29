@@ -161,6 +161,12 @@ object Kit {
 
     suspend fun journeyExtras(raw: JsonObject): JourneyExtras = json.decodeFromJsonElement(call("journeyExtras", journeyArgs(raw)))
 
+    /** The widget's state for the next of these saved journeys; null when none is coming. */
+    suspend fun widgetState(raws: List<JsonObject>): WidgetState? {
+        val result = call("widgetState", buildJsonObject { put("journeys", JsonArray(raws)) })
+        return if (result is kotlinx.serialization.json.JsonNull) null else json.decodeFromJsonElement(result)
+    }
+
     /** A connection shared from DB Navigator, found again. */
     suspend fun importShared(text: String): JourneyDisplay =
         KitJson.journey(call("importShared", buildJsonObject { put("text", text) }))

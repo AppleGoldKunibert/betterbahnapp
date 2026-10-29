@@ -313,3 +313,26 @@ data class JourneyExtras(
     /** By leg index. */
     val arrivalWeather: Map<String, ArrivalWeather> = emptyMap(),
 )
+
+/** What the "Reiseübersicht" widget shows now (`JourneyWidgetState`). */
+@Serializable
+data class WidgetState(
+    /** beforeDeparture, riding, transfer, arrived */
+    val phase: String,
+    val trainName: String,
+    val product: String,
+    val nextStopName: String,
+    val nextStopTime: Long,
+    val nextStopDelayMinutes: Int? = null,
+    val platform: String? = null,
+    val originName: String,
+    val destinationName: String,
+    val finalArrival: Long,
+    val finalDelayMinutes: Int? = null,
+    val cancelled: Boolean = false,
+    val warning: String? = null,
+    val transferStation: String? = null,
+    val transferTrain: String? = null,
+    val transferPlatform: String? = null,
+    val transferDeparture: Long? = null,
+)

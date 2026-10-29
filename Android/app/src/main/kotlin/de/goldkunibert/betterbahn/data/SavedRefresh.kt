@@ -22,6 +22,7 @@ import de.goldkunibert.betterbahn.kit.JourneyDisplay
 import de.goldkunibert.betterbahn.kit.Kit
 import de.goldkunibert.betterbahn.kit.SavedNotification
 import de.goldkunibert.betterbahn.ui.timeString
+import de.goldkunibert.betterbahn.widget.JourneyWidget
 import java.util.concurrent.TimeUnit
 
 /**
@@ -49,6 +50,7 @@ object SavedRefresh {
             onFresh(entry.id, result.journey)
             result.notifications.forEach { Notifier.show(context, it, entry.id) }
         }
+        runCatching { JourneyWidget.update(context) }
     }
 
     /** Planned departure/arrival from the stored JSON, without asking the Kit. */
