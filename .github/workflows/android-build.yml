@@ -58,9 +58,9 @@ jobs:
       - name: Build BetterBahnKit for Android
         run: Android/kit/build.sh
 
-      - name: Build the app
+      - name: Build the app and run its unit tests
         working-directory: Android
-        run: ./gradlew assembleDebug --console=plain
+        run: ./gradlew assembleDebug testDebugUnitTest --console=plain
 
       - uses: actions/upload-artifact@v4
         with:

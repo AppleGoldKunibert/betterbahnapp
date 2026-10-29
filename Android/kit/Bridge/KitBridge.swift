@@ -1,27 +1,32 @@
-// The JNI functions the Android app calls (Android/app/.../kit/Kit.kt). Results go to Kotlin as JSON, the
-// Kit's own Codable models, so the bridge stays a thin layer and the logic stays in BetterBahnKit.
-import BetterBahnKit
+// The JNI entry points of libBetterBahnKit.so (Android/app/.../kit/Kit.kt). Kotlin calls one function with a
+// method name and JSON arguments and gets JSON back (`Methods.swift`), so the bridge stays a thin layer and the
+// logic stays in BetterBahnKit.
 import Dispatch
 import Foundation
 import jni
 
 /// Called once at app start with the folder the app copied the Kit's JSON data to (station names, platforms …).
 @_cdecl("Java_de_goldkunibert_betterbahn_kit_Kit_nativeStart")
-public func nativeStart(_ env: UnsafeMutablePointer<JNIEnv?>, _ cls: jclass, _ resources: jstring) {
+public func nativeStart(_ env: UnsafeMutablePointer<JNIEnv?>, _ this: jobject, _ resources: jstring) {
     // SwiftPM's resource lookup can't see into the APK; it reads this override instead (debug builds only,
     // see docs/android.md).
     setenv("PACKAGE_RESOURCE_BUNDLE_PATH", string(env, resources), 1)
 }
 
-/// Station search through Transitous: the stations as a JSON array of `Station`.
-@_cdecl("Java_de_goldkunibert_betterbahn_kit_Kit_nativeSearchStations")
-public func nativeSearchStations(_ env: UnsafeMutablePointer<JNIEnv?>, _ cls: jclass, _ query: jstring) -> jstring? {
-    let text = string(env, query)
-    let json = blocking {
-        let stations = (try? await TransitousProvider().searchStations(text)) ?? []
-        return (try? JSONEncoder().encode(stations)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
-    }
-    return env.pointee!.pointee.NewStringUTF(env, json)
+/// Runs `method` with `arguments` (a JSON object) and answers `{"ok": result}` or `{"error": "message"}`. JSON
+/// goes both ways as UTF-8 bytes: JNI's own strings use modified UTF-8, which mangles emoji.
+@_cdecl("Java_de_goldkunibert_betterbahn_kit_Kit_nativeCall")
+public func nativeCall(_ env: UnsafeMutablePointer<JNIEnv?>, _ this: jobject, _ method: jstring, _ arguments: jbyteArray) -> jbyteArray? {
+    let jni = env.pointee!.pointee
+    let name = string(env, method)
+    let count = Int(jni.GetArrayLength(env, arguments))
+    var input = Data(count: count)
+    input.withUnsafeMutableBytes { jni.GetByteArrayRegion(env, arguments, 0, jsize(count), $0.bindMemory(to: jbyte.self).baseAddress) }
+    let json = input
+    let answer = Array(blocking { await Methods.call(name, json) }.utf8)
+    guard let result = jni.NewByteArray(env, jsize(answer.count)) else { return nil }
+    answer.withUnsafeBytes { jni.SetByteArrayRegion(env, result, 0, jsize(answer.count), $0.bindMemory(to: jbyte.self).baseAddress) }
+    return result
 }
 
 private func string(_ env: UnsafeMutablePointer<JNIEnv?>, _ value: jstring) -> String {

@@ -3,17 +3,26 @@ package de.goldkunibert.betterbahn.kit
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.put
 import java.io.File
 
-/** A station as the Kit returns it (`Station` in BetterBahnKit, only the fields the app shows so far). */
-data class Station(val id: String, val name: String, val region: String?)
+/** A failed Kit call, with the Kit's (German) message. */
+class KitException(message: String) : Exception(message)
 
 /**
- * BetterBahnKit, the iOS app's Swift logic, built for Android by `Android/kit/build.sh`. The native side is
- * `Android/kit/Bridge/KitBridge.swift`; results come back as JSON of the Kit's own models.
+ * BetterBahnKit, the iOS app's Swift logic, built for Android by `Android/kit/build.sh`. Every call goes through
+ * one JNI function with a method name and JSON (`Android/kit/Bridge/Methods.swift`).
  */
 object Kit {
+    private val json = KitJson.json
+
     init {
         System.loadLibrary("BetterBahnKit")
     }
@@ -36,14 +45,66 @@ object Kit {
         nativeStart(dir.absolutePath)
     }
 
-    suspend fun searchStations(query: String): List<Station> = withContext(Dispatchers.IO) {
-        val json = JSONArray(nativeSearchStations(query))
-        List(json.length()) { i ->
-            val station = json.getJSONObject(i)
-            Station(station.getString("id"), station.getString("name"), station.optString("region").ifEmpty { null })
-        }
+    /** Runs a Kit method off the main thread; its result, or a [KitException]. */
+    suspend fun call(method: String, arguments: JsonObject): JsonElement = withContext(Dispatchers.IO) {
+        KitJson.parseAnswer(String(nativeCall(method, arguments.toString().toByteArray()), Charsets.UTF_8))
     }
 
+    // MARK: Methods
+
+    suspend fun searchStations(text: String): List<Station> =
+        json.decodeFromJsonElement(call("searchStations", buildJsonObject { put("text", text) }))
+
+    suspend fun journeys(
+        from: Station,
+        to: Station,
+        date: Long,
+        isArrival: Boolean,
+        cursor: String? = null,
+        products: Set<Product>? = null,
+        maxTransfers: Int? = null,
+    ): JourneysPage {
+        val result = call("journeys", buildJsonObject {
+            put("from", json.encodeToJsonElement(from))
+            put("to", json.encodeToJsonElement(to))
+            put("date", date)
+            put("isArrival", isArrival)
+            cursor?.let { put("cursor", it) }
+            products?.let { set -> put("products", json.encodeToJsonElement(set.map { it.id })) }
+            maxTransfers?.let { put("maxTransfers", it) }
+        })
+        return KitJson.journeysPage(result)
+    }
+
+    suspend fun completeJourney(raw: JsonObject): JourneyDisplay = KitJson.journey(call("completeJourney", journeyArgs(raw)))
+
+    suspend fun refreshJourney(raw: JsonObject): JourneyDisplay = KitJson.journey(call("refreshJourney", journeyArgs(raw)))
+
+    suspend fun describeJourneys(raws: List<JsonObject>): List<JourneyDisplay> {
+        val result = call("describeJourneys", buildJsonObject { put("journeys", JsonArray(raws)) })
+        return result.jsonArray.map(KitJson::journey)
+    }
+
+    suspend fun board(station: Station, departures: Boolean, date: Long, duration: Int, products: Set<Product>?): List<BoardEntryDisplay> =
+        json.decodeFromJsonElement(call("board", buildJsonObject {
+            put("station", json.encodeToJsonElement(station))
+            put("kind", if (departures) "departures" else "arrivals")
+            put("date", date)
+            put("duration", duration)
+            products?.let { set -> put("products", json.encodeToJsonElement(set.map { it.id })) }
+        }))
+
+    suspend fun trip(id: String, source: String): TripDisplay =
+        json.decodeFromJsonElement(call("trip", buildJsonObject {
+            put("id", id)
+            put("source", source)
+        }))
+
+    suspend fun tripForLeg(rawLeg: JsonObject): TripDisplay =
+        json.decodeFromJsonElement(call("tripForLeg", buildJsonObject { put("leg", rawLeg) }))
+
+    private fun journeyArgs(raw: JsonObject) = buildJsonObject { put("journey", raw) }
+
     private external fun nativeStart(resources: String)
-    private external fun nativeSearchStations(query: String): String
+    private external fun nativeCall(method: String, arguments: ByteArray): ByteArray
 }
