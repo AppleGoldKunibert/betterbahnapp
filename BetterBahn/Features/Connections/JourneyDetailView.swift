@@ -36,6 +36,8 @@ struct JourneyDetailView: View {
     @State private var weather = JourneyWeather()
     /// CO₂ compared with car and plane (#386), once the track geometry is in.
     @State private var co2: CO2Comparison?
+    /// The visible width of the page, without what lies under the iPad's sidebar (#465).
+    @State private var pageWidth: CGFloat?
 
     /// Where the journey is going now.
     private var goal: Station { editedDestination ?? finalDestination }
@@ -52,13 +54,18 @@ struct JourneyDetailView: View {
         ScrollView {
             if !liveDataLoaded, loadsLiveDataOnOpen {
                 ProgressView("Lade Echtzeitdaten …")
-                    .containerRelativeFrame([.horizontal, .vertical])
+                    .frame(width: pageWidth)
+                    .containerRelativeFrame(.vertical)
             } else {
-                // Exactly as wide as the screen: anything too wide would otherwise let the whole
-                // page be dragged sideways.
-                plan.containerRelativeFrame(.horizontal)
+                // Exactly as wide as the visible page: anything too wide would otherwise let the whole
+                // page be dragged sideways (#436). Not `containerRelativeFrame`, which on the iPad also
+                // counts the part of the column under the sidebar and cuts the cards off (#465).
+                plan.frame(width: pageWidth)
             }
         }
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.size.width - proxy.safeAreaInsets.leading - proxy.safeAreaInsets.trailing
+        } action: { pageWidth = $0 }
         .closesMenusOnScroll()
         .refreshable {
             await TimetablesClient.invalidateDelays()
