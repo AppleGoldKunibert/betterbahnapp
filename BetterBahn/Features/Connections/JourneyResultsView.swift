@@ -169,6 +169,7 @@ struct JourneyResultsView: View {
             }
             .padding(.horizontal)
             .padding(.bottom, 24)
+            .readableWidth()
         }
         .tabBarSafePadding()
         .background { AppBackground() }

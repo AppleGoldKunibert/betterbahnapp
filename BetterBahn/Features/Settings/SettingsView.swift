@@ -1,4 +1,3 @@
-import AuthenticationServices
 import BetterBahnKit
 import SwiftUI
 
@@ -10,14 +9,10 @@ struct SettingsView: View {
     @State private var user: TraewellingUser?
     @State private var isLoggedIn = false
     @State private var showClearHistoryConfirmation = false
-    @State private var showFollowedCheckinPushConfirmation = false
-    @State private var isEnablingFollowedCheckinPush = false
-    @State private var followedCheckinPushError: Error?
-    @Environment(\.webAuthenticationSession) private var webAuthenticationSession
 
     var body: some View {
         @Bindable var settings = model.settings
-        NavigationStack {
+        SplitNavigationView {
             Form {
                 Section {
                     HStack(spacing: 14) {
@@ -115,22 +110,24 @@ struct SettingsView: View {
                         }
                         .onChange(of: settings.exitReminderLead) { model.scheduleExitReminderSync() }
                     }
-                    Toggle(isOn: $settings.liveActivitiesEnabled) {
-                        IconLabel(title: "Live-Aktivitäten", systemImage: "bolt.badge.clock.fill", color: .indigo)
-                    }
-                    .tint(.brand)
-                    .onChange(of: settings.liveActivitiesEnabled) { model.syncLiveActivity() }
-                    if settings.liveActivitiesEnabled {
-                        Toggle(isOn: $settings.liveActivityServerUpdates) {
-                            IconLabel(title: "Live-Aktivität über Server aktualisieren", systemImage: "arrow.trianglehead.2.clockwise",
-                                      color: .indigo)
+                    if LiveActivityManager.isSupported {
+                        Toggle(isOn: $settings.liveActivitiesEnabled) {
+                            IconLabel(title: "Live-Aktivitäten", systemImage: "bolt.badge.clock.fill", color: .indigo)
                         }
                         .tint(.brand)
-                        .onChange(of: settings.liveActivityServerUpdates) {
-                            // Whether an activity gets updates from our server is fixed when it starts.
-                            Task {
-                                await model.liveActivities.restart()
-                                model.syncLiveActivity()
+                        .onChange(of: settings.liveActivitiesEnabled) { model.syncLiveActivity() }
+                        if settings.liveActivitiesEnabled {
+                            Toggle(isOn: $settings.liveActivityServerUpdates) {
+                                IconLabel(title: "Live-Aktivität über Server aktualisieren", systemImage: "arrow.trianglehead.2.clockwise",
+                                          color: .indigo)
+                            }
+                            .tint(.brand)
+                            .onChange(of: settings.liveActivityServerUpdates) {
+                                // Whether an activity gets updates from our server is fixed when it starts.
+                                Task {
+                                    await model.liveActivities.restart()
+                                    model.syncLiveActivity()
+                                }
                             }
                         }
                     }
@@ -142,7 +139,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Meine Reisen")
                 } footer: {
-                    Text(settings.liveActivitiesEnabled
+                    Text(settings.liveActivitiesEnabled && LiveActivityManager.isSupported
                          ? "Wir sagen dir Bescheid bei Ausfällen, Gleiswechseln und verpassten Anschlüssen – und kurz bevor du aussteigen musst. Über unseren Server zeigt die Live-Aktivität auch bei geschlossener App aktuelle Zeiten und Gleise. Er bekommt dafür deine Reise bis zur Ankunft."
                          : "Wir sagen dir Bescheid bei Ausfällen, Gleiswechseln und verpassten Anschlüssen – und kurz bevor du aussteigen musst.")
                 }
@@ -346,6 +343,9 @@ struct SettingsView: View {
             } message: {
                 Text("Favoriten, gespeicherte Reisen und deine Anmeldung bleiben erhalten.")
             }
+        } placeholder: {
+            SplitPlaceholder(title: "Einstellungen", systemImage: "gearshape",
+                             message: "Wähl links einen Bereich.")
         }
     }
 
@@ -390,7 +390,7 @@ struct SettingsView: View {
                 }
                 Button(role: .destructive) {
                     Task {
-                        await model.disableFollowedCheckinPush()
+                        await model.disableCheckinPush()
                         await model.traewelling.logout()
                         await refreshLogin()
                     }
@@ -426,33 +426,10 @@ struct SettingsView: View {
                 .disabled(model.isSyncingTraewelling)
             }
             if isLoggedIn {
-                Toggle(isOn: Binding {
-                    settings.notifyFollowedCheckins || isEnablingFollowedCheckinPush
-                } set: { on in
-                    followedCheckinPushError = nil
-                    if on {
-                        showFollowedCheckinPushConfirmation = true
-                    } else {
-                        Task { await model.disableFollowedCheckinPush() }
-                    }
-                }) {
-                    HStack {
-                        IconLabel(title: "Check-ins von Gefolgten melden", systemImage: "bell.badge.fill", color: .orange)
-                        if isEnablingFollowedCheckinPush {
-                            Spacer()
-                            ProgressView()
-                        }
-                    }
-                }
-                .tint(.brand)
-                .disabled(isEnablingFollowedCheckinPush)
-                .alert("Dieses Feature benötigt eine erneute Anmeldung mit Träwelling. Möchtest du fortfahren?",
-                       isPresented: $showFollowedCheckinPushConfirmation) {
-                    Button("Fortfahren") { enableFollowedCheckinPush() }
-                    Button("Abbrechen", role: .cancel) {}
-                }
-                if let followedCheckinPushError {
-                    ErrorBanner(error: followedCheckinPushError)
+                NavigationLink {
+                    CheckinNotificationsView()
+                } label: {
+                    IconLabel(title: "Mitteilungen", systemImage: "bell.badge.fill", color: .orange)
                 }
             }
             Picker(selection: $settings.traewellingVisibility) {
@@ -467,30 +444,6 @@ struct SettingsView: View {
             }
         } header: {
             Text("Träwelling")
-        } footer: {
-            if isLoggedIn, settings.notifyFollowedCheckins {
-                Text("Unser Server schaut alle 2 Minuten nach neuen Check-ins. Dabei wird nichts gespeichert.")
-            } else if isLoggedIn, model.followedCheckinPushEnded {
-                Text("Träwelling hat die Anmeldung für die Meldungen beendet. Zum Weitermachen wieder einschalten.")
-            }
-        }
-    }
-
-    /// Signs in with Träwelling once more for the push Worker (#266), in the same browser session as the
-    /// app's own login; cancelling it leaves the setting off.
-    private func enableFollowedCheckinPush() {
-        isEnablingFollowedCheckinPush = true
-        Task {
-            defer { isEnablingFollowedCheckinPush = false }
-            do {
-                try await model.enableFollowedCheckinPush { url, scheme in
-                    try await webAuthenticationSession.authenticate(using: url, callback: .customScheme(scheme),
-                                                                    preferredBrowserSession: .ephemeral, additionalHeaderFields: [:])
-                }
-            } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
-            } catch {
-                followedCheckinPushError = error
-            }
         }
     }
 

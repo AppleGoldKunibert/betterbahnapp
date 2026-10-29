@@ -41,7 +41,7 @@ final class AppModel {
             // Every saved journey with all its stops is encoded here, which takes noticeably long
             // once there are many, so it happens off the main thread.
             Storage.saveInBackground(savedJourneys, key: "savedJourneys")
-            savedJourneysCloud.localChange(from: oldValue, to: savedJourneys)
+            journeyCloud.localChange(from: oldValue, to: savedJourneys)
             syncLiveActivity()
             scheduleExitReminderSync()
             scheduleCalendarSync()
@@ -167,14 +167,15 @@ final class AppModel {
         // The list of station names every stop is shown under, read before the first screen needs it.
         Task { await StationNames.preload() }
         provider = CombinedProvider(vagonweb: VagonwebClient(browserLoader: { url in try await VagonwebBrowser.shared.html(at: url) }))
-        traewelling = TraewellingClient(config: TraewellingConfig())
+        traewelling = TraewellingClient(config: TraewellingConfig(), keepAlive: { await BackgroundTime.begin(named: "Träwelling-Anmeldung") })
         // Older versions stored everything in UserDefaults; move the raw bytes into files once
         // (re-encoding everything on every launch is what used to slow the start down).
         Storage.migrateFromUserDefaults(keys: ["savedJourneys", "favoriteStations", "recentSearches", "recentStations"])
         favoriteStations = Storage.load(key: "favoriteStations") ?? []
         recentSearches = Storage.load(key: "recentSearches") ?? []
         recentStations = Storage.load(key: "recentStations") ?? []
-        savedJourneys = Storage.load(key: "savedJourneys") ?? []
+        // Sorted again: journeys an earlier build took over from iCloud were stored unsorted.
+        savedJourneys = (Storage.load(key: "savedJourneys") ?? []).sorted(by: SavedJourney.departsEarlier)
         regularTrips = Storage.load(key: "regularTrips") ?? []
         trackedManualCheckins = Storage.load(key: "trackedManualCheckins") ?? []
         checkinStatusIDs = Storage.load(key: "checkinStatusIDs") ?? [:]
@@ -209,13 +210,15 @@ final class AppModel {
     @ObservationIgnored private var cloudObserver: NSObjectProtocol?
     @ObservationIgnored private let favoriteStationsCloud = CloudList<Station>(key: "favoriteStations")
     @ObservationIgnored private let recentSearchesCloud = CloudList<RecentSearch>(key: "recentSearches")
-    @ObservationIgnored private let savedJourneysCloud = CloudList<SavedJourney>(key: "savedJourneys")
+    /// Saved journeys sync through CloudKit instead (#427): as one key-value store value they outgrew its 1 MB.
+    @ObservationIgnored private let journeyCloud = JourneyCloudSync()
     @ObservationIgnored private let regularTripsCloud = CloudList<RegularTrip>(key: "regularTrips")
 
     /// Merges with what iCloud already has (uploading what only exists here, e.g. on the first
     /// launch after updating) and takes over changes made on the user's other devices.
     private func startCloudSync() {
-        applyCloudChange(keys: ["favoriteStations", "recentSearches", "savedJourneys", "regularTrips", AppSettings.cloudKey])
+        applyCloudChange(keys: ["favoriteStations", "recentSearches", "regularTrips", AppSettings.cloudKey])
+        journeyCloud.start(model: self)
         cloudObserver = CloudSync.observe { [weak self] keys in
             self?.applyCloudChange(keys: keys)
         }
@@ -228,13 +231,15 @@ final class AppModel {
         if keys.contains("recentSearches") {
             recentSearchesCloud.receive(local: recentSearches) { recentSearches = $0 }
         }
-        if keys.contains("savedJourneys") {
-            savedJourneysCloud.receive(local: savedJourneys) { savedJourneys = $0 }
-        }
         if keys.contains("regularTrips") {
             regularTripsCloud.receive(local: regularTrips) { regularTrips = $0 }
         }
         if keys.contains(AppSettings.cloudKey) { settings.receiveCloudValue() }
+    }
+
+    /// Takes over journeys changed on the other devices (when the app comes to the foreground).
+    func fetchCloudJourneys() {
+        journeyCloud.fetch()
     }
 
     var trainPicker: TrainPicker { TrainPicker(provider: provider) }
@@ -358,19 +363,24 @@ final class AppModel {
     @ObservationIgnored var followedTrainLoads: [Int: Task<Leg?, Error>] = [:]
     /// The custom emojis for each followed check-in's text, loaded with the list so its pictures are ready on opening.
     @ObservationIgnored var followedEmojis: [Int: [CustomEmoji]] = [:]
-    /// This device's sign-up at the push Worker for notifications about followed check-ins (#266), nil
-    /// while they're off. Kept after turning them off until the Worker confirmed the sign-off.
+    /// This device's sign-up at the push Worker for notifications about followed check-ins (#266) and the
+    /// user's own (#447), nil while they're all off. Kept after turning them off until the Worker confirmed
+    /// the sign-off.
     @ObservationIgnored var followedCheckinPush: FollowedCheckinPushSubscription? = Storage.load(key: "followedCheckinPush") {
         didSet { Storage.save(followedCheckinPush, key: "followedCheckinPush") }
     }
     /// The Worker dropped the sign-up (Träwelling ended its login); Settings says so.
     var followedCheckinPushEnded = false
-    /// The APNs device token iOS gave this launch, the one the Worker last got, and who waits for one.
+    /// The APNs device token iOS gave this launch, the one and the kinds the Worker last got, and who waits for one.
     @ObservationIgnored var pushDeviceToken: String?
     @ObservationIgnored var followedCheckinPushSentToken: String?
+    @ObservationIgnored var followedCheckinPushSentKinds: Set<CheckinPushKind>?
     @ObservationIgnored var pushDeviceTokenWaiters: [CheckedContinuation<String?, Never>] = []
     /// A followed check-in to show, from tapping its notification; the Verbindungen tab opens it once it's in the list.
     var followedCheckinToOpen: Int?
+    /// The user's own check-in to show, from tapping a like's notification (#447); the journey opened with
+    /// `journeyToOpen` shows it and clears this.
+    var checkinToShow: Int?
 
     /// Check-ins imported from Träwelling (newest first), shown on the travel map. Empty until
     /// loaded from disk after launch; `loadTraewellingTrips()` waits for that.
@@ -676,7 +686,7 @@ final class AppModel {
         // One assignment, so the list is persisted and synced once rather than twice.
         var updated = savedJourneys
         updated.append(SavedJourney(journey: journey, search: search))
-        updated.sort { ($0.journey.departure?.planned ?? .distantPast) < ($1.journey.departure?.planned ?? .distantPast) }
+        updated.sort(by: SavedJourney.departsEarlier)
         savedJourneys = updated
     }
 
@@ -950,14 +960,23 @@ final class AppModel {
         return try? await provider.trip(id: tripId, source: leg.source).stopovers
     }
 
-    /// The formation remembered for a saved journey's leg, if any.
+    /// The formation remembered for a saved journey's leg, or for a Träwelling check-in of the same
+    /// train, if any.
     func rememberedFormation(for leg: Leg) -> TrainFormation? {
-        let key = leg.formationKey
-        return savedJourneys.lazy.compactMap { $0.formations?[key] }.first
+        rememberedFormations(for: [leg])[0]
     }
 
-    /// Keeps a leg's formation in every saved journey riding it, so its Tz and Taufname stay known
-    /// (and sync through iCloud) once the train has run.
+    /// `rememberedFormation(for:)` for each of `legs`, collecting the saved formations once.
+    func rememberedFormations(for legs: [Leg]) -> [TrainFormation?] {
+        let remembered: [(legs: [Leg], formations: [String: TrainFormation])] = savedJourneys.compactMap { saved in
+            guard let formations = saved.formations, !formations.isEmpty else { return nil }
+            return (legs: saved.journey.legs, formations: formations)
+        }
+        return legs.map { RideMatch.rememberedFormation(for: $0, in: remembered) }
+    }
+
+    /// Keeps a leg's formation in every saved journey riding it, so its Tz and Taufname (or at least
+    /// its planned series) stay known (and sync through iCloud) once the train has run.
     func rememberFormation(_ formation: TrainFormation, for leg: Leg) {
         let key = leg.formationKey
         var updated = savedJourneys
@@ -1304,7 +1323,7 @@ final class AppModel {
     /// Past journeys; once their live data is gone (`SavedJourney.liveDataLifetime`) shown as planned,
     /// without any delay.
     var pastJourneys: [SavedJourney] {
-        savedJourneys.filter(\.isFinished).reversed().map { entry in
+        savedJourneys.filter(\.isFinished).sorted { SavedJourney.departsEarlier($1, $0) }.map { entry in
             guard let arrival = entry.journey.arrival?.planned,
                   arrival.addingTimeInterval(SavedJourney.liveDataLifetime) < .now else { return entry }
             var entry = entry
@@ -1534,6 +1553,11 @@ nonisolated struct SavedJourney: Codable, Hashable, Identifiable {
 
     /// Finished 10 minutes after the (realtime) arrival.
     var isFinished: Bool { journey.isOver() }
+
+    /// The order of `AppModel.savedJourneys`: by planned departure.
+    static func departsEarlier(_ a: SavedJourney, _ b: SavedJourney) -> Bool {
+        (a.journey.departure?.planned ?? .distantPast) < (b.journey.departure?.planned ?? .distantPast)
+    }
 }
 
 /// Where a saved journey's train is right now.
@@ -1704,6 +1728,14 @@ final class AppSettings {
     var notifyFollowedCheckins: Bool {
         didSet { UserDefaults.standard.set(notifyFollowedCheckins, forKey: "notifyFollowedCheckins") }
     }
+    /// Notifications about likes on the user's own check-ins (#447), per device like `notifyFollowedCheckins`.
+    var notifyCheckinLikes: Bool {
+        didSet { UserDefaults.standard.set(notifyCheckinLikes, forKey: "notifyCheckinLikes") }
+    }
+    /// Notifications when someone checks in on the user's train (#447).
+    var notifyCheckinCompanions: Bool {
+        didSet { UserDefaults.standard.set(notifyCheckinCompanions, forKey: "notifyCheckinCompanions") }
+    }
     var lastTraewellingSync: Date? {
         didSet { UserDefaults.standard.set(lastTraewellingSync, forKey: "lastTraewellingSync") }
     }
@@ -1858,6 +1890,8 @@ final class AppSettings {
         bc100Rules = Storage.load(key: "bc100Rules") ?? .default
         syncTraewellingToMap = defaults.object(forKey: "syncTraewellingToMap") as? Bool ?? true
         notifyFollowedCheckins = defaults.bool(forKey: "notifyFollowedCheckins")
+        notifyCheckinLikes = defaults.bool(forKey: "notifyCheckinLikes")
+        notifyCheckinCompanions = defaults.bool(forKey: "notifyCheckinCompanions")
         lastTraewellingSync = defaults.object(forKey: "lastTraewellingSync") as? Date
         traewellingImportNextPage = defaults.object(forKey: "traewellingImportNextPage") as? Int
         connectionWarnings = defaults.object(forKey: "connectionWarnings") as? Bool ?? true

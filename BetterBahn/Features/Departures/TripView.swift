@@ -54,6 +54,7 @@ struct TripView: View {
             }
             .padding(.horizontal)
             .padding(.bottom, 16)
+            .readableWidth()
         }
         .background { AppBackground() }
         .safeAreaInset(edge: .bottom) {
@@ -65,6 +66,10 @@ struct TripView: View {
         .animation(.snappy, value: selectedLeg?.id)
         .navigationTitle(entry.line.displayName)
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            // Seen before: in the first frame, without the spinner in between.
+            if trip == nil, let seen = model.liveTrips.value(for: tripId) { show(seen) }
+        }
         .task(id: tripId) {
             if tripId == entry.tripId {
                 let remembered = model.openLoadedLaps(lapsKey, tripId: entry.tripId)
@@ -321,6 +326,9 @@ struct TripContent: View {
         return platformStatistics.platformChange(at: stop.station, planned: platform?.planned)
     }
 
+    /// The day the figures are kept for: the train's first departure.
+    private var statisticsDate: Date { trip.stopovers.first?.departure?.planned ?? .now }
+
     /// Where the experience values apply: the stops picked to get on and off, else the station the train
     /// was opened from, else the whole run.
     private var statisticsStops: [StatisticsStop] {
@@ -370,7 +378,7 @@ struct TripContent: View {
                     CoachSequenceDisclosure(trip: trip, spacing: 14)
 
                     if let rows = statistics.rows {
-                        TrainStatisticsSection(content: rows).padding(.top, 14)
+                        TrainStatisticsDisclosure(content: rows).padding(.top, 14)
                     }
                 }
             }
@@ -432,13 +440,15 @@ struct TripContent: View {
             }
             occupancy = try? await bahnDe.occupancy(for: trip, boarding: boarding, exit: exit)
         }
+        .onAppear {
+            platformStatistics.showCached(line: trip.line, stops: platformHintStops, date: statisticsDate)
+            statistics.showCached(line: trip.line, stops: statisticsStops, date: statisticsDate)
+        }
         .task(id: [trip.stopovers.first?.id ?? "", String(nextStopIndex ?? -1)]) {
-            await platformStatistics.load(line: trip.line, stops: platformHintStops, date: trip.stopovers.first?.departure?.planned ?? .now,
-                                          bahnDe: model.provider.bahnDe)
+            await platformStatistics.load(line: trip.line, stops: platformHintStops, date: statisticsDate, bahnDe: model.provider.bahnDe)
         }
         .task(id: [boardingID ?? "", exitID ?? "", trip.stopovers.first?.id ?? ""]) {
-            await statistics.load(line: trip.line, stops: statisticsStops, date: trip.stopovers.first?.departure?.planned ?? .now,
-                                  bahnDe: model.provider.bahnDe)
+            await statistics.load(line: trip.line, stops: statisticsStops, date: statisticsDate, bahnDe: model.provider.bahnDe)
         }
         .task(id: [exitID ?? "", trip.stopovers.compactMap { $0.arrivalPlatform?.best }.joined(separator: "|")]) {
             guard let index = exitIndex else { exitSide = nil; return }

@@ -45,8 +45,10 @@ struct TraewellingLoginButton: View {
         Task {
             defer { isRunning = false }
             do {
+                // A webhook, when our server takes one, brings likes and fellow travellers right away.
+                let webhook = await FollowedCheckinPush().loginParameters()
                 let callback = try await webAuthenticationSession.authenticate(
-                    using: config.authorizeURL(pkce: pkce),
+                    using: config.authorizeURL(pkce: pkce, extra: webhook),
                     callback: .customScheme(config.callbackScheme),
                     preferredBrowserSession: .ephemeral,
                     additionalHeaderFields: [:]

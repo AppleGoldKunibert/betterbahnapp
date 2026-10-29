@@ -60,6 +60,64 @@ import Testing
         #expect(rebuilt.arrival?.planned == time(150))
     }
 
+    /// A train calling at `stops`, one every 10 minutes from `depart`.
+    private func train(_ line: String, _ stops: [String], depart: Int) -> Leg {
+        var ride = leg(line, from: stops[0], to: stops[stops.count - 1], depart: depart,
+                       arrive: depart + 10 * (stops.count - 1))
+        ride.stopovers = stops.enumerated().map { index, name in
+            Stopover(station: station(name, name),
+                     arrival: TimeInfo(planned: time(depart + index * 10), actual: nil),
+                     departure: TimeInfo(planned: time(depart + index * 10), actual: nil),
+                     arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+        }
+        return ride
+    }
+
+    /// Editing the whole journey starts at the train you're on or the next one, not the first of the day.
+    @Test func currentTrainIsTheOneRiddenOrTheNextToBoard() {
+        let first = leg("RE 1", from: "A", to: "B", depart: 0, arrive: 30)
+        let walk = leg(nil, from: "B", to: "B2", depart: 30, arrive: 35)
+        let second = leg("RE 2", from: "B2", to: "C", depart: 40, arrive: 90)
+        let third = leg("RE 3", from: "C", to: "D", depart: 100, arrive: 150)
+        let journey = Journey(legs: [first, walk, second, third], source: .bahnDe)
+
+        #expect(JourneyReplanner.currentTrain(of: journey, at: time(-10)) == first)
+        #expect(JourneyReplanner.currentTrain(of: journey, at: time(10)) == first)
+        #expect(JourneyReplanner.currentTrain(of: journey, at: time(32)) == second)
+        #expect(JourneyReplanner.currentTrain(of: journey, at: time(95)) == third)
+        #expect(JourneyReplanner.currentTrain(of: journey, at: time(200)) == third)
+    }
+
+    /// Berlin → A (change) → through B to C (change) → Berlin, with A, B and C as vias.
+    @Test func passedViasCountTransfersAndStopsPassedThrough() {
+        let outward = train("RE 1", ["Berlin", "X", "A"], depart: 0)
+        let middle = train("RE 2", ["A", "B", "C"], depart: 30)
+        let back = train("RE 3", ["C", "Y", "Berlin"], depart: 60)
+        let journey = Journey(legs: [outward, middle, back], source: .bahnDe)
+        let vias = ["A", "B", "C"].map { station($0, $0) }
+
+        #expect(JourneyReplanner.passedViaCount(vias, in: journey, leavingLegAt: 0, after: outward) == 1)
+        #expect(JourneyReplanner.passedViaCount(vias, in: journey, leavingLegAt: 1, after: middle) == 3)
+        #expect(JourneyReplanner.passedViaCount(vias, in: journey, leavingLegAt: 2, after: back) == 3)
+        // Getting off the middle train in B: C is still ahead.
+        let toB = train("RE 2", ["A", "B"], depart: 30)
+        #expect(JourneyReplanner.passedViaCount(vias, in: journey, leavingLegAt: 1, after: toB) == 2)
+    }
+
+    /// On a round trip the outward train runs through the last via (Südkreuz): it is still ahead.
+    @Test func passedViasAreMatchedInOrder() {
+        let outward = train("ICE 1", ["Berlin Hbf", "Südkreuz", "Leipzig"], depart: 0)
+        let back = train("ICE 2", ["Leipzig", "Südkreuz", "Berlin Hbf"], depart: 120)
+        let journey = Journey(legs: [outward, back], source: .bahnDe)
+        let vias = ["Leipzig", "Südkreuz"].map { station($0, $0) }
+
+        #expect(JourneyReplanner.passedViaCount(vias, in: journey, leavingLegAt: 0, after: outward) == 1)
+        let toSuedkreuz = train("ICE 2", ["Leipzig", "Südkreuz"], depart: 120)
+        #expect(JourneyReplanner.passedViaCount(vias, in: journey, leavingLegAt: 1, after: toSuedkreuz) == 2)
+        #expect(JourneyReplanner.passedViaCount([station("Südkreuz", "Südkreuz")] + vias, in: journey,
+                                                leavingLegAt: 0, after: outward) == 2)
+    }
+
     /// A route whose transfer today's delays already broke must not be offered.
     @Test func continuationsDropTransfersBrokenByDelays() async throws {
         var late = leg("RE 3", from: "X", to: "Y", depart: 70, arrive: 90)

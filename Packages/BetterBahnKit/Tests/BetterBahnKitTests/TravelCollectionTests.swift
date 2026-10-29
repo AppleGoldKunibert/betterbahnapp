@@ -68,6 +68,14 @@ import Testing
         #expect(!trainsets.items[0].isCollected)
     }
 
+    /// A ride whose Tz was never seen still counts for its planned series, not for a trainset or livery.
+    @Test func plannedSeriesCountsOnlyForSeries() {
+        let result = collection([
+            ride("ICE 145", hamburg, berlin, departure: "2026-05-01T08:00:00Z", units: [.init(model: "ICE 3neo", number: nil)]),
+        ])
+        #expect(result.collectedIDs == ["series:ICE 3neo", "station:berlin", "station:hamburg"])
+    }
+
     @Test func leavesOutRidesNotTravelled() {
         let result = collection([
             ride("ICE 1", berlin, hamburg, departure: "2026-10-18T11:00:00Z", units: [.init(model: "ICE 1", number: "304")]),

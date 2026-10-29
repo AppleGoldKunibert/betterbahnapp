@@ -100,7 +100,12 @@ enum ShareSheet {
         guard var top = window?.rootViewController else { return }
         while let presented = top.presentedViewController, !presented.isBeingDismissed { top = presented }
         let controller = UIActivityViewController(activityItems: [item], applicationActivities: nil)
-        controller.popoverPresentationController?.sourceView = top.view
+        // On the iPad and the Mac the sheet is a popover: centred, as its button isn't known here.
+        if let popover = controller.popoverPresentationController {
+            popover.sourceView = top.view
+            popover.sourceRect = CGRect(x: top.view.bounds.midX, y: top.view.bounds.midY, width: 0, height: 0)
+            popover.permittedArrowDirections = []
+        }
         top.present(controller, animated: true)
     }
 }

@@ -46,7 +46,7 @@ struct SavedJourneyRow: View {
 
     var body: some View {
         let blocking = entry.issues.first(where: \.isBlocking)
-        NavigationLink(value: ConnectionsRoute.journey(entry.route(readOnly: readOnly))) {
+        RouteLink(value: ConnectionsRoute.journey(entry.route(readOnly: readOnly))) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
                     Image(systemName: "calendar")
@@ -124,6 +124,7 @@ struct PastTripsView: View {
             }
             .padding(.horizontal)
             .padding(.bottom, 24)
+            .readableWidth()
         }
         .tabBarSafePadding()
         .background { AppBackground() }

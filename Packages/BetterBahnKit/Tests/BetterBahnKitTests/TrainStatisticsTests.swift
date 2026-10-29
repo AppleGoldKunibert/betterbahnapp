@@ -219,7 +219,7 @@ import Testing
         // The next day asks again.
         _ = await store.statistics(for: [ice], day: "2026-10-15")
         #expect(StatsWorkerProtocol.requests.count == 3)
-        #expect(await store.cached(ice, day: "2026-10-15")?.runs == 12)
+        #expect(store.cached(ice, day: "2026-10-15")?.runs == 12)
     }
 
     @Test func findsTheStopsOfALegAndLooksUpMissingEVANumbers() async throws {
@@ -266,7 +266,7 @@ import Testing
         await store.setEnabled(true)
         _ = await store.statistics(for: [ice], day: "2026-10-14")
         await store.setEnabled(false)
-        #expect(await store.cached(ice, day: "2026-10-14") == nil)
+        #expect(store.cached(ice, day: "2026-10-14") == nil)
         #expect(StatsWorkerProtocol.requests.count == 1)
     }
 
@@ -291,6 +291,77 @@ import Testing
         let unknown = TrainStatisticsQuery(category: "ICE", number: "9999", evas: ["8000115"])
         let result = await store.statistics(for: [ice, unknown], day: "2026-10-14")
         #expect(Set(result.keys) == ["ICE|1095|2026-10-14"])
+    }
+
+    private let fulda = Station(id: "8000115", name: "Fulda", coordinate: nil, evaNumber: "8000115", source: .bahnDe)
+    private let line = Line(name: "ICE 1095", number: "1095", product: .highSpeed, operatorName: nil)
+    private let date = Date(timeIntervalSince1970: 1_790_000_000)
+
+    @Test func givesKnownFiguresWithoutWaiting() async {
+        StatsWorkerProtocol.reset(status: 200)
+        let store = store()
+        await store.setEnabled(true)
+        #expect(store.cachedLookup(line: line, at: [fulda], on: date) == nil)
+        let looked = await store.lookup(line: line, at: [fulda], on: date)
+        #expect(looked != nil)
+        #expect(store.cachedLookup(line: line, at: [fulda], on: date) == looked)
+        await store.setEnabled(false)
+        #expect(store.cachedLookup(line: line, at: [fulda], on: date) == nil)
+    }
+
+    @Test func keepsTheDaysFiguresInAFile() async {
+        StatsWorkerProtocol.reset(status: 200)
+        let file = FileManager.default.temporaryDirectory.appending(path: "TrainStatistics-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let clock = Mutex(Date(timeIntervalSince1970: 1_790_000_000))
+        let client = client()
+        func launch() -> TrainStatisticsStore {
+            TrainStatisticsStore(now: { clock.withLock { $0 } }, cacheURL: file) { queries in try await client.statistics(for: queries) }
+        }
+
+        let first = launch()
+        await first.setEnabled(true)
+        _ = await first.lookup(line: line, at: [fulda], on: date)
+        #expect(StatsWorkerProtocol.requests.count == 1)
+
+        // The app started again the same day: shown straight away, nothing asked.
+        let again = launch()
+        await again.setEnabled(true)
+        #expect(again.cachedLookup(line: line, at: [fulda], on: date)?.stop(at: fulda)?.runs == 12)
+        #expect(await again.lookup(line: line, at: [fulda], on: date) != nil)
+        #expect(StatsWorkerProtocol.requests.count == 1)
+
+        // The next day the server has new runs: asked again.
+        clock.withLock { $0 = $0.addingTimeInterval(24 * 60 * 60) }
+        let nextDay = launch()
+        await nextDay.setEnabled(true)
+        #expect(nextDay.cachedLookup(line: line, at: [fulda], on: date) == nil)
+        _ = await nextDay.lookup(line: line, at: [fulda], on: date)
+        #expect(StatsWorkerProtocol.requests.count == 2)
+
+        // Switched off, nothing is kept.
+        await nextDay.setEnabled(false)
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+    }
+
+    @Test func waitsBeforeLookingForAMissingEVANumberAgain() async {
+        StatsWorkerProtocol.reset(status: 200)
+        let clock = Mutex(Date(timeIntervalSince1970: 1_000_000))
+        let store = store(now: { clock.withLock { $0 } })
+        await store.setEnabled(true)
+        let abroad = Station(id: "at-somewhere", name: "Irgendwo", coordinate: nil, evaNumber: nil, source: .transitous)
+        let resolved = Mutex(0)
+        let resolve: TrainStatisticsStore.EVAResolver = { _ in
+            resolved.withLock { $0 += 1 }
+            return nil
+        }
+        _ = await store.lookup(line: line, at: [fulda, abroad], on: date, resolve: resolve)
+        _ = await store.lookup(line: line, at: [fulda, abroad], on: date, resolve: resolve)
+        #expect(resolved.withLock { $0 } == 1, "opening the train again doesn't wait for bahn.de")
+
+        clock.withLock { $0 = $0.addingTimeInterval(6 * 60) }
+        _ = await store.lookup(line: line, at: [fulda, abroad], on: date, resolve: resolve)
+        #expect(resolved.withLock { $0 } == 2)
     }
 }
 

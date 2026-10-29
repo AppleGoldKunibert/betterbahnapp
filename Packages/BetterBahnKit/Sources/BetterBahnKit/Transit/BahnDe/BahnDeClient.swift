@@ -57,16 +57,20 @@ public struct TrainFormation: Codable, Sendable, Hashable {
     public var isIC1: Bool { !units.isEmpty && units.allSatisfy { $0.model == "IC 1" && $0.number == nil } }
 
     /// `stored` with `formation` kept for `key` (see `Leg.formationKey`), so a saved journey still
-    /// shows which trainsets ran once bahn.de and bahn.expert no longer answer for the train. Only a
-    /// formation naming a Tz is kept, and an IC 1 drops the bogus Tz remembered for it; nil when there
-    /// is nothing to change.
+    /// shows which trainsets ran once bahn.de and bahn.expert no longer answer for the train. A
+    /// formation naming a Tz always wins; one naming only the series (the plan) is kept only while
+    /// nothing is remembered yet, so the collection's series count a ride whose Tz was never seen. An
+    /// IC 1 drops the bogus Tz remembered for it; nil when there is nothing to change.
     public static func remembering(_ formation: TrainFormation, for key: String,
                                    in stored: [String: TrainFormation]?) -> [String: TrainFormation]? {
-        if formation.isIC1, var updated = stored, updated[key] != nil {
+        if formation.isIC1 {
+            guard var updated = stored, updated[key] != nil else { return nil }
             updated[key] = nil
             return updated
         }
-        guard formation.unitDescription != nil, stored?[key] != formation else { return nil }
+        let namesTz = formation.unitDescription != nil
+        let namesSeries = formation.units.contains { $0.model != nil }
+        guard namesTz || (namesSeries && stored?[key] == nil), stored?[key] != formation else { return nil }
         var updated = stored ?? [:]
         updated[key] = formation
         return updated
@@ -513,8 +517,18 @@ public struct BahnDeClient: Sendable {
         let vehicles = group.vehicles ?? []
         let carriages = vehicles.map { Carriage(vehicleID: $0.vehicleID, constructionType: $0.type?.constructionType) }
         let types = vehicles.compactMap { $0.type?.constructionType }
-        return TrainModel.detect(carriages, category: category).map(\.name)
-            ?? model(constructionTypes: types, groupName: group.name ?? "", category: category)
+        if let detected = TrainModel.detect(carriages, category: category) { return detected.name }
+        // Another railway's coaches (PKP's "Bvmz" on the EC 47 to Warszawa) are no DB series, so no "IC 1" for them.
+        guard vehicles.isEmpty || vehicles.contains(where: isDBVehicle) else { return nil }
+        return model(constructionTypes: types, groupName: group.name ?? "", category: category)
+    }
+
+    /// A DB vehicle: its UIC number is registered in Germany ("61 80 …"), or its construction type is
+    /// DB's code ("B2091", "I4081"). Other railways' coaches come with a UIC class ("Bvmz") and no number.
+    static func isDBVehicle(_ vehicle: SequenceResponse.Group.Vehicle) -> Bool {
+        if let id = vehicle.vehicleID, id.count == 12, id.allSatisfy(\.isNumber) { return id.dropFirst(2).hasPrefix("80") }
+        guard let type = vehicle.type?.constructionType, type.count == 5, type.first?.isLetter == true else { return false }
+        return type.dropFirst().allSatisfy(\.isNumber)
     }
 
     /// The seat-map sheet of one trainset (`SeatMap.sheet`), from its vehicles' UIC numbers and coach numbers.
