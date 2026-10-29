@@ -60,6 +60,7 @@ enum Methods {
         "trainRun": handler(trainRun),
         "importShared": handler(importShared),
         "refreshSaved": handler(refreshSaved),
+        "journeyExtras": handler(journeyExtras),
     ]
 
     // MARK: Stations
@@ -293,5 +294,37 @@ enum Methods {
         }
         return RefreshedSaved(journey: JourneyDisplay(refreshed), notifications: notifications,
                               notified: Array(known.union(notifications.map(\.id))).sorted())
+    }
+
+    // MARK: Journey details
+
+    struct ArrivalWeather: Encodable {
+        /// "12°"
+        var temperature: String
+        /// "Leichter Regen"
+        var condition: String
+        var weatherCode: Int
+        var isDay: Bool
+    }
+
+    struct JourneyExtras: Encodable {
+        /// CO₂ saved compared to going by car, in kg (`CO2Comparison.savedComparedToCar`).
+        var co2SavedKilograms: Double
+        /// Per leg (index into the journey's legs), the weather where it arrives (`WeatherClient`, Open-Meteo).
+        var arrivalWeather: [String: ArrivalWeather]
+    }
+
+    /// What `JourneyDetailView` shows besides the trains: the CO₂ comparison and the weather at each arrival.
+    @Sendable static func journeyExtras(_ input: JourneyInput) async throws -> JourneyExtras {
+        let journey = input.journey
+        let co2 = CO2Comparison(legs: journey.transitLegs)
+        let weather = await WeatherClient.shared.weather(for: journey)
+        var arrivals: [String: ArrivalWeather] = [:]
+        for (index, leg) in journey.legs.enumerated() {
+            guard let forecast = weather.arrival(of: leg, in: journey)?.forecast else { continue }
+            arrivals[String(index)] = ArrivalWeather(temperature: forecast.temperatureText, condition: forecast.conditionText,
+                                                     weatherCode: forecast.weatherCode, isDay: forecast.isDay)
+        }
+        return JourneyExtras(co2SavedKilograms: co2.savedComparedToCar, arrivalWeather: arrivals)
     }
 }

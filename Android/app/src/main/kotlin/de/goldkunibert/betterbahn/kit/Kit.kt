@@ -149,6 +149,8 @@ object Kit {
         )
     }
 
+    suspend fun journeyExtras(raw: JsonObject): JourneyExtras = json.decodeFromJsonElement(call("journeyExtras", journeyArgs(raw)))
+
     /** A connection shared from DB Navigator, found again. */
     suspend fun importShared(text: String): JourneyDisplay =
         KitJson.journey(call("importShared", buildJsonObject { put("text", text) }))

@@ -286,3 +286,14 @@ data class SavedNotification(
 )
 
 data class RefreshedSaved(val journey: JourneyDisplay, val notifications: List<SavedNotification>, val notified: List<String>)
+
+@Serializable
+data class ArrivalWeather(val temperature: String, val condition: String, val weatherCode: Int, val isDay: Boolean = true)
+
+/** The CO₂ comparison and the weather at each arrival (`Methods.journeyExtras`). */
+@Serializable
+data class JourneyExtras(
+    val co2SavedKilograms: Double = 0.0,
+    /** By leg index. */
+    val arrivalWeather: Map<String, ArrivalWeather> = emptyMap(),
+)

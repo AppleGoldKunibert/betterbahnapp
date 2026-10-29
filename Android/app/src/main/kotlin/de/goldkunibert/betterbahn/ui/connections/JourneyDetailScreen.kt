@@ -21,7 +21,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
+import androidx.compose.material.icons.filled.AcUnit
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Eco
+import androidx.compose.material.icons.filled.NightsStay
+import androidx.compose.material.icons.filled.Thunderstorm
+import androidx.compose.material.icons.filled.Umbrella
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -54,7 +61,9 @@ import androidx.compose.ui.unit.dp
 import de.goldkunibert.betterbahn.AppModel
 import de.goldkunibert.betterbahn.Route
 import de.goldkunibert.betterbahn.data.ConnectionSearch
+import de.goldkunibert.betterbahn.kit.ArrivalWeather
 import de.goldkunibert.betterbahn.kit.JourneyDisplay
+import de.goldkunibert.betterbahn.kit.JourneyExtras
 import de.goldkunibert.betterbahn.kit.Kit
 import de.goldkunibert.betterbahn.kit.Leg
 import de.goldkunibert.betterbahn.kit.LegDisplay
@@ -63,6 +72,7 @@ import de.goldkunibert.betterbahn.ui.DelayPill
 import de.goldkunibert.betterbahn.ui.HeavyDelay
 import de.goldkunibert.betterbahn.ui.LineBadge
 import de.goldkunibert.betterbahn.ui.PlatformBadge
+import de.goldkunibert.betterbahn.ui.Punctual
 import de.goldkunibert.betterbahn.ui.SegmentBar
 import de.goldkunibert.betterbahn.ui.SlightDelay
 import de.goldkunibert.betterbahn.ui.Tag
@@ -87,7 +97,13 @@ private const val REFRESH_MILLIS = 300_000L
 fun JourneyDetailScreen(model: AppModel, route: Route.Detail) {
     var display by route::journey
     var loadingLive by remember { mutableStateOf(true) }
+    var extras by remember { mutableStateOf(JourneyExtras()) }
     val saved = model.isSaved(display)
+
+    // CO₂ and weather; again when live data moves an arrival (the forecasts are cached).
+    LaunchedEffect(display.id, display.journey.arrival?.best) {
+        runCatching { Kit.journeyExtras(display.raw) }.onSuccess { extras = it }
+    }
 
     LaunchedEffect(route) {
         if (!route.completed) {
@@ -119,18 +135,18 @@ fun JourneyDetailScreen(model: AppModel, route: Route.Detail) {
             },
         )
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Summary(display, saved) { model.toggleSaved(display) }
+            Summary(display, extras, saved) { model.toggleSaved(display) }
             if (display.issues.isNotEmpty()) {
                 Issues(display) { alternativeSearch(display)?.let { model.push(Route.Results(it)) } }
             }
-            Legs(display) { index -> model.push(Route.TripFromLeg(display, index)) }
+            Legs(display, extras) { index -> model.push(Route.TripFromLeg(display, index)) }
             Spacer(Modifier.height(24.dp))
         }
     }
 }
 
 @Composable
-private fun Summary(display: JourneyDisplay, saved: Boolean, onSave: () -> Unit) {
+private fun Summary(display: JourneyDisplay, extras: JourneyExtras, saved: Boolean, onSave: () -> Unit) {
     val journey = display.journey
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -149,6 +165,13 @@ private fun Summary(display: JourneyDisplay, saved: Boolean, onSave: () -> Unit)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 display.durationSeconds?.let { AssistChip(onClick = {}, label = { Text(durationString(it)) }) }
                 AssistChip(onClick = {}, label = { Text(transfersText(display.transfers)) })
+                if (extras.co2SavedKilograms >= 0.1) {
+                    AssistChip(
+                        onClick = {},
+                        label = { Text("−${kilograms(extras.co2SavedKilograms)} CO₂") },
+                        leadingIcon = { Icon(Icons.Filled.Eco, "weniger als mit dem Auto", Modifier.size(18.dp), tint = Punctual) },
+                    )
+                }
             }
             FilledTonalButton(onClick = onSave, modifier = Modifier.fillMaxWidth()) {
                 Icon(if (saved) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder, null, Modifier.size(18.dp))
@@ -203,7 +226,7 @@ private fun Issues(display: JourneyDisplay, onAlternative: () -> Unit) {
 
 /** The trains as cards; walks and waiting times go into the transfer between them. */
 @Composable
-private fun Legs(display: JourneyDisplay, onOpenTrain: (Int) -> Unit) {
+private fun Legs(display: JourneyDisplay, extras: JourneyExtras, onOpenTrain: (Int) -> Unit) {
     val legs = display.journey.legs
     val transit = legs.indices.filter { !legs[it].isWalking }
     if (transit.isEmpty()) {
@@ -222,7 +245,7 @@ private fun Legs(display: JourneyDisplay, onOpenTrain: (Int) -> Unit) {
                 broken = position in display.brokenTransferIndices,
             )
         }
-        LegCard(legs[index], display.legs[index]) { onOpenTrain(index) }
+        LegCard(legs[index], display.legs[index], extras.arrivalWeather[index.toString()]) { onOpenTrain(index) }
     }
     legs.indices.filter { it > transit.last() }.forEach { WalkNote(legs[it]) }
 }
@@ -263,7 +286,7 @@ private fun Transfer(arriving: Leg, departing: Leg, walks: List<Leg>, broken: Bo
 
 /** One train: line, direction, delay; departure, the stops in between (folded), arrival; notes (`LegCard`). */
 @Composable
-private fun LegCard(leg: Leg, extra: LegDisplay, onOpenTrain: () -> Unit) {
+private fun LegCard(leg: Leg, extra: LegDisplay, weather: ArrivalWeather?, onOpenTrain: () -> Unit) {
     var showStops by remember { mutableStateOf(false) }
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -299,7 +322,7 @@ private fun LegCard(leg: Leg, extra: LegDisplay, onOpenTrain: () -> Unit) {
             } else {
                 Text(durationString((leg.arrival.planned - leg.departure.planned) / 1000.0), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            StopRow(leg.arrival, leg.destination.shownName, leg.cancelled, note = extra.exitSide, platform = { PlatformBadge(leg.arrivalPlatform, prominent = true) })
+            StopRow(leg.arrival, leg.destination.shownName, leg.cancelled, note = extra.exitSide, weather = weather, platform = { PlatformBadge(leg.arrivalPlatform, prominent = true) })
             if (leg.remarks.isNotEmpty() || leg.messages.isNotEmpty()) {
                 HorizontalDivider()
                 (leg.messages.map { it.text } + leg.remarks).distinct().forEach { Remark(it) }
@@ -314,6 +337,7 @@ private fun StopRow(
     name: String,
     cancelled: Boolean,
     note: String? = null,
+    weather: ArrivalWeather? = null,
     platform: @Composable () -> Unit,
 ) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -321,6 +345,12 @@ private fun StopRow(
         Column(Modifier.weight(1f)) {
             Text(name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
             note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            weather?.let {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Icon(weatherIcon(it), null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${it.temperature} · ${it.condition}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
         }
         platform()
     }
@@ -355,4 +385,17 @@ fun Remark(text: String) {
         Icon(Icons.Filled.Info, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(text, style = MaterialTheme.typography.bodySmall)
     }
+}
+
+/** "3,2 kg", whole kilograms from 10 on (`CO2Comparison.kilogramsText`). */
+private fun kilograms(value: Double): String =
+    if (value < 10) "%.1f kg".format(java.util.Locale.GERMANY, value) else "%.0f kg".format(java.util.Locale.GERMANY, value)
+
+/** WMO weather codes as Open-Meteo gives them. */
+private fun weatherIcon(weather: ArrivalWeather) = when (weather.weatherCode) {
+    0, 1 -> if (weather.isDay) Icons.Filled.WbSunny else Icons.Filled.NightsStay
+    in 51..67, in 80..82 -> Icons.Filled.Umbrella
+    in 71..77, 85, 86 -> Icons.Filled.AcUnit
+    in 95..99 -> Icons.Filled.Thunderstorm
+    else -> Icons.Filled.Cloud
 }
