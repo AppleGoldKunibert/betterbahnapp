@@ -48,7 +48,8 @@ jobs:
           export PATH="$HOME/swift/usr/bin:$PATH"
           swift sdk install "$base/android-sdk/swift-$SWIFT_VERSION-RELEASE/swift-$SWIFT_VERSION-RELEASE_android.artifactbundle.tar.gz" \
             --checksum "$SWIFT_ANDROID_SDK_CHECKSUM"
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSION" > /dev/null
+          # `yes` dies of a broken pipe once sdkmanager stops reading; that's no error.
+          { yes || true; } | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSION" > /dev/null
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION"
           "$HOME/.swiftpm/swift-sdks/swift-$SWIFT_VERSION-RELEASE_android.artifactbundle/swift-android/scripts/setup-android-sdk.sh"
           echo "$HOME/swift/usr/bin" >> "$GITHUB_PATH"
