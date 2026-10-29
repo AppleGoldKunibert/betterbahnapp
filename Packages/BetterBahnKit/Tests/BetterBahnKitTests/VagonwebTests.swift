@@ -414,6 +414,31 @@ private func berlinDate(_ year: Int, _ month: Int, _ day: Int, hour: Int = 12) -
         }
     }
 
+    @Test func readsWhichTrainTheCompositionIsFiledFor() throws {
+        #expect(VagonwebComposition.scheduled(fromHTML: try vagonwebPage("vagonweb-ice377")).first?.train == "ICE 377")
+        #expect(VagonwebComposition.scheduled(fromHTML: try vagonwebPage("vagonweb-ice154")).first?.train == "ICE 154")
+        #expect(VagonwebComposition.scheduled(fromHTML: try vagonwebPage("vagonweb-ec163")).first?.train == "EC 163")
+        #expect(VagonwebComposition.scheduled(fromHTML: try vagonwebPage("vagonweb-nj465")).first?.train == "NJ 465")
+    }
+
+    @Test func skipsAnotherRailwaysTrainWithTheSameNumber() async throws {
+        // ICE 2506 ran instead of ICE 706 and has no plan under DB's; a train with its number under the
+        // SBB's is another one (vagonweb's EC 163 standing in for it here).
+        let html = try vagonwebPage("vagonweb-ec163")
+        let client = VagonwebClient(http: HTTPClient(session: VagonwebStubProtocol.session(category: "ICE", country: "SBB", number: "163", html: html)))
+        #expect(try await client.composition(category: "ICE", number: "163", on: berlinDate(2026, 10, 15)) == nil)
+        let composition = try #require(VagonwebComposition.scheduled(fromHTML: html).first)
+        #expect(composition.isTrain(category: "ec", number: "163"))
+        #expect(!composition.isTrain(category: "ICE", number: "163"))
+        #expect(!composition.isTrain(category: "EC", number: "164"))
+        var unnamed = composition
+        unnamed.train = nil
+        #expect(unnamed.isTrain(category: "ICE", number: "2506"))
+        // DB's own page counts whatever train it names (vagonweb files some trains under another number).
+        let dbClient = VagonwebClient(http: HTTPClient(session: VagonwebStubProtocol.session(category: "ICE", country: "DB", number: "2506", html: html)))
+        #expect(try await dbClient.composition(category: "ICE", number: "2506", on: berlinDate(2026, 10, 15)) != nil)
+    }
+
     @Test func leavesOutCoachesThatDoNotRunThatDay() async throws {
         let html = try vagonwebPage("vagonweb-ec163")
         let client = VagonwebClient(http: HTTPClient(session: VagonwebStubProtocol.session(category: "EC", country: "SBB", number: "163", html: html)))
