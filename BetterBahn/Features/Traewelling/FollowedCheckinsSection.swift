@@ -649,18 +649,11 @@ private struct FollowedCheckinCard: View {
                 // No line until the track is known: drawn from start to end first, it would jump.
                 FollowedRideMap(route: route, showsPath: track != nil)
             }
-            HStack(spacing: 8) {
-                if !checkin.isManualTrip { trainButton }
-                Button {
-                    openURL(model.traewelling.config.baseURL.appending(path: "status/\(status.id)"))
-                } label: {
-                    Label("Träwelling", systemImage: "safari")
-                }
-                if likesEnabled, status.isLikable != false { likeButton }
+            // One line: if all buttons don't fit (small iPhone, large text), Träwelling shows only its icon.
+            ViewThatFits(in: .horizontal) {
+                actionButtons(compact: false)
+                actionButtons(compact: true)
             }
-            .font(.subheadline.weight(.medium))
-            .buttonStyle(.glass)
-            .controlSize(.small)
             if trainSearched, train == nil, !checkin.isManualTrip {
                 Text("Den Zug gibt es in den Fahrplandaten nicht.")
                     .font(.caption)
@@ -676,6 +669,26 @@ private struct FollowedCheckinCard: View {
             }
             if let error { ErrorBanner(error: error) }
         }
+    }
+
+    private func actionButtons(compact: Bool) -> some View {
+        HStack(spacing: 8) {
+            if !checkin.isManualTrip { trainButton }
+            Button {
+                openURL(model.traewelling.config.baseURL.appending(path: "status/\(status.id)"))
+            } label: {
+                if compact {
+                    Label("Träwelling", systemImage: "safari").labelStyle(.iconOnly)
+                } else {
+                    Label("Träwelling", systemImage: "safari")
+                }
+            }
+            if likesEnabled, status.isLikable != false { likeButton }
+        }
+        .lineLimit(1)
+        .font(.subheadline.weight(.medium))
+        .buttonStyle(.glass)
+        .controlSize(.small)
     }
 
     private var trainButton: some View {
@@ -700,12 +713,13 @@ private struct FollowedCheckinCard: View {
         return Button {
             Task { await toggleLike() }
         } label: {
-            Label(count > 0 ? "\(count)" : "Gefällt mir", systemImage: isLiked ? "heart.fill" : "heart")
+            Label("\(count)", systemImage: isLiked ? "heart.fill" : "heart")
                 .monospacedDigit()
         }
         .tint(isLiked ? .pink : nil)
         .disabled(isLiking)
         .accessibilityLabel(isLiked ? "Gefällt mir nicht mehr" : "Gefällt mir")
+        .accessibilityValue("\(count)")
     }
 
     /// Träwelling's track of the ride. Only an answer is remembered; a failed request is asked again next time.
