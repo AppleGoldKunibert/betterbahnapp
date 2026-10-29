@@ -525,6 +525,8 @@ struct TimeSelector: View {
                 }
                 .tint(.brand)
             }
+            // The graphical picker has no ideal width of its own, so a popover (wide screens) squeezes it.
+            .frame(minWidth: 320, idealWidth: 340)
             .padding()
             .presentationCompactAdaptation(.sheet)
             .presentationDetents([.height(500)])
