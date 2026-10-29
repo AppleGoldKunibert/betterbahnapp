@@ -59,6 +59,7 @@ enum Methods {
         "searchTrains": handler(searchTrains),
         "trainRun": handler(trainRun),
         "importShared": handler(importShared),
+        "refreshSaved": handler(refreshSaved),
     ]
 
     // MARK: Stations
@@ -233,5 +234,64 @@ enum Methods {
     /// the share extension on iOS).
     @Sendable static func importShared(_ input: SharedText) async throws -> JourneyDisplay {
         JourneyDisplay(try await DBShareImporter(provider: provider).journey(fromShared: input.text))
+    }
+
+    // MARK: Saved journeys in the background
+
+    struct RefreshSaved: Decodable, Sendable {
+        var journey: Journey
+        /// IDs of what the user was already told about this journey.
+        var notified: [String]
+    }
+
+    struct Notification: Encodable {
+        var id: String
+        var title: String
+        /// Lines of the text; `since` (a time to show as "(seit 14:05)") belongs after the first.
+        var lines: [String]
+        var since: Date?
+        /// A connection that no longer works: louder.
+        var urgent: Bool
+    }
+
+    struct RefreshedSaved: Encodable {
+        var journey: JourneyDisplay
+        var notifications: [Notification]
+        var notified: [String]
+    }
+
+    /// Fresh live data for a saved journey and what's new to notify, as `AppModel.refresh(_:using:)` does on iOS:
+    /// broken or tight transfers and cancelled trains, new delay reasons, platform changes within two hours.
+    @Sendable static func refreshSaved(_ input: RefreshSaved) async throws -> RefreshedSaved {
+        let previous = input.journey
+        let refreshed = await JourneyRefresher(provider: provider).refresh(previous)
+        let known = Set(input.notified)
+        let route = [refreshed.legs.first?.origin.displayName, refreshed.legs.last?.destination.displayName]
+            .compactMap { $0 }.joined(separator: " → ")
+        var notifications: [Notification] = []
+
+        for issue in refreshed.connectionIssues() where !known.contains(issue.id) {
+            notifications.append(Notification(id: issue.id, title: issue.title, lines: [issue.message] + (route.isEmpty ? [] : [route]),
+                                              since: nil, urgent: issue.isBlocking))
+        }
+        // New delay reasons from DB get a notification; plain notices only show as the warning sign.
+        for leg in refreshed.transitLegs {
+            for message in leg.messages where message.kind == .delay {
+                let id = "reason|\(leg.id)|\(message.text)"
+                guard !known.contains(id) else { continue }
+                let line = leg.line?.name ?? "Zug"
+                let delay = leg.departure.delayMinutes ?? 0
+                notifications.append(Notification(
+                    id: id, title: delay > 0 ? "\(line): +\(delay) Min." : "\(line): Verspätungsgrund",
+                    lines: [message.text, "\(leg.origin.displayName) → \(leg.destination.displayName)"],
+                    since: message.timestamp, urgent: false))
+            }
+        }
+        for change in refreshed.platformChanges(since: previous) where !known.contains(change.id) {
+            notifications.append(Notification(id: change.id, title: change.title, lines: change.message.components(separatedBy: "\n"),
+                                              since: nil, urgent: change.isTight))
+        }
+        return RefreshedSaved(journey: JourneyDisplay(refreshed), notifications: notifications,
+                              notified: Array(known.union(notifications.map(\.id))).sorted())
     }
 }

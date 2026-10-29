@@ -273,3 +273,16 @@ object ProductSerializer : KSerializer<Product> {
     override fun deserialize(decoder: Decoder): Product = Product.of(decoder.decodeString())
     override fun serialize(encoder: Encoder, value: Product) = encoder.encodeString(value.id)
 }
+
+/** Something new about a saved journey to tell the user (`Methods.refreshSaved`). */
+@Serializable
+data class SavedNotification(
+    val id: String,
+    val title: String,
+    /** Lines of the text; [since] belongs after the first. */
+    val lines: List<String>,
+    val since: Long? = null,
+    val urgent: Boolean = false,
+)
+
+data class RefreshedSaved(val journey: JourneyDisplay, val notifications: List<SavedNotification>, val notified: List<String>)

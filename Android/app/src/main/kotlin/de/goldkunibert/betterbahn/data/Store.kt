@@ -28,15 +28,29 @@ data class ConnectionSearch(
 @Serializable
 data class RecentSearch(val from: Station, val to: Station)
 
-/** A saved journey ("Reisen"), the journey as the Kit's JSON. */
+/** A saved journey ("Reisen"), the journey as the Kit's JSON, and what the user was already notified about. */
 @Serializable
-data class SavedJourney(val id: String, val journeyId: String, val savedAt: Long, val journey: JsonObject)
+data class SavedJourney(
+    val id: String,
+    val journeyId: String,
+    val savedAt: Long,
+    val journey: JsonObject,
+    val notified: List<String> = emptyList(),
+)
 
 /**
  * What the app keeps on the device: favourite and recent stations, recent searches, saved journeys. JSON in
  * SharedPreferences, like the iOS app's JSON files (without iCloud).
  */
-class Store(context: Context) {
+class Store private constructor(context: Context) {
+    companion object {
+        @Volatile private var shared: Store? = null
+
+        /** One store per process, so the app and the background refresh see the same data. */
+        fun get(context: Context): Store =
+            shared ?: synchronized(this) { shared ?: Store(context.applicationContext).also { shared = it } }
+    }
+
     private val prefs = context.getSharedPreferences("betterbahn", Context.MODE_PRIVATE)
 
     private val _favorites = MutableStateFlow(load("favorites", Station.serializer()))
@@ -94,8 +108,11 @@ class Store(context: Context) {
         set("savedJourneys", SavedJourney.serializer(), _savedJourneys, _savedJourneys.value.filterNot { it.id == id })
 
     /** Fresh data for a saved journey, keeping its place in the list. */
-    fun update(id: String, journeyId: String, journey: JsonObject) {
-        val updated = _savedJourneys.value.map { if (it.id == id) it.copy(journeyId = journeyId, journey = journey) else it }
+    @Synchronized
+    fun update(id: String, journeyId: String, journey: JsonObject, notified: List<String>? = null) {
+        val updated = _savedJourneys.value.map {
+            if (it.id == id) it.copy(journeyId = journeyId, journey = journey, notified = notified ?: it.notified) else it
+        }
         set("savedJourneys", SavedJourney.serializer(), _savedJourneys, updated)
     }
 

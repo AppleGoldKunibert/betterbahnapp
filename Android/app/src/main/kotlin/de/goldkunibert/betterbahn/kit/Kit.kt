@@ -136,6 +136,19 @@ object Kit {
         return TrainRun(json.decodeFromJsonElement(answer.getValue("entry")), KitJson.trip(answer.getValue("trip")))
     }
 
+    /** Fresh data for a saved journey and what's new to notify about. */
+    suspend fun refreshSaved(raw: JsonObject, notified: List<String>): RefreshedSaved {
+        val answer = call("refreshSaved", buildJsonObject {
+            put("journey", raw)
+            put("notified", json.encodeToJsonElement(notified))
+        }).jsonObject
+        return RefreshedSaved(
+            KitJson.journey(answer.getValue("journey")),
+            json.decodeFromJsonElement(answer.getValue("notifications")),
+            json.decodeFromJsonElement(answer.getValue("notified")),
+        )
+    }
+
     /** A connection shared from DB Navigator, found again. */
     suspend fun importShared(text: String): JourneyDisplay =
         KitJson.journey(call("importShared", buildJsonObject { put("text", text) }))

@@ -1,11 +1,14 @@
 package de.goldkunibert.betterbahn
 
+import android.Manifest
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,6 +28,13 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.lifecycleScope
+import de.goldkunibert.betterbahn.data.Notifier
+import de.goldkunibert.betterbahn.data.SavedRefresh
+import de.goldkunibert.betterbahn.data.Store
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import de.goldkunibert.betterbahn.kit.Kit
@@ -40,15 +50,29 @@ import de.goldkunibert.betterbahn.ui.trips.PastTripsScreen
 import de.goldkunibert.betterbahn.ui.trips.TripsScreen
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        /** Opens this saved journey (from a notification). */
+        const val EXTRA_SAVED_ID = "savedId"
+    }
+
     private val model: AppModel by viewModels()
+    private val askNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Kit.start(this)
+        Notifier.createChannel(this)
+        if (Store.get(this).savedJourneys.value.isNotEmpty()) SavedRefresh.schedule(this)
         enableEdgeToEdge()
         if (savedInstanceState == null) handleShare(intent)
         setContent {
             BetterBahnTheme { App(model) }
+            if (model.wantsNotificationPermission) {
+                LaunchedEffect(Unit) {
+                    model.wantsNotificationPermission = false
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }
         }
     }
 
@@ -57,8 +81,18 @@ class MainActivity : ComponentActivity() {
         handleShare(intent)
     }
 
-    /** A connection shared from DB Navigator ("Teilen" → BetterBahn). */
+    /** A connection shared from DB Navigator ("Teilen" → BetterBahn), or a saved journey from its notification. */
     private fun handleShare(intent: Intent?) {
+        intent?.getStringExtra(EXTRA_SAVED_ID)?.let { id ->
+            // Saved journeys are described shortly after start; wait for it.
+            lifecycleScope.launch {
+                repeat(50) {
+                    if (model.savedDisplays.containsKey(id)) return@launch model.openSaved(id)
+                    delay(100)
+                }
+            }
+            return
+        }
         if (intent?.action != Intent.ACTION_SEND) return
         val text = listOfNotNull(intent.getStringExtra(Intent.EXTRA_SUBJECT), intent.getStringExtra(Intent.EXTRA_TEXT)).joinToString("\n")
         if (text.isNotBlank()) model.importShared(text)

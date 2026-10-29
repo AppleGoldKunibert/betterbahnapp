@@ -9,6 +9,8 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import de.goldkunibert.betterbahn.data.ConnectionSearch
+import de.goldkunibert.betterbahn.data.Notifier
+import de.goldkunibert.betterbahn.data.SavedRefresh
 import de.goldkunibert.betterbahn.data.SavedJourney
 import de.goldkunibert.betterbahn.data.Store
 import de.goldkunibert.betterbahn.kit.BoardEntryDisplay
@@ -63,7 +65,7 @@ data class SearchForm(
 
 /** The single app state (`AppModel` on iOS): storage, saved journeys as shown, navigation per tab. */
 class AppModel(application: Application) : AndroidViewModel(application) {
-    val store = Store(application)
+    val store = Store.get(application)
 
     var tab by mutableStateOf(Tab.Connections)
     var form by mutableStateOf(SearchForm())
@@ -88,15 +90,22 @@ class AppModel(application: Application) : AndroidViewModel(application) {
         private set
 
     init {
-        viewModelScope.launch { describeSaved() }
-    }
-
-    private suspend fun describeSaved() {
-        val saved = store.savedJourneys.value
-        runCatching { Kit.describeJourneys(saved.map { it.journey }) }.onSuccess { displays ->
-            saved.zip(displays).forEach { (entry, display) -> savedDisplays[entry.id] = display }
+        // Describe saved journeys whenever the list changes (saved here, or refreshed in the background).
+        viewModelScope.launch {
+            store.savedJourneys.collect { saved ->
+                val missing = saved.filter { savedDisplays[it.id]?.id != it.journeyId }
+                if (missing.isNotEmpty()) {
+                    runCatching { Kit.describeJourneys(missing.map { it.journey }) }.onSuccess { displays ->
+                        missing.zip(displays).forEach { (entry, display) -> savedDisplays[entry.id] = display }
+                    }
+                }
+                savedDisplays.keys.retainAll(saved.map { it.id }.toSet())
+            }
         }
     }
+
+    /** Set once the first journey is saved: time to ask for notifications (the activity asks). */
+    var wantsNotificationPermission by mutableStateOf(false)
 
     fun isSaved(journey: JourneyDisplay) = store.savedEntry(journey.id) != null
 
@@ -110,6 +119,8 @@ class AppModel(application: Application) : AndroidViewModel(application) {
         val entry = SavedJourney(UUID.randomUUID().toString(), journey.id, System.currentTimeMillis(), journey.raw)
         savedDisplays[entry.id] = journey
         store.save(entry) { savedDisplays[it.id]?.journey?.departure?.planned ?: Long.MAX_VALUE }
+        SavedRefresh.schedule(getApplication())
+        if (!Notifier.canNotify(getApplication())) wantsNotificationPermission = true
     }
 
     fun deleteSaved(id: String) {
@@ -117,23 +128,21 @@ class AppModel(application: Application) : AndroidViewModel(application) {
         savedDisplays.remove(id)
     }
 
-    /** Fresh live data for saved journeys departing within 24 hours and not over yet (`refreshSavedJourneys`). */
+    /** Fresh live data and notifications for saved journeys departing within 24 hours (`SavedRefresh`). */
     fun refreshSaved() {
         if (refreshingSaved) return
         refreshingSaved = true
         viewModelScope.launch {
-            val now = System.currentTimeMillis()
-            for (entry in store.savedJourneys.value) {
-                val display = savedDisplays[entry.id] ?: continue
-                val departure = display.journey.departure?.planned ?: continue
-                if (display.isOver || departure - now > 24 * 3600_000L) continue
-                runCatching { Kit.refreshJourney(entry.journey) }.onSuccess { fresh ->
-                    savedDisplays[entry.id] = fresh
-                    store.update(entry.id, fresh.id, fresh.raw)
-                }
-            }
+            SavedRefresh.run(getApplication()) { id, fresh -> savedDisplays[id] = fresh }
             refreshingSaved = false
         }
+    }
+
+    /** Opens a saved journey, from its notification. */
+    fun openSaved(id: String) {
+        val display = savedDisplays[id] ?: return
+        tab = Tab.Trips
+        stacks.getValue(Tab.Trips).apply { clear(); add(Route.Detail(display)) }
     }
 
     /** Updates a saved journey after its detail view loaded fresher data. */
