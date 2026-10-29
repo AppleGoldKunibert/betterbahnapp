@@ -125,7 +125,7 @@ struct CoachSequenceDisclosure: View {
                             liveMissing = false
                             break
                         }
-                    } catch TransitError.rateLimited {
+                    } catch TransitError.rateLimited, TransitError.unauthorized {
                         missing = true
                         break
                     } catch {}
@@ -270,7 +270,7 @@ struct CoachSequencePanel: View {
                 loading = true
                 do {
                     sequence = try await model.coachSequence(for: request)
-                } catch TransitError.rateLimited {
+                } catch TransitError.rateLimited, TransitError.unauthorized {
                     blocked = true
                 } catch {}
                 if sequence?.coaches.isEmpty ?? true, let planned = await model.plannedCoachSequence(for: request) {

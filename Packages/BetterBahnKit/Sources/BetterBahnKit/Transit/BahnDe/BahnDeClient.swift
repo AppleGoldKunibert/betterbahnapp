@@ -715,7 +715,8 @@ public struct BahnDeClient: Sendable {
     /// October 2026, the Worker's included. A hiccup (`isHiccup`: a 502, a dropped connection) is tried again up
     /// to `BahnDeProxy.attempts` times, a timeout once more; a request that times out again throws `timeout`
     /// without pausing the others. While the server fails (down, paused, refused) it is left alone for a
-    /// while and every request throws `rateLimited`, so the app says the live data isn't available.
+    /// while and every request throws `rateLimited`, so the app says the live data isn't available. A 401 (the
+    /// server refused the app's token) throws `unauthorized` for this request only: the next one brings a fresh token.
     /// Without a server (tests) the request goes to `url` itself, with `gate`'s cooldown after a block.
     func get<T: Decodable>(_ url: URL, as type: T.Type) async throws -> T {
         if let proxy, let proxied = proxy.url(for: url) {
@@ -724,6 +725,9 @@ public struct BahnDeClient: Sendable {
                 if await proxy.gate.isBlocked { throw TransitError.rateLimited }
                 do {
                     return try await http.get(proxied, as: type, headers: Self.headers(), auth: auth)
+                } catch TransitError.http(status: 401, _) {
+                    // Not the server failing: the app had no valid token at hand (#472).
+                    throw TransitError.unauthorized
                 } catch let error as TransitError where error.isBahnDeAnswer {
                     // bahn.de's own answer (404 etc.).
                     throw error

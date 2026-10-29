@@ -4451,6 +4451,19 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(try await bahnDe.searchStations("Stuck").map(\.id) == ["8000105"])
     }
 
+    /// ICE 506, 2026-10-29: the server refused a request without a valid token (401), and every bahn.de
+    /// request paused for 2 minutes with "Zu viele Anfragen" (#472).
+    @Test func aRefusedTokenDoesntPauseTheOthers() async throws {
+        ProxyRoutingProtocol.sequences.withLock { $0["proxy-token.test"] = [401] }
+        let (bahnDe, proxy, session) = client(proxyHost: "proxy-token.test")
+        defer { session.invalidateAndCancel() }
+
+        await #expect(throws: TransitError.unauthorized) { try await bahnDe.searchStations("Token") }
+        #expect(await !proxy.gate.isBlocked)
+        #expect(try await bahnDe.searchStations("Token").map(\.id) == ["8000105"])
+        #expect(ProxyRoutingProtocol.count(host: "proxy-token.test") == 2)
+    }
+
     @Test func blocksArentTriedAgain() async throws {
         ProxyRoutingProtocol.answers.withLock { $0["proxy-refused.test"] = 452 }
         let (bahnDe, proxy, session) = client(proxyHost: "proxy-refused.test")
