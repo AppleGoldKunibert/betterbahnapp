@@ -19,6 +19,9 @@ CLAUDE.md still applies; this file only adds GoldKunibert's own preferences and 
   complete `curl_cffi` command to run on the Mac and ask for the output to be pasted.
 - GoldKunibert tests only on the iPhone: write "What to test" (in the reply and in the test list) for the
   iPhone, not the Simulator. A step that needs a launch argument says to run the debug build from Xcode on it.
+- Android: GoldKunibert has no Android phone and tests in the Android Studio emulator on a Windows PC (AMD). Write
+  Android steps for the emulator, starting with where to get the APK: the artifact of the PR's "Android build" run
+  (`docs/android.md`).
 
 ## Test list
 

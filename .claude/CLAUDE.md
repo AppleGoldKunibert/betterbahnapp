@@ -5,7 +5,8 @@ follow `.claude/GoldKunibert.md`.
 
 ## Project
 
-iOS app (SwiftUI, iOS 26, Swift 6) for German train travel. UI text is German, code and comments English.
+iOS app (SwiftUI, iOS 26, Swift 6) for German train travel, plus an Android app in `Android/` (prototype, Kotlin/
+Compose on the same BetterBahnKit). UI text is German, code and comments English.
 
 | Path | Contents |
 | --- | --- |
@@ -15,16 +16,21 @@ iOS app (SwiftUI, iOS 26, Swift 6) for German train travel. UI text is German, c
 | `Config/` | xcconfigs, Info.plists, entitlements. |
 | `Cloudflare/` | Workers: `betterbahn`, `bahnde-proxy` (`betterbahn2`), `pass-signer`, `stats`, `checkin-push`, `live-activity`, `shared`. |
 | `Server/` | `bahnde-proxy`: Docker server asking bahn.de with a browser's TLS fingerprint (the app asks it before `betterbahn2`). |
+| `Android/` | Android app: `kit/` builds BetterBahnKit with the Swift SDK for Android (`build.sh`, JNI bridge), `app/` Kotlin/Compose. |
 | `scripts/` | Offline data rebuilds; `searchsim/` runs Kit tests on Linux. |
-| `.github/workflows/` | `pr-build.yml`, `pr-secrets.yml`, `sync-prod.yml`, `bump-version.yml` (version bump per merged feature/bug), `monthly-data-update.yml` (monthly PR into `prod` with rebuilt station data). |
+| `.github/workflows/` | `pr-build.yml`, `android-build.yml` (Kit for Android + debug APK), `pr-secrets.yml`, `sync-prod.yml`, `bump-version.yml` (version bump per merged feature/bug), `monthly-data-update.yml` (monthly PR into `prod` with rebuilt station data). |
 
 - Details per feature and type: `docs/CODEBASE.md`. Don't read it whole: grep it for the feature or type name
   and read that section, then open only the files you change. Read `docs/app-review-notes.md` (App Store,
-  privacy) and `docs/transit-providers.md` (data sources) only when the task touches them.
+  privacy), `docs/transit-providers.md` (data sources) and `docs/android.md` (Android app) only when the task
+  touches them.
 - Kit tests: `Packages/BetterBahnKit/swift-test.sh --package-path Packages/BetterBahnKit` (`--filter <Name>`).
 - App build: `xcodebuild -project BetterBahn.xcodeproj -scheme BetterBahn -destination 'generic/platform=iOS Simulator' build -quiet`.
   Never run iOS Simulator tests.
 - Logic and models go into BetterBahnKit (`Sendable`, `public`), views stay thin; add a Kit test for behaviour changes.
+- Android: `Android/kit/build.sh`, then `cd Android && ./gradlew assembleDebug` (setup in `docs/android.md`). Kit code
+  must keep building for Android: no new Apple-only imports outside the files `Android/kit/Package.swift` excludes,
+  or guard them with `#if canImport(…)`.
 
 ## UI texts
 
@@ -66,6 +72,19 @@ iOS app (SwiftUI, iOS 26, Swift 6) for German train travel. UI text is German, c
   der Basis-Feature-Branch von oben) – diese Projektregel hat Vorrang vor „keinen PR ohne ausdrückliche Bitte".
   CI-Fehler beheben, bis alles grün ist, dann auf „ready" stellen. Dem Nutzer den Branch nennen
   (`git fetch && git checkout <branch>`).
+- Android (beide Apps sollen dieselben Features haben, der Nutzer testet sie aber getrennt):
+  - Jedes Feature und jeder Bugfix mit Verhaltensänderung kommt in beide Apps, aber nie beide Plattformen in einen
+    Branch oder PR. Erst iOS (Branch und Draft-PR wie oben), danach in derselben Session die Android-Version auf
+    `<branch>android` (`livezugaktualisierung` → `livezugaktualisierungandroid`), ebenfalls von
+    `origin/indevelopment` und mit eigenem Draft-PR in `indevelopment`.
+  - Der Android-PR bekommt dasselbe Label wie der iOS-PR plus `android` (`bump-version.yml` zählt ihn dann nicht:
+    beide Apps tragen dieselbe Version, die mit dem iOS-PR steigt) und verweist mit „Android-Version von #15" bzw.
+    „Android-Version von #<iOS-PR>" auf Issue und iOS-PR, ohne „Fixed".
+  - Fehlt der Android-App noch, worauf das Feature aufbaut (Screen, Plattformfunktion), stattdessen ein Issue
+    „Android: <Feature>" mit den Labels `android` und `enhancement` bzw. `bug` anlegen und im iOS-PR verlinken.
+  - Nur-iOS-Dinge (Live Activity, Siri, Wallet …) und Nur-Android-Dinge brauchen kein Gegenstück; Kit-only-Änderungen
+    landen ohnehin in beiden Apps.
+  - Antwort am Ende: „What to test" getrennt für iPhone und Android-Emulator, mit beiden Branches.
 - Release (nur auf ausdrückliche Bitte): getestete PRs in `indevelopment` mergen, Release-PR `indevelopment` →
   `prod` öffnen (Diff prüfen, bei grüner CI mergen), dann PR `prod` → `externaltester` öffnen, **nicht** mergen.
 

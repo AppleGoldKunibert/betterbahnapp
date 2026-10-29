@@ -6,6 +6,8 @@
 # in front is fine), each counting once; the phrase in the middle of a sentence doesn't count. The
 # PR's own "enhancement" or "bug" label counts once more, but only when nothing above counted that kind.
 # Minors are applied before patches: 1.0.3 + one feature and one bug → 1.1.1. No label, no bump.
+# PRs labeled "android" never bump: the Android app shares the iOS version, which goes up with the iOS PR of
+# the same feature (docs/android.md).
 name: Bump version
 
 on:
@@ -37,6 +39,13 @@ jobs:
             const pr = context.payload.pull_request;
             const body = pr.body ?? "";
             const has = (labels, name) => labels.some((l) => (typeof l === "string" ? l : l.name) === name);
+
+            if (has(pr.labels, "android")) {
+              core.info("Android PR: the version goes up with the iOS PR");
+              core.setOutput("features", 0);
+              core.setOutput("bugs", 0);
+              return;
+            }
 
             const pattern = /\b(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?)\s*:?\s+#(\d+)/gi;
             const numbers = [...new Set([...body.matchAll(pattern)].map((m) => Number(m[1])))];

@@ -1,0 +1,9 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.kotlin/
+# Written by kit/build.sh
+app/src/main/jniLibs/
+app/src/main/assets/BetterBahnKit/

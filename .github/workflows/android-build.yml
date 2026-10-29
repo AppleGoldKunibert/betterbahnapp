@@ -1,0 +1,68 @@
+# Builds the Android app (Android/) with BetterBahnKit for Android and uploads the debug APK, so it can be tried
+# in an emulator without a local Swift setup, and so Kit changes that break the Android build show up in their PR.
+# Linux only; no secrets.
+name: Android build
+
+on:
+  pull_request:
+    paths:
+      - "Android/**"
+      - "Packages/BetterBahnKit/Sources/**"
+      - ".github/workflows/android-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  SWIFT_VERSION: "6.4.1"
+  SWIFT_ANDROID_SDK_CHECKSUM: a356b79f8f1daa6ae3a66f4c556966ca20c0208b3659805cf30a83a0a31d6772
+  NDK_VERSION: "27.3.13750724"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Install Swift, the Swift SDK for Android and the NDK
+        run: |
+          set -euo pipefail
+          base="https://download.swift.org/swift-$SWIFT_VERSION-release"
+          mkdir -p "$HOME/swift"
+          curl -sSfL "$base/ubuntu2404/swift-$SWIFT_VERSION-RELEASE/swift-$SWIFT_VERSION-RELEASE-ubuntu24.04.tar.gz" \
+            | tar -xz -C "$HOME/swift" --strip-components=1
+          export PATH="$HOME/swift/usr/bin:$PATH"
+          swift sdk install "$base/android-sdk/swift-$SWIFT_VERSION-RELEASE/swift-$SWIFT_VERSION-RELEASE_android.artifactbundle.tar.gz" \
+            --checksum "$SWIFT_ANDROID_SDK_CHECKSUM"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSION" > /dev/null
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION"
+          "$HOME/.swiftpm/swift-sdks/swift-$SWIFT_VERSION-RELEASE_android.artifactbundle/swift-android/scripts/setup-android-sdk.sh"
+          echo "$HOME/swift/usr/bin" >> "$GITHUB_PATH"
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> "$GITHUB_ENV"
+
+      - name: Build BetterBahnKit for Android
+        run: Android/kit/build.sh
+
+      - name: Build the app
+        working-directory: Android
+        run: ./gradlew assembleDebug --console=plain
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BetterBahn-Android-debug
+          path: Android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
