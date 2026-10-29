@@ -144,4 +144,24 @@ class AppModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun rememberStation(station: Station) = store.rememberStation(station)
+
+    /** A shared DB connection being looked up, and what went wrong if it wasn't found. */
+    var importing by mutableStateOf(false)
+        private set
+    var importError by mutableStateOf<String?>(null)
+
+    /** Opens a connection shared from DB Navigator in the connections tab (the share extension on iOS). */
+    fun importShared(text: String) {
+        importing = true
+        importError = null
+        viewModelScope.launch {
+            runCatching { Kit.importShared(text) }
+                .onSuccess { journey ->
+                    tab = Tab.Connections
+                    push(Route.Detail(journey))
+                }
+                .onFailure { importError = it.message ?: "Die Verbindung wurde nicht gefunden." }
+            importing = false
+        }
+    }
 }

@@ -136,6 +136,10 @@ object Kit {
         return TrainRun(json.decodeFromJsonElement(answer.getValue("entry")), KitJson.trip(answer.getValue("trip")))
     }
 
+    /** A connection shared from DB Navigator, found again. */
+    suspend fun importShared(text: String): JourneyDisplay =
+        KitJson.journey(call("importShared", buildJsonObject { put("text", text) }))
+
     private fun journeyArgs(raw: JsonObject) = buildJsonObject { put("journey", raw) }
 
     private external fun nativeStart(resources: String)

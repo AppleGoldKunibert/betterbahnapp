@@ -58,6 +58,7 @@ enum Methods {
         "tripLeg": handler(tripLeg),
         "searchTrains": handler(searchTrains),
         "trainRun": handler(trainRun),
+        "importShared": handler(importShared),
     ]
 
     // MARK: Stations
@@ -220,5 +221,17 @@ enum Methods {
         guard let finder = TrainNumberSearch(provider: provider) else { throw TransitError.notFound("Zug") }
         let run = try await finder.run(of: input.result.kit)
         return TrainRun(entry: BoardEntryDisplay(run.entry), trip: TripDisplay(run.trip))
+    }
+
+    // MARK: Shared connections
+
+    struct SharedText: Decodable, Sendable {
+        var text: String
+    }
+
+    /// A connection shared from DB Navigator (its text or link), found again in our sources (`DBShareImporter`,
+    /// the share extension on iOS).
+    @Sendable static func importShared(_ input: SharedText) async throws -> JourneyDisplay {
+        JourneyDisplay(try await DBShareImporter(provider: provider).journey(fromShared: input.text))
     }
 }
