@@ -78,61 +78,158 @@ extension AppModel {
         #endif
     }
 
-    /// Turns the notifications about followed check-ins on: asks for permission and the device token,
-    /// signs in with Träwelling once more (read-only, for the push Worker; `authenticate` runs the browser
-    /// session) and signs the device up. Throws when something is missing; a cancelled login throws too.
-    func enableFollowedCheckinPush(authenticate: (URL, String) async throws -> URL) async throws {
-        let center = UNUserNotificationCenter.current()
-        guard (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) == true else {
-            throw FollowedCheckinPushError.notificationsDenied
-        }
-        guard let deviceToken = await pushDeviceTokenForFollowedCheckins() else { throw FollowedCheckinPushError.noDeviceToken }
-        let user = try await traewelling.currentUser()
-        let config = FollowedCheckinPush.config(from: traewelling.config)
-        let pkce = PKCE()
-        let callback = try await authenticate(config.authorizeURL(pkce: pkce), config.callbackScheme)
-        let code = try TraewellingConfig.authorizationCode(in: callback, pkce: pkce)
-        // A sign-up left from turning it off offline ends first, so its notifications don't come twice.
-        if let old = followedCheckinPush { try? await FollowedCheckinPush().unsubscribe(old) }
-        followedCheckinPush = try await FollowedCheckinPush().subscribe(
-            code: code, codeVerifier: pkce.verifier, deviceToken: deviceToken, sandbox: Self.pushUsesSandbox, userID: user.id)
-        followedCheckinPushSentToken = deviceToken
-        followedCheckinPushEnded = false
-        settings.notifyFollowedCheckins = true
+    /// What the push Worker should notify about, from the settings.
+    var checkinPushKinds: Set<CheckinPushKind> {
+        var kinds: Set<CheckinPushKind> = []
+        if settings.notifyFollowedCheckins { kinds.insert(.followed) }
+        if settings.notifyCheckinLikes { kinds.insert(.likes) }
+        if settings.notifyCheckinCompanions { kinds.insert(.companions) }
+        return kinds
     }
 
-    /// Turns the notifications off and signs the device off at the Worker. Offline the sign-up is kept and
-    /// ended on a later `syncFollowedCheckinPush()`.
-    func disableFollowedCheckinPush() async {
-        settings.notifyFollowedCheckins = false
+    func isCheckinPushOn(_ kind: CheckinPushKind) -> Bool {
+        checkinPushKinds.contains(kind)
+    }
+
+    /// Whether turning `kind` on signs in with Träwelling again: likes and fellow travellers with a login
+    /// handed over from before #452, which can't read Träwelling's notifications.
+    func checkinPushNeedsLogin(for kind: CheckinPushKind) async -> Bool {
+        FollowedCheckinPush.step(for: checkinPushKinds.union([kind]), subscription: followedCheckinPush,
+                                 loginReadsNotifications: await traewelling.readsNotifications) == .signIn
+    }
+
+    private func setCheckinPushKinds(_ kinds: Set<CheckinPushKind>) {
+        settings.notifyFollowedCheckins = kinds.contains(.followed)
+        settings.notifyCheckinLikes = kinds.contains(.likes)
+        settings.notifyCheckinCompanions = kinds.contains(.companions)
+    }
+
+    /// Turns one kind of notification from the push Worker on or off (#266, #447). Turning one on asks for
+    /// permission and the device token and, when `checkinPushNeedsLogin`, signs in with Träwelling again
+    /// (`authenticate` runs the browser session); the Worker reads with the app's login (#452). Throws when
+    /// something is missing; a cancelled login throws too. Offline the change reaches the Worker on the next start.
+    func setCheckinPush(_ kind: CheckinPushKind, on: Bool, authenticate: (URL, String) async throws -> URL) async throws {
+        var kinds = checkinPushKinds
+        if on { kinds.insert(kind) } else { kinds.remove(kind) }
+        if on, (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])) != true {
+            throw FollowedCheckinPushError.notificationsDenied
+        }
+        var step = FollowedCheckinPush.step(for: kinds, subscription: followedCheckinPush,
+                                            loginReadsNotifications: await traewelling.readsNotifications)
+        if step == .signIn {
+            try await signInToTraewellingAgain(authenticate: authenticate)
+            step = FollowedCheckinPush.step(for: kinds, subscription: followedCheckinPush,
+                                            loginReadsNotifications: await traewelling.readsNotifications)
+        }
+        switch step {
+        case .signOff:
+            await disableCheckinPush()
+        case .signIn:
+            // Träwelling didn't grant reading notifications.
+            throw OAuthError.sessionExpired
+        case .signUp:
+            try await signUpForCheckinPush(kinds: kinds)
+        case .update:
+            setCheckinPushKinds(kinds)
+            followedCheckinPushSentKinds = nil
+            await syncFollowedCheckinPush()
+        }
+    }
+
+    /// Signs in with Träwelling again with the app's current scopes; our server keeps the login, so the
+    /// notifications already running carry on.
+    private func signInToTraewellingAgain(authenticate: (URL, String) async throws -> URL) async throws {
+        let config = traewelling.config
+        let pkce = PKCE()
+        // A webhook, when the Worker takes one, brings likes and fellow travellers right away.
+        let webhook = await FollowedCheckinPush().loginParameters()
+        let callback = try await authenticate(config.authorizeURL(pkce: pkce, extra: webhook), config.callbackScheme)
+        try await traewelling.completeLogin(callbackURL: callback, pkce: pkce)
+    }
+
+    private func signUpForCheckinPush(kinds: Set<CheckinPushKind>) async throws {
+        guard let deviceToken = await pushDeviceTokenForFollowedCheckins() else { throw FollowedCheckinPushError.noDeviceToken }
+        guard let login = try await traewelling.serverLogin() else { throw OAuthError.notLoggedIn }
+        let user = try await traewelling.currentUser()
+        // A sign-up left from turning it off offline, or one with a login of its own (before #452), ends
+        // first, so its notifications don't come twice.
+        if let old = followedCheckinPush { try? await FollowedCheckinPush().unsubscribe(old) }
+        followedCheckinPush = try await FollowedCheckinPush().subscribe(
+            login: login, deviceToken: deviceToken, sandbox: Self.pushUsesSandbox, userID: user.id, kinds: kinds)
+        followedCheckinPushSentToken = deviceToken
+        followedCheckinPushSentKinds = kinds
+        followedCheckinPushEnded = false
+        setCheckinPushKinds(kinds)
+    }
+
+    /// Turns all notifications from the push Worker off and signs the device off there. Offline the sign-up
+    /// is kept and ended on a later `syncFollowedCheckinPush()`.
+    func disableCheckinPush() async {
+        setCheckinPushKinds([])
         guard let subscription = followedCheckinPush else { return }
         if (try? await FollowedCheckinPush().unsubscribe(subscription)) != nil, followedCheckinPush == subscription {
             followedCheckinPush = nil
         }
     }
 
-    /// On every start: sends the Worker the current device token (it can change), ends a sign-up that is
-    /// no longer wanted (setting off, logged out of Träwelling) and notices one the Worker dropped.
+    /// On every start and after a setting changed: sends the Worker the current device token (it can change)
+    /// and kinds, ends a sign-up that is no longer wanted (all off, logged out of Träwelling), notices one
+    /// the Worker dropped and moves one with a login of its own (before #452) to the app's login.
     func syncFollowedCheckinPush() async {
         guard let subscription = followedCheckinPush else {
             // Turned on in a build that looked in the background itself: there's no sign-up yet.
-            if settings.notifyFollowedCheckins { settings.notifyFollowedCheckins = false }
+            if !checkinPushKinds.isEmpty { setCheckinPushKinds([]) }
             return
         }
-        guard settings.notifyFollowedCheckins, settings.traewellingEnabled, await traewelling.isLoggedIn else {
-            await disableFollowedCheckinPush()
+        let kinds = checkinPushKinds
+        guard !kinds.isEmpty, settings.traewellingEnabled, await traewelling.isLoggedIn else {
+            await disableCheckinPush()
             return
         }
-        guard let deviceToken = await pushDeviceTokenForFollowedCheckins(), deviceToken != followedCheckinPushSentToken,
-              let known = try? await FollowedCheckinPush().update(subscription, deviceToken: deviceToken, sandbox: Self.pushUsesSandbox),
+        if !subscription.usesAppLogin {
+            // Kept while the app's login can't read what the old one could (likes, fellow travellers).
+            if FollowedCheckinPush.step(for: kinds, subscription: subscription,
+                                        loginReadsNotifications: await traewelling.readsNotifications) == .signUp {
+                try? await signUpForCheckinPush(kinds: kinds)
+                if followedCheckinPush != subscription { return }
+            }
+        }
+        guard let deviceToken = await pushDeviceTokenForFollowedCheckins(),
+              deviceToken != followedCheckinPushSentToken || kinds != followedCheckinPushSentKinds,
+              let known = try? await FollowedCheckinPush().update(subscription, deviceToken: deviceToken, sandbox: Self.pushUsesSandbox, kinds: kinds),
               followedCheckinPush == subscription else { return }
         if known {
             followedCheckinPushSentToken = deviceToken
+            followedCheckinPushSentKinds = kinds
         } else {
             followedCheckinPush = nil
             followedCheckinPushEnded = true
-            settings.notifyFollowedCheckins = false
+            setCheckinPushKinds([])
         }
+    }
+
+    /// A tapped like on one of the user's own check-ins (#447): "Check-in ansehen" in its saved journey when
+    /// it was made in the app, else the check-in on Träwelling.
+    func openOwnCheckin(id: Int) async {
+        let legIDs = Set(checkinStatusIDs.filter { $0.value == id }.keys)
+        if !legIDs.isEmpty, let entry = savedJourneys.first(where: { entry in entry.journey.legs.contains { legIDs.contains($0.id) } }) {
+            checkinToShow = id
+            journeyToOpen = entry
+        } else {
+            await openTraewellingStatus(id: id)
+        }
+    }
+
+    /// A tapped fellow traveller (#447): their check-in in the list of followed ones, else on Träwelling.
+    func openCompanionCheckin(id: Int) async {
+        await openFollowedCheckin(id: id)
+        if followedCheckins?.statuses.contains(where: { $0.id == id }) != true {
+            await openTraewellingStatus(id: id)
+        }
+    }
+
+    private func openTraewellingStatus(id: Int) async {
+        _ = await UIApplication.shared.open(traewelling.config.baseURL.appending(path: "status/\(id)"))
     }
 
     /// The APNs device token: asks iOS to register (again) and waits up to 20 seconds for its answer
@@ -208,14 +305,27 @@ enum FollowedCheckinPushError: LocalizedError {
     }
 }
 
-/// The notification for a new check-in of someone the user follows (#266), sent by the push Worker
-/// (`Cloudflare/checkin-push`); tapping it opens the check-in.
+/// The notifications sent by the push Worker (`Cloudflare/checkin-push`) about a new check-in of someone the
+/// user follows (#266), a like on the user's own check-in or someone on the same train (#447); tapping one
+/// opens the check-in.
 enum FollowedCheckinNotifier {
     nonisolated static let statusIDKey = "followedStatusID"
+    nonisolated static let ownStatusIDKey = "ownStatusID"
+    nonisolated static let companionStatusIDKey = "companionStatusID"
 
     /// The followed check-in a tapped notification is about, if it is one of these.
     nonisolated static func statusID(in userInfo: [AnyHashable: Any]) -> Int? {
         userInfo[statusIDKey] as? Int
+    }
+
+    /// The user's own check-in that was liked.
+    nonisolated static func ownStatusID(in userInfo: [AnyHashable: Any]) -> Int? {
+        userInfo[ownStatusIDKey] as? Int
+    }
+
+    /// The check-in of someone who joined the user's train.
+    nonisolated static func companionStatusID(in userInfo: [AnyHashable: Any]) -> Int? {
+        userInfo[companionStatusIDKey] as? Int
     }
 }
 
