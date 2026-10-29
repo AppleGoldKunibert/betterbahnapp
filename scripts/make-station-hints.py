@@ -32,9 +32,11 @@ TRAIN = {"HIGHSPEED_RAIL", "LONG_DISTANCE", "NIGHT_RAIL", "REGIONAL_RAIL", "REGI
 # nobody gets on (TransitousProvider.isBorderPoint). "Ahlbeck Grenze" is a station.
 BORDER_POINT = re.compile(r"(\(Gr\)|\[Grenze\])\s*$|,[^,]*\bGrenze\b|^Grenze\b|Grænse|Tarifpunkt")
 # The railways' own points along a line that some feeds list as stops: the Harz narrow-gauge railway's
-# "Elend Drw_Eld 007", Czech kilometre posts ("Km 18,000"), junctions and passing loops ("hr.VUSC 0100/0200 01",
-# "Tábor výh.č.501", "Pha hl.n. Lc105-102", "P.hl.n.-Vítkov v.301").
-INTERNAL = re.compile(r"\b[A-Za-z]+[_-][A-Za-z]+ \d{3}( P\d)?$|^hr\.|^Km \d|\bvýh(\.|ybka)|\bLc\d|\bv\.\d{3}$|\bodb\.|^Odb ")
+# "Elend Drw_Eld 007", Czech kilometre posts and sidings ("Km 18,000", "km 0,860=0,900", "vl. v km 12,940"),
+# junctions and passing loops ("hr.VUSC 0100/0200 01", "Tábor výh.č.501", "Pha hl.n. Lc105-102",
+# "P.hl.n.-Vítkov v.301") and border points ("Hodos Gr.", "Rodange-Gr.").
+INTERNAL = re.compile(r"\b[A-Za-z]+[_-][A-Za-z]+ \d{3}( P\d)?$|^hr\.|\b[Kk]m \d|\bvýh(\.|ybka)|\bLc\d|\bv\.\d{3}$"
+                      r"|\bodb\.|^Odb |[ -]Gr\.$")
 # A station's names that are worse than its others: a local transit authority's ("S Südkreuz Bhf (Berlin)",
 # "S Ostbahnhof (Berlin)").
 CLUMSY = re.compile(r"^[SU](\+U)? |\bBhf\b|\(Berlin\)$")
@@ -180,33 +182,44 @@ def hints(found, previous):
         if near:
             near["modes"] |= set(stop.get("modes") or [])
             near["countries"][country(stop["stopId"])] += 1
+            near["bus"] &= "BUS" in (stop.get("modes") or [])
             if name not in near["names"]:
                 near["names"].append(name)
             continue
         cluster = {"names": [name], "lat": stop["lat"], "lon": stop["lon"], "countries": Counter([country(stop["stopId"])]),
-                   "importance": stop.get("importance") or 0, "modes": set(stop.get("modes") or [])}
+                   "importance": stop.get("importance") or 0, "modes": set(stop.get("modes") or []),
+                   "bus": "BUS" in (stop.get("modes") or [])}
         grid.setdefault(cell, []).append(cluster)
         clusters.append(cluster)
 
     entries = []
     for c in clusters:
-        # All stops of a station are equally busy, so which feed's name comes first is chance: take DB's
-        # name (or the national railway's abroad), else last time's, else one that isn't clumsy.
-        names = [n for n in c["names"] if not misplaced(n, c["lat"], c["lon"], german)]
+        # At a German station it's Germany: German stations have stops from many feeds abroad.
+        votes = [(count, code) for code, count in c["countries"].items() if code]
+        land = "de" if germany.near(c["lat"], c["lon"]) else max(votes)[1] if votes else None
+        old = before.near(c["lat"], c["lon"])
+        names = c["names"]
+        if land in ("de", None):
+            # Not abroad, where a station may share a German one's name (Herne in Belgium, Soest in the
+            # Netherlands).
+            names = [n for n in names if not misplaced(n, c["lat"], c["lon"], german)]
         if not names:
             continue
-        old = {e[0] for e in before.near(c["lat"], c["lon"])}
-        name = min(names, key=lambda n: (n not in known, n not in old, bool(CLUMSY.search(n)), names.index(n)))
+        # A new German "station" served by buses at every stop is a replacement bus's stop that a feed
+        # files as a train's ("Ludw. Schloss Favorite").
+        if land == "de" and c["bus"] and not old and not any(n in known for n in names):
+            continue
+        # All stops of a station are equally busy, so which feed's name comes first is chance: take DB's
+        # name (or the national railway's abroad), else last time's, else one that isn't clumsy.
+        old_names = {e[0] for e in old}
+        name = min(names, key=lambda n: (n not in known, n not in old_names, bool(CLUMSY.search(n)), names.index(n)))
         importance = c["importance"]
         # S-Bahn trains run so often that an S-Bahn-only halt looks as busy as a town's station:
         # count a quarter (TransitousProvider.suburbanDiscount).
         if "SUBURBAN" in c["modes"] and not (c["modes"] & (TRAIN - {"SUBURBAN"})):
             importance /= 4
-        # At a German station it's Germany: German stations have stops from many feeds abroad.
-        votes = [(count, code) for code, count in c["countries"].items() if code]
-        land = "de" if germany.near(c["lat"], c["lon"]) else max(votes)[1] if votes else None
         entries.append({"name": name, "lat": c["lat"], "lon": c["lon"], "country": land, "importance": importance,
-                        "old": before.near(c["lat"], c["lon"])})
+                        "old": old})
 
     # Keep each country as busy as last time: scale its stations by how much busier the ones in both
     # lists were before, in the middle.
@@ -230,7 +243,7 @@ def hints(found, previous):
     missing = []
     for name, lat, lon, importance in previous:
         name = readable(name)
-        if now.near(lat, lon) or BORDER_POINT.search(name) or INTERNAL.search(name) or misplaced(name, lat, lon, german):
+        if now.near(lat, lon) or BORDER_POINT.search(name) or INTERNAL.search(name):
             continue
         if any(abs(e[1] - lat) < 0.02 and abs(e[2] - lon) < 0.03 for e in names_now.get(name, [])):
             continue
