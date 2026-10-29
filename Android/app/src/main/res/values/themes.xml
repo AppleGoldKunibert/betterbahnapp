@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Only the window before Compose draws; the app's colours are in ui/Theme.kt. -->
+    <style name="Theme.BetterBahn" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#F2F2F7</item>
+    </style>
+</resources>

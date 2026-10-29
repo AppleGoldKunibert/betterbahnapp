@@ -218,6 +218,7 @@ data class Trip(
 data class TripDisplay(val trip: Trip, val line: LineDisplay? = null)
 
 /** The Kit's product groups (`Product`), in the order the filter chips show them. */
+@Serializable(with = ProductSerializer::class)
 enum class Product(val id: String, val displayName: String, val isTrain: Boolean, val isLongDistance: Boolean) {
     HighSpeed("highSpeed", "Hochgeschwindigkeit", true, true),
     LongDistance("longDistance", "IC / EC", true, true),
@@ -241,4 +242,11 @@ enum class Product(val id: String, val displayName: String, val isTrain: Boolean
         /** The board's "Nur Regionalverkehr": RE and RB only. */
         val regional: Set<Product> = setOf(RegionalExpress, Regional)
     }
+}
+
+/** Products are stored by the Kit's raw values; an unknown one reads as [Product.Other], as in the Kit. */
+object ProductSerializer : KSerializer<Product> {
+    override val descriptor = PrimitiveSerialDescriptor("Product", PrimitiveKind.STRING)
+    override fun deserialize(decoder: Decoder): Product = Product.of(decoder.decodeString())
+    override fun serialize(encoder: Encoder, value: Product) = encoder.encodeString(value.id)
 }
