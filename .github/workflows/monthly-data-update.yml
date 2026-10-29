@@ -1,5 +1,7 @@
 # Rebuilds the offline station lists (Ril100.json, StationNames.json, StationHints.json, Platforms.json) once a month
 # and opens a PR into prod on a branch named monthlyupdate-<month>/<year> (e.g. monthlyupdate-08/26).
+# A rebuild never drops what the sources lost that day: make-station-hints.py and keep-previous-data.py put
+# it back from the committed lists and say what they kept in the PR description.
 # Nothing is merged automatically: the PR is meant to be reviewed for odd changes first. Runs only
 # when something changed, and stops without a PR when a list came out empty or much smaller
 # (scripts/check-data-update.py). A PR opened with the default token doesn't start the other
@@ -76,8 +78,11 @@ jobs:
           python3 scripts/make-station-names.py "$data/netex.xml"
           # The collection's big stations (#384), named as in the new StationNames.json.
           python3 scripts/make-big-stations.py "$data/netex.xml"
-          python3 scripts/make-station-hints.py
+          python3 scripts/make-station-hints.py | tee "$RUNNER_TEMP/hints.log"
           python3 scripts/make-platforms.py "$data/netex.xml" "$data/germany.osm.pbf"
+          # Puts back what a source lost this month (a feed missing that day, an OpenStreetMap edit).
+          python3 scripts/keep-previous-data.py | tee "$RUNNER_TEMP/kept.log"
+          grep -E "busyness|kept" "$RUNNER_TEMP/hints.log" >> "$RUNNER_TEMP/kept.log" || true
 
       - name: Check the result
         id: check
@@ -111,8 +116,13 @@ jobs:
             echo
             cat "$RUNNER_TEMP/table.md"
             echo
+            echo "Kept from last month:"
+            echo
+            sed 's/^/- /' "$RUNNER_TEMP/kept.log"
+            echo
             echo "Check the diff for odd changes. CI doesn't start on its own for this PR: push an empty commit."
           } > "$RUNNER_TEMP/body.md"
           gh pr create --base prod --head "$BRANCH" \
             --title "Update offline station data ($(date -u +%m/%Y))" \
+            --label enhancement \
             --body-file "$RUNNER_TEMP/body.md"
