@@ -1008,6 +1008,17 @@ struct AlternativeTrainsSheet: View {
     @State private var pinnedName: String?
     @State private var isPlanning = false
 
+    /// The current train's departure: a differing live time follows the struck-through planned one, colored
+    /// by delay; a live time on schedule turns the planned one green.
+    private var departureText: Text {
+        let time = leg.departure
+        let planned = Text(time.planned.timeString).monospacedDigit()
+        guard let actual = time.actual, let delay = time.delayMinutes else { return planned }
+        guard delay != 0 else { return planned.foregroundStyle(delayColor(0)) }
+        let live = Text(actual.timeString).monospacedDigit().fontWeight(.semibold).foregroundStyle(delayColor(delay))
+        return Text("\(planned.strikethrough()) \(live)")
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -1020,7 +1031,7 @@ struct AlternativeTrainsSheet: View {
                                     Text("\(leg.origin.displayName) → \(leg.destination.displayName)")
                                         .font(.subheadline.weight(.semibold))
                                         .lineLimit(2)
-                                    Text("Aktuell: \(leg.line?.name ?? "Zug") um \(leg.departure.planned.timeString)")
+                                    Text("Aktuell: \(leg.line?.name ?? "Zug") um \(departureText)")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                     if let notBefore {
