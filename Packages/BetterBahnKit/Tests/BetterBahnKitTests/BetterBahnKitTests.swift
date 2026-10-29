@@ -175,6 +175,35 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(entries[1].platform.best == "F")
     }
 
+    /// Real-world Transitous data for Koblenz Hbf (#460): DELFI puts RE2 and RE17 at the bus bay "A" ("Hausbussteig"),
+    /// which showed as "Gleis A" instead of Gleis 1, and ICE 23 at "D" ("Mittelinsel") with DB's live "4" over
+    /// it. A German stop's track without a number is a bay; DB's live track stays, not as a change. Abroad a
+    /// letter can be a track (Paris Gare de Lyon).
+    @Test func trainIgnoresLetterAsPlatformInGermany() throws {
+        func stop(_ id: String, _ track: String, scheduled: String, _ description: String, _ mode: String) -> String {
+            """
+            {"place": {"name": "Koblenz Hauptbahnhof", "stopId": "\(id)", "lat": 50.35, "lon": 7.59,
+                       "departure": "2026-10-29T09:03:00Z", "scheduledDeparture": "2026-10-29T09:03:00Z",
+                       "track": "\(track)", "scheduledTrack": "\(scheduled)", "description": "\(description)"},
+             "mode": "\(mode)", "realTime": true, "tripId": "\(id)\(track)", "displayName": "RE17 (29653)"}
+            """
+        }
+        let json = """
+        {"stopTimes": [
+          \(stop("de-DELFI_de:07111:010001:02:01", "A", scheduled: "A", "Hausbussteig", "REGIONAL_RAIL")),
+          \(stop("de-DELFI_de:07111:010001:03:04", "4", scheduled: "D", "Mittelinsel", "HIGHSPEED_RAIL")),
+          \(stop("de-DELFI_de:07111:010001:03:08", "H", scheduled: "H", "Mittelinsel", "BUS")),
+          \(stop("fr-sncf_StopPoint:OCETGV-87686006", "K", scheduled: "K", "", "HIGHSPEED_RAIL"))
+        ]}
+        """
+        let platforms = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(json.utf8))
+            .stopTimes.compactMap { $0.toEntry(kind: .departures)?.platform }
+
+        #expect(platforms.map(\.planned) == [nil, nil, "H", "K"])
+        #expect(platforms.map(\.best) == [nil, "4", "H", "K"])
+        #expect(platforms.allSatisfy { !$0.hasChanged })
+    }
+
     /// Real-world Transitous data around Köln (#445): VRS's stops carry their own number as the track
     /// ("85" for the RE8 at Köln Hbf, which bahn.de has at Gleis 3), the real platform only in
     /// `description`. Such a number is no platform; DB's live track over it (Siegburg/Bonn) still is,

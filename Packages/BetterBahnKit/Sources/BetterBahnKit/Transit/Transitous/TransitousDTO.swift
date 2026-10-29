@@ -36,12 +36,15 @@ struct MPlace: Decodable {
             .trimmingCharacters(in: .whitespaces)
     }
 
-    /// Whether this place is a bus bay ("Steig F/G | Steig F") rather than a railway platform.
-    /// DELFI's feed puts some trains at a station's bus stop instead of their actual track - reported
-    /// for trains at Hanau Hbf showing "Gleis F" (the bus bay) instead of Gleis 6.
+    /// Whether this place is a bus bay rather than a railway platform. DELFI's feed puts some trains at a
+    /// station's bus stop instead of their actual track: Hanau Hbf's "Steig F/G | Steig F" (ICE 12 showed
+    /// "Gleis F" instead of Gleis 6) and Koblenz Hbf's "A" ("Hausbussteig"; RE2 and RE17 showed "Gleis A"
+    /// instead of Gleis 1, #460), "D" and "H" ("Mittelinsel"). A German track always has a number ("1", "3a"), so at
+    /// a German stop one without any is a bay; abroad letters can be tracks (Paris Gare de Lyon's A to N).
     var isBusBay: Bool {
-        guard let description else { return false }
-        return description.hasPrefix("Steig") && !description.contains("Gleis")
+        if let description, description.hasPrefix("Steig"), !description.contains("Gleis") { return true }
+        guard stopId?.hasPrefix("de-DELFI_de:") == true, let track = Self.trainTrack(scheduledTrack ?? track) else { return false }
+        return !track.contains(where: \.isNumber)
     }
 
     /// The track and platform numbers `description` names: "Bahnsteig Gleis 2+3" -> 2 and 3, "Gleis 7-10 (DB)"
@@ -85,15 +88,15 @@ struct MPlace: Decodable {
     /// The platform as `PlatformInfo`; `actual` only when `realtime` is set. For a train (`isRail`)
     /// a bus bay's letter (`isBusBay`) and a stop's own number (`hasStopNumberAsTrack`) are dropped,
     /// so DB's own Timetables schedule can fill in the real track instead (see
-    /// `TimetablesClient.fillMissingPlatforms`) rather than showing a wrong one. A live track other
-    /// than that number stays: DB's live data puts the real one there (Siegburg/Bonn "80" -> "3",
-    /// Minden "93" -> "11"), not as a platform change.
+    /// `TimetablesClient.fillMissingPlatforms`) rather than showing a wrong one. A numbered live track
+    /// other than it stays: DB's live data puts the real one there (Siegburg/Bonn "80" -> "3", Minden
+    /// "93" -> "11", Koblenz Hbf "D" -> "4"), not as a platform change.
     func platform(isRail: Bool, realtime: Bool = true) -> PlatformInfo {
-        guard !(isRail && isBusBay) else { return PlatformInfo(planned: nil, actual: nil) }
         let scheduled = isRail ? Self.trainTrack(scheduledTrack) : scheduledTrack
         let live = isRail ? Self.trainTrack(track) : track
-        if isRail && hasStopNumberAsTrack {
-            return PlatformInfo(planned: nil, actual: realtime && live != scheduled ? live : nil)
+        if isRail && (isBusBay || hasStopNumberAsTrack) {
+            let real = live.flatMap { $0 != scheduled && $0.contains(where: \.isNumber) ? $0 : nil }
+            return PlatformInfo(planned: nil, actual: realtime ? real : nil)
         }
         return PlatformInfo(planned: scheduled ?? descriptionTrack,
                             actual: realtime ? (live ?? descriptionTrack) : nil)
