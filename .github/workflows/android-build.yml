@@ -51,7 +51,9 @@ jobs:
           # `yes` dies of a broken pipe once sdkmanager stops reading; that's no error.
           { yes || true; } | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSION" > /dev/null
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION"
-          "$HOME/.swiftpm/swift-sdks/swift-$SWIFT_VERSION-RELEASE_android.artifactbundle/swift-android/scripts/setup-android-sdk.sh"
+          # SwiftPM keeps SDKs in ~/.swiftpm or ~/.config/swiftpm, depending on what exists.
+          setup=$(find "$HOME/.swiftpm" "$HOME/.config/swiftpm" -name setup-android-sdk.sh -path "*swift-$SWIFT_VERSION-RELEASE_android*" 2>/dev/null | head -1)
+          "$setup"
           echo "$HOME/swift/usr/bin" >> "$GITHUB_PATH"
           echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> "$GITHUB_ENV"
 
