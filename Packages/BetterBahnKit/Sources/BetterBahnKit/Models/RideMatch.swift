@@ -93,6 +93,23 @@ public enum RideMatch {
         }
     }
 
+    /// The formation remembered for `leg` in `remembered` (saved journeys' legs with the formations
+    /// kept for them): the one under its own `formationKey`, else one kept for the same train running
+    /// at the same time. A Träwelling check-in replaces the saved leg of its ride (`uncovered`) and
+    /// may start or end a stop away from it, which changes its key.
+    public static func rememberedFormation(
+        for leg: Leg, in remembered: [(legs: [Leg], formations: [String: TrainFormation])]
+    ) -> TrainFormation? {
+        let key = leg.formationKey
+        if let exact = remembered.lazy.compactMap({ $0.formations[key] }).first { return exact }
+        for entry in remembered {
+            for saved in entry.legs where runSimultaneously(leg, saved) && isSameLine(leg.line, saved.line) {
+                if let formation = entry.formations[saved.formationKey] { return formation }
+            }
+        }
+        return nil
+    }
+
     /// Both rides are under way at the same moment, by plan. No tolerance: a connection leaving
     /// the minute the check-in arrives is a ride of its own.
     static func runSimultaneously(_ a: Leg, _ b: Leg) -> Bool {

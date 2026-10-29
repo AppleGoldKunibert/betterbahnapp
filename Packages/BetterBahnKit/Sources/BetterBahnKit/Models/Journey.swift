@@ -342,14 +342,15 @@ public struct PlatformInfo: Codable, Sendable, Hashable {
     }
 
     /// Blank values count as none: bahn.de reports `"gleis": ""` at stations it has no platform for
-    /// (e.g. in Czechia), which showed as a "Gleis" badge without a number.
+    /// (e.g. in Czechia), which showed as a "Gleis" badge without a number. A "Gl." in front of the
+    /// number is dropped (`cleaned`).
     public init(planned: String?, actual: String?, source: Source? = nil) {
-        self.planned = Self.nonBlank(planned)
-        self.actual = Self.nonBlank(actual)
+        self.planned = Self.cleaned(planned)
+        self.actual = Self.cleaned(actual)
         self.source = source
     }
 
-    /// Also drops the blank platforms journeys saved before kept.
+    /// Also cleans the platforms journeys saved before kept (blank, "Gl. 6").
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.init(planned: try c.decodeIfPresent(String.self, forKey: .planned),
@@ -357,8 +358,12 @@ public struct PlatformInfo: Codable, Sendable, Hashable {
                   source: try? c.decodeIfPresent(Source.self, forKey: .source))
     }
 
-    private static func nonBlank(_ value: String?) -> String? {
+    /// `value` without blanks and without a "Gl." or "Gleis" in front of the number: DELFI's feed around
+    /// Dresden writes "Gl. 6" and "Gl.12" (#451), which showed as "Gl. 6" in the badge and, against
+    /// DB's live "6" over it, as a platform change.
+    static func cleaned(_ value: String?) -> String? {
         guard let value, !value.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        if let match = value.wholeMatch(of: /\s*(?:Gleis|Gl\.?)\s*(\d.*)/) { return String(match.1) }
         return value
     }
 

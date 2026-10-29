@@ -49,6 +49,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         UNUserNotificationCenter.current().delegate = self
         // "Fährst du heute?" with its answers (#397).
         UNUserNotificationCenter.current().setNotificationCategories([CommuteNotifier.notificationCategory])
+        // Silent pushes, needing no permission, tell the saved journeys' CloudKit sync about changes elsewhere (#427).
+        application.registerForRemoteNotifications()
         return true
     }
 
@@ -61,7 +63,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         model?.didRegisterForPush(deviceToken: nil)
     }
 
-    /// A followed user's check-in notification (#266) opens that check-in, a regular trip's question (#397) is
+    /// A followed user's check-in notification (#266) opens that check-in, a like or a fellow traveller (#447) the
+    /// check-in it is about, a regular trip's question (#397) is
     /// answered (iOS waits for the journey to be saved after "Ja"), a push about a regular trip's journey opens it;
     /// the others just open the app.
     ///
@@ -71,24 +74,32 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
                                             withCompletionHandler completionHandler: @escaping () -> Void) {
         let userInfo = response.notification.request.content.userInfo
         let statusID = FollowedCheckinNotifier.statusID(in: userInfo)
+        let ownStatusID = FollowedCheckinNotifier.ownStatusID(in: userInfo)
+        let companionStatusID = FollowedCheckinNotifier.companionStatusID(in: userInfo)
         let question = CommuteNotifier.question(in: userInfo)
         let retry = CommuteNotifier.isRetry(userInfo)
         let journeyID = CommuteNotifier.journeyID(in: userInfo)
         let action = response.actionIdentifier
         let done = MainThreadCompletion(completionHandler)
         Task { @MainActor in
-            await self.handleNotification(action: action, statusID: statusID, question: question, retry: retry, journeyID: journeyID)
+            await self.handleNotification(action: action, statusID: statusID, ownStatusID: ownStatusID, companionStatusID: companionStatusID,
+                                          question: question, retry: retry, journeyID: journeyID)
             done.call()
         }
     }
 
-    private func handleNotification(action: String, statusID: Int?, question: CommuteQuestion?, retry: Bool, journeyID: String?) async {
+    private func handleNotification(action: String, statusID: Int?, ownStatusID: Int?, companionStatusID: Int?,
+                                    question: CommuteQuestion?, retry: Bool, journeyID: String?) async {
         if let question {
             await model?.answerCommuteQuestion(question, action: action, retry: retry)
         } else if let journeyID {
             model?.openCommuteJourney(id: journeyID)
         } else if let statusID {
             await model?.openFollowedCheckin(id: statusID)
+        } else if let ownStatusID {
+            await model?.openOwnCheckin(id: ownStatusID)
+        } else if let companionStatusID {
+            await model?.openCompanionCheckin(id: companionStatusID)
         }
     }
 
@@ -154,6 +165,7 @@ struct RootView: View {
                 SettingsView()
             }
         }
+        .adaptiveTabStyle()
         .tint(.brand)
         .overlay {
             if model.showsTrainSearch {
@@ -172,7 +184,10 @@ struct RootView: View {
                 Task { await model.takeBackLiveActivity() }
                 model.syncLiveActivity()
                 model.startRefreshing()
+                // The next Träwelling access token, fetched ahead while the app is open (#452).
+                Task { await model.traewelling.prepareAccessToken() }
                 Task { await model.syncTraewelling() }
+                model.fetchCloudJourneys()
                 Task { await model.syncFollowedCheckinPush() }
                 // Picks up events deleted in the calendar and a switch to full access in iOS Settings.
                 model.scheduleCalendarSync()
@@ -314,6 +329,18 @@ struct RootView: View {
             shareLinkError = error.localizedDescription
         } catch {
             shareLinkError = "Die Reise konnte nicht geladen werden. Prüf deine Internetverbindung und öffne den Link noch einmal."
+        }
+    }
+}
+
+private extension View {
+    /// On the iPad the tabs can also be shown as a sidebar. Not on the Mac: switching back from the sidebar there
+    /// left the tab bar over the sidebar's old place, cut off by the window's edge.
+    @ViewBuilder func adaptiveTabStyle() -> some View {
+        if ProcessInfo.processInfo.isiOSAppOnMac {
+            tabViewStyle(.tabBarOnly)
+        } else {
+            tabViewStyle(.sidebarAdaptable)
         }
     }
 }

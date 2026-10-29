@@ -54,7 +54,9 @@ struct JourneyDetailView: View {
                 ProgressView("Lade Echtzeitdaten …")
                     .containerRelativeFrame([.horizontal, .vertical])
             } else {
-                plan
+                // Exactly as wide as the screen: anything too wide would otherwise let the whole
+                // page be dragged sideways.
+                plan.containerRelativeFrame(.horizontal)
             }
         }
         .closesMenusOnScroll()
@@ -66,6 +68,12 @@ struct JourneyDetailView: View {
         }
         // A seat saved on the way changes where to walk before a transfer.
         .onChange(of: model.savedSeats) { Task { await loadCoachAdvice() } }
+        // A like on one of this journey's check-ins was tapped (#447): show that check-in.
+        .onChange(of: model.checkinToShow, initial: true) { _, id in
+            guard let id, let leg = journey.legs.first(where: { model.checkinStatusIDs[$0.id] == id }) else { return }
+            model.checkinToShow = nil
+            shownCheckin = ShownCheckin(leg: leg, statusId: id)
+        }
         .task {
             if !readOnly, model.savedEntry(for: journey) == nil, let seen = model.liveJourneys.value(for: journey.id) {
                 journey = seen
@@ -193,6 +201,7 @@ struct JourneyDetailView: View {
         }
         .padding(.horizontal)
         .padding(.bottom, 32)
+        .readableWidth()
         .environment(\.bikeMode, model.settings.bike(searchingWithBike: replanSearch?.withBike ?? model.settings.searchWithBike))
     }
 
@@ -450,37 +459,41 @@ struct JourneyDetailView: View {
 
     private var liveActivityButton: some View {
         VStack(spacing: 8) {
-            HStack(spacing: 10) {
+            SaveActionsLayout(spacing: 10) {
                 SaveJourneyButton(journey: journey, search: search, shortLabel: true)
-                if !model.tickets(for: journey).isEmpty {
-                    TicketButton(tickets: model.tickets(for: journey), journey: journey)
-                }
-                JourneyShareButton(journey: journey, title: shareTitle)
-                if !readOnly, let entry = model.savedEntry(for: journey) {
-                    CalendarButton(entry: entry)
-                    RegularTripButton(journey: journey)
-                }
-                if model.settings.editJourneyEnabled {
-                    Button {
-                        showJourneyEditor = true
-                    } label: {
-                        Image(systemName: "pencil")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(width: 40, height: 40)
+                HStack(spacing: 10) {
+                    if !model.tickets(for: journey).isEmpty {
+                        TicketButton(tickets: model.tickets(for: journey), journey: journey)
                     }
-                    .buttonStyle(.plain)
-                    .glassEffect(.regular, in: .circle)
-                    .tint(.brand)
-                    .accessibilityLabel("Reise bearbeiten")
+                    JourneyShareButton(journey: journey, title: shareTitle)
+                    if !readOnly, let entry = model.savedEntry(for: journey) {
+                        CalendarButton(entry: entry)
+                        RegularTripButton(journey: journey)
+                    }
+                    if model.settings.editJourneyEnabled {
+                        Button {
+                            showJourneyEditor = true
+                        } label: {
+                            Image(systemName: "pencil")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(width: 40, height: 40)
+                        }
+                        .buttonStyle(.plain)
+                        .glassEffect(.regular, in: .circle)
+                        .tint(.brand)
+                        .accessibilityLabel("Reise bearbeiten")
+                    }
                 }
             }
             if model.isSaved(journey), model.settings.liveActivitiesEnabled {
-                Label(model.liveActivities.isActive(journey)
-                      ? "Läuft als Live-Aktivität"
-                      : "Startet 30 Min. vor Abfahrt als Live-Aktivität",
-                      systemImage: "bolt.badge.clock.fill")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if LiveActivityManager.isSupported {
+                    Label(model.liveActivities.isActive(journey)
+                          ? "Läuft als Live-Aktivität"
+                          : "Startet 30 Min. vor Abfahrt als Live-Aktivität",
+                          systemImage: "bolt.badge.clock.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 if let entry = model.savedEntry(for: journey),
                    model.isLiveActivityEligible(journey) || model.dismissedLiveActivityJourneyIDs.contains(entry.id) {
                     Toggle(isOn: Binding(
@@ -488,7 +501,7 @@ struct JourneyDetailView: View {
                             && (model.manualLiveActivityJourneyID == entry.id || model.liveActivities.isActive(journey)) },
                         set: { model.setLiveActivity($0, for: entry.id) }
                     )) {
-                        Label("Als Widget und Live-Aktivität zeigen", systemImage: "arrow.left.arrow.right.circle.fill")
+                        Label(LiveActivityManager.isSupported ? "Als Widget und Live-Aktivität zeigen" : "Als Widget zeigen", systemImage: "arrow.left.arrow.right.circle.fill")
                             .font(.caption.weight(.semibold))
                     }
                     .tint(.brand)
@@ -504,6 +517,50 @@ struct JourneyDetailView: View {
                 }
                 .tint(.brand)
             }
+        }
+    }
+}
+
+/// The save button with the round actions beside it while its label fits in full; otherwise (a saved
+/// journey with a ticket on a smaller iPhone, large text) the actions go below it instead of pushing
+/// the row wider than the screen. A layout rather than `ViewThatFits`, so the buttons and their
+/// sheets and alerts stay the same views when the row wraps.
+private struct SaveActionsLayout: Layout {
+    var spacing: CGFloat
+    var lineSpacing: CGFloat = 8
+
+    private func sizes(_ proposal: ProposedViewSize, _ subviews: Subviews) -> (save: CGSize, actions: CGSize, beside: Bool) {
+        let actions = subviews[1].sizeThatFits(.unspecified)
+        guard let width = proposal.width else { return (subviews[0].sizeThatFits(.unspecified), actions, true) }
+        let idealSave = subviews[0].sizeThatFits(.unspecified)
+        if idealSave.width + spacing + actions.width <= width {
+            let save = subviews[0].sizeThatFits(ProposedViewSize(width: width - spacing - actions.width, height: nil))
+            return (save, actions, true)
+        }
+        return (subviews[0].sizeThatFits(ProposedViewSize(width: width, height: nil)), actions, false)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard subviews.count == 2 else { return subviews.first?.sizeThatFits(proposal) ?? .zero }
+        let (save, actions, beside) = sizes(proposal, subviews)
+        return beside
+            ? CGSize(width: save.width + spacing + actions.width, height: max(save.height, actions.height))
+            : CGSize(width: max(save.width, actions.width), height: save.height + lineSpacing + actions.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 2 else {
+            subviews.first?.place(at: bounds.origin, proposal: proposal)
+            return
+        }
+        let (save, actions, beside) = sizes(ProposedViewSize(width: bounds.width, height: nil), subviews)
+        if beside {
+            subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading, proposal: ProposedViewSize(save))
+            subviews[1].place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .trailing, proposal: ProposedViewSize(actions))
+        } else {
+            subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.minY), proposal: ProposedViewSize(save))
+            subviews[1].place(at: CGPoint(x: bounds.midX, y: bounds.minY + save.height + lineSpacing), anchor: .top,
+                              proposal: ProposedViewSize(actions))
         }
     }
 }
@@ -858,6 +915,7 @@ struct LegCard: View {
         .sheet(isPresented: $showFullTrip) {
             LegTripSheet(leg: leg)
         }
+        .onAppear { statistics.showCached(line: leg.line, stops: statisticsStops, date: leg.departure.planned) }
         .task(id: leg.id) {
             await statistics.load(line: leg.line, stops: statisticsStops, date: leg.departure.planned, bahnDe: model.provider.bahnDe)
         }
@@ -944,6 +1002,11 @@ struct AlternativeTrainsSheet: View {
     @State private var error: Error?
     /// A picked train that misses the next planned one, waiting for the user's choice.
     @State private var pending: LegReplacement?
+    @State private var showTrainSheet = false
+    /// Routes riding the train the user named under "Zug vorgeben", fastest first.
+    @State private var pinnedRoutes: [Journey] = []
+    @State private var pinnedName: String?
+    @State private var isPlanning = false
 
     var body: some View {
         NavigationStack {
@@ -976,8 +1039,23 @@ struct AlternativeTrainsSheet: View {
                         }
                     }
 
+                    trainButton
+
                     if let error {
                         ErrorBanner(error: error)
+                    }
+
+                    if isPlanning {
+                        ProgressView("Plane mit diesem Zug …").frame(maxWidth: .infinity).padding(.vertical, 8)
+                    } else if let pinnedName, !pinnedRoutes.isEmpty {
+                        SectionHeader(title: "Mit \(pinnedName)", systemImage: "pin.fill")
+                            .padding(.top, 6)
+                        ForEach(pinnedRoutes) { route in
+                            optionButton(journey: route, legs: route.legs, id: "pinned|" + route.id,
+                                         note: route.transitLegs.count > 1 ? "Mit Umstieg" : "Direkt",
+                                         symbolName: route.transitLegs.count > 1 ? "arrow.triangle.swap" : "arrow.right",
+                                         next: nextLeg)
+                        }
                     }
 
                     if !options.isEmpty {
@@ -988,24 +1066,8 @@ struct AlternativeTrainsSheet: View {
 
                     // One list by arrival; a note on each says how it gets there.
                     ForEach(options) { option in
-                        Button {
-                            apply(option.legs, id: option.id)
-                        } label: {
-                            // Direct trains too as a connection card, so all options look alike.
-                            let next = option.isReroute ? rerouteNextLeg : nextLeg
-                            VStack(alignment: .leading, spacing: 6) {
-                                JourneyCard(journey: option.journey)
-                                    .overlay(alignment: .topTrailing) {
-                                        if applyingID == option.id { ProgressView().padding(14) }
-                                    }
-                                RouteNote(text: option.note, systemImage: option.symbolName).padding(.horizontal, 14)
-                                if let next, let last = option.legs.last, !last.catches(next) {
-                                    MissedConnectionHint(next: next).padding(.horizontal, 14)
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(applyingID != nil)
+                        optionButton(journey: option.journey, legs: option.legs, id: option.id, note: option.note,
+                                     symbolName: option.symbolName, next: option.isReroute ? rerouteNextLeg : nextLeg)
                     }
                 }
                 .padding()
@@ -1014,7 +1076,8 @@ struct AlternativeTrainsSheet: View {
             .overlay {
                 if isLoading {
                     ProgressView("Suche Züge …")
-                } else if alternatives.isEmpty, connections.isEmpty, reroutes.isEmpty, error == nil {
+                } else if alternatives.isEmpty, connections.isEmpty, reroutes.isEmpty, pinnedRoutes.isEmpty,
+                          !isPlanning, error == nil {
                     ContentUnavailableView("Keine anderen Züge", systemImage: "tram.fill",
                                            description: Text("Gerade fährt kein anderer Zug von \(leg.origin.displayName) nach \(leg.destination.displayName)."))
                 }
@@ -1028,6 +1091,12 @@ struct AlternativeTrainsSheet: View {
             }
             .task(id: onlyValidTicket) { await load() }
             .onAppear { onlyValidTicket = model.settings.ticketFilterByDefault }
+            .sheet(isPresented: $showTrainSheet) {
+                TrainNumberSheet(search: trainSearch, suggestions: trainSuggestions, defaultBoarding: leg.origin,
+                                 date: trainSearch.date, allowsEarlier: notBefore == nil) { requirement in
+                    Task { await plan(requirement) }
+                }
+            }
             .alert("Anschluss nicht erreichbar", isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }),
                    presenting: pending) { replacement in
                 Button("Alternativen zeigen") { onApply(replacement, true) }
@@ -1044,6 +1113,108 @@ struct AlternativeTrainsSheet: View {
                         schon um \(missed.leg.departure.best.timeString). Andere Züge dafür anzeigen oder den Plan so lassen?
                         """)
                 }
+            }
+        }
+    }
+
+    /// Names one train for this stretch, like "Zug vorgeben" in the connection search.
+    private var trainButton: some View {
+        HStack(spacing: 10) {
+            Button {
+                showTrainSheet = true
+            } label: {
+                Label(pinnedName == nil ? "Zug vorgeben" : "Anderen Zug vorgeben", systemImage: "number")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.glass)
+            .controlSize(.large)
+            .tint(.brand)
+
+            if pinnedName != nil {
+                Button {
+                    withAnimation(.snappy) {
+                        pinnedName = nil
+                        pinnedRoutes = []
+                    }
+                } label: {
+                    Label("Zurücksetzen", systemImage: "xmark")
+                        .font(.subheadline.weight(.semibold))
+                        .labelStyle(.iconOnly)
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
+                .controlSize(.large)
+                .accessibilityLabel("Zugvorgabe entfernen")
+            }
+        }
+        .disabled(applyingID != nil || isPlanning)
+    }
+
+    /// One entry of the list, direct trains too as a connection card, so all options look alike.
+    private func optionButton(journey: Journey, legs: [Leg], id: String, note: String, symbolName: String,
+                              next: Leg?) -> some View {
+        Button {
+            apply(legs, id: id)
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                JourneyCard(journey: journey)
+                    .overlay(alignment: .topTrailing) {
+                        if applyingID == id { ProgressView().padding(14) }
+                    }
+                RouteNote(text: note, systemImage: symbolName).padding(.horizontal, 14)
+                if let next, let last = legs.last, !last.catches(next) {
+                    MissedConnectionHint(next: next).padding(.horizontal, 14)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(applyingID != nil)
+    }
+
+    /// The stretch of `leg`, from when the list starts.
+    private var trainSearch: ConnectionSearch {
+        ConnectionSearch(from: leg.origin, to: leg.destination, date: notBefore ?? leg.departure.planned,
+                         isArrival: false, onlyValidTicket: onlyValidTicket)
+    }
+
+    private var trainSuggestions: [String] {
+        var names: [String] = []
+        for option in options.flatMap(\.legs) where option.line?.product.isTrain == true {
+            if let name = option.line?.name, !names.contains(name) { names.append(name) }
+        }
+        return Array(names.prefix(12))
+    }
+
+    /// Plans the stretch with the named train; the routes show above the other trains.
+    private func plan(_ requirement: TrainRequirement) async {
+        isPlanning = true
+        defer { isPlanning = false }
+        do {
+            let search = trainSearch
+            let result = try await model.trainRoutePlanner.plan(
+                [requirement], from: search.from, to: search.to, date: search.date,
+                pickedEarlier: notBefore == nil ? TrainCandidateFinder.earlierWindow : 0)
+            var routes = await model.journeyReplanner.withRealtime(result.journeys).filter { route in
+                notBefore.map { (route.departure?.best ?? .distantPast) >= $0 } ?? true
+            }
+            if onlyValidTicket {
+                // Don't leave the user with nothing if the named train itself isn't valid with the ticket.
+                let valid = routes.filter(model.ticketFilter.isValid)
+                if !valid.isEmpty { routes = valid }
+            }
+            withAnimation(.snappy) {
+                pinnedName = result.resolvedNames[requirement.id] ?? requirement.trainName.uppercased()
+                pinnedRoutes = routes
+                error = routes.isEmpty ? TransitError.invalidInput("Mit diesem Zug gibt es keine passende Verbindung.") : nil
+            }
+        } catch is CancellationError {
+        } catch {
+            withAnimation(.snappy) {
+                pinnedName = nil
+                pinnedRoutes = []
+                self.error = error
             }
         }
     }

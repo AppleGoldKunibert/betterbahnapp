@@ -452,14 +452,17 @@ struct TrainSeriesTag: View {
         }
         .task(id: "\(line?.name ?? "")|\(Int(date.timeIntervalSince1970 / 60))|\(request?.station.id ?? "")") {
             family = nil
-            if let request, let live = try? await model.formation(for: request)?.modelSummary {
-                family = live
+            if let request, let live = try? await model.formation(for: request), let summary = live.modelSummary {
+                family = summary
+                if let leg { model.rememberFormation(live, for: leg) }
             } else if let leg, let remembered = model.rememberedFormation(for: leg)?.modelSummary {
                 // The trainsets that actually ran (with their Tz) beat the plan, which can't tell a
                 // redesigned ICE 3neo apart.
                 family = remembered
-            } else if let planned = await model.trainType(for: line, on: date)?.summary {
-                family = planned
+            } else if let planned = await model.trainType(for: line, on: date), let summary = planned.summary {
+                family = summary
+                // Kept for the collection's series until a Tz is seen for the ride.
+                if let leg { model.rememberFormation(planned.formation, for: leg) }
             } else if request == nil, let tripId, let source,
                       let trip = try? await model.provider.trip(id: tripId, source: source),
                       let later = BahnDeClient.formationRequest(for: trip) {
@@ -991,6 +994,11 @@ extension View {
     /// Keeps the last content clear of the floating tab bar.
     func tabBarSafePadding() -> some View {
         safeAreaPadding(.bottom, 24)
+    }
+
+    /// Keeps a page's cards at a readable width, centred, on the iPad and the Mac; on the iPhone it changes nothing.
+    func readableWidth() -> some View {
+        frame(maxWidth: 720).frame(maxWidth: .infinity)
     }
 }
 

@@ -15,12 +15,16 @@ public struct TransitousProvider: TransitProvider {
     let czechTimetableCache = ExpiringCache<[Stopover]?>()
     /// `twinStops(for:)` answers per leg (see `TwinTrainStops.swift`).
     let twinStopsCache = ExpiringCache<[Stopover]?>()
-    /// `continuationID(of:)` answers per trip: the trip ID that goes on, "" for none (see `TripContinuation.swift`).
-    let continuationCache = ExpiringCache<String>()
+    /// `borderContinuation(of:…)` answers per trip: the trip that goes on at the border and where it goes (see `TripContinuation.swift`).
+    let continuationCache = ExpiringCache<BorderContinuation>()
 
-    public init(baseURL: URL = TransitousProvider.defaultBaseURL, http: HTTPClient = HTTPClient()) {
+    /// `extraQueryDeadline`: how long the extra geocoder queries may take; tests with mocked answers that
+    /// expect every hit pass a generous one, so a busy test runner can't drop a hit.
+    public init(baseURL: URL = TransitousProvider.defaultBaseURL, http: HTTPClient = HTTPClient(),
+                extraQueryDeadline: Duration = TransitousProvider.defaultExtraQueryDeadline) {
         self.baseURL = baseURL
         self.http = http
+        self.extraQueryDeadline = extraQueryDeadline
     }
 
     func url(_ path: String, _ items: [URLQueryItem]) -> URL {
@@ -52,7 +56,7 @@ public struct TransitousProvider: TransitProvider {
                 // A typed code has its own lookup above, which the plain search for the letters ("xszh"
                 // finds nothing) mustn't hold up: `CombinedProvider` gives up on the whole search after
                 // 2.5 s and would take the station with it.
-                matches = try await CombinedProvider.withDeadline(Self.extraQueryDeadline) {
+                matches = try await CombinedProvider.withDeadline(extraQueryDeadline) {
                     try await geocode(search.text, addingMainStation: true, near: location, modes: modes)
                 }
             }
@@ -94,7 +98,7 @@ public struct TransitousProvider: TransitProvider {
         let matches = await withTaskGroup(of: [MGeocodeMatch].self) { group in
             for text in Ril100.searchTexts(for: ril.name) {
                 group.addTask {
-                    (try? await CombinedProvider.withDeadline(Self.extraQueryDeadline) { try await geocodeRequest(text) }) ?? []
+                    (try? await CombinedProvider.withDeadline(extraQueryDeadline) { try await geocodeRequest(text) }) ?? []
                 }
             }
             return await group.reduce(into: []) { $0 += $1 }
@@ -1044,7 +1048,7 @@ public struct TransitousProvider: TransitProvider {
                     }
                     // Only an extra: if it fails or is slow, the search still works without it. Waiting
                     // for it longer would run into `CombinedProvider`'s deadline and lose every hit.
-                    let found = (try? await CombinedProvider.withDeadline(Self.extraQueryDeadline) {
+                    let found = (try? await CombinedProvider.withDeadline(extraQueryDeadline) {
                         try await geocodeRequest(text, modes: modes)
                     }) ?? []
                     // The main station only of the place typed: "nord Hbf" also finds "Hamburg Hbf Nord".
@@ -1115,7 +1119,8 @@ public struct TransitousProvider: TransitProvider {
 
     /// How long the extra geocoder queries (main station, nearby town and stations, …) may take,
     /// well within `CombinedProvider`'s 2.5 s for the whole station search.
-    static let extraQueryDeadline: Duration = .milliseconds(1800)
+    public static let defaultExtraQueryDeadline: Duration = .milliseconds(1800)
+    let extraQueryDeadline: Duration
 
     /// `modes`: only stops where any of these stop.
     private func geocodeRequest(_ text: String, modes: Set<String> = []) async throws -> [MGeocodeMatch] {
@@ -1203,7 +1208,7 @@ public struct TransitousProvider: TransitProvider {
               !Self.namedStations.values.contains(where: { $0.id == station.id }) else { return station }
         let busier = try? await stopCache.value(for: station.id, maxAge: 24 * 3600) {
             [station] in
-            let matches = try await CombinedProvider.withDeadline(Self.extraQueryDeadline) {
+            let matches = try await CombinedProvider.withDeadline(extraQueryDeadline) {
                 try await geocode(Station.displayName(for: station.name))
             }
             return Self.busierStop(for: station, among: matches)?.toStation()
@@ -1246,9 +1251,18 @@ public struct TransitousProvider: TransitProvider {
             if !modes.isEmpty { items.append(.init(name: "transitModes", value: modes.sorted().joined(separator: ","))) }
         }
         let response = try await http.get(url("v5/plan", items), as: MPlanResponse.self, headers: ["User-Agent": HTTPClient.identifyingUserAgent])
+        // A train DB's feed ends at the border (EC 47 "Rzepin") goes where the trip carrying on there goes.
+        let beyondBorder = await directionsBeyondBorder(of: response.itineraries.flatMap(\.legs))
         return JourneyPage(
             journeys: response.itineraries
-                .map { Journey(legs: Self.mergeThroughTrainLegs($0.legs.map { $0.toLeg() }), source: .transitous) }
+                .map { itinerary in
+                    let legs = itinerary.legs.map { leg in
+                        var converted = leg.toLeg()
+                        if let id = leg.tripId, let direction = beyondBorder[id] { converted.direction = direction }
+                        return converted
+                    }
+                    return Journey(legs: Self.mergeThroughTrainLegs(legs), source: .transitous)
+                }
                 .filter(query.allows),
             earlierCursor: response.previousPageCursor,
             laterCursor: response.nextPageCursor,
@@ -1478,13 +1492,18 @@ public struct TransitousProvider: TransitProvider {
         let candidates = entries.enumerated().filter { $0.element.line.product == .highSpeed || $0.element.line.product == .longDistance }
         guard !candidates.isEmpty else { return entries }
         var result = entries
-        await withTaskGroup(of: (Int, Trip?).self) { group in
+        await withTaskGroup(of: (Int, Trip?, String?).self) { group in
             for (index, entry) in candidates {
-                group.addTask { (index, try? await self.trip(id: entry.tripId)) }
+                group.addTask {
+                    let trip = try? await self.trip(id: entry.tripId)
+                    // A trip DB's feed ends at the border (EC 47 "Rzepin") goes where the one carrying on goes.
+                    guard kind == .departures, let trip else { return (index, trip, nil) }
+                    return (index, trip, await self.directionBeyondBorder(of: trip))
+                }
             }
-            for await (index, trip) in group {
+            for await (index, trip, beyondBorder) in group {
                 guard let trip else { continue }
-                if kind == .departures, let direction = trip.direction, !direction.isEmpty {
+                if kind == .departures, let direction = beyondBorder ?? trip.direction, !direction.isEmpty {
                     result[index].otherEnd = direction
                 } else if kind == .arrivals, let origin = trip.origin {
                     result[index].otherEnd = origin.displayName
@@ -1549,7 +1568,8 @@ public struct TransitousProvider: TransitProvider {
         let longDistance: Set<Product> = [.highSpeed, .longDistance]
         guard longDistance.contains(a.lineInfo.toLine().product), longDistance.contains(b.lineInfo.toLine().product)
         else { return false }
-        if let trackA = a.place.scheduledTrack, let trackB = b.place.scheduledTrack {
+        // Cleaned: one feed writes "Gl. 5" where another has "5" (Dresden, #451).
+        if let trackA = MPlace.trainTrack(a.place.scheduledTrack), let trackB = MPlace.trainTrack(b.place.scheduledTrack) {
             return trackA == trackB
         }
         return true
@@ -1725,7 +1745,8 @@ public struct TransitousProvider: TransitProvider {
                   candidate.place.scheduledArrival == arrival,
                   candidate.cancelled != true, candidate.tripCancelled != true,
                   !name.isEmpty, seen.insert(name).inserted else { return false }
-            if let ownTrack = own.place.scheduledTrack, let track = candidate.place.scheduledTrack, ownTrack != track { return false }
+            if let ownTrack = MPlace.trainTrack(own.place.scheduledTrack), let track = MPlace.trainTrack(candidate.place.scheduledTrack),
+               ownTrack != track { return false }
             return true
         }
     }
