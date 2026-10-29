@@ -156,7 +156,7 @@ fun TripScreen(
                             Text("Tipp auf zwei Halte, um die Fahrt dazwischen zu speichern.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
-                    itemsIndexed(stops, key = { index, stop -> "$index" + stop.station.id }) { index, stop ->
+                    itemsIndexed(stops, key = { index, stop -> "$index|${stop.station.id}" }) { index, stop ->
                         val from = start
                         val to = end
                         val selected = index == from || index == to

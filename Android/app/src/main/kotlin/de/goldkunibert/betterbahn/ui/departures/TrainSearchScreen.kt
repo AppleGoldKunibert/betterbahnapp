@@ -70,7 +70,7 @@ fun TrainSearchScreen(model: AppModel) {
         searching = true
         error = null
         runCatching { Kit.searchTrains(text, day ?: System.currentTimeMillis()) }
-            .onSuccess { results = it }
+            .onSuccess { found -> results = found.distinctBy { it.journeyId } }
             .onFailure { error = it.message; results = null }
         searching = false
     }

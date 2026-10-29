@@ -10,7 +10,17 @@ import jni
 public func nativeStart(_ env: UnsafeMutablePointer<JNIEnv?>, _ this: jobject, _ resources: jstring) {
     // SwiftPM's resource lookup can't see into the APK; it looks for its bundle in this folder instead (Package.swift
     // makes it read the override in release builds too).
-    setenv("PACKAGE_RESOURCE_BUNDLE_PATH", string(env, resources), 1)
+    let folder = string(env, resources)
+    setenv("PACKAGE_RESOURCE_BUNDLE_PATH", folder, 1)
+    // An app process has no home or temp folder of its own: give Foundation the app's files folder, so the Kit's
+    // caches (UserDefaults, the caches directory) can be written. `folder` is <files>/BetterBahnKit.
+    let files = (folder as NSString).deletingLastPathComponent
+    let cache = files + "/cache"
+    try? FileManager.default.createDirectory(atPath: cache, withIntermediateDirectories: true)
+    setenv("HOME", files, 1)
+    setenv("TMPDIR", cache, 1)
+    setenv("XDG_CACHE_HOME", cache, 1)
+    setenv("XDG_CONFIG_HOME", files + "/config", 1)
 }
 
 /// Runs `method` with `arguments` (a JSON object) and answers `{"ok": result}` or `{"error": "message"}`. JSON

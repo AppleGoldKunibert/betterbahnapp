@@ -28,23 +28,25 @@ import java.util.UUID
 /** The app's tabs, as on iOS. */
 enum class Tab(val title: String) { Connections("Verbindungen"), Departures("Abfahrten"), Trips("Reisen"), Settings("Mehr") }
 
-/** A screen pushed onto a tab. */
-sealed interface Route {
-    class Results(search: ConnectionSearch) : Route {
+/** A screen pushed onto a tab; [key] tells its saved UI state (scroll position …) apart from other screens'. */
+sealed class Route {
+    val key: String = UUID.randomUUID().toString()
+
+    class Results(search: ConnectionSearch) : Route() {
         val state = ResultsState(search)
     }
-    class Detail(journey: JourneyDisplay) : Route {
+    class Detail(journey: JourneyDisplay) : Route() {
         /** The journey as last loaded, so going back to it keeps the live data. */
         var journey by mutableStateOf(journey)
         var completed = false
     }
     /** A train's run: from a board entry, or a journey's leg. */
-    data class TripFromBoard(val entry: BoardEntryDisplay) : Route
-    data class TripFromLeg(val journey: JourneyDisplay, val legIndex: Int) : Route
-    data object PastTrips : Route
-    data object TrainSearch : Route
+    class TripFromBoard(val entry: BoardEntryDisplay) : Route()
+    class TripFromLeg(val journey: JourneyDisplay, val legIndex: Int) : Route()
+    class PastTrips : Route()
+    class TrainSearch : Route()
     /** A train found by its number, already loaded. */
-    data class TripLoaded(val run: TrainRun) : Route
+    class TripLoaded(val run: TrainRun) : Route()
 }
 
 /** The connection search being filled in, kept while switching tabs. */
@@ -77,8 +79,8 @@ class AppModel(application: Application) : AndroidViewModel(application) {
     fun stack(tab: Tab): List<Route> = stacks.getValue(tab)
     fun push(route: Route) = stacks.getValue(tab).add(route)
 
-    /** False when the tab was already at its start, so the system handles Back. */
-    fun pop(): Boolean = stacks.getValue(tab).removeLastOrNull() != null
+    /** The screen taken off, or null when the tab was already at its start. */
+    fun pop(): Route? = stacks.getValue(tab).removeLastOrNull()
 
     fun selectTab(selected: Tab) {
         // Tapping the open tab again goes back to its start, as on iOS.
@@ -95,6 +97,7 @@ class AppModel(application: Application) : AndroidViewModel(application) {
         // Describe saved journeys whenever the list changes (saved here, or refreshed in the background).
         viewModelScope.launch {
             store.savedJourneys.collect { saved ->
+                this@AppModel.saved = saved
                 val missing = saved.filter { savedDisplays[it.id]?.id != it.journeyId }
                 if (missing.isNotEmpty()) {
                     runCatching { Kit.describeJourneys(missing.map { it.journey }) }.onSuccess { displays ->
@@ -110,7 +113,11 @@ class AppModel(application: Application) : AndroidViewModel(application) {
     /** Set once the first journey is saved: time to ask for notifications (the activity asks). */
     var wantsNotificationPermission by mutableStateOf(false)
 
-    fun isSaved(journey: JourneyDisplay) = store.savedEntry(journey.id) != null
+    /** The saved journeys as Compose state, so "Speichern"/"Gespeichert" updates right away. */
+    var saved by mutableStateOf(store.savedJourneys.value)
+        private set
+
+    fun isSaved(journey: JourneyDisplay) = saved.any { it.journeyId == journey.id }
 
     fun toggleSaved(journey: JourneyDisplay) {
         val existing = store.savedEntry(journey.id)
@@ -136,8 +143,11 @@ class AppModel(application: Application) : AndroidViewModel(application) {
         if (refreshingSaved) return
         refreshingSaved = true
         viewModelScope.launch {
-            SavedRefresh.run(getApplication()) { id, fresh -> savedDisplays[id] = fresh }
-            refreshingSaved = false
+            try {
+                SavedRefresh.run(getApplication()) { id, fresh -> savedDisplays[id] = fresh }
+            } finally {
+                refreshingSaved = false
+            }
         }
     }
 

@@ -26,6 +26,8 @@ import de.goldkunibert.betterbahn.widget.BoardWidget
 import de.goldkunibert.betterbahn.widget.JourneyWidget
 import de.goldkunibert.betterbahn.widget.WidgetStations
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Fresh live data for saved journeys departing within 24 hours, and notifications for what's new: broken or
@@ -34,9 +36,11 @@ import java.util.concurrent.TimeUnit
  */
 object SavedRefresh {
     private const val HORIZON = 24 * 3600_000L
+    /** The app and the background worker never refresh at the same time (they would notify twice). */
+    private val running = Mutex()
 
     /** Refreshes what is due; [onFresh] gets each journey as the Kit now describes it. */
-    suspend fun run(context: Context, onFresh: (id: String, JourneyDisplay) -> Unit = { _, _ -> }) {
+    suspend fun run(context: Context, onFresh: (id: String, JourneyDisplay) -> Unit = { _, _ -> }) = running.withLock {
         val store = Store.get(context)
         val now = System.currentTimeMillis()
         val due = store.savedJourneys.value.filter { entry ->

@@ -61,7 +61,7 @@ fun TripsScreen(model: AppModel) {
         TopAppBar(
             title = { Text("Deine Reisen") },
             actions = {
-                if (pastCount > 0) TextButton(onClick = { model.push(Route.PastTrips) }) {
+                if (pastCount > 0) TextButton(onClick = { model.push(Route.PastTrips()) }) {
                     Icon(Icons.Filled.History, null)
                     Text("Vergangene Fahrten", Modifier.padding(start = 6.dp))
                 }

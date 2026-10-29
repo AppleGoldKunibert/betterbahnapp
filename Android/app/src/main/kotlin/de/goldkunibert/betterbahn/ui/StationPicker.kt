@@ -87,9 +87,9 @@ fun StationPicker(store: Store, placeholder: String, onPick: (Station) -> Unit, 
         searching = false
         if (pickFirst) found.firstOrNull()?.let(::pick)
     }
-    LaunchedEffect(Unit) { focus.requestFocus() }
-
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        // Inside the dialog: its content (and the field) only exists from here on.
+        LaunchedEffect(Unit) { focus.requestFocus() }
         Scaffold(topBar = {
             TextField(
                 value = query,

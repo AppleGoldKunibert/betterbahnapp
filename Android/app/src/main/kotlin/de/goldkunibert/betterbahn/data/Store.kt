@@ -79,6 +79,7 @@ class Store private constructor(context: Context) {
 
     fun isFavorite(station: Station) = _favorites.value.any { it.isSamePlace(station) }
 
+    @Synchronized
     fun toggleFavorite(station: Station) {
         val current = _favorites.value
         val updated = if (isFavorite(station)) current.filterNot { it.isSamePlace(station) } else current + station
@@ -86,12 +87,14 @@ class Store private constructor(context: Context) {
     }
 
     /** Moves a picked station to the front of the recent ones (at most 10, `rememberStation`). */
+    @Synchronized
     fun rememberStation(station: Station) {
         val updated = (listOf(station) + _recentStations.value.filterNot { it.isSamePlace(station) }).take(10)
         set("recentStations", Station.serializer(), _recentStations, updated)
     }
 
     /** At most 8, newest first (`remember(from:to:)`). */
+    @Synchronized
     fun rememberSearch(from: Station, to: Station) {
         val search = RecentSearch(from, to)
         val updated = (listOf(search) + _recentSearches.value.filterNot {
@@ -100,9 +103,11 @@ class Store private constructor(context: Context) {
         set("recentSearches", RecentSearch.serializer(), _recentSearches, updated)
     }
 
+    @Synchronized
     fun removeSearch(search: RecentSearch) =
         set("recentSearches", RecentSearch.serializer(), _recentSearches, _recentSearches.value - search)
 
+    @Synchronized
     fun clearHistory() {
         set("recentSearches", RecentSearch.serializer(), _recentSearches, emptyList())
         set("recentStations", Station.serializer(), _recentStations, emptyList())
@@ -111,11 +116,13 @@ class Store private constructor(context: Context) {
     fun savedEntry(journeyId: String): SavedJourney? = _savedJourneys.value.firstOrNull { it.journeyId == journeyId }
 
     /** Saves a journey, the list sorted by departure. */
+    @Synchronized
     fun save(entry: SavedJourney, departure: (SavedJourney) -> Long) {
         val updated = (_savedJourneys.value.filterNot { it.journeyId == entry.journeyId } + entry).sortedBy(departure)
         set("savedJourneys", SavedJourney.serializer(), _savedJourneys, updated)
     }
 
+    @Synchronized
     fun unsave(id: String) =
         set("savedJourneys", SavedJourney.serializer(), _savedJourneys, _savedJourneys.value.filterNot { it.id == id })
 

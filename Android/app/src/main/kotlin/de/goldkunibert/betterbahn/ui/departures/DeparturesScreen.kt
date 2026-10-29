@@ -71,6 +71,7 @@ import de.goldkunibert.betterbahn.ui.TimeStack
 import de.goldkunibert.betterbahn.ui.connections.Message
 import de.goldkunibert.betterbahn.ui.productSummary
 import de.goldkunibert.betterbahn.ui.timeString
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -130,6 +131,8 @@ fun DeparturesScreen(model: AppModel) {
             try {
                 entries = load(at, start())
                 loadedAt = System.currentTimeMillis()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 error = e.message ?: "Die Abfahrten konnten nicht geladen werden."
             }
@@ -146,7 +149,8 @@ fun DeparturesScreen(model: AppModel) {
         if (paging) return
         paging = true
         scope.launch {
-            val from = if (later) current.maxOfOrNull { it.entry.time.planned } ?: start() else start() - WINDOW * 60_000L
+            val from = if (later) current.maxOfOrNull { it.entry.time.planned } ?: start()
+            else (current.minOfOrNull { it.entry.time.planned } ?: start()) - WINDOW * 60_000L
             runCatching { load(at, from) }.onSuccess { page ->
                 val ids = current.map { it.id }.toSet()
                 entries = (current + page.filter { it.id !in ids }).sortedBy { it.entry.time.best }
@@ -169,7 +173,7 @@ fun DeparturesScreen(model: AppModel) {
                     }
                     IconButton(onClick = { filtering = true }) { Icon(Icons.Filled.FilterList, "Verkehrsmittel") }
                 }
-                IconButton(onClick = { model.push(Route.TrainSearch) }) { Icon(Icons.Filled.Train, "Zug suchen") }
+                IconButton(onClick = { model.push(Route.TrainSearch()) }) { Icon(Icons.Filled.Train, "Zug suchen") }
                 IconButton(onClick = { picking = true }) { Icon(Icons.Filled.Search, "Bahnhof suchen") }
             },
         )

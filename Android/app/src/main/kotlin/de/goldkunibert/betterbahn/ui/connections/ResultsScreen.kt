@@ -48,6 +48,7 @@ import de.goldkunibert.betterbahn.kit.Kit
 import de.goldkunibert.betterbahn.kit.Product
 import de.goldkunibert.betterbahn.ui.JourneyCard
 import de.goldkunibert.betterbahn.ui.TimeSelector
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 /** What the results screen shows, kept in its route so going back to it doesn't search again. */
@@ -95,6 +96,8 @@ fun ResultsScreen(model: AppModel, state: ResultsState) {
             earlier = loaded.earlierCursor
             later = loaded.laterCursor
             state.loadedFor = search to reload
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             error = e.message ?: "Die Suche hat nicht geklappt."
         }

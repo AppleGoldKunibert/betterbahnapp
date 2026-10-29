@@ -11,6 +11,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -107,7 +108,8 @@ fun App(model: AppModel) {
     val stack = model.stack(model.tab)
     // Back goes up the open tab's stack, then to the first tab (Android's usual way), then leaves the app.
     BackHandler(enabled = stack.isNotEmpty() || model.tab != Tab.Connections) {
-        if (!model.pop()) model.tab = Tab.Connections
+        val popped = model.pop()
+        if (popped == null) model.tab = Tab.Connections else states.removeState(popped.key)
     }
 
     if (model.importing) {
@@ -149,10 +151,11 @@ fun App(model: AppModel) {
             }
         }
     }) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
+        // The bars' insets are used here; each screen's top bar must not add the status bar again.
+        Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
             val route = stack.lastOrNull()
             // Each screen keeps its scroll position and inputs while another one is on top.
-            states.SaveableStateProvider("${model.tab}/${stack.size}") {
+            states.SaveableStateProvider(route?.key ?: model.tab.name) {
                 when (route) {
                     null -> when (model.tab) {
                         Tab.Connections -> ConnectionsScreen(model)
@@ -176,8 +179,8 @@ fun App(model: AppModel) {
                     is Route.TripLoaded -> TripScreen(model, boardingAt = null, exitAt = null, loaded = route.run.trip) {
                         Kit.trip(route.run.entry.entry.tripId, route.run.entry.entry.source)
                     }
-                    Route.TrainSearch -> TrainSearchScreen(model)
-                    Route.PastTrips -> PastTripsScreen(model)
+                    is Route.TrainSearch -> TrainSearchScreen(model)
+                    is Route.PastTrips -> PastTripsScreen(model)
                 }
             }
         }

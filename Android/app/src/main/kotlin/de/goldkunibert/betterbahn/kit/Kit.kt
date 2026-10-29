@@ -28,26 +28,36 @@ object Kit {
         System.loadLibrary("BetterBahnKit")
     }
 
+    private var started = false
+
     /**
-     * Copies the Kit's JSON data out of the APK (once per app update) and hands its folder to the Kit. SwiftPM looks
+     * Copies the Kit's JSON data out of the APK (once per app update) and hands its folder to the Kit, once per
+     * process: the app, its widgets and the background refresh all call this, maybe at the same time. SwiftPM looks
      * for `<package>_<target>.bundle` inside the folder it's given.
      */
+    @Synchronized
     fun start(context: Context) {
+        if (started) return
         val base = File(context.filesDir, "BetterBahnKit")
         val bundle = File(base, "BetterBahnKitAndroid_BetterBahnKit.bundle")
         val stamp = File(base, ".installed")
         val installed = context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime.toString()
         if (!stamp.exists() || stamp.readText() != installed || !bundle.isDirectory) {
-            base.deleteRecursively()
-            bundle.mkdirs()
+            // Copied next to it first, then swapped in, so the data is never half there.
+            val fresh = File(context.filesDir, "BetterBahnKit.new")
+            fresh.deleteRecursively()
+            val freshBundle = File(fresh, bundle.name).apply { mkdirs() }
             for (name in context.assets.list("BetterBahnKit").orEmpty()) {
                 context.assets.open("BetterBahnKit/$name").use { input ->
-                    File(bundle, name).outputStream().use { input.copyTo(it) }
+                    File(freshBundle, name).outputStream().use { input.copyTo(it) }
                 }
             }
-            stamp.writeText(installed)
+            File(fresh, stamp.name).writeText(installed)
+            base.deleteRecursively()
+            fresh.renameTo(base)
         }
         nativeStart(base.absolutePath)
+        started = true
     }
 
     /** Runs a Kit method off the main thread; its result, or a [KitException]. */
