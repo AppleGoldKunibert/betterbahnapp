@@ -104,7 +104,10 @@ class MainActivity : ComponentActivity() {
 fun App(model: AppModel) {
     val states = rememberSaveableStateHolder()
     val stack = model.stack(model.tab)
-    BackHandler(enabled = stack.isNotEmpty()) { model.pop() }
+    // Back goes up the open tab's stack, then to the first tab (Android's usual way), then leaves the app.
+    BackHandler(enabled = stack.isNotEmpty() || model.tab != Tab.Connections) {
+        if (!model.pop()) model.tab = Tab.Connections
+    }
 
     if (model.importing) {
         AlertDialog(
