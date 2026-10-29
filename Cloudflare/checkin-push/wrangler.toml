@@ -29,6 +29,10 @@ APNS_TOPIC = "de.goldkunibert.BetterBahn"
 APNS_KEY_ID = "9C64LU6XCX"
 TRAEWELLING_CLIENT_ID = "406"
 TRAEWELLING_REDIRECT_URI = "https://betterbahn.betterbahn.workers.dev/oauth/traewelling/callback"
+# "true" once webhooks are on for the OAuth client (traewelling.de → Einstellungen → Anwendungen, client 406) with
+# https://betterbahn-push.betterbahn.workers.dev/traewelling/webhook as its webhook URL. Before that, a login asking
+# for a webhook fails, so the app only asks while this is "true" (`/login-options`).
+TRAEWELLING_WEBHOOKS = "true"
 # Secrets (`npx wrangler secret put …`):
 #   TOKEN_SECRET – same value as in betterbahn2, betterbahn, betterbahn-stats and betterbahn-pass
 #   TOKEN_KEY    – 32 random bytes, base64 (`openssl rand -base64 32`); encrypts the stored Träwelling logins

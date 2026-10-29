@@ -1,4 +1,5 @@
--- Push notifications for new check-ins of the people a Träwelling user follows (#266).
+-- Push notifications for new check-ins of the people a Träwelling user follows (#266) and about the user's own
+-- check-ins (#447: likes, fellow travellers).
 -- One row per device that turned them on.
 CREATE TABLE IF NOT EXISTS subscriptions (
     id TEXT PRIMARY KEY,              -- random, given to the app
@@ -6,12 +7,17 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     device_token TEXT NOT NULL,       -- APNs device token (hex)
     sandbox INTEGER NOT NULL DEFAULT 0, -- 1: development build (APNs sandbox)
     user_id INTEGER NOT NULL,         -- the Träwelling user, so their own check-ins aren't reported
-    tokens TEXT NOT NULL,             -- the Worker's own Träwelling login (read-statuses only), AES-GCM with TOKEN_KEY
+    tokens TEXT NOT NULL,             -- the Worker's own Träwelling login (read-only), AES-GCM with TOKEN_KEY
     known TEXT,                       -- JSON array of the status IDs reported or seen; NULL until the first look
+    kinds TEXT,                       -- JSON array: "followed", "likes", "companions" (#447); NULL: only "followed"
+    notified TEXT,                    -- JSON array of Träwelling's notification IDs reported or seen; NULL until the first look
+    webhook_id INTEGER,               -- Träwelling's webhook for the user's notifications (#447), if the login made one
+    webhook TEXT,                     -- its signing secret, AES-GCM with TOKEN_KEY
     slot INTEGER NOT NULL,            -- minute (0–59) the look is due in, modulo INTERVAL_MINUTES
     created INTEGER NOT NULL          -- unix seconds
 );
 CREATE INDEX IF NOT EXISTS subscriptions_slot ON subscriptions (slot);
+CREATE INDEX IF NOT EXISTS subscriptions_webhook ON subscriptions (webhook_id);
 
 -- Regular trips (#397): the journeys a device's user said yes to for today, looked at in DB's timetable feed.
 -- One row per device; deleted once its journeys have arrived.

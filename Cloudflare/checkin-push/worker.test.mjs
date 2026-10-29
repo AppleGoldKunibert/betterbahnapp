@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { signToken, toBase64 } from "../shared/appattest.mjs";
-import { checkedIn, decryptTokens, handleRequest, notification, processDueSubscriptions, signProviderToken } from "./worker.mjs";
+import { checkedIn, decryptTokens, handleRequest, notification, ownCheckinNotification, parseKinds, processDueSubscriptions, signProviderToken, WEBHOOK_PATH } from "./worker.mjs";
 
 const secret = "test-secret";
 const schema = readFileSync(new URL("./schema.sql", import.meta.url), "utf8");
@@ -84,8 +84,8 @@ async function request(env, path, method, body, upstream, headers) {
     }), env, now, upstream);
 }
 
-async function subscribed(env, upstream = fakeUpstream({ "oauth/token": tokenAnswer() })) {
-    const response = await request(env, "/subscriptions", "POST", { code: "the-code", codeVerifier: verifier, deviceToken, sandbox: false, userId: 1 }, upstream);
+async function subscribed(env, upstream = fakeUpstream({ "oauth/token": tokenAnswer() }), kinds) {
+    const response = await request(env, "/subscriptions", "POST", { code: "the-code", codeVerifier: verifier, deviceToken, sandbox: false, userId: 1, kinds }, upstream);
     assert.equal(response.status, 201);
     return response.json();
 }
@@ -239,6 +239,177 @@ test("names who checked in and the train from where to where", () => {
     assert.equal(notification(status(1)).aps.alert.body, "ICE 1095: München Hbf → Frankfurt(Main)Hbf");
     assert.equal(notification(status(1, { line: "" })).aps.alert.body, "München Hbf → Frankfurt(Main)Hbf");
     assert.equal(notification({ ...status(1), user: null }).aps.alert.title, "Jemand ist eingecheckt");
+});
+
+function liked(id, statusID = 30, liker = { id: 3, username: "anna", name: "Anna" }) {
+    return {
+        id, type: "StatusLiked",
+        data: {
+            like: { id: 1 }, status: { id: statusID }, liker,
+            trip: { origin: { id: 1, name: "Köln Hbf" }, destination: { id: 2, name: "Bonn Hbf" }, lineName: "RE 5" },
+        },
+    };
+}
+
+function joined(id, statusID = 40) {
+    return {
+        id, type: "UserJoinedConnection",
+        data: { status: { id: statusID }, checkin: { linename: "RE 5", origin: "Köln Hbf", destination: "Bonn Hbf" }, user: { id: 4, username: "bob", name: "Bob" } },
+    };
+}
+
+test("keeps the kinds asked for and refuses unknown or none", async () => {
+    assert.deepEqual(parseKinds(["companions", "followed", "likes", "likes"]), ["followed", "likes", "companions"]);
+    assert.equal(parseKinds([]), null);
+    assert.equal(parseKinds(["mentions"]), null);
+    assert.equal(parseKinds("likes"), null);
+
+    const env = await environment();
+    const body = { code: "the-code", codeVerifier: verifier, deviceToken, userId: 1 };
+    const upstream = fakeUpstream({ "oauth/token": tokenAnswer() });
+    assert.equal((await request(env, "/subscriptions", "POST", { ...body, kinds: [] }, upstream)).status, 400);
+    const { id, secret: subscriptionSecret } = await subscribed(env, upstream, ["likes"]);
+    assert.equal(env.DB.rows()[0].kinds, '["likes"]');
+    assert.equal((await request(env, `/subscriptions/${id}`, "PUT", { secret: subscriptionSecret, deviceToken, kinds: ["nope"] })).status, 400);
+    // Without kinds (apps before #447) they stay as they are.
+    assert.equal((await request(env, `/subscriptions/${id}`, "PUT", { secret: subscriptionSecret, deviceToken })).status, 200);
+    assert.equal(env.DB.rows()[0].kinds, '["likes"]');
+});
+
+test("notifies likes and fellow travellers once, only the kinds turned on, and not on the first look", async () => {
+    const env = await environment();
+    await subscribed(env, undefined, ["likes", "companions"]);
+    let items = [liked("n1")];
+    const pushes = [];
+    const upstream = fakeUpstream({
+        "api/v1/notifications": () => ({ body: { data: items } }),
+        "push.apple.com": (url, init) => { pushes.push(init); return { body: {} }; },
+    });
+
+    await processDueSubscriptions(env, now, upstream);
+    assert.equal(pushes.length, 0);
+    assert.ok(!upstream.calls.some(call => call.url.includes("dashboard")));
+    assert.deepEqual(JSON.parse(env.DB.rows()[0].notified), ["n1"]);
+
+    items = [joined("n3"), { id: "n2", type: "UserFollowed", data: {} }, liked("n4", 31), ...items];
+    await processDueSubscriptions(env, now + 60000, upstream);
+    assert.deepEqual(pushes.map(init => JSON.parse(init.body).aps.alert.title), ["Anna gefällt dein Check-in", "Bob fährt mit dir"]);
+    const [like, companion] = pushes.map(init => JSON.parse(init.body));
+    assert.equal(like.ownStatusID, 31);
+    assert.equal(like.aps.alert.body, "RE 5: Köln Hbf → Bonn Hbf");
+    assert.equal(companion.companionStatusID, 40);
+    assert.equal(pushes[1].headers["apns-collapse-id"], "followed-40");
+
+    await processDueSubscriptions(env, now + 120000, upstream);
+    assert.equal(pushes.length, 2);
+    assert.deepEqual(JSON.parse(env.DB.rows()[0].notified), ["n1", "n4", "n2", "n3"]);
+});
+
+test("leaves out the kinds turned off and starts over when one is turned on again", async () => {
+    const env = await environment();
+    const { id, secret: subscriptionSecret } = await subscribed(env, undefined, ["followed", "companions"]);
+    env.DB.db.prepare("UPDATE subscriptions SET known = '[]', notified = '[]'").run();
+    const pushes = [];
+    const upstream = fakeUpstream({
+        "api/v1/dashboard": { body: { data: [] } },
+        "api/v1/notifications": { body: { data: [liked("n1"), joined("n2")] } },
+        "push.apple.com": (url, init) => { pushes.push(JSON.parse(init.body)); return { body: {} }; },
+    });
+    await processDueSubscriptions(env, now, upstream);
+    assert.deepEqual(pushes.map(push => push.aps.alert.title), ["Bob fährt mit dir"]);
+    assert.deepEqual(JSON.parse(env.DB.rows()[0].notified), ["n2", "n1"]);
+
+    // Adding likes keeps what was seen; turning followed off and on again starts it over.
+    await request(env, `/subscriptions/${id}`, "PUT", { secret: subscriptionSecret, deviceToken, kinds: ["likes", "companions"] });
+    assert.deepEqual(JSON.parse(env.DB.rows()[0].notified), ["n2", "n1"]);
+    await request(env, `/subscriptions/${id}`, "PUT", { secret: subscriptionSecret, deviceToken, kinds: ["followed", "likes"] });
+    assert.equal(env.DB.rows()[0].known, null);
+    assert.deepEqual(JSON.parse(env.DB.rows()[0].notified), ["n2", "n1"]);
+    await request(env, `/subscriptions/${id}`, "PUT", { secret: subscriptionSecret, deviceToken, kinds: ["followed"] });
+    await request(env, `/subscriptions/${id}`, "PUT", { secret: subscriptionSecret, deviceToken, kinds: ["followed", "likes"] });
+    assert.equal(env.DB.rows()[0].notified, null);
+});
+
+test("a login without read-notifications still gets followed check-ins", async () => {
+    const env = await environment();
+    await subscribed(env, undefined, ["followed", "likes"]);
+    env.DB.db.prepare("UPDATE subscriptions SET known = '[]', notified = '[]'").run();
+    const pushes = [];
+    await processDueSubscriptions(env, now, fakeUpstream({
+        "api/v1/dashboard": { body: { data: [status(50)] } },
+        "api/v1/notifications": { status: 403, body: { message: "Invalid scope(s) provided." } },
+        "push.apple.com": (url, init) => { pushes.push(JSON.parse(init.body)); return { body: {} }; },
+    }));
+    assert.deepEqual(pushes.map(push => push.followedStatusID), [50]);
+    assert.equal(env.DB.rows().length, 1);
+    assert.deepEqual(JSON.parse(env.DB.rows()[0].notified), []);
+});
+
+test("names who liked or joined, with a fallback for missing names", () => {
+    assert.equal(ownCheckinNotification(liked("n", 1, { username: "anna" }), ["likes"]).payload.aps.alert.title, "@anna gefällt dein Check-in");
+    assert.equal(ownCheckinNotification(liked("n", 1, null), ["likes"]).payload.aps.alert.title, "Jemand gefällt dein Check-in");
+    assert.equal(ownCheckinNotification(liked("n"), ["companions"]), null);
+    assert.equal(ownCheckinNotification({ id: "n", type: "StatusLiked", data: {} }, ["likes"]), null);
+});
+
+async function signed(body, secret) {
+    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    return Buffer.from(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body))).toString("hex");
+}
+
+async function deliver(env, upstream, { webhookID = 77, secret: webhookSecret = "hook-secret", item = liked("w1"), signature } = {}) {
+    const body = JSON.stringify({ event: "notification", notification: item });
+    return handleRequest(new Request(`https://betterbahn-push.example${WEBHOOK_PATH}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Trwl-Webhook-Id": String(webhookID), Signature: signature ?? await signed(body, webhookSecret) },
+        body,
+    }), env, now, upstream);
+}
+
+test("offers Träwelling's webhook to the login only while it is turned on", async () => {
+    const options = async (extra) => (await handleRequest(new Request("https://betterbahn-push.example/login-options"), await environment(extra), now)).json();
+    assert.deepEqual(await options({}), { authorize: {} });
+    assert.deepEqual(await options({ TRAEWELLING_WEBHOOKS: "true" }), {
+        authorize: { trwl_webhook_url: "https://betterbahn-push.example/traewelling/webhook", trwl_webhook_events: "notification" },
+    });
+});
+
+test("pushes a like from the webhook at once, only with a valid signature, and not again on the next look", async () => {
+    const env = await environment();
+    const signUp = fakeUpstream({ "oauth/token": { body: { ...tokenAnswer().body, webhook: { id: 77, secret: "hook-secret", url: "x" } } } });
+    await subscribed(env, signUp, ["likes"]);
+    const [row] = env.DB.rows();
+    assert.equal(row.webhook_id, 77);
+    assert.ok(!row.webhook.includes("hook-secret"));
+    env.DB.db.prepare("UPDATE subscriptions SET notified = '[]'").run();
+
+    const pushes = [];
+    const upstream = fakeUpstream({
+        "api/v1/notifications": { body: { data: [liked("w1")] } },
+        "push.apple.com": (url, init) => { pushes.push(JSON.parse(init.body)); return { body: {} }; },
+    });
+    assert.equal((await deliver(env, upstream, { signature: "00".repeat(32) })).status, 401);
+    assert.equal((await deliver(env, upstream, { webhookID: 78 })).status, 410);
+    assert.equal((await deliver(env, upstream, { item: joined("w2") })).status, 200);
+    assert.equal(pushes.length, 0);
+
+    assert.equal((await deliver(env, upstream)).status, 200);
+    assert.deepEqual(pushes.map(push => push.ownStatusID), [30]);
+    assert.deepEqual(JSON.parse(env.DB.rows()[0].notified), ["w1"]);
+    await deliver(env, upstream);
+    await processDueSubscriptions(env, now, upstream);
+    assert.equal(pushes.length, 1);
+});
+
+test("ends the webhook with the subscription", async () => {
+    const env = await environment();
+    const signUp = fakeUpstream({ "oauth/token": { body: { ...tokenAnswer().body, webhook: { id: 77, secret: "hook-secret", url: "x" } } } });
+    const { id, secret: subscriptionSecret } = await subscribed(env, signUp, ["likes"]);
+    const upstream = fakeUpstream({ "api/v1/webhooks/77": { body: {} }, "auth/logout": { body: {} } });
+    assert.equal((await request(env, `/subscriptions/${id}`, "DELETE", { secret: subscriptionSecret }, upstream)).status, 204);
+    assert.deepEqual(upstream.calls.map(call => [call.init.method, new URL(call.url).pathname]),
+        [["DELETE", "/api/v1/webhooks/77"], ["POST", "/api/v1/auth/logout"]]);
+    assert.equal((await deliver(env, upstream)).status, 410);
 });
 
 test("signs the APNs provider token with ES256", async () => {

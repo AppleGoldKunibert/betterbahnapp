@@ -66,8 +66,9 @@ public struct TraewellingConfig: Sendable {
         return components
     }
 
-    public func authorizeURL(pkce: PKCE) -> URL {
-        baseURL.appending(path: "oauth/authorize").appending(queryItems: [
+    /// `extra`: Träwelling's own additions to the login (e.g. a webhook, `FollowedCheckinPush.loginParameters`).
+    public func authorizeURL(pkce: PKCE, extra: [URLQueryItem] = []) -> URL {
+        baseURL.appending(path: "oauth/authorize").appending(queryItems: extra + [
             .init(name: "client_id", value: clientID),
             .init(name: "redirect_uri", value: redirectURI),
             .init(name: "response_type", value: "code"),
