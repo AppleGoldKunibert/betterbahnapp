@@ -48,6 +48,7 @@ sealed interface Route {
 data class SearchForm(
     val from: Station? = null,
     val to: Station? = null,
+    val via: List<Station> = emptyList(),
     val date: Long? = null,
     val isArrival: Boolean = false,
     val products: Set<Product> = Product.all,
@@ -56,7 +57,7 @@ data class SearchForm(
     fun search(): ConnectionSearch? {
         val from = from ?: return null
         val to = to ?: return null
-        return ConnectionSearch(from, to, date, isArrival, products, maxTransfers)
+        return ConnectionSearch(from, to, via, date, isArrival && via.isEmpty(), products, maxTransfers)
     }
 }
 

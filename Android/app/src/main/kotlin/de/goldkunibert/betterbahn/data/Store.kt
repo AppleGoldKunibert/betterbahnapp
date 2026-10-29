@@ -11,11 +11,13 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonObject
 
-/** A connection search (`ConnectionSearch` on iOS, without via stations, tickets and bikes so far). */
+/** A connection search (`ConnectionSearch` on iOS, without tickets and bikes so far). */
 @Serializable
 data class ConnectionSearch(
     val from: Station,
     val to: Station,
+    /** Stations to pass through, in order; the search then always goes from the chosen time. */
+    val via: List<Station> = emptyList(),
     /** Null: now. */
     val date: Long? = null,
     val isArrival: Boolean = false,

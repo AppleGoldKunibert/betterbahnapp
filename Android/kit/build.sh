@@ -1,7 +1,7 @@
 #!/bin/bash
 # Builds BetterBahnKit for Android with the Swift SDK for Android (macOS, Linux or WSL2; not native Windows).
 #   Android/kit/build.sh            # debug, arm64 (phones) and x86_64 (emulator on a Windows/Intel PC)
-#   Android/kit/build.sh release    # optimized; can't load the Kit's JSON data yet (docs/android.md)
+#   Android/kit/build.sh release    # optimized
 # Needs a Swift toolchain and the matching Swift SDK for Android (https://www.swift.org/documentation/articles/swift-sdk-for-android-getting-started.html)
 # plus the Android NDK (ANDROID_NDK_HOME). The libraries land in Android/app/src/main/jniLibs/<abi>/.
 set -euo pipefail

@@ -78,7 +78,7 @@ fun ResultsScreen(model: AppModel, state: ResultsState) {
 
     suspend fun page(cursor: String?) = Kit.journeys(
         search.from, search.to, search.date ?: System.currentTimeMillis(), search.isArrival, cursor,
-        products = search.products.takeIf { it != Product.all }, maxTransfers = search.maxTransfers,
+        products = search.products.takeIf { it != Product.all }, maxTransfers = search.maxTransfers, via = search.via,
     )
 
     LaunchedEffect(search, reload) {
@@ -121,6 +121,14 @@ fun ResultsScreen(model: AppModel, state: ResultsState) {
             title = { Text("${search.from.shownName} → ${search.to.shownName}", maxLines = 1) },
             navigationIcon = { IconButton(onClick = { model.pop() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Zurück") } },
         )
+        if (search.via.isNotEmpty()) {
+            Text(
+                "über " + search.via.joinToString(", ") { it.shownName },
+                Modifier.padding(horizontal = 16.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TimeSelector(search.date, onChange = { search = search.copy(date = it); journeys = null })
             search.maxTransfers?.let {

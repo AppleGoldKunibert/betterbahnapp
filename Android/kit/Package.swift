@@ -24,7 +24,11 @@ let package = Package(
                 .copy("Resources/StationHints.json"), .copy("Resources/Ril100.json"), .copy("Resources/StationNames.json"),
                 .copy("Resources/SeatMaps.json"), .copy("Resources/ExitSides.json"), .copy("Resources/ExitSideOverrides.json"),
                 .copy("Resources/Platforms.json"),
-            ]
+            ],
+            // SwiftPM's resource lookup reads the app's data folder (PACKAGE_RESOURCE_BUNDLE_PATH, set by the bridge)
+            // only in debug builds; release builds need it too, the APK hides the data from every other place it
+            // looks. The Kit itself uses DEBUG only for Apple's logging, which Android doesn't have.
+            swiftSettings: [.define("DEBUG")]
         ),
     ]
 )

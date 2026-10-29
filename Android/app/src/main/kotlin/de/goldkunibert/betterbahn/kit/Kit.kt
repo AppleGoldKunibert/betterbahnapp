@@ -28,22 +28,26 @@ object Kit {
         System.loadLibrary("BetterBahnKit")
     }
 
-    /** Copies the Kit's JSON data out of the APK (once per app update) and hands its folder to the Kit. */
+    /**
+     * Copies the Kit's JSON data out of the APK (once per app update) and hands its folder to the Kit. SwiftPM looks
+     * for `<package>_<target>.bundle` inside the folder it's given.
+     */
     fun start(context: Context) {
-        val dir = File(context.filesDir, "BetterBahnKit")
-        val stamp = File(dir, ".installed")
+        val base = File(context.filesDir, "BetterBahnKit")
+        val bundle = File(base, "BetterBahnKitAndroid_BetterBahnKit.bundle")
+        val stamp = File(base, ".installed")
         val installed = context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime.toString()
-        if (!stamp.exists() || stamp.readText() != installed) {
-            dir.deleteRecursively()
-            dir.mkdirs()
+        if (!stamp.exists() || stamp.readText() != installed || !bundle.isDirectory) {
+            base.deleteRecursively()
+            bundle.mkdirs()
             for (name in context.assets.list("BetterBahnKit").orEmpty()) {
                 context.assets.open("BetterBahnKit/$name").use { input ->
-                    File(dir, name).outputStream().use { input.copyTo(it) }
+                    File(bundle, name).outputStream().use { input.copyTo(it) }
                 }
             }
             stamp.writeText(installed)
         }
-        nativeStart(dir.absolutePath)
+        nativeStart(base.absolutePath)
     }
 
     /** Runs a Kit method off the main thread; its result, or a [KitException]. */
@@ -64,6 +68,7 @@ object Kit {
         cursor: String? = null,
         products: Set<Product>? = null,
         maxTransfers: Int? = null,
+        via: List<Station> = emptyList(),
     ): JourneysPage {
         val result = call("journeys", buildJsonObject {
             put("from", json.encodeToJsonElement(from))
@@ -73,6 +78,14 @@ object Kit {
             cursor?.let { put("cursor", it) }
             products?.let { set -> put("products", json.encodeToJsonElement(set.map { it.id })) }
             maxTransfers?.let { put("maxTransfers", it) }
+            if (via.isNotEmpty()) {
+                put("via", JsonArray(via.map { station ->
+                    buildJsonObject {
+                        put("station", json.encodeToJsonElement(station))
+                        put("minStayMinutes", 0)
+                    }
+                }))
+            }
         })
         return KitJson.journeysPage(result)
     }

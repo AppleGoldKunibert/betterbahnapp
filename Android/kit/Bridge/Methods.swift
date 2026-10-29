@@ -84,6 +84,8 @@ enum Methods {
         var cursor: String?
         var products: [Product]?
         var maxTransfers: Int?
+        /// Stations to pass through, in order (`ViaRoutePlanner`): one search without paging, from `date`.
+        var via: [ViaWaypoint]?
     }
 
     struct JourneysPage: Encodable {
@@ -92,10 +94,16 @@ enum Methods {
         var laterCursor: String?
     }
 
-    /// One page of connections, as `JourneyResultsView.load(cursor:prepend:)` loads it (without via stations and
-    /// ticket filters yet): bahn.de's train names where it answers within 1.5 s, duplicates dropped.
+    /// One page of connections, as `JourneyResultsView.load(cursor:prepend:)` loads it (without ticket filters yet): bahn.de's train names where it answers within 1.5 s, duplicates dropped.
     @Sendable static func journeys(_ input: Journeys) async throws -> JourneysPage {
         let products = input.products.map { Product.upgradingLegacySelection(Set($0)) } ?? Set(Product.allCases)
+        if let via = input.via, !via.isEmpty {
+            let planner = ViaRoutePlanner(provider: provider, products: products)
+            var found = try await planner.journeys(from: input.from, to: input.to, via: via, date: input.date)
+            // Products apply per part already; only the overall transfer limit is left.
+            if let maxTransfers = input.maxTransfers { found = found.filter { $0.transfers <= maxTransfers } }
+            return JourneysPage(journeys: found.removingDuplicateIDs().map(JourneyDisplay.init), earlierCursor: nil, laterCursor: nil)
+        }
         let page = try await provider.journeys(JourneyQuery(
             from: input.from, to: input.to, date: input.date, isArrival: input.isArrival, cursor: input.cursor,
             products: products, maxTransfers: input.maxTransfers))

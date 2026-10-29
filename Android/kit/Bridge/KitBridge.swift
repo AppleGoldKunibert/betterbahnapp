@@ -8,8 +8,8 @@ import jni
 /// Called once at app start with the folder the app copied the Kit's JSON data to (station names, platforms …).
 @_cdecl("Java_de_goldkunibert_betterbahn_kit_Kit_nativeStart")
 public func nativeStart(_ env: UnsafeMutablePointer<JNIEnv?>, _ this: jobject, _ resources: jstring) {
-    // SwiftPM's resource lookup can't see into the APK; it reads this override instead (debug builds only,
-    // see docs/android.md).
+    // SwiftPM's resource lookup can't see into the APK; it looks for its bundle in this folder instead (Package.swift
+    // makes it read the override in release builds too).
     setenv("PACKAGE_RESOURCE_BUNDLE_PATH", string(env, resources), 1)
 }
 

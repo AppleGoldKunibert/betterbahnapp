@@ -16,7 +16,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.TripOrigin
 import androidx.compose.material.icons.filled.Place
@@ -53,7 +55,15 @@ import de.goldkunibert.betterbahn.ui.StationPicker
 import de.goldkunibert.betterbahn.ui.TimeSelector
 import de.goldkunibert.betterbahn.ui.productSummary
 
-private enum class Field { From, To }
+/** Which station field the picker fills: start, destination, or the via station at that index. */
+private sealed interface Field {
+    data object From : Field
+    data object To : Field
+    data class Via(val index: Int) : Field
+}
+
+/** As on iOS: up to four stations to pass through. */
+private const val MAX_VIA = 4
 
 /** The connection search (`ConnectionsView`): start, destination, time, options, recent searches. */
 @Composable
@@ -75,8 +85,25 @@ fun ConnectionsScreen(model: AppModel) {
                 Box {
                     Column {
                         StationField("Start", form.from?.shownName, "Von wo?", Icons.Filled.TripOrigin) { picking = Field.From }
+                        form.via.forEachIndexed { index, station ->
+                            HorizontalDivider(Modifier.padding(start = 56.dp, end = 56.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.weight(1f)) {
+                                    StationField("Zwischenhalt", station.shownName, "", Icons.Filled.MoreVert) { picking = Field.Via(index) }
+                                }
+                                IconButton(onClick = { model.form = form.copy(via = form.via.filterIndexed { i, _ -> i != index }) }) {
+                                    Icon(Icons.Filled.Close, "Zwischenhalt entfernen")
+                                }
+                            }
+                        }
                         HorizontalDivider(Modifier.padding(start = 56.dp, end = 56.dp))
                         StationField("Ziel", form.to?.shownName, "Wohin?", Icons.Filled.Place) { picking = Field.To }
+                        if (form.via.size < MAX_VIA) {
+                            TextButton(onClick = { picking = Field.Via(form.via.size) }, modifier = Modifier.padding(start = 48.dp)) {
+                                Icon(Icons.Filled.Add, null, Modifier.padding(end = 6.dp))
+                                Text("Zwischenhalt hinzufügen")
+                            }
+                        }
                     }
                     IconButton(
                         onClick = { model.form = form.copy(from = form.to, to = form.from) },
@@ -89,11 +116,15 @@ fun ConnectionsScreen(model: AppModel) {
                     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                         listOf("Abfahrt" to false, "Ankunft" to true).forEachIndexed { index, (label, arrival) ->
                             SegmentedButton(
-                                selected = form.isArrival == arrival,
+                                selected = (form.isArrival && form.via.isEmpty()) == arrival,
                                 onClick = { model.form = form.copy(isArrival = arrival) },
+                                enabled = form.via.isEmpty(),
                                 shape = SegmentedButtonDefaults.itemShape(index, 2),
                             ) { Text(label) }
                         }
+                    }
+                    if (form.via.isNotEmpty()) {
+                        Text("Mit Zwischenhalten suchen wir ab der gewählten Abfahrtszeit.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Zeit", Modifier.weight(1f))
@@ -129,7 +160,7 @@ fun ConnectionsScreen(model: AppModel) {
                         if (index > 0) HorizontalDivider()
                         ListItem(
                             modifier = Modifier.clickable {
-                                model.form = form.copy(from = recent.from, to = recent.to)
+                                model.form = form.copy(from = recent.from, to = recent.to, via = emptyList())
                                 model.form.search()?.let(::search)
                             },
                             colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0f)),
@@ -154,9 +185,19 @@ fun ConnectionsScreen(model: AppModel) {
     picking?.let { field ->
         StationPicker(
             store = model.store,
-            placeholder = if (field == Field.From) "Von wo?" else "Wohin?",
+            placeholder = when (field) {
+                Field.From -> "Von wo?"
+                Field.To -> "Wohin?"
+                is Field.Via -> "Über welchen Bahnhof?"
+            },
             onPick = { station ->
-                model.form = if (field == Field.From) form.copy(from = station) else form.copy(to = station)
+                model.form = when (field) {
+                    Field.From -> form.copy(from = station)
+                    Field.To -> form.copy(to = station)
+                    is Field.Via -> form.copy(via = form.via.toMutableList().apply {
+                        if (field.index < size) set(field.index, station) else add(station)
+                    })
+                }
                 picking = null
             },
             onDismiss = { picking = null },
