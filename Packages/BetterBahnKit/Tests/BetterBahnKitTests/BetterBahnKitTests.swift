@@ -211,6 +211,40 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         #expect(MPlace(name: "x", lat: 0, lon: 0, description: "Gleise 5+6, Gleis1/11, Gleis 2b").descriptionTracks == [1, 2, 5, 6, 11])
     }
 
+    /// Real-world Transitous data around Bielefeld (#458): OWL's stops carry "91" to "98" as the track. IC 2044 showed a
+    /// platform change at every stop from Minden ("93", DB's live "11") to Gütersloh; a regional train without DB's
+    /// live track would show "Gleis 94". Paderborn writes "G4". Real tracks stay: Solingen's "Gl. 3" at "Bahnsteig
+    /// 02", Koblenz' "3" at a cut-off "Gleis 2+" and its Gleis 109.
+    @Test func trainIgnoresOWLStopNumberAsPlatform() throws {
+        func stop(_ name: String, _ track: String, scheduled: String, _ description: String, _ mode: String = "LONG_DISTANCE") -> String {
+            """
+            {"place": {"name": "\(name)", "lat": 52.0, "lon": 8.5, "departure": "2026-10-29T09:12:00Z",
+                       "scheduledDeparture": "2026-10-29T09:12:00Z", "track": "\(track)", "scheduledTrack": "\(scheduled)",
+                       "description": "\(description)"},
+             "mode": "\(mode)", "realTime": true, "tripId": "\(name)", "displayName": "IC 2044"}
+            """
+        }
+        let json = """
+        {"stopTimes": [
+          \(stop("Minden", "11", scheduled: "93", "Bahnsteig 2")),
+          \(stop("Herford", "6", scheduled: "96", "Bahn6+7")),
+          \(stop("Altenbeken", "22", scheduled: "94", "B22+23")),
+          \(stop("Bielefeld Hbf", "94", scheduled: "94", "Bahnsteig 2", "REGIONAL_RAIL")),
+          \(stop("Paderborn Hbf", "G4", scheduled: "G4", "Bahnsteig 4+5", "REGIONAL_RAIL")),
+          \(stop("Solingen Hbf", "Gl. 3", scheduled: "Gl. 3", "Bahnsteig 02", "REGIONAL_RAIL")),
+          \(stop("Koblenz Hbf", "3", scheduled: "3", "Bahnsteig 2 Gleis 2+")),
+          \(stop("Koblenz Hbf", "109", scheduled: "109", "Bahnsteig 4 Gleis 8+", "REGIONAL_RAIL"))
+        ]}
+        """
+        let platforms = try JSONDecoding.decoder.decode(MStopTimesResponse.self, from: Data(json.utf8))
+            .stopTimes.compactMap { $0.toEntry(kind: .departures)?.platform }
+
+        #expect(platforms.map(\.planned) == [nil, nil, nil, nil, "4", "3", "3", "109"])
+        #expect(platforms.map(\.best) == ["11", "6", "22", nil, "4", "3", "3", "109"])
+        #expect(platforms.allSatisfy { !$0.hasChanged })
+        #expect(MPlace.trainTrack("G") == "G")
+    }
+
     /// Real-world Transitous tracks around Dresden (#451): DELFI writes "Gl. 6" and "Gl.12", which showed
     /// as "Gl. 6" in the badge, and with DB's live "6" over the planned "Gl. 6" as a platform change.
     @Test func platformDropsGlPrefix() throws {

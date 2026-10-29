@@ -44,12 +44,13 @@ struct MPlace: Decodable {
         return description.hasPrefix("Steig") && !description.contains("Gleis")
     }
 
-    /// The track numbers `description` names: "Bahnsteig Gleis 2+3" -> 2 and 3, "Gleis 7-10 (DB)" -> 7 to 10,
-    /// "Gleis 2, Gleis 3", "Gleise 5+6", "Gleis1/11", "Gleis 2b" -> 2. Empty when it names none.
+    /// The track and platform numbers `description` names: "Bahnsteig Gleis 2+3" -> 2 and 3, "Gleis 7-10 (DB)"
+    /// -> 7 to 10, "Gleis 2, Gleis 3", "Gleise 5+6", "Gleis1/11", "Gleis 2b" -> 2, and as OWL writes them
+    /// "Bahnsteig 2", "Bahn6+7", "B22+23". Empty when it names none.
     var descriptionTracks: Set<Int> {
         guard let description else { return [] }
         var tracks: Set<Int> = []
-        for list in description.matches(of: /Gleise?\s*(\d+[a-zA-Z]*(?:\s*[+\/,-]\s*\d+[a-zA-Z]*)*)/) {
+        for list in description.matches(of: /\b(?:Gleise?|Gl\.?|Bahnsteig|Bahnstg\.|Bahn|B)\s*(\d+[a-zA-Z]*(?:\s*[+\/,-]\s*\d+[a-zA-Z]*)*)/) {
             for part in list.1.matches(of: /(\d+)[a-zA-Z]*(?:\s*-\s*(\d+))?/) {
                 guard let first = Int(part.1) else { continue }
                 let last = part.2.flatMap { Int($0) } ?? first
@@ -59,29 +60,43 @@ struct MPlace: Decodable {
         return tracks
     }
 
-    /// Whether `scheduledTrack` is the feed's own number for the stop rather than its track: VRS's stops
-    /// around Köln carry "85" at Köln Hbf, "84" to "94" at Köln Messe/Deutz and so on, while `description`
-    /// names the real platform ("Bahnsteig Gleis 2+3"). Reported for the RE8 showing "Gleis 85" at Köln Hbf
-    /// instead of Gleis 3. Only a number the description doesn't name at all counts.
+    /// Whether `scheduledTrack` is the feed's own number for the stop rather than its track, while `description`
+    /// names the real platform: VRS's stops around Köln carry "85" at Köln Hbf ("Bahnsteig Gleis 2+3", Gleis 3) and
+    /// "84" to "94" at Köln Messe/Deutz (#445), OWL's around Bielefeld "91" to "98" (Bielefeld Hbf "94" at
+    /// "Bahnsteig 2", Gleis 4; IC 2044 showed a platform change at every stop from Minden to Gütersloh, #458). Only a
+    /// number from 70 to 99 counts, where all of those lie: a description may name only the platform ("Bahnsteig
+    /// 02" for Gleis 3 at Solingen Hbf) or be cut off ("Gleis 2+" for Gleis 3 at Koblenz Hbf), and real tracks
+    /// that high start at 101 (Koblenz Hbf 109, Stuttgart's S-Bahn 101).
     var hasStopNumberAsTrack: Bool {
+        guard let number = Self.trainTrack(scheduledTrack)?.firstMatch(of: /^\s*(\d+)/).flatMap({ Int($0.1) }),
+              (70..<100).contains(number) else { return false }
         let tracks = descriptionTracks
-        guard !tracks.isEmpty, let scheduledTrack,
-              let number = scheduledTrack.firstMatch(of: /^\s*(\d+)/).flatMap({ Int($0.1) }) else { return false }
-        return !tracks.contains(number)
+        return !tracks.isEmpty && !tracks.contains(number)
+    }
+
+    /// A train's track as the feed writes it, cleaned like every platform (`PlatformInfo.cleaned`) and without
+    /// the "G" Paderborn Hbf puts in front ("G4" -> "4"); a bus bay's letter is left alone, as it isn't a train's.
+    static func trainTrack(_ track: String?) -> String? {
+        guard let track = PlatformInfo.cleaned(track) else { return nil }
+        if let match = track.wholeMatch(of: /G(\d.*)/) { return String(match.1) }
+        return track
     }
 
     /// The platform as `PlatformInfo`; `actual` only when `realtime` is set. For a train (`isRail`)
     /// a bus bay's letter (`isBusBay`) and a stop's own number (`hasStopNumberAsTrack`) are dropped,
     /// so DB's own Timetables schedule can fill in the real track instead (see
     /// `TimetablesClient.fillMissingPlatforms`) rather than showing a wrong one. A live track other
-    /// than that number stays: DB's live data puts the real one there (Siegburg/Bonn "80" -> "3").
+    /// than that number stays: DB's live data puts the real one there (Siegburg/Bonn "80" -> "3",
+    /// Minden "93" -> "11"), not as a platform change.
     func platform(isRail: Bool, realtime: Bool = true) -> PlatformInfo {
         guard !(isRail && isBusBay) else { return PlatformInfo(planned: nil, actual: nil) }
+        let scheduled = isRail ? Self.trainTrack(scheduledTrack) : scheduledTrack
+        let live = isRail ? Self.trainTrack(track) : track
         if isRail && hasStopNumberAsTrack {
-            return PlatformInfo(planned: nil, actual: realtime && track != scheduledTrack ? track : nil)
+            return PlatformInfo(planned: nil, actual: realtime && live != scheduled ? live : nil)
         }
-        return PlatformInfo(planned: scheduledTrack ?? descriptionTrack,
-                            actual: realtime ? (track ?? descriptionTrack) : nil)
+        return PlatformInfo(planned: scheduled ?? descriptionTrack,
+                            actual: realtime ? (live ?? descriptionTrack) : nil)
     }
 
     /// DELFI stop areas whose feed name leaves out the city, keyed by their DHID. Stuttgart Hbf is
