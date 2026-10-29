@@ -2,5 +2,7 @@
 <resources>
     <string name="app_name">BetterBahn</string>
     <string name="journey_widget_name">Reiseübersicht</string>
+    <string name="board_widget_name">Abfahrten</string>
+    <string name="board_widget_description">Die nächsten Abfahrten von einem Bahnhof.</string>
     <string name="journey_widget_description">Deine nächste Reise mit Abfahrt, Gleis und Verspätung.</string>
 </resources>

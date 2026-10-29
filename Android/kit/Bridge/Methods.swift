@@ -62,6 +62,7 @@ enum Methods {
         "refreshSaved": handler(refreshSaved),
         "journeyExtras": handler(journeyExtras),
         "widgetState": handler(widgetState),
+        "boardWidgetRows": handler(boardWidgetRows),
     ]
 
     // MARK: Stations
@@ -399,5 +400,20 @@ enum Methods {
             finalDelayMinutes: state.finalDelayMinutes, cancelled: state.cancelled, warning: state.warning,
             transferStation: state.transfer?.station, transferTrain: state.transfer?.toTrain,
             transferPlatform: state.transfer?.toPlatform, transferDeparture: state.transfer?.departure)
+    }
+
+    struct BoardWidgetInput: Decodable, Sendable {
+        var station: Station
+        var products: [Product]?
+    }
+
+    /// The departures widget's rows (`StationBoardWidget` on iOS, Transitous only): the next departures one may
+    /// board, those that have left dropped, at most eight.
+    @Sendable static func boardWidgetRows(_ input: BoardWidgetInput) async throws -> [BoardWidgetRow] {
+        let products = input.products.map { Product.upgradingLegacySelection(Set($0)) } ?? Set(Product.allCases)
+        let now = Date.now
+        let entries = try await provider.board(.departures, at: input.station, date: now.addingTimeInterval(-BoardWidgetRows.grace),
+                                               duration: 60, products: products)
+        return Array(BoardWidgetRows.rows(board: entries, products: products, now: now).prefix(8))
     }
 }

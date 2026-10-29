@@ -22,7 +22,9 @@ import de.goldkunibert.betterbahn.kit.JourneyDisplay
 import de.goldkunibert.betterbahn.kit.Kit
 import de.goldkunibert.betterbahn.kit.SavedNotification
 import de.goldkunibert.betterbahn.ui.timeString
+import de.goldkunibert.betterbahn.widget.BoardWidget
 import de.goldkunibert.betterbahn.widget.JourneyWidget
+import de.goldkunibert.betterbahn.widget.WidgetStations
 import java.util.concurrent.TimeUnit
 
 /**
@@ -65,18 +67,21 @@ object SavedRefresh {
         return (value as? kotlinx.serialization.json.JsonPrimitive)?.content?.toDoubleOrNull()?.toLong()
     }
 
-    /** Every 15 minutes (Android's shortest), as long as there are saved journeys. */
+    /** Every 15 minutes (Android's shortest), as long as there are saved journeys or departures widgets. */
     fun schedule(context: Context) {
         val request = PeriodicWorkRequestBuilder<SavedRefreshWorker>(15, TimeUnit.MINUTES).build()
         WorkManager.getInstance(context).enqueueUniquePeriodicWork("savedRefresh", ExistingPeriodicWorkPolicy.KEEP, request)
     }
 }
 
+/** Saved journeys' live data and notifications, then the widgets. */
 class SavedRefreshWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
-        if (Store.get(applicationContext).savedJourneys.value.isEmpty()) return Result.success()
+        val hasJourneys = Store.get(applicationContext).savedJourneys.value.isNotEmpty()
+        if (!hasJourneys && !WidgetStations.hasAny(applicationContext)) return Result.success()
         Kit.start(applicationContext)
-        SavedRefresh.run(applicationContext)
+        if (hasJourneys) SavedRefresh.run(applicationContext)
+        runCatching { BoardWidget.update(applicationContext) }
         return Result.success()
     }
 }

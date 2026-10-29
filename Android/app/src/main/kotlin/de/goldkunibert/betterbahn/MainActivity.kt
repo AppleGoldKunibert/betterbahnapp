@@ -33,6 +33,7 @@ import androidx.lifecycle.lifecycleScope
 import de.goldkunibert.betterbahn.data.Notifier
 import de.goldkunibert.betterbahn.data.SavedRefresh
 import de.goldkunibert.betterbahn.data.Store
+import de.goldkunibert.betterbahn.widget.WidgetStations
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
@@ -62,7 +63,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         Kit.start(this)
         Notifier.createChannel(this)
-        if (Store.get(this).savedJourneys.value.isNotEmpty()) SavedRefresh.schedule(this)
+        if (Store.get(this).savedJourneys.value.isNotEmpty() || WidgetStations.hasAny(this)) SavedRefresh.schedule(this)
         enableEdgeToEdge()
         if (savedInstanceState == null) handleShare(intent)
         setContent {

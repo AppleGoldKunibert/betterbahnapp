@@ -167,6 +167,12 @@ object Kit {
         return if (result is kotlinx.serialization.json.JsonNull) null else json.decodeFromJsonElement(result)
     }
 
+    suspend fun boardWidgetRows(station: Station, products: Set<Product>?): List<BoardWidgetRow> =
+        json.decodeFromJsonElement(call("boardWidgetRows", buildJsonObject {
+            put("station", json.encodeToJsonElement(station))
+            products?.let { set -> put("products", json.encodeToJsonElement(set.map { it.id })) }
+        }))
+
     /** A connection shared from DB Navigator, found again. */
     suspend fun importShared(text: String): JourneyDisplay =
         KitJson.journey(call("importShared", buildJsonObject { put("text", text) }))

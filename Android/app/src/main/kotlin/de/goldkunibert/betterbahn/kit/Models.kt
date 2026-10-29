@@ -336,3 +336,16 @@ data class WidgetState(
     val transferPlatform: String? = null,
     val transferDeparture: Long? = null,
 )
+
+/** A row of the departures widget (`BoardWidgetRow`). */
+@Serializable
+data class BoardWidgetRow(
+    val id: String,
+    val departure: TimeInfo,
+    val cancelled: Boolean = false,
+    val lineName: String,
+    val product: String,
+    val isNightTrain: Boolean = false,
+    val destination: String,
+    val platform: String? = null,
+)
