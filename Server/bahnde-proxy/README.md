@@ -25,10 +25,10 @@ it small:
   already running finish on the old session: closing it at once cut them off (curl reported status 0, logged as
   `bahn.de 0 …`, which Tailscale Funnel turned into a 502 that paused the app).
 
-It mirrors the Worker: the same `/web/api/…` paths (GET only, the list in `proxy.py`) and the same App Attest
-tokens (`X-BetterBahn-Token`, signed with `TOKEN_SECRET`). The app asks it first (`BahnDeProxy` in
-BetterBahnKit), and only it: while it is down, paused or refused, the app shows "Aktuelle Wagenreihung nicht
-verfügbar" instead of asking `betterbahn2`, which bahn.de refuses anyway. The server keeps no logs of who asked.
+It takes bahn.de's `/web/api/…` paths (GET only, the list in `proxy.py`) and the App Attest tokens of the
+`betterbahn2` Worker (`X-BetterBahn-Token`, signed with `TOKEN_SECRET`). It is the app's only way to bahn.de
+(`BahnDeProxy` in BetterBahnKit): while it is down, paused or refused, the app shows "Aktuelle Wagenreihung nicht
+verfügbar". The server keeps no logs of who asked.
 The `betterbahn` Worker also asks it for the live times of shared arrivals when IRIS doesn't have the train
 ("Ankunft teilen", `Cloudflare/arrival.mjs`: `fahrt` only, cached 30 s per train), with a token of its own (key `arrival-pages`, one rate limit for all of them).
 

@@ -2,13 +2,13 @@ import Foundation
 
 /// Our own server for bahn.de's web API (`Server/bahnde-proxy`, #342). bahn.de's bot protection refuses
 /// every request whose TLS handshake isn't a browser's, which Cloudflare Workers can't change; the server
-/// asks with a browser's handshake. It mirrors the Worker's `/web/api/…` paths and takes the same App Attest
-/// token. `BahnDeClient` asks only this server; while it is down or refused it is left alone for a while
-/// (`gate`) and the app says the live data isn't available.
+/// asks with a browser's handshake. It takes bahn.de's `/web/api/…` paths (the app builds them on the Worker's
+/// address, `BahnDeClient.baseURL`) and the Worker's App Attest token. `BahnDeClient` asks only this server;
+/// while it is down or refused it is left alone for a while (`gate`) and the app says the live data isn't available.
 public struct BahnDeProxy: Sendable {
     /// Where the server runs: a small game-server host, reached over HTTPS through Tailscale Funnel
     /// (`panel_boot.py`, see Server/bahnde-proxy/README.md). bahn.de refuses Oracle Cloud's addresses.
-    /// nil sends bahn.de requests to the Worker's address itself, which bahn.de refuses since October 2026.
+    /// nil sends bahn.de requests to the Worker's address itself, which no longer serves them.
     public static let baseURL: URL? = URL(string: "https://bahnde-proxy.tail6eed6b.ts.net")
 
     /// The app's proxy, nil while there is no server.
