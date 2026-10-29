@@ -28,6 +28,7 @@ import de.goldkunibert.betterbahn.ui.connections.ConnectionsScreen
 import de.goldkunibert.betterbahn.ui.connections.JourneyDetailScreen
 import de.goldkunibert.betterbahn.ui.connections.ResultsScreen
 import de.goldkunibert.betterbahn.ui.departures.DeparturesScreen
+import de.goldkunibert.betterbahn.ui.departures.TrainSearchScreen
 import de.goldkunibert.betterbahn.ui.departures.TripScreen
 import de.goldkunibert.betterbahn.ui.settings.SettingsScreen
 import de.goldkunibert.betterbahn.ui.trips.PastTripsScreen
@@ -86,13 +87,21 @@ fun App(model: AppModel) {
                     }
                     is Route.Results -> ResultsScreen(model, route.state)
                     is Route.Detail -> JourneyDetailScreen(model, route)
-                    is Route.TripFromBoard -> TripScreen(model, listOf(route.entry.entry.station)) {
-                        Kit.trip(route.entry.entry.tripId, route.entry.entry.source)
+                    is Route.TripFromBoard -> {
+                        val entry = route.entry.entry
+                        val departures = entry.kind == "departures"
+                        TripScreen(model, boardingAt = entry.station.takeIf { departures }, exitAt = entry.station.takeIf { !departures }) {
+                            Kit.trip(entry.tripId, entry.source)
+                        }
                     }
                     is Route.TripFromLeg -> {
                         val leg = route.journey.journey.legs[route.legIndex]
-                        TripScreen(model, listOf(leg.origin, leg.destination)) { Kit.tripForLeg(route.journey.rawLeg(route.legIndex)) }
+                        TripScreen(model, boardingAt = leg.origin, exitAt = leg.destination) { Kit.tripForLeg(route.journey.rawLeg(route.legIndex)) }
                     }
+                    is Route.TripLoaded -> TripScreen(model, boardingAt = null, exitAt = null, loaded = route.run.trip) {
+                        Kit.trip(route.run.entry.entry.tripId, route.run.entry.entry.source)
+                    }
+                    Route.TrainSearch -> TrainSearchScreen(model)
                     Route.PastTrips -> PastTripsScreen(model)
                 }
             }

@@ -33,4 +33,12 @@ object KitJson {
         json.decodeFromJsonElement<JourneyDisplay>(element).also {
             it.raw = element.jsonObject.getValue("journey").jsonObject
         }
+
+    fun trip(element: JsonElement): TripDisplay =
+        json.decodeFromJsonElement<TripDisplay>(element).also {
+            it.raw = element.jsonObject.getValue("trip").jsonObject
+        }
+
+    fun trains(element: JsonElement): List<TrainResult> =
+        element.jsonArray.map { item -> json.decodeFromJsonElement<TrainResult>(item).also { it.raw = item.jsonObject } }
 }

@@ -55,6 +55,9 @@ enum Methods {
         "board": handler(board),
         "trip": handler(trip),
         "tripForLeg": handler(tripForLeg),
+        "tripLeg": handler(tripLeg),
+        "searchTrains": handler(searchTrains),
+        "trainRun": handler(trainRun),
     ]
 
     // MARK: Stations
@@ -162,5 +165,52 @@ enum Methods {
     /// The run of a journey's leg (also when the feed renumbered it since).
     @Sendable static func tripForLeg(_ input: LegInput) async throws -> TripDisplay {
         TripDisplay(try await provider.trip(for: input.leg))
+    }
+
+    struct TripLegInput: Decodable, Sendable {
+        var trip: Trip
+        var from: Int
+        var to: Int
+    }
+
+    /// The ride on a train from one of its stops to a later one, as a journey to save (`TripView`'s selection).
+    @Sendable static func tripLeg(_ input: TripLegInput) async throws -> JourneyDisplay {
+        guard let leg = input.trip.leg(fromIndex: input.from, toIndex: input.to) else {
+            throw TransitError.invalidInput("Zwischen diesen Halten fährt der Zug nicht.")
+        }
+        return JourneyDisplay(Journey(legs: [leg], source: input.trip.source))
+    }
+
+    // MARK: Train numbers
+
+    struct SearchTrains: Decodable, Sendable {
+        /// "ICE 123", "123"
+        var text: String
+        var date: Date
+    }
+
+    /// Runs with this number on the day, best match first (`TrainSearchOverlay`, via bahn.expert).
+    @Sendable static func searchTrains(_ input: SearchTrains) async throws -> [TrainResult] {
+        guard let query = TrainNumberQuery(input.text) else {
+            throw TransitError.invalidInput("Gib eine Zugnummer ein, z. B. ICE 123.")
+        }
+        guard let finder = TrainNumberSearch(provider: provider) else { return [] }
+        return try await finder.trains(query, on: input.date).map(TrainResult.init)
+    }
+
+    struct TrainRunInput: Decodable, Sendable {
+        var result: TrainResult
+    }
+
+    struct TrainRun: Encodable {
+        var entry: BoardEntryDisplay
+        var trip: TripDisplay
+    }
+
+    /// The chosen run, as a board entry and its trip.
+    @Sendable static func trainRun(_ input: TrainRunInput) async throws -> TrainRun {
+        guard let finder = TrainNumberSearch(provider: provider) else { throw TransitError.notFound("Zug") }
+        let run = try await finder.run(of: input.result.kit)
+        return TrainRun(entry: BoardEntryDisplay(run.entry), trip: TripDisplay(run.trip))
     }
 }

@@ -16,6 +16,7 @@ import de.goldkunibert.betterbahn.kit.JourneyDisplay
 import de.goldkunibert.betterbahn.kit.Kit
 import de.goldkunibert.betterbahn.kit.Product
 import de.goldkunibert.betterbahn.kit.Station
+import de.goldkunibert.betterbahn.kit.TrainRun
 import de.goldkunibert.betterbahn.ui.connections.ResultsState
 import de.goldkunibert.betterbahn.ui.departures.BoardState
 import kotlinx.coroutines.launch
@@ -38,6 +39,9 @@ sealed interface Route {
     data class TripFromBoard(val entry: BoardEntryDisplay) : Route
     data class TripFromLeg(val journey: JourneyDisplay, val legIndex: Int) : Route
     data object PastTrips : Route
+    data object TrainSearch : Route
+    /** A train found by its number, already loaded. */
+    data class TripLoaded(val run: TrainRun) : Route
 }
 
 /** The connection search being filled in, kept while switching tabs. */

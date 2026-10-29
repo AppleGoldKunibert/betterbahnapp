@@ -215,7 +215,28 @@ data class Trip(
 }
 
 @Serializable
-data class TripDisplay(val trip: Trip, val line: LineDisplay? = null)
+data class TripDisplay(val trip: Trip, val line: LineDisplay? = null) {
+    /** The trip's Kit JSON, to build a ride from it. */
+    @Transient
+    var raw: JsonObject = JsonObject(emptyMap())
+}
+
+/** A run found by its number (`TrainSearchResult`); [raw] goes back to the Kit to open it. */
+@Serializable
+data class TrainResult(
+    val journeyId: String,
+    val name: String? = null,
+    val lineName: String? = null,
+    val product: String,
+    val origin: String,
+    val destination: String,
+) {
+    @Transient
+    var raw: JsonObject = JsonObject(emptyMap())
+}
+
+/** A found run, opened: the entry as on a board, and the trip. */
+data class TrainRun(val entry: BoardEntryDisplay, val trip: TripDisplay)
 
 /** The Kit's product groups (`Product`), in the order the filter chips show them. */
 @Serializable(with = ProductSerializer::class)

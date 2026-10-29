@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.filled.Train
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -165,6 +166,7 @@ fun DeparturesScreen(model: AppModel) {
                     }
                     IconButton(onClick = { filtering = true }) { Icon(Icons.Filled.FilterList, "Verkehrsmittel") }
                 }
+                IconButton(onClick = { model.push(Route.TrainSearch) }) { Icon(Icons.Filled.Train, "Zug suchen") }
                 IconButton(onClick = { picking = true }) { Icon(Icons.Filled.Search, "Bahnhof suchen") }
             },
         )

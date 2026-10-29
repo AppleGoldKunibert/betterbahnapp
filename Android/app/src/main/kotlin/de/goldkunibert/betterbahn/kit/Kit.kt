@@ -10,6 +10,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import java.io.File
 
@@ -95,13 +96,32 @@ object Kit {
         }))
 
     suspend fun trip(id: String, source: String): TripDisplay =
-        json.decodeFromJsonElement(call("trip", buildJsonObject {
+        KitJson.trip(call("trip", buildJsonObject {
             put("id", id)
             put("source", source)
         }))
 
     suspend fun tripForLeg(rawLeg: JsonObject): TripDisplay =
-        json.decodeFromJsonElement(call("tripForLeg", buildJsonObject { put("leg", rawLeg) }))
+        KitJson.trip(call("tripForLeg", buildJsonObject { put("leg", rawLeg) }))
+
+    /** The ride from stop [from] to stop [to] of a trip, as a journey to save. */
+    suspend fun tripLeg(trip: TripDisplay, from: Int, to: Int): JourneyDisplay =
+        KitJson.journey(call("tripLeg", buildJsonObject {
+            put("trip", trip.raw)
+            put("from", from)
+            put("to", to)
+        }))
+
+    suspend fun searchTrains(text: String, date: Long): List<TrainResult> =
+        KitJson.trains(call("searchTrains", buildJsonObject {
+            put("text", text)
+            put("date", date)
+        }))
+
+    suspend fun trainRun(result: TrainResult): TrainRun {
+        val answer = call("trainRun", buildJsonObject { put("result", result.raw) }).jsonObject
+        return TrainRun(json.decodeFromJsonElement(answer.getValue("entry")), KitJson.trip(answer.getValue("trip")))
+    }
 
     private fun journeyArgs(raw: JsonObject) = buildJsonObject { put("journey", raw) }
 

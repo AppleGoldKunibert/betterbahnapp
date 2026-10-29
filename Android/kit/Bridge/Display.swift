@@ -116,3 +116,38 @@ extension Journey {
         return journey
     }
 }
+
+/// `TrainSearchResult` as JSON both ways (the Kit's type isn't Codable), plus what the list shows.
+struct TrainResult: Codable, Sendable {
+    var journeyId: String
+    var category: String
+    var number: Int
+    var line: String?
+    var product: Product
+    var origin: String
+    var destination: String
+    var originEVA: String?
+    var destinationEVA: String?
+    /// "ICE 123", or the line's name for a regional train (`TrainSearchResult.name`).
+    var name: String?
+    var lineName: String?
+
+    init(_ result: TrainSearchResult) {
+        journeyId = result.journeyId
+        category = result.category
+        number = result.number
+        line = result.line
+        product = result.product
+        origin = result.origin
+        destination = result.destination
+        originEVA = result.originEVA
+        destinationEVA = result.destinationEVA
+        name = result.name
+        lineName = result.lineName
+    }
+
+    var kit: TrainSearchResult {
+        TrainSearchResult(journeyId: journeyId, category: category, number: number, line: line, product: product,
+                          origin: origin, destination: destination, originEVA: originEVA, destinationEVA: destinationEVA)
+    }
+}

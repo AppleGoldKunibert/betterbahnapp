@@ -50,9 +50,18 @@ class KitJsonTest {
 
     @Test
     fun trip() {
-        val trip = KitJson.json.decodeFromJsonElement<TripDisplay>(KitJson.parseAnswer(fixture("trip")))
+        val trip = KitJson.trip(KitJson.parseAnswer(fixture("trip")))
         assertTrue(trip.trip.stopovers.size > 2)
+        assertTrue(trip.raw.containsKey("stopovers"))
         assertFalse(trip.trip.stopovers.first().station.shownName.isEmpty())
+    }
+
+    @Test
+    fun trains() {
+        val trains = KitJson.trains(KitJson.parseAnswer(fixture("trains")))
+        assertEquals("ICE 585", trains.first().name)
+        // Goes back to the Kit as it came.
+        assertTrue(trains.first().raw.containsKey("journeyId") && trains.first().raw.containsKey("category"))
     }
 
     @Test(expected = KitException::class)
