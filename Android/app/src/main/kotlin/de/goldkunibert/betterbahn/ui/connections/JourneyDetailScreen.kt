@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Eco
 import androidx.compose.material.icons.filled.NightsStay
 import androidx.compose.material.icons.filled.Thunderstorm
+import androidx.compose.material.icons.filled.Train
 import androidx.compose.material.icons.filled.Umbrella
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.BookmarkBorder
@@ -55,6 +56,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
@@ -62,12 +64,14 @@ import de.goldkunibert.betterbahn.AppModel
 import de.goldkunibert.betterbahn.Route
 import de.goldkunibert.betterbahn.data.ConnectionSearch
 import de.goldkunibert.betterbahn.kit.ArrivalWeather
+import de.goldkunibert.betterbahn.kit.CoachSequence
 import de.goldkunibert.betterbahn.kit.JourneyDisplay
 import de.goldkunibert.betterbahn.kit.JourneyExtras
 import de.goldkunibert.betterbahn.kit.Kit
 import de.goldkunibert.betterbahn.kit.Leg
 import de.goldkunibert.betterbahn.kit.LegDisplay
 import de.goldkunibert.betterbahn.kit.Stopover
+import de.goldkunibert.betterbahn.ui.CoachSequenceView
 import de.goldkunibert.betterbahn.ui.DelayPill
 import de.goldkunibert.betterbahn.ui.HeavyDelay
 import de.goldkunibert.betterbahn.ui.LineBadge
@@ -245,7 +249,9 @@ private fun Legs(display: JourneyDisplay, extras: JourneyExtras, onOpenTrain: (I
                 broken = position in display.brokenTransferIndices,
             )
         }
-        LegCard(legs[index], display.legs[index], extras.arrivalWeather[index.toString()]) { onOpenTrain(index) }
+        LegCard(legs[index], display.legs[index], extras.arrivalWeather[index.toString()], loadCoaches = { context ->
+            Kit.plannedCoachSequence(context, display.rawLeg(index))
+        }) { onOpenTrain(index) }
     }
     legs.indices.filter { it > transit.last() }.forEach { WalkNote(legs[it]) }
 }
@@ -286,7 +292,13 @@ private fun Transfer(arriving: Leg, departing: Leg, walks: List<Leg>, broken: Bo
 
 /** One train: line, direction, delay; departure, the stops in between (folded), arrival; notes (`LegCard`). */
 @Composable
-private fun LegCard(leg: Leg, extra: LegDisplay, weather: ArrivalWeather?, onOpenTrain: () -> Unit) {
+private fun LegCard(
+    leg: Leg,
+    extra: LegDisplay,
+    weather: ArrivalWeather?,
+    loadCoaches: suspend (android.content.Context) -> CoachSequence?,
+    onOpenTrain: () -> Unit,
+) {
     var showStops by remember { mutableStateOf(false) }
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -323,10 +335,40 @@ private fun LegCard(leg: Leg, extra: LegDisplay, weather: ArrivalWeather?, onOpe
                 Text(durationString((leg.arrival.planned - leg.departure.planned) / 1000.0), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             StopRow(leg.arrival, leg.destination.shownName, leg.cancelled, note = extra.exitSide, weather = weather, platform = { PlatformBadge(leg.arrivalPlatform, prominent = true) })
+            // vagonweb plans long-distance trains (ICE, IC/EC, night trains, IR).
+            if (extra.line?.filterProduct in setOf("highSpeed", "longDistance", "nightTrain", "interregio")) {
+                HorizontalDivider()
+                Coaches(loadCoaches)
+            }
             if (leg.remarks.isNotEmpty() || leg.messages.isNotEmpty()) {
                 HorizontalDivider()
                 (leg.messages.map { it.text } + leg.remarks).distinct().forEach { Remark(it) }
             }
+        }
+    }
+}
+
+/** "Wagenreihung", folded; loaded from vagonweb when opened. */
+@Composable
+private fun Coaches(load: suspend (android.content.Context) -> CoachSequence?) {
+    var open by remember { mutableStateOf(false) }
+    var state by remember { mutableStateOf<Result<CoachSequence?>?>(null) }
+    val context = LocalContext.current
+    Row(Modifier.fillMaxWidth().clickable { open = !open }, verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Filled.Train, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Wagenreihung", Modifier.weight(1f).padding(start = 8.dp), style = MaterialTheme.typography.bodyMedium)
+        Icon(if (open) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    if (open) {
+        LaunchedEffect(Unit) {
+            if (state?.isSuccess != true) state = runCatching { load(context) }
+        }
+        val result = state
+        when {
+            result == null -> CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            result.isFailure -> Text(result.exceptionOrNull()?.message ?: "Die Wagenreihung ist gerade nicht abrufbar.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            result.getOrNull() == null -> Text("Für diesen Zug gibt es keine Wagenreihung.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            else -> CoachSequenceView(result.getOrNull()!!)
         }
     }
 }

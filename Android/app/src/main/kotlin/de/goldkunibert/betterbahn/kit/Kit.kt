@@ -183,6 +183,30 @@ object Kit {
             products?.let { set -> put("products", json.encodeToJsonElement(set.map { it.id })) }
         }))
 
+    /** vagonweb pages loaded in the web view this run, by URL. */
+    private val vagonwebPages = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /**
+     * The planned Wagenreihung of a journey's leg from vagonweb.cz, null when vagonweb has none. When vagonweb's bot
+     * check turns the Kit's plain request away, the Kit asks for the page ("needsPage:<url>"); it is loaded in a
+     * hidden web view ([VagonwebBrowser], as on iOS) and the Kit asked again with it.
+     */
+    suspend fun plannedCoachSequence(context: Context, rawLeg: JsonObject): CoachSequence? {
+        repeat(4) {
+            try {
+                val result = call("plannedCoachSequence", buildJsonObject {
+                    put("leg", rawLeg)
+                    put("pages", JsonObject(vagonwebPages.mapValues { kotlinx.serialization.json.JsonPrimitive(it.value) }))
+                })
+                return if (result is kotlinx.serialization.json.JsonNull) null else json.decodeFromJsonElement(result)
+            } catch (e: KitException) {
+                val url = e.message?.removePrefix("needsPage:")?.takeIf { e.message?.startsWith("needsPage:") == true } ?: throw e
+                vagonwebPages[url] = VagonwebBrowser.html(context, url) ?: throw KitException("Die Wagenreihung ist gerade nicht abrufbar.")
+            }
+        }
+        return null
+    }
+
     /** A connection shared from DB Navigator, found again. */
     suspend fun importShared(text: String): JourneyDisplay =
         KitJson.journey(call("importShared", buildJsonObject { put("text", text) }))

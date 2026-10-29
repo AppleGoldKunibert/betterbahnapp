@@ -64,6 +64,14 @@ class KitJsonTest {
         assertTrue(trains.first().raw.containsKey("journeyId") && trains.first().raw.containsKey("category"))
     }
 
+    @Test
+    fun coaches() {
+        val sequence = KitJson.json.decodeFromJsonElement<CoachSequence>(KitJson.parseAnswer(fixture("coaches")))
+        assertEquals(13, sequence.coaches.size)
+        assertTrue(sequence.coaches.any { it.kind == "halfDiningCar" })
+        assertTrue(sequence.coaches.first().amenities.contains("BIKE_SPACE"))
+    }
+
     @Test(expected = KitException::class)
     fun error() {
         KitJson.parseAnswer("""{"error":"Keine Verbindung"}""")

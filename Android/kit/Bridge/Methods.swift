@@ -63,6 +63,7 @@ enum Methods {
         "journeyExtras": handler(journeyExtras),
         "widgetState": handler(widgetState),
         "boardWidgetRows": handler(boardWidgetRows),
+        "plannedCoachSequence": handler(plannedCoachSequence),
     ]
 
     // MARK: Stations
@@ -415,5 +416,40 @@ enum Methods {
         let entries = try await provider.board(.departures, at: input.station, date: now.addingTimeInterval(-BoardWidgetRows.grace),
                                                duration: 60, products: products)
         return Array(BoardWidgetRows.rows(board: entries, products: products, now: now).prefix(8))
+    }
+
+    // MARK: Wagenreihung
+
+    struct CoachSequenceInput: Decodable, Sendable {
+        var leg: Leg
+        /// vagonweb pages the app loaded in its web view, by URL (see `NeedsPage`).
+        var pages: [String: String]?
+    }
+
+    /// vagonweb's bot check turned the plain request away and the app hasn't loaded this page yet: the app loads it
+    /// in a hidden web view (as `VagonwebBrowser` does on iOS) and asks again with the page's HTML in `pages`.
+    struct NeedsPage: LocalizedError {
+        var url: URL
+        var errorDescription: String? { "needsPage:" + url.absoluteString }
+    }
+
+    /// The planned Wagenreihung of a leg's train from vagonweb.cz (`AppModel.plannedCoachSequence`); nil if vagonweb
+    /// has none for it.
+    @Sendable static func plannedCoachSequence(_ input: CoachSequenceInput) async throws -> CoachSequenceDisplay? {
+        guard let request = BahnDeClient.formationRequest(for: input.leg, lookahead: nil) else { return nil }
+        let pages = input.pages ?? [:]
+        let vagonweb = VagonwebClient(browserLoader: { url in
+            guard let html = pages[url.absoluteString] else { throw NeedsPage(url: url) }
+            return html
+        })
+        // The train's stops up to this one tell vagonweb's section and where the train turns round.
+        var route: [String]?
+        if let tripId = request.tripId, let source = request.tripSource,
+           let trip = try? await provider.plainTrip(id: tripId, source: source) {
+            let key = VagonwebClient.stationKey(request.station.name)
+            let names = trip.stopovers.map(\.station.name)
+            if let index = names.firstIndex(where: { VagonwebClient.stationKey($0) == key }) { route = Array(names[...index]) }
+        }
+        return try await vagonweb.coachSequence(for: request, route: route).map(CoachSequenceDisplay.init)
     }
 }

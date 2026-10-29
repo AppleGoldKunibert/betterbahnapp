@@ -349,3 +349,37 @@ data class BoardWidgetRow(
     val destination: String,
     val platform: String? = null,
 )
+
+/** A train's planned Wagenreihung from vagonweb.cz (`CoachSequence`), front first. */
+@Serializable
+data class CoachSequence(
+    val groups: List<CoachGroup> = emptyList(),
+    val coaches: List<Coach> = emptyList(),
+    /** Whether the train leaves towards the last coach (right); null when unknown. */
+    val travelsTowardsPlatformEnd: Boolean? = null,
+    val reversals: List<String> = emptyList(),
+    val validFrom: Long? = null,
+    val validUntil: Long? = null,
+)
+
+@Serializable
+data class CoachGroup(
+    val trainName: String? = null,
+    val destination: String? = null,
+    val isRequestedTrain: Boolean = true,
+    val isLocomotiveOnly: Boolean = false,
+)
+
+@Serializable
+data class Coach(
+    val number: String? = null,
+    /** passenger, diningCar, halfDiningCar, sleeper, couchette, locomotive, powerCar, other */
+    val kind: String = "passenger",
+    val firstClass: Boolean = false,
+    val secondClass: Boolean = false,
+    val closed: Boolean = false,
+    val amenities: List<String> = emptyList(),
+    val bikeSpaces: Int? = null,
+    val group: Int = 0,
+    val isPassengerCoach: Boolean = true,
+)

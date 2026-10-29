@@ -156,3 +156,55 @@ struct TrainResult: Codable, Sendable {
                           origin: origin, destination: destination, originEVA: originEVA, destinationEVA: destinationEVA)
     }
 }
+
+/// `CoachSequence` (not Codable) as the Android app shows it: the parts and the coaches, front first.
+struct CoachSequenceDisplay: Encodable {
+    struct Group: Encodable {
+        var trainName: String?
+        var destination: String?
+        var isRequestedTrain: Bool
+        var isLocomotiveOnly: Bool
+    }
+
+    struct Coach: Encodable {
+        var number: String?
+        /// passenger, diningCar, halfDiningCar, sleeper, couchette, locomotive, powerCar, other
+        var kind: String
+        var firstClass: Bool
+        var secondClass: Bool
+        var closed: Bool
+        /// bahn.de's names: BIKE_SPACE, WHEELCHAIR_SPACE, ZONE_QUIET, ZONE_FAMILY …
+        var amenities: [String]
+        var bikeSpaces: Int?
+        var group: Int
+        var isPassengerCoach: Bool
+    }
+
+    var groups: [Group]
+    var coaches: [Coach]
+    /// Whether the train leaves towards the last coach (right); nil when unknown.
+    var travelsTowardsPlatformEnd: Bool?
+    /// Stations on the way where the train changes direction.
+    var reversals: [String]
+    var validFrom: Date?
+    var validUntil: Date?
+
+    init(_ sequence: CoachSequence) {
+        groups = sequence.groups.indices.map { index in
+            let group = sequence.groups[index]
+            return Group(trainName: group.trainName, destination: group.destination, isRequestedTrain: group.isRequestedTrain,
+                         isLocomotiveOnly: sequence.isLocomotiveOnly(group: index))
+        }
+        coaches = sequence.coaches.map { coach in
+            Coach(number: coach.number, kind: String(describing: coach.kind), firstClass: coach.firstClass,
+                  secondClass: coach.secondClass, closed: coach.closed, amenities: coach.amenities.map(\.rawValue),
+                  bikeSpaces: coach.bikeSpaces, group: coach.group, isPassengerCoach: coach.isPassengerCoach)
+        }
+        travelsTowardsPlatformEnd = sequence.travelsTowardsPlatformEnd
+        reversals = sequence.reversals
+        if case .vagonweb(let from, let until) = sequence.source {
+            validFrom = from
+            validUntil = until
+        }
+    }
+}
