@@ -36,21 +36,70 @@ struct MPlace: Decodable {
             .trimmingCharacters(in: .whitespaces)
     }
 
-    /// Whether this place is a bus bay ("Steig F/G | Steig F") rather than a railway platform.
-    /// DELFI's feed puts some trains at a station's bus stop instead of their actual track - reported
-    /// for trains at Hanau Hbf showing "Gleis F" (the bus bay) instead of Gleis 6.
+    /// Whether this place is a bus bay rather than a railway platform. DELFI's feed puts some trains at a
+    /// station's bus stop instead of their actual track: Hanau Hbf's "Steig F/G | Steig F" (ICE 12 showed
+    /// "Gleis F" instead of Gleis 6) and Koblenz Hbf's "A" ("Hausbussteig"; RE2 and RE17 showed "Gleis A"
+    /// instead of Gleis 1, #460), "D" and "H" ("Mittelinsel"). A German track always has a number ("1", "3a"), so at
+    /// a German stop one without any is a bay; abroad letters can be tracks (Paris Gare de Lyon's A to N).
     var isBusBay: Bool {
-        guard let description else { return false }
-        return description.hasPrefix("Steig") && !description.contains("Gleis")
+        if let description, description.hasPrefix("Steig"), !description.contains("Gleis") { return true }
+        guard stopId?.hasPrefix("de-DELFI_de:") == true, let track = Self.trainTrack(scheduledTrack ?? track) else { return false }
+        return !track.contains(where: \.isNumber)
+    }
+
+    /// The track and platform numbers `description` names: "Bahnsteig Gleis 2+3" -> 2 and 3, "Gleis 7-10 (DB)"
+    /// -> 7 to 10, "Gleis 2, Gleis 3", "Gleise 5+6", "Gleis1/11", "Gleis 2b" -> 2, and as OWL writes them
+    /// "Bahnsteig 2", "Bahn6+7", "B22+23". Empty when it names none.
+    var descriptionTracks: Set<Int> {
+        guard let description else { return [] }
+        var tracks: Set<Int> = []
+        for list in description.matches(of: /\b(?:Gleise?|Gl\.?|Bahnsteig|Bahnstg\.|Bahn|B)\s*(\d+[a-zA-Z]*(?:\s*[+\/,-]\s*\d+[a-zA-Z]*)*)/) {
+            for part in list.1.matches(of: /(\d+)[a-zA-Z]*(?:\s*-\s*(\d+))?/) {
+                guard let first = Int(part.1) else { continue }
+                let last = part.2.flatMap { Int($0) } ?? first
+                tracks.formUnion(first <= last && last - first <= 20 ? Array(first...last) : [first, last])
+            }
+        }
+        return tracks
+    }
+
+    /// Whether `scheduledTrack` is the feed's own number for the stop rather than its track, while `description`
+    /// names the real platform: VRS's stops around Köln carry "85" at Köln Hbf ("Bahnsteig Gleis 2+3", Gleis 3) and
+    /// "84" to "94" at Köln Messe/Deutz (#445), OWL's around Bielefeld "91" to "98" (Bielefeld Hbf "94" at
+    /// "Bahnsteig 2", Gleis 4; IC 2044 showed a platform change at every stop from Minden to Gütersloh, #458). Only a
+    /// number from 70 to 99 counts, where all of those lie: a description may name only the platform ("Bahnsteig
+    /// 02" for Gleis 3 at Solingen Hbf) or be cut off ("Gleis 2+" for Gleis 3 at Koblenz Hbf), and real tracks
+    /// that high start at 101 (Koblenz Hbf 109, Stuttgart's S-Bahn 101).
+    var hasStopNumberAsTrack: Bool {
+        guard let number = Self.trainTrack(scheduledTrack)?.firstMatch(of: /^\s*(\d+)/).flatMap({ Int($0.1) }),
+              (70..<100).contains(number) else { return false }
+        let tracks = descriptionTracks
+        return !tracks.isEmpty && !tracks.contains(number)
+    }
+
+    /// A train's track as the feed writes it, cleaned like every platform (`PlatformInfo.cleaned`) and without
+    /// the "G" Paderborn Hbf puts in front ("G4" -> "4"); a bus bay's letter is left alone, as it isn't a train's.
+    static func trainTrack(_ track: String?) -> String? {
+        guard let track = PlatformInfo.cleaned(track) else { return nil }
+        if let match = track.wholeMatch(of: /G(\d.*)/) { return String(match.1) }
+        return track
     }
 
     /// The platform as `PlatformInfo`; `actual` only when `realtime` is set. For a train (`isRail`)
-    /// a bus bay's letter is dropped, so DB's own Timetables schedule can fill in the real track
-    /// instead (see `TimetablesClient.fillMissingPlatforms`) rather than showing a wrong one.
+    /// a bus bay's letter (`isBusBay`) and a stop's own number (`hasStopNumberAsTrack`) are dropped,
+    /// so DB's own Timetables schedule can fill in the real track instead (see
+    /// `TimetablesClient.fillMissingPlatforms`) rather than showing a wrong one. A numbered live track
+    /// other than it stays: DB's live data puts the real one there (Siegburg/Bonn "80" -> "3", Minden
+    /// "93" -> "11", Koblenz Hbf "D" -> "4"), not as a platform change.
     func platform(isRail: Bool, realtime: Bool = true) -> PlatformInfo {
-        guard !(isRail && isBusBay) else { return PlatformInfo(planned: nil, actual: nil) }
-        return PlatformInfo(planned: scheduledTrack ?? descriptionTrack,
-                            actual: realtime ? (track ?? descriptionTrack) : nil)
+        let scheduled = isRail ? Self.trainTrack(scheduledTrack) : scheduledTrack
+        let live = isRail ? Self.trainTrack(track) : track
+        if isRail && (isBusBay || hasStopNumberAsTrack) {
+            let real = live.flatMap { $0 != scheduled && $0.contains(where: \.isNumber) ? $0 : nil }
+            return PlatformInfo(planned: nil, actual: realtime ? real : nil)
+        }
+        return PlatformInfo(planned: scheduled ?? descriptionTrack,
+                            actual: realtime ? (live ?? descriptionTrack) : nil)
     }
 
     /// DELFI stop areas whose feed name leaves out the city, keyed by their DHID. Stuttgart Hbf is

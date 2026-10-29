@@ -296,7 +296,11 @@ in `project.pbxproj`: new files join their target automatically.
   `looseNameKey` inside `countryBounds`; position beats name. `Ril100.preload()` and `Ril100.codes(for:)` run off the
   main thread (#301). A typed code's plain search gets `extraQueryDeadline` (an init parameter, 1.8 s by default; mocked tests that expect every hit pass a generous one), so it can't hit `CombinedProvider`'s 2.5 s.
 - `Transit/Transitous/` – MOTIS client + `M*` DTOs, station-name cleanup, board dedup. Departures add arrivals going
-  on as "Nur Ausstieg" (`continuingWithoutBoarding`, #105). Search ranking `searchRank`: text match vs. nearness/size;
+  on as "Nur Ausstieg" (`continuingWithoutBoarding`, #105). A train drops a bus bay as its track (`MPlace.isBusBay`:
+  "Steig F" at Hanau, at a German stop any track without a number, "A" at Koblenz Hbf #460) and a stop's own number (`hasStopNumberAsTrack`: 70–99 and not among the numbers `description` names; VRS "85" at
+  Köln Hbf #445, OWL "94" at Bielefeld #458), so DB Timetables fills the real one; DB's live track over it stays,
+  not as a change. Every `PlatformInfo` drops a "Gl." in front of the number (`cleaned`; DELFI around Dresden, #451),
+  also in saved journeys; trains also Paderborn's "G4" (`MPlace.trainTrack`). Search ranking `searchRank`: text match vs. nearness/size;
   also asks "<nearby town> <query>" (`NearbyTowns`, offline, so coordinates never leave the device), nearby stations
   from `StationHints` (`Resources/StationHints.json`), aliases ("ber" → Flughafen BER), German names abroad
   (`germanNames`; "prag" places CZPTT's station first via `namedStations`/`placingNamedStation`). Bus stops' exact
