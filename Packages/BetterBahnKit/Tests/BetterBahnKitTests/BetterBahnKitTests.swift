@@ -4460,8 +4460,9 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
 
         await #expect(throws: TransitError.unauthorized) { try await bahnDe.searchStations("Token") }
         #expect(await !proxy.gate.isBlocked)
-        #expect(try await bahnDe.searchStations("Token").map(\.id) == ["8000105"])
-        #expect(ProxyRoutingProtocol.count(host: "proxy-token.test") == 2)
+        // Held back for a moment instead of asking again with every request.
+        await #expect(throws: TransitError.unauthorized) { try await bahnDe.searchStations("Token") }
+        #expect(ProxyRoutingProtocol.count(host: "proxy-token.test") == 1)
     }
 
     @Test func blocksArentTriedAgain() async throws {
@@ -4588,9 +4589,11 @@ private final class ProxyRoutingProtocol: URLProtocol, @unchecked Sendable {
             client?.urlProtocol(self, didFailWithError: URLError(.timedOut))
             return
         }
-        let body = status == 200
-            ? #"[{"extId":"8000105","name":"Frankfurt(Main)Hbf","type":"ST","products":["ICE"]}]"#
-            : #"{"error":"paused"}"#
+        let body = switch status {
+        case 200: #"[{"extId":"8000105","name":"Frankfurt(Main)Hbf","type":"ST","products":["ICE"]}]"#
+        case 401: #"{"error": "unauthorized"}"#
+        default: #"{"error":"paused"}"#
+        }
         let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(body.utf8))

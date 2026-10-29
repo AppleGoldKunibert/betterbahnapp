@@ -348,7 +348,7 @@ in `project.pbxproj`: new files join their target automatically.
   when down; a shorter pause never cuts a longer one short) and requests throw `rateLimited`, shown as
   "Plan-Wagenreihung · Aktuelle nicht verfügbar" / "Aktuelle Wagenreihung nicht verfügbar"; `CoachSequenceDisclosure`
   asks again once the pause is over (`pausedUntil()`). A 401 (the server refused the app's token) throws `unauthorized`
-  for that request only, shown the same, without pausing the others (#472). No other way to bahn.de:
+  (shown the same) without that pause: requests are held back only for `BahnDeGate.refusalPause` (30 s) (#472). No other way to bahn.de:
   the Worker and the phone's hidden browser were refused. `requiresReservation(for:)` (attribute `RP`, also other
   railways via `lookupReference`; shares the `journeyCourse` cache) and `bikeTransport(for:)` (bike attributes, same cache).
 - `Transit/BahnDe/Occupancy.swift` – DB's occupancy forecast (#399): the journey details' `auslastungsmeldungen` per stop

@@ -716,17 +716,20 @@ public struct BahnDeClient: Sendable {
     /// to `BahnDeProxy.attempts` times, a timeout once more; a request that times out again throws `timeout`
     /// without pausing the others. While the server fails (down, paused, refused) it is left alone for a
     /// while and every request throws `rateLimited`, so the app says the live data isn't available. A 401 (the
-    /// server refused the app's token) throws `unauthorized` for this request only: the next one brings a fresh token.
+    /// server refused the app's token) throws `unauthorized` without that pause: only for `refusalPause` are
+    /// requests held back, then the next one brings a fresh token.
     /// Without a server (tests) the request goes to `url` itself, with `gate`'s cooldown after a block.
     func get<T: Decodable>(_ url: URL, as type: T.Type) async throws -> T {
         if let proxy, let proxied = proxy.url(for: url) {
             var attempt = 1
             while true {
                 if await proxy.gate.isBlocked { throw TransitError.rateLimited }
+                if await proxy.gate.isRefused { throw TransitError.unauthorized }
                 do {
                     return try await http.get(proxied, as: type, headers: Self.headers(), auth: auth)
-                } catch TransitError.http(status: 401, _) {
-                    // Not the server failing: the app had no valid token at hand (#472).
+                } catch TransitError.http(status: 401, let body) where body?.contains("\"unauthorized\"") == true {
+                    // Our server's own answer, not the server failing: the app had no valid token at hand (#472).
+                    await proxy.gate.refuse()
                     throw TransitError.unauthorized
                 } catch let error as TransitError where error.isBahnDeAnswer {
                     // bahn.de's own answer (404 etc.).
@@ -823,6 +826,18 @@ public actor BahnDeGate {
 
     /// How long the proxy is left alone after it failed without being blocked (down, offline, paused).
     static let failurePause: TimeInterval = 2 * 60
+    /// How long requests are held back after our server refused the app's token, so a token it keeps refusing
+    /// doesn't send every request there; as long as `WorkerAuth` waits after the network failed (#472).
+    static let refusalPause: TimeInterval = 30
+
+    private var refusedUntil: Date?
+
+    /// Whether our server refused the app's token a moment ago.
+    var isRefused: Bool { refusedUntil.map { $0 > .now } ?? false }
+
+    func refuse() {
+        refusedUntil = .now.addingTimeInterval(Self.refusalPause)
+    }
 
     /// Any failure: a block pauses for `cooldown` (as `report`), anything else for `failurePause`.
     func pause(after error: Error, url: URL? = nil) {

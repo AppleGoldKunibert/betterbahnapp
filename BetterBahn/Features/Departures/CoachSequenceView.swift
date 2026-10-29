@@ -268,16 +268,15 @@ struct CoachSequencePanel: View {
         .task(id: request) {
             if sequence == nil {
                 loading = true
-                do {
-                    sequence = try await model.coachSequence(for: request)
-                } catch TransitError.rateLimited, TransitError.unauthorized {
-                    blocked = true
-                } catch {}
-                if sequence?.coaches.isEmpty ?? true, let planned = await model.plannedCoachSequence(for: request) {
-                    sequence = planned
-                    blocked = false
-                }
+                await load()
                 loading = false
+                // A pause or a refused token is usually over shortly: ask again while nothing is shown (#472).
+                while blocked, !Task.isCancelled {
+                    let until = await model.provider.bahnDe?.pausedUntil() ?? .now
+                    try? await Task.sleep(for: .seconds(max(until.timeIntervalSinceNow, 25) + 5))
+                    guard !Task.isCancelled else { return }
+                    await load()
+                }
             }
             #if DEBUG
             if sequence?.source != .bahnDe {
@@ -289,6 +288,21 @@ struct CoachSequencePanel: View {
                let plan = await model.plannedCoachSequence(for: request, direction: false) {
                 deviations = sequence.deviations(fromPlan: plan)
             }
+        }
+    }
+
+    private func load() async {
+        do {
+            sequence = try await model.coachSequence(for: request)
+            blocked = false
+        } catch TransitError.rateLimited, TransitError.unauthorized {
+            blocked = true
+        } catch {
+            blocked = false
+        }
+        if sequence?.coaches.isEmpty ?? true, let planned = await model.plannedCoachSequence(for: request) {
+            sequence = planned
+            blocked = false
         }
     }
 
