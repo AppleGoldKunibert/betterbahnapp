@@ -42,8 +42,7 @@ from aiohttp import web
 UPSTREAM = "https://www.bahn.de/web/api/"
 TOKEN_HEADER = "X-BetterBahn-Token"
 
-# Allowed paths (relative to /web/api/) and how long a successful answer is cached, in seconds; the same as
-# ROUTES in Cloudflare/bahnde-proxy/worker.mjs.
+# Allowed paths (relative to /web/api/) and how long a successful answer is cached, in seconds.
 ROUTES = {
     "reiseloesung/orte": 86400,
     "reiseloesung/orte/nearby": 86400,
