@@ -7,20 +7,27 @@ import Testing
     private let push = FollowedCheckinPush(http: HTTPClient(session: PushWorkerProtocol.session()), baseURL: PushWorkerProtocol.base)
     private let subscription = FollowedCheckinPushSubscription(id: "sub1", secret: "s3cret")
 
-    @Test func signsUpWithTheAuthorizationCode() async throws {
+    /// #452: no second Träwelling login, the Worker reads with the app's.
+    @Test func signsUpWithTheAppsLogin() async throws {
         PushWorkerProtocol.state = .init()
-        let result = try await push.subscribe(code: "the-code", codeVerifier: "verifier", deviceToken: "abcd", sandbox: true, userID: 42,
-                                              kinds: [.companions, .followed])
-        #expect(result == FollowedCheckinPushSubscription(id: "new-id", secret: "new-secret", readsNotifications: true))
+        let login = ServerLogin(id: "login1", secret: "login-secret", readsNotifications: true)
+        let result = try await push.subscribe(login: login, deviceToken: "abcd", sandbox: true, userID: 42, kinds: [.companions, .followed])
+        #expect(result == FollowedCheckinPushSubscription(id: "new-id", secret: "new-secret", usesAppLogin: true))
         let request = try #require(PushWorkerProtocol.state.requests.first)
         #expect(request.method == "POST")
         #expect(request.path == "/subscriptions")
-        #expect(request.body["code"] as? String == "the-code")
-        #expect(request.body["codeVerifier"] as? String == "verifier")
+        #expect(request.body["loginId"] as? String == "login1")
+        #expect(request.body["loginSecret"] as? String == "login-secret")
+        #expect(request.body["code"] == nil)
         #expect(request.body["deviceToken"] as? String == "abcd")
         #expect(request.body["sandbox"] as? Bool == true)
         #expect(request.body["userId"] as? Int == 42)
         #expect(request.body["kinds"] as? [String] == ["followed", "companions"])
+
+        PushWorkerProtocol.state = .init(status: 404)
+        await #expect(throws: OAuthError.loginEnded) {
+            try await push.subscribe(login: login, deviceToken: "abcd", sandbox: true, userID: 42, kinds: [.followed])
+        }
     }
 
     @Test func reportsASubscriptionTheWorkerNoLongerKnows() async throws {
@@ -44,33 +51,29 @@ import Testing
         #expect(PushWorkerProtocol.state.requests.first?.method == "DELETE")
     }
 
-    @Test func asksTheWorkersLoginForReadingOnly() {
-        let app = TraewellingConfig()
-        let config = FollowedCheckinPush.config(from: app)
-        #expect(config.scopes == ["read-statuses", "read-notifications"])
-        #expect(config.clientID == app.clientID)
-        #expect(config.redirectURI == app.redirectURI)
-    }
-
-    /// Likes and fellow travellers need a login that reads notifications (#447); one from before signs in again.
+    /// Likes and fellow travellers need a login that reads notifications (#447); one handed over from before
+    /// #452 signs in again. A sign-up with a login of its own (before #452) is replaced by one with the app's.
     @Test func signsInAgainOnlyWhenTheLoginCantReadWhatIsWanted() {
-        let old = FollowedCheckinPushSubscription(id: "a", secret: "b")
-        let new = FollowedCheckinPushSubscription(id: "a", secret: "b", readsNotifications: true)
-        #expect(FollowedCheckinPush.step(for: [.followed], subscription: nil) == .signUp)
-        #expect(FollowedCheckinPush.step(for: [.followed], subscription: old) == .update)
-        #expect(FollowedCheckinPush.step(for: [.followed, .likes], subscription: old) == .signUp)
-        #expect(FollowedCheckinPush.step(for: [.companions], subscription: new) == .update)
-        #expect(FollowedCheckinPush.step(for: [], subscription: new) == .signOff)
-        #expect(FollowedCheckinPush.step(for: [], subscription: nil) == .signOff)
+        let own = FollowedCheckinPushSubscription(id: "a", secret: "b", usesAppLogin: false)
+        let app = FollowedCheckinPushSubscription(id: "a", secret: "b")
+        #expect(FollowedCheckinPush.step(for: [.followed], subscription: nil, loginReadsNotifications: false) == .signUp)
+        #expect(FollowedCheckinPush.step(for: [.followed], subscription: own, loginReadsNotifications: false) == .signUp)
+        #expect(FollowedCheckinPush.step(for: [.followed], subscription: app, loginReadsNotifications: false) == .update)
+        #expect(FollowedCheckinPush.step(for: [.followed, .likes], subscription: app, loginReadsNotifications: false) == .signIn)
+        #expect(FollowedCheckinPush.step(for: [.companions], subscription: nil, loginReadsNotifications: false) == .signIn)
+        #expect(FollowedCheckinPush.step(for: [.companions], subscription: app, loginReadsNotifications: true) == .update)
+        #expect(FollowedCheckinPush.step(for: [], subscription: app, loginReadsNotifications: false) == .signOff)
+        #expect(FollowedCheckinPush.step(for: [], subscription: nil, loginReadsNotifications: true) == .signOff)
     }
 
-    /// Sign-ups saved before #447 have no `readsNotifications` yet.
-    @Test func readsSignUpsSavedBeforeLikesAndFellowTravellers() throws {
-        let saved = try JSONDecoder().decode(FollowedCheckinPushSubscription.self, from: Data(#"{"id":"a","secret":"b"}"#.utf8))
-        #expect(saved == FollowedCheckinPushSubscription(id: "a", secret: "b", readsNotifications: false))
+    /// Sign-ups saved before #452 have a Träwelling login of their own.
+    @Test func readsSignUpsSavedBeforeTheAppsLoginMovedToTheServer() throws {
+        let saved = try JSONDecoder().decode(FollowedCheckinPushSubscription.self,
+                                             from: Data(#"{"id":"a","secret":"b","readsNotifications":true}"#.utf8))
+        #expect(saved == FollowedCheckinPushSubscription(id: "a", secret: "b", usesAppLogin: false))
         let again = try JSONDecoder().decode(FollowedCheckinPushSubscription.self,
-                                             from: JSONEncoder().encode(FollowedCheckinPushSubscription(id: "a", secret: "b", readsNotifications: true)))
-        #expect(again.readsNotifications)
+                                             from: JSONEncoder().encode(FollowedCheckinPushSubscription(id: "a", secret: "b")))
+        #expect(again.usesAppLogin)
     }
 
     /// Träwelling's webhook for likes and fellow travellers (#447): only its own parameters, nothing when the Worker

@@ -40,7 +40,7 @@ public struct TraewellingConfig: Sendable {
 
     public init(baseURL: URL = URL(string: "https://traewelling.de")!, clientID: String = "406",
                 redirectURI: String = "https://betterbahn.betterbahn.workers.dev/oauth/traewelling/callback",
-                scopes: [String] = ["read-statuses", "write-statuses", "read-search", "write-likes"]) {
+                scopes: [String] = ["read-statuses", "write-statuses", "read-search", "write-likes", "read-notifications"]) {
         self.baseURL = baseURL
         self.clientID = clientID
         self.redirectURI = redirectURI
@@ -105,23 +105,16 @@ public struct OAuthToken: Codable, Sendable, Equatable {
     public var isExpired: Bool { expiresAt.timeIntervalSinceNow < 60 }
 }
 
-struct TokenResponse: Decodable {
-    var access_token: String
-    var refresh_token: String?
-    var expires_in: Double?
-
-    func toToken() -> OAuthToken {
-        OAuthToken(accessToken: access_token, refreshToken: refresh_token,
-                   expiresAt: Date.now.addingTimeInterval(expires_in ?? 3600 * 24 * 365))
-    }
-}
-
 public enum OAuthError: Error, LocalizedError, Equatable {
     case stateMismatch
     case missingCode
     case notLoggedIn
     /// Träwelling no longer accepts the stored login (refresh token used up or expired).
     case sessionExpired
+    /// Our server no longer has the login (logged out on another device, ended on traewelling.de).
+    case loginEnded
+    /// Our server, which keeps the login, doesn't answer and the last access token has run out.
+    case serverUnavailable
     case invalidRedirectURI
 
     public var errorDescription: String? {
@@ -130,13 +123,17 @@ public enum OAuthError: Error, LocalizedError, Equatable {
         case .missingCode: "Träwelling hat keinen Code zurückgegeben."
         case .notLoggedIn: "Nicht bei Träwelling angemeldet."
         case .sessionExpired: "Die Träwelling-Anmeldung ist abgelaufen. Melde dich in den Einstellungen ab und wieder an."
+        case .loginEnded: "Deine Träwelling-Anmeldung ist beendet. Melde dich in den Einstellungen wieder an."
+        case .serverUnavailable: "Träwelling geht gerade nicht, weil unser Server nicht antwortet. Versuch es gleich noch mal."
         case .invalidRedirectURI: "Ungültige Träwelling-OAuth-Konfiguration: Die Weiterleitungs-URL muss eine gültige HTTPS-Adresse mit Host und Callback-Pfad sein."
         }
     }
 }
 
-/// Stores the token in the Keychain, synced through iCloud Keychain so the Träwelling login
-/// carries over to the user's other devices.
+/// The Träwelling login in the Keychain: since #452 our server's login (`ServerLogin`, synced through iCloud
+/// Keychain so the user's other devices use it too) and the access token last fetched for it (this device only).
+/// Before #452 the app kept the token itself, also synced (`load()`, `save(_:)`); it is handed over to our
+/// server once and then deleted.
 public struct TokenStore: Sendable {
     let service: String
     let account: String
@@ -146,48 +143,120 @@ public struct TokenStore: Sendable {
         self.account = account
     }
 
+    private var loginAccount: String { "\(account).login" }
+    private var accessAccount: String { "\(account).access" }
+    private var pendingLogoutsAccount: String { "\(account).pendingLogouts" }
+
     /// Matches the item whether or not it syncs (older versions saved it device-only).
-    private var baseQuery: [String: Any] {
+    private func baseQuery(_ account: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
          kSecAttrService as String: service,
          kSecAttrAccount as String: account,
          kSecAttrSynchronizable as String: kSecAttrSynchronizableAny]
     }
 
-    public func load() -> OAuthToken? {
-        var query = baseQuery
+    private func read<Value: Decodable>(_ type: Value.Type, account: String) -> Value? {
+        var query = baseQuery(account)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: AnyObject?
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
               let data = result as? Data else { return nil }
-        return try? JSONDecoder().decode(OAuthToken.self, from: data)
+        return try? JSONDecoder().decode(Value.self, from: data)
     }
 
-    public func save(_ token: OAuthToken) {
-        guard let data = try? JSONEncoder().encode(token) else { return }
-        SecItemDelete(baseQuery as CFDictionary)
-        var query = baseQuery
+    private func write(_ value: some Encodable, account: String, synchronizable: Bool) {
+        guard let data = try? JSONEncoder().encode(value) else { return }
+        SecItemDelete(baseQuery(account) as CFDictionary)
+        var query = baseQuery(account)
         query[kSecValueData as String] = data
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        query[kSecAttrSynchronizable as String] = kCFBooleanTrue
-        if SecItemAdd(query as CFDictionary, nil) != errSecSuccess {
+        query[kSecAttrAccessible as String] = synchronizable ? kSecAttrAccessibleAfterFirstUnlock : kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        query[kSecAttrSynchronizable as String] = synchronizable ? kCFBooleanTrue : kCFBooleanFalse
+        if SecItemAdd(query as CFDictionary, nil) != errSecSuccess, synchronizable {
             // No iCloud Keychain available (e.g. unsigned test runs): keep it on this device.
             query[kSecAttrSynchronizable as String] = kCFBooleanFalse
             SecItemAdd(query as CFDictionary, nil)
         }
     }
 
+    private func delete(account: String) {
+        SecItemDelete(baseQuery(account) as CFDictionary)
+    }
+
+    // MARK: Before #452
+
+    /// The token the app kept itself before #452.
+    public func load() -> OAuthToken? {
+        read(OAuthToken.self, account: account)
+    }
+
+    public func save(_ token: OAuthToken) {
+        write(token, account: account, synchronizable: true)
+    }
+
     /// Re-saves a token older versions kept device-only so it syncs from now on.
     public func migrateToSynchronizable() {
-        var query = baseQuery
+        var query = baseQuery(account)
         query[kSecAttrSynchronizable as String] = kCFBooleanFalse
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         guard SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess, let token = load() else { return }
         save(token)
     }
 
+    /// Deletes the token from before #452, here and (synced) on the user's other devices.
+    public func clearOwnToken() {
+        delete(account: account)
+    }
+
+    // MARK: Our server's login (#452)
+
+    public func loadLogin() -> ServerLogin? {
+        read(ServerLogin.self, account: loginAccount)
+    }
+
+    public func saveLogin(_ login: ServerLogin) {
+        write(login, account: loginAccount, synchronizable: true)
+    }
+
+    /// The access token last fetched for `loginID`, if this device has one.
+    func loadAccess(for loginID: String) -> OAuthToken? {
+        guard let stored = read(StoredAccess.self, account: accessAccount), stored.loginID == loginID else { return nil }
+        return stored.token
+    }
+
+    func saveAccess(_ token: OAuthToken, for loginID: String) {
+        write(StoredAccess(loginID: loginID, token: token), account: accessAccount, synchronizable: false)
+    }
+
+    /// Logins this device logged out of while our server couldn't be reached, to end there later.
+    func loadPendingLogouts() -> [ServerLogin] {
+        read([ServerLogin].self, account: pendingLogoutsAccount) ?? []
+    }
+
+    func savePendingLogouts(_ logins: [ServerLogin]) {
+        if logins.isEmpty {
+            delete(account: pendingLogoutsAccount)
+        } else {
+            write(logins, account: pendingLogoutsAccount, synchronizable: false)
+        }
+    }
+
+    /// Deletes the login and its access token here and (synced) on the user's other devices, and the token
+    /// from before #452.
+    public func clearLogin() {
+        delete(account: loginAccount)
+        delete(account: accessAccount)
+        delete(account: account)
+    }
+
+    /// Deletes everything, the logins still to end on our server too.
     public func clear() {
-        SecItemDelete(baseQuery as CFDictionary)
+        clearLogin()
+        delete(account: pendingLogoutsAccount)
+    }
+
+    private struct StoredAccess: Codable {
+        var loginID: String
+        var token: OAuthToken
     }
 }

@@ -184,6 +184,8 @@ struct RootView: View {
                 Task { await model.takeBackLiveActivity() }
                 model.syncLiveActivity()
                 model.startRefreshing()
+                // The next Träwelling access token, fetched ahead while the app is open (#452).
+                Task { await model.traewelling.prepareAccessToken() }
                 Task { await model.syncTraewelling() }
                 model.fetchCloudJourneys()
                 Task { await model.syncFollowedCheckinPush() }

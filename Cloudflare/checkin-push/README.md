@@ -5,14 +5,12 @@ user's own check-ins (#447: likes, people checking in on the same train), Settin
 "Mitteilungen". iOS decides on its own when an app may look in the
 background, often hours later, so the app doesn't look itself; this Worker does.
 
-1. Turning the first of them on signs in with Träwelling a second time, for this Worker only and with
-   just `read-statuses` and `read-notifications` (logins from before #447 have only `read-statuses`; the
-   app signs in again when one of those turns on likes or fellow travellers). The app sends the
-   authorization code with its PKCE verifier, its APNs device token, the Träwelling user ID and `kinds`
-   (`followed`, `likes`, `companions`; missing means `followed`) to `POST /subscriptions` (App Attest
-   token) and gets `{ id, secret }` back. The Worker exchanges the code itself, so this login never exists on the device. The app's own
-   login stays untouched: Träwelling's access tokens last an hour and each refresh token works once,
-   so the two can't share one.
+1. Turning the first of them on sends the app's login (`loginId`, `loginSecret`, see below), its APNs
+   device token, the Träwelling user ID and `kinds` (`followed`, `likes`, `companions`; missing means
+   `followed`) to `POST /subscriptions` (App Attest token) and gets `{ id, secret }` back. Likes and
+   fellow travellers need a login with `read-notifications`; one handed over from before #452 signs in
+   again first. Before #452 the app signed in a second time for this Worker (`code`, `codeVerifier` in
+   place of the login); those sign-ups keep that login of their own until the app moves them over.
 2. Every minute the cron trigger looks at the subscriptions due in that minute (each one every
    `INTERVAL_MINUTES`, default 2): it renews the login when it expired. For `followed` it loads the
    dashboard (first page) and sends an APNs notification for each check-in of someone else that is new
@@ -28,9 +26,28 @@ background, often hours later, so the app doesn't look itself; this Worker does.
    { secret }` (all settings off, Träwelling logout) deletes the row and ends the Worker's Träwelling login.
 
 When Träwelling ends the login or APNs says the app is gone, the row is deleted; the app then gets a
-404 and turns the setting off. Stored per device: device token, Träwelling user ID, the login
-(AES-GCM with `TOKEN_KEY`), the kinds and the IDs of the check-ins and notifications already seen. No
-location, no names.
+404 and turns the setting off. Stored per device: device token, Träwelling user ID, the login (or its
+ID), the kinds and the IDs of the check-ins and notifications already seen. No location, no names.
+
+## The app's Träwelling login (`/logins`, #452)
+
+Träwelling's access tokens last an hour, refresh tokens 30 days, and each refresh token works once. A
+device renewing its own login lost it when the answer didn't arrive (poor reception) or after 30 days
+without opening the app. So this Worker keeps the only login per user and is the only one renewing it
+(`logins.mjs`, table `logins`, AES-GCM with `TOKEN_KEY`):
+
+- `POST /logins { code, codeVerifier }` exchanges the authorization code (the app's scopes, with
+  `read-notifications`); `POST /logins { refreshToken }` takes over a login from before #452 and renews
+  it at once. Both answer `{ id, secret, accessToken, expiresAt, readsNotifications }`; the app shares
+  `id` and `secret` with the user's other devices through iCloud Keychain.
+- `POST /logins/<id>/token { secret, rejected? }` answers the current access token, renewed first when
+  less than 15 minutes are left or Träwelling just refused `rejected`. The new tokens are saved before
+  answering, and only one request renews at a time (`renewing`); the others wait for its tokens. Fetching
+  changes nothing, so a lost answer costs nothing.
+- `PUT /logins/<id> { secret, code, codeVerifier }` signs in again in place; `DELETE /logins/<id> { secret }`
+  logs out (ends the Träwelling login and the notifications running on it). 404: the login has ended.
+- The cron trigger renews logins nobody renewed for 20 days (refresh tokens would run out after 30) and
+  ends those no device fetched a token from for 180 days, unless notifications run on them.
 
 A D1 write happens only when something changed (a renewed login about once an hour, new check-ins).
 Each look costs one Träwelling request per source (dashboard, notifications; one more when renewing)
@@ -42,11 +59,12 @@ minute. Beyond that, switch to Workers Paid.
 
 While `TRAEWELLING_WEBHOOKS` is `"true"`, `GET /login-options` gives the app `trwl_webhook_url`
 (`https://betterbahn-push.betterbahn.workers.dev/traewelling/webhook`) and `trwl_webhook_events=notification` to
-add to the Worker's Träwelling login. Träwelling then makes a webhook for the user's notifications and returns its
-ID and secret with the token; the Worker keeps the secret sealed (AES-GCM, `TOKEN_KEY`). Each delivery
+add to the app's Träwelling login (`/logins`; before #452 the sign-up's own login). Träwelling then makes a webhook
+for the user's notifications and returns its ID and secret with the token; the Worker keeps the secret sealed with
+the login (AES-GCM, `TOKEN_KEY`) and pushes each delivery to every sign-up on that login. Each delivery
 (`X-Trwl-Webhook-Id`, `Signature`: HMAC-SHA256 of the body) is checked and answered at once (Träwelling waits only
 a second); the push follows. An unknown webhook gets `410`, on which Träwelling deletes it; signing off deletes it
-too (`DELETE /api/v1/webhooks/<id>`). Träwelling turns a webhook off after 5 failed deliveries in a row; the look
+too (`DELETE /api/v1/webhooks/<id>`), as do logging out and signing in again. Träwelling turns a webhook off after 5 failed deliveries in a row; the look
 every 2 minutes then still finds everything.
 
 To turn it on (once): on traewelling.de → Einstellungen → Anwendungen, edit the app (client 406), turn webhooks on
@@ -71,6 +89,10 @@ from 2 hours before the first departure until 10 minutes after the last arrival,
 next 2 hours, and a transfer at risk (as the app's `ConnectionIssue`). The journey is forgotten 30 minutes
 after its arrival and the row deleted when none is left. bahn.de is never asked (#334). Code and tests:
 `commute.mjs`, `node --test Cloudflare/checkin-push/commute.test.mjs`.
+
+A database made before #452 needs the `logins` table once:
+`npx wrangler d1 execute betterbahn-push --remote --file=migrations/0002_server_logins.sql`, then
+`npx wrangler deploy` (before the app version that keeps its login here ships).
 
 A database made before #447 needs the new columns once:
 `npx wrangler d1 execute betterbahn-push --remote --file=migrations/0001_own_checkin_notifications.sql`,

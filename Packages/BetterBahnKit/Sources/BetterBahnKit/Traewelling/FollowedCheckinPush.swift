@@ -5,8 +5,8 @@ import Foundation
 public enum CheckinPushKind: String, Codable, Sendable, CaseIterable {
     case followed, likes, companions
 
-    /// Likes and fellow travellers come from Träwelling's notifications, which the Worker's login can read
-    /// only when it was made since #447.
+    /// Likes and fellow travellers come from Träwelling's notifications, which the login can read only when
+    /// it was made with `read-notifications` (`ServerLogin.readsNotifications`).
     public var readsNotifications: Bool { self != .followed }
 }
 
@@ -15,27 +15,29 @@ public enum CheckinPushKind: String, Codable, Sendable, CaseIterable {
 public struct FollowedCheckinPushSubscription: Codable, Sendable, Equatable {
     public var id: String
     public var secret: String
-    /// The Worker's login may read Träwelling's notifications (signed up since #447). Older sign-ups get
-    /// only followed check-ins until the user signs in again.
-    public var readsNotifications: Bool
+    /// Reads with the app's login at our server (#452). Sign-ups from before have a login of their own,
+    /// which `syncFollowedCheckinPush` moves over.
+    public var usesAppLogin: Bool
 
-    public init(id: String, secret: String, readsNotifications: Bool = false) {
+    public init(id: String, secret: String, usesAppLogin: Bool = true) {
         self.id = id
         self.secret = secret
-        self.readsNotifications = readsNotifications
+        self.usesAppLogin = usesAppLogin
     }
 
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         secret = try container.decode(String.self, forKey: .secret)
-        readsNotifications = try container.decodeIfPresent(Bool.self, forKey: .readsNotifications) ?? false
+        usesAppLogin = try container.decodeIfPresent(Bool.self, forKey: .usesAppLogin) ?? false
     }
 }
 
 /// What turning a kind on or off needs at the Worker.
 public enum CheckinPushStep: Equatable, Sendable {
-    /// A new sign-up, with a new Träwelling login.
+    /// Signing in with Träwelling again first: the login can't read the notifications a kind needs.
+    case signIn
+    /// A new sign-up, with the app's login.
     case signUp
     /// The kinds of the existing sign-up change.
     case update
@@ -46,10 +48,7 @@ public enum CheckinPushStep: Equatable, Sendable {
 /// Signs the device up for those notifications, keeps its APNs device token and kinds current and signs it off.
 ///
 /// iOS lets an app look in the background only when it likes, often hours later, so the Worker looks
-/// instead. It needs its own Träwelling login (`config`: only reading): the app's access tokens
-/// last an hour and each refresh token works once, so a login shared with the Worker would log one of
-/// the two out. The app hands the Worker the authorization code with its PKCE verifier, and the Worker
-/// exchanges it itself, so that login never exists on the device.
+/// instead, with the app's Träwelling login it keeps anyway (#452, `TraewellingLoginServer`).
 public struct FollowedCheckinPush: Sendable {
     public static let baseURL = URL(string: "https://betterbahn-push.betterbahn.workers.dev")!
 
@@ -61,18 +60,11 @@ public struct FollowedCheckinPush: Sendable {
         self.baseURL = baseURL
     }
 
-    /// The Träwelling login for the Worker: like the app's, but read-only.
-    public static func config(from app: TraewellingConfig) -> TraewellingConfig {
-        var config = app
-        config.scopes = ["read-statuses", "read-notifications"]
-        return config
-    }
-
-    /// What to add to the Worker's Träwelling login (`TraewellingConfig.authorizeURL(pkce:extra:)`): a webhook
-    /// for the user's notifications while the Worker takes one, so likes and fellow travellers arrive right away.
-    /// Nothing when the Worker can't be asked or doesn't take one yet (a login asking for a webhook Träwelling
-    /// doesn't allow fails): the Worker's look every 2 minutes still finds them. Only Träwelling's own `trwl_`
-    /// parameters, so nothing can replace the login's.
+    /// What to add to the app's Träwelling login (`TraewellingConfig.authorizeURL(pkce:extra:)`, kept by our
+    /// server since #452): a webhook for the user's notifications while the Worker takes one, so likes and fellow
+    /// travellers arrive right away. Nothing when the Worker can't be asked or doesn't take one yet (a login asking
+    /// for a webhook Träwelling doesn't allow fails): the Worker's look every 2 minutes still finds them. Only
+    /// Träwelling's own `trwl_` parameters, so nothing can replace the login's.
     public func loginParameters() async -> [URLQueryItem] {
         let request = URLRequest(url: baseURL.appending(path: "login-options"), timeoutInterval: http.timeout)
         guard let data = try? await http.sendRaw(request),
@@ -81,23 +73,32 @@ public struct FollowedCheckinPush: Sendable {
             .map { URLQueryItem(name: $0.key, value: $0.value) }
     }
 
-    /// What the Worker needs when the user wants `kinds`: a sign-up when there is none yet or its login
-    /// can't read the notifications a kind needs.
-    public static func step(for kinds: Set<CheckinPushKind>, subscription: FollowedCheckinPushSubscription?) -> CheckinPushStep {
+    /// What the Worker needs when the user wants `kinds`: signing in again when the login can't read the
+    /// notifications a kind needs (`loginReadsNotifications`), a sign-up when there is none yet or one from
+    /// before #452 with a login of its own.
+    public static func step(for kinds: Set<CheckinPushKind>, subscription: FollowedCheckinPushSubscription?,
+                            loginReadsNotifications: Bool) -> CheckinPushStep {
         guard !kinds.isEmpty else { return .signOff }
-        guard let subscription, subscription.readsNotifications || !kinds.contains(where: \.readsNotifications) else { return .signUp }
+        if kinds.contains(where: \.readsNotifications), !loginReadsNotifications { return .signIn }
+        guard let subscription, subscription.usesAppLogin else { return .signUp }
         return .update
     }
 
-    /// `sandbox`: a development build, whose device token only works with APNs' sandbox.
-    public func subscribe(code: String, codeVerifier: String, deviceToken: String, sandbox: Bool,
-                          userID: Int, kinds: Set<CheckinPushKind>) async throws -> FollowedCheckinPushSubscription {
-        let body = SubscribeBody(code: code, codeVerifier: codeVerifier, deviceToken: deviceToken, sandbox: sandbox, userId: userID,
-                                 kinds: Self.ordered(kinds))
-        let data = try await send("subscriptions", method: "POST", body: body)
+    /// Signs up with the app's login. `sandbox`: a development build, whose device token only works with
+    /// APNs' sandbox. Throws `OAuthError.loginEnded` when the server no longer has the login.
+    public func subscribe(login: ServerLogin, deviceToken: String, sandbox: Bool, userID: Int,
+                          kinds: Set<CheckinPushKind>) async throws -> FollowedCheckinPushSubscription {
+        let body = SubscribeBody(loginId: login.id, loginSecret: login.secret, deviceToken: deviceToken, sandbox: sandbox,
+                                 userId: userID, kinds: Self.ordered(kinds))
+        let data: Data
+        do {
+            data = try await send("subscriptions", method: "POST", body: body)
+        } catch TransitError.http(status: 404, _) {
+            throw OAuthError.loginEnded
+        }
         do {
             var subscription = try JSONDecoder().decode(FollowedCheckinPushSubscription.self, from: data)
-            subscription.readsNotifications = true
+            subscription.usesAppLogin = true
             return subscription
         } catch {
             throw TransitError.decoding(String(describing: error))
@@ -118,7 +119,7 @@ public struct FollowedCheckinPush: Sendable {
         }
     }
 
-    /// Ends the subscription and the Worker's Träwelling login. One already gone counts as ended.
+    /// Ends the subscription (and its own Träwelling login, before #452). One already gone counts as ended.
     public func unsubscribe(_ subscription: FollowedCheckinPushSubscription) async throws {
         do {
             _ = try await send("subscriptions/\(subscription.id)", method: "DELETE", body: DeleteBody(secret: subscription.secret))
@@ -147,8 +148,8 @@ public struct FollowedCheckinPush: Sendable {
     }
 
     private struct SubscribeBody: Encodable {
-        var code: String
-        var codeVerifier: String
+        var loginId: String
+        var loginSecret: String
         var deviceToken: String
         var sandbox: Bool
         var userId: Int

@@ -2,29 +2,32 @@
 // (#266) and about the user's own check-ins (#447: likes, people joining the same train), so they arrive
 // even while iOS doesn't let the app look itself.
 //
-// Turning them on in the app signs in with Träwelling a second time, for this Worker only and with the
-// read-only scopes `read-statuses` and `read-notifications`: the app sends the authorization code here and
-// the Worker keeps that login (encrypted), never the app's own. Träwelling's access tokens last an hour and
-// each refresh token works once, so sharing the app's login would log one of the two out.
+// Since #452 they use the app's Träwelling login, which this Worker keeps (logins.mjs). Sign-ups from before
+// signed in a second time, for this Worker only (read-only); those keep their own login until the app moves
+// them over.
 //
 // Every minute the cron trigger looks at the subscriptions due in that minute: Träwelling's dashboard for
 // followed check-ins, its notifications for likes and fellow travellers, then an APNs notification for
 // each one that is new since the last look. The first look only remembers what is there already.
 //
 // Likes and fellow travellers also arrive right away through a Träwelling webhook (`/traewelling/webhook`),
-// made with the Worker's login while TRAEWELLING_WEBHOOKS is "true"; the look every 2 minutes stays as the
+// made with the app's login while TRAEWELLING_WEBHOOKS is "true"; the look every 2 minutes stays as the
 // fallback (a webhook Träwelling turned off after failed deliveries, logins from before).
 //
 // It also looks after the journeys of regular trips (#397, `/commutes`, see commute.mjs).
 
 import { APNs } from "../shared/apns.mjs";
-import { TOKEN_HEADER, fromBase64, toBase64, unauthorized, verifyToken } from "../shared/appattest.mjs";
+import { TOKEN_HEADER, unauthorized, verifyToken } from "../shared/appattest.mjs";
 import { handleCommute, processDueCommutes } from "./commute.mjs";
+import {
+    LoginEnded, RejectedGrant, currentTokens, decryptTokens, encryptTokens, handleLogin, json, loginAAD, maintainLogins, randomHex,
+    requestTokens, sha256Hex, traewelling, verifiedLogin,
+} from "./logins.mjs";
 
 export { signProviderToken } from "../shared/apns.mjs";
+export { decryptTokens, encryptTokens } from "./logins.mjs";
 
-const TRAEWELLING = "https://traewelling.de";
-const USER_AGENT = "BetterBahn-Push (+https://betterbahn.betterbahn.workers.dev/support)";
+/// The scopes of a sign-up's own login (before #452).
 export const SCOPE = "read-statuses read-notifications";
 /// What a subscription is notified about: followed check-ins (dashboard), likes on the user's own check-ins
 /// and people checking in on the same train (Träwelling's notifications `StatusLiked`, `UserJoinedConnection`).
@@ -43,12 +46,14 @@ export const WEBHOOK_PATH = "/traewelling/webhook";
 
 // MARK: - HTTP
 
-/// POST   /subscriptions      { code, codeVerifier, deviceToken, sandbox, userId, kinds } → 201 { id, secret }
+/// POST   /subscriptions      { loginId, loginSecret, deviceToken, sandbox, userId, kinds } → 201 { id, secret }
+///                            (before #452 `code`, `codeVerifier` in place of the login: a login of its own)
 /// PUT    /subscriptions/<id> { secret, deviceToken, sandbox, kinds }                     → 200 {} (404: gone)
 /// DELETE /subscriptions/<id> { secret }                                            → 204
 /// PUT    /commutes/<id>      { secret, deviceToken, sandbox, journeys }            → 200 { watched } (see commute.mjs)
 /// GET    /login-options                                                           → 200 { authorize } (see `loginOptions`)
 /// POST   /traewelling/webhook  (Träwelling, signed)                                → 200 (410: unknown webhook)
+/// /logins…: the app's Träwelling login (see logins.mjs)
 /// `kinds` (see `KINDS`, at least one) defaults to ["followed"], what apps before #447 sign up for.
 export async function handleRequest(request, env = {}, now = Date.now(), deps = {}) {
     const url = new URL(request.url);
@@ -61,8 +66,9 @@ export async function handleRequest(request, env = {}, now = Date.now(), deps = 
     }
     const commute = url.pathname.match(/^\/commutes\/([^/]+)$/);
     const match = url.pathname.match(/^\/subscriptions(?:\/([^/]+))?$/);
-    if (!match && !commute) return json(404, { error: "not_found" });
-    if (!env.DB || (match && !env.TOKEN_KEY)) return json(503, { error: "not_configured" });
+    const login = /^\/logins(\/|$)/.test(url.pathname);
+    if (!match && !commute && !login) return json(404, { error: "not_found" });
+    if (!env.DB || ((match || login) && !env.TOKEN_KEY)) return json(503, { error: "not_configured" });
 
     // Only the genuine app: an App Attest token (same TOKEN_SECRET as the other Workers), or no token
     // while ALLOW_UNATTESTED is "true" (see ../shared/appattest.mjs).
@@ -88,6 +94,7 @@ export async function handleRequest(request, env = {}, now = Date.now(), deps = 
         if (request.method !== "PUT") return json(405, { error: "method_not_allowed" }, { Allow: "PUT" });
         return handleCommute(commute[1], body, env, now, deps.fetch ?? fetch);
     }
+    if (login) return handleLogin(url.pathname, request.method, body, env, now, deps);
 
     const [, id] = match;
     if (!id) {
@@ -95,7 +102,7 @@ export async function handleRequest(request, env = {}, now = Date.now(), deps = 
         return subscribe(body, env, now, deps.fetch ?? fetch);
     }
     if (!ID_PATTERN.test(id)) return json(404, { error: "not_found" });
-    const row = await env.DB.prepare("SELECT id, secret_hash, tokens, kinds, webhook_id FROM subscriptions WHERE id = ?").bind(id).first();
+    const row = await env.DB.prepare("SELECT id, secret_hash, tokens, kinds, login_id, webhook_id FROM subscriptions WHERE id = ?").bind(id).first();
     if (!row || typeof body.secret !== "string" || await sha256Hex(body.secret) !== row.secret_hash) {
         return json(404, { error: "not_found" });
     }
@@ -116,8 +123,10 @@ export async function handleRequest(request, env = {}, now = Date.now(), deps = 
     }
     if (request.method === "DELETE") {
         await env.DB.prepare("DELETE FROM subscriptions WHERE id = ?").bind(id).run();
-        // Ends the webhook and the Worker's Träwelling login too; nothing is lost when that fails: the token
-        // expires within the hour, and the webhook's next delivery gets a 410, on which Träwelling deletes it.
+        // The app's login (and its webhook) stays; a login of the sign-up's own (before #452) is ended too, with its
+        // webhook. Nothing is lost when that fails: the token expires within the hour, and the webhook's next
+        // delivery gets a 410, on which Träwelling deletes it.
+        if (row.login_id) return new Response(null, { status: 204 });
         const tokens = await decryptTokens(row.tokens, id, env.TOKEN_KEY).catch(() => null);
         if (tokens && Number.isSafeInteger(row.webhook_id)) {
             await traewelling(`api/v1/webhooks/${row.webhook_id}`, tokens.access, { method: "DELETE" }, deps.fetch ?? fetch).catch(() => {});
@@ -131,13 +140,19 @@ export async function handleRequest(request, env = {}, now = Date.now(), deps = 
 async function subscribe(body, env, now, fetchUpstream) {
     const { code, codeVerifier, deviceToken, sandbox, userId } = body;
     const kinds = body.kinds === undefined ? ["followed"] : parseKinds(body.kinds);
-    if (typeof code !== "string" || !code || code.length > 2048 || typeof codeVerifier !== "string"
-        || !/^[A-Za-z0-9._~-]{43,128}$/.test(codeVerifier)) {
+    const withLogin = body.loginId !== undefined;
+    if (!withLogin && (typeof code !== "string" || !code || code.length > 2048 || typeof codeVerifier !== "string"
+        || !/^[A-Za-z0-9._~-]{43,128}$/.test(codeVerifier))) {
         return json(400, { error: "invalid_code" });
     }
     if (!isDeviceToken(deviceToken)) return json(400, { error: "invalid_device_token" });
     if (!Number.isSafeInteger(userId) || userId <= 0) return json(400, { error: "invalid_user" });
     if (!kinds) return json(400, { error: "invalid_kinds" });
+    if (withLogin) {
+        // The app's login (#452): no second one.
+        if (!await verifiedLogin(env, body.loginId, body.loginSecret)) return json(404, { error: "login_not_found" });
+        return insertSubscription(env, now, { deviceToken, sandbox, userId, kinds, loginID: body.loginId });
+    }
 
     let tokens;
     try {
@@ -152,15 +167,21 @@ async function subscribe(body, env, now, fetchUpstream) {
         return json(error instanceof RejectedGrant ? 400 : 502, { error: error instanceof RejectedGrant ? "invalid_code" : "traewelling_unavailable" });
     }
 
+    return insertSubscription(env, now, { deviceToken, sandbox, userId, kinds, tokens });
+}
+
+/// A new sign-up with the app's login (`loginID`) or one of its own (`tokens`).
+async function insertSubscription(env, now, { deviceToken, sandbox, userId, kinds, loginID = null, tokens = null }) {
     const id = randomHex(16);
     const secret = randomHex(32);
     const slot = crypto.getRandomValues(new Uint8Array(1))[0] % 60;
-    // Träwelling made a webhook when the login asked for one (`loginOptions`); only its secret is kept, sealed.
-    const { webhook, ...login } = tokens;
+    // Träwelling made a webhook when the login of its own asked for one (`loginOptions`); only its secret is kept,
+    // sealed. With the app's login, the webhook is the login's (logins.mjs).
+    const { webhook = null, ...login } = tokens ?? {};
     await env.DB.prepare(
-        "INSERT INTO subscriptions (id, secret_hash, device_token, sandbox, user_id, tokens, known, kinds, notified, webhook_id, webhook, slot, created) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?)",
-    ).bind(id, await sha256Hex(secret), deviceToken, sandbox ? 1 : 0, userId, await encryptTokens(login, id, env.TOKEN_KEY),
-        JSON.stringify(kinds), webhook?.id ?? null, webhook ? await encryptTokens({ secret: webhook.secret }, id, env.TOKEN_KEY) : null,
+        "INSERT INTO subscriptions (id, secret_hash, device_token, sandbox, user_id, tokens, login_id, known, kinds, notified, webhook_id, webhook, slot, created) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?)",
+    ).bind(id, await sha256Hex(secret), deviceToken, sandbox ? 1 : 0, userId, tokens ? await encryptTokens(login, id, env.TOKEN_KEY) : "",
+        loginID, JSON.stringify(kinds), webhook?.id ?? null, webhook ? await encryptTokens({ secret: webhook.secret }, id, env.TOKEN_KEY) : null,
         slot, Math.floor(now / 1000)).run();
     return json(201, { id, secret });
 }
@@ -181,11 +202,16 @@ async function handleWebhook(request, env, now, deps) {
     if (body.length > MAX_WEBHOOK_BYTES) return json(413, { error: "too_large" });
     const webhookID = Number(request.headers.get("X-Trwl-Webhook-Id"));
     if (!Number.isSafeInteger(webhookID) || webhookID <= 0) return json(400, { error: "invalid_webhook" });
-    const row = await env.DB.prepare(
-        "SELECT id, device_token, sandbox, kinds, notified, webhook FROM subscriptions WHERE webhook_id = ?",
-    ).bind(webhookID).first();
-    if (!row?.webhook) return json(410, { error: "gone" });
-    const { secret } = await decryptTokens(row.webhook, row.id, env.TOKEN_KEY);
+    // The webhook of a sign-up's own login (before #452), else of the app's login with every sign-up on it.
+    let owner = await env.DB.prepare("SELECT id, webhook FROM subscriptions WHERE webhook_id = ?").bind(webhookID).first();
+    let aad = owner?.id;
+    let rows = owner ? [owner] : [];
+    if (!owner) {
+        owner = await env.DB.prepare("SELECT id, webhook FROM logins WHERE webhook_id = ?").bind(webhookID).first();
+        aad = owner ? loginAAD(owner.id) : undefined;
+    }
+    if (!owner?.webhook) return json(410, { error: "gone" });
+    const { secret } = await decryptTokens(owner.webhook, aad, env.TOKEN_KEY);
     if (!await validSignature(body, request.headers.get("Signature"), secret)) return json(401, { error: "invalid_signature" });
 
     let payload;
@@ -195,12 +221,18 @@ async function handleWebhook(request, env, now, deps) {
         return json(400, { error: "invalid_json" });
     }
     const item = payload?.event === "notification" ? payload.notification : null;
-    const push = typeof item?.id === "string" && item.id.length <= 64 ? ownCheckinNotification(item, storedKinds(row.kinds)) : null;
-    const notified = row.notified ? JSON.parse(row.notified) : null;
-    if (!push || notified?.includes(item.id)) return json(200, {});
+    if (typeof item?.id !== "string" || item.id.length > 64) return json(200, {});
+    const columns = "id, device_token, sandbox, kinds, notified";
+    rows = rows.length > 0
+        ? [await env.DB.prepare(`SELECT ${columns} FROM subscriptions WHERE id = ?`).bind(owner.id).first()]
+        : (await env.DB.prepare(`SELECT ${columns} FROM subscriptions WHERE login_id = ?`).bind(owner.id).all()).results ?? [];
 
-    const deliver = (async () => {
-        const result = await new APNs(env, now, deps.fetch ?? fetch).send(row.device_token, row.sandbox, push.payload, {
+    const apns = new APNs(env, now, deps.fetch ?? fetch);
+    const deliver = Promise.all(rows.map(async row => {
+        const push = ownCheckinNotification(item, storedKinds(row.kinds));
+        const notified = row.notified ? JSON.parse(row.notified) : null;
+        if (!push || notified?.includes(item.id)) return;
+        const result = await apns.send(row.device_token, row.sandbox, push.payload, {
             "apns-topic": env.APNS_TOPIC,
             "apns-push-type": "alert",
             "apns-priority": "10",
@@ -213,7 +245,7 @@ async function handleWebhook(request, env, now, deps) {
             // that look takes in whatever is there.
             await saveNotified(env, row.id, [...notified, item.id]);
         }
-    })().catch(error => console.log(`webhook push failed: ${error?.message ?? error}`));
+    })).catch(error => console.log(`webhook push failed: ${error?.message ?? error}`));
     if (deps.waitUntil) deps.waitUntil(deliver); else await deliver;
     return json(200, {});
 }
@@ -247,13 +279,6 @@ function isDeviceToken(value) {
     return typeof value === "string" && DEVICE_TOKEN_PATTERN.test(value);
 }
 
-function json(status, body, headers = {}) {
-    return new Response(JSON.stringify(body), {
-        status,
-        headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...headers },
-    });
-}
-
 // MARK: - Cron
 
 /// Looks at the subscriptions due in this minute. Returns how many it looked at.
@@ -262,7 +287,7 @@ export async function processDueSubscriptions(env, now = Date.now(), deps = {}) 
     const interval = Math.min(60, Math.max(1, Number(env.INTERVAL_MINUTES) || 2));
     const minute = Math.floor(now / 60000) % 60;
     const { results } = await env.DB.prepare(
-        "SELECT id, device_token, sandbox, user_id, tokens, known, kinds, notified FROM subscriptions WHERE slot % ? = ?",
+        "SELECT id, device_token, sandbox, user_id, tokens, login_id, known, kinds, notified FROM subscriptions WHERE slot % ? = ?",
     ).bind(interval, minute % interval).all();
 
     const apns = new APNs(env, now, fetchUpstream);
@@ -282,9 +307,18 @@ export async function processDueSubscriptions(env, now = Date.now(), deps = {}) 
 async function check(subscription, env, now, fetchUpstream, apns) {
     const { id } = subscription;
     const kinds = storedKinds(subscription.kinds);
-    let tokens = await decryptTokens(subscription.tokens, id, env.TOKEN_KEY);
+    const loginID = subscription.login_id;
+    let tokens = loginID
+        ? await currentTokens(env, loginID, now, fetchUpstream, { renewBefore: MINUTE })
+        : await decryptTokens(subscription.tokens, id, env.TOKEN_KEY);
     let refreshed = false;
     const refresh = async () => {
+        if (loginID) {
+            // The app's login, renewed in one place (logins.mjs); it throws `LoginEnded` when Träwelling ended it.
+            tokens = await currentTokens(env, loginID, now, fetchUpstream, { rejected: tokens.access });
+            refreshed = true;
+            return;
+        }
         tokens = await requestTokens({
             grant_type: "refresh_token",
             client_id: env.TRAEWELLING_CLIENT_ID ?? "406",
@@ -298,7 +332,7 @@ async function check(subscription, env, now, fetchUpstream, apns) {
     /// A Träwelling page, null when it doesn't answer (the next look tries again). Throws `RejectedGrant`
     /// when the login ended (revoked on Träwelling, unused too long).
     const load = async (path) => {
-        if (tokens.expires <= now / 1000 + MINUTE && !refreshed) await refresh();
+        if (tokens.expires <= now / 1000 + MINUTE && !refreshed && !loginID) await refresh();
         let response = await traewelling(path, tokens.access, {}, fetchUpstream);
         if (response.status === 401 && !refreshed) {
             await refresh();
@@ -324,7 +358,7 @@ async function check(subscription, env, now, fetchUpstream, apns) {
         if (readsNotifications(kinds)) await checkNotifications(subscription, kinds, env, load, send);
     } catch (error) {
         // The app learns it from a 404 and turns the settings off.
-        if (error instanceof RejectedGrant || error instanceof DeviceGone) {
+        if (error instanceof RejectedGrant || error instanceof LoginEnded || error instanceof DeviceGone) {
             await env.DB.prepare("DELETE FROM subscriptions WHERE id = ?").bind(id).run();
             return;
         }
@@ -338,7 +372,7 @@ async function checkFollowed(subscription, env, now, load, send) {
     try {
         page = await load("api/v1/dashboard");
     } catch (error) {
-        if (error instanceof RejectedGrant) throw error;
+        if (error instanceof RejectedGrant || error instanceof LoginEnded) throw error;
         return;
     }
     if (!page) return;
@@ -371,7 +405,7 @@ async function checkNotifications(subscription, kinds, env, load, send) {
     try {
         page = await load("api/v1/notifications");
     } catch (error) {
-        if (error instanceof RejectedGrant) throw error;
+        if (error instanceof RejectedGrant || error instanceof LoginEnded) throw error;
         return;
     }
     // A login from before #447 can't read them (403): it only gets followed check-ins.
@@ -503,78 +537,7 @@ export function ownCheckinNotification(item, kinds) {
 
 // MARK: - Träwelling
 
-class RejectedGrant extends Error {}
 class DeviceGone extends Error {}
-
-function traewelling(path, accessToken, init, fetchUpstream) {
-    return fetchUpstream(`${TRAEWELLING}/${path}`, {
-        ...init,
-        headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json", "User-Agent": USER_AGENT },
-    });
-}
-
-/// Asks Träwelling's token endpoint; throws `RejectedGrant` when it refuses the code or refresh token.
-async function requestTokens(form, now, fetchUpstream) {
-    const response = await fetchUpstream(`${TRAEWELLING}/oauth/token`, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json", "User-Agent": USER_AGENT },
-        body: new URLSearchParams(form).toString(),
-    });
-    const body = await response.json().catch(() => null);
-    if (!response.ok) {
-        if ([400, 401].includes(response.status) && ["invalid_grant", "invalid_request", "invalid_client"].includes(body?.error)) {
-            throw new RejectedGrant();
-        }
-        throw new Error(`token endpoint ${response.status}`);
-    }
-    if (typeof body?.access_token !== "string" || typeof body?.refresh_token !== "string") throw new Error("no token");
-    const tokens = {
-        access: body.access_token,
-        refresh: body.refresh_token,
-        expires: Math.floor(now / 1000) + (Number(body.expires_in) > 0 ? Number(body.expires_in) : 3600),
-    };
-    // Träwelling adds the webhook it made for this login (only when exchanging an authorization code).
-    const webhook = body.webhook;
-    if (Number.isSafeInteger(webhook?.id) && typeof webhook?.secret === "string" && webhook.secret.length <= 256) {
-        tokens.webhook = { id: webhook.id, secret: webhook.secret };
-    }
-    return tokens;
-}
-
-// MARK: - Stored logins
-
-async function tokenKey(base64) {
-    return crypto.subtle.importKey("raw", fromBase64(base64), "AES-GCM", false, ["encrypt", "decrypt"]);
-}
-
-/// AES-GCM with TOKEN_KEY, bound to the subscription ID; stored as base64(iv ‖ ciphertext).
-export async function encryptTokens(tokens, id, keyBase64) {
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-    const sealed = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: new TextEncoder().encode(id) },
-        await tokenKey(keyBase64), new TextEncoder().encode(JSON.stringify(tokens)));
-    const out = new Uint8Array(12 + sealed.byteLength);
-    out.set(iv);
-    out.set(new Uint8Array(sealed), 12);
-    return toBase64(out);
-}
-
-export async function decryptTokens(stored, id, keyBase64) {
-    const bytes = fromBase64(stored);
-    const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: bytes.slice(0, 12), additionalData: new TextEncoder().encode(id) },
-        await tokenKey(keyBase64), bytes.slice(12));
-    return JSON.parse(new TextDecoder().decode(plain));
-}
-
-// MARK: - Helpers
-
-function randomHex(bytes) {
-    return [...crypto.getRandomValues(new Uint8Array(bytes))].map(byte => byte.toString(16).padStart(2, "0")).join("");
-}
-
-async function sha256Hex(text) {
-    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-    return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
-}
 
 export default {
     fetch(request, env, ctx) {
@@ -583,5 +546,6 @@ export default {
     scheduled(event, env, ctx) {
         ctx.waitUntil(processDueSubscriptions(env, event.scheduledTime));
         ctx.waitUntil(processDueCommutes(env, event.scheduledTime));
+        ctx.waitUntil(maintainLogins(env, event.scheduledTime));
     },
 };

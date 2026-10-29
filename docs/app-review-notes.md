@@ -23,10 +23,11 @@ features or data flows change (and update the privacy policy in `Cloudflare/work
   declare it (e.g. "Other User Content", not linked, not tracking). The train statistics
   (`Cloudflare/stats`, Settings → "Zugstatistik anzeigen", on by default) only ask that server for a
   train's figures by train number and stops, nothing is kept; the figures come from DB's open data
-  (#336), the app reports nothing. Second exception: the check-in notifications (`Cloudflare/checkin-push`, Settings →
-  Träwelling "Check-ins von Gefolgten melden", off by default) keep the Träwelling user ID, a read-only
-  Träwelling login, the APNs device token and seen status IDs until turned off – likely "Identifiers →
-  User ID" and "Device ID", linked to the user, not tracking, purpose "App Functionality". Third exception: the
+  (#336), the app reports nothing. Second exception: the user's Träwelling login (#452) is kept encrypted on
+  `Cloudflare/checkin-push` while logged in (deleted on logout or after 180 days unused), and the check-in
+  notifications (Settings → Träwelling → "Mitteilungen", off by default) keep the Träwelling user ID, the APNs
+  device token and seen status and notification IDs until turned off – likely "Identifiers → User ID" and
+  "Device ID", linked to the user, not tracking, purpose "App Functionality". Third exception: the
   Live Activity updates (`Cloudflare/live-activity`, Settings → Meine Reisen "Live-Aktivität über Server
   aktualisieren", on by default) keep the running journey (trains, stations, times, platforms) and the activity's
   push token from leaving the app until the arrival or reopening it – likely "Other User Content", not linked to
