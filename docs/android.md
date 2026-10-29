@@ -1,6 +1,6 @@
 # BetterBahn for Android
 
-Status: prototype (#467). The Android app lives in `Android/` in this repo and keeps feature parity with the iOS
+Status: prototype (#467): connections (with via stations), results, journey details, departure board, train view (saving a ride), train number search, saved journeys. The Android app lives in `Android/` in this repo and keeps feature parity with the iOS
 app: same logic (BetterBahnKit, built with the Swift SDK for Android), native UI in Kotlin/Jetpack Compose, same
 version number.
 
@@ -8,8 +8,9 @@ version number.
 
 | Path | Contents |
 | --- | --- |
-| `Android/kit/` | Swift package building BetterBahnKit for Android. `build.sh` links the Kit's source folders into `Sources/BetterBahnKit/` (gitignored), `Package.swift` leaves out what needs Apple frameworks, `Shims/` holds the Android stand-ins (FoundationNetworking/FoundationXML re-exported, a no-op `WorkerAuth`), `Bridge/KitBridge.swift` the JNI functions. Output: `libBetterBahnKit.so` (Swift runtime linked in) + `libc++_shared.so` per ABI in `Android/app/src/main/jniLibs/`, the Kit's JSON data in `Android/app/src/main/assets/BetterBahnKit/` (both gitignored). |
-| `Android/app/` | The Android app (Gradle, AGP 9, Kotlin, Compose, Material 3). `kit/Kit.kt` loads the library, copies the JSON data out of the APK once per update and wraps the JNI calls; results come as JSON of the Kit's own models. `MainActivity.kt`: so far one screen, the station search. |
+| `Android/kit/` | Swift package building BetterBahnKit for Android. `build.sh` links the Kit's source folders into `Sources/BetterBahnKit/` (gitignored), `Package.swift` leaves out what needs Apple frameworks, `Shims/` holds the Android stand-ins (FoundationNetworking/FoundationXML re-exported, a no-op `WorkerAuth`). Output: `libBetterBahnKit.so` (Swift runtime linked in) + `libc++_shared.so` per ABI in `Android/app/src/main/jniLibs/`, the Kit's JSON data in `Android/app/src/main/assets/BetterBahnKit/` (both gitignored). |
+| `Android/kit/Bridge/` | The bridge. `KitBridge.swift`: one JNI function taking a method name and JSON (UTF-8 bytes both ways), run on Swift concurrency. `Methods.swift`: one handler per method (`searchStations`, `journeys` incl. via stations, `completeJourney`, `refreshJourney`, `describeJourneys`, `board`, `trip`, `tripForLeg`, `tripLeg`, `searchTrains`, `trainRun`), calling the Kit as the iOS views do (same provider, same steps). `Display.swift`: Kit models go out as their own Codable JSON (dates in ms) plus what iOS computes from them (line display name and colour, journey duration, bar spans, issues, intermediate stops …); route shapes are dropped. `StationNames.swift`: adds `displayName` to every station. |
+| `Android/app/` | The Android app (Gradle, AGP 9, Kotlin, Compose, Material 3). `kit/`: `Kit.kt` loads the library, copies the JSON data out of the APK once per update and wraps the methods; `Models.kt` mirrors the Kit's JSON (journeys and trips keep it as `raw` to hand back); `KitJson.kt` reads answers (unit-tested against recorded answers in `src/test/resources/kit/`). `AppModel.kt`: tabs, a stack of screens per tab (state of results/detail lives in the route), saved journeys. `data/Store.kt`: favourites, recent stations and searches, saved journeys as JSON in SharedPreferences. `ui/`: the screens, `Theme.kt`/`Format.kt`/`Components.kt` port the iOS app's colours, formats and badges (`DesignSystem.swift`). |
 | `Android/gradle/libs.versions.toml` | Versions of AGP, Kotlin, Compose. |
 
 `applicationId` and package are `de.goldkunibert.betterbahn`. The ID is permanent once the app is on Google Play:
@@ -34,7 +35,11 @@ from breaking the Android build unnoticed.
 
 From a cloud session: Swift, the SDK and the NDK aren't preinstalled; download them from swift.org and
 dl.google.com (a few GB, ~5 min). Maven Central sometimes answers `429`: rerun Gradle with `--max-workers=1`.
-There's no emulator in the cloud (no KVM), so the app is only built there and tested on the owner's PC.
+There's no emulator in the cloud (no KVM), so the app is only built there and tested on the owner's PC. What can be
+checked there: the bridge on Linux (a package with the same sources plus an executable calling `Methods.call`, or
+the bridge built as a Linux `.so` against the JDK's `jni.h` and called from a JVM test through `Kit`), and Compose
+screens rendered with Paparazzi in a scratch copy of `Android/`. Point `PACKAGE_RESOURCE_BUNDLE_PATH` at the folder
+holding `<package>_BetterBahnKit.bundle`.
 
 ## What's not on Android yet
 
@@ -50,10 +55,15 @@ Left out of the Android Kit build (`Android/kit/Package.swift`) because they nee
 Kit code behind `#if canImport(SwiftUI|ActivityKit|PDFKit)` (product colours, Live Activity attributes, ticket
 scanning) compiles to nothing on Android.
 
+Not ported yet (app side): tickets and passenger rights, Träwelling, Wagenreihung, live map, widgets and Live
+Activity, ticket filter and bike option in the search, "Anderer Zug"/alternatives, regular trips, statistics,
+sharing, iCloud sync. bahn.de's extras (train names, occupancy, coach sequence) arrive once Play Integrity is there.
+
 Open technical points:
-- **Resources in release builds**: SwiftPM's `Bundle.module` can't see into the APK. The bridge points it at the
-  copied JSON data with `PACKAGE_RESOURCE_BUNDLE_PATH`, which SwiftPM only reads in debug builds. Before a
-  release build the Kit needs its own resource lookup that the app can set.
+- **Resources**: SwiftPM's `Bundle.module` can't see into the APK. `Kit.start` copies the JSON data to
+  `files/BetterBahnKit/BetterBahnKitAndroid_BetterBahnKit.bundle/` and the bridge points `PACKAGE_RESOURCE_BUNDLE_PATH`
+  at the folder above it. SwiftPM reads that override only with `DEBUG` defined, so `Android/kit/Package.swift`
+  defines it for the Kit (which uses `DEBUG` only for Apple's logging).
 - **Size**: `libBetterBahnKit.so` is ~60 MB per ABI without symbols (~23 MB compressed), mostly ICU data for
   Foundation. Google Play delivers one ABI per device (App Bundle).
 - **Push**: APNs only so far; `Cloudflare/checkin-push` and `Cloudflare/live-activity` need FCM.
