@@ -399,7 +399,8 @@ in `project.pbxproj`: new files join their target automatically.
   per train and year, logs under `vagonweb`. Turned round at `reversalStations`/`terminusStations` (along
   `FormationRequest.stopsBefore`). "Abweichende Wagenreihung" from `CoachSequence.deviations(fromPlan:)` (bahn.de's
   `sequenceStatus` is set for nearly every train). Country per railway (`VagonwebClient.countries(for:)`, ÖBB first
-  for NJ/EN). `NJ`, `EN`, `IR` (`plannedCategories`, `BahnDeClient.plannedOnlyCategories`) are never asked of bahn.de (an
+  for NJ/EN); a composition from a later country only counts when its `train` (from `info_vlak`) is the one asked for
+  (#470: ICE 2506, a replacement train without a DB plan, got an SBB train 2506). `NJ`, `EN`, `IR` (`plannedCategories`, `BahnDeClient.plannedOnlyCategories`) are never asked of bahn.de (an
   unknown category's 403 pauses everything). Sections where the composition changes: `Section.covers`,
   `composition(…route:)`, `restricted(to:)`, `startsReversed`; trains running together ("RJX 184") left out. Parser
   reads vagonweb's HTML and a browser's serialized DOM. Coach notes like "runs on ⑥, ⑦ until 13.6. and from 17.10., on 24., 25.12. …"

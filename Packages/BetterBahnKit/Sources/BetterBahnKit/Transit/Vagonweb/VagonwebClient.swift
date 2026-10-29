@@ -52,7 +52,7 @@ public struct VagonwebClient: Sendable {
     public func composition(category: String, number: String, on date: Date, route: [String]? = nil,
                             countries: [String]? = nil) async throws -> VagonwebComposition? {
         guard Int(number) != nil else { throw TransitError.invalidInput("Zugnummer ungültig.") }
-        for country in countries ?? Self.countries(for: category) {
+        for (index, country) in (countries ?? Self.countries(for: category)).enumerated() {
             let url = Self.trainURL(category: category, number: number, timetableYear: Self.timetableYear(of: date), country: country)
             let found: [VagonwebComposition]
             do {
@@ -61,6 +61,9 @@ public struct VagonwebClient: Sendable {
                 continue
             }
             let compositions = found.filter { composition in
+                // Under another railway's a train with the same number may be another one: ICE 2506 running
+                // instead of ICE 706 has no plan under DB's, but the SBB may have a train 2506.
+                guard index == 0 || composition.isTrain(category: category, number: number) else { return false }
                 guard let route, let section = composition.section else { return true }
                 return section.covers(route: route)
             }
