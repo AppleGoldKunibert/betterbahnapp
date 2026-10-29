@@ -97,3 +97,4 @@ AppStoreScreenshots/6.5-Zoll/06-live-aktivitaet.png
 # OSM extracts for scripts/make-exit-sides.py (gigabytes) and Python caches
 *.osm.pbf
 __pycache__/
+/.idea
