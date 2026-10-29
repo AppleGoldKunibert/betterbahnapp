@@ -40,6 +40,8 @@ struct JourneyDisplay: Encodable {
     var brokenTransferIndices: [Int]
     /// Missed or tight transfers and cancelled legs (`Journey.currentIssues`).
     var issues: [IssueDisplay]
+    /// With a ticket filter: whether the ticket covers it.
+    var validWithTicket: Bool?
 
     init(_ journey: Journey) {
         id = journey.id

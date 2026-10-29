@@ -82,6 +82,7 @@ class BoardState {
     var departures by mutableStateOf(true)
     var time by mutableStateOf<Long?>(null)
     var products by mutableStateOf(Product.all)
+    var onlyValidTicket by mutableStateOf(false)
     var entries by mutableStateOf<List<BoardEntryDisplay>?>(null)
     var error by mutableStateOf<String?>(null)
     var loadedAt by mutableLongStateOf(0L)
@@ -102,6 +103,8 @@ fun DeparturesScreen(model: AppModel) {
     var departures by board::departures
     var time by board::time
     var products by board::products
+    var onlyValidTicket by board::onlyValidTicket
+    val ticket by model.store.ticketType.collectAsState()
     var entries by board::entries
     var error by board::error
     var loadedAt by board::loadedAt
@@ -116,9 +119,9 @@ fun DeparturesScreen(model: AppModel) {
     fun start() = time ?: (System.currentTimeMillis() - 5 * 60_000)
 
     suspend fun load(at: Station, from: Long) =
-        Kit.board(at, departures, from, WINDOW, products.takeIf { it != Product.all })
+        Kit.board(at, departures, from, WINDOW, products.takeIf { it != Product.all }, ticket.takeIf { onlyValidTicket })
 
-    LaunchedEffect(station, departures, time, products, reload) {
+    LaunchedEffect(station, departures, time, products, onlyValidTicket, reload) {
         val at = station ?: return@LaunchedEffect
         // Back from a train: the board shown is fresh enough.
         if (entries != null && reload == 0 && System.currentTimeMillis() - loadedAt < 60_000) delay(60_000 - (System.currentTimeMillis() - loadedAt))
@@ -182,6 +185,7 @@ fun DeparturesScreen(model: AppModel) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.Center) {
                     TimeSelector(time, onChange = { time = it; entries = null })
                     if (products != Product.all) SuggestionChip(onClick = { filtering = true }, label = { Text(productSummary(products), maxLines = 1) })
+                    if (onlyValidTicket) SuggestionChip(onClick = { filtering = true }, label = { Text(ticket.filterTitle, maxLines = 1) })
                     if (loadedAt > 0) Text("Stand ${timeString(loadedAt)}", Modifier.align(Alignment.CenterVertically), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -208,7 +212,15 @@ fun DeparturesScreen(model: AppModel) {
         StationPicker(model.store, "Bahnhof suchen", onPick = { board.station = it; entries = null; picking = false }, onDismiss = { picking = false })
     }
     if (filtering) {
-        ProductFilterSheet(products, onChange = { products = it; entries = null }, onDismiss = { filtering = false }, showRegionalShortcut = true)
+        ProductFilterSheet(
+            products,
+            onChange = { products = it; entries = null },
+            onDismiss = { filtering = false },
+            showRegionalShortcut = true,
+            ticket = ticket,
+            onlyValidTicket = onlyValidTicket,
+            onTicketChange = { onlyValidTicket = it; entries = null },
+        )
     }
 }
 

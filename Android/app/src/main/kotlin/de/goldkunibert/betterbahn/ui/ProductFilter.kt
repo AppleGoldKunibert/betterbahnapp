@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -14,11 +15,14 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import de.goldkunibert.betterbahn.kit.Product
+import de.goldkunibert.betterbahn.kit.TicketType
 
 /** "Alle", "Keine ausgewählt" or the chosen groups (`productSummary`). */
 fun productSummary(products: Set<Product>): String = when {
@@ -36,9 +40,21 @@ fun ProductFilterSheet(
     onChange: (Set<Product>) -> Unit,
     onDismiss: () -> Unit,
     showRegionalShortcut: Boolean = false,
+    ticket: TicketType? = null,
+    onlyValidTicket: Boolean = false,
+    onTicketChange: (Boolean) -> Unit = {},
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            ticket?.let {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(it.filterTitle, style = MaterialTheme.typography.titleMedium)
+                        Text(it.filterSubtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = onlyValidTicket, onCheckedChange = onTicketChange)
+                }
+            }
             Text("Verkehrsmittel", style = MaterialTheme.typography.titleMedium)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(ChipSpacing)) {
                 FilterChip(products == Product.trains, onClick = { onChange(Product.trains) }, label = { Text("Nur Züge") })

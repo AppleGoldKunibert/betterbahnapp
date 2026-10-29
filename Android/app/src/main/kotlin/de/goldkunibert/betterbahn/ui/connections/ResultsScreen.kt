@@ -29,6 +29,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -53,6 +54,7 @@ import kotlinx.coroutines.launch
 class ResultsState(initial: ConnectionSearch) {
     var search by mutableStateOf(initial)
     var journeys by mutableStateOf<List<JourneyDisplay>?>(null)
+    var hidden by mutableIntStateOf(0)
     var earlier by mutableStateOf<String?>(null)
     var later by mutableStateOf<String?>(null)
     var error by mutableStateOf<String?>(null)
@@ -75,10 +77,12 @@ fun ResultsScreen(model: AppModel, state: ResultsState) {
     var paging by state::paging
     var reload by state::reload
     val scope = rememberCoroutineScope()
+    val ticket by model.store.ticketType.collectAsState()
 
     suspend fun page(cursor: String?) = Kit.journeys(
         search.from, search.to, search.date ?: System.currentTimeMillis(), search.isArrival, cursor,
         products = search.products.takeIf { it != Product.all }, maxTransfers = search.maxTransfers, via = search.via,
+        ticket = ticket.takeIf { search.onlyValidTicket },
     )
 
     LaunchedEffect(search, reload) {
@@ -87,6 +91,7 @@ fun ResultsScreen(model: AppModel, state: ResultsState) {
         try {
             val loaded = page(null)
             journeys = loaded.journeys
+            state.hidden = loaded.hiddenCount
             earlier = loaded.earlierCursor
             later = loaded.laterCursor
             state.loadedFor = search to reload
@@ -104,6 +109,7 @@ fun ResultsScreen(model: AppModel, state: ResultsState) {
                 val current = journeys.orEmpty()
                 val ids = current.map { it.id }.toSet()
                 val fresh = loaded.journeys.filter { it.id !in ids }
+                state.hidden += loaded.hiddenCount
                 if (prepend) {
                     journeys = fresh + current
                     earlier = loaded.earlierCursor
@@ -136,6 +142,7 @@ fun ResultsScreen(model: AppModel, state: ResultsState) {
             }
             if (search.products != Product.all) AssistChip(onClick = {}, label = { Text("Verkehrsmittel gefiltert") })
             if (search.isArrival) AssistChip(onClick = {}, label = { Text("Ankunft") })
+            if (search.onlyValidTicket) AssistChip(onClick = {}, label = { Text(ticket.filterTitle) })
         }
         PullToRefreshBox(
             isRefreshing = refreshing,
@@ -151,10 +158,19 @@ fun ResultsScreen(model: AppModel, state: ResultsState) {
                 }
                 list.isEmpty() -> Message("Keine Verbindungen\nVersuch eine andere Uhrzeit oder weniger Filter.")
                 else -> LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // With the ticket filter: the ones the ticket covers; the border crossers only when nothing else fits.
+                    val covered = list.filter { it.validWithTicket != false }
+                    val shown = if (search.onlyValidTicket && covered.isNotEmpty()) covered else list
+                    val notUsable = state.hidden + list.size - shown.size
+                    if (search.onlyValidTicket && notUsable > 0) {
+                        item {
+                            Text("$notUsable nicht mit ${ticket.shortName} nutzbar", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
                     earlier?.let { cursor ->
                         item { PageButton("Frühere Verbindungen", paging) { loadMore(cursor, prepend = true) } }
                     }
-                    items(list, key = { it.id }) { journey ->
+                    items(shown, key = { it.id }) { journey ->
                         JourneyCard(journey) { model.push(Route.Detail(journey)) }
                     }
                     later?.let { cursor ->

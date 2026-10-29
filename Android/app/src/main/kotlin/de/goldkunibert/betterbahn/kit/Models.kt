@@ -166,6 +166,8 @@ data class JourneyDisplay(
     val isOver: Boolean = false,
     val brokenTransferIndices: List<Int> = emptyList(),
     val issues: List<Issue> = emptyList(),
+    /** With a ticket filter: whether the ticket covers it. */
+    val validWithTicket: Boolean? = null,
 ) {
     /** The journey's Kit JSON, to hand back (save, refresh, open a leg's train). */
     @Transient
@@ -179,7 +181,21 @@ data class JourneysPage(
     val journeys: List<JourneyDisplay>,
     val earlierCursor: String? = null,
     val laterCursor: String? = null,
+    /** Dropped by the ticket filter. */
+    val hiddenCount: Int = 0,
 )
+
+/** The ticket for the "only with my ticket" filters (`TicketType`). */
+enum class TicketType(val id: String, val displayName: String, val shortName: String, val filterSubtitle: String) {
+    Deutschlandticket("deutschlandticket", "Deutschlandticket", "D-Ticket", "ICE, IC & Co. ausblenden"),
+    BahnCard100("bahnCard100", "BahnCard 100", "BC100", "FlixTrain & Co. ausblenden");
+
+    val filterTitle: String get() = "Nur $displayName"
+
+    companion object {
+        fun of(id: String?): TicketType = entries.firstOrNull { it.id == id } ?: Deutschlandticket
+    }
+}
 
 @Serializable
 data class BoardEntry(

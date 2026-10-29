@@ -34,6 +34,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -72,6 +73,7 @@ fun ConnectionsScreen(model: AppModel) {
     var picking by remember { mutableStateOf<Field?>(null) }
     var filtering by remember { mutableStateOf(false) }
     val recentSearches by model.store.recentSearches.collectAsState()
+    val ticket by model.store.ticketType.collectAsState()
 
     fun search(search: ConnectionSearch) {
         model.store.rememberSearch(search.from, search.to)
@@ -125,6 +127,13 @@ fun ConnectionsScreen(model: AppModel) {
                     }
                     if (form.via.isNotEmpty()) {
                         Text("Mit Zwischenhalten suchen wir ab der gewählten Abfahrtszeit.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(ticket.filterTitle)
+                            Text(ticket.filterSubtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(checked = form.onlyValidTicket, onCheckedChange = { model.form = form.copy(onlyValidTicket = it) })
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Zeit", Modifier.weight(1f))

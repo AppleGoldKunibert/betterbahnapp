@@ -69,6 +69,7 @@ object Kit {
         products: Set<Product>? = null,
         maxTransfers: Int? = null,
         via: List<Station> = emptyList(),
+        ticket: TicketType? = null,
     ): JourneysPage {
         val result = call("journeys", buildJsonObject {
             put("from", json.encodeToJsonElement(from))
@@ -78,6 +79,7 @@ object Kit {
             cursor?.let { put("cursor", it) }
             products?.let { set -> put("products", json.encodeToJsonElement(set.map { it.id })) }
             maxTransfers?.let { put("maxTransfers", it) }
+            ticket?.let { put("ticket", it.id) }
             if (via.isNotEmpty()) {
                 put("via", JsonArray(via.map { station ->
                     buildJsonObject {
@@ -99,8 +101,16 @@ object Kit {
         return result.jsonArray.map(KitJson::journey)
     }
 
-    suspend fun board(station: Station, departures: Boolean, date: Long, duration: Int, products: Set<Product>?): List<BoardEntryDisplay> =
+    suspend fun board(
+        station: Station,
+        departures: Boolean,
+        date: Long,
+        duration: Int,
+        products: Set<Product>?,
+        ticket: TicketType? = null,
+    ): List<BoardEntryDisplay> =
         json.decodeFromJsonElement(call("board", buildJsonObject {
+            ticket?.let { put("ticket", it.id) }
             put("station", json.encodeToJsonElement(station))
             put("kind", if (departures) "departures" else "arrivals")
             put("date", date)

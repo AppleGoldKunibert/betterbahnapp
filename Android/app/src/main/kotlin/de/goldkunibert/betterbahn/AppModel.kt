@@ -55,11 +55,12 @@ data class SearchForm(
     val isArrival: Boolean = false,
     val products: Set<Product> = Product.all,
     val maxTransfers: Int? = null,
+    val onlyValidTicket: Boolean = false,
 ) {
     fun search(): ConnectionSearch? {
         val from = from ?: return null
         val to = to ?: return null
-        return ConnectionSearch(from, to, via, date, isArrival && via.isEmpty(), products, maxTransfers)
+        return ConnectionSearch(from, to, via, date, isArrival && via.isEmpty(), products, maxTransfers, onlyValidTicket)
     }
 }
 

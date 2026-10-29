@@ -89,12 +89,37 @@ enum Methods {
         var maxTransfers: Int?
         /// Stations to pass through, in order (`ViaRoutePlanner`): one search without paging, from `date`.
         var via: [ViaWaypoint]?
+        /// Only connections this ticket covers ("Nur Deutschlandticket"); ones that just cross a border stay.
+        var ticket: TicketType?
     }
 
     struct JourneysPage: Encodable {
         var journeys: [JourneyDisplay]
         var earlierCursor: String?
         var laterCursor: String?
+        /// Dropped by the ticket filter.
+        var hiddenCount = 0
+    }
+
+    /// The ticket filter for the chosen ticket (`AppModel.ticketFilter`, BahnCard 100 with DB's default rules).
+    static func filter(for ticket: TicketType) -> TicketFilter {
+        switch ticket {
+        case .deutschlandticket: .deutschlandticket
+        case .bahnCard100: .bahnCard100(.default)
+        }
+    }
+
+    /// As in `JourneyResultsView`: connections the ticket doesn't cover go, unless they only cross a border; each
+    /// kept one says whether the ticket covers it (the list shows those first).
+    static func applying(_ ticket: TicketType?, to page: JourneysPage) -> JourneysPage {
+        guard let ticket else { return page }
+        let filter = filter(for: ticket)
+        var page = page
+        let before = page.journeys.count
+        page.journeys = page.journeys.filter { filter.isValid($0.journey) || filter.crossesBorder($0.journey) }
+        page.hiddenCount = before - page.journeys.count
+        for index in page.journeys.indices { page.journeys[index].validWithTicket = filter.isValid(page.journeys[index].journey) }
+        return page
     }
 
     /// One page of connections, as `JourneyResultsView.load(cursor:prepend:)` loads it (without ticket filters yet): bahn.de's train names where it answers within 1.5 s, duplicates dropped.
@@ -105,15 +130,16 @@ enum Methods {
             var found = try await planner.journeys(from: input.from, to: input.to, via: via, date: input.date)
             // Products apply per part already; only the overall transfer limit is left.
             if let maxTransfers = input.maxTransfers { found = found.filter { $0.transfers <= maxTransfers } }
-            return JourneysPage(journeys: found.removingDuplicateIDs().map(JourneyDisplay.init), earlierCursor: nil, laterCursor: nil)
+            return applying(input.ticket, to: JourneysPage(journeys: found.removingDuplicateIDs().map(JourneyDisplay.init),
+                                                           earlierCursor: nil, laterCursor: nil))
         }
         let page = try await provider.journeys(JourneyQuery(
             from: input.from, to: input.to, date: input.date, isArrival: input.isArrival, cursor: input.cursor,
             products: products, maxTransfers: input.maxTransfers))
         let corrected = await provider.correctingTrainNames(in: page.journeys, deadline: .milliseconds(1500))
         let journeys = corrected.removingDuplicateIDs().removingSameTrainDuplicates()
-        return JourneysPage(journeys: journeys.map(JourneyDisplay.init), earlierCursor: page.earlierCursor,
-                            laterCursor: page.laterCursor)
+        return applying(input.ticket, to: JourneysPage(journeys: journeys.map(JourneyDisplay.init),
+                                                       earlierCursor: page.earlierCursor, laterCursor: page.laterCursor))
     }
 
     struct JourneyInput: Decodable, Sendable {
@@ -148,6 +174,7 @@ enum Methods {
         /// Minutes from `date`.
         var duration: Int
         var products: [Product]?
+        var ticket: TicketType?
     }
 
     /// One window of a departure or arrival board.
@@ -156,7 +183,7 @@ enum Methods {
         let entries = try await provider.board(input.kind, at: input.station, date: input.date,
                                                duration: input.duration, products: products)
         // Sorted by live time, pass-throughs and trains ending here dropped (`StationBoardView`).
-        return BoardFilter(products: products).apply(entries).map(BoardEntryDisplay.init)
+        return BoardFilter(products: products, ticketFilter: input.ticket.map(filter(for:))).apply(entries).map(BoardEntryDisplay.init)
     }
 
     struct TripInput: Decodable, Sendable {

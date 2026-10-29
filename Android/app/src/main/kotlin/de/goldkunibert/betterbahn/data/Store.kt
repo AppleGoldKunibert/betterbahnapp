@@ -4,6 +4,7 @@ import android.content.Context
 import de.goldkunibert.betterbahn.kit.KitJson
 import de.goldkunibert.betterbahn.kit.Product
 import de.goldkunibert.betterbahn.kit.Station
+import de.goldkunibert.betterbahn.kit.TicketType
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.KSerializer
@@ -23,6 +24,8 @@ data class ConnectionSearch(
     val isArrival: Boolean = false,
     val products: Set<Product> = Product.all,
     val maxTransfers: Int? = null,
+    /** Only connections the ticket from the settings covers. */
+    val onlyValidTicket: Boolean = false,
 )
 
 @Serializable
@@ -61,6 +64,15 @@ class Store private constructor(context: Context) {
 
     private val _recentSearches = MutableStateFlow(load("recentSearches", RecentSearch.serializer()))
     val recentSearches: StateFlow<List<RecentSearch>> = _recentSearches
+
+    private val _ticketType = MutableStateFlow(TicketType.of(prefs.getString("ticketType", null)))
+    /** The ticket for "Nur Deutschlandticket" & Co. (Einstellungen). */
+    val ticketType: StateFlow<TicketType> = _ticketType
+
+    fun setTicketType(type: TicketType) {
+        _ticketType.value = type
+        prefs.edit().putString("ticketType", type.id).apply()
+    }
 
     private val _savedJourneys = MutableStateFlow(load("savedJourneys", SavedJourney.serializer()))
     val savedJourneys: StateFlow<List<SavedJourney>> = _savedJourneys
