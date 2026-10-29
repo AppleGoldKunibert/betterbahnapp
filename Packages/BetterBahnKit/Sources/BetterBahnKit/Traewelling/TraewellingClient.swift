@@ -218,7 +218,8 @@ public actor TraewellingClient {
     public nonisolated let config: TraewellingConfig
     let http: HTTPClient
     let store: TokenStore
-    private var token: OAuthToken?
+    /// Keeps the login and renews it (#452); the app only fetches access tokens there.
+    let loginServer: TraewellingLoginServer
     /// Autocomplete results per query and recent departures per station and time, so a checkin that
     /// tries again (under another train name, then as a manual trip) doesn't repeat every lookup (#106).
     private var stationCache: [String: [TraewellingStation]] = [:]
@@ -226,167 +227,232 @@ public actor TraewellingClient {
     let searchBudget: TraewellingSearchBudget
     /// How long the last station search that reached Träwelling took, to tell a slow connection.
     private var lastStationSearch: Duration?
-    /// An answer at least this quick means good reception, so the token is renewed early (`renewEarlyIfFast`).
-    let fastAnswer: Duration
-    /// Asks the system for time to finish a token refresh and hands back what ends it again.
+    /// Asks the system for time to finish handing the login over and hands back what ends it again.
     public typealias KeepAlive = @Sendable () async -> @Sendable () async -> Void
     let keepAlive: KeepAlive?
 
-    /// `keepAlive` keeps the app running while a token refresh waits for its answer (a background task in the app).
+    /// `keepAlive` keeps the app running while handing a login from before #452 over to our server waits
+    /// for its answer (a background task in the app). `loginServer` defaults to our server, asked with `http`.
     public init(config: TraewellingConfig, http: HTTPClient = HTTPClient(timeout: 30), store: TokenStore = TokenStore(),
-                searchBudget: TraewellingSearchBudget = TraewellingSearchBudget(),
-                fastAnswer: Duration = .milliseconds(1500), keepAlive: KeepAlive? = nil) {
+                loginServer: TraewellingLoginServer? = nil, searchBudget: TraewellingSearchBudget = TraewellingSearchBudget(),
+                keepAlive: KeepAlive? = nil) {
         self.config = config
         self.http = http
         self.searchBudget = searchBudget
-        self.fastAnswer = fastAnswer
         self.keepAlive = keepAlive
         self.store = store
+        self.loginServer = loginServer ?? TraewellingLoginServer(http: http)
         store.migrateToSynchronizable()
-        self.token = store.load()
     }
 
-    /// Re-reads the Keychain each time, since the token may have been added, refreshed or removed
-    /// on another device and synced in through iCloud Keychain.
+    /// Re-reads the Keychain each time, since the login may have been added or removed on another device
+    /// and synced in through iCloud Keychain.
     public var isLoggedIn: Bool {
-        token = store.load()
-        return token != nil
+        finishPendingLogouts()
+        return store.loadLogin() != nil || store.load() != nil
+    }
+
+    /// Whether the login can read Träwelling's notifications (likes, fellow travellers). One handed over
+    /// from before #452 can't until the user signs in again (`completeLogin`).
+    public var readsNotifications: Bool {
+        store.loadLogin()?.readsNotifications ?? false
     }
 
     // MARK: Auth
 
-    /// Exchanges the redirect URL from `ASWebAuthenticationSession` for a token.
+    /// Signs in with the redirect URL from `ASWebAuthenticationSession`: our server exchanges the code and
+    /// keeps the login. Signing in while logged in replaces the login's tokens in place, so the
+    /// notifications running on it carry on.
     public func completeLogin(callbackURL: URL, pkce: PKCE) async throws {
         let code = try TraewellingConfig.authorizationCode(in: callbackURL, pkce: pkce)
-        try await requestToken([
-            "grant_type": "authorization_code",
-            "client_id": config.clientID,
-            "redirect_uri": config.redirectURI,
-            "code_verifier": pkce.verifier,
-            "code": code,
-        ])
-    }
-
-    public func logout() {
-        token = nil
-        store.clear()
-    }
-
-    private func requestToken(_ form: [String: String]) async throws {
-        var request = URLRequest(url: config.tokenURL)
-        request.httpMethod = "POST"
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        request.setValue(HTTPClient.identifyingUserAgent, forHTTPHeaderField: "User-Agent")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        var components = URLComponents()
-        components.queryItems = form.map { URLQueryItem(name: $0.key, value: $0.value) }
-        request.httpBody = components.percentEncodedQuery?
-            .replacingOccurrences(of: "+", with: "%2B")
-            .data(using: .utf8)
-        let response = try await http.send(request, as: TokenResponse.self)
-        let newToken = response.toToken()
-        token = newToken
-        store.save(newToken)
-    }
-
-    /// The refresh in progress, if any. An actor lets other calls in while it waits for the network,
-    /// and Träwelling accepts a refresh token only once: two calls refreshing together (the map's sync
-    /// next to the followed check-ins, say) made the second one fail with 400 `invalid_grant`.
-    private var refreshing: Task<Void, Error>?
-
-    private func validAccessToken() async throws -> String {
-        token = store.load()
-        guard let token else { throw OAuthError.notLoggedIn }
-        if token.isExpired, let refresh = token.refreshToken {
-            try await refreshToken(refresh)
+        if let login = store.loadLogin() {
+            do {
+                let (updated, token) = try await loginServer.signInAgain(login, code: code, codeVerifier: pkce.verifier)
+                keep(updated, token)
+                return
+            } catch OAuthError.loginEnded {}
         }
-        guard let access = self.token?.accessToken else { throw OAuthError.notLoggedIn }
-        return access
+        let (login, token) = try await loginServer.signIn(code: code, codeVerifier: pkce.verifier)
+        keep(login, token)
     }
 
-    /// The refresh token Träwelling last rejected, so it isn't sent again on every request until the
-    /// Keychain holds another one.
+    /// The login at our server, after handing over a login from before #452 if there is one. Nil when
+    /// logged out.
+    public func serverLogin() async throws -> ServerLogin? {
+        if let login = store.loadLogin() { return login }
+        guard let refresh = store.load()?.refreshToken else { return nil }
+        return try await handOver(refresh)
+    }
+
+    /// Fetches the next access token ahead when this one runs out within 10 minutes (or there is none),
+    /// e.g. when the app is opened, so requests in a dead spot later still have one.
+    public func prepareAccessToken() async {
+        guard let login = try? await serverLogin() else { return }
+        if let token = cachedAccess(for: login), token.expiresAt.timeIntervalSinceNow > Self.fetchAhead { return }
+        _ = try? await startFetch(login).value
+    }
+
+    /// Logs out on this device and (through iCloud Keychain) the user's other ones, and ends the login at
+    /// our server. Offline it is ended there on a later start.
+    public func logout() async {
+        let login = store.loadLogin()
+        forgetLogin()
+        guard let login else { return }
+        do {
+            try await loginServer.end(login)
+        } catch {
+            store.savePendingLogouts(store.loadPendingLogouts() + [login])
+        }
+    }
+
+    private func forgetLogin() {
+        access = nil
+        store.clearLogin()
+    }
+
+    private func keep(_ login: ServerLogin, _ token: OAuthToken) {
+        store.saveLogin(login)
+        remember(token, for: login)
+        // The token from before #452 has done its job.
+        store.clearOwnToken()
+    }
+
+    private var endingLogouts: Task<Void, Never>?
+
+    /// Ends the logins logged out of while our server couldn't be reached.
+    private func finishPendingLogouts() {
+        guard endingLogouts == nil, !store.loadPendingLogouts().isEmpty else { return }
+        endingLogouts = Task {
+            defer { endingLogouts = nil }
+            var left: [ServerLogin] = []
+            for login in store.loadPendingLogouts() {
+                do {
+                    try await loginServer.end(login)
+                } catch {
+                    left.append(login)
+                }
+            }
+            store.savePendingLogouts(left)
+        }
+    }
+
+    // MARK: Access token
+
+    /// How long before the access token runs out the next one is fetched ahead.
+    static let fetchAhead: TimeInterval = 10 * 60
+
+    /// The access token last fetched, for the login it belongs to (also kept in the Keychain, this device only).
+    private var access: (loginID: String, token: OAuthToken)?
+    /// The fetch from our server in progress, if any.
+    private var fetching: Task<OAuthToken, Error>?
+    /// The handover of a login from before #452 in progress, if any.
+    private var handingOver: Task<ServerLogin, Error>?
+    /// The refresh token from before #452 Träwelling last rejected, so it isn't sent again on every request
+    /// until the Keychain holds another one.
     private var rejectedRefreshToken: String?
 
-    private func refreshToken(_ refresh: String) async throws {
-        if refresh == rejectedRefreshToken { throw OAuthError.sessionExpired }
-        try await startRefresh(refresh).value
+    private func cachedAccess(for login: ServerLogin) -> OAuthToken? {
+        if let access, access.loginID == login.id { return access.token }
+        guard let token = store.loadAccess(for: login.id) else { return nil }
+        access = (login.id, token)
+        return token
     }
 
-    /// Träwelling has issued the new token before its answer arrives, so a refresh cut off by iOS
-    /// suspending the app ends the login: `keepAlive` asks for the time to finish it.
-    private func startRefresh(_ refresh: String) -> Task<Void, Error> {
-        if let refreshing { return refreshing }
+    private func remember(_ token: OAuthToken, for login: ServerLogin) {
+        access = (login.id, token)
+        store.saveAccess(token, for: login.id)
+    }
+
+    /// The access token to send: the one last fetched while it has time left (fetching the next one ahead in
+    /// its last 10 minutes), else a new one from our server.
+    private func validAccessToken() async throws -> String {
+        let login: ServerLogin?
+        do {
+            login = try await serverLogin()
+        } catch OAuthError.serverUnavailable {
+            // Handing over has to wait for our server; the old token works while it lasts.
+            if let own = store.load(), !own.isExpired { return own.accessToken }
+            throw OAuthError.serverUnavailable
+        }
+        guard let login else {
+            // A token from before #452 without a refresh token is used while it lasts.
+            guard let own = store.load() else { throw OAuthError.notLoggedIn }
+            return own.accessToken
+        }
+        if let token = cachedAccess(for: login), !token.isExpired {
+            if token.expiresAt.timeIntervalSinceNow < Self.fetchAhead, fetching == nil { _ = startFetch(login) }
+            return token.accessToken
+        }
+        return try await startFetch(login).value.accessToken
+    }
+
+    /// A new access token after Träwelling refused `rejected`: the one a fetch in progress brings, else one
+    /// our server renews.
+    private func newAccessToken(replacing rejected: String, for login: ServerLogin) async throws -> String {
+        if let fetching, let token = try? await fetching.value, token.accessToken != rejected { return token.accessToken }
+        if let token = cachedAccess(for: login), token.accessToken != rejected, !token.isExpired { return token.accessToken }
+        return try await startFetch(login, rejected: rejected).value.accessToken
+    }
+
+    /// Fetching changes nothing at our server, so calls running together share one fetch only to save requests.
+    private func startFetch(_ login: ServerLogin, rejected: String? = nil) -> Task<OAuthToken, Error> {
+        if let fetching { return fetching }
         let task = Task {
-            defer { refreshing = nil }
+            defer { fetching = nil }
+            do {
+                let (token, readsNotifications) = try await loginServer.token(for: login, rejected: rejected)
+                // Logged out or in again meanwhile: the answer belongs to a login no longer kept.
+                guard var current = store.loadLogin(), current.id == login.id else { throw OAuthError.notLoggedIn }
+                remember(token, for: current)
+                if current.readsNotifications != readsNotifications {
+                    current.readsNotifications = readsNotifications
+                    store.saveLogin(current)
+                }
+                return token
+            } catch OAuthError.loginEnded {
+                if store.loadLogin()?.id == login.id { forgetLogin() }
+                throw OAuthError.loginEnded
+            }
+        }
+        fetching = task
+        return task
+    }
+
+    /// Hands a login from before #452 over to our server once (also when several calls ask together: the
+    /// refresh token works once). Träwelling has renewed it before the answer arrives, so a handover cut off
+    /// by iOS suspending the app would end the login: `keepAlive` asks for the time to finish it.
+    private func handOver(_ refresh: String) async throws -> ServerLogin {
+        if refresh == rejectedRefreshToken { throw OAuthError.sessionExpired }
+        if let handingOver { return try await handingOver.value }
+        let task = Task {
+            defer { handingOver = nil }
             let endKeepAlive = await keepAlive?()
             do {
-                try await exchangeRefreshToken(refresh)
+                let (login, token) = try await loginServer.handOver(refreshToken: refresh)
+                await endKeepAlive?()
+                // Another device handed it over meanwhile and its login synced in: that one is used, this one ended.
+                if let synced = store.loadLogin() {
+                    try? await loginServer.end(login)
+                    return synced
+                }
+                store.saveLogin(login)
+                remember(token, for: login)
+                if store.load()?.refreshToken == refresh { store.clearOwnToken() }
+                return login
+            } catch OAuthError.sessionExpired {
+                await endKeepAlive?()
+                // Another device handed it over first; its login may sync in later. The old token stays:
+                // deleting it would delete the synced Keychain item on every device.
+                if let synced = store.loadLogin() { return synced }
+                rejectedRefreshToken = refresh
+                throw OAuthError.sessionExpired
             } catch {
                 await endKeepAlive?()
                 throw error
             }
-            await endKeepAlive?()
         }
-        refreshing = task
-        return task
-    }
-
-    /// How long before the access token runs out a quick answer renews it.
-    static let earlyRenewal: TimeInterval = 20 * 60
-
-    /// Access tokens last an hour and every refresh token works once, so a refresh whose answer is lost
-    /// (a tunnel, a dead spot) ends the login. Renewing in the token's last 20 minutes right after a quick
-    /// answer does it while the reception is good, and requests in a dead spot later find a valid token.
-    private func renewEarlyIfFast(answeredIn elapsed: Duration) {
-        guard elapsed < fastAnswer, refreshing == nil, let token, !token.isExpired,
-              token.expiresAt.timeIntervalSinceNow < Self.earlyRenewal,
-              let refresh = token.refreshToken, refresh != rejectedRefreshToken else { return }
-        _ = startRefresh(refresh)
-    }
-
-    /// Waits for a refresh in progress, for tests of the early renewal.
-    func refreshFinished() async {
-        _ = try? await refreshing?.value
-    }
-
-    /// Träwelling answers a refresh token it no longer accepts with 400 `invalid_grant`. Access tokens last
-    /// only an hour, so this is common: another device already used the refresh token (it syncs through
-    /// iCloud Keychain, which may not have delivered the new one yet), or the answer to an earlier refresh
-    /// never arrived (a train in a tunnel). Without handling it every request failed with
-    /// "Serverfehler (400)" until the user logged out and in again; now a newer token in the Keychain is
-    /// used, and otherwise the request fails with `OAuthError.sessionExpired`. The stored token is kept:
-    /// deleting it (`logout()`) would delete the synced Keychain item on every device, including a fresh
-    /// token the other device just stored. If one arrives later, the next request picks it up.
-    private func exchangeRefreshToken(_ refresh: String, isRetry: Bool = false) async throws {
-        do {
-            // No `scope`: the new token keeps what the login granted. Asking for scopes added since
-            // (e.g. "write-likes") would make Träwelling reject the refresh and end older logins.
-            try await requestToken([
-                "grant_type": "refresh_token",
-                "client_id": config.clientID,
-                "refresh_token": refresh,
-            ])
-        } catch TransitError.http(let status, let body) where [400, 401].contains(status) && Self.isRejectedGrant(body) {
-            if !isRetry, let stored = store.load(), stored.refreshToken != refresh {
-                if !stored.isExpired {
-                    token = stored
-                    return
-                }
-                if let newer = stored.refreshToken {
-                    return try await exchangeRefreshToken(newer, isRetry: true)
-                }
-            }
-            rejectedRefreshToken = refresh
-            throw OAuthError.sessionExpired
-        }
-    }
-
-    /// Whether a token endpoint answer says the grant (here: the refresh token) is invalid, expired or revoked.
-    static func isRejectedGrant(_ body: String?) -> Bool {
-        guard let data = body?.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
-        return json["error"] as? String == "invalid_grant"
+        handingOver = task
+        return try await task.value
     }
 
     // MARK: API
@@ -418,20 +484,21 @@ public actor TraewellingClient {
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue(HTTPClient.identifyingUserAgent, forHTTPHeaderField: "User-Agent")
         do {
-            let started = ContinuousClock.now
-            let data = try await http.sendRaw(request)
-            renewEarlyIfFast(answeredIn: ContinuousClock.now - started)
-            return data
+            return try await http.sendRaw(request)
         } catch TransitError.http(let status, let responseBody) {
             if status == 401 {
-                // An early renewal finishing meanwhile revokes the token this request was sent with.
-                if !isRetry, let refreshing { _ = try? await refreshing.value }
-                // Another device may have refreshed the token meanwhile (it syncs via iCloud
-                // Keychain): retry with that one instead of deleting it for every device.
+                if !isRetry, let login = store.loadLogin() {
+                    // Renewed meanwhile (by our server, for another device), or revoked: our server knows.
+                    _ = try await newAccessToken(replacing: accessToken, for: login)
+                    return try await authorizedData(path, query: query, method: method, body: body, timeout: timeout, isRetry: true)
+                }
+                if store.loadLogin() != nil { throw OAuthError.sessionExpired }
+                // A token from before #452: another device may have stored a newer one meanwhile (it syncs via
+                // iCloud Keychain); retry with that one instead of deleting it for every device.
                 if !isRetry, let stored = store.load(), stored.accessToken != accessToken {
                     return try await authorizedData(path, query: query, method: method, body: body, timeout: timeout, isRetry: true)
                 }
-                logout()
+                forgetLogin()
                 throw OAuthError.notLoggedIn
             }
             if status == 409 { throw TraewellingError.collision }
@@ -499,7 +566,7 @@ public actor TraewellingClient {
         guard let line = leg.line else { throw TraewellingError.tripNotFound("Fußweg") }
 
         if let match = try await findDeparture(for: leg) {
-            return try await checkin(draft, departure: match.departure)
+            return try await checkin(draft, departures: match.departures)
         }
         guard allowManualTrip else { throw TraewellingError.tripNotFound(line.name) }
         return try await checkinManualTrip(draft)
@@ -521,10 +588,10 @@ public actor TraewellingClient {
         var arrival: Date
     }
 
-    private func checkin(_ draft: CheckinDraft, departure: TraewellingDeparture) async throws -> CheckinResult {
+    private func checkin(_ draft: CheckinDraft, departures: [TraewellingDeparture]) async throws -> CheckinResult {
         // Resolve every part first so a train Träwelling only half knows doesn't leave a stray
         // checkin for the first part behind.
-        let segments = try await segments(for: draft.leg, departure: departure)
+        let segments = try await segments(for: draft.leg, departures: departures)
         var result: CheckinResult?
         for segment in segments {
             // The user's message/toot belong on the first part only, so a split train doesn't post
@@ -541,6 +608,23 @@ public actor TraewellingClient {
         }
         guard let result else { throw TraewellingError.tripNotFound(draft.leg.line?.name ?? "Fußweg") }
         return result
+    }
+
+    /// The Träwelling trips covering `leg`, from the first of `departures` whose trip has both ends of
+    /// the leg. The board can list the same train twice at the same time (#449: ICE 1206 from
+    /// Innsbruck once from Austrian data with only its main stops, once from German data with all
+    /// of them), so a trip missing our stop doesn't end the checkin while another one may have it.
+    private func segments(for leg: Leg, departures: [TraewellingDeparture], remainingSplits: Int = 3) async throws -> [Segment] {
+        var firstError: Error?
+        for departure in departures {
+            do {
+                return try await segments(for: leg, departure: departure, remainingSplits: remainingSplits)
+            } catch let error as TraewellingError {
+                guard case .stopNotOnTrip = error else { throw error }
+                firstError = firstError ?? error
+            }
+        }
+        throw firstError ?? TraewellingError.tripNotFound(leg.line?.name ?? "Fußweg")
     }
 
     /// The Träwelling trips covering `leg`, starting with `departure`'s. Usually just one, but
@@ -577,13 +661,14 @@ public actor TraewellingClient {
         guard remainingSplits > 0, let end = laterStops.last,
               let split = Self.splitStopover(tripEnd: end, in: leg.stopovers),
               let rest = Self.remainder(of: leg, from: split),
-              let next = try await findDeparture(for: rest)?.departure, next.tripId != departure.tripId else {
+              let next = try await findDeparture(for: rest)?.departures.filter({ $0.tripId != departure.tripId }),
+              !next.isEmpty else {
             throw TraewellingError.stopNotOnTrip(leg.destination.name, tripStops: trip.stopovers.map(\.name))
         }
         let first = Segment(tripId: departure.tripId, lineName: lineName, startID: origin.stationID,
                             destinationID: end.stationID, departure: departureTime,
                             arrival: end.arrivalPlanned ?? split.arrival?.planned ?? rest.departure.planned)
-        return [first] + (try await segments(for: rest, departure: next, remainingSplits: remainingSplits - 1))
+        return [first] + (try await segments(for: rest, departures: next, remainingSplits: remainingSplits - 1))
     }
 
     /// The intermediate stop of our leg where a Träwelling trip ending at `tripEnd` stops, if the
@@ -878,7 +963,7 @@ public actor TraewellingClient {
     /// Träwelling's own timetable data sometimes only has the train under a neighbouring stop or a
     /// fahrtNr/time that drifted a bit from our plan. All of it within `searchBudget`: then the boards
     /// still loading are given up on.
-    private func findDeparture(for leg: Leg) async throws -> (station: TraewellingStation, departure: TraewellingDeparture)? {
+    private func findDeparture(for leg: Leg) async throws -> (station: TraewellingStation, departures: [TraewellingDeparture])? {
         guard leg.line != nil else { return nil }
         let started = ContinuousClock.now
         let candidates = try await candidateStations(for: leg.origin)
@@ -962,19 +1047,21 @@ public actor TraewellingClient {
         case deadline
     }
 
-    /// The best station (first in `stations`, see `ranked(_:for:)`) whose boards have `leg`'s train.
+    /// The best station (first in `stations`, see `ranked(_:for:)`) whose boards have `leg`'s train,
+    /// with every departure there that may be it, best first.
     /// A station whose boards are still loading is skipped, or with `waitingForBetter` ends the
     /// search, since it may yet have the train.
     private static func match(_ leg: Leg, on boards: [Result<[TraewellingDeparture], any Error>?], of requests: [BoardRequest],
                               at stations: [TraewellingStation], tolerance: TimeInterval,
-                              waitingForBetter: Bool) -> (station: TraewellingStation, departure: TraewellingDeparture)? {
+                              waitingForBetter: Bool) -> (station: TraewellingStation, departures: [TraewellingDeparture])? {
         for (index, station) in stations.enumerated() {
             let stationBoards = zip(requests, boards).filter { $0.0.station == index }.map(\.1)
             if waitingForBetter, stationBoards.contains(where: { $0 == nil }) { return nil }
             let departures = stationBoards.flatMap { board -> [TraewellingDeparture] in
                 if case .success(let departures)? = board { departures } else { [] }
             }
-            if let departure = bestMatch(departures, for: leg, tolerance: tolerance) { return (station, departure) }
+            let matches = Self.matches(departures, for: leg, tolerance: tolerance)
+            if !matches.isEmpty { return (station, matches) }
         }
         return nil
     }
@@ -1005,7 +1092,13 @@ public actor TraewellingClient {
     }
 
     static func bestMatch(_ departures: [TraewellingDeparture], for leg: Leg, tolerance: TimeInterval) -> TraewellingDeparture? {
-        guard let line = leg.line else { return nil }
+        matches(departures, for: leg, tolerance: tolerance).first
+    }
+
+    /// Every departure on the board that may be `leg`'s train, the closest to its planned time first
+    /// (the board's own order on a tie), each trip once.
+    static func matches(_ departures: [TraewellingDeparture], for leg: Leg, tolerance: TimeInterval) -> [TraewellingDeparture] {
+        guard let line = leg.line else { return [] }
         let wantedName = Line.normalize(line.name)
         let candidates = departures.filter { dep in
             guard let planned = dep.plannedWhen,
@@ -1022,10 +1115,14 @@ public actor TraewellingClient {
             }
             return false
         }
-        return candidates.min {
-            abs(($0.plannedWhen ?? .distantPast).timeIntervalSince(leg.departure.planned))
-                < abs(($1.plannedWhen ?? .distantPast).timeIntervalSince(leg.departure.planned))
+        var seen = Set<String>()
+        return candidates.enumerated().sorted { a, b in
+            let offsetA = abs((a.element.plannedWhen ?? .distantPast).timeIntervalSince(leg.departure.planned))
+            let offsetB = abs((b.element.plannedWhen ?? .distantPast).timeIntervalSince(leg.departure.planned))
+            return offsetA != offsetB ? offsetA < offsetB : a.offset < b.offset
         }
+        .map(\.element)
+        .filter { seen.insert($0.tripId).inserted }
     }
 
     /// A train number without leading zeros ("003135" → "3135").

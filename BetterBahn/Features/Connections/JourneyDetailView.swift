@@ -68,6 +68,12 @@ struct JourneyDetailView: View {
         }
         // A seat saved on the way changes where to walk before a transfer.
         .onChange(of: model.savedSeats) { Task { await loadCoachAdvice() } }
+        // A like on one of this journey's check-ins was tapped (#447): show that check-in.
+        .onChange(of: model.checkinToShow, initial: true) { _, id in
+            guard let id, let leg = journey.legs.first(where: { model.checkinStatusIDs[$0.id] == id }) else { return }
+            model.checkinToShow = nil
+            shownCheckin = ShownCheckin(leg: leg, statusId: id)
+        }
         .task {
             if !readOnly, model.savedEntry(for: journey) == nil, let seen = model.liveJourneys.value(for: journey.id) {
                 journey = seen
