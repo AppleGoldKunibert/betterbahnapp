@@ -20,6 +20,8 @@ android {
         versionName = xcodeSetting("MARKETING_VERSION")
         versionCode = xcodeSetting("CURRENT_PROJECT_VERSION").toInt()
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+        // Play Integrity (PlayIntegrity.kt) stays off while this is 0.
+        buildConfigField("long", "PLAY_CLOUD_PROJECT_NUMBER", "${providers.gradleProperty("playCloudProjectNumber").getOrElse("0")}L")
     }
 
     buildTypes {
@@ -29,6 +31,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -49,6 +52,7 @@ dependencies {
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.glance.appwidget)
     implementation(libs.androidx.glance.material3)
+    implementation(libs.play.integrity)
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation(libs.junit)
 }

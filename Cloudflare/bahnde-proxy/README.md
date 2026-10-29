@@ -33,6 +33,14 @@ from BetterBahn on a real device (`../shared/appattest.mjs`, app side `WorkerAut
    `APP_IDS` (`wrangler.toml`).
 3. `POST /auth/token {keyToken, assertion, challenge}` → an access token valid for 1 hour.
 
+The Android app gets the same access token with Google's Play Integrity instead of steps 2 and 3
+(`../shared/playintegrity.mjs`): `POST /auth/play {integrityToken, challenge}`. The app asks Play for a
+token with `requestHash` = hex SHA-256 of the challenge; the Worker lets Google decode it (service account
+key in `PLAY_INTEGRITY_KEY`) and wants our package (`PLAY_PACKAGE`, default `de.goldkunibert.betterbahn`),
+the matching hash, at most 5 minutes old, `PLAY_RECOGNIZED` and `MEETS_DEVICE_INTEGRITY`.
+`PLAY_INTEGRITY_ALLOW_TESTING = "true"` skips the last two (emulator, sideloaded debug build); for
+testing only. Without `PLAY_INTEGRITY_KEY` the route answers 503.
+
 Nothing is stored: challenges and tokens are HMAC-signed with `TOKEN_SECRET`. Rotating it makes
 every app attest a new key. Builds without App Attest (Simulator, Mac) get no token, so bahn.de,
 Timetables and Wallet don't work there unless `ALLOW_UNATTESTED` is set (Timetables never works
@@ -55,6 +63,7 @@ Secrets (the same `TOKEN_SECRET` in `../pass-signer`, e.g. from `openssl rand -b
 npx wrangler secret put TOKEN_SECRET
 npx wrangler secret put DB_CLIENT_ID   # DB API Marketplace, Timetables
 npx wrangler secret put DB_API_KEY
+npx wrangler secret put PLAY_INTEGRITY_KEY   # Android: the service account's JSON key (docs/android.md)
 ```
 
 Rollout: while older builds without App Attest are still installed, set `ALLOW_UNATTESTED` to
@@ -64,7 +73,7 @@ be rotated in the API Marketplace after the switch.
 
 ## Verify
 
-Unit tests: `node --test Cloudflare/bahnde-proxy/worker.test.mjs Cloudflare/shared/appattest.test.mjs`.
+Unit tests: `node --test Cloudflare/bahnde-proxy/worker.test.mjs Cloudflare/shared/*.test.mjs`.
 
 After deploying, `curl https://betterbahn2.betterbahn.workers.dev/health` answers `{"ok":true}`; Timetables
 needs a token from the app (`-H 'X-BetterBahn-Token: …'`).

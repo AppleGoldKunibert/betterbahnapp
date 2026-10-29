@@ -8,4 +8,7 @@ workers_dev = true
 # build with Config/Local.xcconfig under another team or bundle ID.
 APP_IDS = "9NXP66M9UL.de.goldkunibert.BetterBahn"
 # Secrets (`npx wrangler secret put …`): TOKEN_SECRET (same value in betterbahn-pass), DB_CLIENT_ID,
-# DB_API_KEY. ALLOW_UNATTESTED = "true" lets requests without a token through during a rollout.
+# DB_API_KEY, PLAY_INTEGRITY_KEY (Android, Play Integrity). ALLOW_UNATTESTED = "true" lets requests
+# without a token through during a rollout. PLAY_INTEGRITY_ALLOW_TESTING = "true" accepts Android builds
+# not installed from Google Play and emulators; for testing only. PLAY_PACKAGE overrides the Android
+# package name (default de.goldkunibert.betterbahn).

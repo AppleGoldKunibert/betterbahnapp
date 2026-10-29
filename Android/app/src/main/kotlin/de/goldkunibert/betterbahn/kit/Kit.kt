@@ -57,13 +57,24 @@ object Kit {
             fresh.renameTo(base)
         }
         nativeStart(base.absolutePath)
+        appContext = context.applicationContext
         started = true
     }
 
-    /** Runs a Kit method off the main thread; its result, or a [KitException]. */
+    @Volatile private var appContext: Context? = null
+
+    /**
+     * Runs a Kit method off the main thread; its result, or a [KitException]. Gets the Play Integrity token for our
+     * servers first when it's missing or about to expire.
+     */
     suspend fun call(method: String, arguments: JsonObject): JsonElement = withContext(Dispatchers.IO) {
-        KitJson.parseAnswer(String(nativeCall(method, arguments.toString().toByteArray()), Charsets.UTF_8))
+        appContext?.let { PlayIntegrity.ensureToken(it) }
+        callDirectly(method, arguments)
     }
+
+    /** [call] without the token check, for [PlayIntegrity] itself. */
+    internal fun callDirectly(method: String, arguments: JsonObject): JsonElement =
+        KitJson.parseAnswer(String(nativeCall(method, arguments.toString().toByteArray()), Charsets.UTF_8))
 
     // MARK: Methods
 

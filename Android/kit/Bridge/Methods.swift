@@ -64,7 +64,30 @@ enum Methods {
         "widgetState": handler(widgetState),
         "boardWidgetRows": handler(boardWidgetRows),
         "plannedCoachSequence": handler(plannedCoachSequence),
+        "setWorkerToken": handler(setWorkerToken),
+        "hasWorkerToken": handler(hasWorkerToken),
     ]
+
+    // MARK: Play Integrity
+
+    struct WorkerToken: Decodable, Sendable {
+        /// Nil forgets the token.
+        var token: String?
+        var expiresAt: Date
+    }
+
+    /// The access token from `/auth/play` for our servers (`PlayIntegrity.kt`).
+    @Sendable static func setWorkerToken(_ input: WorkerToken) async throws -> Bool {
+        WorkerAuth.shared.set(input.token, expires: input.expiresAt)
+        return true
+    }
+
+    struct NoInput: Decodable, Sendable {}
+
+    /// Whether the token is still there and valid (a server that refused it makes the Kit forget it).
+    @Sendable static func hasWorkerToken(_ input: NoInput) async throws -> Bool {
+        WorkerAuth.shared.accessToken() != nil
+    }
 
     // MARK: Stations
 
