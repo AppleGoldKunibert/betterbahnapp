@@ -1,6 +1,6 @@
-# Timetables and App Attest Worker (`betterbahn2`)
+# Timetables, lift status and App Attest Worker (`betterbahn2`)
 
-This Worker forwards DB's Timetables API with our API key and hands out the App Attest tokens every request
+This Worker forwards DB's Timetables API and the lifts out of order from DB's FaSta API with our API key and hands out the App Attest tokens every request
 to our servers needs. It used to forward bahn.de's web API too (`/web/api/…`), but bahn.de refuses Workers
 since October 2026; the app asks bahn.de only through `../../Server/bahnde-proxy`, so those paths are gone.
 The app still builds its bahn.de URLs on this Worker's address (`BahnDeClient.baseURL`) and `BahnDeProxy`
@@ -11,6 +11,7 @@ rewrites them to the server.
 | `/timetables/v1/plan/<eva>/<yymmdd>/<hh>` | 30 min |
 | `/timetables/v1/fchg/<eva>` | 30 s |
 | `/timetables/v1/station/<eva>` | 1 day |
+| `/fasta/v2/facilities` | 5 min |
 
 Only these GET paths (and `/auth/…`) are allowed; everything else is 404. Errors are passed through uncached.
 `GET /health` answers without calling upstream.
@@ -20,6 +21,11 @@ departure board uses) first. Only when IRIS fails (error, timeout, 5xx, 429) the
 `DB-Client-Id`/`DB-Api-Key` from this Worker's secrets, so the key never ships in the app and the Marketplace's
 60 calls/minute are kept for when IRIS is down. IRIS's "no data" answers (400/404/410) are passed on without a
 fallback. DB marked IRIS deprecated, so the Marketplace stays configured.
+
+`/fasta/v2/facilities` (#486) always asks DB's FaSta API for every lift in Germany that is out of order
+(`?type=ELEVATOR&state=INACTIVE`, the app's query is ignored), so all users share one cached list and the app
+never says which station it looks at. It needs the API key, and the Marketplace application behind
+`DB_CLIENT_ID` must be subscribed to "FaSta – Station Facilities Status" as well as Timetables.
 
 ## App Attest
 
@@ -53,7 +59,7 @@ Secrets (the same `TOKEN_SECRET` in `../pass-signer`, e.g. from `openssl rand -b
 
 ```sh
 npx wrangler secret put TOKEN_SECRET
-npx wrangler secret put DB_CLIENT_ID   # DB API Marketplace, Timetables
+npx wrangler secret put DB_CLIENT_ID   # DB API Marketplace, Timetables and FaSta
 npx wrangler secret put DB_API_KEY
 ```
 

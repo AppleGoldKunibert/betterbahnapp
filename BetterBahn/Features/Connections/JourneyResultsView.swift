@@ -656,6 +656,8 @@ struct JourneyCard: View {
 
     @Environment(AppModel.self) private var model
     @State private var transferWarning: String?
+    /// With "Stufenfrei reisen" (#486): the first lift out of order where the journey needs one.
+    @State private var liftAlert: JourneyLiftAlert?
     /// DB's occupancy forecasts of the legs (#399), only those already loaded: a result never asks bahn.de.
     @State private var occupancies: [OccupancyForecast] = []
 
@@ -729,7 +731,17 @@ struct JourneyCard: View {
                 if let transferWarning {
                     TransferWarning(text: transferWarning)
                 }
+                if let liftAlert {
+                    LiftWarning(text: liftAlert.title)
+                }
             }
+        }
+        .task(id: "\(journey.id)|\(model.settings.stepFree)") {
+            guard model.settings.stepFree, !journey.isCancelled else {
+                liftAlert = nil
+                return
+            }
+            liftAlert = await model.liftAlerts(for: journey).first
         }
         .task(id: journey.id) {
             guard warnsAboutTransfers, !journey.isCancelled else { return }
