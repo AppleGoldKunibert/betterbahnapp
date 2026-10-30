@@ -14,14 +14,16 @@
 # (another PR was merged), indevelopment is merged into the PR branch in the same commit, so the PR merges
 # without conflict and doesn't keep the number the other PR already took. PRs whose merge with
 # indevelopment conflicts are skipped and listed in the run summary (the run then fails so GitHub notifies
-# you), as is a PR that got merged before its bump caught up. Pushes with the GITHUB_TOKEN don't start
-# other workflows, so the bump commit neither loops nor reruns "Build & test"; pull before pushing to a
-# bumped PR branch again.
+# you), as is a PR that got merged before its bump caught up. Bump commits are pushed with the review
+# bot App's token (it needs Contents and Workflows write), so "Build & test" runs on them; the bump run
+# such a push starts finds the version up to date and pushes nothing, so nothing loops. Without those
+# permissions the GITHUB_TOKEN pushes, which starts no other workflow. Pull before pushing to a bumped PR
+# branch again.
 name: Bump version
 
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review, synchronize, edited, labeled, unlabeled, closed]
+    types: [opened, reopened, ready_for_review, synchronize, edited, labeled, unlabeled]
     branches: [indevelopment]
   push:
     branches: [indevelopment]
@@ -32,19 +34,19 @@ permissions:
   issues: read
   pull-requests: read
 
-concurrency:
-  group: bump-version
-  cancel-in-progress: false
-
 jobs:
-  bump:
+  count:
     # Events of draft PRs and of PRs from forks don't start a run.
     if: >-
       github.event_name != 'pull_request' ||
       (github.event.pull_request.draft == false &&
        github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
+    outputs:
+      prs: ${{ steps.count.outputs.prs }}
+      merged_pr: ${{ steps.count.outputs.merged_pr }}
+      merged_sha: ${{ steps.count.outputs.merged_sha }}
     steps:
       - name: Count features and bug fixes of the open PRs
         id: count
@@ -112,25 +114,78 @@ jobs:
             core.setOutput("prs", JSON.stringify(prs));
 
             // A PR merged before this workflow caught up with indevelopment keeps the version the previous
-            // PR already took; the next step flags it so it gets bumped by hand.
-            const pr = context.payload.pull_request;
-            let check = "";
-            if (context.payload.action === "closed" && pr?.merged) {
-              const { features, bugs } = await count(pr);
-              if (features > 0 || bugs > 0) check = pr.merge_commit_sha;
+            // PR already took; the check job flags it so it gets bumped by hand.
+            let merged;
+            if (context.eventName === "push") {
+              const sha = context.payload.after;
+              const { data } = await github.rest.repos.listPullRequestsAssociatedWithCommit({ owner, repo, commit_sha: sha });
+              merged = data.find((pr) => pr.merge_commit_sha === sha && pr.base.ref === "indevelopment");
             }
-            core.setOutput("check", check);
+            const counted = merged ? await count(merged) : { features: 0, bugs: 0 };
+            const check = counted.features > 0 || counted.bugs > 0;
+            core.setOutput("merged_pr", check ? merged.number : "");
+            core.setOutput("merged_sha", check ? merged.merge_commit_sha : "");
+
+  # Its own job outside the bump's queue: a waiting run can be replaced by a newer one, which would drop
+  # the check, while losing a waiting bump is fine (the newer run bumps every PR).
+  check:
+    needs: count
+    if: needs.count.outputs.merged_sha != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.count.outputs.merged_sha }}
+          fetch-depth: 2
+
+      - name: Compare with indevelopment before the merge
+        env:
+          MERGED_PR: ${{ needs.count.outputs.merged_pr }}
+        run: |
+          set -euo pipefail
+          project=BetterBahn.xcodeproj/project.pbxproj
+          version_of() {
+            git show "$1:$project" | grep -oE '(MARKETING_VERSION = [0-9.]+|CURRENT_PROJECT_VERSION = [0-9]+);' | sort -u
+          }
+          if [ "$(version_of HEAD)" = "$(version_of HEAD^1)" ]; then
+            echo "- #$MERGED_PR: ❌ merged without its version bump, bump indevelopment by hand" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::#$MERGED_PR was merged without its version bump"
+            exit 1
+          fi
+
+  bump:
+    needs: count
+    if: needs.count.outputs.prs != '[]'
+    # One bump at a time. A newly queued run replaces a waiting one, which is fine: every run bumps all PRs.
+    concurrency:
+      group: bump-version
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Fails while the App lacks Contents or Workflows write; the GITHUB_TOKEN pushes then.
+      - name: Get the App token
+        id: app
+        continue-on-error: true
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.REVIEW_BOT_APP_ID }}
+          private-key: ${{ secrets.REVIEW_BOT_PRIVATE_KEY }}
+          permission-contents: write
+          permission-workflows: write
 
       - uses: actions/checkout@v4
         with:
           ref: indevelopment
           fetch-depth: 0
+          token: ${{ steps.app.outputs.token || github.token }}
 
       - name: Bump the PR branches
         env:
-          PRS: ${{ steps.count.outputs.prs }}
-          CHECK: ${{ steps.count.outputs.check }}
-          MERGED_PR: ${{ github.event.pull_request.number }}
+          PRS: ${{ needs.count.outputs.prs }}
+          APP_TOKEN: ${{ steps.app.outcome }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           project=BetterBahn.xcodeproj/project.pbxproj
@@ -157,10 +212,8 @@ jobs:
 
           echo "## Version bumps" >> "$GITHUB_STEP_SUMMARY"
           failed=()
-
-          if [ -n "$CHECK" ] && [ "$(version_of "$CHECK")" = "$(version_of "$CHECK^1")" ]; then
-            echo "- #$MERGED_PR: ❌ merged without its version bump, bump indevelopment by hand" >> "$GITHUB_STEP_SUMMARY"
-            failed+=("#$MERGED_PR")
+          if [ "$APP_TOKEN" != success ]; then
+            echo "Pushed with the GITHUB_TOKEN (the App lacks Contents or Workflows write): \"Build & test\" doesn't run on the bump commits." >> "$GITHUB_STEP_SUMMARY"
           fi
 
           read -r base_version base_build <<< "$(version_of "$base")"
@@ -176,6 +229,12 @@ jobs:
             bugs=$(jq -r .bugs <<< "$pr")
             author_name=$(jq -r .author <<< "$pr")
             author_email="$(jq -r .author_id <<< "$pr")+$author_name@users.noreply.github.com"
+
+            # Counted before this job waited for the previous bump; the PR may be merged or a draft by now.
+            if [ "$(gh pr view "$number" --json state,isDraft --jq '"\(.state) \(.isDraft)"')" != "OPEN false" ]; then
+              echo "- #$number \`$head\`: no longer open and ready, skipped" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
 
             IFS=. read -r major minor patch <<< "$base_version"
             minor=${minor:-0}
