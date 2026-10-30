@@ -93,7 +93,7 @@ aber nicht mit Daten über dich:</p>
 <li><a href="https://www.openrailwaymap.org">OpenRailwayMap</a> (Kartenkacheln mit Daten von <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>) und Apple Karten</li>
 <li><a href="https://open-meteo.com">Open-Meteo</a> (Wetter bei Ankunft und beim Umstieg; abschaltbar in den Einstellungen) –
 dafür geht nur die ungefähre Lage des Bahnhofs an den Dienst, nie dein Standort</li>
-<li>bahn.de und die Timetables-Schnittstelle der Deutschen Bahn – diese Anfragen laufen über den Server von
+<li>bahn.de und die Timetables- und FaSta-Schnittstellen der Deutschen Bahn (Aufzüge außer Betrieb) – diese Anfragen laufen über den Server von
 BetterBahn (siehe unten), daher sieht die Deutsche Bahn nicht deine IP-Adresse, sondern die des Servers. Es gelten die
 <a href="https://www.bahn.de/datenschutz">Datenschutzhinweise der Deutschen Bahn</a>.</li>
 </ul>
@@ -103,6 +103,8 @@ BetterBahn (siehe unten), daher sieht die Deutsche Bahn nicht deine IP-Adresse, 
 <ul>
 <li>leiten Fahrplananfragen an die Timetables-Schnittstelle der Deutschen Bahn weiter und speichern die Antworten
 kurz zwischen (Sekunden bis höchstens einen Tag), damit nicht jede Anfrage erneut gestellt wird,</li>
+<li>laden die Liste aller Aufzüge, die an Bahnhöfen außer Betrieb sind, und speichern sie 5 Minuten zwischen. Die App
+lädt immer die ganze Liste, der Server erfährt also nicht, welchen Bahnhof du ansiehst,</li>
 <li>signieren Apple-Wallet-Pässe: Wenn du „Zu Apple Wallet hinzufügen“ tippst, werden die Daten des Passes
 (Barcode des Tickets, Namen der Reisenden, Verbindung, Sitzplätze, Auftragsnummer; bei Zeitkarten auch das
 Geburtsdatum aus dem Barcode) an den Server geschickt, dort signiert und sofort zurückgegeben,</li>
