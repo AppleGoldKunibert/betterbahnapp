@@ -6264,6 +6264,22 @@ private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
                                     by: [Journey(legs: [checkin], source: .traewelling)], calendar: utc).isEmpty)
     }
 
+    /// The same train checked in twice across midnight, the later check-in first (as stored):
+    /// both the repeat and a saved copy departing after midnight are recognised.
+    @Test func repeatedCheckinOverMidnightCountsOnce() {
+        let early = leg("ICE 1000", from: "München Hbf", to: "Nürnberg Hbf",
+                        departure: "2026-03-04T23:55:00Z", arrival: "2026-03-05T00:30:00Z")
+        let late = leg("ICE1000", from: "München Hbf", to: "Nürnberg Hbf",
+                       departure: "2026-03-05T00:05:00Z", arrival: "2026-03-05T00:30:00Z")
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        let checkins = [late, early].map { Journey(legs: [$0], source: .traewelling) }
+        #expect(RideMatch.deduplicated(checkins, calendar: utc).count == 1)
+        #expect(RideMatch.deduplicated([Journey(legs: [early], source: .traewelling)],
+                                       against: [Journey(legs: [late], source: .transitous)],
+                                       calendar: utc).isEmpty)
+    }
+
     /// Checked out at Itzehoe and in again on the same train a bit later: two rides, not a repeat.
     @Test func checkinsOnTheSameTrainOneAfterAnotherAreKept() {
         let first = leg("ICE 2074", from: "Berlin Gesundbrunnen", to: "Itzehoe",
