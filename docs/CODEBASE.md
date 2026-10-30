@@ -47,6 +47,10 @@ in `project.pbxproj`: new files join their target automatically.
   portrait unless Kit `ScreenRotation.turnsFreely` (screen ratio below 1.6, the Duo folded and unfolded). There
   iOS itself shows the tabs as a vertical bar at the screen's side, but only in builds from Xcode 27.2 or later
   (iOS 27.2 SDK); the Duo simulator needs the iOS 27.2 runtime.
+  Unfolded, the Duo gets the iPad's columns (#464): iOS calls an upright phone compact, so
+  `phoneColumnsWhenUnfolded` (`Shared/SplitNavigation.swift`, on the `WindowGroup`'s root) measures the window and,
+  while Kit `PhoneColumns.fit` (short side at least 600 pt; folded about 466), sets the window scene's
+  `traitOverrides.horizontalSizeClass` to `.regular`, removed again when folded.
   In regular width "Verbindungen suchen" sits in a `safeAreaBar` at the bottom of the search column (hard scroll
   edge), since next to a journey the column is often shorter than the form (#487).
   `JourneyDetailView`'s page is `frame(minWidth: 0, maxWidth: .infinity)`: exactly as wide as the scroll view offers,
