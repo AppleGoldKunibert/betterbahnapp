@@ -1,17 +1,31 @@
-# Bumps the app version on indevelopment when a PR is merged into it: +0.1 (patch reset to 0) for every
-# feature, +0.0.1 for every bug fix, and the build number +1 once per bumped PR. A feature or bug is an issue
-# the PR fixes ("Fixed #15", "Closes #15", … in the PR body) labeled "enhancement" or "bug" (an issue with
-# both counts as a feature), so a PR fixing two bugs bumps the patch twice. Changes without an issue are
-# listed in the PR body as lines starting with "Feature without Issue" or "Bug without Issue" (a "- " bullet
-# in front is fine), each counting once; the phrase in the middle of a sentence doesn't count. The
-# PR's own "enhancement" or "bug" label counts once more, but only when nothing above counted that kind.
-# Minors are applied before patches: 1.0.3 + one feature and one bug → 1.1.1. No label, no bump.
+# Bumps the app version on the PR branch before a PR is merged into indevelopment, because the ruleset
+# on indevelopment only accepts changes through a reviewed PR (a push to indevelopment after the merge is
+# rejected). +0.1 (patch reset to 0) for every feature, +0.0.1 for every bug fix, and the build number +1
+# once per bumped PR. A feature or bug is an issue the PR fixes ("Fixed #15", "Closes #15", … in the PR
+# body) labeled "enhancement" or "bug" (an issue with both counts as a feature), so a PR fixing two bugs
+# bumps the patch twice. Changes without an issue are listed in the PR body as lines starting with
+# "Feature without Issue" or "Bug without Issue" (a "- " bullet in front is fine), each counting once; the
+# phrase in the middle of a sentence doesn't count. The PR's own "enhancement" or "bug" label counts once
+# more, but only when nothing above counted that kind. Minors are applied before patches: 1.0.3 + one
+# feature and one bug → 1.1.1. No label, no bump (the PR's version lines are left alone).
+#
+# Every run looks at all open, non-draft PRs into indevelopment from this repo and sets each one's version
+# to "indevelopment's version + its bump". When indevelopment's version moved since the PR branched off
+# (another PR was merged), indevelopment is merged into the PR branch in the same commit, so the PR merges
+# without conflict and doesn't keep the number the other PR already took. PRs whose merge with
+# indevelopment conflicts are skipped and listed in the run summary (the run then fails so GitHub notifies
+# you), as is a PR that got merged before its bump caught up. Pushes with the GITHUB_TOKEN don't start
+# other workflows, so the bump commit neither loops nor reruns "Build & test"; pull before pushing to a
+# bumped PR branch again.
 name: Bump version
 
 on:
   pull_request:
-    types: [closed]
+    types: [opened, reopened, ready_for_review, synchronize, edited, labeled, unlabeled, closed]
     branches: [indevelopment]
+  push:
+    branches: [indevelopment]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -24,109 +38,206 @@ concurrency:
 
 jobs:
   bump:
-    if: github.event.pull_request.merged == true
+    # Events of draft PRs and of PRs from forks don't start a run.
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.draft == false &&
+       github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
-      - name: Count features and bug fixes
+      - name: Count features and bug fixes of the open PRs
         id: count
         uses: actions/github-script@v7
         with:
           script: |
             const { owner, repo } = context.repo;
-            const pr = context.payload.pull_request;
-            const body = pr.body ?? "";
             const has = (labels, name) => labels.some((l) => (typeof l === "string" ? l : l.name) === name);
+            const issues = new Map();
 
-            const pattern = /\b(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?)\s*:?\s+#(\d+)/gi;
-            const numbers = [...new Set([...body.matchAll(pattern)].map((m) => Number(m[1])))];
+            async function count(pr) {
+              const body = pr.body ?? "";
+              const pattern = /\b(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?)\s*:?\s+#(\d+)/gi;
+              const numbers = [...new Set([...body.matchAll(pattern)].map((m) => Number(m[1])))];
 
-            let features = 0;
-            let bugs = 0;
-            for (const issue_number of numbers) {
-              let issue;
-              try {
-                ({ data: issue } = await github.rest.issues.get({ owner, repo, issue_number }));
-              } catch (error) {
-                core.warning(`Could not read #${issue_number}: ${error.message}`);
+              let features = 0;
+              let bugs = 0;
+              for (const issue_number of numbers) {
+                if (!issues.has(issue_number)) {
+                  try {
+                    const { data } = await github.rest.issues.get({ owner, repo, issue_number });
+                    issues.set(issue_number, data);
+                  } catch (error) {
+                    core.warning(`#${pr.number}: could not read #${issue_number}: ${error.message}`);
+                    issues.set(issue_number, null);
+                  }
+                }
+                const issue = issues.get(issue_number);
+                if (!issue || issue.pull_request) continue;
+                if (has(issue.labels, "enhancement")) features++;
+                else if (has(issue.labels, "bug")) bugs++;
+              }
+
+              for (const [, kind] of body.matchAll(/^[ \t]*(?:[-*][ \t]+)?(feature|bug)[ \t]+without[ \t]+issue\b/gim)) {
+                if (kind.toLowerCase() === "feature") features++;
+                else bugs++;
+              }
+
+              const listedFeatures = features;
+              const listedBugs = bugs;
+              if (has(pr.labels, "enhancement") && listedFeatures === 0) features++;
+              if (has(pr.labels, "bug") && listedBugs === 0) bugs++;
+
+              core.info(`#${pr.number}: ${features} feature(s), ${bugs} bug fix(es)`);
+              return { features, bugs };
+            }
+
+            const open = await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: "open", base: "indevelopment", per_page: 100,
+            });
+            const prs = [];
+            for (const pr of open) {
+              if (pr.draft) continue;
+              const { features, bugs } = await count(pr);
+              if (features === 0 && bugs === 0) continue;
+              if (pr.head.repo?.full_name !== `${owner}/${repo}`) {
+                core.warning(`#${pr.number} comes from a fork, bump it by hand.`);
                 continue;
               }
-              if (issue.pull_request) continue;
-              if (has(issue.labels, "enhancement")) {
-                features++;
-                core.info(`#${issue_number}: feature`);
-              } else if (has(issue.labels, "bug")) {
-                bugs++;
-                core.info(`#${issue_number}: bug fix`);
-              }
+              prs.push({
+                number: pr.number, head: pr.head.ref, features, bugs,
+                author: pr.user.login, author_id: pr.user.id,
+              });
             }
+            core.setOutput("prs", JSON.stringify(prs));
 
-            for (const [, kind] of body.matchAll(/^[ \t]*(?:[-*][ \t]+)?(feature|bug)[ \t]+without[ \t]+issue\b/gim)) {
-              if (kind.toLowerCase() === "feature") features++;
-              else bugs++;
-              core.info(`${kind} without issue`);
+            // A PR merged before this workflow caught up with indevelopment keeps the version the previous
+            // PR already took; the next step flags it so it gets bumped by hand.
+            const pr = context.payload.pull_request;
+            let check = "";
+            if (context.payload.action === "closed" && pr?.merged) {
+              const { features, bugs } = await count(pr);
+              if (features > 0 || bugs > 0) check = pr.merge_commit_sha;
             }
-
-            const listedFeatures = features;
-            const listedBugs = bugs;
-            if (has(pr.labels, "enhancement") && listedFeatures === 0) {
-              features++;
-              core.info("PR label: feature");
-            }
-            if (has(pr.labels, "bug") && listedBugs === 0) {
-              bugs++;
-              core.info("PR label: bug fix");
-            }
-
-            core.info(`${features} feature(s), ${bugs} bug fix(es)`);
-            core.setOutput("features", features);
-            core.setOutput("bugs", bugs);
+            core.setOutput("check", check);
 
       - uses: actions/checkout@v4
-        if: steps.count.outputs.features != '0' || steps.count.outputs.bugs != '0'
         with:
           ref: indevelopment
+          fetch-depth: 0
 
-      - name: Bump MARKETING_VERSION and build number
-        if: steps.count.outputs.features != '0' || steps.count.outputs.bugs != '0'
+      - name: Bump the PR branches
         env:
-          FEATURES: ${{ steps.count.outputs.features }}
-          BUGS: ${{ steps.count.outputs.bugs }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          MERGER_LOGIN: ${{ github.event.pull_request.merged_by.login }}
-          MERGER_ID: ${{ github.event.pull_request.merged_by.id }}
+          PRS: ${{ steps.count.outputs.prs }}
+          CHECK: ${{ steps.count.outputs.check }}
+          MERGED_PR: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
           project=BetterBahn.xcodeproj/project.pbxproj
-
-          versions=$(grep -oE 'MARKETING_VERSION = [0-9.]+;' "$project" | sort -u)
-          builds=$(grep -oE 'CURRENT_PROJECT_VERSION = [0-9]+;' "$project" | sort -u)
-          if [ "$(wc -l <<< "$versions")" -ne 1 ] || [ "$(wc -l <<< "$builds")" -ne 1 ]; then
-            echo "::error::Targets don't share one version: $versions / $builds"
-            exit 1
-          fi
-
-          old=$(sed -E 's/.*= ([0-9.]+);/\1/' <<< "$versions")
-          build=$(sed -E 's/.*= ([0-9]+);/\1/' <<< "$builds")
-          IFS=. read -r major minor patch <<< "$old"
-          minor=${minor:-0}
-          patch=${patch:-0}
-          if [ "$FEATURES" -gt 0 ]; then
-            minor=$((minor + FEATURES))
-            patch=0
-          fi
-          patch=$((patch + BUGS))
-          new="$major.$minor.$patch"
-          new_build=$((build + 1))
-
-          sed -i -E "s/MARKETING_VERSION = [0-9.]+;/MARKETING_VERSION = $new;/; s/CURRENT_PROJECT_VERSION = [0-9]+;/CURRENT_PROJECT_VERSION = $new_build;/" "$project"
+          base=origin/indevelopment
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # The person who merged the PR authors the bump, so it counts as theirs and not as a bot contributor.
-          author=()
-          [ -n "$MERGER_LOGIN" ] && author=(--author="$MERGER_LOGIN <$MERGER_ID+$MERGER_LOGIN@users.noreply.github.com>")
-          git commit -qam "Version $new ($new_build) for #$PR_NUMBER" "${author[@]}"
-          git push origin HEAD:indevelopment
 
-          echo "Version $old ($build) → $new ($new_build): $FEATURES feature(s), $BUGS bug fix(es) in #$PR_NUMBER" >> "$GITHUB_STEP_SUMMARY"
+          # "1.6.2 21" for a commit, "mixed" when its targets don't share one version.
+          version_of() {
+            local versions builds
+            versions=$(git show "$1:$project" | grep -oE 'MARKETING_VERSION = [0-9.]+;' | sort -u)
+            builds=$(git show "$1:$project" | grep -oE 'CURRENT_PROJECT_VERSION = [0-9]+;' | sort -u)
+            if [ "$(wc -l <<< "$versions")" -ne 1 ] || [ "$(wc -l <<< "$builds")" -ne 1 ]; then
+              echo mixed
+            else
+              echo "$(sed -E 's/.*= ([0-9.]+);/\1/' <<< "$versions") $(sed -E 's/.*= ([0-9]+);/\1/' <<< "$builds")"
+            fi
+          }
+
+          set_version() {
+            sed -i -E "s/MARKETING_VERSION = [0-9.]+;/MARKETING_VERSION = $1;/; s/CURRENT_PROJECT_VERSION = [0-9]+;/CURRENT_PROJECT_VERSION = $2;/" "$project"
+          }
+
+          echo "## Version bumps" >> "$GITHUB_STEP_SUMMARY"
+          failed=()
+
+          if [ -n "$CHECK" ] && [ "$(version_of "$CHECK")" = "$(version_of "$CHECK^1")" ]; then
+            echo "- #$MERGED_PR: ❌ merged without its version bump, bump indevelopment by hand" >> "$GITHUB_STEP_SUMMARY"
+            failed+=("#$MERGED_PR")
+          fi
+
+          read -r base_version base_build <<< "$(version_of "$base")"
+          if [ "$base_version" = mixed ]; then
+            echo "::error::Targets on indevelopment don't share one version"
+            exit 1
+          fi
+
+          while read -r pr; do
+            number=$(jq -r .number <<< "$pr")
+            head=$(jq -r .head <<< "$pr")
+            features=$(jq -r .features <<< "$pr")
+            bugs=$(jq -r .bugs <<< "$pr")
+            author_name=$(jq -r .author <<< "$pr")
+            author_email="$(jq -r .author_id <<< "$pr")+$author_name@users.noreply.github.com"
+
+            IFS=. read -r major minor patch <<< "$base_version"
+            minor=${minor:-0}
+            patch=${patch:-0}
+            if [ "$features" -gt 0 ]; then
+              minor=$((minor + features))
+              patch=0
+            fi
+            patch=$((patch + bugs))
+            new="$major.$minor.$patch"
+            new_build=$((base_build + 1))
+            message="Version $new ($new_build) for #$number"
+
+            git fetch -q origin "+refs/heads/$head:refs/remotes/origin/$head"
+            head_sha=$(git rev-parse "origin/$head")
+            # indevelopment's version moved since the PR branched off: without merging it in, both sides
+            # change the version lines (a conflict, or no bump at all when both picked the same number).
+            needs_merge=false
+            if [ "$(version_of "$(git merge-base "$base" "$head_sha")")" != "$base_version $base_build" ]; then
+              needs_merge=true
+            fi
+
+            if [ "$(version_of "$head_sha")" = "$new $new_build" ] && [ "$needs_merge" = false ]; then
+              echo "- #$number \`$head\`: $new ($new_build), up to date" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+
+            git checkout -q --detach "$head_sha"
+            if [ "$needs_merge" = true ]; then
+              # Take indevelopment's version first so only real code can conflict, then put the merge and
+              # the bump into one merge commit on top of the PR head (the helper commit is dropped).
+              set_version "$base_version" "$base_build"
+              git diff --quiet || git commit -qam "Take indevelopment's version"
+              if ! git merge -q --no-ff --no-commit "$base"; then
+                git merge --abort
+                echo "- #$number \`$head\`: ❌ conflicts with indevelopment, merge it in by hand" >> "$GITHUB_STEP_SUMMARY"
+                failed+=("#$number")
+                continue
+              fi
+              set_version "$new" "$new_build"
+              git add "$project"
+              commit=$(GIT_AUTHOR_NAME="$author_name" GIT_AUTHOR_EMAIL="$author_email" \
+                git commit-tree "$(git write-tree)" -p "$head_sha" -p "$base" \
+                -m "Merge indevelopment into $head" -m "$message")
+              git merge --abort
+            else
+              set_version "$new" "$new_build"
+              git commit -qam "$message" --author="$author_name <$author_email>"
+              commit=$(git rev-parse HEAD)
+            fi
+
+            # Not forced: if the branch moved meanwhile, that push starts a new run which bumps it again.
+            if git push -q origin "$commit:refs/heads/$head"; then
+              merged_in=""
+              [ "$needs_merge" = true ] && merged_in=", indevelopment merged in"
+              echo "- #$number \`$head\`: → $new ($new_build)$merged_in" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "- #$number \`$head\`: moved during the run, the next run bumps it" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done < <(jq -c '.[]' <<< "$PRS")
+
+          if [ ${#failed[@]} -gt 0 ]; then
+            echo "::error::Needs a hand: ${failed[*]}"
+            exit 1
+          fi
