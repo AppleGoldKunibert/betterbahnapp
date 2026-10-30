@@ -46,6 +46,30 @@ import Testing
         #expect(AuthWorkerProtocol.state.dataTokens == ["access-1", "access-2"])
     }
 
+    /// A dead spot on the train: our servers refuse requests without a token, so the next attempt
+    /// comes soon, not after `retryDelay` (#472).
+    @Test func triesAgainSoonAfterTheNetworkFailed() async throws {
+        let (auth, _, _) = makeAuth()
+        AuthWorkerProtocol.state.offline = true
+
+        #expect(await auth.accessToken() == nil)
+        let next = try #require(await auth.nextAttempt)
+        #expect(next <= Date.now.addingTimeInterval(WorkerAuth.offlineRetryDelay))
+        #expect(WorkerAuth.offlineRetryDelay < WorkerAuth.retryDelay)
+    }
+
+    @Test func waitsLongerAfterARefusal() async throws {
+        let (auth, _, suite) = makeAuth()
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.set("old-key", forKey: WorkerAuth.keyIDDefaultsKey)
+        defaults.set("revoked", forKey: WorkerAuth.keyTokenDefaultsKey)
+        AuthWorkerProtocol.state.refuseAttestation = true
+
+        #expect(await auth.accessToken() == nil)
+        let next = try #require(await auth.nextAttempt)
+        #expect(next > Date.now.addingTimeInterval(WorkerAuth.offlineRetryDelay))
+    }
+
     @Test func sendsNothingWithoutAppAttest() async throws {
         let (auth, device, _) = makeAuth(supported: false)
         #expect(await auth.accessToken() == nil)
@@ -106,6 +130,10 @@ final class AuthWorkerProtocol: URLProtocol, @unchecked Sendable {
         var issued = 0
         /// Tokens `/data` accepts; empty means any.
         var acceptedTokens: Set<String> = []
+        /// Every request fails as without network.
+        var offline = false
+        /// `/auth/attest` refuses every key.
+        var refuseAttestation = false
     }
     private static let lock = NSLock()
     nonisolated(unsafe) private static var _state = State()
@@ -125,6 +153,10 @@ final class AuthWorkerProtocol: URLProtocol, @unchecked Sendable {
     override func stopLoading() {}
 
     override func startLoading() {
+        if Self.state.offline {
+            client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+            return
+        }
         let path = request.url!.path
         let body = Self.json(Self.body(of: request))
         var status = 200
@@ -132,6 +164,9 @@ final class AuthWorkerProtocol: URLProtocol, @unchecked Sendable {
         switch path {
         case "/auth/challenge":
             response = #"{"challenge":"challenge"}"#
+        case "/auth/attest" where Self.state.refuseAttestation:
+            status = 401
+            response = #"{"error":"invalid_attestation"}"#
         case "/auth/attest":
             let key = body["keyId"] ?? ""
             response = #"{"keyToken":"keytoken-for-\#(key)"}"#
