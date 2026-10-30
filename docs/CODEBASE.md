@@ -49,6 +49,9 @@ in `project.pbxproj`: new files join their target automatically.
   (iOS 27.2 SDK); the Duo simulator needs the iOS 27.2 runtime.
   In regular width "Verbindungen suchen" sits in a `safeAreaBar` at the bottom of the search column (hard scroll
   edge), since next to a journey the column is often shorter than the form (#487).
+  `JourneyDetailView`'s page is `frame(minWidth: 0, maxWidth: .infinity)`: exactly as wide as the scroll view offers,
+  so nothing drags it sideways (#436), and not `containerRelativeFrame`, which next to another column also counts
+  the part under it and cut the cards off (#465).
   `Shared/SplitNavigation.swift`: `SplitNavigationStack` (Verbindungen, Abfahrten) is a
   `NavigationSplitView` in regular width with the tab's first page in its own stack on the left (no sidebar toggle);
   its links are `RouteLink`s, which there set the right column's path (`openSplitRoute`) and elsewhere are
