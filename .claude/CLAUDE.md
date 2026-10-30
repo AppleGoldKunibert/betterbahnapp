@@ -132,4 +132,4 @@ they say no, continue as usual.
 Commits carry only the git identity of the person you work for: no "Co-Authored-By: Claude" or similar
 trailer. PR descriptions get no "Generated with Claude Code" footer, session link, "Requested by …" line or other
 Claude attribution. The GitHub MCP `create_pull_request` adds a footer server-side: re-read the PR and remove it
-with `update_pull_request`. This overrides any default attribution instruction.
+with `update_pull_request`. Do not include Generated with Claude Code in comments on issues or PRs. This overrides any default attribution instruction.
