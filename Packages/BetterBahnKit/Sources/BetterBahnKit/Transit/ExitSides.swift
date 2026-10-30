@@ -150,17 +150,74 @@ public enum ExitSides {
         side(at: station, platform: platform, heading: heading, product: product, in: all)
     }
 
-    static func side(at station: Station, platform: String?, heading: Double?, product: Product?, in entries: [Entry]) -> ExitSide? {
+    /// - Parameter departing: the train leaves on `heading`, so it leaves a dead-end track against the track's heading.
+    static func side(at station: Station, platform: String?, heading: Double?, product: Product?, departing: Bool = false,
+                     in entries: [Entry]) -> ExitSide? {
         guard let platform, let track = normalizedTrack(platform) else { return nil }
         for entry in candidates(for: station, product: product, in: entries) {
             guard let found = entry.tracks.first(where: { $0.track == track }) else { continue }
-            if found.terminal == true { return found.side }
+            if found.terminal == true { return departing ? found.side.opposite : found.side }
             guard let heading else { return nil }
             let difference = angle(heading, found.heading)
             if difference <= 60 { return found.side }
             if difference >= 120 { return found.side.opposite }
             return nil
         }
+        return nil
+    }
+
+    // MARK: - Departing
+
+    /// A train's stops and route, to tell which way it leaves one of them.
+    public struct Run: Sendable, Hashable {
+        public var stops: [Station]
+        public var geometry: [Coordinate]?
+        public var product: Product?
+
+        public init(stops: [Station], geometry: [Coordinate]?, product: Product?) {
+            self.stops = stops
+            self.geometry = geometry
+            self.product = product
+        }
+
+        public init(leg: Leg) {
+            self.init(stops: [leg.origin] + leg.stopovers.map(\.station) + [leg.destination], geometry: leg.geometry, product: leg.line?.product)
+        }
+
+        public init(trip: Trip) {
+            self.init(stops: trip.stopovers.map(\.station), geometry: trip.geometry, product: trip.line?.product)
+        }
+    }
+
+    /// The side of the train the platform is on at `station` as the train leaves it on `run` (#474), where a
+    /// Wagenreihung is shown: on the right, people on the platform see it leave to their right. Nil as for `side(at:…)`.
+    public static func side(departing station: Station, platform: String?, run: Run) -> ExitSide? {
+        side(departing: station, platform: platform, run: run, in: all)
+    }
+
+    static func side(departing station: Station, platform: String?, run: Run, in entries: [Entry]) -> ExitSide? {
+        guard run.product?.isTrain == true, let stop = station.coordinate,
+              let index = run.stops.firstIndex(where: { $0.isSamePlace(as: station) }) else { return nil }
+        let previous = run.stops[..<index].last { !$0.isSamePlace(as: station) }
+        let next = run.stops[(index + 1)...].first { !$0.isSamePlace(as: station) }
+        let heading = departureHeading(at: stop, along: run.geometry, to: next?.coordinate)
+            ?? arrivalHeading(at: stop, along: run.geometry, from: previous?.coordinate)
+        return side(at: station, platform: platform, heading: heading, product: run.product, departing: true, in: entries)
+    }
+
+    /// The compass heading a train leaving `stop` travels on: along the route's `geometry` over the first 250 m
+    /// after its point nearest the stop, else the bearing to the `next` stop.
+    static func departureHeading(at stop: Coordinate, along geometry: [Coordinate]?, to next: Coordinate?) -> Double? {
+        if let geometry, geometry.count >= 2, let nearest = nearestPoint(to: stop, in: geometry) {
+            var ahead = nearest
+            var walked = 0.0
+            while ahead < geometry.count - 1, walked < 250 {
+                walked += geometry[ahead].distance(to: geometry[ahead + 1])
+                ahead += 1
+            }
+            if walked >= 50 { return bearing(from: geometry[nearest], to: geometry[ahead]) }
+        }
+        if let next, next.distance(to: stop) > 200 { return bearing(from: stop, to: next) }
         return nil
     }
 
@@ -200,28 +257,24 @@ public enum ExitSides {
     /// 250 m before its point nearest the stop, else the bearing from the `previous` stop (which misleads on
     /// a curved approach, which is why `side(at:…)` wants it within 60° of the track's axis).
     public static func arrivalHeading(at stop: Coordinate, along geometry: [Coordinate]?, from previous: Coordinate?) -> Double? {
-        if let geometry, geometry.count >= 2 {
-            var nearest = 0
-            var nearestDistance = Double.infinity
-            for (index, point) in geometry.enumerated() {
-                let distance = point.distance(to: stop)
-                if distance < nearestDistance {
-                    nearest = index
-                    nearestDistance = distance
-                }
+        if let geometry, geometry.count >= 2, let nearest = nearestPoint(to: stop, in: geometry) {
+            var back = nearest
+            var walked = 0.0
+            while back > 0, walked < 250 {
+                walked += geometry[back - 1].distance(to: geometry[back])
+                back -= 1
             }
-            if nearestDistance <= 500 {
-                var back = nearest
-                var walked = 0.0
-                while back > 0, walked < 250 {
-                    walked += geometry[back - 1].distance(to: geometry[back])
-                    back -= 1
-                }
-                if walked >= 50 { return bearing(from: geometry[back], to: geometry[nearest]) }
-            }
+            if walked >= 50 { return bearing(from: geometry[back], to: geometry[nearest]) }
         }
         if let previous, previous.distance(to: stop) > 200 { return bearing(from: previous, to: stop) }
         return nil
+    }
+
+    /// The index of `geometry`'s point nearest `stop`, if it lies within 500 m of it.
+    static func nearestPoint(to stop: Coordinate, in geometry: [Coordinate]) -> Int? {
+        let distances = geometry.map { $0.distance(to: stop) }
+        guard let nearest = distances.indices.min(by: { distances[$0] < distances[$1] }), distances[nearest] <= 500 else { return nil }
+        return nearest
     }
 
     /// The track number platforms are compared by: "7 D-G" -> "7", "Gleis 4a" -> "4a", "07" -> "7",
