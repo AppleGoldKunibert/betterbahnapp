@@ -1,7 +1,7 @@
 # BetterBahn – instructions for Claude
 
 If `git config user.name` (in cloud sessions also the GitHub MCP `get_me` login) is `goldkunibert`, also
-follow `.claude/GoldKunibert.md`.
+follow `.claude/GoldKunibert.md`. If it's `tobiaslach` also follow `.claude/tobi.md`.
 
 ## Project
 
