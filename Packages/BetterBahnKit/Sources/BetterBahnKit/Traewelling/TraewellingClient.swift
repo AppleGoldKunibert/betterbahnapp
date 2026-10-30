@@ -1104,15 +1104,16 @@ public actor TraewellingClient {
             guard let planned = dep.plannedWhen,
                   abs(planned.timeIntervalSince(leg.departure.planned)) <= tolerance else { return false }
             if let name = dep.line.name, Line.normalize(name) == wantedName { return true }
-            if let number = line.number {
-                // Träwelling passes on MOTIS' trip short name as is: VBB's "03134" for our "RE2 (3134)".
-                if let fahrtNr = dep.line.fahrtNr, !Self.trainNumber(fahrtNr).isEmpty,
-                   Self.trainNumber(fahrtNr) == Self.trainNumber(number) { return true }
-                // Cross-border trains are sometimes carried under a different product brand once they
-                // switch networks (e.g. an ÖBB "RJ 177" is DB's "ICE 177" while still in Germany) — the
-                // shared train number still identifies it even when the name/product prefix doesn't match.
-                if let name = dep.line.name, Self.trailingNumber(name) == number { return true }
-            }
+            // Träwelling passes on MOTIS' trip short name as is: VBB's "03134" for our "RE2 (3134)".
+            if let number = Self.runNumber(of: line), let fahrtNr = dep.line.fahrtNr, !Self.trainNumber(fahrtNr).isEmpty,
+               Self.trainNumber(fahrtNr) == Self.trainNumber(number) { return true }
+            // Cross-border trains are sometimes carried under a different product brand once they
+            // switch networks (e.g. an ÖBB "RJ 177" is DB's "ICE 177" while still in Germany) — the
+            // shared train number still identifies it even when the name/product prefix doesn't match.
+            // Only long-distance trains are named by their number: an RE 6's line number would also
+            // match the S 6, RB 6 or bus 6 (#485).
+            if line.product.isLongDistance, let number = line.number, let name = dep.line.name,
+               Self.trailingNumber(name) == number { return true }
             return false
         }
         var seen = Set<String>()
@@ -1123,6 +1124,17 @@ public actor TraewellingClient {
         }
         .map(\.element)
         .filter { seen.insert($0.tripId).inserted }
+    }
+
+    /// The number `line` runs as, nil when we only know a regional line's number: "RE 6" is line 6,
+    /// not train 6 (an S 6 or bus 6 may run as 6), while "RE2 (3134)" runs as 3134.
+    static func runNumber(of line: Line) -> String? {
+        if let tripNumber = line.tripNumber { return tripNumber }
+        guard let number = line.number else { return nil }
+        if line.product.isLongDistance { return number }
+        guard let lineNumber = line.name.split(whereSeparator: { !$0.isNumber }).first.map(String.init),
+              lineNumber.count <= 3 else { return number }
+        return trainNumber(lineNumber) == trainNumber(number) ? nil : number
     }
 
     /// A train number without leading zeros ("003135" → "3135").

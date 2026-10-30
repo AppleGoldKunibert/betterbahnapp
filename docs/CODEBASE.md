@@ -478,6 +478,8 @@ in `project.pbxproj`: new files join their target automatically.
   Träwelling's board is MOTIS' next 50 departures within 200 m, so it also loads only the leg's kind
   (`travelType`, `boardTravelTypes`/`travelType(for:)`). The same train can be on the board twice at the same time (Austrian and
   German data, #449): `matches` lists every candidate and `segments(for:departures:)` takes the first trip with both stops.
+  A candidate has the leg's name or run number (`runNumber(of:)`; "RE 6" alone is a line number, not a run); another
+  brand with the same number (ÖBB's RJ 177 = ICE 177) only counts for long-distance trains (#485).
   `replaceWithManualTrip` (creates the trip, deletes, re-checks in).
   `TraewellingCheckinEdit`: `status(id:)`, `updateStatus`, `deleteStatus`, `tags`, `applyTagChanges`/`StatusTagChanges`,
   exit moves, `earlyExit`, `fellowTravellers(of:)` (`trips/{id}/statuses`). `FollowedCheckinPush`
