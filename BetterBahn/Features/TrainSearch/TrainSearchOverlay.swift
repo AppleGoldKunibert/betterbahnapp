@@ -527,7 +527,7 @@ private struct CoachSequenceByStop: View {
                     Card {
                         VStack(alignment: .leading, spacing: 12) {
                             if stops.count > 1 { stopMenu(selected: stop) }
-                            CoachSequencePanel(request: request, sequence: request == next ? nextSequence : nil)
+                            CoachSequencePanel(request: request, sequence: request == next ? nextSequence : nil, run: ExitSides.Run(trip: trip))
                                 .id(stop.id)
                         }
                     }

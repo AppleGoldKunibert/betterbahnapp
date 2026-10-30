@@ -144,6 +144,28 @@ import Testing
         #expect(ExitSides.side(leaving: trip, at: 0, in: entries) == nil)
     }
 
+    @Test func departingSideFollowsTheWayTheTrainLeaves() {
+        // #474: where the Wagenreihung is shown, the side counts in the direction the train leaves in.
+        let west = station("9900002", "Westdorf", 50.0, 7.9)
+        let east = station("9900003", "Ostdorf", 50.0, 8.1)
+        let re = Product.regional
+        // Leaving east along the route: track 7's platform is on the left.
+        let route = [point(east: 0, north: 0), point(east: 300, north: 0), point(east: 7000, north: 0)]
+        let eastbound = ExitSides.Run(stops: [hbf, east], geometry: route, product: re)
+        #expect(ExitSides.side(departing: hbf, platform: "7", run: eastbound, in: entries) == .left)
+        // Without geometry the next stop gives the direction, else the previous one.
+        let westbound = ExitSides.Run(stops: [east, hbf, west], geometry: nil, product: re)
+        #expect(ExitSides.side(departing: hbf, platform: "7", run: westbound, in: entries) == .right)
+        let ending = ExitSides.Run(stops: [west, hbf], geometry: nil, product: re)
+        #expect(ExitSides.side(departing: hbf, platform: "7", run: ending, in: entries) == .left)
+        // A train leaves a dead-end track against its heading.
+        #expect(ExitSides.side(departing: hbf, platform: "8", run: westbound, in: entries) == .left)
+        // Not a stop of the run, or no train.
+        #expect(ExitSides.side(departing: west, platform: "7", run: eastbound, in: entries) == nil)
+        let bus = ExitSides.Run(stops: [hbf, east], geometry: route, product: .bus)
+        #expect(ExitSides.side(departing: hbf, platform: "7", run: bus, in: entries) == nil)
+    }
+
     @Test func reminderNamesTheSide() {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let time = TimeInfo(planned: now.addingTimeInterval(1800), actual: nil)
