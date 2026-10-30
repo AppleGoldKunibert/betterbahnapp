@@ -1,7 +1,9 @@
+import BetterBahnKit
 import SwiftUI
 
-/// A tab's navigation stack that becomes two columns on the iPad and the Mac (regular width): the tab's first page
-/// stays on the left and everything it opens is pushed on the right. On the iPhone it's a plain `NavigationStack`.
+/// A tab's navigation stack that becomes two columns on the iPad, the Mac and the unfolded iPhone Duo (regular width,
+/// `phoneColumnsWhenUnfolded`): the tab's first page stays on the left and everything it opens is pushed on the
+/// right. On the iPhone it's a plain `NavigationStack`.
 ///
 /// Links on the first page are `RouteLink`s: on the left they replace the right column's path, elsewhere they are
 /// plain `NavigationLink(value:)`s.
@@ -92,8 +94,8 @@ struct SplitPlaceholder: View {
     }
 }
 
-/// A list of pages (like the settings) that shows the opened page next to it on the iPad and the Mac, where links
-/// in the list replace the right column. On the iPhone it's a plain `NavigationStack`.
+/// A list of pages (like the settings) that shows the opened page next to it on the iPad, the Mac and the unfolded
+/// iPhone Duo, where links in the list replace the right column. On the iPhone it's a plain `NavigationStack`.
 struct SplitNavigationView<Sidebar: View, Placeholder: View>: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var columns = NavigationSplitViewVisibility.all
@@ -111,6 +113,51 @@ struct SplitNavigationView<Sidebar: View, Placeholder: View>: View {
             .navigationSplitViewStyle(.balanced)
         } else {
             NavigationStack { sidebar() }
+        }
+    }
+}
+
+extension View {
+    /// Gives the unfolded iPhone Duo the iPad's columns (#464). iOS calls an upright phone narrow, which keeps
+    /// `SplitNavigationStack` and `SplitNavigationView` in one column there: this tells the whole scene, sheets
+    /// included, it is wide while the window fits two columns (Kit `PhoneColumns`).
+    func phoneColumnsWhenUnfolded() -> some View {
+        background { PhoneColumnsObserver().accessibilityHidden(true) }
+    }
+}
+
+private struct PhoneColumnsObserver: UIViewRepresentable {
+    func makeUIView(context: Context) -> ObserverView {
+        let view = ObserverView()
+        view.isUserInteractionEnabled = false
+        return view
+    }
+
+    func updateUIView(_ view: ObserverView, context: Context) {}
+
+    /// Measures the window on every layout, so folding and turning the device switch the columns at once.
+    final class ObserverView: UIView {
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            update()
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            update()
+        }
+
+        private func update() {
+            guard UIDevice.current.userInterfaceIdiom == .phone, let window, let scene = window.windowScene else { return }
+            let size = window.bounds.size
+            let wide = PhoneColumns.fit(width: size.width, height: size.height)
+            let overridden = scene.traitOverrides.contains(UITraitHorizontalSizeClass.self)
+            // Only on a change: every override lays the scene out again.
+            if wide, !overridden {
+                scene.traitOverrides.horizontalSizeClass = .regular
+            } else if !wide, overridden {
+                scene.traitOverrides.remove(UITraitHorizontalSizeClass.self)
+            }
         }
     }
 }
