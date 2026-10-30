@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Settings → Datenquellen: every service the app gets data from, with the attribution their terms ask for
-/// (Transitous sources, OSM + OpenRailwayMap with links, DB Timetables and Open-Meteo under CC BY 4.0, operator logos).
+/// (Transitous sources, OSM + OpenRailwayMap with links, DB Timetables, DB FaSta and Open-Meteo under CC BY 4.0, operator logos).
 struct DataSourcesView: View {
     struct Source: Identifiable {
         let name: String
@@ -17,6 +17,9 @@ struct DataSourcesView: View {
                license: ("Quellen der Fahrplandaten", URL(string: "https://transitous.org/sources/")!)),
         Source(name: "Deutsche Bahn – DB Timetables", usage: "Echtzeitdaten und Meldungen",
                url: URL(string: "https://developers.deutschebahn.com/db-api-marketplace/apis/product/timetables")!,
+               license: ("Lizenz: CC BY 4.0", URL(string: "https://creativecommons.org/licenses/by/4.0/deed.de")!)),
+        Source(name: "Deutsche Bahn – FaSta", usage: "Aufzüge außer Betrieb",
+               url: URL(string: "https://developers.deutschebahn.com/db-api-marketplace/apis/product/fasta")!,
                license: ("Lizenz: CC BY 4.0", URL(string: "https://creativecommons.org/licenses/by/4.0/deed.de")!)),
         Source(name: "deutsche-bahn-data von Piet Brömmel", usage: "Zugstatistik: Verspätungen, Ausfälle und Gleiswechsel der letzten 30 Tage, aus DB Timetables",
                url: URL(string: "https://github.com/piebro/deutsche-bahn-data")!,

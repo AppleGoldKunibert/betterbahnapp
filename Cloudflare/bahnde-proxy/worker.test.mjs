@@ -130,6 +130,36 @@ test("Timetables answers are cached whichever source gave them", async () => {
     assert.equal(failing.store.size, 0);
 });
 
+const FASTA = "https://apis.deutschebahn.com/db-api-marketplace/apis/fasta/v2/facilities?type=ELEVATOR&state=INACTIVE";
+const fastaRequest = async (query = "") => new Request(`${base}/fasta/v2/facilities${query}`, { headers: { [TOKEN_HEADER]: await accessToken("secret") } });
+
+test("FaSta needs an App Attest token and the API key", async () => {
+    const fetch = fakeFetch(200, "[]");
+    assert.equal((await handleRequest(new Request(`${base}/fasta/v2/facilities`), timetablesEnv, { fetch, cache: null })).status, 401);
+    assert.equal((await handleRequest(await fastaRequest(), { ...open, TOKEN_SECRET: "secret" }, { fetch, cache: null })).status, 503);
+    assert.equal(fetch.calls.length, 0);
+    for (const path of ["/fasta/v2/facilities/123", "/fasta/v2/stations/1071", "/fasta/v2/"]) {
+        assert.equal((await handleRequest(new Request(base + path), open, { fetch, cache: null })).status, 404, path);
+    }
+});
+
+test("FaSta always asks for the lifts out of order, whatever the app's query, and caches them for 5 minutes", async () => {
+    const fetch = fakeFetch(200, '[{"equipmentnumber":1,"type":"ELEVATOR","state":"INACTIVE"}]');
+    const cache = fakeCache();
+    const first = await handleRequest(await fastaRequest("?type=ESCALATOR&stationnumber=1071"), timetablesEnv, { fetch, cache });
+    assert.equal(first.status, 200);
+    assert.equal(first.headers.get("Cache-Control"), "public, max-age=300");
+    assert.deepEqual(fetch.calls.map(call => call.url), [FASTA]);
+    assert.equal(fetch.calls[0].init.headers["DB-Api-Key"], "key");
+    const second = await handleRequest(await fastaRequest(), timetablesEnv, { fetch, cache });
+    assert.equal(second.headers.get("X-Proxy-Cache"), "HIT");
+    assert.equal(fetch.calls.length, 1);
+    const failing = fakeCache();
+    const error = await handleRequest(await fastaRequest(), timetablesEnv, { fetch: fakeFetch(429, "quota"), cache: failing });
+    assert.equal(error.status, 429);
+    assert.equal(failing.store.size, 0);
+});
+
 test("answers the health check without calling upstream", async () => {
     const fetch = fakeFetch();
     const response = await handleRequest(new Request(`${base}/health`), {}, { fetch, cache: null });

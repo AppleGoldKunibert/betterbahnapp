@@ -46,9 +46,11 @@ public extension Journey {
     ///     passed was shown already and doesn't come again, even if a new delay moved the arrival.
     ///   - dispositions: what DB decided for the train departing after a transfer, by that leg's `id`.
     ///   - exitSide: which side of the train the platform is on where the leg ends (#394), if known.
+    ///   - liftAlerts: lifts out of order where the user gets off or changes trains (#486), named at the end.
     func exitReminders(lead: TimeInterval, now: Date = .now, scheduled: [String: Date] = [:],
                        dispositions: [String: TransferDisposition] = [:],
-                       exitSide: (Leg) -> ExitSide? = { ExitSides.side(leaving: $0) }) -> [ExitReminder] {
+                       exitSide: (Leg) -> ExitSide? = { ExitSides.side(leaving: $0) },
+                       liftAlerts: [JourneyLiftAlert] = []) -> [ExitReminder] {
         let transit = transitLegs
         var reminders: [ExitReminder] = []
         for (index, leg) in transit.enumerated() where !leg.cancelled {
@@ -67,6 +69,9 @@ public extension Journey {
                 details += "Ankunft am Ziel \(place)"
             } else {
                 details += "Ankunft in \(place) – hier aussteigen"
+            }
+            for alert in liftAlerts where alert.legID == leg.id && alert.place != .start {
+                details += ". \(alert.alert.text)"
             }
             reminders.append(ExitReminder(legID: leg.id, station: station, arrival: arrival,
                                           fireDate: max(arrival.addingTimeInterval(-lead), now),

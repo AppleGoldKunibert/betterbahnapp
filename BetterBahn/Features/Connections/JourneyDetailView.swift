@@ -32,6 +32,8 @@ struct JourneyDetailView: View {
     @State private var transferWarnings: [String: String] = [:]
     /// Where to board for a quick transfer or exit (#383), keyed by the leg to board.
     @State private var coachAdvice: [String: CoachAdvice] = [:]
+    /// Lifts out of order where the journey needs one (#486).
+    @State private var liftAlerts: [JourneyLiftAlert] = []
     /// The forecast on arrival and at long transfers (#385).
     @State private var weather = JourneyWeather()
     /// CO₂ compared with car and plane (#386), once the track geometry is in.
@@ -68,6 +70,7 @@ struct JourneyDetailView: View {
             await refreshRealtime()
             await loadDispositions()
             await loadCoachAdvice()
+            await loadLiftAlerts()
         }
         // A seat saved on the way changes where to walk before a transfer.
         .onChange(of: model.savedSeats) { Task { await loadCoachAdvice() } }
@@ -91,6 +94,7 @@ struct JourneyDetailView: View {
             await loadDispositions()
             await loadTransferWarnings()
             await loadCoachAdvice()
+            await loadLiftAlerts()
             // Keep a saved journey's delays current while it's open.
             while !Task.isCancelled {
                 try? await Task.sleep(for: AppModel.realtimeRefreshInterval)
@@ -98,6 +102,7 @@ struct JourneyDetailView: View {
                 if model.savedEntry(for: journey) != nil { await refreshRealtime() }
                 await loadDispositions()
                 await loadCoachAdvice()
+                await loadLiftAlerts()
             }
         }
         .task(id: journey.transitLegs.map(\.id)) { await loadCO2() }
@@ -190,12 +195,15 @@ struct JourneyDetailView: View {
                         coachAdvice: coachAdvice[leg.id],
                         // Next to the transfer when there is one.
                         showsCoachAdvice: transferInfo(after: leg) == nil,
-                        arrivalWeather: weather.arrival(of: leg, in: journey)
+                        arrivalWeather: weather.arrival(of: leg, in: journey),
+                        liftWarnings: liftAlerts.filter { $0.place != .transfer && $0.legID == leg.id }
+                            .map { "\($0.station): \($0.alert.text)" }
                     )
                     if let info = transferInfo(after: leg) {
                         TransferRow(from: leg, to: info.next, walk: info.walk, isPast: journey.isOver(),
                                     disposition: dispositions[info.next.id], warning: transferWarnings[leg.id],
-                                    coachAdvice: coachAdvice[leg.id])
+                                    coachAdvice: coachAdvice[leg.id],
+                                    liftWarnings: liftAlerts.filter { $0.place == .transfer && $0.legID == leg.id }.map(\.alert.text))
                     }
                 }
             }
@@ -214,6 +222,14 @@ struct JourneyDetailView: View {
         let advice = await model.coachAdvice(for: journey)
         guard advice != coachAdvice else { return }
         withAnimation { coachAdvice = advice }
+    }
+
+    /// Lifts out of order at the start, the transfers and the destination (#486); not for a journey that is over.
+    private func loadLiftAlerts() async {
+        guard !journey.isOver() else { return }
+        let alerts = await model.liftAlerts(for: journey)
+        guard alerts != liftAlerts else { return }
+        withAnimation { liftAlerts = alerts }
     }
 
     /// Which tight transfers the incoming train usually misses (#316); not for a journey that is over.
@@ -583,6 +599,8 @@ struct TransferRow: View {
     var warning: String?
     /// Where to board the incoming train to be quick here (#383).
     var coachAdvice: CoachAdvice?
+    /// Lifts out of order on the way from one platform to the other (#486).
+    var liftWarnings: [String] = []
 
     private var minutes: Int {
         Int((to.departure.best.timeIntervalSince(from.arrival.best) / 60).rounded())
@@ -623,6 +641,9 @@ struct TransferRow: View {
                 }
                 if let warning, !isPast, !broken {
                     TransferWarning(text: warning)
+                }
+                if !isPast, !broken {
+                    ForEach(liftWarnings, id: \.self) { LiftWarning(text: $0) }
                 }
                 if let walk {
                     Text("\(Int((walk.arrival.best.timeIntervalSince(walk.departure.best) / 60).rounded())) min Fußweg")
@@ -684,6 +705,8 @@ struct LegCard: View {
     /// The forecast where this leg arrives: at the destination, or at a transfer with more than 15 minutes
     /// until the next train (#385).
     var arrivalWeather: LegArrivalWeather?
+    /// Lifts out of order where this leg starts or ends the journey (#486), with the station.
+    var liftWarnings: [String] = []
 
     @State private var showStops = false
     @State private var showDetails = false
@@ -851,6 +874,10 @@ struct LegCard: View {
 
                 if transferBroken {
                     RemarkRow(text: "Wegen Verspätung klappt dieser Umstieg nicht mehr.")
+                }
+                ForEach(liftWarnings, id: \.self) { warning in
+                    LiftWarning(text: warning)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 ForEach(leg.remarks, id: \.self) { RemarkRow(text: $0) }
 
