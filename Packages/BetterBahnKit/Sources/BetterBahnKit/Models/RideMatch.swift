@@ -27,7 +27,8 @@ public enum RideMatch {
     /// right after a stop) are two rides, and merging them lost one of them.
     ///
     /// Bucketed by day so this stays cheap with long histories; a ride is compared against the legs
-    /// of its own and the previous day, which covers rides running over midnight.
+    /// of its own and both neighbouring days, which covers rides running over midnight whichever of
+    /// the two records comes first (check-ins are stored newest first).
     public static func deduplicated(_ imported: [Journey], against saved: [Journey] = [],
                                     calendar: Calendar = .current) -> [Journey] {
         func byDay(_ legs: [Leg]) -> [Date: [Leg]] {
@@ -38,7 +39,7 @@ public enum RideMatch {
         return imported.filter { trip in
             let isKnown = trip.transitLegs.contains { leg in
                 let day = calendar.startOfDay(for: leg.departure.planned)
-                let days = [day, calendar.date(byAdding: .day, value: -1, to: day) ?? day]
+                let days = [-1, 0, 1].map { calendar.date(byAdding: .day, value: $0, to: day) ?? day }
                 return days.contains { day in
                     savedByDay[day, default: []].contains { isSameRide(leg, $0) }
                         || keptByDay[day, default: []].contains { isRepeatedCheckin(leg, $0) }
