@@ -1,58 +1,6 @@
 {
   "sourceLanguage" : "de",
   "strings" : {
-    " (1. Klasse)" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : " (1. Klasse)"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : " (1st class)"
-          }
-        }
-      }
-    },
-    " (2. Klasse)" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : " (2. Klasse)"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : " (2nd class)"
-          }
-        }
-      }
-    },
-    " ab %@" : {
-      "comment" : "Calendar event notes: train leaves from (station, platform)",
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : " ab %@"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : " from %@"
-          }
-        }
-      }
-    },
     " auf Gl. %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -357,24 +305,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ – Departures"
-          }
-        }
-      }
-    },
-    "%@ „%@“" : {
-      "comment" : "Trainset number and its name, e.g. 9457 „Bundesrepublik Deutschland“",
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ „%@“"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@ “%2$@”"
           }
         }
       }

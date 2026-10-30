@@ -79,7 +79,7 @@ public extension Journey {
     private static func transfer(from leg: Leg, to next: Leg, disposition: TransferDisposition?) -> String {
         var text = String(kit: "Umstieg in %@", next.line?.name ?? String(kit: "Anschlusszug"))
         if let delay = delay(next.departure) { text += " (\(delay))" }
-        if !next.origin.isSamePlace(as: leg.destination) { text += String(kit: " ab %@", next.origin.displayName) }
+        if !next.origin.isSamePlace(as: leg.destination) { text = String(kit: "%@ ab %@", text, next.origin.displayName) }
         let minutes = Int((next.departure.best.timeIntervalSince(leg.arrival.best) / 60).rounded(.down))
         if minutes < 0, disposition != .waiting {
             text += String(kit: ", fährt vor der Ankunft ab")

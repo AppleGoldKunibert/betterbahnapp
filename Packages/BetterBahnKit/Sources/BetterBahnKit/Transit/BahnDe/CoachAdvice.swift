@@ -76,7 +76,7 @@ public struct CoachAdvice: Sendable, Hashable {
             return namingStation ? String(kit: "Du sitzt schon im richtigen Wagen, um in %@ %@ auszusteigen.", station, spot)
                 : String(kit: "Du sitzt schon im richtigen Wagen, um %@ auszusteigen.", spot)
         }
-        let coaches = coachList + (otherClass.map { $0 == 1 ? String(kit: " (1. Klasse)") : $0 == 2 ? String(kit: " (2. Klasse)") : " (\($0). Klasse)" } ?? "")
+        let coaches = coachList + (otherClass.map { " (" + ($0 == 1 ? String(kit: "1. Klasse") : $0 == 2 ? String(kit: "2. Klasse") : String(kit: "%lld. Klasse", $0)) + ")" } ?? "")
         if walkBeforeArrival {
             return namingStation ? String(kit: "Vor der Ankunft in %@ wechseln, um in %@ %@ auszusteigen.", coaches, station, spot)
                 : String(kit: "Vor der Ankunft in %@ wechseln, um %@ auszusteigen.", coaches, spot)

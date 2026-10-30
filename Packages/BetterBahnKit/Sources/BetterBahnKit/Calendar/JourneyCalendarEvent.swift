@@ -61,7 +61,7 @@ public struct JourneyCalendarEvent: Sendable, Hashable {
         if !leg.origin.isSamePlace(as: station) { place.append(leg.origin.displayName) }
         if let platform = leg.departurePlatform?.best { place.append(String(kit: "Gl. %@", platform)) }
         var text = leg.line?.displayName ?? String(kit: "Zug")
-        if !place.isEmpty { text += String(kit: " ab %@", place.joined(separator: ", ")) }
+        if !place.isEmpty { text = String(kit: "%@ ab %@", text, place.joined(separator: ", ")) }
         if leg.cancelled { text += String(kit: " – fällt aus") }
         return text
     }
