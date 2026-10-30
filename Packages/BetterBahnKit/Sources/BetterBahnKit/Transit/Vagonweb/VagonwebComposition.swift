@@ -84,6 +84,16 @@ public struct VagonwebComposition: Sendable, Hashable {
     /// Trains running together with this one on part of the run ("RJX 184"); their coaches are drawn
     /// in the same composition and carry the train's name as a note.
     public var coupledTrains: [String] = []
+    /// The train the composition is filed for ("ICE 377", "EC 163"), from its "Report a bug" link;
+    /// nil when the page doesn't say.
+    public var train: String?
+
+    /// Whether the composition is filed for the train `category` `number`; true when the page doesn't name it.
+    func isTrain(category: String, number: String) -> Bool {
+        guard let train else { return true }
+        let parts = train.split(separator: " ")
+        return parts.count == 2 && parts[0] == category.uppercased() && Int(parts[1]) == Int(number)
+    }
 
     /// Whether the composition applies on `day` (calendar day, Europe/Berlin).
     public func applies(on day: Date) -> Bool {
@@ -176,6 +186,9 @@ extension VagonwebComposition {
                 reversalStations: reversalStations(fromNotes: block))
             composition.startsReversed = startsReversed(fromNotes: notes, reversals: composition.reversalStations)
             composition.coupledTrains = coupledTrains(fromNotes: notes)
+            // `info_vlak='DB ICE 377'`, `info_vlak="SBB,ÖBB EC 163 Transalpin"`: the railways, then the train.
+            composition.train = block.firstMatch(of: #/info_vlak=['"][^'" ]+\s+([A-Za-z]+)\s+(\d+)/#)
+                .map { "\($0.1.uppercased()) \($0.2)" }
             composition.section = heading.firstMatch(of: #/(?:section|Abschnitt)[^:]*:\s*<b>([^<]*)<\/b>/#.ignoresCase())
                 .flatMap { Section(label: String($0.1).strippingTags) }
             return composition
