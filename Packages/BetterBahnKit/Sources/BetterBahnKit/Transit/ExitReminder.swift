@@ -75,9 +75,13 @@ public extension Journey {
         return reminders
     }
 
-    /// "Umstieg in ICE 578 (+23), in 26 Min. auf Gl. 4 statt Gl. 5 (Anschluss wartet)"
+    /// "Umstieg in ICE 578 (+23), in 26 Min. auf Gl. 4 statt Gl. 5 (Anschluss wartet)", or "ICE 578 fällt aus"
+    /// when the connecting train (or just its departure at the transfer stop) is cancelled (#482).
     private static func transfer(from leg: Leg, to next: Leg, disposition: TransferDisposition?) -> String {
-        var text = "Umstieg in \(next.line?.name ?? "Anschlusszug")"
+        let name = next.line?.name ?? "Anschlusszug"
+        let departureCancelled = next.stopovers.first.map { $0.station.isSamePlace(as: next.origin) && $0.departureCancelled } ?? false
+        if next.cancelled || departureCancelled { return "\(name) fällt aus" }
+        var text = "Umstieg in \(name)"
         if let delay = delay(next.departure) { text += " (\(delay))" }
         if !next.origin.isSamePlace(as: leg.destination) { text += " ab \(next.origin.displayName)" }
         let minutes = Int((next.departure.best.timeIntervalSince(leg.arrival.best) / 60).rounded(.down))
