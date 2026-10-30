@@ -3,6 +3,8 @@ import Foundation
 public enum TransitError: Error, Sendable, Equatable, LocalizedError {
     case http(status: Int, body: String?)
     case rateLimited
+    /// One of our servers refused the app's token (none at hand, e.g. after a dead spot).
+    case unauthorized
     case decoding(String)
     case notFound(String)
     case invalidInput(String)
@@ -12,6 +14,7 @@ public enum TransitError: Error, Sendable, Equatable, LocalizedError {
         switch self {
         case .http(let status, _): "Serverfehler (\(status))"
         case .rateLimited: "Zu viele Anfragen – bitte kurz warten."
+        case .unauthorized: "Anmeldung bei unserem Server fehlgeschlagen. Bitte versuch es gleich noch mal."
         case .decoding(let detail): "Antwort konnte nicht gelesen werden: \(detail)"
         case .notFound(let what): "\(what) nicht gefunden."
         case .invalidInput(let detail): detail
