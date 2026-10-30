@@ -565,5 +565,8 @@ in `project.pbxproj`: new files join their target automatically.
 - Kit tests use Swift Testing with HTTP mocked by a `URLProtocol` subclass + `Tests/.../Fixtures/*.json`. Use
   `swift-test.sh` (temp `--scratch-path`): plain `swift test` can fail codesigning on `.build` attributes.
 - Content folding in or out uses `.transition(.fold)`, never `.move(edge: .top)` (slides over the text above).
+- `DateComparison.swift` (Kit, its tests, `BetterBahn/Shared`, widgets, share): our own `Date` `<=`/`>=`, identical copies.
+  The iOS 27.2 SDK calls the system's from 27.2 on, which early 27.2 betas lack (crash at launch); keep them, keep them
+  in sync, and check `nm -m <binary> | grep 'DateV2[gl]eoiy'` finds nothing after SDK updates.
 - DB-style station names ("Frankfurt (Oder)", "Bernau (bei Berlin)").
 - Commit titles: short imperative sentence ("Show …", "Stop …", "Keep …").
