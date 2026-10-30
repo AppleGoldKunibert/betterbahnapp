@@ -27,6 +27,8 @@ struct CoachSequenceDisclosure: View {
     var notesCoachAdvice = true
     /// The leg to save your own seat on while riding it (#410), next to the title.
     var seatLeg: Leg?
+    /// The train's stops and route, to draw the Wagenreihung as seen from the platform (#474).
+    var run: ExitSides.Run?
 
     init(leg: Leg, reservation: SeatReservation? = nil, savesSeat: Bool = false, coachAdvice: CoachAdvice? = nil,
          notesCoachAdvice: Bool = true, spacing: CGFloat = 0) {
@@ -35,6 +37,7 @@ struct CoachSequenceDisclosure: View {
         self.coachAdvice = coachAdvice
         self.notesCoachAdvice = notesCoachAdvice
         seatLeg = savesSeat ? leg : nil
+        run = ExitSides.Run(leg: leg)
         // The stop just left until its Wagenreihung would close, then the next one; to a terminus the last one.
         let requests = BahnDeClient.formationRequests(for: leg)
         request = requests.first
@@ -49,6 +52,7 @@ struct CoachSequenceDisclosure: View {
         let plannedRequest = BahnDeClient.formationRequest(for: trip, lookahead: nil)
         self.request = request
         self.plannedRequest = plannedRequest
+        run = ExitSides.Run(trip: trip)
         departure = Self.departure(of: trip, for: request ?? plannedRequest)
     }
 
@@ -93,7 +97,7 @@ struct CoachSequenceDisclosure: View {
                         }
                         if open {
                             CoachSequencePanel(request: shown, sequence: sequence, reservation: reservation, coachAdvice: coachAdvice,
-                                               notesCoachAdvice: notesCoachAdvice)
+                                               notesCoachAdvice: notesCoachAdvice, run: run)
                                 .transition(.fold)
                         }
                     }
@@ -194,8 +198,8 @@ struct CoachSequenceToggle: View {
 }
 
 /// A train's coach sequence ("Wagenreihung") in place, inside a card: notes, a card per series with
-/// its side view, then the platform from left to right with its sectors, the coaches to scale with
-/// number, class and amenities, and the direction the train leaves in.
+/// its side view, then the platform as seen standing on it facing the train (#474) with its sectors, the
+/// coaches to scale with number, class and amenities, and the direction the train leaves in.
 struct CoachSequencePanel: View {
     let request: BahnDeClient.FormationRequest
     @State private var sequence: CoachSequence?
@@ -205,14 +209,17 @@ struct CoachSequencePanel: View {
     /// (`notesCoachAdvice`).
     let coachAdvice: CoachAdvice?
     let notesCoachAdvice: Bool
+    /// The train's stops and route: which side of it the platform is on, to draw it as seen from there.
+    let run: ExitSides.Run?
 
     /// - Parameter sequence: already loaded by the caller; fetched here otherwise (e.g. from a stop's platform).
     init(request: BahnDeClient.FormationRequest, sequence: CoachSequence? = nil, reservation: SeatReservation? = nil,
-         coachAdvice: CoachAdvice? = nil, notesCoachAdvice: Bool = true) {
+         coachAdvice: CoachAdvice? = nil, notesCoachAdvice: Bool = true, run: ExitSides.Run? = nil) {
         self.request = request
         self.reservation = reservation
         self.coachAdvice = coachAdvice
         self.notesCoachAdvice = notesCoachAdvice
+        self.run = run
         _sequence = State(initialValue: sequence)
     }
 
@@ -221,6 +228,8 @@ struct CoachSequencePanel: View {
     @State private var blocked = false
     /// What bahn.de's sequence has differently from vagonweb's plan (`CoachSequence.deviations(fromPlan:)`).
     @State private var deviations: [String] = []
+    /// Which side of the train the platform is on as it leaves (`ExitSides.side(departing:…)`); nil when unknown.
+    @State private var platformSide: ExitSide?
     @Environment(\.bikeMode) private var bikeMode
     #if DEBUG
     /// Why bahn.de had no Wagenreihung when vagonweb's plan is shown instead (`BahnDeClient.coachSequenceNote(for:)`),
@@ -239,12 +248,15 @@ struct CoachSequencePanel: View {
                         TrainCard(formation: part)
                     }
                     let suggested = coachAdvice.map(sequence.coachIDs(for:)) ?? []
-                    CoachSequenceDiagram(sequence: sequence, reservation: reservation, highlightedCoachID: reservation.flatMap { reservation in
+                    let seen = sequence.asSeenFromPlatform(side: platformSide)
+                    CoachSequenceDiagram(sequence: seen, reservation: reservation, highlightedCoachID: reservation.flatMap { reservation in
                         switch sequence.position(ofCoach: reservation.coach, train: reservation.trainName) {
                         case .sectors(_, let id), .noSectors(let id): id
                         case .coachMissing: nil
                         }
                     }, suggestedCoachIDs: suggested)
+                        // Built anew once turned round, so it opens at the train's front again.
+                        .id(seen.travelsTowardsPlatformEnd)
                     if let coachAdvice, notesCoachAdvice, !suggested.isEmpty {
                         Label(coachAdvice.legend, systemImage: CoachAdviceLabel.symbol(for: coachAdvice))
                             .font(.caption)
@@ -266,6 +278,7 @@ struct CoachSequencePanel: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .task(id: request) {
+            platformSide = nil
             if sequence == nil {
                 loading = true
                 do {
@@ -278,6 +291,13 @@ struct CoachSequencePanel: View {
                     blocked = false
                 }
                 loading = false
+            }
+            if let run, let sequence, sequence.source == .bahnDe {
+                let station = request.station
+                let platform = sequence.platform
+                platformSide = await Task.detached(priority: .userInitiated) {
+                    ExitSides.side(departing: station, platform: platform, run: run)
+                }.value
             }
             #if DEBUG
             if sequence?.source != .bahnDe {
@@ -443,9 +463,10 @@ private struct TrainCard: View {
     }
 }
 
-/// The platform from its start (left) to its end, everything placed by its position in meters. Scrolls
-/// sideways and opens at the front of the train; each part's label (train, Tz, Taufname) stays in view
-/// while scrolling until the part ends at the coupling point. Tapping an ICE's coach opens the seat map.
+/// The platform as `sequence` lays it out (from the start of bahn.de's, unless turned round to be seen from
+/// it), everything placed by its position in meters. Scrolls sideways and opens at the front of the train;
+/// each part's label (train, Tz, Taufname) stays in view while scrolling until the part ends at the coupling
+/// point. Tapping an ICE's coach opens the seat map.
 private struct CoachSequenceDiagram: View {
     let sequence: CoachSequence
     /// Highlighted in the seat map.

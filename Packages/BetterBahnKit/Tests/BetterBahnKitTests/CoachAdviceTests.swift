@@ -35,6 +35,33 @@ import Testing
 
     let hannover = StationPlatforms(sharedPlatforms: [["11", "12"], ["13", "14"]])
 
+    // MARK: As seen from the platform (#474)
+
+    @Test func turnsRoundToLeaveAsSeenFromThePlatform() {
+        // Leaving towards sector A (the platform's start) with the platform on the train's right: people
+        // there see it leave to their right, so A comes on the right.
+        let sequence = train(numbers(21...24), from: 10, towardsEnd: false)
+        let turned = sequence.asSeenFromPlatform(side: .right)
+        #expect(turned.travelsTowardsPlatformEnd == true)
+        #expect(turned.sectors.first?.name == "H")
+        #expect(turned.sectors.last == CoachSequence.Sector(name: "A", start: 350, end: 400))
+        // The front coach stood at 10–36 m, now at 364–390 m; the order from the front stays.
+        #expect(turned.coaches.map(\.number) == sequence.coaches.map(\.number))
+        #expect(turned.coaches.first?.start == 364)
+        #expect(turned.coaches.first?.end == 390)
+        // Already the way they see it, or nothing known: unchanged.
+        #expect(sequence.asSeenFromPlatform(side: .left) == sequence)
+        #expect(train(numbers(21...24), from: 10, towardsEnd: true).asSeenFromPlatform(side: .right).travelsTowardsPlatformEnd == true)
+        #expect(sequence.asSeenFromPlatform(side: nil) == sequence)
+        var plan = sequence
+        plan.source = .vagonweb(validFrom: nil, validUntil: nil)
+        #expect(plan.asSeenFromPlatform(side: .right) == plan)
+        // A train standing past the platform's end (400 m) keeps every position at 0 or more.
+        let long = train(numbers(21...36), from: 10, towardsEnd: false).asSeenFromPlatform(side: .right)
+        #expect(long.coaches.allSatisfy { ($0.start ?? -1) >= 0 })
+        #expect(long.coaches.last?.start == 0)
+    }
+
     // MARK: Transfer at the same platform
 
     @Test func boardsOppositeTheConnectingTrain() throws {

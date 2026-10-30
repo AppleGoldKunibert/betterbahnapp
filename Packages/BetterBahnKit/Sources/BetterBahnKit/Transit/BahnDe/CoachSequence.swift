@@ -126,6 +126,32 @@ public struct CoachSequence: Sendable, Hashable {
     public static let shownAfterDeparture: TimeInterval = 15 * 60
 }
 
+// MARK: - As seen from the platform
+
+extension CoachSequence {
+    /// The Wagenreihung as people on the platform see it facing the train (#474): bahn.de counts from the
+    /// platform's start, which lies at either end, so it is turned round when the train would leave the
+    /// other way than it does for them. With the platform on its right (`platformSide`, in the direction it
+    /// travels) the train leaves to their right, else to their left. Unchanged when the side, the direction or
+    /// the positions aren't known.
+    public func asSeenFromPlatform(side platformSide: ExitSide?) -> CoachSequence {
+        guard let platformSide, let towardsEnd = travelsTowardsPlatformEnd, source == .bahnDe,
+              towardsEnd != (platformSide == .right) else { return self }
+        // A train standing past the platform's end still turns round onto positions of its own.
+        let ends = coaches.compactMap { [$0.start, $0.end].compactMap(\.self).max() } + sectors.map(\.end) + [platformLength].compactMap(\.self)
+        guard let length = ends.max() else { return self }
+        var turned = self
+        turned.travelsTowardsPlatformEnd = !towardsEnd
+        turned.coaches = coaches.map { coach in
+            var coach = coach
+            (coach.start, coach.end) = (coach.end.map { length - $0 }, coach.start.map { length - $0 })
+            return coach
+        }
+        turned.sectors = sectors.map { Sector(name: $0.name, start: length - $0.end, end: length - $0.start) }.reversed()
+        return turned
+    }
+}
+
 // MARK: - Reserved seat
 
 extension CoachSequence {
