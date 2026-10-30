@@ -52,6 +52,25 @@ export class APNs {
     }
 }
 
+/// A notification text the app translates on the device: `key` is the German text with `%@` for each of
+/// `args`, an entry of the app's `Localizable.xcstrings` (iOS looks it up via `loc-key`).
+export const text = (key, ...args) => ({ key, args: args.map(String) });
+
+/// An APNs alert from `text()`s (or plain strings that need no translation). `title` and `body` hold the
+/// German text for anything that ignores the keys; iOS shows the device language's version of the keys.
+export function localizedAlert(title, body) {
+    const alert = { title: german(title), body: german(body) };
+    if (typeof title === "object") Object.assign(alert, { "title-loc-key": title.key, "title-loc-args": title.args });
+    if (typeof body === "object") Object.assign(alert, { "loc-key": body.key, "loc-args": body.args });
+    return alert;
+}
+
+function german(value) {
+    if (typeof value !== "object") return value;
+    let next = 0;
+    return value.key.replace(/%@/g, () => value.args[next++] ?? "");
+}
+
 export async function signProviderToken(pem, keyId, teamId, issuedAt) {
     const der = fromBase64(pem.replace(/-----[^-]+-----/g, "").replace(/\s+/g, ""));
     const key = await crypto.subtle.importKey("pkcs8", der, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);

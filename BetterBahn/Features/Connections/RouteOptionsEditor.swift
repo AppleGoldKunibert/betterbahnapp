@@ -42,14 +42,14 @@ struct ViaRowView<Focus: Hashable>: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            StationInput(label: "Zwischenhalt", placeholder: "Über welchen Ort?", systemImage: "smallcircle.filled.circle",
+            StationInput(label: String(localized: "Zwischenhalt"), placeholder: String(localized: "Über welchen Ort?"), systemImage: "smallcircle.filled.circle",
                          iconColor: .secondary, station: $row.station, focus: focus, focusValue: focusValue)
 
             HStack(spacing: 10) {
                 Button {
                     showStayPopover = true
                 } label: {
-                    Label(row.minStayMinutes > 0 ? "Mind. \(row.minStayMinutes) Min." : "Mindestaufenthalt",
+                    Label(row.minStayMinutes > 0 ? String(localized: "Mind. \(row.minStayMinutes) Min.") : String(localized: "Mindestaufenthalt"),
                           systemImage: "clock.badge.checkmark")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(row.minStayMinutes > 0 ? Color.brand : Color.secondary)
@@ -94,7 +94,7 @@ struct MinimumStayPopover: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            Text("Mindestaufenthalt in \(stationName ?? "diesem Ort")")
+            Text("Mindestaufenthalt in \(stationName ?? String(localized: "diesem Ort"))")
                 .font(.subheadline.weight(.semibold))
                 .multilineTextAlignment(.center)
             Stepper("\(minutes) Minuten", value: $minutes, in: 0...120, step: 5)
@@ -180,7 +180,7 @@ struct OptionLabel: View {
 
 /// Human-readable summary of a vehicle-type selection.
 func productSummary(_ products: Set<Product>) -> String {
-    if products.count == Product.allCases.count { return "Alle" }
+    if products.count == Product.allCases.count { return String(localized: "Alle") }
     let names = Product.allCases.filter(products.contains).map(\.displayName)
-    return names.isEmpty ? "Keine ausgewählt" : names.joined(separator: ", ")
+    return names.isEmpty ? String(localized: "Keine ausgewählt") : names.joined(separator: ", ")
 }

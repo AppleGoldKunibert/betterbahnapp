@@ -92,7 +92,7 @@ public struct TrainRoutePlanner: Sendable {
     public func plan(_ requirements: [TrainRequirement], from: Station, to: Station,
                      date: Date, pickedEarlier: TimeInterval = 0, limit: Int = 5) async throws -> TrainRoutePlan {
         guard !requirements.isEmpty else {
-            throw TransitError.invalidInput("Keine Zugvorgabe ausgewählt.")
+            throw TransitError.invalidInput(String(kit: "Keine Zugvorgabe ausgewählt."))
         }
         let start = requirements.first?.tripId != nil ? date.addingTimeInterval(-pickedEarlier) : date
         var beam = [Partial(legs: [], station: from, time: start, breaksRules: false)]
@@ -123,7 +123,7 @@ public struct TrainRoutePlanner: Sendable {
             finished += await completing(partial, to: to)
         }
         guard !finished.isEmpty else {
-            throw TransitError.notFound("Anschluss nach \(to.displayName)")
+            throw TransitError.notFound(String(kit: "Anschluss nach %@", to.displayName))
         }
         let journeys = prune(finished, keeping: limit).map {
             Journey(legs: $0.legs, source: $0.legs.first?.source ?? provider.source)
@@ -143,7 +143,7 @@ public struct TrainRoutePlanner: Sendable {
         if needsFeeder {
             reachable = try await connections(from: partial.station, to: requirement.boarding, departingAfter: partial.time)
             guard let soonest = reachable.compactMap({ $0.arrival?.best }).min() else {
-                throw TransitError.notFound("Verbindung nach \(requirement.boarding.displayName)")
+                throw TransitError.notFound(String(kit: "Verbindung nach %@", requirement.boarding.displayName))
             }
             earliest = soonest
         }
@@ -157,19 +157,19 @@ public struct TrainRoutePlanner: Sendable {
         guard let visit = boardingIndex(in: trip, at: requirement.boarding, notBefore: notBefore,
                                         picked: pinned == nil ? nil : requirement.departure),
               let departure = trip.stopovers[visit].departure
-        else { throw TransitError.notFound("\(requirement.trainName) ab \(requirement.boarding.displayName)") }
+        else { throw TransitError.notFound(String(kit: "%@ ab %@", requirement.trainName, requirement.boarding.displayName)) }
         // A ring line's trip is the vehicle's whole day: only the lap from this visit is ridden, so the
         // exit is looked up there and not on the day's first lap.
         let lap = trip.lap(at: requirement.boarding, near: departure.planned) ?? trip
         guard let boardIndex = lap.stopovers.firstIndex(where: { $0.id == trip.stopovers[visit].id })
-        else { throw TransitError.notFound("\(requirement.trainName) ab \(requirement.boarding.displayName)") }
+        else { throw TransitError.notFound(String(kit: "%@ ab %@", requirement.trainName, requirement.boarding.displayName)) }
 
         // 3. Ride to the boarding station as late as comfortably possible.
         var feederLegs: [Leg] = []
         if needsFeeder {
             guard let feeder = await feeder(from: partial.station, to: requirement.boarding,
                                             arriveBy: departure.best, notBefore: partial.time, fallbacks: reachable)
-            else { throw TransitError.notFound("Verbindung nach \(requirement.boarding.displayName) bis \(departure.best.formatted(date: .omitted, time: .shortened))") }
+            else { throw TransitError.notFound(String(kit: "Verbindung nach %@ bis %@", requirement.boarding.displayName, departure.best.formatted(date: .omitted, time: .shortened))) }
             feederLegs = feeder.legs
         }
 
@@ -181,7 +181,7 @@ public struct TrainRoutePlanner: Sendable {
                                    after: feederLegs, base: partial)
         guard !extended.isEmpty else {
             let where_ = requirement.exit?.displayName ?? target.displayName
-            throw TransitError.notFound("\(trainName) nach \(where_) (hält dort nicht)")
+            throw TransitError.notFound(String(kit: "%@ nach %@ (hält dort nicht)", trainName, where_))
         }
         return (prune(extended), trainName)
     }
@@ -283,7 +283,7 @@ public struct TrainRoutePlanner: Sendable {
               let trip = try? await provider.trip(id: tripId, source: requirement.tripSource ?? provider.source) else { return nil }
         let name = trip.line?.name ?? requirement.trainName
         guard boardingIndex(in: trip, at: requirement.boarding, notBefore: notBefore, picked: requirement.departure) != nil else {
-            throw TransitError.invalidInput("\(name) ab \(requirement.boarding.displayName) fährt ab, bevor du dort sein kannst.")
+            throw TransitError.invalidInput(String(kit: "%@ ab %@ fährt ab, bevor du dort sein kannst.", name, requirement.boarding.displayName))
         }
         return (name, trip)
     }
@@ -309,7 +309,7 @@ public struct TrainRoutePlanner: Sendable {
     private func train(_ name: String, at station: Station, notBefore: Date) async throws -> (String, Trip) {
         let wanted = TrainNameQuery(name)
         guard !wanted.isEmpty else {
-            throw TransitError.invalidInput("Bitte einen Zug angeben, z. B. „ICE 423“.")
+            throw TransitError.invalidInput(String(kit: "Bitte einen Zug angeben, z. B. „ICE 423“."))
         }
         let slack: TimeInterval = -2 * 60
         var windowStart = notBefore.addingTimeInterval(slack)
@@ -332,7 +332,7 @@ public struct TrainRoutePlanner: Sendable {
             }
             windowStart = windowStart.addingTimeInterval(TimeInterval(windowMinutes * 60))
         }
-        throw TransitError.notFound("\(name) ab \(station.displayName)")
+        throw TransitError.notFound(String(kit: "%@ ab %@", name, station.displayName))
     }
 
     /// The provider's board says `entry` is cancelled – that is sometimes wrong (stale or mismatched

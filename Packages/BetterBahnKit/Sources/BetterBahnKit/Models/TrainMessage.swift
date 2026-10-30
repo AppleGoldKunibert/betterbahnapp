@@ -17,6 +17,10 @@ public struct TrainMessage: Codable, Sendable, Hashable, Identifiable {
     /// When DB reported it, if known.
     public var timestamp: Date?
 
+    /// `text` in the app's language. Only DB's texts from `TrainMessageCodes` are translated; `text` itself
+    /// stays German, as stored and as matched (e.g. `BikeTransport`), and other sources' texts stay as delivered.
+    public var displayText: String { TrainMessageCodes.displayText(for: text) }
+
     public init(kind: Kind, text: String, timestamp: Date?) {
         self.kind = kind
         self.text = text
@@ -53,6 +57,13 @@ enum TrainMessageCodes {
     static func text(for code: Int) -> String? {
         texts[code]
     }
+
+    /// The translation of one of `texts` (the German text is its key); any other text stays as it is.
+    static func displayText(for text: String) -> String {
+        knownTexts.contains(text) ? String(kit: text) : text
+    }
+
+    private static let knownTexts = Set(texts.values)
 
     private static let texts: [Int: String] = [
         2: "Polizeiliche Ermittlung",

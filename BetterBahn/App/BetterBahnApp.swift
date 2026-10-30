@@ -328,7 +328,7 @@ struct RootView: View {
         } catch let error as ShortShareLinkError {
             shareLinkError = error.localizedDescription
         } catch {
-            shareLinkError = "Die Reise konnte nicht geladen werden. Prüf deine Internetverbindung und öffne den Link noch einmal."
+            shareLinkError = String(localized: "Die Reise konnte nicht geladen werden. Prüf deine Internetverbindung und öffne den Link noch einmal.")
         }
     }
 }

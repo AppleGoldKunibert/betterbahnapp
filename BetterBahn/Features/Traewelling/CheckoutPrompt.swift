@@ -57,11 +57,11 @@ private struct CheckoutPrompt: ViewModifier {
 
     private func message(for journey: Journey) -> String {
         if let early = model.earlyCheckout(in: journey) {
-            let line = early.leg.line?.name ?? "dieser Fahrt"
-            return "Du bist in \(line) eingecheckt. „In \(early.exit.station.displayName) auschecken“ beendet die Fahrt "
-                + "dort und löscht spätere Check-ins dieser Reise."
+            let line = early.leg.line?.name ?? String(localized: "dieser Fahrt")
+            let station = early.exit.station.displayName
+            return String(localized: "Du bist in \(line) eingecheckt. „In \(station) auschecken“ beendet die Fahrt dort und löscht spätere Check-ins dieser Reise.")
         }
-        return "Du bist auf dieser Reise bei Träwelling eingecheckt."
+        return String(localized: "Du bist auf dieser Reise bei Träwelling eingecheckt.")
     }
 
     private var isAsking: Binding<Bool> {

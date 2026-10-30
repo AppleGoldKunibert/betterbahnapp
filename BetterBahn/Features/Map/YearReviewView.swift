@@ -207,8 +207,9 @@ struct YearReviewCardView: View {
         switch card {
         case .intro:
             headline("Dein Bahnjahr \(String(review.year))")
-            big(review.rides.formatted(), unit: review.rides == 1 ? "Fahrt" : "Fahrten")
-            caption("an \(review.activeDays) \(review.activeDays == 1 ? "Tag" : "Tagen") unterwegs")
+            big(review.rides.formatted(), unit: review.rides == 1 ? String(localized: "Fahrt") : String(localized: "Fahrten"))
+            caption(review.activeDays == 1 ? String(localized: "an \(review.activeDays) Tag unterwegs")
+                    : String(localized: "an \(review.activeDays) Tagen unterwegs"))
         case .distance:
             headline("So weit bist du gefahren")
             big(kilometers(review.kilometers), unit: "km")
@@ -216,23 +217,23 @@ struct YearReviewCardView: View {
         case .co2:
             headline("So viel CO₂ gespart")
             big(kilometers(review.co2.savedComparedToCar), unit: "kg")
-            caption("gegenüber denselben Strecken mit dem Auto.")
+            caption(String(localized: "gegenüber denselben Strecken mit dem Auto."))
         case .time:
             headline("So lange warst du im Zug")
-            big(review.hours.formatted(.number.precision(.fractionLength(0))), unit: "Stunden")
+            big(review.hours.formatted(.number.precision(.fractionLength(0))), unit: String(localized: "Stunden"))
             caption(timeComparison)
         case .punctuality:
             headline("Pünktlich angekommen")
             big((review.punctuality ?? 0).formatted(.percent.precision(.fractionLength(0))), unit: nil)
-            caption("\(review.delayMinutes.formatted()) Minuten Verspätung insgesamt")
+            caption(String(localized: "\(review.delayMinutes.formatted()) Minuten Verspätung insgesamt"))
             if let late = review.mostDelayed {
-                caption("Am längsten gewartet: \(late.name) mit +\(late.count) min")
+                caption(String(localized: "Am längsten gewartet: \(late.name) mit +\(late.count) min"))
             }
         case .series:
             headline("Deine Lieblingszüge")
             list(review.series)
             if let trainset = review.trainsets.first {
-                caption("Am öftesten im selben Zug: \(trainset.name), \(trainset.count)×")
+                caption(String(localized: "Am öftesten im selben Zug: \(trainset.name), \(trainset.count)×"))
             }
         case .stations:
             headline("Deine Bahnhöfe")
@@ -241,7 +242,7 @@ struct YearReviewCardView: View {
             headline("Deine Strecken")
             list(review.routes)
             if let train = review.trains.first {
-                caption("Am öftesten gefahren: \(train.name), \(train.count)×")
+                caption(String(localized: "Am öftesten gefahren: \(train.name), \(train.count)×"))
             }
         case .longestRide:
             if let ride = review.longestRide {
@@ -256,19 +257,19 @@ struct YearReviewCardView: View {
                 .minimumScaleFactor(0.7)
                 .padding(.top, 8)
                 caption([ride.train, ride.date.formatted(.dateTime.day().month(.wide)),
-                         "\(ride.hours.formatted(.number.precision(.fractionLength(1)))) Std."]
+                         String(localized: "\(ride.hours.formatted(.number.precision(.fractionLength(1)))) Std.")]
                     .compactMap { $0 }.joined(separator: " · "))
             }
         case .abroad:
             if review.countries.count > 1 {
                 headline("Unterwegs in")
-                big("\(review.countries.count)", unit: "Ländern")
+                big("\(review.countries.count)", unit: String(localized: "Ländern"))
                 caption(review.countries.joined(separator: ", "))
             } else {
                 headline("Unterwegs bei Nacht")
             }
             if review.nightTrains > 0 {
-                Label("\(review.nightTrains) \(review.nightTrains == 1 ? "Nachtzug" : "Nachtzüge")", systemImage: "bed.double.fill")
+                Label(review.nightTrains == 1 ? "\(review.nightTrains) Nachtzug" : "\(review.nightTrains) Nachtzüge", systemImage: "bed.double.fill")
                     .font(.title2.weight(.bold))
                     .padding(.top, 16)
             }
@@ -295,7 +296,7 @@ struct YearReviewCardView: View {
 
     // MARK: Pieces
 
-    private func headline(_ text: String) -> some View {
+    private func headline(_ text: LocalizedStringKey) -> some View {
         Text(text)
             .font(.title2.weight(.bold))
             .fixedSize(horizontal: false, vertical: true)
@@ -343,7 +344,7 @@ struct YearReviewCardView: View {
         .padding(.top, 20)
     }
 
-    private func summaryRow(_ value: String, _ label: String) -> some View {
+    private func summaryRow(_ value: String, _ label: LocalizedStringKey) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(value).font(.title2.weight(.heavy)).lineLimit(1).minimumScaleFactor(0.6)
             Text(label).font(.subheadline.weight(.medium)).opacity(0.8)
@@ -357,17 +358,17 @@ struct YearReviewCardView: View {
     private var distanceComparison: String {
         let laps = review.kilometers / Self.earthKilometers
         if laps >= 1 {
-            return "Das ist \(laps.formatted(.number.precision(.fractionLength(1))))-mal um die Erde."
+            return String(localized: "Das ist \(laps.formatted(.number.precision(.fractionLength(1))))-mal um die Erde.")
         }
-        return "Das sind \(laps.formatted(.percent.precision(.fractionLength(0)))) einer Reise um die Erde."
+        return String(localized: "Das sind \(laps.formatted(.percent.precision(.fractionLength(0)))) einer Reise um die Erde.")
     }
 
     private var timeComparison: String {
         let days = review.hours / 24
         if days >= 1 {
-            return "Das sind \(days.formatted(.number.precision(.fractionLength(1)))) Tage am Stück."
+            return String(localized: "Das sind \(days.formatted(.number.precision(.fractionLength(1)))) Tage am Stück.")
         }
-        return "Das sind \((review.hours * 60).formatted(.number.precision(.fractionLength(0)))) Minuten."
+        return String(localized: "Das sind \((review.hours * 60).formatted(.number.precision(.fractionLength(0)))) Minuten.")
     }
 }
 

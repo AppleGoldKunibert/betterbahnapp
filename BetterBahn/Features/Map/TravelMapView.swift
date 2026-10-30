@@ -69,7 +69,7 @@ struct TravelMapView: View {
                             if preset == .custom {
                                 Image(systemName: "calendar")
                             } else {
-                                Text(preset.rawValue)
+                                Text(preset.title)
                             }
                         }
                         .font(.subheadline.weight(.semibold))
@@ -82,7 +82,7 @@ struct TravelMapView: View {
                         .contentShape(.capsule)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(preset.rawValue)
+                    .accessibilityLabel(preset.title)
                 }
             }
             .padding(4)
@@ -186,7 +186,7 @@ struct TravelMapView: View {
         .padding(.top, 8)
     }
 
-    private func sourceToggle(_ title: String, icon: String, isOn: Binding<Bool>) -> some View {
+    private func sourceToggle(_ title: LocalizedStringKey, icon: String, isOn: Binding<Bool>) -> some View {
         Button {
             withAnimation(.snappy) { isOn.wrappedValue.toggle() }
         } label: {
@@ -201,7 +201,7 @@ struct TravelMapView: View {
         .opacity(isOn.wrappedValue ? 1 : 0.7)
     }
 
-    private func stat(value: String, label: String, icon: String) -> some View {
+    private func stat(value: String, label: LocalizedStringKey, icon: String) -> some View {
         VStack(spacing: 2) {
             Text(value).font(.headline.monospacedDigit())
             Label(label, systemImage: icon)
@@ -339,7 +339,7 @@ final class TrainAnnotation: NSObject, MKAnnotation {
         title = live.trainName
         var parts: [String] = []
         if let speed = position.speedKmh { parts.append("\(Int(speed.rounded())) km/h") }
-        parts.append("Stand \(position.time.formatted(date: .omitted, time: .standard))")
+        parts.append(String(localized: "Stand \(position.time.formatted(date: .omitted, time: .standard))"))
         subtitle = parts.joined(separator: " · ")
         isStale = position.isStale()
     }

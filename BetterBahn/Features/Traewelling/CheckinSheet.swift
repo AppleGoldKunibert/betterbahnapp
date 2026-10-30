@@ -86,14 +86,15 @@ struct CheckinSheet: View {
                 Button("Manuell eintragen") { send(asManualTrip: true) }
                 Button("Abbrechen", role: .cancel) {}
             } message: {
-                Text("Träwelling kennt \(rideLeg.line?.name ?? "diesen Zug") nicht. Du kannst ihn selbst eintragen.")
+                Text("Träwelling kennt \(rideLeg.line?.name ?? String(localized: "diesen Zug")) nicht. Du kannst ihn selbst eintragen.")
             }
             .alert("Schon eingecheckt", isPresented: $offerForcedCheckin) {
                 Button("Trotzdem einchecken") { send(asManualTrip: forcedAsManualTrip, force: true) }
                 Button("Abbrechen", role: .cancel) {}
             } message: {
-                Text("Du bist bei Träwelling zu dieser Zeit schon in einem anderen Zug eingecheckt. Trotzdem einchecken?"
-                     + (showsPoints ? " Dafür gibt es keine Punkte." : ""))
+                Text(showsPoints
+                     ? "Du bist bei Träwelling zu dieser Zeit schon in einem anderen Zug eingecheckt. Trotzdem einchecken? Dafür gibt es keine Punkte."
+                     : "Du bist bei Träwelling zu dieser Zeit schon in einem anderen Zug eingecheckt. Trotzdem einchecken?")
             }
         }
     }
@@ -134,10 +135,10 @@ struct CheckinSheet: View {
                 Text("Eingecheckt").font(.title2.weight(.bold))
                 HStack(spacing: 8) {
                     if showsPoints {
-                        InfoChip(text: "+\(result.points) Punkte", systemImage: "sparkles", tint: .brand)
+                        InfoChip(text: String(localized: "+\(result.points) Punkte"), systemImage: "sparkles", tint: .brand)
                     }
                     if result.alsoOnThisConnection > 0 {
-                        InfoChip(text: "\(result.alsoOnThisConnection) Mitreisende", systemImage: "person.2.fill", tint: .punctual)
+                        InfoChip(text: String(localized: "\(result.alsoOnThisConnection) Mitreisende"), systemImage: "person.2.fill", tint: .punctual)
                     }
                 }
             }
@@ -193,10 +194,10 @@ struct CheckinSheet: View {
             VStack(alignment: .leading, spacing: 14) {
                 EmojiMessageField(message: $message, emojis: emojis, isFocused: $messageFocused)
                 Divider()
-                MenuPickerRow(title: "Sichtbarkeit", icon: "eye.fill", color: .purple, selection: $visibility,
+                MenuPickerRow(title: String(localized: "Sichtbarkeit"), icon: "eye.fill", color: .purple, selection: $visibility,
                               options: TraewellingVisibility.allCases) { $0.label }
                 Divider()
-                MenuPickerRow(title: "Reiseart", icon: "briefcase.fill", color: .orange, selection: $business,
+                MenuPickerRow(title: String(localized: "Reiseart"), icon: "briefcase.fill", color: .orange, selection: $business,
                               options: TraewellingBusiness.allCases) { $0.label }
                 if !model.settings.quickTags.isEmpty {
                     Divider()

@@ -6,7 +6,7 @@
 // same rules and texts as the app (`CommuteAlerts`, `ConnectionIssue`, `PlatformChange`). It never asks
 // bahn.de (#334). Stored per device: the APNs device token and those journeys. No location, no account.
 
-import { APNs } from "../shared/apns.mjs";
+import { APNs, localizedAlert, text } from "../shared/apns.mjs";
 import { Iris, findStop, liveChange, parseStops, planPath } from "../shared/iris.mjs";
 
 const MINUTE = 60 * 1000;
@@ -220,8 +220,8 @@ export function alerts(journey, live, now) {
             if (!state.cancelled) {
                 found.push({
                     key: `cancelled-${index}`,
-                    title: `${leg.line} fällt aus`,
-                    body: `Die Fahrt von ${leg.from.name} nach ${leg.to.name} findet nicht statt.`,
+                    title: text("%@ fällt aus", leg.line),
+                    body: text("Die Fahrt von %@ nach %@ findet nicht statt.", leg.from.name, leg.to.name),
                     remember: () => { state.cancelled = true; },
                 });
             }
@@ -232,8 +232,8 @@ export function alerts(journey, live, now) {
             if (minutes >= journey.threshold && (state.delay == null || minutes >= state.delay + DELAY_GROWTH)) {
                 found.push({
                     key: `delay-${index}`,
-                    title: `${leg.line}: +${minutes} Min.`,
-                    body: `Ab ${leg.from.name} um ${clock(departure.actual)} statt ${clock(departure.planned)}.`,
+                    title: text("%@: +%@ Min.", leg.line, minutes),
+                    body: text("Ab %@ um %@ statt %@.", leg.from.name, clock(departure.actual), clock(departure.planned)),
                     remember: () => { state.delay = minutes; },
                 });
             }
@@ -247,13 +247,13 @@ export function alerts(journey, live, now) {
             const key = `${kind}Platform`;
             const before = state[key] ?? event.plannedPlatform;
             if (!isDifferentTrack(before, event.platform)) return;
-            const text = kind === "departure"
-                ? `Abfahrt ${station} jetzt von Gleis ${event.platform} (statt ${before})`
-                : `Ankunft ${station} jetzt auf Gleis ${event.platform} (statt ${before})`;
+            const change = kind === "departure" ? "Abfahrt %@ jetzt von Gleis %@ (statt %@)" : "Ankunft %@ jetzt auf Gleis %@ (statt %@)";
             found.push({
                 key: `${kind}-platform-${index}`,
-                title: `${leg.line}: Gleiswechsel`,
-                body: transfer == null ? text : `${text}\nUmstieg: ${transfer} Min.`,
+                title: text("%@: Gleiswechsel", leg.line),
+                body: transfer == null
+                    ? text(change, station, event.platform, before)
+                    : text(`${change}\nUmstieg: %@ Min.`, station, event.platform, before, transfer),
                 remember: () => { state[key] = event.platform; },
             });
         };
@@ -270,10 +270,10 @@ export function alerts(journey, live, now) {
                 const at = leg.from.name;
                 found.push({
                     key: `transfer-${index}`,
-                    title: level === "missed" ? `Umstieg in ${at} klappt nicht mehr` : `Umstieg in ${at} wird knapp`,
+                    title: text(level === "missed" ? "Umstieg in %@ klappt nicht mehr" : "Umstieg in %@ wird knapp", at),
                     body: level === "risk" || transferBefore >= 0
-                        ? `${level === "missed" ? "Nur " : ""}${transferBefore} Min. zum Umsteigen von ${previous.line} in ${leg.line}.`
-                        : `${leg.line} fährt ${-transferBefore} Min. bevor ${previous.line} ankommt.`,
+                        ? text(`${level === "missed" ? "Nur " : ""}%@ Min. zum Umsteigen von %@ in %@.`, transferBefore, previous.line, leg.line)
+                        : text("%@ fährt %@ Min. bevor %@ ankommt.", leg.line, -transferBefore, previous.line),
                     remember: () => { journey.transfers[index] = level; },
                 });
             }
@@ -285,7 +285,7 @@ export function alerts(journey, live, now) {
 function payload(journey, alert) {
     return {
         aps: {
-            alert: { title: alert.title, body: alert.body },
+            alert: localizedAlert(alert.title, alert.body),
             sound: "default",
             "interruption-level": "time-sensitive",
             "thread-id": `commute-${journey.id}`,

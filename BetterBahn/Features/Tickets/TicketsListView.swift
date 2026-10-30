@@ -170,9 +170,9 @@ struct TicketsListView: View {
     }
 
     private func validity(of pass: TravelPass) -> String? {
-        if pass.isExpired() { return "Abgelaufen" }
-        if !pass.isValid(), let from = pass.validFrom { return "ab " + from.formatted(date: .abbreviated, time: .omitted) }
-        return pass.validUntil.map { "bis " + $0.formatted(date: .abbreviated, time: .shortened) }
+        if pass.isExpired() { return String(localized: "Abgelaufen") }
+        if !pass.isValid(), let from = pass.validFrom { return String(localized: "ab \(from.formatted(date: .abbreviated, time: .omitted))") }
+        return pass.validUntil.map { String(localized: "bis \($0.formatted(date: .abbreviated, time: .shortened))") }
     }
 
     private var sortedTickets: [SavedTicket] {

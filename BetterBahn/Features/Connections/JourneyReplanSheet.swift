@@ -242,8 +242,8 @@ struct JourneyReplanSheet: View {
     }
 
     private var navigationTitle: String {
-        if appliedJourney != nil { return "Route geändert" }
-        return startLeg == nil ? "Reise bearbeiten" : "Ausstieg wechseln"
+        if appliedJourney != nil { return String(localized: "Route geändert") }
+        return startLeg == nil ? String(localized: "Reise bearbeiten") : String(localized: "Ausstieg wechseln")
     }
 
     /// The remaining route as a normal search, for the sheets that take one.
@@ -266,7 +266,7 @@ struct JourneyReplanSheet: View {
         if !requirements.isEmpty {
             requirementList
             if breaksBoardingRules {
-                warningBanner("An einem gewählten Halt ist Ein- oder Aussteigen laut Fahrplan nicht erlaubt.")
+                warningBanner(String(localized: "An einem gewählten Halt ist Ein- oder Aussteigen laut Fahrplan nicht erlaubt."))
             }
         }
         if let error { ErrorBanner(error: error) }
@@ -292,7 +292,7 @@ struct JourneyReplanSheet: View {
         if let timeLostVersusPlan { stayOnTrainNote(lost: timeLostVersusPlan) }
         if let fasterOption { fasterNote(fasterOption) }
         if !results.isEmpty {
-            SectionHeader(title: "Weiterfahrt ab \(exitStation.displayName)", systemImage: "arrow.triangle.branch")
+            SectionHeader(title: String(localized: "Weiterfahrt ab \(exitStation.displayName)"), systemImage: "arrow.triangle.branch")
                 .padding(.top, 4)
             ForEach(results) { option in
                 Button {
@@ -319,7 +319,7 @@ struct JourneyReplanSheet: View {
     private var legPicker: some View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
-                OptionLabel(title: "Ab welchem Zug?", subtitle: "Alles davor bleibt gleich", icon: "tram.fill")
+                OptionLabel(title: String(localized: "Ab welchem Zug?"), subtitle: String(localized: "Alles davor bleibt gleich"), icon: "tram.fill")
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
@@ -329,7 +329,7 @@ struct JourneyReplanSheet: View {
                                     withAnimation(.snappy) { selectedLegID = option.id }
                                 } label: {
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(option.line?.name ?? "Zug").font(.caption.weight(.bold))
+                                        Text(option.line?.name ?? String(localized: "Zug")).font(.caption.weight(.bold))
                                         Text("\(option.origin.displayName) → \(option.destination.displayName)")
                                             .font(.caption2)
                                             .lineLimit(1)
@@ -395,8 +395,8 @@ struct JourneyReplanSheet: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(resolvedTrainNames[requirement.id] ?? requirement.trainName.uppercased())
                             .font(.subheadline.weight(.semibold))
-                        Text(requirement.exit.map { "ab \(requirement.boarding.displayName) → \($0.displayName)" }
-                             ?? "ab \(requirement.boarding.displayName) → schnellster Weg")
+                        Text(requirement.exit.map { String(localized: "ab \(requirement.boarding.displayName) → \($0.displayName)") }
+                             ?? String(localized: "ab \(requirement.boarding.displayName) → schnellster Weg"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -483,9 +483,8 @@ struct JourneyReplanSheet: View {
 
     private func stayOnTrainSubtitle(lost: TimeInterval) -> String {
         let minutes = Int(lost / 60)
-        guard let planned = journey.arrival?.best else { return "Umplanen kostet \(minutes) Min." }
-        return "Bleibst du im Zug, bist du um \(planned.timeString) in \(finalDestination.displayName) – "
-            + "\(minutes) Min. früher."
+        guard let planned = journey.arrival?.best else { return String(localized: "Umplanen kostet \(minutes) Min.") }
+        return String(localized: "Bleibst du im Zug, bist du um \(planned.timeString) in \(finalDestination.displayName) – \(minutes) Min. früher.")
     }
 
     /// A hint that staying on (or leaving earlier) reaches the goal sooner than the chosen exit.
@@ -533,10 +532,10 @@ struct JourneyReplanSheet: View {
     }
 
     private func fasterSubtitle(_ option: ExitOption) -> String {
-        let arrival = "an \(option.arrival.timeString) in \(target.displayName)"
+        let arrival = String(localized: "an \(option.arrival.timeString) in \(target.displayName)")
         guard let mine = results.compactMap({ $0.arrival?.best }).min() else { return arrival }
         let saved = Int(mine.timeIntervalSince(option.arrival) / 60)
-        return saved > 0 ? "\(arrival) · \(saved) Min. früher" : arrival
+        return saved > 0 ? String(localized: "\(arrival) · \(saved) Min. früher") : arrival
     }
 
     /// The train with its stop list – tapping a stop moves the exit.
@@ -594,7 +593,7 @@ struct JourneyReplanSheet: View {
     private var endOrContinueCard: some View {
         Card {
             VStack(alignment: .leading, spacing: 12) {
-                OptionLabel(title: "Und dann?", subtitle: "Ausstieg in \(exitStation.displayName) um \(exitArrival.timeString)",
+                OptionLabel(title: String(localized: "Und dann?"), subtitle: String(localized: "Ausstieg in \(exitStation.displayName) um \(exitArrival.timeString)"),
                             icon: "arrow.triangle.branch")
                 Button {
                     endJourneyAtExit()
@@ -671,7 +670,7 @@ struct JourneyReplanSheet: View {
                     }
                 }
 
-                StationInput(label: "Ziel", placeholder: "Wohin?", systemImage: "mappin.circle.fill",
+                StationInput(label: String(localized: "Ziel"), placeholder: String(localized: "Wohin?"), systemImage: "mappin.circle.fill",
                              station: $destination, focus: $focused, focusValue: .destination)
 
                 if viaRows.count - passed.count < Self.maxViaPoints {
@@ -701,7 +700,7 @@ struct JourneyReplanSheet: View {
                     showBufferPopover = true
                 } label: {
                     HStack {
-                        OptionLabel(title: "Zeit zum Umsteigen", subtitle: "\(minTransferMinutes) Min.",
+                        OptionLabel(title: String(localized: "Zeit zum Umsteigen"), subtitle: String(localized: "\(minTransferMinutes) Min."),
                                     icon: "clock.badge.checkmark")
                         Spacer()
                         Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
@@ -725,7 +724,7 @@ struct JourneyReplanSheet: View {
                 Divider()
 
                 VStack(alignment: .leading, spacing: 8) {
-                    OptionLabel(title: "Max. Umstiege", subtitle: "Weniger Umsteigen, evtl. länger unterwegs",
+                    OptionLabel(title: String(localized: "Max. Umstiege"), subtitle: String(localized: "Weniger Umsteigen, evtl. länger unterwegs"),
                                 icon: "arrow.triangle.swap")
                     MaxTransfersPicker(maxTransfers: $maxTransfers)
                 }
@@ -740,7 +739,7 @@ struct JourneyReplanSheet: View {
             showProductsPopover = true
         } label: {
             HStack {
-                OptionLabel(title: "Verkehrsmittel", subtitle: productSummary(products),
+                OptionLabel(title: String(localized: "Verkehrsmittel"), subtitle: productSummary(products),
                             icon: "train.side.front.car")
                 Spacer()
                 Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
@@ -1080,13 +1079,13 @@ struct JourneyReplanSheet: View {
 
     private func apply(continuation: Journey?, exit overrideExit: Leg? = nil) {
         guard let exit = overrideExit ?? exitLeg, let index = legIndex else {
-            error = TransitError.notFound("Diese Teilstrecke im Reiseplan")
+            error = TransitError.notFound(String(localized: "Diese Teilstrecke im Reiseplan"))
             return
         }
         applyingID = continuation?.id ?? "end"
         let updated = JourneyReplanner.rebuild(journey, replacingLegAt: index, with: exit,
                                                continuation: continuation)
-        let reason = exitChanged ? "Ausstieg in \(exit.destination.displayName)" : "Route neu geplant"
+        let reason = exitChanged ? String(localized: "Ausstieg in \(exit.destination.displayName)") : String(localized: "Route neu geplant")
         if let entry = model.savedEntry(for: journey) {
             model.replaceSaved(id: entry.id, with: updated, reason: reason, search: updatedSearch)
         }

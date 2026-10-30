@@ -52,11 +52,14 @@ struct JourneyResultsView: View {
     private var borderFallbackText: String {
         let filter = model.ticketFilter
         guard journeys.allSatisfy(filter.isEntirelyAbroad) else {
-            return "Diese Verbindungen führen ins Ausland. Mit \(model.settings.ticketType.dativeShortName) kommst du nur bis zur Grenze."
+            switch model.settings.ticketType {
+            case .bahnCard100: return String(localized: "Diese Verbindungen führen ins Ausland. Mit der BC100 kommst du nur bis zur Grenze.")
+            case .deutschlandticket: return String(localized: "Diese Verbindungen führen ins Ausland. Mit dem D-Ticket kommst du nur bis zur Grenze.")
+            }
         }
         switch model.settings.ticketType {
-        case .bahnCard100: return "Auf der kompletten Strecke gilt deine BahnCard 100 nicht!"
-        case .deutschlandticket: return "Auf der kompletten Strecke gilt dein Deutschlandticket nicht!"
+        case .bahnCard100: return String(localized: "Auf der kompletten Strecke gilt deine BahnCard 100 nicht!")
+        case .deutschlandticket: return String(localized: "Auf der kompletten Strecke gilt dein Deutschlandticket nicht!")
         }
     }
 
@@ -104,15 +107,15 @@ struct JourneyResultsView: View {
                     }
 
                     if let extraTravelTime {
-                        warningBanner("Mit diesem Zug bist du \(extraTravelTime.compactDuration) länger unterwegs.")
+                        warningBanner(String(localized: "Mit diesem Zug bist du \(extraTravelTime.compactDuration) länger unterwegs."))
                     }
 
                     if plan?.breaksBoardingRules == true {
-                        warningBanner("An einem gewählten Halt ist Ein- oder Aussteigen laut Fahrplan nicht erlaubt.")
+                        warningBanner(String(localized: "An einem gewählten Halt ist Ein- oder Aussteigen laut Fahrplan nicht erlaubt."))
                     }
 
                     if !visibleJourneys.isEmpty {
-                        SectionHeader(title: "Routen mit \(requirements.count == 1 ? "diesem Zug" : "diesen Zügen")",
+                        SectionHeader(title: requirements.count == 1 ? String(localized: "Routen mit diesem Zug") : String(localized: "Routen mit diesen Zügen"),
                                       systemImage: "pin.fill")
                     }
                 }
@@ -159,7 +162,7 @@ struct JourneyResultsView: View {
 
                 VStack(spacing: 8) {
                     if hiddenCount + journeys.count - visibleJourneys.count > 0, requirements.isEmpty {
-                        InfoChip(text: "\(hiddenCount + journeys.count - visibleJourneys.count) nicht mit \(model.settings.ticketType.shortName) nutzbar", systemImage: "eye.slash.fill")
+                        InfoChip(text: String(localized: "\(hiddenCount + journeys.count - visibleJourneys.count) nicht mit \(model.settings.ticketType.shortName) nutzbar"), systemImage: "eye.slash.fill")
                     }
                     if source == .transitous {
                         SourceNotice()
@@ -221,7 +224,7 @@ struct JourneyResultsView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 if !search.via.isEmpty {
-                    Text("über " + search.via.map(viaLabel).joined(separator: ", "))
+                    Text("über \(search.via.map(viaLabel).joined(separator: ", "))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
@@ -244,11 +247,12 @@ struct JourneyResultsView: View {
                     InfoChip(text: ticket.shortName, systemImage: ticket.symbolName, tint: .brand)
                 }
                 if let maxTransfers = search.maxTransfers {
-                    InfoChip(text: maxTransfers == 0 ? "Direkt" : "≤ \(maxTransfers) Umstieg\(maxTransfers == 1 ? "" : "e")",
+                    InfoChip(text: maxTransfers == 0 ? String(localized: "Direkt")
+                                : maxTransfers == 1 ? String(localized: "≤ 1 Umstieg") : String(localized: "≤ \(maxTransfers) Umstiege"),
                              systemImage: "arrow.triangle.swap", tint: .brand)
                 }
                 if search.products != Set(Product.allCases) {
-                    InfoChip(text: "Verkehrsmittel gefiltert", systemImage: "line.3.horizontal.decrease", tint: .brand)
+                    InfoChip(text: String(localized: "Verkehrsmittel gefiltert"), systemImage: "line.3.horizontal.decrease", tint: .brand)
                 }
             }
         }
@@ -347,9 +351,9 @@ struct JourneyResultsView: View {
 
     private func requirementSubtitle(_ requirement: TrainRequirement) -> String {
         if let exit = requirement.exit {
-            return "ab \(requirement.boarding.displayName) → \(exit.displayName)"
+            return String(localized: "ab \(requirement.boarding.displayName) → \(exit.displayName)")
         }
-        return "ab \(requirement.boarding.displayName) → schnellster Weg"
+        return String(localized: "ab \(requirement.boarding.displayName) → schnellster Weg")
     }
 
     /// A new requirement usually continues where the last one ends: its exit, else where the planned
@@ -406,7 +410,7 @@ struct JourneyResultsView: View {
     }
 
     private func viaLabel(_ waypoint: ViaWaypoint) -> String {
-        waypoint.minStayMinutes > 0 ? "\(waypoint.station.displayName) (≥ \(waypoint.minStayMinutes) Min.)" : waypoint.station.displayName
+        waypoint.minStayMinutes > 0 ? String(localized: "\(waypoint.station.displayName) (≥ \(waypoint.minStayMinutes) Min.)") : waypoint.station.displayName
     }
 
     /// Long-distance trains from the loaded results, as quick picks.
@@ -418,7 +422,7 @@ struct JourneyResultsView: View {
         return Array(names.prefix(12))
     }
 
-    private func pageButton(_ title: String, systemImage: String, action: @escaping () async -> Void) -> some View {
+    private func pageButton(_ title: LocalizedStringKey, systemImage: String, action: @escaping () async -> Void) -> some View {
         Button {
             loadingMore = true
             Task {
@@ -699,10 +703,11 @@ struct JourneyCard: View {
                 }
 
                 HStack(spacing: 8) {
-                    InfoChip(text: journey.transfers == 0 ? "Direkt" : "\(journey.transfers) Umstieg\(journey.transfers == 1 ? "" : "e")",
+                    InfoChip(text: journey.transfers == 0 ? String(localized: "Direkt")
+                                : journey.transfers == 1 ? String(localized: "1 Umstieg") : String(localized: "\(journey.transfers) Umstiege"),
                              systemImage: journey.transfers == 0 ? "arrow.right" : "arrow.triangle.swap")
                     if let platform = journey.transitLegs.first?.departurePlatform?.best {
-                        InfoChip(text: "Gleis \(platform)", systemImage: "signpost.right.fill",
+                        InfoChip(text: String(localized: "Gleis \(platform)"), systemImage: "signpost.right.fill",
                                  tint: journey.transitLegs.first?.departurePlatform?.hasChanged == true ? .heavyDelay : .secondary)
                     }
                     if !journey.isCancelled, let level = OccupancyForecast.highest(occupancies, in: model.settings.travelClass) {
@@ -710,15 +715,15 @@ struct JourneyCard: View {
                     }
                     Spacer()
                     if journey.isCancelled {
-                        InfoChip(text: "Fällt aus", systemImage: "xmark.octagon.fill", tint: .heavyDelay)
+                        InfoChip(text: String(localized: "Fällt aus"), systemImage: "xmark.octagon.fill", tint: .heavyDelay)
                     } else if journey.transitLegs.contains(where: { $0.stopovers.first?.access.allowsBoarding == false }) {
-                        InfoChip(text: "Kein Einstieg", systemImage: "arrow.down.right.circle.fill", tint: .slightDelay)
+                        InfoChip(text: String(localized: "Kein Einstieg"), systemImage: "arrow.down.right.circle.fill", tint: .slightDelay)
                     } else if journey.transitLegs.contains(where: { $0.stopovers.last?.access.allowsAlighting == false }) {
-                        InfoChip(text: "Kein Ausstieg", systemImage: "arrow.up.right.circle.fill", tint: .slightDelay)
+                        InfoChip(text: String(localized: "Kein Ausstieg"), systemImage: "arrow.up.right.circle.fill", tint: .slightDelay)
                     } else if journey.currentIssues().contains(where: \.isBlocking) {
-                        InfoChip(text: "Nicht möglich", systemImage: "exclamationmark.triangle.fill", tint: .heavyDelay)
+                        InfoChip(text: String(localized: "Nicht möglich"), systemImage: "exclamationmark.triangle.fill", tint: .heavyDelay)
                     } else if !journey.currentIssues().isEmpty {
-                        InfoChip(text: "Knapp", systemImage: "exclamationmark.triangle.fill", tint: .slightDelay)
+                        InfoChip(text: String(localized: "Knapp"), systemImage: "exclamationmark.triangle.fill", tint: .slightDelay)
                     } else if journey.legs.contains(where: { $0.messages.containsDelayReason }) {
                         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.heavyDelay)
                     } else if journey.legs.contains(where: { !$0.remarks.isEmpty || !$0.messages.isEmpty }) {

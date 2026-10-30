@@ -241,6 +241,11 @@ test("names who checked in and the train from where to where", () => {
     assert.equal(notification(status(1)).aps.alert.body, "ICE 1095: München Hbf → Frankfurt(Main)Hbf");
     assert.equal(notification(status(1, { line: "" })).aps.alert.body, "München Hbf → Frankfurt(Main)Hbf");
     assert.equal(notification({ ...status(1), user: null }).aps.alert.title, "Jemand ist eingecheckt");
+    // The app shows these in the device's language.
+    const alert = notification(status(1)).aps.alert;
+    assert.equal(alert["title-loc-key"], "%@ ist eingecheckt");
+    assert.deepEqual(alert["title-loc-args"], [alert.title.replace(" ist eingecheckt", "")]);
+    assert.equal(alert["loc-key"], undefined);
 });
 
 function liked(id, statusID = 30, liker = { id: 3, username: "anna", name: "Anna" }) {

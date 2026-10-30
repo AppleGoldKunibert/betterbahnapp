@@ -57,11 +57,11 @@ public struct CoachAdvice: Sendable, Hashable {
     public var coachList: String {
         guard groups.count > 1 else {
             let parts = CoachSequence.numberList(coaches).components(separatedBy: ", ")
-            guard let last = parts.last, parts.count > 1 else { return "Wagen \(parts.joined())" }
-            return "Wagen \(parts.dropLast().joined(separator: ", ")) oder \(last)"
+            guard let last = parts.last, parts.count > 1 else { return String(kit: "Wagen %@", parts.joined()) }
+            return String(kit: "Wagen %@ oder %@", parts.dropLast().joined(separator: ", "), last)
         }
         let places = groups.compactMap { group in group.first.map { first in group.count > 1 ? "\(first)–\(group.last!)" : first } }
-        return "Wagen \(places.dropLast().joined(separator: ", ")) oder \(places.last ?? "")"
+        return String(kit: "Wagen %@ oder %@", places.dropLast().joined(separator: ", "), places.last ?? "")
     }
 
     /// "In Wagen 30 oder 31 einsteigen, um in Hannover Hbf direkt an deinem Anschluss auszusteigen."; on
@@ -72,29 +72,39 @@ public struct CoachAdvice: Sendable, Hashable {
     ///   - boarded: already on the train, so the advice is to walk to those coaches.
     ///   - namingStation: false next to the transfer, which says where already.
     public func text(boarded: Bool = false, namingStation: Bool = true) -> String {
-        let place = namingStation ? " in \(station)" : ""
-        if alreadyThere { return "Du sitzt schon im richtigen Wagen, um\(place) \(spot) auszusteigen." }
-        let coaches = coachList + (otherClass.map { " (\($0). Klasse)" } ?? "")
-        let first = walkBeforeArrival ? "Vor der Ankunft in \(coaches) wechseln"
-            : boarded ? "In \(coaches) wechseln" : "In \(coaches) einsteigen"
-        return "\(first), um\(place) \(spot) auszusteigen."
+        if alreadyThere {
+            return namingStation ? String(kit: "Du sitzt schon im richtigen Wagen, um in %@ %@ auszusteigen.", station, spot)
+                : String(kit: "Du sitzt schon im richtigen Wagen, um %@ auszusteigen.", spot)
+        }
+        let coaches = coachList + (otherClass.map { $0 == 1 ? String(kit: " (1. Klasse)") : $0 == 2 ? String(kit: " (2. Klasse)") : " (\($0). Klasse)" } ?? "")
+        if walkBeforeArrival {
+            return namingStation ? String(kit: "Vor der Ankunft in %@ wechseln, um in %@ %@ auszusteigen.", coaches, station, spot)
+                : String(kit: "Vor der Ankunft in %@ wechseln, um %@ auszusteigen.", coaches, spot)
+        }
+        if boarded {
+            return namingStation ? String(kit: "In %@ wechseln, um in %@ %@ auszusteigen.", coaches, station, spot)
+                : String(kit: "In %@ wechseln, um %@ auszusteigen.", coaches, spot)
+        }
+        return namingStation ? String(kit: "In %@ einsteigen, um in %@ %@ auszusteigen.", coaches, station, spot)
+            : String(kit: "In %@ einsteigen, um %@ auszusteigen.", coaches, spot)
     }
 
     /// Below the Wagenreihung with these coaches marked: "Die markierten Wagen halten in Hannover Hbf
     /// direkt an deinem Anschluss." With a seat, whose coach is framed too, the whole advice.
     public var legend: String {
-        walkBeforeArrival || alreadyThere ? text() : "Die markierten Wagen halten in \(station) \(spot)."
+        walkBeforeArrival || alreadyThere ? text() : String(kit: "Die markierten Wagen halten in %@ %@.", station, spot)
     }
 
     /// "direkt an deinem Anschluss", "direkt an der Treppe", "möglichst nah am Ausgang"
     private var spot: String {
-        let how = nearestOfClass ? "möglichst nah" : "direkt"
+        let near = nearestOfClass
         return switch target {
-        case .connection(let coach?): "\(how) an Wagen \(coach) deines Anschlusses"
-        case .connection(nil): "\(how) an deinem Anschluss"
-        case .access(.stairs): "\(how) an der Treppe"
-        case .access(.lift): "\(how) am Aufzug"
-        case .access(.exit): "\(how) am Ausgang"
+        case .connection(let coach?):
+            near ? String(kit: "möglichst nah an Wagen %@ deines Anschlusses", coach) : String(kit: "direkt an Wagen %@ deines Anschlusses", coach)
+        case .connection(nil): near ? String(kit: "möglichst nah an deinem Anschluss") : String(kit: "direkt an deinem Anschluss")
+        case .access(.stairs): near ? String(kit: "möglichst nah an der Treppe") : String(kit: "direkt an der Treppe")
+        case .access(.lift): near ? String(kit: "möglichst nah am Aufzug") : String(kit: "direkt am Aufzug")
+        case .access(.exit): near ? String(kit: "möglichst nah am Ausgang") : String(kit: "direkt am Ausgang")
         }
     }
 

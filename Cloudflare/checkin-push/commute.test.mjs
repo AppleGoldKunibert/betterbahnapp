@@ -7,6 +7,9 @@ import { parseTime } from "../shared/iris.mjs";
 import { clock, processDueCommutes } from "./commute.mjs";
 import { handleRequest } from "./worker.mjs";
 
+/// The German text of an alert, without the keys the app translates it with.
+const german = ({ title, body }) => ({ title, body });
+
 const secret = "test-secret";
 const schema = readFileSync(new URL("./schema.sql", import.meta.url), "utf8");
 const deviceToken = "cd".repeat(32);
@@ -159,7 +162,11 @@ test("reports a delay from the threshold on and again when it grew", async () =>
     await put(env, { journeys: [journey] }, fetch);
     await processDueCommutes(env, now, { fetch });
     assert.equal(pushes.length, 1);
-    assert.deepEqual(pushes[0].payload.aps.alert, { title: "RE 3: +8 Min.", body: "Ab Eberswalde Hbf um 7:50 statt 7:42." });
+    assert.deepEqual(pushes[0].payload.aps.alert, {
+        title: "RE 3: +8 Min.", body: "Ab Eberswalde Hbf um 7:50 statt 7:42.",
+        "title-loc-key": "%@: +%@ Min.", "title-loc-args": ["RE 3", "8"],
+        "loc-key": "Ab %@ um %@ statt %@.", "loc-args": ["Eberswalde Hbf", "7:50", "7:42"],
+    });
     assert.equal(pushes[0].payload.commuteJourneyID, "J1");
     assert.equal(pushes[0].collapse, "commute-J1-delay-0");
     await processDueCommutes(env, now + 60000, { fetch });
@@ -187,7 +194,7 @@ test("reports a cancellation once", async () => {
     await processDueCommutes(env, now, { fetch });
     await processDueCommutes(env, now + 60000, { fetch });
     assert.equal(pushes.length, 1);
-    assert.deepEqual(pushes[0].payload.aps.alert, { title: "RE 3 fällt aus", body: "Die Fahrt von Eberswalde Hbf nach Berlin Gesundbrunnen findet nicht statt." });
+    assert.deepEqual(german(pushes[0].payload.aps.alert), { title: "RE 3 fällt aus", body: "Die Fahrt von Eberswalde Hbf nach Berlin Gesundbrunnen findet nicht statt." });
 });
 
 test("reports a platform change, not a sector", async () => {
@@ -200,7 +207,7 @@ test("reports a platform change, not a sector", async () => {
     assert.equal(pushes.length, 0);
     platform = "4";
     await processDueCommutes(env, now + 60000, { fetch });
-    assert.deepEqual(pushes[0].payload.aps.alert, { title: "RE 3: Gleiswechsel", body: "Abfahrt Eberswalde Hbf jetzt von Gleis 4 (statt 2)" });
+    assert.deepEqual(german(pushes[0].payload.aps.alert), { title: "RE 3: Gleiswechsel", body: "Abfahrt Eberswalde Hbf jetzt von Gleis 4 (statt 2)" });
     await processDueCommutes(env, now + 120000, { fetch });
     assert.equal(pushes.length, 1);
 });
@@ -224,9 +231,10 @@ test("warns when a transfer gets tight", async () => {
     assert.deepEqual(await response.json(), { watched: ["J2"] });
     await processDueCommutes(env, now, { fetch });
     assert.equal(pushes.length, 1);
-    assert.deepEqual(pushes[0].payload.aps.alert, {
+    assert.deepEqual(german(pushes[0].payload.aps.alert), {
         title: "Umstieg in Berlin Gesundbrunnen wird knapp", body: "3 Min. zum Umsteigen von RE 3 in S 1.",
     });
+    assert.equal(pushes[0].payload.aps.alert["loc-key"], "%@ Min. zum Umsteigen von %@ in %@.");
 });
 
 test("forgets journeys that have arrived", async () => {

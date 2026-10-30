@@ -359,7 +359,7 @@ public actor TrainCandidateFinder {
     /// The picked run's trip, to show its stops: from the boarding station's board when the route
     /// meets it (one small board), else wherever the train search finds it (`TrainNumberSearch.run`).
     public func candidate(for train: NumberedTrain, target: Station) async throws -> TrainCandidate {
-        guard let numberSearch else { throw TransitError.notFound("\(train.result.name) im Fahrplan") }
+        guard let numberSearch else { throw TransitError.notFound(String(kit: "%@ im Fahrplan", train.result.name)) }
         if let station = train.fit?.boarding, let departure = train.fit?.departure,
            let entries = try? await provider.departuresForTrainLookup(at: station, date: departure.addingTimeInterval(-2 * 60),
                                                                      duration: 5, products: Self.trainProducts),

@@ -38,14 +38,13 @@ struct CO2Sheet: View {
                     LabeledContent("Strecke", value: "\(comparison.kilometers.formatted(.number.precision(.fractionLength(0)))) km")
                 }
                 Section {
-                    row("Bahn", systemImage: "tram.fill", kilograms: comparison.train, color: .punctual)
-                    row("Auto", systemImage: "car.fill", kilograms: comparison.car, color: .slightDelay)
-                    row("Flugzeug", systemImage: "airplane", kilograms: comparison.plane, color: .heavyDelay)
+                    row(String(localized: "Bahn"), systemImage: "tram.fill", kilograms: comparison.train, color: .punctual)
+                    row(String(localized: "Auto"), systemImage: "car.fill", kilograms: comparison.car, color: .slightDelay)
+                    row(String(localized: "Flugzeug"), systemImage: "airplane", kilograms: comparison.plane, color: .heavyDelay)
                 } header: {
                     Text("CO₂ für diese Reise")
                 } footer: {
-                    Text("Mit der Bahn sparst du \(CO2Comparison.kilogramsText(comparison.savedComparedToCar)) gegenüber dem Auto "
-                         + "und \(CO2Comparison.kilogramsText(comparison.savedComparedToPlane)) gegenüber dem Flugzeug.")
+                    Text("Mit der Bahn sparst du \(CO2Comparison.kilogramsText(comparison.savedComparedToCar)) gegenüber dem Auto und \(CO2Comparison.kilogramsText(comparison.savedComparedToPlane)) gegenüber dem Flugzeug.")
                 }
                 Section {
                 } footer: {

@@ -15,18 +15,18 @@ public enum TransferDisposition: String, Codable, Sendable, Hashable {
 
     public var title: String {
         switch self {
-        case .waiting: "Anschluss wartet"
-        case .notWaiting: "Anschluss wartet nicht"
+        case .waiting: String(kit: "Anschluss wartet")
+        case .notWaiting: String(kit: "Anschluss wartet nicht")
         }
     }
 
     /// "RE3 wartet in Berlin Hbf (nicht) auf ICE 91."
     public func message(arriving: Leg, departing: Leg) -> String {
-        let a = arriving.line?.name ?? "Zug", d = departing.line?.name ?? "Anschlusszug"
+        let a = arriving.line?.name ?? String(kit: "Zug"), d = departing.line?.name ?? String(kit: "Anschlusszug")
         let station = departing.origin.displayName
         return switch self {
-        case .waiting: "\(d) wartet in \(station) auf \(a)."
-        case .notWaiting: "\(d) wartet in \(station) nicht auf \(a)."
+        case .waiting: String(kit: "%@ wartet in %@ auf %@.", d, station, a)
+        case .notWaiting: String(kit: "%@ wartet in %@ nicht auf %@.", d, station, a)
         }
     }
 }

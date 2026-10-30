@@ -552,4 +552,14 @@ in `project.pbxproj`: new files join their target automatically.
   `swift-test.sh` (temp `--scratch-path`): plain `swift test` can fail codesigning on `.build` attributes.
 - Content folding in or out uses `.transition(.fold)`, never `.move(edge: .top)` (slides over the text above).
 - DB-style station names ("Frankfurt (Oder)", "Bernau (bei Berlin)").
+- Languages (#479): German is the base language, English follows the device language. Every UI text lives in
+  a String Catalog keyed by the German text: `BetterBahn/Localizable.xcstrings` (+ `InfoPlist.xcstrings`),
+  `BetterBahnWidgets/…`, `BetterBahnShare/…` and Kit's `Resources/Localizable.xcstrings`. In the app targets
+  SwiftUI literals are looked up by themselves; a text typed `String` needs `String(localized: "…")`. Kit
+  texts use `String(kit: "Gleis %@", platform)` (`Support/KitLocalization.swift`; manual catalog entries,
+  placeholders filled in order). Kit tests and tools always get German (`KitLocalization.isGerman`), so tests
+  keep asserting German; dates and numbers in Kit texts use `KitLocalization.locale`. Texts from DB (messages,
+  station names) stay as delivered. The push Workers send German `title`/`body` plus `loc-key`s
+  (`shared/apns.mjs`, `localizedAlert`) that must exist as manual entries in the app catalog; the Live
+  Activity's server-written `warning` is translated by `ContentState.localizedWarning`.
 - Commit titles: short imperative sentence ("Show …", "Stop …", "Keep …").

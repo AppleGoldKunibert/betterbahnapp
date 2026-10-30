@@ -32,7 +32,7 @@ public struct RegularTripPlanner: Sendable {
             return (legs, found)
         }
         guard found > 0 || template.transitLegs.isEmpty else {
-            throw TransitError.notFound(template.transitLegs.first?.line?.displayName ?? "Zug")
+            throw TransitError.notFound(template.transitLegs.first?.line?.displayName ?? String(kit: "Zug"))
         }
         return Journey(legs: legs, source: template.source)
     }

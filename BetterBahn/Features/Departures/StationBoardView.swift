@@ -72,9 +72,9 @@ struct StationBoardView: View {
                     if station != nil {
                         let visible = filter.apply(entries)
                         if !visible.isEmpty {
-                            SectionHeader(title: kind == .departures ? "Abfahrten" : "Ankünfte",
+                            SectionHeader(title: kind == .departures ? String(localized: "Abfahrten") : String(localized: "Ankünfte"),
                                           systemImage: kind == .departures ? "arrow.up.right" : "arrow.down.right",
-                                          trailing: lastUpdate.map { "Stand \($0.timeString)" })
+                                          trailing: lastUpdate.map { String(localized: "Stand \($0.timeString)") })
                                 .padding(.top, 4)
                         }
                         if lastUpdate != nil {
@@ -185,8 +185,8 @@ struct StationBoardView: View {
         } destination: { entry in
             TripView(entry: entry)
         } placeholder: {
-            SplitPlaceholder(title: "Bahnhofstafel", systemImage: "clock.arrow.2.circlepath",
-                             message: "Wähl einen Zug, um seinen Fahrtverlauf zu sehen.")
+            SplitPlaceholder(title: String(localized: "Bahnhofstafel"), systemImage: "clock.arrow.2.circlepath",
+                             message: String(localized: "Wähl einen Zug, um seinen Fahrtverlauf zu sehen."))
         }
         // The tab bar stays next to the board on the iPad.
         .toolbar(path.isEmpty || sizeClass == .regular ? .automatic : .hidden, for: .tabBar)
@@ -195,7 +195,7 @@ struct StationBoardView: View {
     private var headerCard: some View {
         VStack(spacing: 12) {
             Card(padding: 0) {
-                StationInput(label: "Bahnhof", placeholder: "Bahnhof suchen", systemImage: "building.2.fill",
+                StationInput(label: String(localized: "Bahnhof"), placeholder: String(localized: "Bahnhof suchen"), systemImage: "building.2.fill",
                              station: $station, focus: $stationFocused, focusValue: true)
                     .clipShape(.rect(cornerRadius: 22, style: .continuous))
             }
@@ -241,7 +241,7 @@ struct StationBoardView: View {
             }
             .padding(.top, 30)
         } else {
-            SectionHeader(title: "Favoriten", systemImage: "star.fill")
+            SectionHeader(title: String(localized: "Favoriten"), systemImage: "star.fill")
                 .padding(.top, 4)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 10) {
                 ForEach(model.favoriteStations) { favorite in
@@ -335,7 +335,7 @@ struct StationBoardView: View {
         }
     }
 
-    private func pageButton(_ title: String, systemImage: String, action: @escaping () async -> Void) -> some View {
+    private func pageButton(_ title: LocalizedStringKey, systemImage: String, action: @escaping () async -> Void) -> some View {
         Button {
             loadingPage = true
             Task {
@@ -435,7 +435,7 @@ private struct BoardFilterMenu: View {
 
     /// One menu per group, so none is taller than the screen: iOS rebuilds an open menu on every change and set a
     /// scrolling one back by a bit, which made the single long list jump whenever a vehicle was switched.
-    private func productMenu(_ title: String, systemImage: String, products group: [Product]) -> some View {
+    private func productMenu(_ title: LocalizedStringKey, systemImage: String, products group: [Product]) -> some View {
         Menu(title, systemImage: systemImage) {
             ForEach(group, id: \.self) { product in
                 Toggle(isOn: Binding(
@@ -470,9 +470,9 @@ struct BoardRow: View {
                         .strikethrough(entry.cancelled)
                 }
                 if entry.access == .exitOnly {
-                    InfoChip(text: "Nur Ausstieg", systemImage: "arrow.down.right.circle.fill", tint: .slightDelay)
+                    InfoChip(text: String(localized: "Nur Ausstieg"), systemImage: "arrow.down.right.circle.fill", tint: .slightDelay)
                 } else if entry.access == .entryOnly {
-                    InfoChip(text: "Nur Einstieg", systemImage: "arrow.up.right.circle.fill", tint: .blue)
+                    InfoChip(text: String(localized: "Nur Einstieg"), systemImage: "arrow.up.right.circle.fill", tint: .blue)
                 }
                 if let remark = entry.remarks.first {
                     Label(remark, systemImage: "exclamationmark.triangle.fill")

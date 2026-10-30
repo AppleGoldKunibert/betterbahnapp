@@ -9,9 +9,9 @@ public enum BikeOption: String, Codable, Sendable, CaseIterable, Hashable {
 
     public var displayName: String {
         switch self {
-        case .hidden: "Ausblenden"
-        case .foldingBike: "Klapprad"
-        case .bike: "Fahrrad"
+        case .hidden: String(kit: "Ausblenden")
+        case .foldingBike: String(kit: "Klapprad")
+        case .bike: String(kit: "Fahrrad")
         }
     }
 
@@ -19,8 +19,8 @@ public enum BikeOption: String, Codable, Sendable, CaseIterable, Hashable {
     public var searchTitle: String? {
         switch self {
         case .hidden: nil
-        case .foldingBike: "Mit Klapprad"
-        case .bike: "Mit Fahrrad"
+        case .foldingBike: String(kit: "Mit Klapprad")
+        case .bike: String(kit: "Mit Fahrrad")
         }
     }
 }
@@ -71,11 +71,11 @@ public struct BikeTransport: Sendable, Hashable {
     /// "Fahrrad nur mit Reservierung", with "meist" where only the rules say so.
     public var title: String {
         switch kind {
-        case .allowed: ticket == nil ? "Fahrrad kostenlos" : "Fahrrad mit Fahrradkarte"
-        case .limited: "Fahrradmitnahme begrenzt möglich"
-        case .reservationRequired: isConfirmed ? "Fahrrad nur mit Reservierung" : "Fahrrad meist nur mit Reservierung"
-        case .notAllowed: "Keine Fahrradmitnahme"
-        case .luggage: "Klapprad zusammengeklappt kostenlos"
+        case .allowed: ticket == nil ? String(kit: "Fahrrad kostenlos") : String(kit: "Fahrrad mit Fahrradkarte")
+        case .limited: String(kit: "Fahrradmitnahme begrenzt möglich")
+        case .reservationRequired: isConfirmed ? String(kit: "Fahrrad nur mit Reservierung") : String(kit: "Fahrrad meist nur mit Reservierung")
+        case .notAllowed: String(kit: "Keine Fahrradmitnahme")
+        case .luggage: String(kit: "Klapprad zusammengeklappt kostenlos")
         }
     }
 
@@ -88,7 +88,7 @@ public struct BikeTransport: Sendable, Hashable {
         if line.product.isLongDistance || line.isNightTrain {
             let inGermany = StationNames.isGerman(leg.origin) && StationNames.isGerman(leg.destination)
             return BikeTransport(kind: .reservationRequired, isConfirmed: false,
-                                 ticket: inGermany ? fernverkehrTicket : "Fahrradkarte")
+                                 ticket: inGermany ? fernverkehrTicket : String(kit: "Fahrradkarte"))
         }
         switch line.product {
         case .regionalExpress, .regional, .suburban:
@@ -100,7 +100,7 @@ public struct BikeTransport: Sendable, Hashable {
         }
     }
 
-    static let fernverkehrTicket = "Fahrradkarte Fernverkehr (ab 7,99 €, mit Reservierung)"
+    static var fernverkehrTicket: String { String(kit: "Fahrradkarte Fernverkehr (ab 7,99 €, mit Reservierung)") }
 
     /// What to show for `leg` with `bike`. A folding bike rides as luggage on every train. For a normal bike: DB's
     /// notice "Fahrradmitnahme nicht möglich" on the leg first (it concerns this very day), then a train without bike
@@ -113,7 +113,7 @@ public struct BikeTransport: Sendable, Hashable {
         let texts = Set(leg.messages.map(\.text))
         if texts.contains(TrainMessageCodes.noBikesText) { return BikeTransport(kind: .notAllowed, isConfirmed: true) }
         if hasBikeSpaces == false {
-            return BikeTransport(kind: .notAllowed, isConfirmed: true, note: "Dieser Zug hat keine Fahrradstellplätze")
+            return BikeTransport(kind: .notAllowed, isConfirmed: true, note: String(kit: "Dieser Zug hat keine Fahrradstellplätze"))
         }
         let rule = rule(for: leg)
         guard var transport = bahnDe ?? rule else { return nil }
@@ -213,14 +213,14 @@ extension CoachSequence {
         let numbers = coaches.compactMap(\.number)
         let sectors = bikeSectors
         var parts: [String] = []
-        if !numbers.isEmpty { parts.append("Wagen " + Self.germanList(numbers)) }
-        if !sectors.isEmpty { parts.append("Abschnitt " + sectors.joined(separator: ", ")) }
+        if !numbers.isEmpty { parts.append(String(kit: "Wagen %@", Self.germanList(numbers))) }
+        if !sectors.isEmpty { parts.append(String(kit: "Abschnitt %@", sectors.joined(separator: ", "))) }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     /// "1", "1 und 7", "1, 7 und 12".
     private static func germanList(_ items: [String]) -> String {
         guard items.count > 1 else { return items.first ?? "" }
-        return items.dropLast().joined(separator: ", ") + " und " + items.last!
+        return String(kit: "%@ und %@", items.dropLast().joined(separator: ", "), items.last!)
     }
 }

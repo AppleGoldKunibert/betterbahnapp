@@ -42,14 +42,14 @@ public struct TrainFormation: Codable, Sendable, Hashable {
     public var unitSummary: String? {
         let numbers = units.compactMap(\.number)
         guard !numbers.isEmpty else { return nil }
-        return "Tz " + numbers.joined(separator: " + ")
+        return String(kit: "Tz %@", numbers.joined(separator: " + "))
     }
 
     /// "Tz 9457 „Bundesrepublik Deutschland“ + 9018"
     public var unitDescription: String? {
-        let parts = units.compactMap { unit in unit.number.map { number in unit.name.map { "\(number) „\($0)“" } ?? number } }
+        let parts = units.compactMap { unit in unit.number.map { number in unit.name.map { String(kit: "%@ „%@“", number, $0) } ?? number } }
         guard !parts.isEmpty else { return nil }
-        return "Tz " + parts.joined(separator: " + ")
+        return String(kit: "Tz %@", parts.joined(separator: " + "))
     }
 
     /// A loco-hauled IC 1: only "IC 1" units, none with a Tz. Older versions read its coach-set number

@@ -73,8 +73,8 @@ struct CoachSequenceDisclosure: View {
     @State private var expanded: Bool?
 
     private func title(of sequence: CoachSequence) -> String {
-        if sequence.source == .bahnDe { return "Wagenreihung" }
-        return liveMissing ? "Plan-Wagenreihung · Aktuelle nicht verfügbar" : "Plan-Wagenreihung"
+        if sequence.source == .bahnDe { return String(localized: "Wagenreihung") }
+        return liveMissing ? String(localized: "Plan-Wagenreihung · Aktuelle nicht verfügbar") : String(localized: "Plan-Wagenreihung")
     }
 
     var body: some View {
@@ -328,14 +328,14 @@ struct CoachSequencePanel: View {
 
     private func notes(_ sequence: CoachSequence) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text([station.displayName, sequence.platform.map { "Gleis \($0)" }].compactMap(\.self).joined(separator: " · "))
+            Text([station.displayName, sequence.platform.map { String(localized: "Gleis \($0)") }].compactMap(\.self).joined(separator: " · "))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
             if case .vagonweb(let from, let until) = sequence.source {
                 plannedNote(sequence, from: from, until: until)
             }
             if bikeMode == .bike, let bikes = sequence.bikeCoachSummary {
-                InfoChip(text: "Fahrradstellplätze: \(bikes)", systemImage: "bicycle", tint: .punctual)
+                InfoChip(text: String(localized: "Fahrradstellplätze: \(bikes)"), systemImage: "bicycle", tint: .punctual)
             }
             #if DEBUG
             if let bahnDeNote {
@@ -347,14 +347,14 @@ struct CoachSequencePanel: View {
             #endif
             if !deviations.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    InfoChip(text: "Abweichende Wagenreihung", systemImage: "exclamationmark.triangle.fill", tint: .slightDelay)
+                    InfoChip(text: String(localized: "Abweichende Wagenreihung"), systemImage: "exclamationmark.triangle.fill", tint: .slightDelay)
                     Text(deviations.joined(separator: " · "))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
             if sequence.hasOtherTrains || sequence.partsGoToDifferentPlaces {
-                InfoChip(text: "Zugteile mit anderem Ziel – auf den Wagen achten", systemImage: "arrow.triangle.branch", tint: .slightDelay)
+                InfoChip(text: String(localized: "Zugteile mit anderem Ziel – auf den Wagen achten"), systemImage: "arrow.triangle.branch", tint: .slightDelay)
             }
         }
     }
@@ -364,12 +364,12 @@ struct CoachSequencePanel: View {
     /// the train changed direction on the way; without its stops the direction is unknown.
     private func plannedNote(_ sequence: CoachSequence, from: Date?, until: Date?) -> some View {
         let validity: String? = switch (from, until) {
-        case let (from?, until?): "gilt \(from.formatted(.dateTime.day().month(.twoDigits).year())) – \(until.formatted(.dateTime.day().month(.twoDigits).year()))"
+        case let (from?, until?): String(localized: "gilt \(from.formatted(.dateTime.day().month(.twoDigits).year())) – \(until.formatted(.dateTime.day().month(.twoDigits).year()))")
         default: nil
         }
         return VStack(alignment: .leading, spacing: 4) {
-            InfoChip(text: "Plan-Wagenreihung – kann abweichen", systemImage: "calendar", tint: .secondary)
-            Text(["Ohne Gleisabschnitte", validity, "Daten: vagonweb.cz"].compactMap(\.self).joined(separator: " · "))
+            InfoChip(text: String(localized: "Plan-Wagenreihung – kann abweichen"), systemImage: "calendar", tint: .secondary)
+            Text([String(localized: "Ohne Gleisabschnitte"), validity, String(localized: "Daten: vagonweb.cz")].compactMap(\.self).joined(separator: " · "))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             if sequence.travelsTowardsPlatformEnd == nil {
@@ -712,7 +712,7 @@ private struct CoachSequenceDiagram: View {
             train = [group.trainName, group.destination].compactMap(\.self).joined(separator: " → ")
             if train?.isEmpty == true { train = nil }
         }
-        let unit = group.unit?.number.map { "Tz \($0)" }
+        let unit = group.unit?.number.map { String(localized: "Tz \($0)") }
         guard train != nil || unit != nil else { return nil }
         return PartLabel(id: coach.group, train: train, unit: unit, name: unit == nil ? nil : group.unit?.name, start: 0, end: 0)
     }
@@ -769,18 +769,18 @@ private struct CoachTile: View {
     /// "Bistro", "1. Klasse" …
     private var captionLines: [String] {
         let kind: String? = switch coach.kind {
-        case .locomotive: "Lok"
-        case .powerCar: "Triebkopf"
-        case .diningCar: "Restaurant"
-        case .halfDiningCar: "Bistro"
-        case .sleeper: "Schlafwagen"
-        case .couchette: "Liegewagen"
+        case .locomotive: String(localized: "Lok")
+        case .powerCar: String(localized: "Triebkopf")
+        case .diningCar: String(localized: "Restaurant")
+        case .halfDiningCar: String(localized: "Bistro")
+        case .sleeper: String(localized: "Schlafwagen")
+        case .couchette: String(localized: "Liegewagen")
         case .passenger, .other: nil
         }
         let classes: String? = switch (coach.firstClass, coach.secondClass) {
-        case (true, true): "1./2. Kl."
-        case (true, false): "1. Klasse"
-        case (false, true): "2. Klasse"
+        case (true, true): String(localized: "1./2. Kl.")
+        case (true, false): String(localized: "1. Klasse")
+        case (false, true): String(localized: "2. Klasse")
         case (false, false): nil
         }
         return [kind, classes].compactMap(\.self)
@@ -812,9 +812,9 @@ private struct CoachTile: View {
     }
 
     private var accessibilityText: String {
-        var parts = [highlighted ? "Dein Wagen" : suggested ? "Empfohlener Wagen" : nil, coach.number.map { "Wagen \($0)" }, coach.title == "Wagen" ? nil : coach.title, coach.closed ? "Geschlossen" : nil].compactMap(\.self)
+        var parts = [highlighted ? String(localized: "Dein Wagen") : suggested ? String(localized: "Empfohlener Wagen") : nil, coach.number.map { String(localized: "Wagen \($0)") }, coach.hasKindOrClass ? coach.title : nil, coach.closed ? String(localized: "Geschlossen") : nil].compactMap(\.self)
         parts += coach.amenities.map(\.title)
-        if let bikes = coach.bikeSpaces, coach.amenities.contains(.bikeSpace) { parts.append("\(bikes) Fahrradstellplätze") }
+        if let bikes = coach.bikeSpaces, coach.amenities.contains(.bikeSpace) { parts.append(String(localized: "\(bikes) Fahrradstellplätze")) }
         return parts.joined(separator: ", ")
     }
 
@@ -860,37 +860,42 @@ private struct CoachTile: View {
 extension CoachSequence.Coach {
     /// "Wagen 21 · 2. Klasse", "Bordrestaurant · 1. Klasse", "Triebkopf" …
     var title: String {
-        let classes = switch (firstClass, secondClass) {
-        case (true, true): "1./2. Klasse"
-        case (true, false): "1. Klasse"
-        case (false, true): "2. Klasse"
+        let classes: String? = switch (firstClass, secondClass) {
+        case (true, true): String(localized: "1./2. Klasse")
+        case (true, false): String(localized: "1. Klasse")
+        case (false, true): String(localized: "2. Klasse")
         case (false, false): nil as String?
         }
         let kind: String? = switch kind {
-        case .locomotive: "Lok"
-        case .powerCar: "Triebkopf"
-        case .diningCar: "Bordrestaurant"
-        case .halfDiningCar: "Bordbistro"
-        case .sleeper: "Schlafwagen"
-        case .couchette: "Liegewagen"
+        case .locomotive: String(localized: "Lok")
+        case .powerCar: String(localized: "Triebkopf")
+        case .diningCar: String(localized: "Bordrestaurant")
+        case .halfDiningCar: String(localized: "Bordbistro")
+        case .sleeper: String(localized: "Schlafwagen")
+        case .couchette: String(localized: "Liegewagen")
         case .passenger, .other: nil
         }
-        return [kind, classes].compactMap(\.self).joined(separator: " · ").nilIfEmpty ?? "Wagen"
+        return [kind, classes].compactMap(\.self).joined(separator: " · ").nilIfEmpty ?? String(localized: "Wagen")
+    }
+
+    /// Whether `title` names a kind or class rather than falling back to plain "Wagen".
+    var hasKindOrClass: Bool {
+        firstClass || secondClass || (kind != .passenger && kind != .other)
     }
 }
 
 extension CoachSequence.Coach.Amenity {
     var title: String {
         switch self {
-        case .bikeSpace: "Fahrradstellplätze"
-        case .wheelchairSpace: "Rollstuhlstellplätze"
-        case .wheelchairToilet: "Rollstuhlgerechtes WC"
-        case .severelyDisabledSeats: "Plätze für Schwerbehinderte"
-        case .quietZone: "Ruhebereich"
-        case .familyZone: "Familienbereich"
-        case .infantCabin: "Kleinkindabteil"
-        case .bahnComfortSeats: "BahnComfort-Plätze"
-        case .info: "Info-Punkt"
+        case .bikeSpace: String(localized: "Fahrradstellplätze")
+        case .wheelchairSpace: String(localized: "Rollstuhlstellplätze")
+        case .wheelchairToilet: String(localized: "Rollstuhlgerechtes WC")
+        case .severelyDisabledSeats: String(localized: "Plätze für Schwerbehinderte")
+        case .quietZone: String(localized: "Ruhebereich")
+        case .familyZone: String(localized: "Familienbereich")
+        case .infantCabin: String(localized: "Kleinkindabteil")
+        case .bahnComfortSeats: String(localized: "BahnComfort-Plätze")
+        case .info: String(localized: "Info-Punkt")
         }
     }
 

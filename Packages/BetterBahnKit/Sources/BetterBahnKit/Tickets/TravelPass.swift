@@ -13,6 +13,12 @@ public struct TravelPass: Codable, Sendable, Hashable, Identifiable {
         /// "12.04.1990"
         public var birthDateDescription: String? {
             guard let year = birthDate?.year, let month = birthDate?.month, let day = birthDate?.day else { return nil }
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(identifier: "UTC")!
+            if !KitLocalization.isGerman, let date = calendar.date(from: DateComponents(year: year, month: month, day: day)) {
+                return date.formatted(Date.FormatStyle(date: .numeric, time: .omitted, locale: KitLocalization.locale,
+                                                       calendar: calendar, timeZone: calendar.timeZone))
+            }
             return String(format: "%02d.%02d.%04d", day, month, year)
         }
     }
@@ -22,9 +28,9 @@ public struct TravelPass: Codable, Sendable, Hashable, Identifiable {
 
         public var errorDescription: String? {
             switch self {
-            case .noBarcode: "Auf dem Bild wurde kein Ticket-Barcode gefunden."
-            case .unreadable: "Der Barcode konnte nicht gelesen werden. Unterstützt werden Tickets mit UIC-Barcode, z. B. aus dem DB Navigator."
-            case .noPass: "Der Barcode gehört zu keiner Zeitkarte."
+            case .noBarcode: String(kit: "Auf dem Bild wurde kein Ticket-Barcode gefunden.")
+            case .unreadable: String(kit: "Der Barcode konnte nicht gelesen werden. Unterstützt werden Tickets mit UIC-Barcode, z. B. aus dem DB Navigator.")
+            case .noPass: String(kit: "Der Barcode gehört zu keiner Zeitkarte.")
             }
         }
     }
@@ -49,7 +55,7 @@ public struct TravelPass: Codable, Sendable, Hashable, Identifiable {
         guard let document = content.document else { throw ImportError.noPass }
         let holder = content.travellers.first(where: \.isTicketHolder) ?? content.travellers.first
         id = UUID()
-        name = document.name ?? "Zeitkarte"
+        name = document.name ?? String(kit: "Zeitkarte")
         travelClass = document.travelClass
         issuer = content.issuerName
         self.holder = holder.map { Holder(firstName: $0.firstName, lastName: $0.lastName, birthDate: $0.birthDate) }
@@ -62,7 +68,7 @@ public struct TravelPass: Codable, Sendable, Hashable, Identifiable {
     }
 
     /// "2. Klasse"
-    public var classDescription: String? { travelClass.map { "\($0). Klasse" } }
+    public var classDescription: String? { travelClass.map(DBTicket.classText) }
 
     public func isExpired(at date: Date = .now) -> Bool {
         validUntil.map { $0 <= date } ?? false

@@ -23,9 +23,9 @@ public enum ConnectionIssue: Sendable, Hashable, Identifiable {
 
     public var title: String {
         switch self {
-        case .transferMissed(let at, _, _, _): "Umstieg in \(at) klappt nicht mehr"
-        case .transferAtRisk(let at, _, _, _): "Umstieg in \(at) wird knapp"
-        case .legCancelled(let line, _, _): "\(line) fällt aus"
+        case .transferMissed(let at, _, _, _): String(kit: "Umstieg in %@ klappt nicht mehr", at)
+        case .transferAtRisk(let at, _, _, _): String(kit: "Umstieg in %@ wird knapp", at)
+        case .legCancelled(let line, _, _): String(kit: "%@ fällt aus", Self.shown(line))
         }
     }
 
@@ -33,13 +33,18 @@ public enum ConnectionIssue: Sendable, Hashable, Identifiable {
         switch self {
         case .transferMissed(_, let arriving, let departing, let buffer):
             buffer < 0
-                ? "\(departing) fährt \(-buffer) Min. bevor \(arriving) ankommt."
-                : "Nur \(buffer) Min. zum Umsteigen von \(arriving) in \(departing)."
+                ? String(kit: "%@ fährt %lld Min. bevor %@ ankommt.", Self.shown(departing), -buffer, Self.shown(arriving))
+                : String(kit: "Nur %lld Min. zum Umsteigen von %@ in %@.", buffer, Self.shown(arriving), Self.shown(departing))
         case .transferAtRisk(_, let arriving, let departing, let buffer):
-            "\(buffer) Min. zum Umsteigen von \(arriving) in \(departing)."
+            String(kit: "%lld Min. zum Umsteigen von %@ in %@.", buffer, Self.shown(arriving), Self.shown(departing))
         case .legCancelled(_, let from, let to):
-            "Die Fahrt von \(from) nach \(to) findet nicht statt."
+            String(kit: "Die Fahrt von %@ nach %@ findet nicht statt.", from, to)
         }
+    }
+
+    /// A line name for display: "Zug" (no line known) is kept German in the issue, which is matched by it.
+    private static func shown(_ line: String) -> String {
+        line == "Zug" ? String(kit: "Zug") : line
     }
 }
 

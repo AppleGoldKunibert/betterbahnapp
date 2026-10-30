@@ -119,13 +119,13 @@ public enum OAuthError: Error, LocalizedError, Equatable {
 
     public var errorDescription: String? {
         switch self {
-        case .stateMismatch: "Anmeldung abgebrochen (ungültiger Status)."
-        case .missingCode: "Träwelling hat keinen Code zurückgegeben."
-        case .notLoggedIn: "Nicht bei Träwelling angemeldet."
-        case .sessionExpired: "Die Träwelling-Anmeldung ist abgelaufen. Melde dich in den Einstellungen ab und wieder an."
-        case .loginEnded: "Deine Träwelling-Anmeldung ist beendet. Melde dich in den Einstellungen wieder an."
-        case .serverUnavailable: "Träwelling geht gerade nicht, weil unser Server nicht antwortet. Versuch es gleich noch mal."
-        case .invalidRedirectURI: "Ungültige Träwelling-OAuth-Konfiguration: Die Weiterleitungs-URL muss eine gültige HTTPS-Adresse mit Host und Callback-Pfad sein."
+        case .stateMismatch: String(kit: "Anmeldung abgebrochen (ungültiger Status).")
+        case .missingCode: String(kit: "Träwelling hat keinen Code zurückgegeben.")
+        case .notLoggedIn: String(kit: "Nicht bei Träwelling angemeldet.")
+        case .sessionExpired: String(kit: "Die Träwelling-Anmeldung ist abgelaufen. Melde dich in den Einstellungen ab und wieder an.")
+        case .loginEnded: String(kit: "Deine Träwelling-Anmeldung ist beendet. Melde dich in den Einstellungen wieder an.")
+        case .serverUnavailable: String(kit: "Träwelling geht gerade nicht, weil unser Server nicht antwortet. Versuch es gleich noch mal.")
+        case .invalidRedirectURI: String(kit: "Ungültige Träwelling-OAuth-Konfiguration: Die Weiterleitungs-URL muss eine gültige HTTPS-Adresse mit Host und Callback-Pfad sein.")
         }
     }
 }

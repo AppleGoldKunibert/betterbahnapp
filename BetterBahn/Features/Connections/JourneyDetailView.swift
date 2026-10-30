@@ -7,7 +7,7 @@ struct JourneyDetailView: View {
     let finalDestination: Station
     /// Old plans are shown without actions.
     var readOnly = false
-    var title = "Reiseplan"
+    var title = String(localized: "Reiseplan")
     /// Options this journey was searched with, so a re-plan can pick them up.
     var search: ConnectionSearch?
 
@@ -118,7 +118,7 @@ struct JourneyDetailView: View {
                 let updated = replacement.journey
                 withAnimation {
                     if let entry = model.savedEntry(for: journey) {
-                        model.replaceSaved(id: entry.id, with: updated, reason: "Anderer Zug gewählt")
+                        model.replaceSaved(id: entry.id, with: updated, reason: String(localized: "Anderer Zug gewählt"))
                     }
                     journey = updated
                 }
@@ -366,11 +366,11 @@ struct JourneyDetailView: View {
     private var historySection: some View {
         if let versions = model.savedEntry(for: journey)?.previousVersions, !versions.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                SectionHeader(title: "Frühere Reisepläne", systemImage: "clock.arrow.circlepath")
+                SectionHeader(title: String(localized: "Frühere Reisepläne"), systemImage: "clock.arrow.circlepath")
                 ForEach(versions) { version in
                     NavigationLink(value: ConnectionsRoute.journey(JourneyRoute(
                         journey: version.journey, finalDestination: finalDestination, readOnly: true,
-                        title: "Früherer Reiseplan"))) {
+                        title: String(localized: "Früherer Reiseplan")))) {
                         VStack(alignment: .leading, spacing: 6) {
                             Label("Ersetzt \(version.replacedAt.formatted(date: .abbreviated, time: .shortened)) · \(version.reason)",
                                   systemImage: "arrow.uturn.backward")
@@ -405,7 +405,7 @@ struct JourneyDetailView: View {
                             Text(last.destination.displayName).font(.subheadline.weight(.semibold)).lineLimit(2)
                                 .multilineTextAlignment(.trailing)
                             if let forecast = weather.destination {
-                                WeatherLabel(forecast: forecast, context: "bei Ankunft", station: last.destination.displayName)
+                                WeatherLabel(forecast: forecast, context: String(localized: "bei Ankunft"), station: last.destination.displayName)
                                     .transition(.fold)
                             }
                         }
@@ -418,7 +418,8 @@ struct JourneyDetailView: View {
                     if let duration = journey.duration {
                         InfoChip(text: duration.durationString, systemImage: "clock.fill")
                     }
-                    InfoChip(text: journey.transfers == 0 ? "Direkt" : "\(journey.transfers) Umstieg\(journey.transfers == 1 ? "" : "e")",
+                    InfoChip(text: journey.transfers == 0 ? String(localized: "Direkt")
+                             : journey.transfers == 1 ? String(localized: "1 Umstieg") : String(localized: "\(journey.transfers) Umstiege"),
                              systemImage: "arrow.triangle.swap")
                     if model.ticketFilter.isValid(journey) {
                         let ticket = model.settings.ticketType
@@ -453,7 +454,7 @@ struct JourneyDetailView: View {
 
     private var shareTitle: String {
         guard let origin = journey.legs.first?.origin.displayName,
-              let destination = journey.legs.last?.destination.displayName else { return "Reiseplan" }
+              let destination = journey.legs.last?.destination.displayName else { return String(localized: "Reiseplan") }
         return "\(origin) → \(destination)"
     }
 
@@ -721,11 +722,11 @@ struct LegCard: View {
                                       color: color, size: 38, logo: leg.line?.transitLogo)
                     VStack(alignment: .leading, spacing: 2) {
                         // Coupled trains have a long name; their series tag goes below it rather than being cut off.
-                        TrainNameRow(name: leg.line?.displayName ?? "Zug") {
+                        TrainNameRow(name: leg.line?.displayName ?? String(localized: "Zug")) {
                             TrainSeriesTag(leg: leg)
                         }
                         if let direction = leg.directionDescription {
-                            Text("Richtung \(direction)").font(.caption).foregroundStyle(.secondary).fullTextPopup("Richtung \(direction)")
+                            Text("Richtung \(direction)").font(.caption).foregroundStyle(.secondary).fullTextPopup(String(localized: "Richtung \(direction)"))
                         }
                         TrainFormationLabel(leg: leg)
                     }
@@ -769,7 +770,7 @@ struct LegCard: View {
                                 withAnimation(.snappy) { showStops.toggle() }
                             } label: {
                                 HStack(spacing: 4) {
-                                    Text("\(intermediate.count) Zwischenhalt\(intermediate.count == 1 ? "" : "e")")
+                                    Text(intermediate.count == 1 ? "1 Zwischenhalt" : "\(intermediate.count) Zwischenhalte")
                                     Text("· \(leg.arrival.best.timeIntervalSince(leg.departure.best).durationString)")
                                     Image(systemName: "chevron.down")
                                         .rotationEffect(.degrees(showStops ? 180 : 0))
@@ -785,7 +786,7 @@ struct LegCard: View {
                                     HStack {
                                         Text(stop.station.displayName).font(.caption).expandsOnTap()
                                         if stop.isAdditional {
-                                            InfoChip(text: "Zusatzhalt", systemImage: "plus.circle.fill", tint: .brand)
+                                            InfoChip(text: String(localized: "Zusatzhalt"), systemImage: "plus.circle.fill", tint: .brand)
                                         }
                                         Spacer()
                                         if let time = stop.departure ?? stop.arrival {
@@ -847,7 +848,7 @@ struct LegCard: View {
                 }
 
                 if transferBroken {
-                    RemarkRow(text: "Wegen Verspätung klappt dieser Umstieg nicht mehr.")
+                    RemarkRow(text: String(localized: "Wegen Verspätung klappt dieser Umstieg nicht mehr."))
                 }
                 ForEach(leg.remarks, id: \.self) { RemarkRow(text: $0) }
 
@@ -895,13 +896,13 @@ struct LegCard: View {
                             LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)],
                                       spacing: 10) {
                                 if let onReplace {
-                                    ActionTileButton(title: "Anderer Zug", systemImage: "arrow.left.arrow.right", tint: .primary, action: onReplace)
+                                    ActionTileButton(title: String(localized: "Anderer Zug"), systemImage: "arrow.left.arrow.right", tint: .primary, action: onReplace)
                                 }
                                 if let onReplan {
-                                    ActionTileButton(title: "Ausstieg wechseln", systemImage: "arrow.down.right.circle.fill", tint: .brand, action: onReplan)
+                                    ActionTileButton(title: String(localized: "Ausstieg wechseln"), systemImage: "arrow.down.right.circle.fill", tint: .brand, action: onReplan)
                                 }
                                 if let onShowCheckin {
-                                    ActionTileButton(title: "Check-in ansehen", systemImage: "text.bubble.fill", tint: .brand, action: onShowCheckin)
+                                    ActionTileButton(title: String(localized: "Check-in ansehen"), systemImage: "text.bubble.fill", tint: .brand, action: onShowCheckin)
                                 } else if let onCheckin {
                                     ActionTileButton(title: "Träwelling", systemImage: "checkmark.seal.fill", tint: .brand, action: onCheckin)
                                 }
@@ -941,7 +942,7 @@ struct LegCard: View {
     /// "Fällt aus" or the departure delay, always on one line.
     @ViewBuilder private var status: some View {
         if leg.cancelled {
-            InfoChip(text: "Fällt aus", systemImage: "xmark.octagon.fill", tint: .heavyDelay).fixedSize()
+            InfoChip(text: String(localized: "Fällt aus"), systemImage: "xmark.octagon.fill", tint: .heavyDelay).fixedSize()
         } else {
             DelayPill(minutes: leg.departure.delayMinutes).fixedSize()
         }
@@ -957,7 +958,7 @@ struct LegCard: View {
                     .font(.headline)
                     .fullTextPopup(name, lines: 2)
                 if let weather {
-                    WeatherLabel(forecast: weather.forecast, context: weather.atDestination ? "bei Ankunft" : "beim Umstieg",
+                    WeatherLabel(forecast: weather.forecast, context: weather.atDestination ? String(localized: "bei Ankunft") : String(localized: "beim Umstieg"),
                                  station: name)
                         .transition(.fold)
                 }
@@ -1031,7 +1032,7 @@ struct AlternativeTrainsSheet: View {
                                     Text("\(leg.origin.displayName) → \(leg.destination.displayName)")
                                         .font(.subheadline.weight(.semibold))
                                         .lineLimit(2)
-                                    Text("Aktuell: \(leg.line?.name ?? "Zug") um \(departureText)")
+                                    Text("Aktuell: \(leg.line?.name ?? String(localized: "Zug")) um \(departureText)")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                     if let notBefore {
@@ -1059,11 +1060,11 @@ struct AlternativeTrainsSheet: View {
                     if isPlanning {
                         ProgressView("Plane mit diesem Zug …").frame(maxWidth: .infinity).padding(.vertical, 8)
                     } else if let pinnedName, !pinnedRoutes.isEmpty {
-                        SectionHeader(title: "Mit \(pinnedName)", systemImage: "pin.fill")
+                        SectionHeader(title: String(localized: "Mit \(pinnedName)"), systemImage: "pin.fill")
                             .padding(.top, 6)
                         ForEach(pinnedRoutes) { route in
                             optionButton(journey: route, legs: route.legs, id: "pinned|" + route.id,
-                                         note: route.transitLegs.count > 1 ? "Mit Umstieg" : "Direkt",
+                                         note: route.transitLegs.count > 1 ? String(localized: "Mit Umstieg") : String(localized: "Direkt"),
                                          symbolName: route.transitLegs.count > 1 ? "arrow.triangle.swap" : "arrow.right",
                                          next: nextLeg)
                         }
@@ -1071,7 +1072,7 @@ struct AlternativeTrainsSheet: View {
 
                     if !options.isEmpty {
                         SectionHeader(title: "Andere Züge", systemImage: "tram.fill",
-                                      trailing: notBefore == nil ? "30 Min. vorher bis 3 Std. nachher" : "3 Std. ab Ankunft")
+                                      trailing: notBefore == nil ? String(localized: "30 Min. vorher bis 3 Std. nachher") : String(localized: "3 Std. ab Ankunft"))
                             .padding(.top, 6)
                     }
 
@@ -1119,8 +1120,8 @@ struct AlternativeTrainsSheet: View {
             } message: { replacement in
                 if let missed = replacement.missedConnection {
                     Text("""
-                        \(missed.arriving.line?.name ?? "Der Zug") kommt um \(missed.arriving.arrival.best.timeString) in \
-                        \(missed.leg.origin.displayName) an, \(missed.leg.line?.name ?? "dein Anschluss") fährt dort \
+                        \(missed.arriving.line?.name ?? String(localized: "Der Zug")) kommt um \(missed.arriving.arrival.best.timeString) in \
+                        \(missed.leg.origin.displayName) an, \(missed.leg.line?.name ?? String(localized: "dein Anschluss")) fährt dort \
                         schon um \(missed.leg.departure.best.timeString). Andere Züge dafür anzeigen oder den Plan so lassen?
                         """)
                 }
@@ -1218,7 +1219,7 @@ struct AlternativeTrainsSheet: View {
             withAnimation(.snappy) {
                 pinnedName = result.resolvedNames[requirement.id] ?? requirement.trainName.uppercased()
                 pinnedRoutes = routes
-                error = routes.isEmpty ? TransitError.invalidInput("Mit diesem Zug gibt es keine passende Verbindung.") : nil
+                error = routes.isEmpty ? TransitError.invalidInput(String(localized: "Mit diesem Zug gibt es keine passende Verbindung.")) : nil
             }
         } catch is CancellationError {
         } catch {
@@ -1283,9 +1284,9 @@ struct AlternativeTrainsSheet: View {
         var isReroute: Bool { if case .reroute = self { true } else { false } }
         var note: String {
             switch self {
-            case .direct: "Direkt"
-            case .withTransfer: "Mit Umstieg"
-            case .reroute: "Andere Routenführung"
+            case .direct: String(localized: "Direkt")
+            case .withTransfer: String(localized: "Mit Umstieg")
+            case .reroute: String(localized: "Andere Routenführung")
             }
         }
         var symbolName: String {
@@ -1396,7 +1397,7 @@ struct MissedConnectionHint: View {
     let next: Leg
 
     var body: some View {
-        Label("Anschluss \(next.line?.name ?? "Zug") um \(next.departure.best.timeString) nicht erreichbar",
+        Label("Anschluss \(next.line?.name ?? String(localized: "Zug")) um \(next.departure.best.timeString) nicht erreichbar",
               systemImage: "exclamationmark.triangle.fill")
             .font(.caption.weight(.semibold))
             .foregroundStyle(Color.heavyDelay)
@@ -1511,7 +1512,7 @@ struct AlternativeJourneySheet: View {
     private func load() async {
         defer { isLoading = false }
         guard let restart, let destination = entry.journey.legs.last?.destination else {
-            error = TransitError.notFound("Problemstelle")
+            error = TransitError.notFound(String(localized: "Problemstelle"))
             return
         }
         do {

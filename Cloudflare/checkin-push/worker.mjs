@@ -16,7 +16,7 @@
 //
 // It also looks after the journeys of regular trips (#397, `/commutes`, see commute.mjs).
 
-import { APNs } from "../shared/apns.mjs";
+import { APNs, localizedAlert, text } from "../shared/apns.mjs";
 import { TOKEN_HEADER, unauthorized, verifyToken } from "../shared/appattest.mjs";
 import { handleCommute, processDueCommutes } from "./commute.mjs";
 import {
@@ -483,7 +483,9 @@ export function notification(status) {
     const line = typeof checkin.lineName === "string" ? checkin.lineName.trim() : "";
     return {
         aps: {
-            alert: { title: `${status.user?.displayName ?? "Jemand"} ist eingecheckt`, body: line ? `${line}: ${route}` : route },
+            alert: localizedAlert(
+                status.user?.displayName ? text("%@ ist eingecheckt", status.user.displayName) : text("Jemand ist eingecheckt"),
+                line ? `${line}: ${route}` : route),
             sound: "default",
             "thread-id": "followed-checkins",
         },
@@ -496,11 +498,13 @@ export function notification(status) {
 /// that one replaces a followed check-in's push about the same check-in (same collapse ID).
 export function ownCheckinNotification(item, kinds) {
     const data = item?.data ?? {};
-    const text = (value) => typeof value === "string" ? value.trim() : "";
-    const person = (user) => text(user?.name) || (text(user?.username) ? `@${text(user.username)}` : "Jemand");
+    const trimmed = (value) => typeof value === "string" ? value.trim() : "";
+    const person = (user) => trimmed(user?.name) || (trimmed(user?.username) ? `@${trimmed(user.username)}` : null);
+    // "Anna gefällt dein Check-in", "Jemand gefällt dein Check-in" without a name.
+    const about = (user, key) => person(user) ? text(`%@ ${key}`, person(user)) : text(`Jemand ${key}`);
     const ride = (line, origin, destination) => {
-        const route = `${text(origin) || "?"} → ${text(destination) || "?"}`;
-        return text(line) ? `${text(line)}: ${route}` : route;
+        const route = `${trimmed(origin) || "?"} → ${trimmed(destination) || "?"}`;
+        return trimmed(line) ? `${trimmed(line)}: ${route}` : route;
     };
     const statusID = data.status?.id;
     if (!Number.isSafeInteger(statusID)) return null;
@@ -509,7 +513,7 @@ export function ownCheckinNotification(item, kinds) {
         return {
             payload: {
                 aps: {
-                    alert: { title: `${person(data.liker)} gefällt dein Check-in`, body: ride(trip.lineName, trip.origin?.name, trip.destination?.name) },
+                    alert: localizedAlert(about(data.liker, "gefällt dein Check-in"), ride(trip.lineName, trip.origin?.name, trip.destination?.name)),
                     sound: "default",
                     "thread-id": "own-checkins",
                 },
@@ -523,7 +527,7 @@ export function ownCheckinNotification(item, kinds) {
         return {
             payload: {
                 aps: {
-                    alert: { title: `${person(data.user)} fährt mit dir`, body: ride(checkin.linename, checkin.origin, checkin.destination) },
+                    alert: localizedAlert(about(data.user, "fährt mit dir"), ride(checkin.linename, checkin.origin, checkin.destination)),
                     sound: "default",
                     "thread-id": "own-checkins",
                 },
