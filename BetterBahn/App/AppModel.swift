@@ -682,7 +682,9 @@ final class AppModel {
     /// can be picked up again when the route is re-planned from an earlier exit.
     func save(_ journey: Journey, search: ConnectionSearch? = nil) {
         guard !isSaved(journey) else { return }
-        if settings.connectionWarnings || settings.exitReminders { Task { await ConnectionNotifier.requestAuthorization() } }
+        if settings.connectionWarnings || settings.exitReminders || settings.stepFree {
+            Task { await ConnectionNotifier.requestAuthorization() }
+        }
         // One assignment, so the list is persisted and synced once rather than twice.
         var updated = savedJourneys
         updated.append(SavedJourney(journey: journey, search: search))
@@ -1307,6 +1309,15 @@ final class AppModel {
                 .union(newPlatforms.map(\.id)).union(newDispositions.compactMap(\.notificationID))
                 .union(newDelays.map(\.notificationID)))
         }
+        // A lift the journey needs that is out of order (#486), once per lift and place.
+        if settings.stepFree {
+            let known = Set(updated.notifiedIssues ?? [])
+            let newLifts = await liftAlerts(for: refreshed).filter { !known.contains($0.id) }
+            for alert in newLifts {
+                await ConnectionNotifier.notify(alert, journey: refreshed)
+            }
+            if !newLifts.isEmpty { updated.notifiedIssues = Array(known.union(newLifts.map(\.id))) }
+        }
         // The notifications above await too, so check again before storing.
         guard let storeIndex = stillSavedIndex(of: entry) else { return }
         if updated != savedJourneys[storeIndex] { savedJourneys[storeIndex] = updated }
@@ -1704,6 +1715,15 @@ final class AppSettings {
             uploadToCloud()
         }
     }
+    /// "Stufenfrei reisen" (#486): search results flag journeys that need a lift out of order, saved journeys
+    /// notify when one fails and exit reminders name it. Off by default; the warnings in a journey and on the
+    /// departure board show anyway.
+    var stepFree: Bool {
+        didSet {
+            UserDefaults.standard.set(stepFree, forKey: "stepFree")
+            uploadToCloud()
+        }
+    }
     var exitReminderLead: ExitReminderLead {
         didSet {
             UserDefaults.standard.set(exitReminderLead.rawValue, forKey: "exitReminderLead")
@@ -1896,6 +1916,7 @@ final class AppSettings {
         traewellingImportNextPage = defaults.object(forKey: "traewellingImportNextPage") as? Int
         connectionWarnings = defaults.object(forKey: "connectionWarnings") as? Bool ?? true
         exitReminders = defaults.object(forKey: "exitReminders") as? Bool ?? true
+        stepFree = defaults.bool(forKey: "stepFree")
         exitReminderLead = ExitReminderLead(rawValue: defaults.integer(forKey: "exitReminderLead")) ?? .five
         calendarAccess = defaults.string(forKey: "calendarAccess").flatMap(CalendarAccessMode.init)
         calendarID = defaults.string(forKey: "calendarID")
@@ -1936,6 +1957,7 @@ final class AppSettings {
         var searchWithBike: Bool?
         var bikeOption: BikeOption?
         var travelClass: TravelClass?
+        var stepFree: Bool?
     }
 
     /// What iCloud stores: the settings and when they were last changed.
@@ -1952,7 +1974,8 @@ final class AppSettings {
         expertTrainChoice: false, expertIgnoreBoardingRules: false, expertRil100: false,
         trainSearchKinds: TrainSearchKind.defaults.sorted(by: { $0.rawValue < $1.rawValue }),
         trainSearchCountries: TrainSearchCountry.defaults.sorted(), exitReminders: true, exitReminderLead: .five,
-        liveActivityServerUpdates: true, showWeather: true, searchWithBike: false, bikeOption: .hidden, travelClass: .second)
+        liveActivityServerUpdates: true, showWeather: true, searchWithBike: false, bikeOption: .hidden, travelClass: .second,
+        stepFree: false)
 
     @ObservationIgnored private var isApplyingCloudValue = false
 
@@ -1968,7 +1991,7 @@ final class AppSettings {
                    trainSearchCountries: trainSearchCountries.sorted(), exitReminders: exitReminders,
                    exitReminderLead: exitReminderLead, liveActivityServerUpdates: liveActivityServerUpdates,
                    showWeather: showWeather, searchWithBike: searchWithBike, bikeOption: bikeOption,
-                   travelClass: travelClass)
+                   travelClass: travelClass, stepFree: stepFree)
     }
 
     /// When the settings were last changed on this device or taken over from iCloud. Before
@@ -2024,6 +2047,7 @@ final class AppSettings {
         searchWithBike = value.searchWithBike ?? searchWithBike
         bikeOption = value.bikeOption ?? bikeOption
         travelClass = value.travelClass ?? travelClass
+        stepFree = value.stepFree ?? stepFree
     }
 }
 
