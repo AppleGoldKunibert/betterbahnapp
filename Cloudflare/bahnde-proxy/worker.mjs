@@ -1,5 +1,6 @@
-// Forwards DB's Timetables API (`/timetables/v1/…`) with the API key kept here as a secret, and hands out
-// the App Attest tokens (`/auth/…`) every request to our servers needs (see ../shared/appattest.mjs).
+// Forwards DB's Timetables API (`/timetables/v1/…`) and the lifts out of order from DB's FaSta API
+// (`/fasta/v2/facilities`, #486) with the API key kept here as a secret, and hands out the App Attest
+// tokens (`/auth/…`) every request to our servers needs (see ../shared/appattest.mjs).
 // bahn.de itself refuses Workers since October 2026; the app asks it through Server/bahnde-proxy.
 
 import { handleAuth, isAuthorized, unauthorized } from "../shared/appattest.mjs";
@@ -20,6 +21,12 @@ const TIMETABLES_ROUTES = [
     { pattern: /^station\/\d{6,8}$/, ttl: 86400 },
 ];
 
+// DB FaSta (Facility Status): every station lift in Germany that is out of order, one list for all users, so the
+// app never says which station it looks at. Lifts are only polled every few minutes upstream anyway.
+const FASTA_UPSTREAM = "https://apis.deutschebahn.com/db-api-marketplace/apis/fasta/v2/";
+const FASTA_PATH = "facilities?type=ELEVATOR&state=INACTIVE";
+const FASTA_TTL = 300;
+
 /// The allowed route for `pathname` (`path` relative to its upstream, cache TTL in seconds), or null.
 export function matchRoute(pathname) {
     if (pathname.startsWith("/timetables/v1/")) {
@@ -27,10 +34,11 @@ export function matchRoute(pathname) {
         const ttl = TIMETABLES_ROUTES.find(route => route.pattern.test(path))?.ttl;
         return ttl === undefined ? null : { path, ttl };
     }
+    if (pathname === "/fasta/v2/facilities") return { path: FASTA_PATH, ttl: FASTA_TTL, fasta: true };
     return null;
 }
 
-async function timetablesAnswer(url, headers, fetchUpstream) {
+async function upstreamAnswer(url, headers, fetchUpstream) {
     try {
         const response = await fetchUpstream(url, { headers, signal: AbortSignal.timeout(TIMETABLES_TIMEOUT) });
         return { response, body: await response.arrayBuffer() };
@@ -43,12 +51,12 @@ async function timetablesAnswer(url, headers, fetchUpstream) {
 /// (error, timeout, 5xx, 429 …). Returns `{ upstream, body }` where `upstream` is the successful response or the
 /// error to pass on (the Marketplace's if both failed), or null if nothing was reachable.
 export async function fetchTimetables(path, env, fetchUpstream) {
-    const iris = await timetablesAnswer(IRIS_UPSTREAM + path, { Accept: "application/xml" }, fetchUpstream);
+    const iris = await upstreamAnswer(IRIS_UPSTREAM + path, { Accept: "application/xml" }, fetchUpstream);
     if (iris.response && (iris.response.ok || NO_DATA_STATUSES.has(iris.response.status))) {
         return { upstream: iris.response, body: iris.body };
     }
     if (env.DB_CLIENT_ID && env.DB_API_KEY) {
-        const marketplace = await timetablesAnswer(TIMETABLES_UPSTREAM + path,
+        const marketplace = await upstreamAnswer(TIMETABLES_UPSTREAM + path,
             { "DB-Client-Id": env.DB_CLIENT_ID, "DB-Api-Key": env.DB_API_KEY, Accept: "application/xml" }, fetchUpstream);
         if (marketplace.response) return { upstream: marketplace.response, body: marketplace.body };
     }
@@ -79,9 +87,10 @@ export async function handleRequest(request, env = {}, deps = {}) {
 
     if (request.method !== "GET") return json(405, { error: "method_not_allowed" }, { Allow: "GET" });
 
-    // Only the genuine app (App Attest token), always: Timetables spends our API key.
+    // Only the genuine app (App Attest token), always: Timetables and FaSta spend our API key.
     if (!(await isAuthorized(request, env, { required: true }))) return unauthorized();
 
+    if (route.fasta) return fastaResponse(env, fetchUpstream, cache, deps);
     return timetablesResponse(path, ttl, env, fetchUpstream, cache, deps);
 }
 
@@ -102,6 +111,19 @@ async function timetablesResponse(path, ttl, env, fetchUpstream, cache, deps) {
     const result = await fetchTimetables(path, env, fetchUpstream);
     if (!result) return json(502, { error: "upstream_unreachable" });
     return await answer(result.upstream, result.body, ttl, cacheKey, cache, deps);
+}
+
+async function fastaResponse(env, fetchUpstream, cache, deps) {
+    if (!env.DB_CLIENT_ID || !env.DB_API_KEY) return json(503, { error: "not_configured" });
+    const url = FASTA_UPSTREAM + FASTA_PATH;
+    const cacheKey = new Request(url);
+    const cached = await cachedAnswer(cache, cacheKey);
+    if (cached) return cached;
+
+    const headers = { "DB-Client-Id": env.DB_CLIENT_ID, "DB-Api-Key": env.DB_API_KEY, Accept: "application/json" };
+    const result = await upstreamAnswer(url, headers, fetchUpstream);
+    if (!result.response) return json(502, { error: "upstream_unreachable" });
+    return await answer(result.response, result.body, FASTA_TTL, cacheKey, cache, deps);
 }
 
 // A successful upstream answer is cached for `ttl`; errors (including 429) pass through unchanged and uncached.
