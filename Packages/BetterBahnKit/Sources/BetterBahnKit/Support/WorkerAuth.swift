@@ -40,9 +40,12 @@ public actor WorkerAuth {
     public static let shared = WorkerAuth()
     public static let baseURL = URL(string: "https://betterbahn2.betterbahn.workers.dev/auth")!
     public static let header = "X-BetterBahn-Token"
-    /// After a failed attempt (no network, Apple's service down) the next one waits this long, so
+    /// After a failed attempt (Apple's service down, a refused key) the next one waits this long, so
     /// requests don't each start a new attestation.
     static let retryDelay: TimeInterval = 5 * 60
+    /// After the network failed (a dead spot on the train) the next attempt waits only this long: our
+    /// servers refuse requests without a token, so every one would fail until then (#472).
+    static let offlineRetryDelay: TimeInterval = 30
     static let keyIDDefaultsKey = "workerAuth.keyID"
     static let keyTokenDefaultsKey = "workerAuth.keyToken"
 
@@ -52,7 +55,10 @@ public actor WorkerAuth {
     private let baseURL: URL
     private var token: (value: String, expires: Date)?
     private var pending: Task<String?, Never>?
-    private var failedAt: Date?
+    /// When the next attempt may start after a failed one; nil after a success.
+    private(set) var nextAttempt: Date?
+    /// Whether the last failed attempt failed for lack of network (`isOffline`).
+    private var failedOffline = false
 
     /// `defaultsSuite` is where the attested key is remembered (the standard defaults when nil).
     public init(attest: any AppAttesting = DeviceAppAttest(), http: HTTPClient = HTTPClient(timeout: 15),
@@ -70,12 +76,12 @@ public actor WorkerAuth {
     public func accessToken() async -> String? {
         if let token, token.expires > Date.now.addingTimeInterval(60) { return token.value }
         if let pending { return await pending.value }
-        if let failedAt, Date.now.timeIntervalSince(failedAt) < Self.retryDelay { return nil }
+        if let nextAttempt, nextAttempt > .now { return nil }
         let task = Task { await fetchToken() }
         pending = task
         let value = await task.value
         pending = nil
-        failedAt = value == nil ? .now : nil
+        nextAttempt = value == nil ? Date.now.addingTimeInterval(failedOffline ? Self.offlineRetryDelay : Self.retryDelay) : nil
         return value
     }
 
@@ -85,6 +91,7 @@ public actor WorkerAuth {
     }
 
     private func fetchToken() async -> String? {
+        failedOffline = false
         guard attest.isSupported else { return nil }
         for attempt in 0..<2 {
             do {
@@ -97,6 +104,7 @@ public actor WorkerAuth {
                 token = (response.token, Date.now.addingTimeInterval(response.expiresIn))
                 return response.token
             } catch {
+                failedOffline = Self.isOffline(error)
                 // The key is unknown or refused (reinstalled app, restored backup, new server
                 // secret): start over with a new key, once.
                 guard attempt == 0, Self.needsNewKey(error) else { return nil }
@@ -148,6 +156,13 @@ public actor WorkerAuth {
         if let error = error as? DCError { return error.code == .invalidKey || error.code == .invalidInput }
         if case TransitError.http(let status, _) = error { return status == 401 || status == 403 }
         return false
+    }
+
+    /// No network or no answer: likely gone a moment later, unlike a refused key or Apple's service failing.
+    static func isOffline(_ error: any Error) -> Bool {
+        guard let error = error as? URLError else { return false }
+        return [.notConnectedToInternet, .networkConnectionLost, .timedOut, .cannotConnectToHost, .cannotFindHost,
+                .dnsLookupFailed, .dataNotAllowed, .internationalRoamingOff, .secureConnectionFailed].contains(error.code)
     }
 
     struct ChallengeResponse: Decodable { var challenge: String }
