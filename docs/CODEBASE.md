@@ -47,6 +47,8 @@ in `project.pbxproj`: new files join their target automatically.
   portrait unless Kit `ScreenRotation.turnsFreely` (screen ratio below 1.6, the Duo folded and unfolded). There
   iOS itself shows the tabs as a vertical bar at the screen's side, but only in builds from Xcode 27.2 or later
   (iOS 27.2 SDK); the Duo simulator needs the iOS 27.2 runtime.
+  In regular width "Verbindungen suchen" sits in a `safeAreaBar` at the bottom of the search column (hard scroll
+  edge), since next to a journey the column is often shorter than the form (#487).
   `Shared/SplitNavigation.swift`: `SplitNavigationStack` (Verbindungen, Abfahrten) is a
   `NavigationSplitView` in regular width with the tab's first page in its own stack on the left (no sidebar toggle);
   its links are `RouteLink`s, which there set the right column's path (`openSplitRoute`) and elsewhere are
