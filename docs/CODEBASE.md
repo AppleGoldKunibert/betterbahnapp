@@ -44,7 +44,9 @@ in `project.pbxproj`: new files join their target automatically.
   `.sidebarAdaptable` on the iPad, `.tabBarOnly` on the Mac (switching back from the sidebar left the tab bar over
   the sidebar's old place there). The iPhone's Info.plist allows every orientation, else the iPhone Duo shows the
   app in a narrow compatibility window (#487); `AppDelegate`'s `supportedInterfaceOrientationsFor` keeps phones in
-  portrait unless Kit `ScreenRotation.turnsFreely` (screen ratio below 1.6, the Duo folded and unfolded).
+  portrait unless Kit `ScreenRotation.turnsFreely` (screen ratio below 1.6, the Duo folded and unfolded). There
+  iOS itself shows the tabs as a vertical bar at the screen's side, but only in builds from Xcode 27.2 or later
+  (iOS 27.2 SDK); the Duo simulator needs the iOS 27.2 runtime.
   `Shared/SplitNavigation.swift`: `SplitNavigationStack` (Verbindungen, Abfahrten) is a
   `NavigationSplitView` in regular width with the tab's first page in its own stack on the left (no sidebar toggle);
   its links are `RouteLink`s, which there set the right column's path (`openSplitRoute`) and elsewhere are
