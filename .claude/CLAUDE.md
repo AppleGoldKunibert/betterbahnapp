@@ -16,7 +16,7 @@ iOS app (SwiftUI, iOS 26, Swift 6) for German train travel. UI text is German, c
 | `Cloudflare/` | Workers: `betterbahn`, `bahnde-proxy` (`betterbahn2`), `pass-signer`, `stats`, `checkin-push`, `live-activity`, `shared`. |
 | `Server/` | `bahnde-proxy`: Docker server asking bahn.de with a browser's TLS fingerprint (the app asks it before `betterbahn2`). |
 | `scripts/` | Offline data rebuilds; `searchsim/` runs Kit tests on Linux. |
-| `.github/workflows/` | `pr-build.yml`, `pr-secrets.yml`, `bump-version.yml` (version bump per merged feature/bug), `monthly-data-update.yml` (monthly PR into `prod` with rebuilt station data), `review-bot.yml` (`@<app> approve` / `@<app> request changes` in a PR comment submits that review as a GitHub App). |
+| `.github/workflows/` | `pr-build.yml`, `pr-secrets.yml`, `bump-version.yml` (version bump per feature/bug on the PR branch before the merge), `monthly-data-update.yml` (monthly PR into `prod` with rebuilt station data), `review-bot.yml` (`@<app> approve` / `@<app> request changes` in a PR comment submits that review as a GitHub App). |
 
 - Details per feature and type: `docs/CODEBASE.md`. Don't read it whole: grep it for the feature or type name
   and read that section, then open only the files you change. Read `docs/app-review-notes.md` (App Store,
@@ -55,10 +55,11 @@ iOS app (SwiftUI, iOS 26, Swift 6) for German train travel. UI text is German, c
   - Komplett neues, unabhängiges Feature: per AskUserQuestion fragen – neuer Branch von `indevelopment`
     oder auf dem aktuellen Branch weiter.
 - Issue ohne Label: `bug` oder `enhancement` vergeben, wenn eindeutig, sonst ohne Label lassen.
-- Jeder PR bekommt das Label `bug` oder `enhancement` (bei beidem beide). `bump-version.yml` erhöht danach beim Merge
-  die Version: +0.1 je Feature, +0.0.1 je Bugfix. Gezählt werden die gefixten Issues („Fixed #15"); für jedes Feature
-  bzw. jeden Bugfix im PR ohne eigenes Issue eine eigene Zeile `Feature without Issue: <kurz was>` bzw.
-  `Bug without Issue: <kurz was>` in die PR-Beschreibung schreiben.
+- Jeder PR bekommt das Label `bug` oder `enhancement` (bei beidem beide). `bump-version.yml` erhöht danach schon vor
+  dem Merge auf dem PR-Branch die Version: +0.1 je Feature, +0.0.1 je Bugfix. Gezählt werden die gefixten Issues
+  („Fixed #15"); für jedes Feature bzw. jeden Bugfix im PR ohne eigenes Issue eine eigene Zeile
+  `Feature without Issue: <kurz was>` bzw. `Bug without Issue: <kurz was>` in die PR-Beschreibung schreiben. Nach
+  einem Bump-Commit auf dem eigenen Branch vor dem nächsten Push pullen.
 - Wer mit einem Issue anfängt, setzt das Label `in progress` (der Workflow „Label done issues" tauscht es beim
   Merge gegen `ready`). Mehrere Issues auf einmal startet `/issues-starten 420 421` (oder ohne Nummern: alle
   neuen), je eine Session pro Issue.
