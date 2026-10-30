@@ -52,11 +52,14 @@ struct JourneyDetailView: View {
         ScrollView {
             if !liveDataLoaded, loadsLiveDataOnOpen {
                 ProgressView("Lade Echtzeitdaten …")
-                    .containerRelativeFrame([.horizontal, .vertical])
+                    .frame(minWidth: 0, maxWidth: .infinity)
+                    .containerRelativeFrame(.vertical)
             } else {
-                // Exactly as wide as the screen: anything too wide would otherwise let the whole
-                // page be dragged sideways.
-                plan.containerRelativeFrame(.horizontal)
+                // Exactly as wide as the scroll view offers, however wide a row inside gets: anything wider
+                // would let the whole page be dragged sideways (#436). Not `containerRelativeFrame`, which
+                // next to another column (iPad, iPhone Duo) also counts the part under it and cuts the cards
+                // off (#465, #487).
+                plan.frame(minWidth: 0, maxWidth: .infinity)
             }
         }
         .closesMenusOnScroll()

@@ -42,7 +42,21 @@ in `project.pbxproj`: new files join their target automatically.
   refresh start/stop.
 - iPad and Mac ("Designed for iPad", #425): `TARGETED_DEVICE_FAMILY = 1,2`, all orientations on the iPad, tabs
   `.sidebarAdaptable` on the iPad, `.tabBarOnly` on the Mac (switching back from the sidebar left the tab bar over
-  the sidebar's old place there). `Shared/SplitNavigation.swift`: `SplitNavigationStack` (Verbindungen, Abfahrten) is a
+  the sidebar's old place there). The iPhone's Info.plist allows every orientation, else the iPhone Duo shows the
+  app in a narrow compatibility window (#487); `AppDelegate`'s `supportedInterfaceOrientationsFor` keeps phones in
+  portrait unless Kit `ScreenRotation.turnsFreely` (screen ratio below 1.6, the Duo folded and unfolded). There
+  iOS itself shows the tabs as a vertical bar at the screen's side, but only in builds from Xcode 27.2 or later
+  (iOS 27.2 SDK); the Duo simulator needs the iOS 27.2 runtime.
+  Unfolded, the Duo gets the iPad's columns (#464): iOS calls an upright phone compact, so
+  `phoneColumnsWhenUnfolded` (`Shared/SplitNavigation.swift`, on the `WindowGroup`'s root) measures the window and,
+  while Kit `PhoneColumns.fit` (short side at least 600 pt; folded about 466), sets the window scene's
+  `traitOverrides.horizontalSizeClass` to `.regular`, removed again when folded.
+  In regular width "Verbindungen suchen" sits in a `safeAreaBar` at the bottom of the search column (hard scroll
+  edge), since next to a journey the column is often shorter than the form (#487).
+  `JourneyDetailView`'s page is `frame(minWidth: 0, maxWidth: .infinity)`: exactly as wide as the scroll view offers,
+  so nothing drags it sideways (#436), and not `containerRelativeFrame`, which next to another column also counts
+  the part under it and cut the cards off (#465).
+  `Shared/SplitNavigation.swift`: `SplitNavigationStack` (Verbindungen, Abfahrten) is a
   `NavigationSplitView` in regular width with the tab's first page in its own stack on the left (no sidebar toggle);
   its links are `RouteLink`s, which there set the right column's path (`openSplitRoute`) and elsewhere are
   `NavigationLink(value:)`. `SplitNavigationView` (settings) is a `NavigationSplitView`

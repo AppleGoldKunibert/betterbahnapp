@@ -129,9 +129,8 @@ struct ConnectionsView: View {
                 VStack(spacing: 20) {
                     routeCard
                     optionsCard
-                    HStack(spacing: 10) {
-                        searchButton
-                        AddTicketButton()
+                    if sizeClass != .regular {
+                        searchButtons
                     }
                     if let year = reviewBannerYear {
                         YearReviewBanner(year: year)
@@ -155,6 +154,17 @@ struct ConnectionsView: View {
                 .padding(.horizontal)
                 .padding(.bottom, 32)
             }
+            // Next to a journey the column is often shorter than the search form (iPhone Duo unfolded, #487):
+            // the search stays at its bottom.
+            .safeAreaBar(edge: .bottom) {
+                if sizeClass == .regular {
+                    searchButtons
+                        .padding(.horizontal)
+                        .padding(.bottom, 8)
+                }
+            }
+            // The disabled button is see-through: hide the cards scrolling under it.
+            .scrollEdgeEffectStyle(sizeClass == .regular ? .hard : nil, for: .bottom)
             .onChange(of: productsTapCount) {
                 // Bring the row into view first so the popover has room instead of being squeezed.
                 withAnimation(.snappy) { proxy.scrollTo(Self.productsRowID, anchor: .center) }
@@ -461,6 +471,13 @@ struct ConnectionsView: View {
     }
 
     // MARK: Search
+
+    private var searchButtons: some View {
+        HStack(spacing: 10) {
+            searchButton
+            AddTicketButton()
+        }
+    }
 
     private var searchButton: some View {
         Button(action: search) {
