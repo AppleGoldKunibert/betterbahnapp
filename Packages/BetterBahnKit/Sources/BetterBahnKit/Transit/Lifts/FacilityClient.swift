@@ -71,12 +71,13 @@ public struct FacilityClient: Sendable {
     private func fetch() async throws -> [BrokenLift] {
         var request = URLRequest(url: Self.url, timeoutInterval: http.timeout)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        return Self.parse(try await http.sendRaw(request, auth: auth))
+        return try Self.parse(try await http.sendRaw(request, auth: auth))
     }
 
-    /// FaSta's facilities; only lifts out of order, whatever else the answer holds.
-    static func parse(_ data: Data) -> [BrokenLift] {
-        guard let facilities = try? JSONDecoder().decode([Facility].self, from: data) else { return [] }
+    /// FaSta's facilities; only lifts out of order, whatever else the answer holds. Throws when the answer
+    /// isn't FaSta's list, so a changed format reads as "unknown" (and isn't cached), not as "all lifts work".
+    static func parse(_ data: Data) throws -> [BrokenLift] {
+        let facilities = try JSONDecoder().decode([Facility].self, from: data)
         return facilities.compactMap { facility in
             guard facility.type == "ELEVATOR", facility.state == "INACTIVE", let id = facility.equipmentnumber else { return nil }
             // FaSta's X is the longitude; 0/0 or nothing means DB doesn't know where it is.

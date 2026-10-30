@@ -1,5 +1,6 @@
 // Forwards DB's Timetables API (`/timetables/v1/…`) and the lifts out of order from DB's FaSta API
-// (`/fasta/v2/facilities`, #486) with the API key kept here as a secret, and hands out the App Attest tokens (`/auth/…`) every request to our servers needs (see ../shared/appattest.mjs).
+// (`/fasta/v2/facilities`, #486) with the API key kept here as a secret, and hands out the App Attest
+// tokens (`/auth/…`) every request to our servers needs (see ../shared/appattest.mjs).
 // bahn.de itself refuses Workers since October 2026; the app asks it through Server/bahnde-proxy.
 
 import { handleAuth, isAuthorized, unauthorized } from "../shared/appattest.mjs";

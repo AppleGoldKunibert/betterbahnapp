@@ -49,7 +49,7 @@ import Testing
         ], source: .bahnDe)
     }
 
-    @Test func parsesOnlyLiftsOutOfOrderWithFaStasCoordinates() {
+    @Test func parsesOnlyLiftsOutOfOrderWithFaStasCoordinates() throws {
         let json = """
         [{"equipmentnumber": 10, "type": "ELEVATOR", "description": "zu Gleis 4/5", "geocoordX": 9.684, "geocoordY": 50.5549,
           "state": "INACTIVE", "stateExplanation": "not available", "stationnumber": 1866},
@@ -58,12 +58,12 @@ import Testing
          {"equipmentnumber": 13, "type": "ELEVATOR", "description": "zu Gleis 3", "state": "ACTIVE"},
          {"type": "ELEVATOR", "state": "INACTIVE"}]
         """
-        let lifts = FacilityClient.parse(Data(json.utf8))
+        let lifts = try FacilityClient.parse(Data(json.utf8))
         #expect(lifts.map(\.id) == [10, 11])
         #expect(lifts[0].coordinate == Coordinate(latitude: 50.5549, longitude: 9.684))
         #expect(lifts[0].reasonText == nil)
         #expect(lifts[1].coordinate == nil)
-        #expect(FacilityClient.parse(Data("{\"error\": 1}".utf8)).isEmpty)
+        #expect(throws: (any Error).self) { try FacilityClient.parse(Data("{\"error\": 1}".utf8)) }
     }
 
     @Test func readsTracksFromDBsDescription() {
