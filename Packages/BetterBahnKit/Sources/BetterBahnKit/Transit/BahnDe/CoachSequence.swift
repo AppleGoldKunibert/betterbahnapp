@@ -137,8 +137,9 @@ extension CoachSequence {
     public func asSeenFromPlatform(side platformSide: ExitSide?) -> CoachSequence {
         guard let platformSide, let towardsEnd = travelsTowardsPlatformEnd, source == .bahnDe,
               towardsEnd != (platformSide == .right) else { return self }
-        let ends = coaches.compactMap { [$0.start, $0.end].compactMap(\.self).max() } + sectors.map(\.end)
-        guard let length = platformLength ?? ends.max() else { return self }
+        // A train standing past the platform's end still turns round onto positions of its own.
+        let ends = coaches.compactMap { [$0.start, $0.end].compactMap(\.self).max() } + sectors.map(\.end) + [platformLength].compactMap(\.self)
+        guard let length = ends.max() else { return self }
         var turned = self
         turned.travelsTowardsPlatformEnd = !towardsEnd
         turned.coaches = coaches.map { coach in

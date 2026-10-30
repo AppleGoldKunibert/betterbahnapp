@@ -56,6 +56,10 @@ import Testing
         var plan = sequence
         plan.source = .vagonweb(validFrom: nil, validUntil: nil)
         #expect(plan.asSeenFromPlatform(side: .right) == plan)
+        // A train standing past the platform's end (400 m) keeps every position at 0 or more.
+        let long = train(numbers(21...36), from: 10, towardsEnd: false).asSeenFromPlatform(side: .right)
+        #expect(long.coaches.allSatisfy { ($0.start ?? -1) >= 0 })
+        #expect(long.coaches.last?.start == 0)
     }
 
     // MARK: Transfer at the same platform
