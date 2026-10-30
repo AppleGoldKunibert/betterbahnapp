@@ -54,6 +54,15 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         return true
     }
 
+    /// The Info.plist allows every orientation on the iPhone, else iOS shows the app on the iPhone Duo in a narrow
+    /// window (#487). Normal iPhones stay upright here.
+    func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
+        guard UIDevice.current.userInterfaceIdiom == .phone else { return .all }
+        let scene = window?.windowScene ?? application.connectedScenes.first as? UIWindowScene
+        guard let size = scene?.screen.nativeBounds.size else { return .portrait }
+        return ScreenRotation.turnsFreely(width: size.width, height: size.height) ? .all : .portrait
+    }
+
     /// The APNs device token for the notifications about followed check-ins (#266).
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         model?.didRegisterForPush(deviceToken: FollowedCheckinPush.hex(deviceToken))

@@ -42,7 +42,10 @@ in `project.pbxproj`: new files join their target automatically.
   refresh start/stop.
 - iPad and Mac ("Designed for iPad", #425): `TARGETED_DEVICE_FAMILY = 1,2`, all orientations on the iPad, tabs
   `.sidebarAdaptable` on the iPad, `.tabBarOnly` on the Mac (switching back from the sidebar left the tab bar over
-  the sidebar's old place there). `Shared/SplitNavigation.swift`: `SplitNavigationStack` (Verbindungen, Abfahrten) is a
+  the sidebar's old place there). The iPhone's Info.plist allows every orientation, else the iPhone Duo shows the
+  app in a narrow compatibility window (#487); `AppDelegate`'s `supportedInterfaceOrientationsFor` keeps phones in
+  portrait unless Kit `ScreenRotation.turnsFreely` (screen ratio below 1.6, the Duo folded and unfolded).
+  `Shared/SplitNavigation.swift`: `SplitNavigationStack` (Verbindungen, Abfahrten) is a
   `NavigationSplitView` in regular width with the tab's first page in its own stack on the left (no sidebar toggle);
   its links are `RouteLink`s, which there set the right column's path (`openSplitRoute`) and elsewhere are
   `NavigationLink(value:)`. `SplitNavigationView` (settings) is a `NavigationSplitView`
