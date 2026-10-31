@@ -32,7 +32,7 @@ struct CalendarButton: View {
                 .frame(width: 40, height: 40)
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular, in: .circle)
+        .roundActionBackground()
         .tint(.brand)
         .disabled(isAdding)
         .accessibilityLabel(isInCalendar ? "Aus dem Kalender löschen" : "Zum Kalender hinzufügen")

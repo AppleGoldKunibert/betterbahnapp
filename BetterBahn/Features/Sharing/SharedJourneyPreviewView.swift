@@ -10,18 +10,19 @@ struct SharedJourneyPreviewView: View {
     var noteIcon = "person.2.wave.2.fill"
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.appDesign) private var design
     @State private var saved = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 16) {
-                    Label(note, systemImage: noteIcon)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 16) {
+                    noteLabel
                     JourneyCard(journey: journey)
                 }
-                .padding()
+                .padding(.horizontal)
+                .padding(.vertical, 16)
+                .readableWidth()
             }
             .background { AppBackground() }
             .navigationTitle("Geteilte Reise")
@@ -41,15 +42,36 @@ struct SharedJourneyPreviewView: View {
                           systemImage: saved ? "bookmark.fill" : "bookmark")
                         .font(.headline)
                         .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
                         .contentTransition(.symbolEffect(.replace))
                 }
-                .buttonStyle(.glassProminent)
+                .pageButtonStyle(.prominent)
                 .tint(saved ? Color.punctual : Color.brand)
                 .controlSize(.large)
                 .disabled(saved)
                 .sensoryFeedback(.success, trigger: saved)
                 .padding()
+                .readableWidth()
             }
+        }
+    }
+
+    /// Where the journey comes from. Fahrkarte: a small label in capitals, like on a ticket.
+    @ViewBuilder
+    private var noteLabel: some View {
+        if design == .fahrkarte {
+            Label(note, systemImage: noteIcon)
+                .font(.caption.weight(.semibold))
+                .fontDesign(.rounded)
+                .tracking(0.6)
+                .textCase(.uppercase)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+        } else {
+            Label(note, systemImage: noteIcon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
         }
     }
 }

@@ -22,8 +22,9 @@ struct TraewellingLoginButton: View {
                 }
                 .font(.headline)
                 .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
             }
-            .buttonStyle(.glassProminent)
+            .pageButtonStyle(.prominent)
             .tint(.brand)
             .controlSize(.large)
             .disabled(isRunning)

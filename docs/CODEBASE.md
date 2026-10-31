@@ -194,7 +194,8 @@ in `project.pbxproj`: new files join their target automatically.
   `TicketsListView` (Settings → Gespeicherte Tickets; "Zeitkarten" like the Deutschland-Ticket from a screenshot via
   `PhotosPicker`, `TravelPassView`), `SeatReservationViews` (`ReservationRow` in `LegCard`;
   `AppModel.reservations(for:)`, only on the leg whose train matches; `SaveSeatButton`/`SaveSeatSheet`, #410).
-- `Features/Trips/TripsView.swift` – upcoming/past journeys, `SaveJourneyButton` (warns "Zug ist
+- `Features/Trips/TripsView.swift` – upcoming/past journeys (`PastTripsView` under a header per month; #504
+  Fahrkarte draws them as `PastTripTicket`, like the search page's `TripTicket`), `SaveJourneyButton` (warns "Zug ist
   reservierungspflichtig", in bike mode also "Fahrradreservierung nötig" / "Keine Fahrradmitnahme", via
   `AppModel.saveWarnings`; ticket/reservation imports never warn).
 - Bike mode (#398): Settings → Fahrrad (`AppSettings.bikeOption`: Ausblenden (default), Klapprad, Fahrrad; synced). Unless
@@ -217,7 +218,8 @@ in `project.pbxproj`: new files join their target automatically.
   `TraewellingLoginButton`, `CustomEmojiViews` (`EmojiMessageField`, `EmojiText`), `CheckinDetailSheet` ("Check-in
   ansehen" for check-ins made in the app, `AppModel.checkinStatusIDs`: edit text/visibility/trip type/tags, delete,
   "Mitreisende"), `CheckoutPrompt` (removing a journey with check-ins: check out at the last stop reached via
-  `TraewellingClient.earlyExit`, delete them, or keep them).
+  `TraewellingClient.earlyExit`, delete them, or keep them). `CheckinTicket` (#504): Minimal a `Card`, Fahrkarte a
+  `ticketBackground()` ticket with the line above a perforation; small buttons in cards use `.compactActionStyle()`.
   `FollowedCheckinsSection` (#196): who the user follows is checked in now, above "Deine Reisen"
   (`AppModel.followedCheckins`, every 2 min while Verbindungen shows, `keepFollowedCheckinsFresh`; one entry per person
   via `TraewellingClient.grouped`). Detail: train (`LegTripSheet`, hidden for manual trips), map with live position
@@ -242,6 +244,7 @@ in `project.pbxproj`: new files join their target automatically.
   per level after arrival and keeps the worst claim in `SavedJourney.recordedClaim`. Never shows amounts.
 - `Features/Sharing/` – shared-journey and DB-share previews; `JourneyShareButton` (menu: "Reise teilen" short link,
   falls back to the long one, `UIActivityViewController`; "Ankunft teilen" #317 adds an `ArrivalShare`, until 2 h after the arrival).
+  `.roundActionBackground()` draws its and `CalendarButton`'s 40 pt circle in either design.
 - `Features/Commute/` – regular trips (#397): `RegularTripButton` (↻ next to "Gespeichert") → `RegularTripEditor` (weekdays,
   question 15–60 min before, delay threshold, "Pausieren bis"); Settings → Meine Reisen → `RegularTripsView`. `CommuteModel.swift`:
   `AppModel.regularTrips` (synced, `CloudList` key `regularTrips`), `scheduleCommuteQuestions()` (one-shot "Fährst du heute?" for

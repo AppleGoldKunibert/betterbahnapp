@@ -11,6 +11,7 @@ struct CheckinDetailSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+    @Environment(\.appDesign) private var design
     @State private var status: TraewellingStatus?
     @State private var emojis: [CustomEmoji] = []
     /// Whether the account collects Träwelling points, so deleting mentions losing them.
@@ -164,6 +165,7 @@ struct CheckinDetailSheet: View {
                     HStack(spacing: 4) {
                         Text(fellow.user?.displayName ?? String(localized: "Träwelling-Nutzer"))
                             .font(.subheadline.weight(.semibold))
+                            .fontDesign(design == .fahrkarte ? .rounded : nil)
                         if let username = fellow.user?.username {
                             Text("@\(username)")
                                 .font(.caption)
@@ -267,10 +269,11 @@ struct CheckinDetailSheet: View {
                 }
             }
             .font(.headline)
+            .foregroundStyle(Color.heavyDelay)
             .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
         }
-        .buttonStyle(.glass)
-        .tint(.red)
+        .pageButtonStyle()
         .controlSize(.large)
         .disabled(isDeleting)
         .confirmationDialog("Check-in löschen?", isPresented: $confirmDelete, titleVisibility: .visible) {
@@ -291,7 +294,9 @@ struct CheckinDetailSheet: View {
         Card {
             VStack(spacing: 10) {
                 IconTile(systemImage: "questionmark.circle.fill", color: .secondary, size: 44)
-                Text("Check-in nicht mehr da").font(.headline)
+                Text("Check-in nicht mehr da")
+                    .font(.headline)
+                    .fontDesign(design == .fahrkarte ? .rounded : nil)
                 Text("Träwelling kennt diesen Check-in nicht mehr, vielleicht wurde er gelöscht.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -312,8 +317,9 @@ struct CheckinDetailSheet: View {
             }
             .font(.headline)
             .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
         }
-        .buttonStyle(.glassProminent)
+        .pageButtonStyle(.prominent)
         .tint(.brand)
         .controlSize(.large)
         .disabled(isSaving || message.count > 280)

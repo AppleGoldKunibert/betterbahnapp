@@ -6,6 +6,7 @@ struct CheckinSheet: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.appDesign) private var design
     @State private var message = ""
     @State private var visibility: TraewellingVisibility = .publicVisible
     @State private var business: TraewellingBusiness = .privateTrip
@@ -101,9 +102,11 @@ struct CheckinSheet: View {
 
     private var loginCard: some View {
         Card {
-            VStack(spacing: 14) {
-                IconTile(systemImage: "person.badge.key.fill", color: .brand, size: 52)
-                Text("Bei Träwelling anmelden").font(.headline)
+            VStack(spacing: 12) {
+                IconTile(systemImage: "person.badge.key.fill", color: .brand, size: 48)
+                Text("Bei Träwelling anmelden")
+                    .font(.headline)
+                    .fontDesign(design == .fahrkarte ? .rounded : nil)
                 Text("Zum Einchecken brauchst du ein Träwelling-Konto.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -132,7 +135,9 @@ struct CheckinSheet: View {
                     .font(.system(size: 56))
                     .foregroundStyle(Color.punctual.gradient)
                     .symbolEffect(.bounce, value: result.points)
-                Text("Eingecheckt").font(.title2.weight(.bold))
+                Text("Eingecheckt")
+                    .font(.title2.weight(.bold))
+                    .fontDesign(design == .fahrkarte ? .rounded : nil)
                 HStack(spacing: 8) {
                     if showsPoints {
                         InfoChip(text: String(localized: "+\(result.points) Punkte"), systemImage: "sparkles", tint: .brand)
@@ -249,10 +254,11 @@ struct CheckinSheet: View {
                 .font(.caption.weight(.medium))
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .foregroundStyle(isOn ? .white : Color.brand)
-                .background(isOn ? Color.brand : Color.brand.opacity(0.12), in: .capsule)
+                .foregroundStyle(isOn ? Color.white : Color.primary)
+                .background(isOn ? Color.brand : Color.primary.opacity(0.07), in: .capsule)
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 
     private func valueBinding(for tag: QuickTag) -> Binding<String> {
@@ -275,8 +281,9 @@ struct CheckinSheet: View {
             }
             .font(.headline)
             .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
         }
-        .buttonStyle(.glassProminent)
+        .pageButtonStyle(.prominent)
         .tint(.brand)
         .controlSize(.large)
         .disabled(isSending || message.count > 280 || needsTrainChoice)
@@ -451,55 +458,111 @@ struct MenuPickerRow<T: Hashable>: View {
     }
 }
 
-/// Ticket-style summary of the leg.
+/// Summary of the leg at the top of the check-in sheets. Minimal: a card with the line, both stops and the
+/// ride's duration. Fahrkarte: a ticket with the line above a perforation and labelled departure and arrival.
 struct CheckinTicket: View {
     let leg: Leg
+    @Environment(\.appDesign) private var design
 
     var body: some View {
-        let color = leg.line?.color ?? .brand
-        VStack(spacing: 0) {
-            HStack {
+        if design == .fahrkarte {
+            ticket
+        } else {
+            card
+        }
+    }
+
+    private var duration: String {
+        leg.arrival.best.timeIntervalSince(leg.departure.best).compactDuration
+    }
+
+    // MARK: Minimal
+
+    private var card: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 8) {
+                    LineBadge(line: leg.line)
+                    if let direction = leg.direction {
+                        Text("Richtung \(direction)")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                }
+                stops(label: false)
+            }
+        }
+    }
+
+    // MARK: Fahrkarte
+
+    private var ticket: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
                 LineBadge(line: leg.line)
-                Spacer()
+                Spacer(minLength: 8)
                 if let direction = leg.direction {
                     Text("Richtung \(direction)")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.85))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
             }
-            .padding(14)
-            .background(color.gradient)
-
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    TimeStack(time: leg.departure, font: .title2.weight(.bold))
-                    Text(leg.origin.displayName).font(.subheadline.weight(.semibold)).lineLimit(2)
-                    PlatformBadge(platform: leg.departurePlatform)
-                }
-                Spacer()
-                VStack(spacing: 6) {
-                    Image(systemName: leg.line?.symbolName ?? "tram.fill")
-                        .font(.title3)
-                        .foregroundStyle(color)
-                    Text(leg.arrival.best.timeIntervalSince(leg.departure.best).compactDuration)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.top, 6)
-                Spacer()
-                VStack(alignment: .trailing, spacing: 4) {
-                    TimeStack(time: leg.arrival, alignment: .trailing, font: .title2.weight(.bold))
-                    Text(leg.destination.displayName).font(.subheadline.weight(.semibold)).lineLimit(2)
-                        .multilineTextAlignment(.trailing)
-                    PlatformBadge(platform: leg.arrivalPlatform)
-                }
-            }
-            .padding(16)
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 12)
+            TicketPerforation()
+            stops(label: true)
+                .padding(16)
         }
-        .background(Color.card)
-        .clipShape(.rect(cornerRadius: 22, style: .continuous))
-        .shadow(color: .black.opacity(0.08), radius: 14, y: 5)
+        .fontDesign(.rounded)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .ticketBackground()
+        .environment(\.cardSurface, Color.ticket)
+    }
+
+    // MARK: Parts
+
+    private func stops(label: Bool) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            stop(label: label ? String(localized: "Abfahrt") : nil, time: leg.departure, name: leg.origin.displayName,
+                 platform: leg.departurePlatform, alignment: .leading)
+            Spacer(minLength: 0)
+            VStack(spacing: 4) {
+                Image(systemName: leg.line?.symbolName ?? "tram.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Text(duration)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, label ? 22 : 6)
+            .accessibilityElement(children: .combine)
+            Spacer(minLength: 0)
+            stop(label: label ? String(localized: "Ankunft") : nil, time: leg.arrival, name: leg.destination.displayName,
+                 platform: leg.arrivalPlatform, alignment: .trailing)
+        }
+    }
+
+    private func stop(label: String?, time: TimeInfo, name: String, platform: PlatformInfo?,
+                      alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 4) {
+            if let label {
+                Text(label)
+                    .font(.caption2.weight(.semibold))
+                    .tracking(0.6)
+                    .textCase(.uppercase)
+                    .foregroundStyle(.secondary)
+            }
+            TimeStack(time: time, alignment: alignment, font: .title2.weight(.bold))
+            Text(name)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(2)
+                .multilineTextAlignment(alignment == .trailing ? .trailing : .leading)
+            PlatformBadge(platform: platform)
+        }
     }
 }
 

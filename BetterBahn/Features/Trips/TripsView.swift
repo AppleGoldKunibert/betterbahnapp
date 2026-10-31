@@ -110,19 +110,36 @@ struct SavedJourneyRow: View {
     }
 }
 
+/// The finished journeys, newest first, under a header per month. Minimal shows them like the upcoming ones,
+/// Fahrkarte as small tickets like on the search page.
 struct PastTripsView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.appDesign) private var design
 
     var body: some View {
+        let months = Self.months(of: model.pastJourneys)
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 12) {
-                if model.pastJourneys.isEmpty {
+            LazyVStack(alignment: .leading, spacing: design == .fahrkarte ? 8 : 12) {
+                if months.isEmpty {
                     ContentUnavailableView("Keine vergangenen Fahrten", systemImage: "clock.arrow.circlepath")
                         .padding(.top, 60)
                 }
-                ForEach(model.pastJourneys) { SavedJourneyRow(entry: $0, readOnly: true) }
+                ForEach(months) { month in
+                    SectionHeader(title: month.start.formatted(.dateTime.month(.wide).year()), systemImage: "calendar",
+                                  trailing: "\(month.entries.count)")
+                        .padding(.top, month.start == months.first?.start ? 0 : 16)
+                        .accessibilityAddTraits(.isHeader)
+                    ForEach(month.entries) { entry in
+                        if design == .fahrkarte {
+                            PastTripTicket(entry: entry)
+                        } else {
+                            SavedJourneyRow(entry: entry, readOnly: true)
+                        }
+                    }
+                }
             }
             .padding(.horizontal)
+            .padding(.top, 8)
             .padding(.bottom, 24)
             .readableWidth()
         }
@@ -130,6 +147,136 @@ struct PastTripsView: View {
         .background { AppBackground() }
         .navigationTitle("Vergangene Fahrten")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// The journeys by the month they departed in, keeping their order.
+    private static func months(of entries: [SavedJourney]) -> [PastMonth] {
+        var months: [PastMonth] = []
+        let calendar = Calendar.current
+        for entry in entries {
+            let date = entry.journey.departure?.planned ?? .distantPast
+            let start = calendar.dateInterval(of: .month, for: date)?.start ?? date
+            if let last = months.indices.last, months[last].start == start {
+                months[last].entries.append(entry)
+            } else {
+                months.append(PastMonth(start: start, entries: [entry]))
+            }
+        }
+        return months
+    }
+}
+
+/// The past journeys of one month.
+private struct PastMonth: Identifiable {
+    let start: Date
+    var entries: [SavedJourney]
+    var id: Date { start }
+}
+
+/// A finished journey as a small ticket (Fahrkarte), matching the saved journeys on the search page: the day and
+/// the trains above the perforation, the times and the route below. Opens the journey read-only.
+private struct PastTripTicket: View {
+    let entry: SavedJourney
+    @Environment(AppModel.self) private var model
+    @State private var journeyToRemove: Journey?
+
+    private static let notchRadius: CGFloat = 7
+    private static let cornerRadius: CGFloat = 18
+
+    var body: some View {
+        let journey = entry.journey
+        let blocking = entry.issues.first(where: \.isBlocking)
+        RouteLink(value: ConnectionsRoute.journey(entry.route(readOnly: true))) {
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
+                TicketPerforation(notchRadius: Self.notchRadius)
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            if let departure = journey.departure {
+                                TimeStack(time: departure, cancelled: journey.isCancelled, font: .title3.weight(.bold))
+                            }
+                            Image(systemName: "arrow.right")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.tertiary)
+                                .accessibilityHidden(true)
+                            if let arrival = journey.arrival {
+                                TimeStack(time: arrival, cancelled: journey.isCancelled, font: .title3.weight(.bold))
+                            }
+                        }
+                        if let first = journey.legs.first, let last = journey.legs.last {
+                            Text("\(first.origin.displayName) → \(last.destination.displayName)")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        if let blocking {
+                            Label(blocking.title, systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Color.heavyDelay)
+                                .padding(.top, 4)
+                        }
+                        if let claim = model.passengerRightsClaim(for: entry) {
+                            PassengerRightsBadge(claim: claim)
+                                .padding(.horizontal, -6)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(16)
+            }
+            .fontDesign(.rounded)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .ticketBackground(notchRadius: Self.notchRadius, cornerRadius: Self.cornerRadius,
+                              outline: blocking != nil ? Color.heavyDelay : Color.hairline,
+                              outlineWidth: blocking != nil ? 2 : 1)
+            .environment(\.cardSurface, Color.ticket)
+            .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button("Reise löschen", systemImage: "trash", role: .destructive) {
+                model.remove(entry.journey, askingToCheckOut: &journeyToRemove)
+            }
+        }
+        .checkoutPrompt($journeyToRemove)
+    }
+
+    /// The day and, on the right, the trains ridden ("ICE 597 · RE 5").
+    private var header: some View {
+        let trains = entry.journey.legs.compactMap { $0.line?.name }
+        return HStack(spacing: 6) {
+            Text(dayLabel)
+                .tracking(0.5)
+                .textCase(.uppercase)
+            let tickets = model.tickets(for: entry)
+            if !tickets.isEmpty {
+                let onlyReservations = tickets.allSatisfy(\.ticket.isReservationOnly)
+                Image(systemName: onlyReservations ? "carseat.right.fill" : "ticket.fill")
+                    .accessibilityLabel(onlyReservations ? "Reservierung gespeichert" : "Ticket gespeichert")
+            }
+            Spacer(minLength: 8)
+            if !trains.isEmpty {
+                Text(trains.joined(separator: " · "))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .layoutPriority(-1)
+                    .accessibilityLabel(String(localized: "Züge: \(trains.formatted(.list(type: .and)))"))
+            }
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+    }
+
+    private var dayLabel: String {
+        guard let date = entry.journey.departure?.planned else { return "" }
+        return date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
     }
 }
 
