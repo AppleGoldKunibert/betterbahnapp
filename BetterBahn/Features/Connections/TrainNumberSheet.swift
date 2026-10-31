@@ -146,7 +146,7 @@ struct TrainNumberSheet: View {
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
             if !suggestions.isEmpty {
-                SectionHeader(title: "Züge aus den Ergebnissen", systemImage: "tram.fill")
+                SectionHeader(title: String(localized: "Züge aus den Ergebnissen"), systemImage: "tram.fill")
                 FlowChips(items: suggestions) { name in train = name }
             }
         } else {
@@ -167,7 +167,7 @@ struct TrainNumberSheet: View {
                 hint("Prüfe, wo die Züge halten …")
             }
             if !shownCandidates.isEmpty, !shownNumbered.isEmpty {
-                SectionHeader(title: "Weitere Züge auf deiner Strecke", systemImage: "tram.fill")
+                SectionHeader(title: String(localized: "Weitere Züge auf deiner Strecke"), systemImage: "tram.fill")
                     .padding(.top, 4)
             }
             ForEach(shownCandidates) { candidate in
@@ -185,7 +185,7 @@ struct TrainNumberSheet: View {
         }
     }
 
-    private func hint(_ text: String) -> some View {
+    private func hint(_ text: LocalizedStringKey) -> some View {
         HStack(spacing: 8) {
             ProgressView().controlSize(.small)
             Text(text).font(.caption).foregroundStyle(.secondary)
@@ -239,9 +239,9 @@ struct TrainNumberSheet: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         if fit.reachesTarget {
-                            InfoChip(text: "fährt bis \(search.to.displayName)", systemImage: "checkmark.circle.fill", tint: .punctual)
+                            InfoChip(text: String(localized: "fährt bis \(search.to.displayName)"), systemImage: "checkmark.circle.fill", tint: .punctual)
                         } else {
-                            InfoChip(text: "fährt nicht bis \(search.to.displayName)", systemImage: "arrow.triangle.branch")
+                            InfoChip(text: String(localized: "fährt nicht bis \(search.to.displayName)"), systemImage: "arrow.triangle.branch")
                         }
                     } else {
                         Label("hält nicht auf deiner Strecke – Einstieg selbst wählen", systemImage: "questionmark.circle")
@@ -290,10 +290,10 @@ struct TrainNumberSheet: View {
                         .foregroundStyle(.secondary)
                 }
                 if let exit = candidate.exit, let arrival = exit.arrival {
-                    InfoChip(text: "bis \(exit.station.displayName), an \(arrival.planned.timeString)",
+                    InfoChip(text: String(localized: "bis \(exit.station.displayName), an \(arrival.planned.timeString)"),
                              systemImage: "checkmark.circle.fill", tint: .punctual)
                 } else if candidate.boarding != nil {
-                    InfoChip(text: "fährt nicht bis \(search.to.displayName)", systemImage: "arrow.triangle.branch")
+                    InfoChip(text: String(localized: "fährt nicht bis \(search.to.displayName)"), systemImage: "arrow.triangle.branch")
                 }
             }
             Spacer(minLength: 0)
@@ -315,10 +315,10 @@ struct TrainNumberSheet: View {
             VStack(alignment: .leading, spacing: 12) {
                 Card(padding: 0) {
                     VStack(spacing: 0) {
-                        StationInput(label: "Einstieg", placeholder: "Ab wo einsteigen?", systemImage: "figure.walk",
+                        StationInput(label: String(localized: "Einstieg"), placeholder: String(localized: "Ab wo einsteigen?"), systemImage: "figure.walk",
                                      station: $boardingStation, focus: $focused, focusValue: .boardingStation)
                         Divider().padding(.leading, 54)
-                        StationInput(label: "Ausstieg (optional)", placeholder: "Ideal: \(search.to.displayName)",
+                        StationInput(label: String(localized: "Ausstieg (optional)"), placeholder: String(localized: "Ideal: \(search.to.displayName)"),
                                      systemImage: "mappin.circle.fill",
                                      station: $exitStation, focus: $focused, focusValue: .exitStation)
                     }

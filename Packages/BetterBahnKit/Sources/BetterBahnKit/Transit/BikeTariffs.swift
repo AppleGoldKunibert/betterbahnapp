@@ -92,7 +92,7 @@ public struct BikeTariff: Sendable, Hashable {
         "04": BikeTariff("Bremen", .ticket("Fahrradtageskarte Niedersachsen (7 €)")),
         "05": BikeTariff("Nordrhein-Westfalen", .ticket("24hFahrradTicket NRW (6,30 €)")),
         "06": BikeTariff("Hessen", .free),
-        "07": BikeTariff("Rheinland-Pfalz", .ticketOnWeekdays("Fahrkarte für das Fahrrad", fromNine)),
+        "07": BikeTariff("Rheinland-Pfalz", .ticketOnWeekdays(String(kit: "Fahrkarte für das Fahrrad"), fromNine)),
         "08": BikeTariff("Baden-Württemberg", .ticketOnWeekdays("bwFAHRRAD (6 €)", morningPeak)),
         "09": BikeTariff("Bayern", .ticket("Fahrrad-Tageskarte Bayern (7,50 €)")),
         "10": BikeTariff("Saarland", .ticketOnWeekdays("saarVV Einzelfahrkarte Rad (ab 2,60 €)", fromNine)),
@@ -158,7 +158,7 @@ public struct BikeTariff: Sendable, Hashable {
         BikeTariff("bodo", .ticketOnWeekdays("bodo Fahrradticket", morningPeak), districts: ["08435", "08436"]),
         BikeTariff("RVF", .ticketOnWeekdays("RVF Fahrradkarte", morningPeak), districts: ["08311", "08315", "08316"]),
         BikeTariff("MVV", .ticket("MVV Fahrrad-Tageskarte (3,70 €)"),
-                   suburbanNote: "In der S-Bahn Mo–Fr 6–9 Uhr nur mit Fahrrad-Tageskarte Bayern",
+                   suburbanNote: String(kit: "In der S-Bahn Mo–Fr 6–9 Uhr nur mit Fahrrad-Tageskarte Bayern"),
                    districts: ["09162", "09163", "09173", "09174", "09175", "09177", "09178", "09179", "09180", "09181",
                                "09182", "09183", "09184", "09187", "09188", "09190", "09261", "09274"]),
         BikeTariff("VGN", .ticket("VGN Einzelfahrkarte Kind"), suburbanBlackout: [Hours(6, 8)],
@@ -178,7 +178,7 @@ public struct BikeTariff: Sendable, Hashable {
         let isSuburban = product == .suburban
         if isSuburban, weekday, suburbanBlackout.contains(where: { $0.contains(minute) }) {
             return BikeTransport(kind: .notAllowed, isConfirmed: false,
-                                 note: "Mo–Fr \(Self.hoursText(suburbanBlackout)) Uhr keine Fahrräder in der S-Bahn")
+                                 note: String(kit: "Mo–Fr %@ Uhr keine Fahrräder in der S-Bahn", Self.hoursText(suburbanBlackout)))
         }
         var transport = BikeTransport(kind: .allowed, isConfirmed: false)
         switch isSuburban ? suburban : regional {
@@ -189,24 +189,24 @@ public struct BikeTariff: Sendable, Hashable {
         case .ticketOnWeekdays(let ticket, let hours):
             if weekday, hours.contains(where: { $0.contains(minute) }) {
                 transport.ticket = ticket
-                transport.note = "Nur Mo–Fr \(Self.hoursText(hours)) Uhr kostenpflichtig"
+                transport.note = String(kit: "Nur Mo–Fr %@ Uhr kostenpflichtig", Self.hoursText(hours))
             } else {
-                transport.note = "Mo–Fr \(Self.hoursText(hours)) Uhr: \(ticket)"
+                transport.note = String(kit: "Mo–Fr %@ Uhr: %@", Self.hoursText(hours), ticket)
             }
         }
         if isSuburban, let note = suburbanNote { transport.note = note }
         if isSuburban, transport.note == nil, !suburbanBlackout.isEmpty {
-            transport.note = "Mo–Fr \(Self.hoursText(suburbanBlackout)) Uhr keine Fahrräder in der S-Bahn"
+            transport.note = String(kit: "Mo–Fr %@ Uhr keine Fahrräder in der S-Bahn", Self.hoursText(suburbanBlackout))
         }
         return transport
     }
 
     /// "6–9 und 16–18"; hours from midnight read "vor 9".
     static func hoursText(_ hours: [Hours]) -> String {
-        if hours.count == 1, hours[0].start == 0 { return "vor \(hours[0].end / 60)" }
+        if hours.count == 1, hours[0].start == 0 { return String(kit: "vor %lld", hours[0].end / 60) }
         let texts = hours.map(\.text)
         guard texts.count > 1 else { return texts.first ?? "" }
-        return texts.dropLast().joined(separator: ", ") + " und " + texts.last!
+        return String(kit: "%@ und %@", texts.dropLast().joined(separator: ", "), texts.last!)
     }
 
     /// Whether `date` falls on Monday to Friday, and its minute of the day, in Berlin. Public holidays and school

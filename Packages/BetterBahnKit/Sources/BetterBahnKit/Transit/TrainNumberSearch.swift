@@ -110,7 +110,7 @@ public enum TrainSearchKind: String, Codable, Sendable, CaseIterable, Hashable {
         case .re: "RE"
         case .rb: "RB"
         case .sBahn: "S-Bahn"
-        case .other: "Sonstiges"
+        case .other: String(kit: "Sonstiges")
         }
     }
 
@@ -146,7 +146,7 @@ public struct TrainSearchCountry: Sendable, Hashable, Identifiable {
         ("LU", "Luxemburg"), ("FR", "Frankreich"), ("DK", "Dänemark"), ("PL", "Polen"), ("CZ", "Tschechien"),
         ("IT", "Italien"), ("SE", "Schweden"), ("NO", "Norwegen"), ("HU", "Ungarn"), ("SK", "Slowakei"),
         ("SI", "Slowenien"), ("HR", "Kroatien"), ("ES", "Spanien"), ("GB", "Großbritannien"),
-    ].map { TrainSearchCountry(code: $0.0, name: $0.1) }
+    ].map { TrainSearchCountry(code: $0.0, name: String(kit: $0.1)) }
 
     public static let defaults: Set<String> = ["DE"]
 
@@ -254,7 +254,7 @@ public struct TrainNumberSearch: Sendable {
             else { continue }
             return Self.named(after: result, entry: entry, trip: trip)
         }
-        throw TransitError.notFound("\(result.name) im Fahrplan")
+        throw TransitError.notFound(String(kit: "%@ im Fahrplan", result.name))
     }
 
     /// `entry` and `trip` of a long-distance train under the name DB's search result gives it. For some
@@ -387,7 +387,7 @@ extension BahnExpertClient {
     /// Every run with this number starting on `day` (`yyyy-MM-dd`), including buses and trams.
     /// bahn.expert takes the category only as a hint, so the caller filters.
     public func findTrains(number: Int, category: String?, day: String) async throws -> [TrainSearchResult] {
-        guard Self.isValidDay(day) else { throw TransitError.invalidInput("Datum ungültig.") }
+        guard Self.isValidDay(day) else { throw TransitError.invalidInput(String(kit: "Datum ungültig.")) }
         var input: [String: Any] = ["journeyNumber": number, "initialDepartureDate": "\(day)T12:00:00.000Z", "withOEV": true]
         if let category { input["category"] = category }
         let found: [FoundRun]

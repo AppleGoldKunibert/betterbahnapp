@@ -132,7 +132,7 @@ private struct TicketPage: View {
     }
 
     private var partnerNotice: some View {
-        Label("Dieses Ticket stellt \(ticket.issuer?.capitalized ?? "ein Partner der Bahn") selbst aus. Du findest es in der Buchungsbestätigung oder auf bahn.de.",
+        Label("Dieses Ticket stellt \(ticket.issuer?.capitalized ?? String(localized: "ein Partner der Bahn")) selbst aus. Du findest es in der Buchungsbestätigung oder auf bahn.de.",
               systemImage: "info.circle.fill")
             .font(.callout)
             .padding(12)

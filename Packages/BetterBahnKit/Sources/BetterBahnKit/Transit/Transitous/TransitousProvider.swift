@@ -1762,7 +1762,7 @@ public struct TransitousProvider: TransitProvider {
 
     public func trip(id: String) async throws -> Trip {
         let itinerary = try await http.get(url("v5/trip", [.init(name: "tripId", value: id)]), as: MItinerary.self, headers: ["User-Agent": HTTPClient.identifyingUserAgent])
-        guard let leg = itinerary.legs.first(where: { !$0.isWalking }) else { throw TransitError.notFound("Fahrt") }
+        guard let leg = itinerary.legs.first(where: { !$0.isWalking }) else { throw TransitError.notFound(String(kit: "Fahrt")) }
         let converted = leg.toLeg()
         return Trip(
             id: id, line: converted.line, direction: converted.direction, stopovers: converted.stopovers,

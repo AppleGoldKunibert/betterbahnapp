@@ -33,12 +33,12 @@ public enum TrainPositionRefresh: String, CaseIterable, Codable, Sendable {
 
     public var displayName: String {
         switch self {
-        case .automatic: "Automatisch"
-        case .every15Seconds: "15 Sek."
-        case .every30Seconds: "30 Sek."
-        case .everyMinute: "1 Min."
-        case .every2Minutes: "2 Min."
-        case .off: "Aus"
+        case .automatic: String(kit: "Automatisch")
+        case .every15Seconds: String(kit: "15 Sek.")
+        case .every30Seconds: String(kit: "30 Sek.")
+        case .everyMinute: String(kit: "1 Min.")
+        case .every2Minutes: String(kit: "2 Min.")
+        case .off: String(kit: "Aus")
         }
     }
 }

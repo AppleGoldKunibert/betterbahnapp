@@ -83,7 +83,7 @@ struct JourneyShareButton: View {
         guard let arrival = ArrivalShare(journey: journey, journeyId: await journeyId, evaNumbers: evaNumbers) else { return }
         do {
             let url = try await ShortShareLinkClient().arrivalURL(for: journey, arrival: arrival)
-            ShareSheet.present(JourneyLinkItem(url: url, title: "Ankunft in \(leg.destination.displayName)", icon: .appIcon))
+            ShareSheet.present(JourneyLinkItem(url: url, title: String(localized: "Ankunft in \(leg.destination.displayName)"), icon: .appIcon))
         } catch {
             arrivalFailed = true
         }

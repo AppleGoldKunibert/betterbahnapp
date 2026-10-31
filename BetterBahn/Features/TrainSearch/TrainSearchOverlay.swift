@@ -155,7 +155,8 @@ struct TrainSearchOverlay: View {
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(isToday ? "Tag wählen, heute" : "Tag wählen, \(date.formatted(date: .complete, time: .omitted))")
+            .accessibilityLabel(isToday ? String(localized: "Tag wählen, heute")
+                                : String(localized: "Tag wählen, \(date.formatted(date: .complete, time: .omitted))"))
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
@@ -595,8 +596,8 @@ private struct CoachSequenceByStop: View {
 
 /// A tappable option on `TrainSearchResultView`.
 private struct OptionRow: View {
-    let title: String
-    let subtitle: String
+    let title: LocalizedStringKey
+    let subtitle: LocalizedStringKey
     let systemImage: String
     let color: Color
     var loading = false

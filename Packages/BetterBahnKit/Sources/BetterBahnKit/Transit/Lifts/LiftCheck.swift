@@ -23,16 +23,38 @@ public struct LiftAlert: Sendable, Hashable, Identifiable {
 
     /// "Aufzug zu Gleis 4/5 wegen Wartung außer Betrieb", "Aufzug außer Betrieb: Empfangsgebäude"
     public var text: String {
-        let reason = lift.reasonText.map { "wegen \($0) " } ?? ""
+        // Whole sentences per reason, so that other languages can put the reason where they need it.
         let description = lift.description
         if let first = description.first, first.isLowercase {
-            return "Aufzug \(description) \(reason)außer Betrieb"
+            return byReason(String(kit: "Aufzug %@ außer Betrieb", description),
+                            maintenance: String(kit: "Aufzug %@ wegen Wartung außer Betrieb", description),
+                            construction: String(kit: "Aufzug %@ wegen Bauarbeiten außer Betrieb", description))
+        }
+        if description.isEmpty, tracks.isEmpty {
+            return byReason(String(kit: "Ein Aufzug ist außer Betrieb"),
+                            maintenance: String(kit: "Ein Aufzug ist wegen Wartung außer Betrieb"),
+                            construction: String(kit: "Ein Aufzug ist wegen Bauarbeiten außer Betrieb"))
         }
         if description.isEmpty {
-            return tracks.isEmpty ? "Ein Aufzug ist \(reason)außer Betrieb"
-                : "Aufzug zu Gleis \(tracks.joined(separator: "/")) \(reason)außer Betrieb"
+            let tracks = tracks.joined(separator: "/")
+            return byReason(String(kit: "Aufzug zu Gleis %@ außer Betrieb", tracks),
+                            maintenance: String(kit: "Aufzug zu Gleis %@ wegen Wartung außer Betrieb", tracks),
+                            construction: String(kit: "Aufzug zu Gleis %@ wegen Bauarbeiten außer Betrieb", tracks))
         }
-        return "Aufzug \(reason)außer Betrieb: \(description)"
+        let sentence = byReason(String(kit: "Aufzug außer Betrieb"),
+                                maintenance: String(kit: "Aufzug wegen Wartung außer Betrieb"),
+                                construction: String(kit: "Aufzug wegen Bauarbeiten außer Betrieb"))
+        return "\(sentence): \(description)"
+    }
+
+    /// The text for the lift's `reasonText`.
+    private func byReason(_ plain: @autoclosure () -> String, maintenance: @autoclosure () -> String,
+                          construction: @autoclosure () -> String) -> String {
+        switch lift.reasonText {
+        case "Wartung": maintenance()
+        case "Bauarbeiten": construction()
+        default: plain()
+        }
     }
 }
 
@@ -59,14 +81,14 @@ public struct JourneyLiftAlert: Sendable, Hashable, Identifiable {
     public var id: String { "lift|\(place.rawValue)|\(legID)|\(alert.id)" }
 
     /// "Aufzug defekt in Fulda"
-    public var title: String { "Aufzug defekt in \(station)" }
+    public var title: String { String(kit: "Aufzug defekt in %@", station) }
 
     /// "Aufzug zu Gleis 4/5 außer Betrieb. Du steigst hier um."
     public var message: String {
         let note = switch place {
-        case .start: "Hier fährst du los."
-        case .transfer: "Du steigst hier um."
-        case .destination: "Hier kommst du an."
+        case .start: String(kit: "Hier fährst du los.")
+        case .transfer: String(kit: "Du steigst hier um.")
+        case .destination: String(kit: "Hier kommst du an.")
         }
         return "\(alert.text). \(note)"
     }

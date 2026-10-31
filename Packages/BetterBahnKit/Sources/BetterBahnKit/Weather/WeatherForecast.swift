@@ -73,27 +73,27 @@ public enum WeatherCondition: Sendable, Hashable {
 
     public func description(isDay: Bool) -> String {
         switch self {
-        case .clear: isDay ? "Sonnig" : "Klar"
-        case .mainlyClear: isDay ? "Heiter" : "Überwiegend klar"
-        case .partlyCloudy: "Teils bewölkt"
-        case .overcast: "Bedeckt"
-        case .fog: "Nebel"
-        case .drizzle: "Nieselregen"
-        case .freezingDrizzle: "Gefrierender Nieselregen"
-        case .lightRain: "Leichter Regen"
-        case .rain: "Regen"
-        case .heavyRain: "Starker Regen"
-        case .freezingRain: "Gefrierender Regen"
-        case .lightSnow: "Leichter Schneefall"
-        case .snow: "Schneefall"
-        case .heavySnow: "Starker Schneefall"
-        case .snowGrains: "Schneegriesel"
-        case .rainShowers: "Regenschauer"
-        case .heavyRainShowers: "Heftige Regenschauer"
-        case .snowShowers: "Schneeschauer"
-        case .thunderstorm: "Gewitter"
-        case .thunderstormWithHail: "Gewitter mit Hagel"
-        case .unknown: "Wetter"
+        case .clear: isDay ? String(kit: "Sonnig") : String(kit: "Klar")
+        case .mainlyClear: isDay ? String(kit: "Heiter") : String(kit: "Überwiegend klar")
+        case .partlyCloudy: String(kit: "Teils bewölkt")
+        case .overcast: String(kit: "Bedeckt")
+        case .fog: String(kit: "Nebel")
+        case .drizzle: String(kit: "Nieselregen")
+        case .freezingDrizzle: String(kit: "Gefrierender Nieselregen")
+        case .lightRain: String(kit: "Leichter Regen")
+        case .rain: String(kit: "Regen")
+        case .heavyRain: String(kit: "Starker Regen")
+        case .freezingRain: String(kit: "Gefrierender Regen")
+        case .lightSnow: String(kit: "Leichter Schneefall")
+        case .snow: String(kit: "Schneefall")
+        case .heavySnow: String(kit: "Starker Schneefall")
+        case .snowGrains: String(kit: "Schneegriesel")
+        case .rainShowers: String(kit: "Regenschauer")
+        case .heavyRainShowers: String(kit: "Heftige Regenschauer")
+        case .snowShowers: String(kit: "Schneeschauer")
+        case .thunderstorm: String(kit: "Gewitter")
+        case .thunderstormWithHail: String(kit: "Gewitter mit Hagel")
+        case .unknown: String(kit: "Wetter")
         }
     }
 

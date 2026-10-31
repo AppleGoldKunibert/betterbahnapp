@@ -23,8 +23,8 @@ public enum TicketType: String, Codable, Sendable, CaseIterable, Hashable {
     /// Short name with its article in the dative, e.g. "dem D-Ticket" (for "Mit …").
     public var dativeShortName: String {
         switch self {
-        case .deutschlandticket: "dem D-Ticket"
-        case .bahnCard100: "der BC100"
+        case .deutschlandticket: String(kit: "dem D-Ticket")
+        case .bahnCard100: String(kit: "der BC100")
         }
     }
 }

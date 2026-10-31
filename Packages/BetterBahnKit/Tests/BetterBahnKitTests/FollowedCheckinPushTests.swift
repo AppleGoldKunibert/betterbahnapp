@@ -23,6 +23,8 @@ import Testing
         #expect(request.body["sandbox"] as? Bool == true)
         #expect(request.body["userId"] as? Int == 42)
         #expect(request.body["kinds"] as? [String] == ["followed", "companions"])
+        // Our server writes the notifications in the app's language (German in tests).
+        #expect(request.body["language"] as? String == "de")
 
         PushWorkerProtocol.state = .init(status: 404)
         await #expect(throws: OAuthError.loginEnded) {
@@ -38,6 +40,7 @@ import Testing
         #expect(request.path == "/subscriptions/sub1")
         #expect(request.body["secret"] as? String == "s3cret")
         #expect(request.body["kinds"] as? [String] == ["likes"])
+        #expect(request.body["language"] as? String == "de")
 
         PushWorkerProtocol.state = .init(status: 404)
         #expect(try await push.update(subscription, deviceToken: "abcd", sandbox: false, kinds: [.followed]) == false)

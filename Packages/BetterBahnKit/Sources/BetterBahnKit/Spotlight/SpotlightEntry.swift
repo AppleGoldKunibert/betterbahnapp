@@ -31,8 +31,9 @@ public struct SpotlightEntry: Sendable, Hashable, Identifiable {
     /// A favourite station: opens its departure board.
     public static func station(_ station: Station) -> SpotlightEntry {
         let name = station.displayName
-        return SpotlightEntry(kind: .station, title: "\(name) – Abfahrten", subtitle: station.region,
-                              keywords: keywords(for: [station]) + ["Abfahrten", "Abfahrt", "Ankünfte", "Bahnhof"],
+        return SpotlightEntry(kind: .station, title: String(kit: "%@ – Abfahrten", name), subtitle: station.region,
+                              keywords: keywords(for: [station]) + [String(kit: "Abfahrten"), String(kit: "Abfahrt"),
+                                                                 String(kit: "Ankünfte"), String(kit: "Bahnhof")],
                               expiry: nil, url: BoardWidgetLink.url(station: station))
     }
 
@@ -42,7 +43,7 @@ public struct SpotlightEntry: Sendable, Hashable, Identifiable {
         guard let first = journey.legs.first, let last = journey.legs.last, !journey.isOver(now: now) else { return nil }
         let trains = journey.transitLegs.compactMap(\.line)
         let destination = last.destination.displayName
-        let what = trains.first.map(\.displayName) ?? "Reise"
+        let what = trains.first.map(\.displayName) ?? String(kit: "Reise")
         let when = departureText(first.departure.planned, now: now, timeZone: timeZone)
         var subtitle = "\(first.origin.displayName) → \(destination)"
         if trains.count > 1 {
@@ -56,8 +57,8 @@ public struct SpotlightEntry: Sendable, Hashable, Identifiable {
             words += line.allNames.map { $0.replacingOccurrences(of: " ", with: "") }
             words += [line.number, line.tripNumber].compactMap { $0 }
         }
-        words += keywords(for: stations) + ["Reise", "Verbindung"]
-        return SpotlightEntry(kind: .journey, title: "\(what) nach \(destination), \(when)", subtitle: subtitle,
+        words += keywords(for: stations) + [String(kit: "Reise"), String(kit: "Verbindung")]
+        return SpotlightEntry(kind: .journey, title: String(kit: "%@ nach %@, %@", what, destination, when), subtitle: subtitle,
                               keywords: unique(words), expiry: journey.arrival.map { $0.best.addingTimeInterval(10 * 60) },
                               url: LiveActivityLink.url(journeyID: journey.id))
     }
@@ -94,11 +95,17 @@ public struct SpotlightEntry: Sendable, Hashable, Identifiable {
         // The weekday by hand: ICU writes "Fr." or "Fr" depending on its version.
         let weekday = weekdays[(calendar.component(.weekday, from: date) - 1) % 7]
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = timeZone
-        formatter.dateFormat = (-1...6).contains(days) ? "HH:mm" : "dd.MM. HH:mm"
+        if KitLocalization.isGerman {
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = (-1...6).contains(days) ? "HH:mm" : "dd.MM. HH:mm"
+        } else {
+            formatter.locale = KitLocalization.locale
+            formatter.setLocalizedDateFormatFromTemplate((-1...6).contains(days) ? "jmm" : "dMMMjmm")
+        }
         return weekday + " " + formatter.string(from: date)
     }
 
-    private static let weekdays = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"]
+    private static let weekdays = [String(kit: "So"), String(kit: "Mo"), String(kit: "Di"), String(kit: "Mi"),
+                                   String(kit: "Do"), String(kit: "Fr"), String(kit: "Sa")]
 }

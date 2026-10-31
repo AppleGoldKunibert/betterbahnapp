@@ -61,12 +61,12 @@ struct BikeTransportRow: View {
             withAnimation(.snappy) { transport = found }
             guard bike == .bike, found?.kind != .notAllowed, let request = BahnDeClient.formationRequest(for: leg),
                   let sequence = try? await model.coachSequence(for: request) else { return }
-            withAnimation(.snappy) { coaches = sequence.bikeCoachSummary.map { "Fahrradstellplätze: \($0)" } }
+            withAnimation(.snappy) { coaches = sequence.bikeCoachSummary.map { String(localized: "Fahrradstellplätze: \($0)") } }
         }
     }
 
     private func details(of transport: BikeTransport) -> [String] {
-        var lines = [transport.section.map { "Gilt für \($0)" }, transport.ticket, transport.note]
+        var lines = [transport.section.map { String(localized: "Gilt für \($0)") }, transport.ticket, transport.note]
         if transport.kind != .notAllowed { lines.append(coaches) }
         return lines.compactMap(\.self)
     }

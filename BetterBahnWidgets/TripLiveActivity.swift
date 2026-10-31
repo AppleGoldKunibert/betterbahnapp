@@ -183,7 +183,7 @@ struct LockScreenView: View {
                 // Countdown + time
                 HStack(alignment: .lastTextBaseline) {
                     VStack(alignment: .leading, spacing: 0) {
-                        Text("\(state.isDeparture ? "Abfahrt" : "Ankunft") \(state.nextStopName)")
+                        Text(state.isDeparture ? String(localized: "Abfahrt \(state.nextStopName)") : String(localized: "Ankunft \(state.nextStopName)"))
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.white.opacity(0.7))
                             .lineLimit(1)
@@ -217,7 +217,7 @@ struct LockScreenView: View {
                     EmptyView()
                 }
                 .tint(state.product.color == .gray ? .white : state.product.color)
-                if let warning = state.warning {
+                if let warning = state.localizedWarning {
                     Label(warning, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(Color(red: 1, green: 0.45, blue: 0.35))
@@ -302,7 +302,7 @@ struct PlatformChip: View {
         .padding(.vertical, 3)
         .background(.white.opacity(0.18), in: .capsule)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(replaced.map { "Gleis \(platform), statt \($0)" } ?? "Gleis \(platform)")
+        .accessibilityLabel(replaced.map { String(localized: "Gleis \(platform), statt \($0)") } ?? String(localized: "Gleis \(platform)"))
     }
 }
 
@@ -332,13 +332,13 @@ struct TransferRowView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            TransferSideView(title: "Ankunft", line: transfer.incomingLine, time: transfer.incomingExpectedArrival,
+            TransferSideView(title: String(localized: "Ankunft"), line: transfer.incomingLine, time: transfer.incomingExpectedArrival,
                               delayMinutes: transfer.incomingDelayMinutes, platform: transfer.incomingPlatform)
             Image(systemName: "arrow.right")
                 .font(.caption2.weight(.bold))
                 .opacity(0.5)
                 .padding(.top, 14)
-            TransferSideView(title: "Abfahrt", line: outgoingLine, time: outgoingTime,
+            TransferSideView(title: String(localized: "Abfahrt"), line: outgoingLine, time: outgoingTime,
                               delayMinutes: outgoingDelayMinutes, platform: outgoingPlatform, alignment: .trailing)
         }
     }
