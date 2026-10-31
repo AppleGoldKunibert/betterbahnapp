@@ -209,7 +209,9 @@ struct ConnectionsView: View {
         } destination: { route in
             switch route {
             case .search(let search):
+                // A new search next to open results (iPad) must not keep the old results.
                 JourneyResultsView(search: search)
+                    .id(search)
             case .journey(let journey):
                 JourneyDetailView(journey: journey.journey, finalDestination: journey.finalDestination,
                                   readOnly: journey.readOnly, title: journey.title, search: journey.search)
