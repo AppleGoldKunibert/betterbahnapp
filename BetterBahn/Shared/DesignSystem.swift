@@ -48,10 +48,57 @@ extension EnvironmentValues {
     }
 }
 
+nonisolated private struct RouteMapDesignKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// The route-map look of the connection search: stops as rings on a red line, options as chips.
+    /// Set with `routeMapDesign()`; other pages using the same fields keep their look.
+    nonisolated var routeMapDesign: Bool {
+        get { self[RouteMapDesignKey.self] }
+        set { self[RouteMapDesignKey.self] = newValue }
+    }
+}
+
 extension View {
     /// Draws this page and its cards, section headers and background in the calm design.
     func calmDesign() -> some View {
         environment(\.calmDesign, true)
+    }
+
+    /// Draws this page's station fields and time button in the route-map look.
+    func routeMapDesign() -> some View {
+        environment(\.routeMapDesign, true)
+    }
+}
+
+/// A stop on a route map: a ring sitting on the line, smaller for intermediate stops.
+struct RouteStopMarker: View {
+    var isIntermediate = false
+    @ScaledMetric(relativeTo: .title3) private var terminusSize: CGFloat = 19
+    @ScaledMetric(relativeTo: .title3) private var stopSize: CGFloat = 13
+
+    var body: some View {
+        Circle()
+            .fill(Color.card)
+            .overlay {
+                Circle().strokeBorder(isIntermediate ? Color.brand : Color.primary, lineWidth: isIntermediate ? 3 : 4.5)
+            }
+            .frame(width: isIntermediate ? stopSize : terminusSize, height: isIntermediate ? stopSize : terminusSize)
+            .accessibilityHidden(true)
+    }
+}
+
+/// Capsule behind a route-map option chip: plain at its default, tinted once something is set.
+struct ChipBackground: View {
+    var isActive: Bool
+
+    var body: some View {
+        ZStack {
+            Capsule().fill(isActive ? Color.brand.opacity(0.12) : Color.card)
+            Capsule().strokeBorder(isActive ? Color.brand.opacity(0.45) : Color.hairline, lineWidth: 1)
+        }
     }
 }
 

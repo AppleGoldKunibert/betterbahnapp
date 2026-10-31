@@ -134,7 +134,7 @@ struct ConnectionsView: View {
                         .padding(.top, 4)
                         .accessibilityAddTraits(.isHeader)
                     routeCard
-                    optionsCard
+                    optionChips
                     if sizeClass != .regular {
                         searchButtons
                     }
@@ -183,6 +183,7 @@ struct ConnectionsView: View {
             .tabBarSafePadding()
             .background { AppBackground() }
             .calmDesign()
+            .routeMapDesign()
             .navigationTitle("Verbindungen")
             // The page's own headline takes the title's place; the title stays for the back button.
             .toolbarTitleDisplayMode(.inline)
@@ -273,7 +274,7 @@ struct ConnectionsView: View {
                             path.move(to: top)
                             path.addLine(to: CGPoint(x: top.x, y: bottom.y))
                         }
-                        .stroke(Color.primary.opacity(0.15), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                        .stroke(Color.brand, style: StrokeStyle(lineWidth: 5, lineCap: .round))
                     }
                 }
             }
@@ -295,7 +296,7 @@ struct ConnectionsView: View {
                 if showAdd, viaRows.count < Self.maxViaPoints {
                     HStack {
                         // Centered on the line between the stops.
-                        addViaButton.padding(.leading, 14)
+                        addViaButton.padding(.leading, 6)
                         Spacer()
                     }
                 }
@@ -335,91 +336,135 @@ struct ConnectionsView: View {
                 viaRows.append(ViaRow())
             }
         } label: {
+            // A ring on the line, like a stop still to be added.
             Image(systemName: "plus")
-                .font(.subheadline.weight(.bold))
-                .frame(width: 28, height: 28)
+                .font(.caption.weight(.heavy))
+                .foregroundStyle(Color.brand)
+                .frame(width: 24, height: 24)
+                .background(Color.card, in: .circle)
+                .overlay { Circle().strokeBorder(Color.brand, lineWidth: 2.5) }
+                .frame(width: 44, height: 44)
+                .contentShape(.circle)
         }
-        .buttonStyle(.glass)
-        .buttonBorderShape(.circle)
-        .tint(.brand)
+        .buttonStyle(.plain)
         .accessibilityLabel("Zwischenhalt hinzufügen")
     }
 
     // MARK: Options
 
-    private var optionsCard: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 10) {
-                    Picker("Zeit", selection: $isArrival) {
-                        Label("Abfahrt", systemImage: "arrow.up.right").tag(false)
-                        Label("Ankunft", systemImage: "arrow.down.right").tag(true)
-                    }
-                    .pickerStyle(.segmented)
-                    .fixedSize()
-                    .disabled(!viaRows.isEmpty)
-
-                    Spacer()
-
+    /// The search options as one row of chips; each opens its own control or switches itself.
+    private var optionChips: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
                     TimeSelector(date: $date, useNow: $useNow)
+                    directionChip
+                    transfersChip
+                    productsChip
+                    ticketChip
+                    bikeChip
                 }
+            }
+            .scrollIndicators(.hidden)
+            // Chips scrolled aside stay visible up to the screen's edge.
+            .scrollClipDisabled()
+            .id(Self.productsRowID)
 
-                if !viaRows.isEmpty {
-                    Label("Mit Zwischenhalten suchen wir ab der gewählten Abfahrtszeit.", systemImage: "info.circle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Divider()
-
-                Toggle(isOn: $onlyValidTicket) {
-                    let ticket = model.settings.ticketType
-                    optionLabel(ticket.filterTitle, subtitle: ticket.filterSubtitle, icon: ticket.symbolName, color: .brand)
-                }
-                .tint(.brand)
-
-                Divider()
-
-                if let title = model.settings.bikeOption.searchTitle {
-                    Toggle(isOn: Bindable(model.settings).searchWithBike) {
-                        optionLabel(title, subtitle: model.settings.bikeOption == .foldingBike
-                                    ? String(localized: "Zeigt, wo dein Klapprad mitkommt") : String(localized: "Zeigt, ob dein Fahrrad mitkommt"),
-                                    icon: "bicycle", color: .brand)
-                    }
-                    .tint(.brand)
-
-                    Divider()
-                }
-
-                transfersPicker
-
-                productsButton
+            if !viaRows.isEmpty {
+                Label("Mit Zwischenhalten suchen wir ab der gewählten Abfahrtszeit.", systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 4)
             }
         }
     }
 
-    private var transfersPicker: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            optionLabel(String(localized: "Max. Umstiege"), subtitle: String(localized: "Weniger Umsteigen, evtl. länger unterwegs"), icon: "arrow.triangle.swap", color: .brand)
-            MaxTransfersPicker(maxTransfers: $maxTransfers)
+    private var directionChip: some View {
+        Menu {
+            Picker("Zeit", selection: $isArrival) {
+                Label("Abfahrt", systemImage: "arrow.up.right").tag(false)
+                Label("Ankunft", systemImage: "arrow.down.right").tag(true)
+            }
+        } label: {
+            OptionChip(title: isArrival ? String(localized: "Ankunft") : String(localized: "Abfahrt"),
+                       systemImage: isArrival ? "arrow.down.right" : "arrow.up.right", isActive: isArrival)
+        }
+        .buttonStyle(.plain)
+        .disabled(!viaRows.isEmpty)
+    }
+
+    private var transfersChip: some View {
+        Menu {
+            Section("Weniger Umsteigen, evtl. länger unterwegs") {
+                Picker("Max. Umstiege", selection: $maxTransfers) {
+                    ForEach([Int?.none, 0, 1, 2], id: \.self) { limit in
+                        Text(transfersTitle(limit, menu: true)).tag(limit)
+                    }
+                }
+            }
+        } label: {
+            OptionChip(title: transfersTitle(maxTransfers, menu: false), systemImage: "arrow.triangle.swap",
+                       isActive: maxTransfers != nil)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// "Umstiege" on the chip while any number is fine, "Beliebig" among the choices.
+    private func transfersTitle(_ limit: Int?, menu: Bool) -> String {
+        switch limit {
+        case nil: menu ? String(localized: "Beliebig") : String(localized: "Umstiege")
+        case 0: String(localized: "Direkt")
+        case 1: String(localized: "Max. 1 Umstieg")
+        default: String(localized: "Max. 2 Umstiege")
         }
     }
 
-    private var productsButton: some View {
+    private var productsChip: some View {
         Button {
             productsTapCount += 1
         } label: {
-            HStack {
-                optionLabel(String(localized: "Verkehrsmittel"), subtitle: productSummary,
-                            icon: "train.side.front.car", color: .brand)
-                Spacer()
-                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
-            }
-            .contentShape(.rect)
+            OptionChip(title: productsChipTitle, systemImage: "train.side.front.car",
+                       isActive: perLeg || products != all)
         }
         .buttonStyle(.plain)
-        .id(Self.productsRowID)
+        .accessibilityValue(productSummary)
         .popover(isPresented: $showProductsPopover) { productsPopover }
+    }
+
+    /// Short enough for a chip: the names of one or two vehicle types, else how many.
+    private var productsChipTitle: String {
+        if perLeg { return String(localized: "Pro Abschnitt") }
+        if products == all { return String(localized: "Verkehrsmittel") }
+        if products.count <= 2 { return BetterBahn.productSummary(products) }
+        return String(localized: "\(products.count) Verkehrsmittel")
+    }
+
+    private var ticketChip: some View {
+        let ticket = model.settings.ticketType
+        return Button {
+            onlyValidTicket.toggle()
+        } label: {
+            OptionChip(title: ticket.filterTitle, systemImage: ticket.symbolName, isActive: onlyValidTicket)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint(ticket.filterSubtitle)
+        .accessibilityAddTraits(onlyValidTicket ? .isSelected : [])
+    }
+
+    @ViewBuilder
+    private var bikeChip: some View {
+        if let title = model.settings.bikeOption.searchTitle {
+            let isOn = model.settings.searchWithBike
+            Button {
+                model.settings.searchWithBike.toggle()
+            } label: {
+                OptionChip(title: title, systemImage: "bicycle", isActive: isOn)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(model.settings.bikeOption == .foldingBike
+                               ? String(localized: "Zeigt, wo dein Klapprad mitkommt") : String(localized: "Zeigt, ob dein Fahrrad mitkommt"))
+            .accessibilityAddTraits(isOn ? .isSelected : [])
+        }
     }
 
     private var productSummary: String {
@@ -484,16 +529,6 @@ struct ConnectionsView: View {
         .padding()
     }
 
-    private func optionLabel(_ title: String, subtitle: String, icon: String, color: Color) -> some View {
-        HStack(spacing: 12) {
-            IconTile(systemImage: icon, color: color, size: 32)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.subheadline.weight(.semibold))
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
-            }
-        }
-    }
-
     // MARK: Search
 
     private var searchButtons: some View {
@@ -532,14 +567,10 @@ struct ConnectionsView: View {
                         } label: {
                             HStack(spacing: 14) {
                                 MiniRoute()
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(recent.from.displayName).font(.subheadline.weight(.semibold)).lineLimit(1)
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "arrow.turn.down.right").font(.caption2)
-                                        Text(recent.to.displayName).lineLimit(1)
-                                    }
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                // Each name next to its ring.
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(recent.from.displayName).font(.subheadline.weight(.bold)).lineLimit(1)
+                                    Text(recent.to.displayName).font(.subheadline.weight(.bold)).lineLimit(1)
                                 }
                                 Spacer()
                                 Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
@@ -575,14 +606,41 @@ struct ConnectionsView: View {
 
 /// Two stops joined by a line, the route card's line in small, for the recent searches.
 private struct MiniRoute: View {
+    @ScaledMetric(relativeTo: .subheadline) private var lineHeight: CGFloat = 14
+
     var body: some View {
-        VStack(spacing: 2) {
-            Circle().strokeBorder(Color.secondary, lineWidth: 2).frame(width: 9, height: 9)
-            Capsule().fill(Color.secondary.opacity(0.4)).frame(width: 2, height: 12)
-            Circle().fill(Color.brand).frame(width: 9, height: 9)
+        VStack(spacing: -1) {
+            ring
+            Rectangle().fill(Color.brand).frame(width: 3, height: lineHeight)
+            ring
         }
         .frame(width: 30)
         .accessibilityHidden(true)
+    }
+
+    private var ring: some View {
+        Circle()
+            .fill(Color.card)
+            .overlay { Circle().strokeBorder(Color.primary, lineWidth: 2.5) }
+            .frame(width: 11, height: 11)
+    }
+}
+
+/// One search option in the chip row: an icon and a short title, tinted while it differs from the default.
+private struct OptionChip: View {
+    let title: String
+    let systemImage: String
+    var isActive = false
+
+    var body: some View {
+        Label(title, systemImage: systemImage)
+            .font(.subheadline.weight(.semibold))
+            .lineLimit(1)
+            .foregroundStyle(isActive ? Color.brand : Color.primary)
+            .padding(.horizontal, 12)
+            .frame(minHeight: 34)
+            .background { ChipBackground(isActive: isActive) }
+            .contentShape(.capsule)
     }
 }
 

@@ -11,6 +11,58 @@
         }
       }
     },
+    "%lld Verkehrsmittel" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld transport mode"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld transport modes"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Max. 1 Umstieg" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Max. 1 transfer"
+          }
+        }
+      }
+    },
+    "Max. 2 Umstiege" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Max. 2 transfers"
+          }
+        }
+      }
+    },
+    "Umstiege" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transfers"
+          }
+        }
+      }
+    },
     "·" : {
       "localizations" : {
         "en" : {

@@ -43,7 +43,7 @@ struct ViaRowView<Focus: Hashable>: View {
     var body: some View {
         VStack(spacing: 0) {
             StationInput(label: String(localized: "Zwischenhalt"), placeholder: String(localized: "Über welchen Ort?"), systemImage: "smallcircle.filled.circle",
-                         iconColor: .secondary, station: $row.station, focus: focus, focusValue: focusValue)
+                         iconColor: .secondary, station: $row.station, focus: focus, focusValue: focusValue, isIntermediate: true)
 
             HStack(spacing: 10) {
                 Button {

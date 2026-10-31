@@ -18,10 +18,13 @@ struct StationInput<Focus: Hashable>: View {
     @Binding var station: Station?
     let focus: FocusState<Focus?>.Binding
     let focusValue: Focus
+    /// A stop between start and destination, drawn as a smaller ring in the route-map look.
+    var isIntermediate = false
 
     @Environment(AppModel.self) private var model
     @Environment(\.stationSearchArea) private var searchArea
     @Environment(\.calmDesign) private var calm
+    @Environment(\.routeMapDesign) private var routeMap
     /// This field's key in `searchArea`.
     @State private var areaID = UUID()
     @State private var query = ""
@@ -68,21 +71,27 @@ struct StationInput<Focus: Hashable>: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 14) {
-                Image(systemName: systemImage)
-                    .font(.title3)
-                    .foregroundStyle(iconColor)
-                    // Covers the line a calm route card draws between its stops.
-                    .background(Circle().fill(calm ? Color.card : .clear).padding(-2))
-                    .frame(width: 24)
-                    .anchorPreference(key: RouteMarkerKey.self, value: .center) { [$0] }
-                    .allowsHitTesting(false)
+                Group {
+                    if routeMap {
+                        RouteStopMarker(isIntermediate: isIntermediate)
+                    } else {
+                        Image(systemName: systemImage)
+                            .font(.title3)
+                            .foregroundStyle(iconColor)
+                            // Covers the line a calm route card draws between its stops.
+                            .background(Circle().fill(calm ? Color.card : .clear).padding(-2))
+                    }
+                }
+                .frame(width: 24)
+                .anchorPreference(key: RouteMarkerKey.self, value: .center) { [$0] }
+                .allowsHitTesting(false)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(label)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .allowsHitTesting(false)
                     TextField(placeholder, text: $query)
-                        .font(.headline)
+                        .font(routeMap ? .title3.weight(.bold) : .headline)
                         .focused(focus, equals: focusValue)
                         .submitLabel(.search)
                         .autocorrectionDisabled()
@@ -367,8 +376,6 @@ struct StationInput<Focus: Hashable>: View {
     }
 }
 
-/// Whether any `StationInput` in the view shows its suggestions, so a screen can keep its layout
-/// around the field still while it does (see `StationInput.showsSuggestions`).
 /// Centers of the station fields' icons, so a route card can join its stops with a line.
 struct RouteMarkerKey: PreferenceKey {
     static let defaultValue: [Anchor<CGPoint>] = []
@@ -377,6 +384,8 @@ struct RouteMarkerKey: PreferenceKey {
     }
 }
 
+/// Whether any `StationInput` in the view shows its suggestions, so a screen can keep its layout
+/// around the field still while it does (see `StationInput.showsSuggestions`).
 struct StationSuggestionsShownKey: PreferenceKey {
     static let defaultValue = false
     static func reduce(value: inout Bool, nextValue: () -> Bool) {
@@ -482,6 +491,7 @@ struct TimeSelector: View {
     @Binding var date: Date
     @Binding var useNow: Bool
     @State private var showPicker = false
+    @Environment(\.routeMapDesign) private var routeMap
 
     var body: some View {
         HStack(spacing: 0) {
@@ -516,7 +526,14 @@ struct TimeSelector: View {
             }
             .buttonStyle(.plain)
         }
-        .background(Color.brand.opacity(0.1), in: .capsule)
+        .background {
+            // Among the route-map option chips it looks like one of them.
+            if routeMap {
+                ChipBackground(isActive: !useNow)
+            } else {
+                Capsule().fill(Color.brand.opacity(0.1))
+            }
+        }
         .popover(isPresented: $showPicker) {
             VStack(spacing: 12) {
                 DatePicker("Zeit", selection: Binding(get: { date }, set: { date = $0; useNow = false }))
