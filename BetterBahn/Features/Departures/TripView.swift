@@ -23,6 +23,7 @@ struct TripView: View {
     @State private var extraLapsBefore = 0
     @State private var extraLapsAfter = 0
     @State private var isLoadingLap = false
+    @Environment(\.appDesign) private var design
 
     private var tripId: String { shownTripId ?? entry.tripId }
 
@@ -115,10 +116,11 @@ struct TripView: View {
                     .foregroundStyle(.secondary)
             }
             .font(.subheadline.weight(.semibold))
+            .fontDesign(design == .fahrkarte ? .rounded : nil)
             SaveJourneyButton(journey: Journey(legs: [leg], source: leg.source))
         }
         .padding(16)
-        .glassEffect(.regular, in: .rect(cornerRadius: 26, style: .continuous))
+        .modifier(ActionBarSurface())
         .padding(.horizontal)
         .padding(.bottom, 8)
     }
@@ -219,6 +221,23 @@ struct TripView: View {
     }
 }
 
+/// Behind the bar for the picked ride. Minimal: the card surface, lifted by a soft shadow. Fahrkarte: Liquid Glass.
+private struct ActionBarSurface: ViewModifier {
+    @Environment(\.appDesign) private var design
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 26, style: .continuous)
+        if design == .fahrkarte {
+            content.glassEffect(.regular, in: shape)
+        } else {
+            content
+                .background(Color.card, in: shape)
+                .overlay { shape.strokeBorder(Color.hairline, lineWidth: 0.5) }
+                .shadow(color: .black.opacity(0.12), radius: 16, y: 4)
+        }
+    }
+}
+
 /// Spinner shown while a trip loads. Sized to the scroll view's visible area rather than laid over
 /// the (still empty) scroll view, which could leave it squeezed into a corner until the trip arrived.
 private struct TripLoadingView: View {
@@ -295,8 +314,15 @@ struct TripContent: View {
     /// DB's occupancy forecast (#399) from the picked boarding stop to the exit, else for the whole run.
     @State private var occupancy: OccupancyForecast?
     @Environment(AppModel.self) private var model
+    @Environment(\.appDesign) private var design
 
     private var color: Color { trip.line?.color ?? .gray }
+
+    /// The Fahrkarte design draws the train's header as a ticket (#504).
+    private var isTicket: Bool { design == .fahrkarte }
+
+    /// Fahrkarte: names and times in the rounded type.
+    private var rounded: Font.Design? { isTicket ? .rounded : nil }
 
     /// The time the train reaches the stop (leaves it, at the first one), which the platform hint is timed by.
     private func hintTime(_ stop: Stopover, index: Int) -> Date? {
@@ -350,35 +376,27 @@ struct TripContent: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            Card {
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(spacing: 12) {
-                        LiveTrainIconTile(route: LiveTrainRoute(trip: trip), systemImage: trip.line?.symbolName ?? "tram.fill",
-                                          color: color, size: 46, logo: trip.line?.transitLogo)
-                        VStack(alignment: .leading, spacing: 3) {
-                            TrainNameRow(name: trip.line?.nameWithTripNumber ?? String(localized: "Zug"), font: .title3.weight(.bold), spacing: 8) {
-                                TrainSeriesTag(trip: trip, savedLeg: savedLeg)
+            if isTicket {
+                ticketHeader
+            } else {
+                Card {
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(spacing: 12) {
+                            trainIcon
+                            VStack(alignment: .leading, spacing: 3) {
+                                trainName
+                                if let origin = trip.origin, let destination = trip.destination {
+                                    Text("\(origin.displayName) → \(destination.displayName)")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                        .fullTextPopup("\(origin.displayName) → \(destination.displayName)", lines: 2)
+                                }
+                                trainDetails
                             }
-                            if let origin = trip.origin, let destination = trip.destination {
-                                Text("\(origin.displayName) → \(destination.displayName)")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                    .fullTextPopup("\(origin.displayName) → \(destination.displayName)", lines: 2)
-                            }
-                            if trip.line?.operatorName != nil {
-                                TrainOperatorsLabel(source: .trip(trip)).font(.caption).foregroundStyle(.tertiary)
-                            }
-                            TrainFormationLabel(trip: trip, savedLeg: savedLeg)
+                            Spacer()
+                            headerButtons
                         }
-                        Spacer()
-                        OccupancyButton(forecast: occupancy, travelClass: model.settings.travelClass)
-                        TrainMessagesButton(messages: trip.messages)
-                    }
-                    // At the next stop; any other stop's unfolds below it with a tap on its platform.
-                    CoachSequenceDisclosure(trip: trip, spacing: 14)
-
-                    if let rows = statistics.rows {
-                        TrainStatisticsDisclosure(content: rows).padding(.top, 14)
+                        headerExtras
                     }
                 }
             }
@@ -457,6 +475,104 @@ struct TripContent: View {
         }
     }
 
+    // MARK: Header
+
+    private var trainIcon: some View {
+        LiveTrainIconTile(route: LiveTrainRoute(trip: trip), systemImage: trip.line?.symbolName ?? "tram.fill",
+                          color: color, size: 46, logo: trip.line?.transitLogo)
+    }
+
+    private var trainName: some View {
+        TrainNameRow(name: trip.line?.nameWithTripNumber ?? String(localized: "Zug"), font: .title3.weight(.bold), spacing: 8) {
+            TrainSeriesTag(trip: trip, savedLeg: savedLeg)
+        }
+    }
+
+    /// The railways and the trainsets.
+    @ViewBuilder
+    private var trainDetails: some View {
+        if trip.line?.operatorName != nil {
+            TrainOperatorsLabel(source: .trip(trip)).font(.caption).foregroundStyle(.tertiary)
+        }
+        TrainFormationLabel(trip: trip, savedLeg: savedLeg)
+    }
+
+    private var headerButtons: some View {
+        HStack(spacing: 8) {
+            OccupancyButton(forecast: occupancy, travelClass: model.settings.travelClass)
+            TrainMessagesButton(messages: trip.messages)
+        }
+    }
+
+    /// The Wagenreihung at the next stop (any other stop's unfolds below it with a tap on its platform) and
+    /// what past runs say.
+    @ViewBuilder
+    private var headerExtras: some View {
+        CoachSequenceDisclosure(trip: trip, spacing: 14)
+        if let rows = statistics.rows {
+            TrainStatisticsDisclosure(content: rows).padding(.top, 14)
+        }
+    }
+
+    /// Fahrkarte: the train on top, "Von" and "Nach" in large type below the perforation.
+    private var ticketHeader: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                trainIcon
+                VStack(alignment: .leading, spacing: 3) {
+                    trainName
+                    trainDetails
+                }
+                Spacer()
+                headerButtons
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, trip.origin != nil && trip.destination != nil ? 16 : 0)
+            if let origin = trip.origin, let destination = trip.destination {
+                TicketPerforation()
+                HStack(alignment: .top, spacing: 12) {
+                    ticketEnd(String(localized: "Von"), origin.displayName, alignment: .leading)
+                    Image(systemName: "arrow.right")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 20)
+                        .accessibilityHidden(true)
+                    ticketEnd(String(localized: "Nach"), destination.displayName, alignment: .trailing)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                headerExtras
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
+        }
+        .fontDesign(.rounded)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .ticketBackground()
+        .environment(\.cardSurface, Color.ticket)
+    }
+
+    /// One end of the run on the ticket: a small upper-case label over the station.
+    private func ticketEnd(_ label: String, _ name: String, alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 2) {
+            Text(label)
+                .font(.caption2.weight(.semibold))
+                .tracking(0.6)
+                .textCase(.uppercase)
+                .foregroundStyle(.secondary)
+            Text(name)
+                .font(.title3.weight(.bold))
+                .multilineTextAlignment(alignment == .leading ? .leading : .trailing)
+                .lineLimit(2)
+                .fullTextPopup(name, lines: 2)
+        }
+        .frame(maxWidth: .infinity, alignment: alignment == .leading ? .leading : .trailing)
+        .accessibilityElement(children: .combine)
+    }
+
     /// Loads the lap before / after the one shown, at the top / bottom of the stops.
     private func lapButton(_ title: LocalizedStringKey, systemImage: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
@@ -509,6 +625,7 @@ struct TripContent: View {
                                               font: isMajor ? .headline : .subheadline)
                             }
                         }
+                        .fontDesign(rounded)
                         .fixedSize()
                         .frame(minWidth: 68, alignment: .leading)
                         .contentShape(.rect)
@@ -524,6 +641,7 @@ struct TripContent: View {
                                 Text(stop.station.displayName)
                                     .font(isMajor ? .headline : .subheadline)
                                     .fontWeight(highlight.map { stop.station.isSamePlace(as: $0) } == true ? .bold : nil)
+                                    .fontDesign(rounded)
                                     .lineLimit(2)
                                 if isBoarding {
                                     InfoChip(text: String(localized: "Einstieg"), systemImage: "arrow.up.right.circle.fill", tint: .punctual)

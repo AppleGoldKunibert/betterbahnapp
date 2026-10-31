@@ -31,7 +31,11 @@ struct StationBoardView: View {
     @State private var scrollPosition = ScrollPosition()
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.appDesign) private var design
     @FocusState private var stationFocused: Bool?
+
+    /// The Fahrkarte design lays the station and the time out as a ticket (#504).
+    private var isTicket: Bool { design == .fahrkarte }
 
     private var filter: BoardFilter {
         BoardFilter(products: products, ticketFilter: onlyValidTicket ? model.ticketFilter : nil)
@@ -60,8 +64,19 @@ struct StationBoardView: View {
     var body: some View {
         SplitNavigationStack(path: $path) {
             ScrollView {
-                LazyVStack(spacing: 12, pinnedViews: []) {
-                    headerCard
+                LazyVStack(spacing: isTicket ? 16 : 12, pinnedViews: []) {
+                    if isTicket {
+                        Text("Bahnhofstafel")
+                            .font(.largeTitle.weight(.heavy))
+                            .fontDesign(.rounded)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 4)
+                            .padding(.top, 4)
+                            .accessibilityAddTraits(.isHeader)
+                        ticketHeader
+                    } else {
+                        headerCard
+                    }
 
                     if station == nil {
                         favoritesSection
@@ -90,8 +105,12 @@ struct StationBoardView: View {
                         }
                         Card(padding: 0) {
                             VStack(spacing: 0) {
+                                if isTicket, !visible.isEmpty {
+                                    BoardColumnLabels(kind: kind)
+                                    Divider()
+                                }
                                 ForEach(Array(visible.enumerated()), id: \.element.id) { index, entry in
-                                    if index > 0 { Divider().padding(.leading, 84) }
+                                    if index > 0 { Divider().padding(.leading, 86) }
                                     RouteLink(value: entry) {
                                         BoardRow(entry: entry)
                                     }
@@ -133,7 +152,12 @@ struct StationBoardView: View {
                 }
             }
             .navigationTitle("Bahnhofstafel")
+            // On the ticket the page's own headline takes the title's place; the title stays for the back button.
+            .toolbarTitleDisplayMode(isTicket ? .inline : .automatic)
             .toolbar {
+                if isTicket {
+                    ToolbarItem(placement: .principal) { Color.clear.frame(width: 1, height: 1) }
+                }
                 if let station {
                     ToolbarItem {
                         Button {
@@ -199,41 +223,71 @@ struct StationBoardView: View {
         .toolbar(path.isEmpty || sizeClass == .regular ? .automatic : .hidden, for: .tabBar)
     }
 
+    // MARK: Header (Minimal)
+
+    /// The station, then what and when, in one card.
     private var headerCard: some View {
-        VStack(spacing: 12) {
-            Card(padding: 0) {
-                StationInput(label: String(localized: "Bahnhof"), placeholder: String(localized: "Bahnhof suchen"), systemImage: "building.2.fill",
-                             station: $station, focus: $stationFocused, focusValue: true)
-                    .clipShape(.rect(cornerRadius: 22, style: .continuous))
+        Card(padding: 0) {
+            VStack(spacing: 0) {
+                stationField
+                Divider().padding(.leading, 54)
+                boardControls
+                    .padding(12)
             }
-            Card(padding: 12) {
-            VStack(spacing: 12) {
-                HStack(spacing: 10) {
-                    Picker("Anzeige", selection: $kind) {
-                        Label("Abfahrten", systemImage: "arrow.up.right").tag(BoardKind.departures)
-                        Label("Ankünfte", systemImage: "arrow.down.right").tag(BoardKind.arrivals)
-                    }
-                    .pickerStyle(.segmented)
+            .clipShape(.rect(cornerRadius: 22, style: .continuous))
+        }
+    }
 
-                    TimeSelector(date: $date, useNow: $useNow)
+    // MARK: Header (Fahrkarte)
+
+    /// The station on top of a ticket, what and when below its perforation.
+    private var ticketHeader: some View {
+        VStack(spacing: 0) {
+            stationField
+                .environment(\.ticketStationFields, true)
+                .clipShape(TicketTopShape())
+            TicketPerforation()
+            boardControls
+                .padding(16)
+                .padding(.top, 2)
+        }
+        .fontDesign(.rounded)
+        .ticketBackground()
+        .environment(\.cardSurface, Color.ticket)
+    }
+
+    private var stationField: some View {
+        StationInput(label: String(localized: "Bahnhof"), placeholder: String(localized: "Bahnhof suchen"), systemImage: "building.2.fill",
+                     iconColor: isTicket ? .secondary : .brand, station: $station, focus: $stationFocused, focusValue: true)
+    }
+
+    /// Departures or arrivals, the time and the filters in effect.
+    private var boardControls: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 10) {
+                Picker("Anzeige", selection: $kind) {
+                    Label("Abfahrten", systemImage: "arrow.up.right").tag(BoardKind.departures)
+                    Label("Ankünfte", systemImage: "arrow.down.right").tag(BoardKind.arrivals)
                 }
+                .pickerStyle(.segmented)
 
-                if isFiltered {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            if onlyValidTicket {
-                                let ticket = model.settings.ticketType
-                                InfoChip(text: ticket.displayName, systemImage: ticket.symbolName, tint: .brand)
-                            }
-                            if products.count != Product.allCases.count {
-                                ForEach(Product.allCases.filter(products.contains), id: \.self) { product in
-                                    InfoChip(text: product.displayName, systemImage: product.symbolName, tint: product.color)
-                                }
+                TimeSelector(date: $date, useNow: $useNow)
+            }
+
+            if isFiltered {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        if onlyValidTicket {
+                            let ticket = model.settings.ticketType
+                            InfoChip(text: ticket.displayName, systemImage: ticket.symbolName, tint: .brand)
+                        }
+                        if products.count != Product.allCases.count {
+                            ForEach(Product.allCases.filter(products.contains), id: \.self) { product in
+                                InfoChip(text: product.displayName, systemImage: product.symbolName, tint: product.color)
                             }
                         }
                     }
                 }
-            }
             }
         }
     }
@@ -259,14 +313,21 @@ struct StationBoardView: View {
                             IconTile(systemImage: "star.fill", color: .yellow, size: 30)
                             Text(favorite.displayName)
                                 .font(.subheadline.weight(.semibold))
+                                .fontDesign(isTicket ? .rounded : nil)
                                 .lineLimit(2)
                                 .multilineTextAlignment(.leading)
                             Spacer(minLength: 0)
                         }
                         .padding(12)
-                        .frame(maxWidth: .infinity, minHeight: 58)
+                        .frame(maxWidth: .infinity, minHeight: 56)
                         .background(Color.card, in: .rect(cornerRadius: 16, style: .continuous))
-                        .shadow(color: .black.opacity(0.05), radius: 8, y: 3)
+                        // Like `Card`: Minimal lifts the tiles a little, Fahrkarte outlines them.
+                        .shadow(color: .black.opacity(isTicket ? 0 : 0.04), radius: 8, y: 2)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .strokeBorder(Color.hairline, lineWidth: isTicket ? 1 : 0.5)
+                        }
+                        .contentShape(.rect(cornerRadius: 16, style: .continuous))
                     }
                     .buttonStyle(.plain)
                     .contextMenu {
@@ -362,7 +423,7 @@ struct StationBoardView: View {
                 .font(.subheadline.weight(.semibold))
                 .frame(maxWidth: .infinity)
         }
-        .buttonStyle(.glass)
+        .pageButtonStyle()
         .controlSize(.large)
         .disabled(loadingPage)
     }
@@ -465,12 +526,37 @@ private struct BoardFilterMenu: View {
     }
 }
 
-struct BoardRow: View {
-    let entry: BoardEntry
+/// Fahrkarte: small upper-case column titles over the board, like on a printed timetable.
+private struct BoardColumnLabels: View {
+    let kind: BoardKind
 
     var body: some View {
+        HStack(spacing: 12) {
+            Text("Zeit").frame(width: 60, alignment: .leading)
+            Text(kind == .departures ? "Nach" : "Von")
+            Spacer(minLength: 4)
+            Text("Gleis")
+        }
+        .font(.caption2.weight(.semibold))
+        .tracking(0.6)
+        .textCase(.uppercase)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 14)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+        .accessibilityHidden(true)
+    }
+}
+
+struct BoardRow: View {
+    let entry: BoardEntry
+    @Environment(\.appDesign) private var design
+
+    var body: some View {
+        let rounded: Font.Design? = design == .fahrkarte ? .rounded : nil
         HStack(alignment: .center, spacing: 12) {
             TimeStack(time: entry.time, cancelled: entry.cancelled, font: .title3.weight(.bold))
+                .fontDesign(rounded)
                 .frame(width: 60, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 5) {
@@ -481,6 +567,7 @@ struct BoardRow: View {
                         .foregroundStyle(.tertiary)
                     Text(entry.otherEnd ?? "?")
                         .font(.subheadline.weight(.semibold))
+                        .fontDesign(rounded)
                         .lineLimit(1)
                         .strikethrough(entry.cancelled)
                 }

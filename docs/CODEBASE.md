@@ -136,7 +136,9 @@ in `project.pbxproj`: new files join their target automatically.
   ahead of the picked train's exit, #430; "Halt hinzufügen" via
   `ManualStopSheet` adds an off-timetable exit, a check-in then becomes a manual trip via
   `AppModel.replaceCheckinWithManualTrip`; a new exit on the last train asks "Reise … beenden" / "Weiter nach …").
-- `Features/Departures/` – `StationBoardView`/`BoardRow`, `TripView` (and `LegTripSheet`, the read-only run of a journey's
+- `Features/Departures/` – two layouts by `\.appDesign` (#504): Minimal has the station and the time in one card; Fahrkarte
+  puts them on a ticket under its own headline, with "Zeit / Nach / Gleis" over the board (`BoardColumnLabels`), and draws
+  `TripContent`'s header as a ticket with "Von" and "Nach" below its perforation. `StationBoardView`/`BoardRow`, `TripView` (and `LegTripSheet`, the read-only run of a journey's
   leg): `plainTrip` with the board's line and lap, then `AppModel.liveRun` with the shown or remembered trip (and the
   saved leg) as baseline, painted as the sources answer, remembered via `rememberLive`. `DelayTimeText` shows a delay
   in planned-time mode only with a live time (no "0" for a plain timetable). `CoachSequenceView.swift`: the Wagenreihung

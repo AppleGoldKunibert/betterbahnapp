@@ -13,6 +13,10 @@ struct SeatMapSheet: View {
     var reservation: SeatReservation?
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.appDesign) private var design
+
+    /// Fahrkarte: the seat and the coaches' names in the rounded type (#504).
+    private var rounded: Font.Design? { design == .fahrkarte ? .rounded : nil }
 
     private static let coachHeight: CGFloat = 180
 
@@ -43,6 +47,7 @@ struct SeatMapSheet: View {
                     if let reservation, !reservation.description.isEmpty {
                         Label(reservation.description, systemImage: "person.crop.square.fill")
                             .font(.subheadline.weight(.semibold))
+                            .fontDesign(rounded)
                             .foregroundStyle(Color.brand)
                             .padding(.horizontal, 16)
                     }
@@ -105,6 +110,7 @@ struct SeatMapSheet: View {
         return VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.subheadline.weight(.semibold))
+                .fontDesign(rounded)
                 .foregroundStyle(item.id == selected.id ? Color.brand : .primary)
             SeatMapCoach(map: item.map, turned: item.turned, reserved: reserved, height: Self.coachHeight, coachID: item.id)
         }

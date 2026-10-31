@@ -406,6 +406,7 @@ struct CoachSequencePanel: View {
 /// share a box ("2× ICE 4"). Drawings: DB Fahrzeuglexikon, © Deutsche Bahn AG.
 private struct TrainCard: View {
     let formation: TrainFormation
+    @Environment(\.appDesign) private var design
 
     private static let drawingHeight: CGFloat = 54
 
@@ -417,6 +418,7 @@ private struct TrainCard: View {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(model)
                             .font(.headline)
+                            .fontDesign(design == .fahrkarte ? .rounded : nil)
                         if let series = drawing?.series {
                             Text(series)
                                 .font(.subheadline)
@@ -739,6 +741,7 @@ private struct CoachTile: View {
     var bikeHighlighted = false
     var leadingNose = false
     var trailingNose = false
+    @Environment(\.appDesign) private var design
 
     static let height: CGFloat = 46
     private static let amenitiesPerRow = 3
@@ -845,6 +848,7 @@ private struct CoachTile: View {
                 if let number = coach.number {
                     Text(number)
                         .font(.title3.weight(.bold))
+                        .fontDesign(design == .fahrkarte ? .rounded : nil)
                         .monospacedDigit()
                         .foregroundStyle(coach.closed ? .secondary : .primary)
                         .minimumScaleFactor(0.6)
@@ -919,9 +923,26 @@ private extension String {
 }
 
 private extension View {
-    /// The Wagenreihung's boxes inside a card: a faint fill instead of a card of their own.
+    /// The Wagenreihung's boxes inside a card: a faint fill instead of a card of their own (Minimal), or a fine
+    /// outline like the cards themselves (Fahrkarte).
     func insetPanel() -> some View {
-        background(Color.primary.opacity(0.05), in: .rect(cornerRadius: 16, style: .continuous))
-            .clipShape(.rect(cornerRadius: 16, style: .continuous))
+        modifier(InsetPanel())
+    }
+}
+
+private struct InsetPanel: ViewModifier {
+    @Environment(\.appDesign) private var design
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        if design == .fahrkarte {
+            content
+                .clipShape(shape)
+                .overlay { shape.strokeBorder(Color.hairline, lineWidth: 1) }
+        } else {
+            content
+                .background(Color.primary.opacity(0.05), in: shape)
+                .clipShape(shape)
+        }
     }
 }
