@@ -86,7 +86,7 @@ struct SettingsView: View {
 
                 Section {
                     Toggle(isOn: $settings.stepFree) {
-                        IconLabel(title: "Stufenfrei reisen", systemImage: "figure.roll", color: .brand)
+                        IconLabel(title: String(localized: "Stufenfrei reisen"), systemImage: "figure.roll", color: .brand)
                     }
                     .tint(.brand)
                     .onChange(of: settings.stepFree) { _, enabled in

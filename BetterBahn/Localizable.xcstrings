@@ -8896,6 +8896,56 @@
           }
         }
       }
+    },
+    "Aufzug defekt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lift out of order"
+          }
+        }
+      }
+    },
+    "%lld Aufzüge defekt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld lifts out of order"
+          }
+        }
+      }
+    },
+    "Stufenfrei reisen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Step-Free Travel"
+          }
+        }
+      }
+    },
+    "Die Suche zeigt, wo ein Aufzug auf deinem Weg außer Betrieb ist. Für gespeicherte Reisen bekommst du dann eine Mitteilung." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The search shows where a lift on your way is out of order. For saved journeys, you'll get a notification."
+          }
+        }
+      }
+    },
+    "Aufzüge außer Betrieb" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lifts out of order"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

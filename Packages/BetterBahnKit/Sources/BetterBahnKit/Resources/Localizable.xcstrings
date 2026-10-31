@@ -1188,6 +1188,176 @@
         }
       }
     },
+    "Aufzug %@ außer Betrieb" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aufzug %@ außer Betrieb"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lift %@ out of order"
+          }
+        }
+      }
+    },
+    "Aufzug %@ wegen Bauarbeiten außer Betrieb" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aufzug %@ wegen Bauarbeiten außer Betrieb"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lift %@ out of order due to construction work"
+          }
+        }
+      }
+    },
+    "Aufzug %@ wegen Wartung außer Betrieb" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aufzug %@ wegen Wartung außer Betrieb"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lift %@ out of order for maintenance"
+          }
+        }
+      }
+    },
+    "Aufzug außer Betrieb" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aufzug außer Betrieb"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lift out of order"
+          }
+        }
+      }
+    },
+    "Aufzug defekt in %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aufzug defekt in %@"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lift out of order in %@"
+          }
+        }
+      }
+    },
+    "Aufzug wegen Bauarbeiten außer Betrieb" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aufzug wegen Bauarbeiten außer Betrieb"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lift out of order due to construction work"
+          }
+        }
+      }
+    },
+    "Aufzug wegen Wartung außer Betrieb" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aufzug wegen Wartung außer Betrieb"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lift out of order for maintenance"
+          }
+        }
+      }
+    },
+    "Aufzug zu Gleis %@ außer Betrieb" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aufzug zu Gleis %@ außer Betrieb"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lift to platform %@ out of order"
+          }
+        }
+      }
+    },
+    "Aufzug zu Gleis %@ wegen Bauarbeiten außer Betrieb" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aufzug zu Gleis %@ wegen Bauarbeiten außer Betrieb"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lift to platform %@ out of order due to construction work"
+          }
+        }
+      }
+    },
+    "Aufzug zu Gleis %@ wegen Wartung außer Betrieb" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aufzug zu Gleis %@ wegen Wartung außer Betrieb"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lift to platform %@ out of order for maintenance"
+          }
+        }
+      }
+    },
     "Aus" : {
       "comment" : "Picker option: show station flag never (Off)",
       "extractionState" : "manual",
@@ -2128,6 +2298,23 @@
         }
       }
     },
+    "Du steigst hier um." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Du steigst hier um."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You change trains here."
+          }
+        }
+      }
+    },
     "Dänemark" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2141,6 +2328,57 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Denmark"
+          }
+        }
+      }
+    },
+    "Ein Aufzug ist außer Betrieb" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ein Aufzug ist außer Betrieb"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A lift is out of order"
+          }
+        }
+      }
+    },
+    "Ein Aufzug ist wegen Bauarbeiten außer Betrieb" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ein Aufzug ist wegen Bauarbeiten außer Betrieb"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A lift is out of order due to construction work"
+          }
+        }
+      }
+    },
+    "Ein Aufzug ist wegen Wartung außer Betrieb" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ein Aufzug ist wegen Wartung außer Betrieb"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A lift is out of order for maintenance"
           }
         }
       }
@@ -2943,6 +3181,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Today: multi-purpose area at the front"
+          }
+        }
+      }
+    },
+    "Hier fährst du los." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hier fährst du los."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your journey starts here."
+          }
+        }
+      }
+    },
+    "Hier kommst du an." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hier kommst du an."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You arrive here."
           }
         }
       }
