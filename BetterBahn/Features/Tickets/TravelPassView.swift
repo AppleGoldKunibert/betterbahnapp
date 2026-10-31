@@ -11,7 +11,8 @@ struct TravelPassView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    TicketFace(title: pass.name, subtitle: pass.classDescription, details: details) {
+                    let barcode = DBTicket.Barcode(payload: pass.barcode.payload, image: nil).uiImage
+                    TicketFace(title: pass.name, subtitle: pass.classDescription, details: details, hasCode: barcode != nil) {
                         if pass.isExpired() {
                             TicketNote(text: String(localized: "Abgelaufen. Füg die neue Karte mit einem aktuellen Screenshot hinzu."),
                                        systemImage: "exclamationmark.triangle.fill", color: .slightDelay, emphasized: true)
@@ -21,7 +22,7 @@ struct TravelPassView: View {
                         }
                     } code: {
                         // Drawn from the bytes, also for passes saved with the screenshot's cut-out.
-                        if let image = DBTicket.Barcode(payload: pass.barcode.payload, image: nil).uiImage {
+                        if let image = barcode {
                             TicketBarcode(image: image)
                         }
                     }

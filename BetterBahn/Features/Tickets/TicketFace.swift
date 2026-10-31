@@ -3,10 +3,9 @@ import SwiftUI
 import UIKit
 
 /// One line of a ticket's details: "Klasse" – "2. Klasse".
-struct TicketDetail: Identifiable {
+struct TicketDetail {
     let label: String
     let value: String
-    var id: String { label + "|" + value }
 }
 
 /// A ticket or pass ready for a ticket check (#504): its name and route, notes, the barcode and the details.
@@ -16,6 +15,8 @@ struct TicketFace<Notes: View, Code: View>: View {
     let title: String
     var subtitle: String?
     let details: [TicketDetail]
+    /// False when there is nothing to show between the perforations (no barcode could be drawn).
+    var hasCode = true
     @ViewBuilder var notes: Notes
     @ViewBuilder var code: Code
 
@@ -62,9 +63,11 @@ struct TicketFace<Notes: View, Code: View>: View {
         VStack(spacing: 0) {
             header
                 .padding(20)
-            TicketPerforation()
-            code
-                .padding(16)
+            if hasCode {
+                TicketPerforation()
+                code
+                    .padding(16)
+            }
             if !details.isEmpty {
                 TicketPerforation()
                 detailGrid
@@ -80,7 +83,9 @@ struct TicketFace<Notes: View, Code: View>: View {
         let columns = Array(repeating: GridItem(.flexible(), spacing: 16, alignment: .topLeading),
                             count: dynamicTypeSize.isAccessibilitySize ? 1 : 2)
         return LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
-            ForEach(details) { detail in
+            // By position: two details can read the same (two seats alike).
+            ForEach(details.indices, id: \.self) { index in
+                let detail = details[index]
                 VStack(alignment: .leading, spacing: 4) {
                     TicketFieldLabel(title: detail.label)
                     Text(detail.value)
@@ -98,7 +103,8 @@ struct TicketFace<Notes: View, Code: View>: View {
 
     private var detailList: some View {
         VStack(alignment: .leading, spacing: 12) {
-            ForEach(details) { detail in
+            ForEach(details.indices, id: \.self) { index in
+                let detail = details[index]
                 LabeledContent(detail.label) {
                     Text(detail.value).multilineTextAlignment(.trailing)
                 }
