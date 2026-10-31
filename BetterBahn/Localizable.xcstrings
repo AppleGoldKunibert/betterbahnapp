@@ -1050,6 +1050,16 @@
         }
       }
     },
+    "1 Fahrt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 trip"
+          }
+        }
+      }
+    },
     "1 Jahr" : {
       "localizations" : {
         "en" : {
@@ -6838,6 +6848,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Special livery: %@"
+          }
+        }
+      }
+    },
+    "Sortieren" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sort"
           }
         }
       }
