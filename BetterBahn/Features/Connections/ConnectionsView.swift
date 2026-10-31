@@ -127,6 +127,12 @@ struct ConnectionsView: View {
             ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 20) {
+                    Text("Wohin geht’s?")
+                        .font(.largeTitle.weight(.heavy))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 4)
+                        .padding(.top, 4)
+                        .accessibilityAddTraits(.isHeader)
                     routeCard
                     optionsCard
                     if sizeClass != .regular {
@@ -176,8 +182,12 @@ struct ConnectionsView: View {
             }
             .tabBarSafePadding()
             .background { AppBackground() }
+            .calmDesign()
             .navigationTitle("Verbindungen")
+            // The page's own headline takes the title's place; the title stays for the back button.
+            .toolbarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .principal) { Color.clear.frame(width: 1, height: 1) }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Zug suchen", systemImage: "train.side.front.car") { model.showsTrainSearch = true }
                 }
@@ -254,6 +264,19 @@ struct ConnectionsView: View {
                 StationInput(label: String(localized: "Ziel"), placeholder: String(localized: "Wohin?"), systemImage: "mappin.circle.fill",
                              station: $to, focus: $focused, focusValue: .to)
             }
+            .backgroundPreferenceValue(RouteMarkerKey.self) { anchors in
+                // The stops sit on one line, like on a route map; hidden while suggestions push between them.
+                GeometryReader { proxy in
+                    let points = anchors.map { proxy[$0] }
+                    if !suggestionsShown, let top = points.min(by: { $0.y < $1.y }), let bottom = points.max(by: { $0.y < $1.y }) {
+                        Path { path in
+                            path.move(to: top)
+                            path.addLine(to: CGPoint(x: top.x, y: bottom.y))
+                        }
+                        .stroke(Color.primary.opacity(0.15), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    }
+                }
+            }
             .clipShape(.rect(cornerRadius: 22, style: .continuous))
         }
         .onPreferenceChange(StationSuggestionsShownKey.self) { shown in
@@ -271,7 +294,8 @@ struct ConnectionsView: View {
             if !suggestionsShown {
                 if showAdd, viaRows.count < Self.maxViaPoints {
                     HStack {
-                        addViaButton.padding(.leading, 20)
+                        // Centered on the line between the stops.
+                        addViaButton.padding(.leading, 14)
                         Spacer()
                     }
                 }
@@ -507,7 +531,7 @@ struct ConnectionsView: View {
                             }
                         } label: {
                             HStack(spacing: 14) {
-                                IconTile(systemImage: "arrow.triangle.swap", color: .secondary.opacity(0.6), size: 30)
+                                MiniRoute()
                                 VStack(alignment: .leading, spacing: 1) {
                                     Text(recent.from.displayName).font(.subheadline.weight(.semibold)).lineLimit(1)
                                     HStack(spacing: 4) {
@@ -546,6 +570,19 @@ struct ConnectionsView: View {
                                      isArrival: via.isEmpty ? isArrival : false, onlyValidTicket: onlyValidTicket,
                                      products: perLeg ? legProducts[Self.startLegID] ?? all : products,
                                      maxTransfers: maxTransfers, withBike: model.settings.searchWithBike))]
+    }
+}
+
+/// Two stops joined by a line, the route card's line in small, for the recent searches.
+private struct MiniRoute: View {
+    var body: some View {
+        VStack(spacing: 2) {
+            Circle().strokeBorder(Color.secondary, lineWidth: 2).frame(width: 9, height: 9)
+            Capsule().fill(Color.secondary.opacity(0.4)).frame(width: 2, height: 12)
+            Circle().fill(Color.brand).frame(width: 9, height: 9)
+        }
+        .frame(width: 30)
+        .accessibilityHidden(true)
     }
 }
 

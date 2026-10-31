@@ -25,6 +25,34 @@ extension Color {
     static let heavyDelay = Color(red: 0.88, green: 0.15, blue: 0.20)
     /// Card surface: white in light mode, elevated gray in dark mode.
     static let card = Color(.secondarySystemGroupedBackground)
+    /// Page background of the calm design: a warm off-white, near-black in dark mode.
+    static let canvas = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0.05, green: 0.05, blue: 0.06, alpha: 1)
+            : UIColor(red: 0.96, green: 0.955, blue: 0.945, alpha: 1)
+    })
+    /// Thin outline of flat cards.
+    static let hairline = Color.primary.opacity(0.08)
+}
+
+nonisolated private struct CalmDesignKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// The calm design (flat cards, no glow, plain section titles), switched on page by page while it is
+    /// rolled out. Set with `calmDesign()` at a page's root.
+    nonisolated var calmDesign: Bool {
+        get { self[CalmDesignKey.self] }
+        set { self[CalmDesignKey.self] = newValue }
+    }
+}
+
+extension View {
+    /// Draws this page and its cards, section headers and background in the calm design.
+    func calmDesign() -> some View {
+        environment(\.calmDesign, true)
+    }
 }
 
 extension TicketType {
@@ -86,41 +114,68 @@ func transferColor(_ minutes: Int) -> Color {
 struct Card<Content: View>: View {
     var padding: CGFloat = 16
     @ViewBuilder var content: Content
+    @Environment(\.calmDesign) private var calm
 
     var body: some View {
         content
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.card, in: .rect(cornerRadius: 22, style: .continuous))
-            .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
+            // The calm design separates cards from the page by their outline alone.
+            .shadow(color: .black.opacity(calm ? 0 : 0.06), radius: 12, y: 4)
             .overlay {
                 // Subtle edge so cards stay visible on dark backgrounds.
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
+                    .strokeBorder(calm ? Color.hairline : Color.primary.opacity(0.06), lineWidth: calm ? 1 : 0.5)
             }
     }
 }
 
 /// Grouped background with a soft brand glow at the top.
+/// In the calm design a plain off-white page instead.
 struct AppBackground: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.calmDesign) private var calm
 
     var body: some View {
         ZStack(alignment: .top) {
-            Color(.systemGroupedBackground)
-            LinearGradient(colors: [Color.brand.opacity(colorScheme == .dark ? 0.28 : 0.16), .clear], startPoint: .top, endPoint: .bottom)
-                .frame(height: 340)
+            if calm {
+                Color.canvas
+            } else {
+                Color(.systemGroupedBackground)
+                LinearGradient(colors: [Color.brand.opacity(colorScheme == .dark ? 0.28 : 0.16), .clear], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 340)
+            }
         }
         .ignoresSafeArea()
     }
 }
 
+/// In the calm design a bold title in sentence case, without the icon.
 struct SectionHeader: View {
     let title: String
     let systemImage: String
     var trailing: String?
+    @Environment(\.calmDesign) private var calm
 
     var body: some View {
+        if calm {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title)
+                    .font(.title3.weight(.bold))
+                Spacer()
+                if let trailing {
+                    Text(trailing).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary).monospacedDigit()
+                }
+            }
+            .padding(.horizontal, 4)
+            .padding(.top, 8)
+        } else {
+            classic
+        }
+    }
+
+    private var classic: some View {
         HStack(spacing: 6) {
             Image(systemName: systemImage)
                 .font(.caption.weight(.bold))
@@ -139,12 +194,14 @@ struct SectionHeader: View {
 }
 
 /// iOS-Settings style colored icon square. With a `logo` (S-Bahn, U-Bahn, #350) the logo itself takes
-/// the tile's place, in its own colors and with the tile's rounded corners.
+/// the tile's place, in its own colors and with the tile's rounded corners. The calm design draws only
+/// the symbol, in grey.
 struct IconTile: View {
     let systemImage: String
     let color: Color
     var size: CGFloat = 30
     var logo: TransitLogo? = nil
+    @Environment(\.calmDesign) private var calm
 
     var body: some View {
         if let logo, UIImage(named: logo.assetName) != nil {
@@ -155,6 +212,11 @@ struct IconTile: View {
                 .frame(width: size, height: size)
                 .clipShape(.rect(cornerRadius: size * 0.28, style: .continuous))
                 .accessibilityHidden(true)
+        } else if calm {
+            Image(systemName: systemImage)
+                .font(.system(size: size * 0.6, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: size, height: size)
         } else {
             Image(systemName: systemImage)
                 .font(.system(size: size * 0.5, weight: .semibold))
