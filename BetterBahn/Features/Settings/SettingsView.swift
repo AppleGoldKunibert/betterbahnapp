@@ -10,24 +10,37 @@ struct SettingsView: View {
     @State private var isLoggedIn = false
     @State private var showClearHistoryConfirmation = false
 
+    /// The accent color's name, or "Eigene Farbe".
+    private var accentName: String {
+        switch Theme.shared.accent {
+        case .preset(let preset): preset.displayName
+        case .custom: String(localized: "Eigene Farbe")
+        }
+    }
+
     var body: some View {
         @Bindable var settings = model.settings
         SplitNavigationView {
             Form {
                 Section {
                     HStack(spacing: 14) {
-                        // The app icon itself (AppLogo is the icon scaled to 56 pt).
-                        Image("AppLogo")
-                            .resizable()
-                            .frame(width: 56, height: 56)
-                            .clipShape(.rect(cornerRadius: 56 * 0.2237, style: .continuous))
-                            .accessibilityHidden(true)
+                        // The app icon in the picked accent color.
+                        AppLogoView(size: 56)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("BetterBahn").font(.title3.weight(.bold))
                             Text("Bahnfahren, aber besser.").font(.subheadline).foregroundStyle(.secondary)
                         }
                     }
                     .padding(.vertical, 6)
+                }
+
+                Section {
+                    NavigationLink {
+                        DesignSettingsView()
+                    } label: {
+                        IconLabel(title: String(localized: "Design"), systemImage: "paintpalette.fill", color: .brand,
+                                  subtitle: "\(Theme.shared.design.displayName) · \(accentName)")
+                    }
                 }
 
                 if settings.traewellingEnabled {

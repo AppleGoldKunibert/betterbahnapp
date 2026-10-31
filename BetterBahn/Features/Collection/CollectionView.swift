@@ -449,7 +449,7 @@ struct CollectionButton: View {
                     if newCount > 0 { NewBadge(text: "\(newCount)").offset(x: 6, y: -10) }
                 }
         }
-        .buttonStyle(.glass)
+        .pageButtonStyle()
         .controlSize(.large)
         .accessibilityValue(newCount > 0 ? String(localized: "\(newCount) neu gesammelt") : "")
         .task(id: "\(model.savedJourneys.count)|\(model.traewellingTrips.count)") {

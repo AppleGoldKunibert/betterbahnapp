@@ -91,6 +91,7 @@ nonisolated struct ConnectionSearch: Hashable, Codable {
 struct ConnectionsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.appDesign) private var design
     @State private var from: Station?
     @State private var to: Station?
     @State private var viaRows: [ViaRow] = []
@@ -105,12 +106,16 @@ struct ConnectionsView: View {
     /// Per-section selections; the section from the start is keyed by `startLegID`, the others by the via row they start at.
     @State private var legProducts: [UUID: Set<Product>] = [:]
     @State private var showProductsPopover = false
+    /// Minimal: the rarely changed options (ticket, bike, transfers, vehicles) are folded away until opened.
+    @State private var showsOptions = false
     @State private var productsTapCount = 0
     @FocusState private var focused: Field?
     /// A station field shows its suggestions (they stay a moment after it loses focus).
     @State private var suggestionsShown = false
     @State private var path: [ConnectionsRoute] = []
     @State private var swapRotation = 0.0
+    /// "Zuletzt gesucht" is unfolded.
+    @AppStorage("recentSearchesExpanded") private var recentExpanded = false
     /// The year the review banner offers (#319); nil without any rides.
     @State private var reviewBannerYear: Int?
 
@@ -128,9 +133,21 @@ struct ConnectionsView: View {
         SplitNavigationStack(path: $path) {
             ScrollViewReader { proxy in
             ScrollView {
-                VStack(spacing: 20) {
-                    routeCard
-                    optionsCard
+                VStack(spacing: isTicket ? 20 : 16) {
+                    if isTicket {
+                        Text("Wohin geht’s?")
+                            .font(.largeTitle.weight(.heavy))
+                            .fontDesign(.rounded)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 4)
+                            .padding(.top, 4)
+                            .accessibilityAddTraits(.isHeader)
+                        ticketCard
+                        ticketOptionsCard
+                    } else {
+                        routeCard
+                        foldedOptionsCard
+                    }
                     if sizeClass != .regular {
                         searchButtons
                     }
@@ -138,19 +155,18 @@ struct ConnectionsView: View {
                         YearReviewBanner(year: year)
                             .transition(.fold)
                     }
-                    UpcomingTripsSection()
-                    if !model.recentSearches.isEmpty {
-                        recentSection
-                    }
-                    HStack(spacing: 10) {
-                        RouteLink(value: ConnectionsRoute.pastTrips) {
-                            Label("Vergangene Fahrten", systemImage: "clock.arrow.circlepath")
-                                .font(.subheadline.weight(.semibold))
-                                .frame(maxWidth: .infinity)
+                    if isTicket {
+                        TripTicketsSection()
+                        moreButtons
+                        if !model.recentSearches.isEmpty {
+                            recentSection
                         }
-                        .buttonStyle(.glass)
-                        .controlSize(.large)
-                        CollectionButton()
+                    } else {
+                        UpcomingTripsSection()
+                        if !model.recentSearches.isEmpty {
+                            recentSection
+                        }
+                        moreButtons
                     }
                 }
                 .padding(.horizontal)
@@ -168,7 +184,7 @@ struct ConnectionsView: View {
             // The disabled button is see-through: hide the cards scrolling under it.
             .scrollEdgeEffectStyle(sizeClass == .regular ? .hard : nil, for: .bottom)
             .onChange(of: productsTapCount) {
-                // Bring the row into view first so the popover has room instead of being squeezed.
+                // Bring the field into view first so the popover has room instead of being squeezed.
                 withAnimation(.snappy) { proxy.scrollTo(Self.productsRowID, anchor: .center) }
                 Task {
                     try? await Task.sleep(for: .milliseconds(350))
@@ -179,7 +195,12 @@ struct ConnectionsView: View {
             .tabBarSafePadding()
             .background { AppBackground() }
             .navigationTitle("Verbindungen")
+            // On the ticket the page's own headline takes the title's place; the title stays for the back button.
+            .toolbarTitleDisplayMode(isTicket ? .inline : .automatic)
             .toolbar {
+                if isTicket {
+                    ToolbarItem(placement: .principal) { Color.clear.frame(width: 1, height: 1) }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Zug suchen", systemImage: "train.side.front.car") { model.showsTrainSearch = true }
                 }
@@ -229,6 +250,9 @@ struct ConnectionsView: View {
         .toolbar(showsJourney ? .hidden : .automatic, for: .tabBar)
     }
 
+    /// The Fahrkarte design lays the search out as a ticket.
+    private var isTicket: Bool { design == .fahrkarte }
+
     /// A journey hides the tab bar on the iPhone; next to the search on the iPad it stays.
     private var showsJourney: Bool {
         guard sizeClass != .regular else { return false }
@@ -236,32 +260,78 @@ struct ConnectionsView: View {
         return false
     }
 
-    // MARK: Route
+    // MARK: Route (Minimal)
 
     private var routeCard: some View {
         Card(padding: 0) {
-            VStack(spacing: 0) {
-                StationInput(label: String(localized: "Start"), placeholder: String(localized: "Von wo?"), systemImage: "circle.circle.fill",
-                             iconColor: .primary, station: $from, focus: $focused, focusValue: .from)
-
-                // The swap button always sits right below Start, so it never drifts onto (and
-                // covers) a via row's own remove button as the card grows with more stops.
-                routeDivider(showAdd: viaRows.isEmpty, showSwap: true)
-
-                ForEach($viaRows) { $row in
-                    ViaRowView(row: $row, focus: $focused, focusValue: .via(row.id)) {
-                        withAnimation(.snappy) { viaRows.removeAll { $0.id == row.id } }
-                    }
-                    routeDivider(showAdd: row.id == viaRows.last?.id, showSwap: false)
-                }
-
-                StationInput(label: String(localized: "Ziel"), placeholder: String(localized: "Wohin?"), systemImage: "mappin.circle.fill",
-                             station: $to, focus: $focused, focusValue: .to)
-            }
-            .clipShape(.rect(cornerRadius: 22, style: .continuous))
+            stopFields(ticket: false)
+                .clipShape(.rect(cornerRadius: 22, style: .continuous))
         }
         .onPreferenceChange(StationSuggestionsShownKey.self) { shown in
             withAnimation(.snappy(duration: 0.25)) { suggestionsShown = shown }
+        }
+    }
+
+    // MARK: Ticket (Fahrkarte)
+
+    /// The route and the time on one ticket, parted by a perforation between two notches.
+    private var ticketCard: some View {
+        VStack(spacing: 0) {
+            routeSection
+                .clipShape(TicketTopShape())
+            TicketPerforation()
+            timeSection
+                .padding(16)
+                .padding(.top, 2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .fontDesign(.rounded)
+        .ticketBackground()
+        .environment(\.cardSurface, Color.ticket)
+        .onPreferenceChange(StationSuggestionsShownKey.self) { shown in
+            withAnimation(.snappy(duration: 0.25)) { suggestionsShown = shown }
+        }
+    }
+
+    private var routeSection: some View {
+        stopFields(ticket: true)
+            .backgroundPreferenceValue(RouteMarkerKey.self) { anchors in
+                // The stops sit on one line, like on a route map; hidden while suggestions push between them.
+                GeometryReader { proxy in
+                    let points = anchors.map { proxy[$0] }
+                    if !suggestionsShown, let top = points.min(by: { $0.y < $1.y }), let bottom = points.max(by: { $0.y < $1.y }) {
+                        Path { path in
+                            path.move(to: top)
+                            path.addLine(to: CGPoint(x: top.x, y: bottom.y))
+                        }
+                        .stroke(Color.primary.opacity(0.15), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity)
+    }
+
+    /// Start, the stops and the destination; on the ticket labelled "Von" and "Nach" in the ticket's type.
+    private func stopFields(ticket: Bool) -> some View {
+        VStack(spacing: 0) {
+            StationInput(label: ticket ? String(localized: "Von") : String(localized: "Start"), placeholder: String(localized: "Von wo?"),
+                         systemImage: "circle.circle.fill", iconColor: .primary, station: $from, focus: $focused, focusValue: .from)
+                .environment(\.ticketStationFields, ticket)
+
+            // The swap button always sits right below Start, so it never drifts onto (and
+            // covers) a via row's own remove button as the card grows with more stops.
+            routeDivider(showAdd: viaRows.isEmpty, showSwap: true)
+
+            ForEach($viaRows) { $row in
+                ViaRowView(row: $row, focus: $focused, focusValue: .via(row.id)) {
+                    withAnimation(.snappy) { viaRows.removeAll { $0.id == row.id } }
+                }
+                routeDivider(showAdd: row.id == viaRows.last?.id, showSwap: false)
+            }
+
+            StationInput(label: ticket ? String(localized: "Nach") : String(localized: "Ziel"), placeholder: String(localized: "Wohin?"),
+                         systemImage: "mappin.circle.fill", station: $to, focus: $focused, focusValue: .to)
+                .environment(\.ticketStationFields, ticket)
         }
     }
 
@@ -275,7 +345,8 @@ struct ConnectionsView: View {
             if !suggestionsShown {
                 if showAdd, viaRows.count < Self.maxViaPoints {
                     HStack {
-                        addViaButton.padding(.leading, 20)
+                        // On the ticket the plus sits on the line between the stops.
+                        addViaButton.padding(.leading, isTicket ? 16 : 20)
                         Spacer()
                     }
                 }
@@ -296,91 +367,194 @@ struct ConnectionsView: View {
                 swapRotation += 180
             }
         } label: {
-            Image(systemName: "arrow.up.arrow.down")
-                .font(.headline)
-                .rotationEffect(.degrees(swapRotation))
-                .frame(width: 44, height: 44)
+            if isTicket {
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(swapRotation))
+                    .frame(width: 34, height: 34)
+                    .background(Circle().fill(Color.ticket))
+                    .overlay(Circle().strokeBorder(Color.hairline, lineWidth: 1))
+                    .frame(width: 44, height: 44)
+                    .contentShape(.circle)
+            } else {
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.headline)
+                    .rotationEffect(.degrees(swapRotation))
+                    .frame(width: 44, height: 44)
+            }
         }
-        .buttonStyle(.glass)
-        .buttonBorderShape(.circle)
+        .modifier(SwapButtonStyle(isTicket: isTicket))
         .padding(.trailing, 14)
         .disabled(from == nil && to == nil)
+        // The ticket's plain button doesn't fade by itself when disabled.
+        .opacity(isTicket && from == nil && to == nil ? 0.5 : 1)
         .accessibilityLabel("Start und Ziel tauschen")
         .transition(.opacity)
     }
 
+    @ViewBuilder
     private var addViaButton: some View {
-        Button {
-            withAnimation(.snappy) {
-                viaRows.append(ViaRow())
+        if isTicket {
+            Button {
+                withAnimation(.snappy) { viaRows.append(ViaRow()) }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "plus")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.brand)
+                        .frame(width: 24, height: 24)
+                        .background(Circle().fill(Color.ticket))
+                        .overlay(Circle().strokeBorder(Color.hairline, lineWidth: 1))
+                    Text("Zwischenhalt")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                // Covers the divider behind the text.
+                .padding(.trailing, 8)
+                .background(Capsule().fill(Color.ticket))
+                .frame(height: 44)
+                .contentShape(.rect)
             }
-        } label: {
-            Image(systemName: "plus")
-                .font(.subheadline.weight(.bold))
-                .frame(width: 28, height: 28)
+            .buttonStyle(.plain)
+            .accessibilityLabel("Zwischenhalt hinzufügen")
+        } else {
+            Button {
+                withAnimation(.snappy) { viaRows.append(ViaRow()) }
+            } label: {
+                Image(systemName: "plus")
+                    .font(.subheadline.weight(.bold))
+                    .frame(width: 28, height: 28)
+            }
+            .pageButtonStyle(.circle)
+            .tint(.brand)
+            .accessibilityLabel("Zwischenhalt hinzufügen")
         }
-        .buttonStyle(.glass)
-        .buttonBorderShape(.circle)
-        .tint(.brand)
-        .accessibilityLabel("Zwischenhalt hinzufügen")
     }
 
     // MARK: Options
 
-    private var optionsCard: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 10) {
-                    Picker("Zeit", selection: $isArrival) {
-                        Label("Abfahrt", systemImage: "arrow.up.right").tag(false)
-                        Label("Ankunft", systemImage: "arrow.down.right").tag(true)
-                    }
-                    .pickerStyle(.segmented)
-                    .fixedSize()
-                    .disabled(!viaRows.isEmpty)
-
-                    Spacer()
-
-                    TimeSelector(date: $date, useNow: $useNow)
+    /// Departure or arrival and the time: the ticket's lower part.
+    private var timeSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                // Via routing only searches by departure, so with stopovers the switch shows that.
+                Picker("Zeit", selection: Binding(get: { isArrival && viaRows.isEmpty }, set: { isArrival = $0 })) {
+                    Label("Abfahrt", systemImage: "arrow.up.right").tag(false)
+                    Label("Ankunft", systemImage: "arrow.down.right").tag(true)
                 }
+                .pickerStyle(.segmented)
+                .fixedSize()
+                .disabled(!viaRows.isEmpty)
 
-                if !viaRows.isEmpty {
-                    Label("Mit Zwischenhalten suchen wir ab der gewählten Abfahrtszeit.", systemImage: "info.circle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Spacer()
 
-                Divider()
+                TimeSelector(date: $date, useNow: $useNow)
+            }
 
-                Toggle(isOn: $onlyValidTicket) {
-                    let ticket = model.settings.ticketType
-                    optionLabel(ticket.filterTitle, subtitle: ticket.filterSubtitle, icon: ticket.symbolName, color: .brand)
-                }
-                .tint(.brand)
-
-                Divider()
-
-                if let title = model.settings.bikeOption.searchTitle {
-                    Toggle(isOn: Bindable(model.settings).searchWithBike) {
-                        optionLabel(title, subtitle: model.settings.bikeOption == .foldingBike
-                                    ? String(localized: "Zeigt, wo dein Klapprad mitkommt") : String(localized: "Zeigt, ob dein Fahrrad mitkommt"),
-                                    icon: "bicycle", color: .brand)
-                    }
-                    .tint(.brand)
-
-                    Divider()
-                }
-
-                transfersPicker
-
-                productsButton
+            if !viaRows.isEmpty {
+                Label("Mit Zwischenhalten suchen wir ab der gewählten Abfahrtszeit.", systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
 
+    /// Fahrkarte: the options in a card of their own below the ticket.
+    private var ticketOptionsCard: some View {
+        Card {
+            optionRows
+        }
+    }
+
+    /// Minimal: departure or arrival and the time, then one row that unfolds the rarely changed options.
+    private var foldedOptionsCard: some View {
+        Card(padding: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                timeSection
+                    .padding(16)
+
+                Divider().padding(.leading, 16)
+
+                optionsToggleRow
+
+                if showsOptions {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Divider()
+                        optionRows
+                    }
+                    .padding([.horizontal, .bottom], 16)
+                    .transition(.opacity)
+                }
+            }
+        }
+    }
+
+    /// The ticket filter, the bike, the transfers and the vehicles.
+    private var optionRows: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Toggle(isOn: $onlyValidTicket) {
+                let ticket = model.settings.ticketType
+                optionLabel(ticket.filterTitle, subtitle: ticket.filterSubtitle, icon: ticket.symbolName, color: .brand)
+            }
+            .tint(.brand)
+
+            Divider()
+
+            if let title = model.settings.bikeOption.searchTitle {
+                Toggle(isOn: Bindable(model.settings).searchWithBike) {
+                    optionLabel(title, subtitle: model.settings.bikeOption == .foldingBike
+                                ? String(localized: "Zeigt, wo dein Klapprad mitkommt") : String(localized: "Zeigt, ob dein Fahrrad mitkommt"),
+                                icon: "bicycle", color: .secondary)
+                }
+                .tint(.brand)
+
+                Divider()
+            }
+
+            transfersPicker
+
+            productsButton
+        }
+    }
+
+    /// The single row that unfolds the options; it names what differs from the defaults.
+    private var optionsToggleRow: some View {
+        Button {
+            withAnimation(.snappy) { showsOptions.toggle() }
+        } label: {
+            HStack {
+                optionLabel(String(localized: "Optionen"), subtitle: optionsSummary ?? String(localized: "Keine Einschränkungen"),
+                            icon: "slider.horizontal.3", color: .secondary)
+                Spacer()
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(showsOptions ? 180 : 0))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint(showsOptions ? String(localized: "Optionen ausblenden") : String(localized: "Optionen einblenden"))
+    }
+
+    /// The options that differ from the defaults, or nil when none do.
+    private var optionsSummary: String? {
+        var parts: [String] = []
+        if onlyValidTicket { parts.append(model.settings.ticketType.shortName) }
+        if model.settings.searchWithBike, let title = model.settings.bikeOption.searchTitle { parts.append(title) }
+        if let maxTransfers {
+            parts.append(maxTransfers == 0 ? String(localized: "Direkt") : String(localized: "Max. \(maxTransfers) Umstiege"))
+        }
+        if perLeg || products != all { parts.append(productSummary) }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
     private var transfersPicker: some View {
         VStack(alignment: .leading, spacing: 8) {
-            optionLabel(String(localized: "Max. Umstiege"), subtitle: String(localized: "Weniger Umsteigen, evtl. länger unterwegs"), icon: "arrow.triangle.swap", color: .brand)
+            optionLabel(String(localized: "Max. Umstiege"), subtitle: String(localized: "Weniger Umsteigen, evtl. länger unterwegs"), icon: "arrow.triangle.swap", color: .secondary)
             MaxTransfersPicker(maxTransfers: $maxTransfers)
         }
     }
@@ -391,7 +565,7 @@ struct ConnectionsView: View {
         } label: {
             HStack {
                 optionLabel(String(localized: "Verkehrsmittel"), subtitle: productSummary,
-                            icon: "train.side.front.car", color: .brand)
+                            icon: "train.side.front.car", color: .secondary)
                 Spacer()
                 Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
             }
@@ -457,7 +631,7 @@ struct ConnectionsView: View {
                     ProductChips(products: $products)
                 }
                 Button("Fertig") { showProductsPopover = false }
-                    .buttonStyle(.glassProminent)
+                    .pageButtonStyle(.prominent)
                     .tint(.brand)
                     .frame(maxWidth: .infinity)
         }
@@ -468,7 +642,7 @@ struct ConnectionsView: View {
         HStack(spacing: 12) {
             IconTile(systemImage: icon, color: color, size: 32)
             VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.subheadline.weight(.semibold))
+                Text(title).font(.subheadline.weight(isTicket ? .semibold : .medium))
                 Text(subtitle).font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -477,7 +651,7 @@ struct ConnectionsView: View {
     // MARK: Search
 
     private var searchButtons: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: isTicket ? 10 : 8) {
             searchButton
             AddTicketButton()
         }
@@ -490,19 +664,39 @@ struct ConnectionsView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 6)
         }
-        .buttonStyle(.glassProminent)
+        .pageButtonStyle(.prominent)
         .tint(.brand)
         .controlSize(.large)
         .disabled(from == nil || to == nil || hasEmptyProductSelection || viaRows.contains { $0.station == nil })
     }
 
+    /// The recent searches as plain rows, folded away by default; a tap fills in start and destination.
     private var recentSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            SectionHeader(title: String(localized: "Zuletzt gesucht"), systemImage: "clock.arrow.circlepath")
+            Button {
+                withAnimation(.snappy) { recentExpanded.toggle() }
+            } label: {
+                HStack(spacing: 8) {
+                    SectionHeader(title: String(localized: "Zuletzt gesucht"), systemImage: "clock.arrow.circlepath",
+                                  trailing: "\(model.recentSearches.count)")
+                    Image(systemName: "chevron.down")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(recentExpanded ? 0 : -90))
+                        .padding(.top, isTicket ? 8 : 0)
+                        .padding(.trailing, 4)
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityValue(recentExpanded ? String(localized: "Ausgeklappt") : String(localized: "Eingeklappt"))
+
+            if recentExpanded {
             Card(padding: 0) {
                 VStack(spacing: 0) {
                     ForEach(Array(model.recentSearches.enumerated()), id: \.element.id) { index, recent in
-                        if index > 0 { Divider().padding(.leading, 60) }
+                        if index > 0 { Divider().padding(.leading, isTicket ? 16 : 58) }
                         Button {
                             withAnimation {
                                 from = recent.from
@@ -510,23 +704,7 @@ struct ConnectionsView: View {
                                 viaRows = []
                             }
                         } label: {
-                            HStack(spacing: 14) {
-                                IconTile(systemImage: "arrow.triangle.swap", color: .secondary.opacity(0.6), size: 30)
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(recent.from.displayName).font(.subheadline.weight(.semibold)).lineLimit(1)
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "arrow.turn.down.right").font(.caption2)
-                                        Text(recent.to.displayName).lineLimit(1)
-                                    }
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
-                            .contentShape(.rect)
+                            recentRow(recent)
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
@@ -534,9 +712,63 @@ struct ConnectionsView: View {
                                 model.recentSearches.removeAll { $0.id == recent.id }
                             }
                         }
+                        .accessibilityLabel("\(recent.from.displayName) nach \(recent.to.displayName)")
                     }
                 }
             }
+            .transition(.opacity)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func recentRow(_ recent: RecentSearch) -> some View {
+        if isTicket {
+            HStack(spacing: 8) {
+                Text("\(recent.from.displayName) → \(recent.to.displayName)")
+                    .font(.subheadline.weight(.semibold))
+                    .fontDesign(.rounded)
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+                Image(systemName: "arrow.up.left")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+            .contentShape(.rect)
+        } else {
+            HStack(spacing: 12) {
+                IconTile(systemImage: "arrow.triangle.swap", color: .secondary, size: 30)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(recent.from.displayName).font(.subheadline.weight(.medium)).lineLimit(1)
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.turn.down.right").font(.caption2)
+                        Text(recent.to.displayName).lineLimit(1)
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .contentShape(.rect)
+        }
+    }
+
+    /// Past trips and the collection.
+    private var moreButtons: some View {
+        HStack(spacing: isTicket ? 10 : 8) {
+            RouteLink(value: ConnectionsRoute.pastTrips) {
+                Label("Vergangene Fahrten", systemImage: "clock.arrow.circlepath")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .pageButtonStyle()
+            .controlSize(.large)
+            CollectionButton()
         }
     }
 
@@ -550,6 +782,19 @@ struct ConnectionsView: View {
                                      isArrival: via.isEmpty ? isArrival : false, onlyValidTicket: onlyValidTicket,
                                      products: perLeg ? legProducts[Self.startLegID] ?? all : products,
                                      maxTransfers: maxTransfers, withBike: model.settings.searchWithBike))]
+    }
+}
+
+/// The ticket's swap button draws its own circle; Minimal's is the page's round button.
+private struct SwapButtonStyle: ViewModifier {
+    let isTicket: Bool
+
+    func body(content: Content) -> some View {
+        if isTicket {
+            content.buttonStyle(.plain)
+        } else {
+            content.pageButtonStyle(.circle)
+        }
     }
 }
 
