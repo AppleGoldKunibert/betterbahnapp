@@ -617,7 +617,7 @@ private struct MiniRoute: View {
 
 /// One half of the ticket: rounded outer corners and, where the halves meet, a quarter of each side
 /// notch. `outlineOnly` leaves out the edge to the other half, for the outline.
-private struct TicketHalf: Shape {
+nonisolated private struct TicketHalf: Shape {
     static let notchRadius: CGFloat = 10
     var notchesAtTop = false
     var outlineOnly = false
@@ -643,7 +643,7 @@ private struct TicketHalf: Shape {
 }
 
 /// The ticket's perforation: a line along the middle of its frame, stroked dashed.
-private struct Perforation: Shape {
+nonisolated private struct Perforation: Shape {
     func path(in rect: CGRect) -> Path {
         Path { path in
             path.move(to: CGPoint(x: rect.minX, y: rect.midY))
