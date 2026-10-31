@@ -376,50 +376,43 @@ struct ConnectionsView: View {
 
     // MARK: Options
 
-    /// The options as ticket fields, two side by side (one below the other with very large text). A tap on
-    /// a field opens its menu or popover.
+    /// The options: the time, transfers and vehicles as tiles (one below the other with very large text) that
+    /// open their menu or popover, then the ticket and bike filters as switches.
     private var optionsSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 12) {
             if dynamicTypeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 8) {
                     timeField
-                    Divider()
                     transfersField
-                    Divider()
                     productsField
-                    Divider()
-                    ticketField
-                    if model.settings.bikeOption.searchTitle != nil {
-                        Divider()
-                        bikeField
-                    }
                 }
             } else {
-                Grid(alignment: .topLeading, horizontalSpacing: 16, verticalSpacing: 0) {
+                Grid(alignment: .topLeading, horizontalSpacing: 8, verticalSpacing: 8) {
                     GridRow {
                         timeField
                         transfersField
                     }
-                    Divider()
                     GridRow {
                         productsField
-                        ticketField
-                    }
-                    if model.settings.bikeOption.searchTitle != nil {
-                        Divider()
-                        GridRow {
-                            bikeField
-                                .gridCellColumns(2)
-                        }
+                            .gridCellColumns(2)
                     }
                 }
             }
 
             if !viaRows.isEmpty {
                 viaTimeNote
-                    .padding(.bottom, 8)
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                Divider()
+                ticketToggle
+                if model.settings.bikeOption.searchTitle != nil {
+                    Divider()
+                    bikeToggle
+                }
             }
         }
+        .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -436,20 +429,20 @@ struct ConnectionsView: View {
         useNow ? String(localized: "Jetzt") : TimeSelector.label(for: date)
     }
 
-    /// Departure or arrival and the time; the popover holds both, the clock next to a picked time resets it.
+    /// Departure or arrival and the time; the popover holds both, the clock in a picked time's tile resets it.
     private var timeField: some View {
         let title = searchesByArrival ? String(localized: "Ankunft") : String(localized: "Abfahrt")
-        return HStack(spacing: 0) {
-            Button {
-                showTimePicker = true
-            } label: {
-                TicketFieldLabel(title: title, value: timeValue, changed: !useNow || searchesByArrival)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(title)
-            .accessibilityValue(timeValue)
-            .popover(isPresented: $showTimePicker) { timePopover }
-
+        return Button {
+            showTimePicker = true
+        } label: {
+            TicketFieldLabel(title: title, value: timeValue, changed: !useNow || searchesByArrival,
+                             indicator: useNow ? "chevron.down" : nil)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityValue(timeValue)
+        .popover(isPresented: $showTimePicker) { timePopover }
+        .overlay(alignment: .trailing) {
             if !useNow {
                 Button {
                     withAnimation(.snappy) {
@@ -460,7 +453,7 @@ struct ConnectionsView: View {
                     Image(systemName: "clock.arrow.circlepath")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.secondary)
-                        .frame(width: 32, height: 44)
+                        .frame(width: 40, height: 44)
                         .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
@@ -472,7 +465,8 @@ struct ConnectionsView: View {
 
     private var timePopover: some View {
         VStack(spacing: 12) {
-            Picker("Zeit", selection: $isArrival) {
+            // With stopovers it shows departure, like the field.
+            Picker("Zeit", selection: Binding(get: { searchesByArrival }, set: { isArrival = $0 })) {
                 Label("Abfahrt", systemImage: "arrow.up.right").tag(false)
                 Label("Ankunft", systemImage: "arrow.down.right").tag(true)
             }
@@ -541,7 +535,7 @@ struct ConnectionsView: View {
             productsTapCount += 1
         } label: {
             TicketFieldLabel(title: String(localized: "Verkehrsmittel"), value: productSummary,
-                             changed: perLeg || products != all)
+                             changed: perLeg || products != all, indicator: "chevron.down")
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Verkehrsmittel")
@@ -550,44 +544,30 @@ struct ConnectionsView: View {
         .popover(isPresented: $showProductsPopover) { productsPopover }
     }
 
-    private var ticketField: some View {
-        let ticket = model.settings.ticketType
-        let value = onlyValidTicket ? ticket.filterTitle : String(localized: "Alle Verbindungen")
-        return Menu {
-            Toggle(isOn: $onlyValidTicket) {
-                Text(ticket.filterTitle)
-                Text(ticket.filterSubtitle)
-            }
-        } label: {
-            TicketFieldLabel(title: String(localized: "Ticket"), value: value, changed: onlyValidTicket)
+    private var ticketToggle: some View {
+        Toggle(isOn: $onlyValidTicket) {
+            let ticket = model.settings.ticketType
+            toggleLabel(ticket.filterTitle, subtitle: ticket.filterSubtitle)
         }
-        .menuStyle(.button)
-        .menuIndicator(.hidden)
-        .buttonStyle(.plain)
-        .accessibilityLabel("Ticket")
-        .accessibilityValue(value)
+        .tint(.brand)
     }
 
     @ViewBuilder
-    private var bikeField: some View {
+    private var bikeToggle: some View {
         let option = model.settings.bikeOption
         if let title = option.searchTitle {
-            let withBike = model.settings.searchWithBike
-            let value = withBike ? String(localized: "Dabei") : String(localized: "Nicht dabei")
-            Menu {
-                Toggle(isOn: Bindable(model.settings).searchWithBike) {
-                    Text(title)
-                    Text(option == .foldingBike
-                         ? String(localized: "Zeigt, wo dein Klapprad mitkommt") : String(localized: "Zeigt, ob dein Fahrrad mitkommt"))
-                }
-            } label: {
-                TicketFieldLabel(title: option.displayName, value: value, changed: withBike)
+            Toggle(isOn: Bindable(model.settings).searchWithBike) {
+                toggleLabel(title, subtitle: option == .foldingBike
+                            ? String(localized: "Zeigt, wo dein Klapprad mitkommt") : String(localized: "Zeigt, ob dein Fahrrad mitkommt"))
             }
-            .menuStyle(.button)
-            .menuIndicator(.hidden)
-            .buttonStyle(.plain)
-            .accessibilityLabel(option.displayName)
-            .accessibilityValue(value)
+            .tint(.brand)
+        }
+    }
+
+    private func toggleLabel(_ title: String, subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title).font(.subheadline.weight(.semibold))
+            Text(subtitle).font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -676,13 +656,14 @@ struct ConnectionsView: View {
         .disabled(from == nil || to == nil || hasEmptyProductSelection || viaRows.contains { $0.station == nil })
     }
 
-    /// The recent searches as chips in one row; a tap fills in start and destination.
+    /// The recent searches as plain rows; a tap fills in start and destination.
     private var recentSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionHeader(title: String(localized: "Zuletzt gesucht"), systemImage: "clock.arrow.circlepath")
-            ScrollView(.horizontal) {
-                HStack(spacing: 8) {
-                    ForEach(model.recentSearches, id: \.id) { recent in
+            Card(padding: 0) {
+                VStack(spacing: 0) {
+                    ForEach(Array(model.recentSearches.enumerated()), id: \.element.id) { index, recent in
+                        if index > 0 { Divider().padding(.leading, 16) }
                         Button {
                             withAnimation {
                                 from = recent.from
@@ -690,24 +671,21 @@ struct ConnectionsView: View {
                                 viaRows = []
                             }
                         } label: {
-                            HStack(spacing: 6) {
-                                Text(recent.from.displayName)
-                                Image(systemName: "arrow.right")
-                                    .font(.caption2.weight(.bold))
+                            HStack(spacing: 8) {
+                                Text("\(recent.from.displayName) → \(recent.to.displayName)")
+                                    .font(.subheadline.weight(.semibold))
+                                    .fontDesign(.rounded)
+                                    .multilineTextAlignment(.leading)
+                                Spacer(minLength: 0)
+                                Image(systemName: "arrow.up.left")
+                                    .font(.caption.weight(.semibold))
                                     .foregroundStyle(.tertiary)
-                                Text(recent.to.displayName)
                             }
-                            .font(.subheadline.weight(.semibold))
-                            .fontDesign(.rounded)
-                            .lineLimit(1)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 9)
-                            .background(Color.card, in: .capsule)
-                            .overlay(Capsule().strokeBorder(Color.hairline, lineWidth: 1))
-                            .contentShape(.capsule)
+                            .padding(.horizontal, 16)
+                            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                            .contentShape(.rect)
                         }
                         .buttonStyle(.plain)
-                        .contentShape(.contextMenuPreview, Capsule())
                         .contextMenu {
                             Button("Entfernen", systemImage: "trash", role: .destructive) {
                                 model.recentSearches.removeAll { $0.id == recent.id }
@@ -716,12 +694,7 @@ struct ConnectionsView: View {
                         .accessibilityLabel("\(recent.from.displayName) nach \(recent.to.displayName)")
                     }
                 }
-                .padding(.vertical, 1)
             }
-            .scrollIndicators(.hidden)
-            .contentMargins(.horizontal, 16, for: .scrollContent)
-            // Runs to the screen's edges.
-            .padding(.horizontal, -16)
         }
     }
 
