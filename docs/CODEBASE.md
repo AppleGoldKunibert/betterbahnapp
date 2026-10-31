@@ -70,7 +70,7 @@ in `project.pbxproj`: new files join their target automatically.
   a map shows (Kit `TrainPositionRefresh`: 15 s, 60 s on mobile data/Low Data Mode, "Aus" loads once); delay
   notifications, geometry/heatmap caches, Live Activity selection. Defines `SavedJourney`, `PlanVersion`,
   `ImportedTrip`, `RecentSearch`, `Storage`, `AppSettings`, `ConnectionNotifier`. `SavedJourney.formations` keeps
-  the Tz/Taufname seen per leg (`Leg.formationKey`, `rememberFormation`, used by `TrainFormationLabel`/`TrainSeriesTag`).
+  the Tz/Taufname seen per leg (`Leg.formationKey`, `rememberFormation`, used by `TrainFormationLabel`/`TrainSeriesTag`). "Wendet aus ICE 567 · Wendet zu ICE 1501" (#501, `TrainTurnaroundLabel` under the Tz line, `AppModel.turnaround`, only within 36 h of the ride): Kit `BahnExpertClient.turnaround` asks bahn.expert's `coachSequence/wenden` with the first open coach's vehicle number of each own trainset (`TrainTurnaround`).
 - **Persistence:** `Storage.save/load(key:)` → `Application Support/BetterBahn/<key>.json` (migrates old
   UserDefaults); `AppSettings` uses UserDefaults. Saved data must stay decodable across versions (e.g.
   `DataSource.dbRest` kept only for decoding).

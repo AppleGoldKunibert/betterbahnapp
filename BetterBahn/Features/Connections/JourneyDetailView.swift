@@ -755,6 +755,7 @@ struct LegCard: View {
                             Text("Richtung \(direction)").font(.caption).foregroundStyle(.secondary).fullTextPopup(String(localized: "Richtung \(direction)"))
                         }
                         TrainFormationLabel(leg: leg)
+                        TrainTurnaroundLabel(line: leg.line, date: leg.departure.planned)
                     }
                     Spacer()
                     HStack(spacing: 10) {
