@@ -32,21 +32,24 @@ extension Color {
     /// Card surface: white in light mode, elevated gray in dark mode.
     static let card = Color(.secondarySystemGroupedBackground)
     /// Page background of the Fahrkarte design: a warm off-white, near-black in dark mode.
-    static let canvas = Color(UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.05, green: 0.05, blue: 0.06, alpha: 1)
-            : UIColor(red: 0.96, green: 0.955, blue: 0.945, alpha: 1)
-    })
+    static let canvas = Color(dynamicUIColor(light: RGBColor(red: 0.96, green: 0.955, blue: 0.945),
+                                             dark: RGBColor(red: 0.05, green: 0.05, blue: 0.06)))
     /// Thin card outline.
     static let hairline = Color.primary.opacity(0.08)
     /// Surface of the ticket-style cards: white (dark gray in dark mode) tinted a little towards the accent.
     static var ticket: Color {
         let accent = Theme.shared.accent.color
-        return Color(UIColor { traits in
-            let base: Double = traits.userInterfaceStyle == .dark ? 0.11 : 1
-            let tinted = RGBColor(red: base, green: base, blue: base).mixed(with: accent, by: 0.035)
-            return UIColor(red: tinted.red, green: tinted.green, blue: tinted.blue, alpha: 1)
-        })
+        return Color(dynamicUIColor(light: RGBColor(red: 1, green: 1, blue: 1).mixed(with: accent, by: 0.035),
+                                    dark: RGBColor(red: 0.11, green: 0.11, blue: 0.11).mixed(with: accent, by: 0.035)))
+    }
+}
+
+/// A color for light and dark mode. Nonisolated on purpose: UIKit may resolve it off the main thread, where a
+/// provider closure inferred as main-actor isolated would crash.
+nonisolated func dynamicUIColor(light: RGBColor, dark: RGBColor) -> UIColor {
+    UIColor { @Sendable traits in
+        let color = traits.userInterfaceStyle == .dark ? dark : light
+        return UIColor(red: color.red, green: color.green, blue: color.blue, alpha: 1)
     }
 }
 

@@ -17,7 +17,7 @@ final class Theme {
         didSet { UserDefaults.standard.set(accent.storageValue, forKey: "accentColor") }
     }
 
-    private static let log = Logger(subsystem: "de.goldkunibert.BetterBahn", category: "theme")
+    nonisolated private static let log = Logger(subsystem: "de.goldkunibert.BetterBahn", category: "theme")
 
     private init() {
         let defaults = UserDefaults.standard
@@ -31,11 +31,11 @@ final class Theme {
         let name = accent.iconPreset.iconName
         let app = UIApplication.shared
         guard app.supportsAlternateIcons, app.alternateIconName != name else { return }
-        Task {
-            do {
-                try await app.setAlternateIconName(name)
-            } catch {
-                Self.log.error("App icon not changed: \(String(describing: error), privacy: .public)")
+        // iOS calls back on a background queue: a closure inferred as main-actor isolated (or the async variant)
+        // trips Swift's isolation check there and crashes the app.
+        app.setAlternateIconName(name) { @Sendable error in
+            if let error {
+                Theme.log.error("App icon not changed: \(String(describing: error), privacy: .public)")
             }
         }
     }
