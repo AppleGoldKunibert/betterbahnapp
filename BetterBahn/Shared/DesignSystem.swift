@@ -17,8 +17,11 @@ extension UIImage {
 
 // MARK: - Tokens
 
+/// The accent color's components: the single source `Color.brand` and the colors derived from it are built from.
+nonisolated private let brandComponents: (red: CGFloat, green: CGFloat, blue: CGFloat) = (0.86, 0.09, 0.19)
+
 extension Color {
-    static let brand = Color(red: 0.86, green: 0.09, blue: 0.19)
+    static let brand = Color(red: brandComponents.red, green: brandComponents.green, blue: brandComponents.blue)
     static let brandDeep = Color(red: 0.55, green: 0.03, blue: 0.14)
     static let punctual = Color(red: 0.13, green: 0.62, blue: 0.35)
     static let slightDelay = Color(red: 0.95, green: 0.55, blue: 0.05)
@@ -33,11 +36,14 @@ extension Color {
     })
     /// Thin outline of flat cards.
     static let hairline = Color.primary.opacity(0.08)
-    /// Surface of the ticket-style route card: white with a faint warm red, a warm dark gray in dark mode.
+    /// Surface of the ticket-style cards, accent-dependent: white (dark gray in dark mode) tinted a little
+    /// towards the accent color, so another accent tints the tickets alike.
     static let ticket = Color(UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.135, green: 0.11, blue: 0.11, alpha: 1)
-            : UIColor(red: 1, green: 0.975, blue: 0.968, alpha: 1)
+        let base: CGFloat = traits.userInterfaceStyle == .dark ? 0.11 : 1
+        let share: CGFloat = 0.035
+        return UIColor(red: base + (brandComponents.red - base) * share,
+                       green: base + (brandComponents.green - base) * share,
+                       blue: base + (brandComponents.blue - base) * share, alpha: 1)
     })
 }
 
