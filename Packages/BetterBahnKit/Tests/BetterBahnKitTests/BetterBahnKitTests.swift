@@ -7038,6 +7038,30 @@ private final class TimetablesPlanProtocol: URLProtocol, @unchecked Sendable {
     override func stopLoading() {}
 }
 
+@Suite struct TimetablesPlanHoursTests {
+    // 2027-01-15 13:50 UTC == 14:50 Europe/Berlin (CET).
+    let from = Date(timeIntervalSince1970: 1_800_000_000 + 6 * 3600 - 600)
+
+    func berlinHours(_ dates: [Date]) -> [Int] {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/Berlin")!
+        return dates.map { calendar.component(.hour, from: $0) }
+    }
+
+    @Test func shortWindowIncludesTheNextHourBucket() {
+        #expect(berlinHours(TimetablesClient.planHours(from: from, duration: 30)) == [14, 15])
+    }
+
+    @Test func longWindowIncludesTheBucketOfItsEnd() {
+        #expect(berlinHours(TimetablesClient.planHours(from: from, duration: 480)) == Array(14...22))
+    }
+
+    @Test func fullHourWindowDoesNotAddAnExtraBucket() {
+        let onTheHour = from.addingTimeInterval(600)
+        #expect(berlinHours(TimetablesClient.planHours(from: onTheHour, duration: 60)) == [15])
+    }
+}
+
 @Suite struct TimetablesCategoryTests {
     @Test func splitsCategoryAndNumberWhenSeparatedBySpace() {
         #expect(TimetablesClient.category(from: "ICE 571") == "ICE")
