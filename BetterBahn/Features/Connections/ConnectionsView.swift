@@ -33,17 +33,20 @@ nonisolated struct ConnectionSearch: Hashable, Codable {
     /// "Mit Fahrrad" (#398): legs say whether a bike can come along, saving warns about bike reservations.
     /// The results aren't filtered by it, since the feeds don't know which German trains take bikes.
     var withBike = false
+    /// Another station that would do as well (#516): its connections show in the same list, marked.
+    var alternativeTo: Station?
 
     var isFiltered: Bool { products != Set(Product.allCases) || maxTransfers != nil }
 
     /// Stored under the old "onlyBC100" key so journeys saved before the Deutschlandticket filter still load.
     enum CodingKeys: String, CodingKey {
-        case from, to, via, date, isArrival, products, maxTransfers, hasProductGroups, withBike
+        case from, to, via, date, isArrival, products, maxTransfers, hasProductGroups, withBike, alternativeTo
         case onlyValidTicket = "onlyBC100"
     }
 
     init(from: Station, to: Station, via: [ViaWaypoint] = [], date: Date, isArrival: Bool, onlyValidTicket: Bool,
-         products: Set<Product> = Set(Product.allCases), maxTransfers: Int? = nil, withBike: Bool = false) {
+         products: Set<Product> = Set(Product.allCases), maxTransfers: Int? = nil, withBike: Bool = false,
+         alternativeTo: Station? = nil) {
         self.from = from
         self.to = to
         self.via = via
@@ -53,6 +56,16 @@ nonisolated struct ConnectionSearch: Hashable, Codable {
         self.products = products
         self.maxTransfers = maxTransfers
         self.withBike = withBike
+        self.alternativeTo = alternativeTo
+    }
+
+    /// The same search to the alternative station only, for its connections' journey pages.
+    var towardsAlternative: ConnectionSearch? {
+        guard let alternativeTo else { return nil }
+        var search = self
+        search.to = alternativeTo
+        search.alternativeTo = nil
+        return search
     }
 
     init(from decoder: Decoder) throws {
@@ -65,6 +78,7 @@ nonisolated struct ConnectionSearch: Hashable, Codable {
         onlyValidTicket = try container.decode(Bool.self, forKey: .onlyValidTicket)
         maxTransfers = try container.decodeIfPresent(Int.self, forKey: .maxTransfers)
         withBike = try container.decodeIfPresent(Bool.self, forKey: .withBike) ?? false
+        alternativeTo = try container.decodeIfPresent(Station.self, forKey: .alternativeTo)
         let stored = try container.decodeIfPresent(Set<Product>.self, forKey: .products) ?? Set(Product.allCases)
         // Searches saved before night trains and IR/FLX were groups of their own lack the marker.
         let isCurrent = try container.decodeIfPresent(Bool.self, forKey: .hasProductGroups) == true
@@ -82,6 +96,7 @@ nonisolated struct ConnectionSearch: Hashable, Codable {
         try container.encode(products, forKey: .products)
         try container.encodeIfPresent(maxTransfers, forKey: .maxTransfers)
         try container.encode(withBike, forKey: .withBike)
+        try container.encodeIfPresent(alternativeTo, forKey: .alternativeTo)
         try container.encode(true, forKey: .hasProductGroups)
     }
 }
@@ -91,6 +106,9 @@ struct ConnectionsView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var from: Station?
     @State private var to: Station?
+    /// An alternative destination (#516), only while its field is open.
+    @State private var alternative: Station?
+    @State private var showsAlternative = false
     @State private var viaRows: [ViaRow] = []
     @State private var date = Date.now
     @State private var useNow = true
@@ -119,7 +137,7 @@ struct ConnectionsView: View {
     private static let maxViaPoints = 4
 
     enum Field: Hashable {
-        case from, to, via(UUID)
+        case from, to, alternative, via(UUID)
     }
 
     var body: some View {
@@ -198,6 +216,8 @@ struct ConnectionsView: View {
                 from = search.from
                 to = search.to
                 viaRows = []
+                alternative = search.alternativeTo
+                showsAlternative = search.alternativeTo != nil
                 model.remember(from: search.from, to: search.to)
                 path = [.search(search)]
                 model.searchToOpen = nil
@@ -253,11 +273,63 @@ struct ConnectionsView: View {
 
                 StationInput(label: String(localized: "Ziel"), placeholder: String(localized: "Wohin?"), systemImage: "mappin.circle.fill",
                              station: $to, focus: $focused, focusValue: .to)
+
+                alternativeRow
             }
             .clipShape(.rect(cornerRadius: 22, style: .continuous))
         }
         .onPreferenceChange(StationSuggestionsShownKey.self) { shown in
             withAnimation(.snappy(duration: 0.25)) { suggestionsShown = shown }
+        }
+    }
+
+    /// The optional alternative destination below Ziel (#516): a small button, then a field of its own.
+    @ViewBuilder private var alternativeRow: some View {
+        if showsAlternative {
+            Divider().padding(.leading, 54)
+            StationInput(label: String(localized: "Oder nach"), placeholder: String(localized: "Anderer Bahnhof"),
+                         systemImage: "mappin.and.ellipse", iconColor: .secondary,
+                         station: $alternative, focus: $focused, focusValue: .alternative)
+            if !suggestionsShown {
+                HStack {
+                    Text("Verbindungen zu beiden Zielen erscheinen in einer Liste.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        withAnimation(.snappy) {
+                            showsAlternative = false
+                            alternative = nil
+                        }
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.caption.weight(.semibold))
+                            .frame(width: 44, height: 44)
+                            .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Alternatives Ziel entfernen")
+                }
+                .padding(.leading, 54)
+                .padding(.trailing, 6)
+                .padding(.top, -12)
+            }
+        } else if !suggestionsShown {
+            Button {
+                withAnimation(.snappy) { showsAlternative = true }
+                focused = .alternative
+            } label: {
+                Label("Alternatives Ziel", systemImage: "plus")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.brand)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, 54)
+            .padding(.top, -8)
         }
     }
 
@@ -536,6 +608,12 @@ struct ConnectionsView: View {
         }
     }
 
+    /// The alternative destination if it is set and differs from the destination.
+    private var alternativeDestination: Station? {
+        guard showsAlternative, let alternative, let to, !alternative.isSamePlace(as: to) else { return nil }
+        return alternative
+    }
+
     private func search() {
         guard let from, let to else { return }
         let via = viaRows.compactMap { row in row.station.map { ViaWaypoint(station: $0, minStayMinutes: row.minStayMinutes, products: perLeg ? legProducts[row.id] ?? all : nil) } }
@@ -545,7 +623,8 @@ struct ConnectionsView: View {
         path = [.search(ConnectionSearch(from: from, to: to, via: via, date: useNow ? .now : date,
                                      isArrival: via.isEmpty ? isArrival : false, onlyValidTicket: onlyValidTicket,
                                      products: perLeg ? legProducts[Self.startLegID] ?? all : products,
-                                     maxTransfers: maxTransfers, withBike: model.settings.searchWithBike))]
+                                     maxTransfers: maxTransfers, withBike: model.settings.searchWithBike,
+                                     alternativeTo: alternativeDestination))]
     }
 }
 

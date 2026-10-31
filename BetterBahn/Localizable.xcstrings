@@ -11,6 +11,76 @@
         }
       }
     },
+    "Alternatives Ziel" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alternative destination"
+          }
+        }
+      }
+    },
+    "Alternatives Ziel entfernen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove alternative destination"
+          }
+        }
+      }
+    },
+    "Anderer Bahnhof" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Another station"
+          }
+        }
+      }
+    },
+    "Nach %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "To %@"
+          }
+        }
+      }
+    },
+    "oder %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "or %@"
+          }
+        }
+      }
+    },
+    "Oder nach" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Or to"
+          }
+        }
+      }
+    },
+    "Verbindungen zu beiden Zielen erscheinen in einer Liste." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connections to both destinations appear in one list."
+          }
+        }
+      }
+    },
     "·" : {
       "localizations" : {
         "en" : {

@@ -120,7 +120,11 @@ in `project.pbxproj`: new files join their target automatically.
   `AppDependencyManager`) and removes what's gone (IDs in UserDefaults `spotlightIDs`). Tapping opens the link via
   the entity's `OpenIntent` (`AppModel.linkToOpen`) or the `CSSearchableItemActionType` activity.
 - `Features/Connections/` – `ConnectionsView`, `ConnectionSearch`, `RouteOptionsEditor` (vias, products, max
-  transfers), `JourneyResultsView` + `JourneyCard`, `TrainNumberSheet` ("Bestimmten Zug wählen", #225: trains fitting
+  transfers), `JourneyResultsView` + `JourneyCard` (alternative destination, #516: "Alternatives Ziel" below Ziel sets
+  `ConnectionSearch.alternativeTo`, not remembered; the results view loads and pages both destinations side by side
+  and shows them as one list via Kit `AlternativeDestination.merging` (by departure; a connection is dropped when one
+  to the other station rides the same trains and arrives no later), cards to the alternative say "Nach …" and open
+  with `towardsAlternative`; train requirements only plan to the destination), `TrainNumberSheet` ("Bestimmten Zug wählen", #225: trains fitting
   the input via Kit `TrainCandidateFinder`; picking one shows its stops in `TripContent` with boarding/exit preselected
   and pins that run; "Ein- und Ausstieg selbst angeben"), `JourneyDetailView` (+ `LegCard`, `TransferRow`,
   alternatives sheets; below the legs `CO2SavingButton` "−42 kg CO₂" → `CO2Sheet`, #386, from Kit `CO2Comparison`

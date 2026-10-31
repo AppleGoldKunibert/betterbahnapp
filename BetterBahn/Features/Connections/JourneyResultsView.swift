@@ -9,11 +9,17 @@ struct JourneyResultsView: View {
     @State private var journeys: [Journey] = []
     @State private var earlierCursor: String?
     @State private var laterCursor: String?
+    /// The connections to the alternative destination (#516), paged on their own.
+    @State private var alternativeJourneys: [Journey] = []
+    @State private var alternativeEarlierCursor: String?
+    @State private var alternativeLaterCursor: String?
     @State private var hiddenCount = 0
     @State private var source: DataSource?
     @State private var isLoading = false
     @State private var loadingMore = false
     @State private var error: Error?
+    /// Loading the alternative destination's connections failed; the others still show.
+    @State private var alternativeError: Error?
     @State private var showTrainSheet = false
     @State private var showTimePicker = false
     /// Trains the route has to use, in ride order. Adding another one keeps the existing ones.
@@ -32,26 +38,32 @@ struct JourneyResultsView: View {
         _searchDate = State(initialValue: search.date)
     }
 
+    /// The connections to the destination and to the alternative one in a single list, by departure.
+    private var results: [Journey] {
+        guard search.alternativeTo != nil else { return journeys }
+        return AlternativeDestination.merging(journeys, alternative: alternativeJourneys)
+    }
+
     /// Only routes that fulfil every train requirement are shown once one is set.
     private var visibleJourneys: [Journey] {
         guard requirements.isEmpty else { return (plan?.journeys ?? []).removingDuplicateIDs() }
-        return ticketJourneys.isEmpty ? journeys : ticketJourneys
+        return ticketJourneys.isEmpty ? results : ticketJourneys
     }
 
     /// With the ticket filter on, the connections the ticket covers; all of them without it.
     private var ticketJourneys: [Journey] {
-        search.onlyValidTicket ? journeys.filter(model.ticketFilter.isValid) : journeys
+        search.onlyValidTicket ? results.filter(model.ticketFilter.isValid) : results
     }
 
     /// The ticket covers none of the connections, they only cross a border: shown with a warning.
     private var showsBorderFallback: Bool {
-        requirements.isEmpty && search.onlyValidTicket && ticketJourneys.isEmpty && !journeys.isEmpty
+        requirements.isEmpty && search.onlyValidTicket && ticketJourneys.isEmpty && !results.isEmpty
     }
 
     /// The warning when the ticket covers none of the connections: they are abroad entirely, or only reach the border.
     private var borderFallbackText: String {
         let filter = model.ticketFilter
-        guard journeys.allSatisfy(filter.isEntirelyAbroad) else {
+        guard results.allSatisfy(filter.isEntirelyAbroad) else {
             switch model.settings.ticketType {
             case .bahnCard100: return String(localized: "Diese Verbindungen führen ins Ausland. Mit der BC100 kommst du nur bis zur Grenze.")
             case .deutschlandticket: return String(localized: "Diese Verbindungen führen ins Ausland. Mit dem D-Ticket kommst du nur bis zur Grenze.")
@@ -80,7 +92,7 @@ struct JourneyResultsView: View {
             LazyVStack(spacing: 12) {
                 header
 
-                if let error {
+                if let error = error ?? alternativeError {
                     ErrorBanner(error: error)
                 }
 
@@ -124,16 +136,18 @@ struct JourneyResultsView: View {
                     warningBanner(borderFallbackText)
                 }
 
-                if requirements.isEmpty, earlierCursor != nil {
+                if requirements.isEmpty, earlierCursor != nil || alternativeEarlierCursor != nil {
                     pageButton("Frühere Verbindungen", systemImage: "chevron.up") {
-                        await load(cursor: earlierCursor, prepend: true)
+                        await load(.earlier)
                     }
                 }
 
                 ForEach(Array(visibleJourneys.enumerated()), id: \.element.id) { index, result in
                     let journey = liveResults[result.id].map { JourneyRefresher.keepingPlatforms(of: result, in: $0) } ?? result
-                    NavigationLink(value: ConnectionsRoute.journey(JourneyRoute(journey: journey, finalDestination: search.to, search: search))) {
-                        JourneyCard(journey: journey, warnsAboutTransfers: true)
+                    let alternative = alternativeIDs.contains(result.id) ? search.towardsAlternative : nil
+                    NavigationLink(value: ConnectionsRoute.journey(JourneyRoute(journey: journey, finalDestination: alternative?.to ?? search.to,
+                                                                                search: alternative ?? search))) {
+                        JourneyCard(journey: journey, warnsAboutTransfers: true, alternativeDestination: alternative?.to)
                             .overlay {
                                 if !requirements.isEmpty, index == 0 {
                                     RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -145,9 +159,9 @@ struct JourneyResultsView: View {
                     .task { await checkLive(result) }
                 }
 
-                if requirements.isEmpty, laterCursor != nil {
+                if requirements.isEmpty, laterCursor != nil || alternativeLaterCursor != nil {
                     pageButton("Spätere Verbindungen", systemImage: "chevron.down") {
-                        await load(cursor: laterCursor, prepend: false)
+                        await load(.later)
                     }
                 }
 
@@ -161,8 +175,8 @@ struct JourneyResultsView: View {
                 }
 
                 VStack(spacing: 8) {
-                    if hiddenCount + journeys.count - visibleJourneys.count > 0, requirements.isEmpty {
-                        InfoChip(text: String(localized: "\(hiddenCount + journeys.count - visibleJourneys.count) nicht mit \(model.settings.ticketType.shortName) nutzbar"), systemImage: "eye.slash.fill")
+                    if hiddenCount + results.count - visibleJourneys.count > 0, requirements.isEmpty {
+                        InfoChip(text: String(localized: "\(hiddenCount + results.count - visibleJourneys.count) nicht mit \(model.settings.ticketType.shortName) nutzbar"), systemImage: "eye.slash.fill")
                     }
                     if source == .transitous {
                         SourceNotice()
@@ -177,7 +191,7 @@ struct JourneyResultsView: View {
         .tabBarSafePadding()
         .background { AppBackground() }
         .overlay {
-            if isLoading, journeys.isEmpty {
+            if isLoading, results.isEmpty {
                 ProgressView("Suche Verbindungen …")
             }
         }
@@ -192,9 +206,9 @@ struct JourneyResultsView: View {
             }
         }
         // Only the first time: coming back from a connection keeps the list (and the trains added below).
-        .task { if journeys.isEmpty, error == nil { await load(cursor: nil, prepend: false) } }
+        .task { if results.isEmpty, error == nil { await load(.first) } }
         .refreshable {
-            await load(cursor: nil, prepend: false)
+            await load(.first)
             await replan()
         }
     }
@@ -223,6 +237,14 @@ struct JourneyResultsView: View {
                 }
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+                if let alternative = search.alternativeTo {
+                    HStack(spacing: 4) {
+                        Image(systemName: "mappin.and.ellipse")
+                        Text("oder \(alternative.displayName)").lineLimit(1)
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                }
                 if !search.via.isEmpty {
                     Text("über \(search.via.map(viaLabel).joined(separator: ", "))")
                         .font(.caption)
@@ -444,8 +466,11 @@ struct JourneyResultsView: View {
         journeys = []
         earlierCursor = nil
         laterCursor = nil
+        alternativeJourneys = []
+        alternativeEarlierCursor = nil
+        alternativeLaterCursor = nil
         hiddenCount = 0
-        await load(cursor: nil, prepend: false)
+        await load(.first)
         // Train requirements survive a new time – they're only cleared by the reset button.
         await replan()
     }
@@ -476,26 +501,78 @@ struct JourneyResultsView: View {
         }
     }
 
-    private func load(cursor: String?, prepend: Bool) async {
+    private enum Page { case first, earlier, later }
+
+    /// The search's destination or the alternative one (#516).
+    private enum Target { case main, alternative }
+
+    private var alternativeIDs: Set<String> { Set(alternativeJourneys.map(\.id)) }
+
+    /// Loads a page of connections to the destination and, alongside, to the alternative one.
+    private func load(_ page: Page) async {
         isLoading = true
         defer { isLoading = false }
+        async let mainLoad: Void = load(page, to: .main)
+        async let alternativeLoad: Void = load(page, to: .alternative)
+        _ = await (mainLoad, alternativeLoad)
+    }
+
+    private func station(for target: Target) -> Station {
+        target == .main ? search.to : search.alternativeTo ?? search.to
+    }
+
+    private func list(_ target: Target) -> [Journey] { target == .main ? journeys : alternativeJourneys }
+
+    private func setList(_ list: [Journey], _ target: Target) {
+        if target == .main { journeys = list } else { alternativeJourneys = list }
+    }
+
+    private func setCursors(earlier: String??, later: String??, _ target: Target) {
+        switch target {
+        case .main:
+            if let earlier { earlierCursor = earlier }
+            if let later { laterCursor = later }
+        case .alternative:
+            if let earlier { alternativeEarlierCursor = earlier }
+            if let later { alternativeLaterCursor = later }
+        }
+    }
+
+    private func setError(_ error: Error?, _ target: Target) {
+        if target == .main { self.error = error } else { alternativeError = error }
+    }
+
+    /// One page to one of the destinations, if there is such a page.
+    private func load(_ page: Page, to target: Target) async {
+        if target == .alternative, search.alternativeTo == nil { return }
+        let cursor: String?
+        switch page {
+        case .first: cursor = nil
+        case .earlier:
+            guard let earlier = target == .main ? earlierCursor : alternativeEarlierCursor else { return }
+            cursor = earlier
+        case .later:
+            guard let later = target == .main ? laterCursor : alternativeLaterCursor else { return }
+            cursor = later
+        }
+        let destination = station(for: target)
         // First page: which trains call at both ends is looked up alongside the search, so detours are
         // gone and the expert option's trains are there about when the results show.
         let lookup: Task<DetourLookup, Never>? = cursor == nil && search.via.isEmpty ? {
             let start = search.isArrival ? searchDate.addingTimeInterval(-Self.lookupWindow) : searchDate
             let addingRestricted = model.settings.ignoreBoardingRulesEnabled
-            return Task { await detourLookup(start: start, end: start.addingTimeInterval(2 * Self.lookupWindow),
+            return Task { await detourLookup(to: destination, start: start, end: start.addingTimeInterval(2 * Self.lookupWindow),
                                              addingRestricted: addingRestricted) }
         }() : nil
         do {
             var result: [Journey]
-            var page: JourneyPage?
+            var loadedPage: JourneyPage?
             if search.via.isEmpty {
                 let loaded = try await model.provider.journeys(JourneyQuery(
-                    from: search.from, to: search.to, date: searchDate, isArrival: search.isArrival, cursor: cursor,
+                    from: search.from, to: destination, date: searchDate, isArrival: search.isArrival, cursor: cursor,
                     products: search.products, maxTransfers: search.maxTransfers))
                 result = loaded.journeys
-                page = loaded
+                loadedPage = loaded
             } else {
                 // Routed via search has no cursor-based paging – it's a single chained search.
                 var planner = ViaRoutePlanner(provider: model.provider, products: search.products)
@@ -508,7 +585,7 @@ struct JourneyResultsView: View {
                         return await picker.journeysIgnoringBoardingRules(from: from, to: to, calls: calls)
                     }
                 }
-                result = try await planner.journeys(from: search.from, to: search.to, via: search.via, date: searchDate)
+                result = try await planner.journeys(from: search.from, to: destination, via: search.via, date: searchDate)
                 // Products are applied per leg by the planner; only the overall transfer limit is left.
                 if let maxTransfers = search.maxTransfers {
                     result = result.filter { $0.transfers <= maxTransfers }
@@ -521,35 +598,35 @@ struct JourneyResultsView: View {
                 result = result.filter { filter.isValid($0) || filter.crossesBorder($0) }
                 hiddenCount += before - result.count
             }
-            source = page?.source ?? model.provider.source
+            if target == .main { source = loadedPage?.source ?? model.provider.source }
             // Wait a moment for the lookup, so the list doesn't change right after it shows.
             let early = await lookup?.value(within: .milliseconds(1500))
             if let early { result = applying(early, to: result) }
-            if cursor == nil {
-                journeys = result.removingDuplicateIDs().removingSameTrainDuplicates()
+            switch page {
+            case .first:
+                setList(result.removingDuplicateIDs().removingSameTrainDuplicates(), target)
                 // The first connection is the one most likely opened next: have its live data ready.
-                if let first = result.first(where: { ($0.departure?.best ?? .distantFuture) > .now }) {
+                if target == .main, let first = result.first(where: { ($0.departure?.best ?? .distantFuture) > .now }) {
                     model.prepareLiveData(for: first)
                 }
-                earlierCursor = page?.earlierCursor
-                laterCursor = page?.laterCursor
-            } else if prepend {
-                journeys = (result + journeys).removingDuplicateIDs().removingSameTrainDuplicates()
-                earlierCursor = page?.earlierCursor
-            } else {
-                journeys = (journeys + result).removingDuplicateIDs().removingSameTrainDuplicates()
-                laterCursor = page?.laterCursor
+                setCursors(earlier: .some(loadedPage?.earlierCursor), later: .some(loadedPage?.laterCursor), target)
+            case .earlier:
+                setList((result + list(target)).removingDuplicateIDs().removingSameTrainDuplicates(), target)
+                setCursors(earlier: .some(loadedPage?.earlierCursor), later: nil, target)
+            case .later:
+                setList((list(target) + result).removingDuplicateIDs().removingSameTrainDuplicates(), target)
+                setCursors(earlier: nil, later: .some(loadedPage?.laterCursor), target)
             }
-            error = nil
+            setError(nil, target)
             if let lookup, early == nil {
                 let found = await lookup.value
-                if !Task.isCancelled { withAnimation(.snappy) { journeys = applying(found, to: journeys) } }
+                if !Task.isCancelled { withAnimation(.snappy) { setList(applying(found, to: list(target)), target) } }
             } else if cursor != nil, search.via.isEmpty, !result.isEmpty {
                 // A further page: its own window, detours and markings only.
                 let start = result.compactMap(\.departure?.planned).min() ?? searchDate
                 let end = result.compactMap(\.arrival?.planned).max() ?? start
-                let found = await detourLookup(start: start, end: end, addingRestricted: false)
-                if !Task.isCancelled { withAnimation(.snappy) { journeys = applying(found, to: journeys) } }
+                let found = await detourLookup(to: destination, start: start, end: end, addingRestricted: false)
+                if !Task.isCancelled { withAnimation(.snappy) { setList(applying(found, to: list(target)), target) } }
             }
             await fillMissingPlatforms(in: result)
             await correctLateTrainNames(in: result)
@@ -557,7 +634,7 @@ struct JourneyResultsView: View {
             lookup?.cancel()
         } catch {
             lookup?.cancel()
-            self.error = error
+            setError(error, target)
         }
     }
 
@@ -576,15 +653,15 @@ struct JourneyResultsView: View {
     /// Ein-/Ausstieg ignorieren" it also finds the direct trains the timetable doesn't let you board or
     /// leave here, which the search itself never offers, and trains you may not board here that end
     /// short of the destination, with a connection on from where they stop.
-    private func detourLookup(start: Date, end: Date, addingRestricted: Bool) async -> DetourLookup {
+    private func detourLookup(to destination: Station, start: Date, end: Date, addingRestricted: Bool) async -> DetourLookup {
         let picker = model.trainPicker
-        let calls = await picker.stationCalls(from: search.from, to: search.to, start: start, end: end)
+        let calls = await picker.stationCalls(from: search.from, to: destination, start: start, end: end)
         guard addingRestricted else { return DetourLookup(calls: calls, extra: []) }
         // Also trains you may not board here that don't go all the way, with a connection from where they stop.
-        let query = JourneyQuery(from: search.from, to: search.to, date: start, products: search.products,
+        let query = JourneyQuery(from: search.from, to: destination, date: start, products: search.products,
                                  maxTransfers: search.maxTransfers)
         async let continuing = picker.journeysContinuingFromRestrictedTrains(query, calls: calls, end: end)
-        let direct = await picker.journeysIgnoringBoardingRules(from: search.from, to: search.to, calls: calls)
+        let direct = await picker.journeysIgnoringBoardingRules(from: search.from, to: destination, calls: calls)
         var extra = (direct + (await continuing))
             .filter { journey in
                 journey.transitLegs.allSatisfy { search.products.contains($0.line?.filterProduct ?? .other) }
@@ -630,7 +707,10 @@ struct JourneyResultsView: View {
     private func correctLateTrainNames(in loaded: [Journey]) async {
         let corrected = await model.provider.correctingTrainNames(in: loaded, deadline: .seconds(20))
         guard !Task.isCancelled, corrected != loaded else { return }
-        withAnimation(.snappy) { journeys = BahnDeClient.takingTrainNames(from: corrected, into: journeys) }
+        withAnimation(.snappy) {
+            journeys = BahnDeClient.takingTrainNames(from: corrected, into: journeys)
+            alternativeJourneys = BahnDeClient.takingTrainNames(from: corrected, into: alternativeJourneys)
+        }
     }
 
     private func fillMissingPlatforms(in loaded: [Journey]) async {
@@ -645,8 +725,12 @@ struct JourneyResultsView: View {
                 }
             }
             for await filled in group {
-                guard let filled, let index = journeys.firstIndex(where: { $0.id == filled.id }) else { continue }
-                journeys[index] = filled
+                guard let filled else { continue }
+                if let index = journeys.firstIndex(where: { $0.id == filled.id }) {
+                    journeys[index] = filled
+                } else if let index = alternativeJourneys.firstIndex(where: { $0.id == filled.id }) {
+                    alternativeJourneys[index] = filled
+                }
             }
         }
     }
@@ -657,6 +741,8 @@ struct JourneyCard: View {
     /// Search results warn when an incoming train is often too late for a tight transfer, from past
     /// runs (#316). Off elsewhere, so lists of saved or alternative journeys don't ask the server.
     var warnsAboutTransfers = false
+    /// Set when the connection goes to the search's alternative destination (#516), marked on the card.
+    var alternativeDestination: Station?
 
     @Environment(AppModel.self) private var model
     @State private var transferWarning: String?
@@ -690,6 +776,13 @@ struct JourneyCard: View {
                 }
 
                 JourneySegmentBar(journey: journey)
+
+                if let alternativeDestination {
+                    Label(String(localized: "Nach \(alternativeDestination.displayName)"), systemImage: "mappin.and.ellipse")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.brand)
+                        .lineLimit(1)
+                }
 
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
