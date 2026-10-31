@@ -856,7 +856,7 @@ final class AppModel {
     /// Runs `body` at the interval picked in the settings (`TrainPositionRefresh`, which may depend on
     /// mobile data or Low Data Mode) until the calling task is cancelled. With refreshing switched off,
     /// `body` runs once and again only after it is switched back on.
-    private func repeatingAtPositionInterval(_ body: () async -> Void) async {
+    func repeatingAtPositionInterval(_ body: () async -> Void) async {
         let monitor = NWPathMonitor()
         monitor.start(queue: .global(qos: .utility))
         defer { monitor.cancel() }
@@ -906,6 +906,25 @@ final class AppModel {
                 update(try await livePosition(of: route))
             } catch {}
         }
+    }
+
+    // MARK: Other trains on the map (#505)
+
+    /// Transitous' map answers can be megabytes, so they get more time than other requests.
+    @ObservationIgnored private let liveTrainSource = TransitousProvider(http: HTTPClient(timeout: 30))
+
+    /// Every train bahn.jetzt has a position for (the list `livePosition(of:)` uses too); nil when it
+    /// can't be reached or is pausing.
+    func runningTrains() async -> [BahnJetztClient.RunningTrain]? {
+        guard let bahnJetzt = provider.bahnJetzt else { return nil }
+        return try? await bahnJetzt.runningTrains()
+    }
+
+    /// Transitous' trains in `area` for the next `LiveTrainCoverage.window`, with their tracks; nil on failure.
+    func liveTrainSegments(in area: MapArea, zoom: Int) async -> [LiveTrainSegment]? {
+        let now = Date.now
+        return try? await liveTrainSource.liveTrainSegments(in: area, zoom: zoom, from: now,
+                                                            to: now.addingTimeInterval(LiveTrainCoverage.window))
     }
 
     /// Series, Triebzug numbers and names of a train from bahn.de's coach sequence. bahn.de caches
@@ -1795,6 +1814,16 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(trainPositionRefresh.rawValue, forKey: "trainPositionRefresh") }
     }
 
+    /// Whether maps show the other running trains around too (#505). Stays on this device.
+    var showOtherTrains: Bool {
+        didSet { UserDefaults.standard.set(showOtherTrains, forKey: "showOtherTrains") }
+    }
+
+    /// Whether the other trains' tracks are loaded on mobile data too; they can be several megabytes.
+    var otherTrainsOnMobileData: Bool {
+        didSet { UserDefaults.standard.set(otherTrainsOnMobileData, forKey: "otherTrainsOnMobileData") }
+    }
+
     /// Whether station search results start with the country's flag (#349). Stays on this device.
     var stationFlagMode: StationFlagMode {
         didSet { UserDefaults.standard.set(stationFlagMode.rawValue, forKey: "stationFlagMode") }
@@ -1895,6 +1924,8 @@ final class AppSettings {
         liveActivitiesEnabled = defaults.object(forKey: "liveActivitiesEnabled") as? Bool ?? true
         liveActivityServerUpdates = defaults.object(forKey: "liveActivityServerUpdates") as? Bool ?? true
         trainPositionRefresh = defaults.string(forKey: "trainPositionRefresh").flatMap(TrainPositionRefresh.init) ?? .automatic
+        showOtherTrains = defaults.object(forKey: "showOtherTrains") as? Bool ?? true
+        otherTrainsOnMobileData = defaults.bool(forKey: "otherTrainsOnMobileData")
         stationFlagMode = defaults.string(forKey: "stationFlagMode").flatMap(StationFlagMode.init) ?? .foreignOnly
         // A new key: switching off sharing (#169) said nothing about wanting to see the statistics.
         let showTrainStatistics = defaults.object(forKey: "showTrainStatistics") as? Bool ?? true
