@@ -670,6 +670,40 @@
         }
       }
     },
+    "12-teilig" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "12-teilig"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "12 cars"
+          }
+        }
+      }
+    },
+    "13-teilig" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "13-teilig"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "13 cars"
+          }
+        }
+      }
+    },
     "15 Sek." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -734,6 +768,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "30 sec"
+          }
+        }
+      }
+    },
+    "7-teilig" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "7-teilig"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "7 cars"
           }
         }
       }
@@ -5996,6 +6047,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Points failure"
+          }
+        }
+      }
+    },
+    "Weitere" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Weitere"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Others"
           }
         }
       }

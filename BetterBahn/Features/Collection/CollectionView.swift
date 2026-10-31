@@ -1,7 +1,7 @@
 import BetterBahnKit
 import SwiftUI
 
-/// The collection ("Sammlung", #384): special liveries, series, named trainsets and big stations, each
+/// The collection ("Sammlung", #384): special liveries, series, trainsets and big stations, each
 /// with its progress; opened from the Verbindungen tab next to "Vergangene Fahrten". Computed on the
 /// device from Kit `TravelCollection`.
 struct CollectionView: View {
@@ -16,7 +16,11 @@ struct CollectionView: View {
                 if let collection {
                     ForEach(collection.groups) { group in
                         NavigationLink {
-                            CollectionCategoryView(group: group, newIDs: newIDs)
+                            if group.category == .trainsets {
+                                CollectionTrainsetsView(group: group, series: collection.trainsetSeries, newIDs: newIDs)
+                            } else {
+                                CollectionCategoryView(group: group, newIDs: newIDs)
+                            }
                         } label: {
                             CollectionGroupCard(group: group, newCount: group.items.count(where: { newIDs.contains($0.id) }))
                         }
@@ -235,6 +239,154 @@ private struct CollectionItemSheet: View {
     }
 }
 
+/// The trainsets by series ("ICE 4") and length ("7-teilig") to expand (#521); a Tz expands to the rides
+/// with it, and a ride opens its journey.
+struct CollectionTrainsetsView: View {
+    let group: TravelCollection.Group
+    let series: [TravelCollection.TrainsetSeries]
+    let newIDs: Set<String>
+
+    var body: some View {
+        List {
+            Section {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("\(group.collected) von \(group.total) gesammelt")
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    ProgressView(value: Double(group.collected), total: Double(max(group.total, 1)))
+                        .tint(.brand)
+                }
+            }
+            ForEach(series) { series in
+                Section {
+                    DisclosureGroup {
+                        if series.variants.count == 1, series.variants[0].name == nil {
+                            TrainsetRows(items: series.variants[0].items, newIDs: newIDs)
+                        } else {
+                            ForEach(series.variants) { variant in
+                                DisclosureGroup {
+                                    TrainsetRows(items: variant.items, newIDs: newIDs)
+                                } label: {
+                                    TrainsetGroupLabel(title: variant.title, collected: variant.collected, total: variant.total,
+                                                       newCount: variant.items.count(where: { newIDs.contains($0.id) }))
+                                }
+                            }
+                        }
+                    } label: {
+                        TrainsetGroupLabel(title: series.name, collected: series.collected, total: series.total,
+                                           newCount: series.items.count(where: { newIDs.contains($0.id) }), isSeries: true)
+                    }
+                }
+            }
+            Section {
+                Text(TravelCollection.Category.trainsets.hint)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .listRowBackground(Color.clear)
+        }
+        .scrollContentBackground(.hidden)
+        .tabBarSafePadding()
+        .background { AppBackground() }
+        .navigationTitle(group.category.title)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct TrainsetGroupLabel: View {
+    let title: String
+    let collected: Int
+    let total: Int
+    let newCount: Int
+    var isSeries = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if isSeries {
+                Image(systemName: TravelCollection.Category.series.systemImage)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 30, height: 30)
+                    .background(Color.brand.gradient, in: .rect(cornerRadius: 8, style: .continuous))
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(isSeries ? .headline : .subheadline.weight(.semibold))
+                Text("\(collected) von \(total) gesammelt")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+            if newCount > 0 { NewBadge(text: "\(newCount) neu") }
+        }
+    }
+}
+
+/// One row per Tz: a collected one expands to its rides, one not collected yet is greyed out.
+private struct TrainsetRows: View {
+    let items: [TravelCollection.Item]
+    let newIDs: Set<String>
+
+    var body: some View {
+        ForEach(items) { item in
+            if item.isCollected {
+                DisclosureGroup {
+                    ForEach(Array(item.sightings.enumerated()), id: \.offset) { _, sighting in
+                        CollectionRideLink(sighting: sighting)
+                    }
+                } label: {
+                    TrainsetLabel(item: item, isNew: newIDs.contains(item.id))
+                }
+            } else {
+                TrainsetLabel(item: item, isNew: false)
+            }
+        }
+    }
+}
+
+private struct TrainsetLabel: View {
+    let item: TravelCollection.Item
+    let isNew: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: item.isCollected ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(item.isCollected ? Color.brand : Color.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(item.title).font(.subheadline.weight(.semibold).monospacedDigit())
+                if let subtitle = item.subtitle {
+                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 0)
+            if isNew { NewBadge() }
+            if item.isCollected {
+                (item.sightings.count == 1 ? Text("1 Fahrt") : Text("\(item.sightings.count) Fahrten"))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .opacity(item.isCollected ? 1 : 0.55)
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(item.isCollected ? "Gesammelt" : "Noch nicht gesammelt")
+    }
+}
+
+/// A ride of a collected item; opens its journey.
+private struct CollectionRideLink: View {
+    let sighting: TravelCollection.Sighting
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        if let journey = sighting.journey {
+            RouteLink(value: ConnectionsRoute.journey(model.collectionRoute(for: journey))) {
+                SightingRow(sighting: sighting)
+            }
+        } else {
+            SightingRow(sighting: sighting)
+        }
+    }
+}
+
 private struct SightingRow: View {
     let sighting: TravelCollection.Sighting
 
@@ -275,25 +427,48 @@ struct CollectionButton: View {
 
 extension AppModel {
     private static let collectionSeenKey = "collectionSeenIDs"
+    private static let unnamedTrainsetsSeenKey = "collectionUnnamedTrainsetsSeen"
 
     /// The collection from every ride the travel map draws; trainsets from the formations remembered for
     /// saved journeys, also where a Träwelling check-in replaced the saved leg.
     func travelCollection() async -> TravelCollection {
         await loadTraewellingTrips()
         let all = TravelMapSelection(range: .all, includeTraewelling: settings.traewellingEnabled)
-        let legs = travelledLegs(of: mapJourneys(for: all)).map(\.leg)
-        let rides = zip(legs, rememberedFormations(for: legs)).map { leg, formation in
-            TravelCollection.Ride(leg: leg, formation: formation)
+        let journeys = mapJourneys(for: all)
+        let travelled = travelledLegs(of: journeys)
+        let legs = travelled.map(\.leg)
+        let rides = zip(travelled, rememberedFormations(for: legs)).map { ride, formation in
+            TravelCollection.Ride(leg: ride.leg, formation: formation, journey: journeys[ride.group])
         }
         return await Task.detached(priority: .userInitiated) { TravelCollection(rides: rides) }.value
     }
 
     /// Items collected since the collection was last opened. The first time, everything collected so far
-    /// becomes the starting point, so it doesn't all show up as new.
+    /// becomes the starting point, so it doesn't all show up as new; the same once for the trainsets without
+    /// a name, which only count since #521.
     func newCollectionIDs(in collection: TravelCollection) -> Set<String> {
-        let stored = UserDefaults.standard.stringArray(forKey: Self.collectionSeenKey)
+        let defaults = UserDefaults.standard
+        var stored = defaults.stringArray(forKey: Self.collectionSeenKey)
         if stored == nil { markCollectionSeen(collection) }
+        if !defaults.bool(forKey: Self.unnamedTrainsetsSeenKey) {
+            defaults.set(true, forKey: Self.unnamedTrainsetsSeenKey)
+            if let seen = stored {
+                stored = Array(Set(seen).union(collection.collectedUnnamedTrainsetIDs)).sorted()
+                defaults.set(stored, forKey: Self.collectionSeenKey)
+            }
+        }
         return collection.newIDs(since: stored.map { Set($0) })
+    }
+
+    /// The journey of a ride in the collection: the saved journey (also one a check-in replaced), else the
+    /// check-in itself.
+    func collectionRoute(for journey: Journey) -> JourneyRoute {
+        let keys = Set(journey.legs.map(\.formationKey))
+        let saved = pastJourneys.first { $0.journey.id == journey.id }
+            ?? pastJourneys.first { $0.journey.legs.contains { keys.contains($0.formationKey) } }
+        if let saved { return saved.route(readOnly: true) }
+        return JourneyRoute(journey: journey, finalDestination: journey.legs.last?.destination ?? journey.legs[0].destination,
+                            readOnly: true)
     }
 
     func markCollectionSeen(_ collection: TravelCollection) {
