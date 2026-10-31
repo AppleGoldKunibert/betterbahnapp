@@ -24,7 +24,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Booked trains"
+            "value" : "Gebuchte Züge"
           }
         },
         "en" : {
@@ -41,7 +41,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Trains taken"
+            "value" : "Gefahrene Züge"
           }
         },
         "en" : {
