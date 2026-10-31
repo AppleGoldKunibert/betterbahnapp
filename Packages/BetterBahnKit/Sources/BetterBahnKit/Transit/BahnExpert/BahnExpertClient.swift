@@ -122,7 +122,7 @@ public struct BahnExpertClient: Sendable {
         struct Sequence: Decodable {
             struct Group: Decodable {
                 struct Baureihe: Decodable { var identifier: String?; var baureihe: String?; var name: String? }
-                struct Coach: Decodable {}
+                struct Coach: Decodable { var evn: String?; var closed: Bool? }
                 var name: String?
                 var originName: String?
                 var destinationName: String?
@@ -135,6 +135,18 @@ public struct BahnExpertClient: Sendable {
         var isRealtime: Bool
         var source: String?
         var sequence: Sequence?
+    }
+
+    struct TurnaroundResponse: Decodable {
+        struct Journey: Decodable {
+            struct Relation: Decodable {
+                var startCategory: String?
+                var startJourneyNumber: Int?
+            }
+            var journeyRelation: Relation
+        }
+        var previousJourneys: [Journey]?
+        var nextJourneys: [Journey]?
     }
 
     // MARK: Lookup
@@ -201,7 +213,69 @@ public struct BahnExpertClient: Sendable {
         return try await trainType(category: ref.category, number: ref.number, date: BahnDeClient.berlinDay(leg.departure.planned))
     }
 
+    /// The trains a train's trainset runs as before and after it ("Wendet aus ICE 567", "Wendet auf ICE 1501"),
+    /// as bahn.expert's page shows them. Needs DB's live assignment, so it is empty until the trainset is known.
+    public func turnaround(category: String, number: String, date: String,
+                           administration: String = BahnDeClient.dbAdministration) async throws -> TrainTurnaround {
+        let category = category.uppercased()
+        guard let journeyNumber = Int(number), Self.isValidDay(date) else {
+            throw TransitError.invalidInput(String(kit: "Zugnummer oder Datum ungültig."))
+        }
+        let found: [FoundJourney] = try await call("journey/find", input: [
+            "json": [
+                "journeyNumber": journeyNumber, "administration": administration, "category": category,
+                "initialDepartureDate": "\(date)T12:00:00.000Z", "withOEV": true, "limit": 1,
+            ] as [String: Any],
+            "meta": [["date", "initialDepartureDate"]],
+        ])
+        guard let journey = found.first(where: {
+            $0.train?.journeyNumber == journeyNumber && $0.train?.category?.uppercased() == category
+        }) else { throw TransitError.notFound("\(category) \(number)") }
+        let details: Details = try await call("journey/detailsByJourneyId", input: ["json": journey.journeyId])
+        guard let firstStop = details.stops.first, let departure = firstStop.departure?.scheduledTime else { return .none }
+        let plannedDeparture = JSONDecoding.isoString(departure)
+        let sequenceResponse: SequenceResponse = try await call("coachSequence/departureSequence", input: [
+            "json": [
+                "evaNumber": firstStop.stopPlace.evaNumber, "plannedDeparture": plannedDeparture,
+                "initialDeparture": plannedDeparture, "journeyNumber": journeyNumber,
+                "category": category, "administration": details.train?.admin ?? administration,
+            ],
+            "meta": [["date", "plannedDeparture"], ["date", "initialDeparture"]],
+        ])
+        let vehicleIds = Self.vehicleIds(of: sequenceResponse, journeyNumber: journeyNumber)
+        guard !vehicleIds.isEmpty else { return .none }
+        let response: TurnaroundResponse = try await call("coachSequence/wenden", input: [
+            "json": ["journeyId": journey.journeyId, "initialDeparture": plannedDeparture, "vehicleIds": vehicleIds],
+            "meta": [["date", "initialDeparture"]],
+        ])
+        return Self.turnaround(from: response)
+    }
+
+    public func turnaround(for line: Line?, on date: Date) async throws -> TrainTurnaround {
+        guard let ref = BahnDeClient.trainReference(for: line) else { return .none }
+        return try await turnaround(category: ref.category, number: ref.number, date: BahnDeClient.berlinDay(date))
+    }
+
     // MARK: Helpers
+
+    /// The first open coach's vehicle number of each trainset running as the asked train (what bahn.expert asks with).
+    static func vehicleIds(of response: SequenceResponse, journeyNumber: Int) -> [String] {
+        (response.sequence?.groups ?? []).filter { $0.journeyNumber == journeyNumber }
+            .compactMap { $0.coaches?.first { $0.closed != true }?.evn }
+    }
+
+    static func turnaround(from response: TurnaroundResponse) -> TrainTurnaround {
+        func trains(_ journeys: [TurnaroundResponse.Journey]?) -> [TrainTurnaround.Train] {
+            var result: [TrainTurnaround.Train] = []
+            for relation in (journeys ?? []).map(\.journeyRelation) {
+                guard let category = relation.startCategory, let number = relation.startJourneyNumber else { continue }
+                let train = TrainTurnaround.Train(category: category, number: number)
+                if !result.contains(train) { result.append(train) }
+            }
+            return result
+        }
+        return TrainTurnaround(previous: trains(response.previousJourneys), next: trains(response.nextJourneys))
+    }
 
     /// bahn.expert's series name; for IC 2 Twindexx sets ("ICD2868") it has none, only the group name
     /// says what it is (as in bahn.de's `model(constructionTypes:groupName:category:)`).
@@ -251,4 +325,20 @@ public struct BahnExpertClient: Sendable {
             throw TransitError.notFound(procedure)
         }
     }
+}
+
+/// The trains a train's trainset ran as before it ("Wendet aus") and runs as after it ("Wendet zu").
+public struct TrainTurnaround: Codable, Sendable, Hashable {
+    public struct Train: Codable, Sendable, Hashable {
+        public var category: String
+        public var number: Int
+        /// "ICE 567".
+        public var name: String { "\(category) \(number)" }
+    }
+
+    public var previous: [Train]
+    public var next: [Train]
+
+    public static let none = TrainTurnaround(previous: [], next: [])
+    public var isEmpty: Bool { previous.isEmpty && next.isEmpty }
 }

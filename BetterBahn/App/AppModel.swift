@@ -992,6 +992,19 @@ final class AppModel {
         if changed { savedJourneys = updated }
     }
 
+    @ObservationIgnored private var turnaroundCache: [String: TrainTurnaround] = [:]
+
+    /// The trains a train's trainset ran as before and runs as after it, from bahn.expert, which only knows
+    /// it around the day of the ride. Cached per train and day; failed or empty answers are asked again.
+    func turnaround(for line: Line?, on date: Date) async -> TrainTurnaround? {
+        guard abs(date.timeIntervalSinceNow) < 36 * 3600, let ref = BahnDeClient.trainReference(for: line) else { return nil }
+        let key = "\(ref.category) \(ref.number)|\(BahnDeClient.berlinDay(date))"
+        if let cached = turnaroundCache[key] { return cached }
+        guard let found = try? await provider.bahnExpert?.turnaround(for: line, on: date), !found.isEmpty else { return nil }
+        turnaroundCache[key] = found
+        return found
+    }
+
     @ObservationIgnored private var trainTypeCache: [String: TrainTypeLookup?] = [:]
 
     /// A train's type ("ICE 4", "ICE 3neo" …) from its planned formation: vagonweb.cz's scheduled

@@ -400,6 +400,43 @@ struct TrainFormationLabel: View {
     }
 }
 
+/// "Wendet aus ICE 567 · Wendet zu ICE 1501": the trains the train's trainset ran as before and runs as after it.
+/// Only shown when bahn.expert knows them, which it does around the day of the ride.
+struct TrainTurnaroundLabel: View {
+    let line: Line?
+    let date: Date
+
+    @Environment(AppModel.self) private var model
+    @State private var turnaround: TrainTurnaround?
+
+    private var text: String? {
+        guard let turnaround else { return nil }
+        var parts: [String] = []
+        if !turnaround.previous.isEmpty {
+            parts.append(String(localized: "Wendet aus \(turnaround.previous.map(\.name).formatted(.list(type: .and)))"))
+        }
+        if !turnaround.next.isEmpty {
+            parts.append(String(localized: "Wendet zu \(turnaround.next.map(\.name).formatted(.list(type: .and)))"))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    var body: some View {
+        // A ZStack rather than Group: `.task` never fires on a view that is empty.
+        ZStack(alignment: .leading) {
+            if let text {
+                Label(text, systemImage: "arrow.triangle.turn.up.right.diamond")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fullTextPopup(text, lines: 2)
+            }
+        }
+        .task(id: "\(line?.name ?? "")|\(Int(date.timeIntervalSince1970 / 60))") {
+            turnaround = await model.turnaround(for: line, on: date)
+        }
+    }
+}
+
 /// "ICE 4" / "ICE 3neo" / "ICE L" … next to a train's name. bahn.de's coach sequence first (the same
 /// request `TrainFormationLabel` makes, so it is only sent once); then the planned formation for days
 /// ahead from vagonweb.cz, or bahn.expert when vagonweb has none (`AppModel.trainType`).
