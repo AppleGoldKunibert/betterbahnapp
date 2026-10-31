@@ -46,31 +46,29 @@ final class LiveTrainsLayer {
             Task { @MainActor in self?.savingData = saving }
         }
         monitor.start(queue: .global(qos: .utility))
+        // Moves the markers every second while the fetches below run.
+        let ticker = Task { [weak self] in
+            while !Task.isCancelled {
+                self?.tick()
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
         defer {
+            ticker.cancel()
             monitor.cancel()
             loading?.cancel()
         }
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { @MainActor in
-                await model.repeatingAtPositionInterval {
-                    guard model.settings.showOtherTrains else {
-                        if !self.running.isEmpty || !self.segments.isEmpty { self.clearOthers() }
-                        return
-                    }
-                    // A failed fetch keeps the last list; its fixes soon count as too old to move on.
-                    if let running = await model.runningTrains() {
-                        self.running = running
-                        await self.rebuildField()
-                    }
-                    self.loadSegmentsIfNeeded(model: model)
-                }
+        await model.repeatingAtPositionInterval {
+            guard model.settings.showOtherTrains else {
+                if !self.running.isEmpty || !self.segments.isEmpty { self.clearOthers() }
+                return
             }
-            group.addTask { @MainActor in
-                while !Task.isCancelled {
-                    self.tick()
-                    try? await Task.sleep(for: .seconds(1))
-                }
+            // A failed fetch keeps the last list; its fixes soon count as too old to move on.
+            if let running = await model.runningTrains() {
+                self.running = running
+                await self.rebuildField()
             }
+            self.loadSegmentsIfNeeded(model: model)
         }
     }
 
