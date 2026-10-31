@@ -220,6 +220,20 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Toggle(isOn: $settings.showOtherTrains) {
+                        IconLabel(title: String(localized: "Andere Züge zeigen"), systemImage: "tram.fill", color: .gray)
+                    }
+                    if settings.showOtherTrains {
+                        Toggle(isOn: $settings.otherTrainsOnMobileData) {
+                            IconLabel(title: String(localized: "Strecken über Mobilfunk laden"), systemImage: "antenna.radiowaves.left.and.right",
+                                      color: .gray)
+                        }
+                    }
+                } footer: {
+                    Text("Zeigt auf den Karten auch die anderen fahrenden Züge. Über Mobilfunk fahren sie nur mit geladenen Strecken flüssig, das kostet einige MB pro Karte.")
+                }
+
+                Section {
                     Menu {
                         ForEach(TrainSearchKind.allCases, id: \.self) { kind in
                             Toggle(kind.displayName, isOn: Binding {

@@ -1734,6 +1734,16 @@
         }
       }
     },
+    "Andere Züge zeigen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show other trains"
+          }
+        }
+      }
+    },
     "Anderen Halt wählen" : {
       "localizations" : {
         "en" : {
@@ -5905,6 +5915,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Trains Only"
+          }
+        }
+      }
+    },
+    "Strecken über Mobilfunk laden" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Load tracks on mobile data"
+          }
+        }
+      }
+    },
+    "Zeigt auf den Karten auch die anderen fahrenden Züge. Über Mobilfunk fahren sie nur mit geladenen Strecken flüssig, das kostet einige MB pro Karte." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shows the other running trains on the maps too. On mobile data they only move smoothly with their tracks loaded, which costs a few MB per map."
           }
         }
       }

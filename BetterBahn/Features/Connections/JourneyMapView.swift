@@ -11,10 +11,14 @@ struct JourneyMapView: View {
     @State private var mapVersion = 0
     @State private var selectedTransfer: TransferPoint?
     @State private var trains: [LiveTrainPosition] = []
+    /// Moves the trains between fixes and shows the other trains around (#505).
+    @State private var layer = LiveTrainsLayer()
 
     var body: some View {
         NavigationStack {
-            JourneyMap(journey: journey, version: mapVersion, trains: trains, onMarkerTap: { selectedTransfer = $0 })
+            JourneyMap(journey: journey, version: mapVersion, trains: trains, shownTrains: layer.ownCoordinates,
+                       otherTrains: layer.markers, onRegionChange: { layer.setVisible($0, model: model) },
+                       onMarkerTap: { selectedTransfer = $0 })
                 .ignoresSafeArea(edges: .top)
                 .navigationTitle("\(journey.legs.first?.origin.displayName ?? String(localized: "Reise")) → \(finalDestination.displayName)")
                 .navigationBarTitleDisplayMode(.inline)
@@ -25,8 +29,14 @@ struct JourneyMapView: View {
                 }
         }
         .task(id: journey) {
-            await model.followPositions(of: journey.legs) { trains = $0 }
+            await model.followPositions(of: journey.legs) { found in
+                trains = found
+                layer.setOwnTrains(found.map { live in
+                    LiveTrainsLayer.OwnTrain(live, leg: journey.transitLegs.first { $0.line?.name == live.trainName })
+                })
+            }
         }
+        .task { await layer.run(model: model) }
         .sheet(item: $selectedTransfer) { transfer in
             TransferDetailsSheet(transfer: transfer)
         }
@@ -131,6 +141,11 @@ struct JourneyMap: UIViewRepresentable {
     let version: Int
     /// Running trains of the journey (from bahn.jetzt), shown as train markers.
     var trains: [LiveTrainPosition] = []
+    /// Where those trains are drawn this second, by name (they run on between fixes).
+    var shownTrains: [String: Coordinate] = [:]
+    /// The other trains around (#505).
+    var otherTrains: [LiveTrainMarker] = []
+    var onRegionChange: (MKCoordinateRegion) -> Void = { _ in }
     let onMarkerTap: (TransferPoint) -> Void
 
     func makeUIView(context: Context) -> MKMapView {
@@ -151,7 +166,9 @@ struct JourneyMap: UIViewRepresentable {
     func updateUIView(_ map: MKMapView, context: Context) {
         let coordinator = context.coordinator
         coordinator.onMarkerTap = onMarkerTap
-        coordinator.syncTrains(trains, on: map)
+        coordinator.onRegionChange = onRegionChange
+        coordinator.syncTrains(trains, shown: shownTrains, on: map)
+        coordinator.otherTrains.sync(otherTrains, on: map)
 
         // Route and markers only when the journey changed, so the periodic train refresh doesn't
         // redraw everything and zoom back out.
@@ -206,10 +223,12 @@ struct JourneyMap: UIViewRepresentable {
         var onMarkerTap: ((TransferPoint) -> Void)?
         var renderedJourney: Journey?
         var renderedVersion = -1
+        var onRegionChange: (MKCoordinateRegion) -> Void = { _ in }
+        let otherTrains = OtherTrainsAnnotator()
         private var trainAnnotations: [String: TrainAnnotation] = [:]
 
         /// Adds, moves and removes train markers in place so an open callout survives the refresh.
-        func syncTrains(_ trains: [LiveTrainPosition], on map: MKMapView) {
+        func syncTrains(_ trains: [LiveTrainPosition], shown: [String: Coordinate], on map: MKMapView) {
             let current = Dictionary(trains.map { ($0.trainName, $0) }, uniquingKeysWith: { $1 })
             for (name, annotation) in trainAnnotations where current[name] == nil {
                 map.removeAnnotation(annotation)
@@ -217,7 +236,9 @@ struct JourneyMap: UIViewRepresentable {
             }
             for (name, live) in current {
                 if let annotation = trainAnnotations[name] {
-                    annotation.update(live)
+                    UIView.animate(withDuration: 1, delay: 0, options: [.curveLinear, .beginFromCurrentState, .allowUserInteraction]) {
+                        annotation.update(live, shown: shown[name])
+                    }
                     (map.view(for: annotation) as? MKMarkerAnnotationView)?.markerTintColor = annotation.isStale ? .systemGray : UIColor(Color.brand)
                 } else {
                     let annotation = TrainAnnotation(live)
@@ -239,7 +260,12 @@ struct JourneyMap: UIViewRepresentable {
             return MKOverlayRenderer(overlay: overlay)
         }
 
+        func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
+            onRegionChange(mapView.region)
+        }
+
         func mapView(_ mapView: MKMapView, viewFor annotation: any MKAnnotation) -> MKAnnotationView? {
+            if let other = annotation as? OtherTrainAnnotation { return otherTrains.view(for: other, on: mapView) }
             if let train = annotation as? TrainAnnotation {
                 let id = "train"
                 let view = (mapView.dequeueReusableAnnotationView(withIdentifier: id) as? MKMarkerAnnotationView)
