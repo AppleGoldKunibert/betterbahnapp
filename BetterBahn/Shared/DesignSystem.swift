@@ -191,6 +191,71 @@ struct SectionHeader: View {
     }
 }
 
+// MARK: - Page buttons
+
+/// Kinds of the page's own buttons: wide or round, and the one prominent main action.
+nonisolated enum PageButtonKind {
+    case regular, circle, prominent
+}
+
+extension View {
+    /// Liquid Glass, or in the refined look a flat button on the card surface (#504).
+    func pageButtonStyle(_ kind: PageButtonKind = .regular) -> some View {
+        modifier(PageButtonStyleModifier(kind: kind))
+    }
+}
+
+private struct PageButtonStyleModifier: ViewModifier {
+    let kind: PageButtonKind
+    @Environment(\.refinedDesign) private var refined
+
+    func body(content: Content) -> some View {
+        if refined {
+            content.buttonStyle(FlatButtonStyle(kind: kind))
+        } else {
+            switch kind {
+            case .regular: content.buttonStyle(.glass)
+            case .circle: content.buttonStyle(.glass).buttonBorderShape(.circle)
+            case .prominent: content.buttonStyle(.glassProminent)
+            }
+        }
+    }
+}
+
+/// The refined look's button: card surface with a hairline edge, or filled with the accent color for the
+/// main action, without Liquid Glass shine.
+private struct FlatButtonStyle: ButtonStyle {
+    let kind: PageButtonKind
+
+    func makeBody(configuration: Configuration) -> some View {
+        FlatButtonBody(kind: kind, configuration: configuration)
+    }
+}
+
+private struct FlatButtonBody: View {
+    let kind: PageButtonKind
+    let configuration: ButtonStyleConfiguration
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        let shape = kind == .circle ? AnyShape(Circle()) : AnyShape(Capsule())
+        configuration.label
+            .foregroundStyle(kind == .prominent ? Color.white : Color.primary)
+            .padding(.vertical, kind == .circle ? 6 : 12)
+            .padding(.horizontal, kind == .circle ? 6 : 16)
+            .background {
+                if kind == .prominent {
+                    shape.fill(Color.brand)
+                } else {
+                    shape.fill(Color.card).overlay { shape.stroke(Color.hairline, lineWidth: 1) }
+                }
+            }
+            .contentShape(shape)
+            .opacity(isEnabled ? (configuration.isPressed ? 0.6 : 1) : 0.4)
+            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
+    }
+}
+
 /// iOS-Settings style colored icon square. With a `logo` (S-Bahn, U-Bahn, #350) the logo itself takes
 /// the tile's place, in its own colors and with the tile's rounded corners. The refined look draws a softly
 /// tinted tile with the symbol in the tile's color.

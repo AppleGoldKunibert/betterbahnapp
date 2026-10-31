@@ -8866,6 +8866,26 @@
         }
       }
     },
+    "Zuletzt gesucht ausblenden" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide recent searches"
+          }
+        }
+      }
+    },
+    "Zuletzt gesucht einblenden" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show recent searches"
+          }
+        }
+      }
+    },
     "Zum Abholen: Ankunftszeit und Gleis live" : {
       "localizations" : {
         "en" : {

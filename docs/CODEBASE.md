@@ -251,7 +251,9 @@ in `project.pbxproj`: new files join their target automatically.
   `.refinedDesign()` (#504) switches a page to the quieter look, so far on the connection search: the classic cards
   with lighter shadows and a hairline edge, a fainter glow, sentence-case section titles, softly tinted `IconTile`s
   and a grey `AddTicketButton`, so red stays for the main action. There the rarely changed search options sit behind
-  one foldable "Optionen" row that names what differs from the defaults.
+  one foldable "Optionen" row that names what differs from the defaults, and "Zuletzt gesucht" starts folded.
+  `.pageButtonStyle(.regular/.circle/.prominent)` gives a page's own buttons Liquid Glass, or flat card-like buttons
+  (the main action filled with `Color.brand`) in the refined look.
 - `Shared/ClosesMenusOnScroll.swift` – `.closesMenusOnScroll()` on scroll views with a `Menu` or menu `Picker` in their
   content (journey details, Settings, check-in): an open menu otherwise slides along while the content scrolls.
   `.resetsWhenMenusCloseOnScroll()` rebuilds a glass menu button (`JourneyShareButton`) that stayed where its menu was.

@@ -105,6 +105,8 @@ struct ConnectionsView: View {
     @State private var showProductsPopover = false
     /// The rarely changed options (ticket, bike, transfers, vehicles) are folded away until opened.
     @State private var showsOptions = false
+    /// The recent searches start folded away.
+    @State private var showsRecent = false
     @State private var productsTapCount = 0
     @FocusState private var focused: Field?
     /// A station field shows its suggestions (they stay a moment after it loses focus).
@@ -148,7 +150,7 @@ struct ConnectionsView: View {
                                 .font(.subheadline.weight(.semibold))
                                 .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.glass)
+                        .pageButtonStyle()
                         .controlSize(.large)
                         CollectionButton()
                     }
@@ -300,8 +302,7 @@ struct ConnectionsView: View {
                 .rotationEffect(.degrees(swapRotation))
                 .frame(width: 44, height: 44)
         }
-        .buttonStyle(.glass)
-        .buttonBorderShape(.circle)
+        .pageButtonStyle(.circle)
         .padding(.trailing, 14)
         .disabled(from == nil && to == nil)
         .accessibilityLabel("Start und Ziel tauschen")
@@ -318,8 +319,7 @@ struct ConnectionsView: View {
                 .font(.subheadline.weight(.bold))
                 .frame(width: 28, height: 28)
         }
-        .buttonStyle(.glass)
-        .buttonBorderShape(.circle)
+        .pageButtonStyle(.circle)
         .tint(.brand)
         .accessibilityLabel("Zwischenhalt hinzufügen")
     }
@@ -536,7 +536,7 @@ struct ConnectionsView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 6)
         }
-        .buttonStyle(.glassProminent)
+        .pageButtonStyle(.prominent)
         .tint(.brand)
         .controlSize(.large)
         .disabled(from == nil || to == nil || hasEmptyProductSelection || viaRows.contains { $0.station == nil })
@@ -544,44 +544,63 @@ struct ConnectionsView: View {
 
     private var recentSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SectionHeader(title: String(localized: "Zuletzt gesucht"), systemImage: "clock.arrow.circlepath")
-            Card(padding: 0) {
-                VStack(spacing: 0) {
-                    ForEach(Array(model.recentSearches.enumerated()), id: \.element.id) { index, recent in
-                        if index > 0 { Divider().padding(.leading, 58) }
-                        Button {
-                            withAnimation {
-                                from = recent.from
-                                to = recent.to
-                                viaRows = []
-                            }
-                        } label: {
-                            HStack(spacing: 12) {
-                                IconTile(systemImage: "arrow.triangle.swap", color: .secondary, size: 30)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(recent.from.displayName).font(.subheadline.weight(.medium)).lineLimit(1)
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "arrow.turn.down.right").font(.caption2)
-                                        Text(recent.to.displayName).lineLimit(1)
-                                    }
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+            Button {
+                withAnimation(.snappy) { showsRecent.toggle() }
+            } label: {
+                HStack(spacing: 8) {
+                    SectionHeader(title: String(localized: "Zuletzt gesucht"), systemImage: "clock.arrow.circlepath",
+                                  trailing: showsRecent ? nil : "\(model.recentSearches.count)")
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(showsRecent ? 180 : 0))
+                        .padding(.trailing, 4)
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityHint(showsRecent ? String(localized: "Zuletzt gesucht ausblenden") : String(localized: "Zuletzt gesucht einblenden"))
+            if showsRecent {
+                Card(padding: 0) {
+                    VStack(spacing: 0) {
+                        ForEach(Array(model.recentSearches.enumerated()), id: \.element.id) { index, recent in
+                            if index > 0 { Divider().padding(.leading, 58) }
+                            Button {
+                                withAnimation {
+                                    from = recent.from
+                                    to = recent.to
+                                    viaRows = []
                                 }
-                                Spacer()
-                                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    IconTile(systemImage: "arrow.triangle.swap", color: .secondary, size: 30)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(recent.from.displayName).font(.subheadline.weight(.medium)).lineLimit(1)
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "arrow.turn.down.right").font(.caption2)
+                                            Text(recent.to.displayName).lineLimit(1)
+                                        }
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
+                                .contentShape(.rect)
                             }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
-                            .contentShape(.rect)
-                        }
-                        .buttonStyle(.plain)
-                        .contextMenu {
-                            Button("Entfernen", systemImage: "trash", role: .destructive) {
-                                model.recentSearches.removeAll { $0.id == recent.id }
+                            .buttonStyle(.plain)
+                            .contextMenu {
+                                Button("Entfernen", systemImage: "trash", role: .destructive) {
+                                    model.recentSearches.removeAll { $0.id == recent.id }
+                                }
                             }
                         }
                     }
                 }
+                .transition(.opacity)
             }
         }
     }
