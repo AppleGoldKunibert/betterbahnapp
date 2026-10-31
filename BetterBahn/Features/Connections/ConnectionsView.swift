@@ -8,7 +8,7 @@ struct JourneyRoute: Hashable {
     var journey: Journey
     var finalDestination: Station
     var readOnly = false
-    var title = "Reiseplan"
+    var title = String(localized: "Reiseplan")
     /// The search this journey came from, so a re-plan can start from the same options.
     var search: ConnectionSearch?
 }
@@ -219,8 +219,8 @@ struct ConnectionsView: View {
                 CollectionView()
             }
         } placeholder: {
-            SplitPlaceholder(title: "Verbindungen", systemImage: "arrow.triangle.swap",
-                             message: "Such eine Verbindung oder wähl eine deiner Reisen.")
+            SplitPlaceholder(title: String(localized: "Verbindungen"), systemImage: "arrow.triangle.swap",
+                             message: String(localized: "Such eine Verbindung oder wähl eine deiner Reisen."))
         }
         .toolbar(showsJourney ? .hidden : .automatic, for: .tabBar)
     }
@@ -237,7 +237,7 @@ struct ConnectionsView: View {
     private var routeCard: some View {
         Card(padding: 0) {
             VStack(spacing: 0) {
-                StationInput(label: "Start", placeholder: "Von wo?", systemImage: "circle.circle.fill",
+                StationInput(label: String(localized: "Start"), placeholder: String(localized: "Von wo?"), systemImage: "circle.circle.fill",
                              iconColor: .primary, station: $from, focus: $focused, focusValue: .from)
 
                 // The swap button always sits right below Start, so it never drifts onto (and
@@ -251,7 +251,7 @@ struct ConnectionsView: View {
                     routeDivider(showAdd: row.id == viaRows.last?.id, showSwap: false)
                 }
 
-                StationInput(label: "Ziel", placeholder: "Wohin?", systemImage: "mappin.circle.fill",
+                StationInput(label: String(localized: "Ziel"), placeholder: String(localized: "Wohin?"), systemImage: "mappin.circle.fill",
                              station: $to, focus: $focused, focusValue: .to)
             }
             .clipShape(.rect(cornerRadius: 22, style: .continuous))
@@ -359,7 +359,7 @@ struct ConnectionsView: View {
                 if let title = model.settings.bikeOption.searchTitle {
                     Toggle(isOn: Bindable(model.settings).searchWithBike) {
                         optionLabel(title, subtitle: model.settings.bikeOption == .foldingBike
-                                    ? "Zeigt, wo dein Klapprad mitkommt" : "Zeigt, ob dein Fahrrad mitkommt",
+                                    ? String(localized: "Zeigt, wo dein Klapprad mitkommt") : String(localized: "Zeigt, ob dein Fahrrad mitkommt"),
                                     icon: "bicycle", color: .brand)
                     }
                     .tint(.brand)
@@ -376,7 +376,7 @@ struct ConnectionsView: View {
 
     private var transfersPicker: some View {
         VStack(alignment: .leading, spacing: 8) {
-            optionLabel("Max. Umstiege", subtitle: "Weniger Umsteigen, evtl. länger unterwegs", icon: "arrow.triangle.swap", color: .brand)
+            optionLabel(String(localized: "Max. Umstiege"), subtitle: String(localized: "Weniger Umsteigen, evtl. länger unterwegs"), icon: "arrow.triangle.swap", color: .brand)
             MaxTransfersPicker(maxTransfers: $maxTransfers)
         }
     }
@@ -386,7 +386,7 @@ struct ConnectionsView: View {
             productsTapCount += 1
         } label: {
             HStack {
-                optionLabel("Verkehrsmittel", subtitle: productSummary,
+                optionLabel(String(localized: "Verkehrsmittel"), subtitle: productSummary,
                             icon: "train.side.front.car", color: .brand)
                 Spacer()
                 Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
@@ -399,7 +399,7 @@ struct ConnectionsView: View {
     }
 
     private var productSummary: String {
-        perLeg ? "Pro Abschnitt festgelegt" : BetterBahn.productSummary(products)
+        perLeg ? String(localized: "Pro Abschnitt festgelegt") : BetterBahn.productSummary(products)
     }
 
     private var all: Set<Product> { Set(Product.allCases) }
@@ -415,7 +415,9 @@ struct ConnectionsView: View {
 
     /// The route sections between consecutive stops, as (key, title) pairs.
     private var legs: [(id: UUID, title: String)] {
-        let names = [from?.displayName ?? "Start"] + viaRows.map { $0.station?.displayName ?? "Zwischenhalt" } + [to?.displayName ?? "Ziel"]
+        let names: [String] = [from?.displayName ?? String(localized: "Start")]
+            + viaRows.map { $0.station?.displayName ?? String(localized: "Zwischenhalt") }
+            + [to?.displayName ?? String(localized: "Ziel")]
         return legIDs.enumerated().map { ($1, "\(names[$0]) → \(names[$0 + 1])") }
     }
 
@@ -492,7 +494,7 @@ struct ConnectionsView: View {
 
     private var recentSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            SectionHeader(title: "Zuletzt gesucht", systemImage: "clock.arrow.circlepath")
+            SectionHeader(title: String(localized: "Zuletzt gesucht"), systemImage: "clock.arrow.circlepath")
             Card(padding: 0) {
                 VStack(spacing: 0) {
                     ForEach(Array(model.recentSearches.enumerated()), id: \.element.id) { index, recent in

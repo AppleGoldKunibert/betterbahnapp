@@ -180,7 +180,7 @@ public struct JourneyWidgetState: Hashable, Sendable {
     /// Short train name for small widgets: the line for regional trains ("RE 5", "S 3"), the train
     /// number only where there's no line (long-distance trains, "ICE 645"); never the run number.
     public static func name(of leg: Leg) -> String {
-        guard let line = leg.line, !line.isUnknown else { return "Zug" }
+        guard let line = leg.line, !line.isUnknown else { return String(kit: "Zug") }
         return line.displayName
     }
 

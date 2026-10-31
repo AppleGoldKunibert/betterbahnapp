@@ -8,7 +8,7 @@ public enum ExitReminderLead: Int, Codable, Sendable, CaseIterable, Hashable {
     case ten = 10
 
     public var interval: TimeInterval { TimeInterval(rawValue * 60) }
-    public var displayName: String { "\(rawValue) Min. vorher" }
+    public var displayName: String { String(kit: "%lld Min. vorher", rawValue) }
 }
 
 /// A reminder shortly before a train of a saved journey reaches the stop where the user gets off:
@@ -33,7 +33,7 @@ public struct ExitReminder: Sendable, Hashable, Identifiable {
     /// The text, for a reminder showing at `date` (the fire date, or earlier for the Live Activity).
     public func body(at date: Date) -> String {
         let minutes = Int((arrival.timeIntervalSince(date) / 60).rounded())
-        return (minutes >= 1 ? "In \(minutes) Min. " : "Gleich ") + details
+        return minutes >= 1 ? String(kit: "In %lld Min. %@", minutes, details) : String(kit: "Gleich %@", details)
     }
 
     public var body: String { body(at: fireDate) }
@@ -64,18 +64,18 @@ public extension Journey {
             var details = Self.delay(leg.arrival).map { "(\($0)) " } ?? ""
             if index + 1 < transit.count {
                 let next = transit[index + 1]
-                details += "Ankunft in \(place) – " + Self.transfer(from: leg, to: next, disposition: dispositions[next.id])
+                details += String(kit: "Ankunft in %@ – %@", place, Self.transfer(from: leg, to: next, disposition: dispositions[next.id]))
             } else if leg.destination.isSamePlace(as: legs.last?.destination ?? leg.destination) {
-                details += "Ankunft am Ziel \(place)"
+                details += String(kit: "Ankunft am Ziel %@", place)
             } else {
-                details += "Ankunft in \(place) – hier aussteigen"
+                details += String(kit: "Ankunft in %@ – hier aussteigen", place)
             }
             for alert in liftAlerts where alert.legID == leg.id && alert.place != .start {
                 details += ". \(alert.alert.text)"
             }
             reminders.append(ExitReminder(legID: leg.id, station: station, arrival: arrival,
                                           fireDate: max(arrival.addingTimeInterval(-lead), now),
-                                          title: "Gleich aussteigen: \(station)", details: details))
+                                          title: String(kit: "Gleich aussteigen: %@", station), details: details))
         }
         return reminders
     }
@@ -83,20 +83,20 @@ public extension Journey {
     /// "Umstieg in ICE 578 (+23), in 26 Min. auf Gl. 4 statt Gl. 5 (Anschluss wartet)", or "ICE 578 fällt aus"
     /// when the connecting train (or just its departure at the transfer stop) is cancelled (#482).
     private static func transfer(from leg: Leg, to next: Leg, disposition: TransferDisposition?) -> String {
-        let name = next.line?.name ?? "Anschlusszug"
+        let name = next.line?.name ?? String(kit: "Anschlusszug")
         let departureCancelled = next.stopovers.first.map { $0.station.isSamePlace(as: next.origin) && $0.departureCancelled } ?? false
-        if next.cancelled || departureCancelled { return "\(name) fällt aus" }
-        var text = "Umstieg in \(name)"
+        if next.cancelled || departureCancelled { return String(kit: "%@ fällt aus", name) }
+        var text = String(kit: "Umstieg in %@", name)
         if let delay = delay(next.departure) { text += " (\(delay))" }
-        if !next.origin.isSamePlace(as: leg.destination) { text += " ab \(next.origin.displayName)" }
+        if !next.origin.isSamePlace(as: leg.destination) { text = String(kit: "%@ ab %@", text, next.origin.displayName) }
         let minutes = Int((next.departure.best.timeIntervalSince(leg.arrival.best) / 60).rounded(.down))
         if minutes < 0, disposition != .waiting {
-            text += ", fährt vor der Ankunft ab"
+            text += String(kit: ", fährt vor der Ankunft ab")
         } else {
-            text += ", in \(max(minutes, 0)) Min."
+            text += String(kit: ", in %lld Min.", max(minutes, 0))
             if let platform = next.departurePlatform, let best = platform.best {
-                text += " auf Gl. \(best)"
-                if let planned = platform.planned, PlatformInfo.isDifferentTrack(planned, best) { text += " statt Gl. \(planned)" }
+                text += String(kit: " auf Gl. %@", best)
+                if let planned = platform.planned, PlatformInfo.isDifferentTrack(planned, best) { text += String(kit: " statt Gl. %@", planned) }
             }
         }
         if let disposition { text += " (\(disposition.title))" }

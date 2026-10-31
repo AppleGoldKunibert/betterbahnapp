@@ -109,11 +109,11 @@ public enum DBOrderPage {
 
         public var errorDescription: String? {
             switch self {
-            case .notReady: "Die Buchung wird noch geladen."
-            case .blocked: "bahn.de hat die Anfrage blockiert. Bitte versuch es später noch mal."
-            case .notFound: "Zu dieser Auftragsnummer und diesem Namen wurde keine Buchung gefunden."
-            case .http(let status): "bahn.de hat mit einem Fehler geantwortet (\(status))."
-            case .unreadable: "Die Antwort von bahn.de konnte nicht gelesen werden."
+            case .notReady: String(kit: "Die Buchung wird noch geladen.")
+            case .blocked: String(kit: "bahn.de hat die Anfrage blockiert. Bitte versuch es später noch mal.")
+            case .notFound: String(kit: "Zu dieser Auftragsnummer und diesem Namen wurde keine Buchung gefunden.")
+            case .http(let status): String(kit: "bahn.de hat mit einem Fehler geantwortet (%lld).", status)
+            case .unreadable: String(kit: "Die Antwort von bahn.de konnte nicht gelesen werden.")
             }
         }
     }

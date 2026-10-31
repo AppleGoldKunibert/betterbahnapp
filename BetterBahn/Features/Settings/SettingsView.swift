@@ -38,15 +38,15 @@ struct SettingsView: View {
                     Picker(selection: $settings.ticketType) {
                         ForEach(TicketType.allCases, id: \.self) { Text($0.displayName).tag($0) }
                     } label: {
-                        IconLabel(title: "Mein Ticket", systemImage: settings.ticketType.symbolName, color: .brand)
+                        IconLabel(title: String(localized: "Mein Ticket"), systemImage: settings.ticketType.symbolName, color: .brand)
                     }
                     Picker(selection: $settings.travelClass) {
                         ForEach(TravelClass.allCases, id: \.self) { Text($0.displayName).tag($0) }
                     } label: {
-                        IconLabel(title: "Reiseklasse", systemImage: "person.2.fill", color: .brand)
+                        IconLabel(title: String(localized: "Reiseklasse"), systemImage: "person.2.fill", color: .brand)
                     }
                     Toggle(isOn: $settings.ticketFilterByDefault) {
-                        IconLabel(title: "Nur passende Züge zeigen",
+                        IconLabel(title: String(localized: "Nur passende Züge zeigen"),
                                   systemImage: "line.3.horizontal.decrease.circle.fill", color: .brand)
                     }
                     .tint(.brand)
@@ -54,28 +54,27 @@ struct SettingsView: View {
                         NavigationLink {
                             BC100RulesView()
                         } label: {
-                            IconLabel(title: "Ausgeschlossene Anbieter", systemImage: "nosign", color: .orange)
+                            IconLabel(title: String(localized: "Ausgeschlossene Anbieter"), systemImage: "nosign", color: .orange)
                         }
                     }
                     NavigationLink {
                         TicketsListView()
                     } label: {
-                        IconLabel(title: "Gespeicherte Tickets", systemImage: "ticket.fill", color: .brand)
+                        IconLabel(title: String(localized: "Gespeicherte Tickets"), systemImage: "ticket.fill", color: .brand)
                     }
                 } header: {
                     Text("Ticket")
                 } footer: {
-                    Text((settings.ticketType == .deutschlandticket
-                          ? "Blendet Fernzüge wie ICE und IC aus, in denen das Deutschlandticket nicht gilt."
-                          : "Blendet Züge aus, in denen die BahnCard 100 nicht gilt, z. B. FlixTrain.")
-                         + " Die erwartete Auslastung wird für deine Reiseklasse gezeigt.")
+                    Text(settings.ticketType == .deutschlandticket
+                         ? "Blendet Fernzüge wie ICE und IC aus, in denen das Deutschlandticket nicht gilt. Die erwartete Auslastung wird für deine Reiseklasse gezeigt."
+                         : "Blendet Züge aus, in denen die BahnCard 100 nicht gilt, z. B. FlixTrain. Die erwartete Auslastung wird für deine Reiseklasse gezeigt.")
                 }
 
                 Section {
                     Picker(selection: $settings.bikeOption) {
                         ForEach(BikeOption.allCases, id: \.self) { Text($0.displayName).tag($0) }
                     } label: {
-                        IconLabel(title: "Fahrrad", systemImage: "bicycle", color: .brand)
+                        IconLabel(title: String(localized: "Fahrrad"), systemImage: "bicycle", color: .brand)
                     }
                 } header: {
                     Text("Fahrrad")
@@ -87,7 +86,7 @@ struct SettingsView: View {
 
                 Section {
                     Toggle(isOn: $settings.stepFree) {
-                        IconLabel(title: "Stufenfrei reisen", systemImage: "figure.roll", color: .brand)
+                        IconLabel(title: String(localized: "Stufenfrei reisen"), systemImage: "figure.roll", color: .brand)
                     }
                     .tint(.brand)
                     .onChange(of: settings.stepFree) { _, enabled in
@@ -100,7 +99,7 @@ struct SettingsView: View {
 
                 Section {
                     Toggle(isOn: $settings.connectionWarnings) {
-                        IconLabel(title: "Bei Problemen benachrichtigen", systemImage: "exclamationmark.triangle.fill", color: .orange)
+                        IconLabel(title: String(localized: "Bei Problemen benachrichtigen"), systemImage: "exclamationmark.triangle.fill", color: .orange)
                     }
                     .tint(.brand)
                     .onChange(of: settings.connectionWarnings) { _, enabled in
@@ -108,7 +107,7 @@ struct SettingsView: View {
                         Task { await model.syncCommutePush() }
                     }
                     Toggle(isOn: $settings.exitReminders) {
-                        IconLabel(title: "Ans Aussteigen erinnern", systemImage: "bell.badge.fill", color: .red)
+                        IconLabel(title: String(localized: "Ans Aussteigen erinnern"), systemImage: "bell.badge.fill", color: .red)
                     }
                     .tint(.brand)
                     .onChange(of: settings.exitReminders) { _, enabled in
@@ -119,19 +118,19 @@ struct SettingsView: View {
                         Picker(selection: $settings.exitReminderLead) {
                             ForEach(ExitReminderLead.allCases, id: \.self) { Text($0.displayName).tag($0) }
                         } label: {
-                            IconLabel(title: "Erinnerung", systemImage: "clock.fill", color: .red)
+                            IconLabel(title: String(localized: "Erinnerung"), systemImage: "clock.fill", color: .red)
                         }
                         .onChange(of: settings.exitReminderLead) { model.scheduleExitReminderSync() }
                     }
                     if LiveActivityManager.isSupported {
                         Toggle(isOn: $settings.liveActivitiesEnabled) {
-                            IconLabel(title: "Live-Aktivitäten", systemImage: "bolt.badge.clock.fill", color: .indigo)
+                            IconLabel(title: String(localized: "Live-Aktivitäten"), systemImage: "bolt.badge.clock.fill", color: .indigo)
                         }
                         .tint(.brand)
                         .onChange(of: settings.liveActivitiesEnabled) { model.syncLiveActivity() }
                         if settings.liveActivitiesEnabled {
                             Toggle(isOn: $settings.liveActivityServerUpdates) {
-                                IconLabel(title: "Live-Aktivität über Server aktualisieren", systemImage: "arrow.trianglehead.2.clockwise",
+                                IconLabel(title: String(localized: "Live-Aktivität über Server aktualisieren"), systemImage: "arrow.trianglehead.2.clockwise",
                                           color: .indigo)
                             }
                             .tint(.brand)
@@ -147,7 +146,7 @@ struct SettingsView: View {
                     NavigationLink {
                         RegularTripsView()
                     } label: {
-                        IconLabel(title: "Regelmäßige Fahrten", systemImage: "repeat", color: .brand)
+                        IconLabel(title: String(localized: "Regelmäßige Fahrten"), systemImage: "repeat", color: .brand)
                     }
                 } header: {
                     Text("Meine Reisen")
@@ -162,7 +161,7 @@ struct SettingsView: View {
                                               set: { settings.calendarAccess = $0 })) {
                         ForEach(CalendarAccessMode.allCases, id: \.self) { Text($0.displayName).tag($0) }
                     } label: {
-                        IconLabel(title: "Zugriff", systemImage: "calendar", color: .red)
+                        IconLabel(title: String(localized: "Zugriff"), systemImage: "calendar", color: .red)
                     }
                     .onChange(of: settings.calendarAccess) { _, mode in
                         guard let mode, mode == .full || settings.calendarAutoAdd != .off else { return }
@@ -177,7 +176,7 @@ struct SettingsView: View {
                     Picker(selection: $settings.calendarAutoAdd) {
                         ForEach(CalendarAutoAdd.allCases, id: \.self) { Text($0.displayName).tag($0) }
                     } label: {
-                        IconLabel(title: "Automatisch", systemImage: "calendar.badge.clock", color: .red)
+                        IconLabel(title: String(localized: "Automatisch"), systemImage: "calendar.badge.clock", color: .red)
                     }
                     .onChange(of: settings.calendarAutoAdd) { _, autoAdd in
                         guard autoAdd != .off else { return }
@@ -200,7 +199,7 @@ struct SettingsView: View {
                         Text("Nur Ausland").tag(StationFlagMode.foreignOnly)
                         Text("An").tag(StationFlagMode.always)
                     } label: {
-                        IconLabel(title: "Flagge", systemImage: "flag.fill", color: .brand)
+                        IconLabel(title: String(localized: "Flagge"), systemImage: "flag.fill", color: .brand)
                     }
                 } header: {
                     Text("Bahnhofssuche")
@@ -212,7 +211,7 @@ struct SettingsView: View {
                     Picker(selection: $settings.trainPositionRefresh) {
                         ForEach(TrainPositionRefresh.allCases, id: \.self) { Text($0.displayName).tag($0) }
                     } label: {
-                        IconLabel(title: "Aktualisierung", systemImage: "location.fill", color: .brand)
+                        IconLabel(title: String(localized: "Aktualisierung"), systemImage: "location.fill", color: .brand)
                     }
                 } header: {
                     Text("Live-Karte")
@@ -231,7 +230,7 @@ struct SettingsView: View {
                         }
                     } label: {
                         HStack {
-                            IconLabel(title: "Zugarten", systemImage: "tram.fill", color: .brand)
+                            IconLabel(title: String(localized: "Zugarten"), systemImage: "tram.fill", color: .brand)
                             Spacer()
                             Text(trainSearchKindsSummary(settings.trainSearchKinds))
                                 .foregroundStyle(.secondary)
@@ -245,7 +244,7 @@ struct SettingsView: View {
                         TrainSearchCountriesView()
                     } label: {
                         HStack {
-                            IconLabel(title: "Länder", systemImage: "globe.europe.africa.fill", color: .teal)
+                            IconLabel(title: String(localized: "Länder"), systemImage: "globe.europe.africa.fill", color: .teal)
                             Spacer()
                             Text(trainSearchCountriesSummary(settings.trainSearchCountries))
                                 .foregroundStyle(.secondary)
@@ -260,7 +259,7 @@ struct SettingsView: View {
 
                 Section {
                     Toggle(isOn: $settings.showTrainStatistics) {
-                        IconLabel(title: "Zugstatistik anzeigen", systemImage: "chart.bar.fill", color: .teal)
+                        IconLabel(title: String(localized: "Zugstatistik anzeigen"), systemImage: "chart.bar.fill", color: .teal)
                     }
                     .tint(.brand)
                 } header: {
@@ -271,7 +270,7 @@ struct SettingsView: View {
 
                 Section {
                     Toggle(isOn: $settings.showWeather) {
-                        IconLabel(title: "Wetter am Ziel", systemImage: "cloud.sun.fill", color: .orange)
+                        IconLabel(title: String(localized: "Wetter am Ziel"), systemImage: "cloud.sun.fill", color: .orange)
                     }
                     .tint(.brand)
                 } header: {
@@ -284,7 +283,7 @@ struct SettingsView: View {
                     Button(role: .destructive) {
                         showClearHistoryConfirmation = true
                     } label: {
-                        IconLabel(title: "Suchverlauf löschen", systemImage: "clock.arrow.circlepath", color: .heavyDelay)
+                        IconLabel(title: String(localized: "Suchverlauf löschen"), systemImage: "clock.arrow.circlepath", color: .heavyDelay)
                     }
                 } footer: {
                     Text("Favoriten und gespeicherte Reisen bleiben erhalten.")
@@ -292,33 +291,33 @@ struct SettingsView: View {
 
                 Section {
                     Toggle(isOn: $settings.expertMode.animation()) {
-                        IconLabel(title: "Expertenmodus", systemImage: "wand.and.stars", color: .indigo)
+                        IconLabel(title: String(localized: "Expertenmodus"), systemImage: "wand.and.stars", color: .indigo)
                     }
                     .tint(.brand)
                     if settings.expertMode {
                         Toggle(isOn: $settings.expertTraewelling) {
-                            IconLabel(title: "Träwelling", systemImage: "checkmark.seal.fill", color: .brand,
-                                      subtitle: "Bei Träwelling in Züge einchecken.")
+                            IconLabel(title: String(localized: "Träwelling"), systemImage: "checkmark.seal.fill", color: .brand,
+                                      subtitle: String(localized: "Bei Träwelling in Züge einchecken."))
                         }
                         .tint(.brand)
                         Toggle(isOn: $settings.expertEditJourney) {
-                            IconLabel(title: "Reise bearbeiten", systemImage: "pencil", color: .orange,
-                                      subtitle: "Reisen ändern und ab einem Halt neu planen.")
+                            IconLabel(title: String(localized: "Reise bearbeiten"), systemImage: "pencil", color: .orange,
+                                      subtitle: String(localized: "Reisen ändern und ab einem Halt neu planen."))
                         }
                         .tint(.brand)
                         Toggle(isOn: $settings.expertTrainChoice) {
-                            IconLabel(title: "Bestimmten Zug wählen", systemImage: "number", color: .purple,
-                                      subtitle: "Einen bestimmten Zug in die Reise übernehmen.")
+                            IconLabel(title: String(localized: "Bestimmten Zug wählen"), systemImage: "number", color: .purple,
+                                      subtitle: String(localized: "Einen bestimmten Zug in die Reise übernehmen."))
                         }
                         .tint(.brand)
                         Toggle(isOn: $settings.expertIgnoreBoardingRules) {
-                            IconLabel(title: "„Nur Ein-/Ausstieg“ ignorieren", systemImage: "arrow.up.arrow.down.circle.fill", color: .teal,
-                                      subtitle: "Auch Züge, die nur zum Ein- oder Aussteigen halten.")
+                            IconLabel(title: String(localized: "„Nur Ein-/Ausstieg“ ignorieren"), systemImage: "arrow.up.arrow.down.circle.fill", color: .teal,
+                                      subtitle: String(localized: "Auch Züge, die nur zum Ein- oder Aussteigen halten."))
                         }
                         .tint(.brand)
                         Toggle(isOn: $settings.expertRil100) {
-                            IconLabel(title: "RIL100-Codes in der Suche", systemImage: "character.textbox", color: .gray,
-                                      subtitle: "Kürzel wie „FF“ zeigen und danach suchen.")
+                            IconLabel(title: String(localized: "RIL100-Codes in der Suche"), systemImage: "character.textbox", color: .gray,
+                                      subtitle: String(localized: "Kürzel wie „FF“ zeigen und danach suchen."))
                         }
                         .tint(.brand)
                     }
@@ -332,10 +331,10 @@ struct SettingsView: View {
                     NavigationLink {
                         DataSourcesView()
                     } label: {
-                        IconLabel(title: "Datenquellen", systemImage: "server.rack", color: .gray)
+                        IconLabel(title: String(localized: "Datenquellen"), systemImage: "server.rack", color: .gray)
                     }
                     Link(destination: Self.privacyPolicyURL) {
-                        IconLabel(title: "Datenschutz", systemImage: "hand.raised.fill", color: .blue)
+                        IconLabel(title: String(localized: "Datenschutz"), systemImage: "hand.raised.fill", color: .blue)
                     }
                     .foregroundStyle(.primary)
                 } footer: {
@@ -357,31 +356,31 @@ struct SettingsView: View {
                 Text("Favoriten, gespeicherte Reisen und deine Anmeldung bleiben erhalten.")
             }
         } placeholder: {
-            SplitPlaceholder(title: "Einstellungen", systemImage: "gearshape",
-                             message: "Wähl links einen Bereich.")
+            SplitPlaceholder(title: String(localized: "Einstellungen"), systemImage: "gearshape",
+                             message: String(localized: "Wähl links einen Bereich."))
         }
     }
 
     private var trainPositionRefreshFooter: String {
         switch model.settings.trainPositionRefresh {
         case .off:
-            "Karten laden die Positionen der Züge nur einmal beim Öffnen."
+            String(localized: "Karten laden die Positionen der Züge nur einmal beim Öffnen.")
         default:
-            "Wie oft die Live-Position aktualisiert wird. Öfter verbraucht mehr Daten."
+            String(localized: "Wie oft die Live-Position aktualisiert wird. Öfter verbraucht mehr Daten.")
         }
     }
 
     private func trainSearchKindsSummary(_ kinds: Set<TrainSearchKind>) -> String {
-        if kinds == Set(TrainSearchKind.allCases) { return "Alle" }
-        if kinds == TrainSearchKind.defaults { return "Alle Züge" }
-        if kinds.isEmpty { return "Keine" }
+        if kinds == Set(TrainSearchKind.allCases) { return String(localized: "Alle") }
+        if kinds == TrainSearchKind.defaults { return String(localized: "Alle Züge") }
+        if kinds.isEmpty { return String(localized: "Keine") }
         return TrainSearchKind.allCases.filter(kinds.contains).map(\.displayName).joined(separator: ", ")
     }
 
     private func trainSearchCountriesSummary(_ codes: Set<String>) -> String {
-        if codes.isEmpty { return "Überall" }
+        if codes.isEmpty { return String(localized: "Überall") }
         let names = TrainSearchCountry.all.filter { codes.contains($0.code) }.map(\.name)
-        return names.count <= 2 ? names.joined(separator: ", ") : "\(names.count) Länder"
+        return names.count <= 2 ? names.joined(separator: ", ") : String(localized: "\(names.count) Länder")
     }
 
     private var traewellingSection: some View {
@@ -391,7 +390,7 @@ struct SettingsView: View {
                 HStack(spacing: 12) {
                     IconTile(systemImage: "person.crop.circle.badge.checkmark", color: .punctual)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(user?.displayName ?? "Angemeldet").font(.body.weight(.semibold))
+                        Text(user?.displayName ?? String(localized: "Angemeldet")).font(.body.weight(.semibold))
                         if let user {
                             Text("@\(user.username)").font(.caption).foregroundStyle(.secondary)
                         }
@@ -408,7 +407,7 @@ struct SettingsView: View {
                         await refreshLogin()
                     }
                 } label: {
-                    IconLabel(title: "Abmelden", systemImage: "rectangle.portrait.and.arrow.right", color: .heavyDelay)
+                    IconLabel(title: String(localized: "Abmelden"), systemImage: "rectangle.portrait.and.arrow.right", color: .heavyDelay)
                 }
             } else {
                 TraewellingLoginButton { Task { await refreshLogin() } }
@@ -416,7 +415,7 @@ struct SettingsView: View {
                     .listRowInsets(EdgeInsets())
             }
             Toggle(isOn: $settings.syncTraewellingToMap) {
-                IconLabel(title: "Fahrten auf der Karte zeigen", systemImage: "map.fill", color: .teal)
+                IconLabel(title: String(localized: "Fahrten auf der Karte zeigen"), systemImage: "map.fill", color: .teal)
             }
             .tint(.brand)
             if isLoggedIn, settings.syncTraewellingToMap {
@@ -424,7 +423,7 @@ struct SettingsView: View {
                     Task { await model.syncTraewelling(force: true) }
                 } label: {
                     HStack {
-                        IconLabel(title: "Jetzt synchronisieren", systemImage: "arrow.triangle.2.circlepath", color: .blue)
+                        IconLabel(title: String(localized: "Jetzt synchronisieren"), systemImage: "arrow.triangle.2.circlepath", color: .blue)
                         Spacer()
                         // The count keeps growing while a long history is imported page by page.
                         Text("\(model.traewellingTrips.count) Fahrten")
@@ -442,18 +441,18 @@ struct SettingsView: View {
                 NavigationLink {
                     CheckinNotificationsView()
                 } label: {
-                    IconLabel(title: "Mitteilungen", systemImage: "bell.badge.fill", color: .orange)
+                    IconLabel(title: String(localized: "Mitteilungen"), systemImage: "bell.badge.fill", color: .orange)
                 }
             }
             Picker(selection: $settings.traewellingVisibility) {
                 ForEach(TraewellingVisibility.allCases, id: \.self) { Text($0.label).tag($0) }
             } label: {
-                IconLabel(title: "Sichtbarkeit", systemImage: "eye.fill", color: .purple)
+                IconLabel(title: String(localized: "Sichtbarkeit"), systemImage: "eye.fill", color: .purple)
             }
             NavigationLink {
                 QuickTagsView()
             } label: {
-                IconLabel(title: "Tags", systemImage: "tag.fill", color: .brand)
+                IconLabel(title: String(localized: "Tags"), systemImage: "tag.fill", color: .brand)
             }
         } header: {
             Text("Träwelling")
@@ -498,7 +497,7 @@ struct BC100RulesView: View {
                     load(.default)
                     save()
                 } label: {
-                    IconLabel(title: "Standard wiederherstellen", systemImage: "arrow.counterclockwise", color: .gray)
+                    IconLabel(title: String(localized: "Standard wiederherstellen"), systemImage: "arrow.counterclockwise", color: .gray)
                 }
                 .foregroundStyle(.primary)
             }
@@ -558,14 +557,14 @@ struct QuickTagsView: View {
                 Button {
                     showAddSheet = true
                 } label: {
-                    IconLabel(title: "Tag hinzufügen", systemImage: "plus.circle.fill", color: .brand)
+                    IconLabel(title: String(localized: "Tag hinzufügen"), systemImage: "plus.circle.fill", color: .brand)
                 }
                 .foregroundStyle(.primary)
                 Button {
                     tags = QuickTag.defaults
                     save()
                 } label: {
-                    IconLabel(title: "Standard wiederherstellen", systemImage: "arrow.counterclockwise", color: .gray)
+                    IconLabel(title: String(localized: "Standard wiederherstellen"), systemImage: "arrow.counterclockwise", color: .gray)
                 }
                 .foregroundStyle(.primary)
             }
@@ -642,7 +641,7 @@ private struct TrainSearchCountriesView: View {
                 Button {
                     settings.trainSearchCountries = []
                 } label: {
-                    row(title: "Überall", flag: "🌍", selected: settings.trainSearchCountries.isEmpty)
+                    row(title: String(localized: "Überall"), flag: "🌍", selected: settings.trainSearchCountries.isEmpty)
                 }
             } footer: {
                 Text("Zeigt Züge aus allen Ländern, die bahn.expert kennt.")

@@ -135,7 +135,7 @@ public struct TraewellingStatus: Decodable, Sendable, Hashable {
         let o = checkin.origin, d = checkin.destination
         guard let plannedDeparture = o.departurePlanned ?? o.departure ?? checkin.manualDeparture,
               let plannedArrival = d.arrivalPlanned ?? d.arrival ?? checkin.manualArrival else { return nil }
-        let name = checkin.lineName ?? "Fahrt"
+        let name = checkin.lineName ?? String(kit: "Fahrt")
         let line = Line(name: name, number: checkin.journeyNumber.map(String.init), product: product, operatorName: nil)
         let leg = Leg(
             origin: station(o), destination: station(d),

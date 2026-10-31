@@ -102,7 +102,7 @@ struct CalendarChoiceRow: View {
                     .tag(Optional(calendar.calendarIdentifier))
             }
         } label: {
-            IconLabel(title: "Kalender", systemImage: "calendar.badge.plus", color: .red)
+            IconLabel(title: String(localized: "Kalender"), systemImage: "calendar.badge.plus", color: .red)
         }
         .task(id: model.calendarAccessChanges) {
             calendars = model.writableCalendars()

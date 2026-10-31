@@ -152,14 +152,14 @@ public extension TripActivityAttributes.ContentState {
         var previousArrival = min(now, legs[0].departure.best.addingTimeInterval(-30 * 60))
         var previousLeg: Leg?
         for (index, leg) in legs.enumerated() {
-            let line = leg.line?.name ?? "Zug"
+            let line = leg.line?.name ?? String(kit: "Zug")
             let product = leg.line?.product ?? .other
             let isNightTrain = leg.line?.isNightTrain ?? false
             if now < leg.departure.best {
                 var transfer: TripActivityAttributes.TransferDetails?
                 if let previousLeg, leg.departure.best.timeIntervalSince(now) <= 10 * 60 {
                     transfer = TripActivityAttributes.TransferDetails(
-                        incomingLine: previousLeg.line?.name ?? "Zug",
+                        incomingLine: previousLeg.line?.name ?? String(kit: "Zug"),
                         incomingPlannedArrival: previousLeg.arrival.planned,
                         incomingExpectedArrival: previousLeg.arrival.best,
                         incomingPlatform: previousLeg.arrivalPlatform?.best)
@@ -191,7 +191,7 @@ public extension TripActivityAttributes.ContentState {
             previousLeg = leg
         }
         let last = legs[legs.count - 1]
-        return Self(lineName: last.line?.name ?? "Zug", nextStopName: last.destination.displayName,
+        return Self(lineName: last.line?.name ?? String(kit: "Zug"), nextStopName: last.destination.displayName,
                     plannedTime: last.arrival.planned, expectedTime: last.arrival.best,
                     platform: last.arrivalPlatform?.best, isDeparture: false, cancelled: last.cancelled,
                     progressStart: last.departure.best, progressEnd: last.arrival.best,

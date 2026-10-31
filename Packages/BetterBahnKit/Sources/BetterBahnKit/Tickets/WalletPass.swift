@@ -56,38 +56,38 @@ public struct WalletPassPayload: Encodable, Sendable, Hashable {
 
         var pass = BoardingPass()
         if let first {
-            pass.headerFields = [Field(key: "date", label: "Datum",
+            pass.headerFields = [Field(key: "date", label: String(kit: "Datum"),
                                        value: first.departure.formatted(Self.dateStyle))]
         }
         pass.primaryFields = [
-            Field(key: "from", label: first.map { "Ab " + $0.departure.formatted(Self.timeStyle(for: $0.originEVA)) },
+            Field(key: "from", label: first.map { String(kit: "Ab %@", $0.departure.formatted(Self.timeStyle(for: $0.originEVA))) },
                   value: Station.displayName(for: ticket.validOrigin)),
-            Field(key: "to", label: last.map { "An " + $0.arrival.formatted(Self.timeStyle(for: $0.destinationEVA)) },
+            Field(key: "to", label: last.map { String(kit: "An %@", $0.arrival.formatted(Self.timeStyle(for: $0.destinationEVA))) },
                   value: Station.displayName(for: ticket.validDestination)),
         ]
         pass.secondaryFields = [Field(key: "offer", label: "Ticket", value: ticket.offerName)]
         if let travelClass = ticket.classDescription {
-            pass.secondaryFields.append(Field(key: "class", label: "Klasse", value: travelClass))
+            pass.secondaryFields.append(Field(key: "class", label: String(kit: "Klasse"), value: travelClass))
         }
         let trains = ticket.legs.map(\.displayName).joined(separator: ", ")
         if !trains.isEmpty {
-            pass.auxiliaryFields.append(Field(key: "trains", label: ticket.isTrainBound ? "Zugbindung" : "Züge", value: trains))
+            pass.auxiliaryFields.append(Field(key: "trains", label: ticket.isTrainBound ? String(kit: "Zugbindung") : String(kit: "Züge"), value: trains))
         }
         let seats = ticket.seats.map(SeatReservation.init)
         if !seats.isEmpty {
-            pass.auxiliaryFields.append(Field(key: "seats", label: "Sitzplatz",
+            pass.auxiliaryFields.append(Field(key: "seats", label: String(kit: "Sitzplatz"),
                                               value: seats.map(\.description).joined(separator: "\n")))
         }
         pass.backFields = [
-            Field(key: "order", label: "Auftragsnummer", value: ticket.orderNumber),
-            Field(key: "travellers", label: "Reisende", value: ticket.travellers.map(\.displayName).joined(separator: "\n")),
-            Field(key: "conditions", label: "Bedingungen", value: ticket.conditions.joined(separator: "\n")),
-            Field(key: "legs", label: "Verbindung", value: ticket.legs.map { leg in
+            Field(key: "order", label: String(kit: "Auftragsnummer"), value: ticket.orderNumber),
+            Field(key: "travellers", label: String(kit: "Reisende"), value: ticket.travellers.map(\.displayName).joined(separator: "\n")),
+            Field(key: "conditions", label: String(kit: "Bedingungen"), value: ticket.conditions.joined(separator: "\n")),
+            Field(key: "legs", label: String(kit: "Verbindung"), value: ticket.legs.map { leg in
                 "\(leg.displayName): \(Station.displayName(for: leg.originName)) \(leg.departure.formatted(Self.timeStyle(for: leg.originEVA)))"
                     + " → \(Station.displayName(for: leg.destinationName)) \(leg.arrival.formatted(Self.timeStyle(for: leg.destinationEVA)))"
             }.joined(separator: "\n")),
-            Field(key: "note", label: "Hinweis",
-                  value: "Der Barcode stammt unverändert aus deinem DB-Ticket. Gültig nur mit dem bei der Buchung angegebenen Ausweis."),
+            Field(key: "note", label: String(kit: "Hinweis"),
+                  value: String(kit: "Der Barcode stammt unverändert aus deinem DB-Ticket. Gültig nur mit dem bei der Buchung angegebenen Ausweis.")),
         ].filter { !$0.value.isEmpty }
         boardingPass = pass
     }
@@ -107,23 +107,23 @@ public struct WalletPassPayload: Encodable, Sendable, Hashable {
         var fields = BoardingPass()
         // Validity as the "route": from → until.
         fields.primaryFields = [
-            Field(key: "from", label: pass.validFrom.map { "Ab " + $0.formatted(Self.berlinTime) } ?? "Ab",
+            Field(key: "from", label: pass.validFrom.map { String(kit: "Ab %@", $0.formatted(Self.berlinTime)) } ?? String(kit: "Ab"),
                   value: pass.validFrom.map { $0.formatted(Self.dateStyle) } ?? "–"),
-            Field(key: "until", label: pass.validUntil.map { "Bis " + $0.formatted(Self.berlinTime) } ?? "Bis",
+            Field(key: "until", label: pass.validUntil.map { String(kit: "Bis %@", $0.formatted(Self.berlinTime)) } ?? String(kit: "Bis"),
                   value: pass.validUntil.map { $0.formatted(Self.dateStyle) } ?? "–"),
         ]
         fields.secondaryFields = [Field(key: "offer", label: "Ticket", value: pass.name)]
         if let travelClass = pass.classDescription {
-            fields.secondaryFields.append(Field(key: "class", label: "Klasse", value: travelClass))
+            fields.secondaryFields.append(Field(key: "class", label: String(kit: "Klasse"), value: travelClass))
         }
         if let holder = pass.holder?.name, !holder.isEmpty {
-            fields.auxiliaryFields = [Field(key: "holder", label: "Inhaber", value: holder)]
+            fields.auxiliaryFields = [Field(key: "holder", label: String(kit: "Inhaber"), value: holder)]
         }
         fields.backFields = [
-            Field(key: "birthDate", label: "Geburtsdatum", value: pass.holder?.birthDateDescription ?? ""),
-            Field(key: "issuer", label: "Ausgestellt von", value: pass.issuer ?? ""),
-            Field(key: "note", label: "Hinweis",
-                  value: "Der Barcode stammt unverändert aus deinem Ticket. Bei der Kontrolle gilt die Karte in der App, in der du sie gekauft hast."),
+            Field(key: "birthDate", label: String(kit: "Geburtsdatum"), value: pass.holder?.birthDateDescription ?? ""),
+            Field(key: "issuer", label: String(kit: "Ausgestellt von"), value: pass.issuer ?? ""),
+            Field(key: "note", label: String(kit: "Hinweis"),
+                  value: String(kit: "Der Barcode stammt unverändert aus deinem Ticket. Bei der Kontrolle gilt die Karte in der App, in der du sie gekauft hast.")),
         ].filter { !$0.value.isEmpty }
         boardingPass = fields
     }
@@ -135,18 +135,18 @@ public struct WalletPassPayload: Encodable, Sendable, Hashable {
     }
 
     private static var dateStyle: Date.FormatStyle {
-        Date.FormatStyle(date: .abbreviated, time: .omitted, locale: Locale(identifier: "de_DE"),
+        Date.FormatStyle(date: .abbreviated, time: .omitted, locale: KitLocalization.locale,
                          timeZone: TimeZone(identifier: "Europe/Berlin")!)
     }
 
     private static var berlinTime: Date.FormatStyle {
-        Date.FormatStyle(date: .omitted, time: .shortened, locale: Locale(identifier: "de_DE"),
+        Date.FormatStyle(date: .omitted, time: .shortened, locale: KitLocalization.locale,
                          timeZone: TimeZone(identifier: "Europe/Berlin")!)
     }
 
     /// Times in the station's own zone, as on the ticket.
     private static func timeStyle(for eva: String?) -> Date.FormatStyle {
-        Date.FormatStyle(date: .omitted, time: .shortened, locale: Locale(identifier: "de_DE"),
+        Date.FormatStyle(date: .omitted, time: .shortened, locale: KitLocalization.locale,
                          timeZone: DBOrder.timeZone(forEVA: eva))
     }
 }
@@ -158,7 +158,7 @@ public enum WalletPassError: Error, Sendable, Equatable, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .unverifiedBarcode:
-            "Der Barcode trägt keine gültige Signatur des Ausstellers. Daraus kann BetterBahn keinen Wallet-Pass machen."
+            String(kit: "Der Barcode trägt keine gültige Signatur des Ausstellers. Daraus kann BetterBahn keinen Wallet-Pass machen.")
         }
     }
 }
