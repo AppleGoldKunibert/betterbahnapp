@@ -119,6 +119,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
                                             withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         let userInfo = notification.request.content.userInfo
         let shows = notification.request.identifier.hasPrefix(AppModel.exitReminderPrefix)
+            || notification.request.identifier.hasPrefix(AppModel.checkinReminderPrefix)
             || CommuteNotifier.question(in: userInfo) != nil || CommuteNotifier.journeyID(in: userInfo) != nil
         completionHandler(shows ? [.banner, .list, .sound] : [])
     }

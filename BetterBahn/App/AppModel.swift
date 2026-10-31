@@ -124,7 +124,11 @@ final class AppModel {
     /// Träwelling status of each leg checked in from this app (by `Leg.id`), so the leg's "Mehr"
     /// offers "Check-in ansehen" instead of checking in again.
     var checkinStatusIDs: [String: Int] {
-        didSet { Storage.save(checkinStatusIDs, key: "checkinStatusIDs") }
+        didSet {
+            Storage.save(checkinStatusIDs, key: "checkinStatusIDs")
+            // A check-in cancels the reminder for that train (#519).
+            scheduleExitReminderSync()
+        }
     }
     /// Seats saved on the trains being ridden, without a reservation (#410); forgotten a while after the ride.
     private(set) var savedSeats: [SavedSeat] {
@@ -1715,6 +1719,11 @@ final class AppSettings {
             uploadToCloud()
         }
     }
+    /// A notification 5 minutes after a saved journey's train has left, to check in on Träwelling (#519). Only
+    /// with a Träwelling login; per device, like the notifications themselves.
+    var checkinReminders: Bool {
+        didSet { UserDefaults.standard.set(checkinReminders, forKey: "checkinReminders") }
+    }
     /// "Stufenfrei reisen" (#486): search results flag journeys that need a lift out of order, saved journeys
     /// notify when one fails and exit reminders name it. Off by default; the warnings in a journey and on the
     /// departure board show anyway.
@@ -1917,6 +1926,7 @@ final class AppSettings {
         connectionWarnings = defaults.object(forKey: "connectionWarnings") as? Bool ?? true
         exitReminders = defaults.object(forKey: "exitReminders") as? Bool ?? true
         stepFree = defaults.bool(forKey: "stepFree")
+        checkinReminders = defaults.object(forKey: "checkinReminders") as? Bool ?? true
         exitReminderLead = ExitReminderLead(rawValue: defaults.integer(forKey: "exitReminderLead")) ?? .five
         calendarAccess = defaults.string(forKey: "calendarAccess").flatMap(CalendarAccessMode.init)
         calendarID = defaults.string(forKey: "calendarID")
