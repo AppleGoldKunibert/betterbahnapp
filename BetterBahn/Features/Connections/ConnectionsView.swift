@@ -103,6 +103,8 @@ struct ConnectionsView: View {
     /// Per-section selections; the section from the start is keyed by `startLegID`, the others by the via row they start at.
     @State private var legProducts: [UUID: Set<Product>] = [:]
     @State private var showProductsPopover = false
+    /// The rarely changed options (ticket, bike, transfers, vehicles) are folded away until opened.
+    @State private var showsOptions = false
     @State private var productsTapCount = 0
     @FocusState private var focused: Field?
     /// A station field shows its suggestions (they stay a moment after it loses focus).
@@ -325,54 +327,101 @@ struct ConnectionsView: View {
     // MARK: Options
 
     private var optionsCard: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 8) {
-                    Picker("Zeit", selection: $isArrival) {
-                        Label("Abfahrt", systemImage: "arrow.up.right").tag(false)
-                        Label("Ankunft", systemImage: "arrow.down.right").tag(true)
+        Card(padding: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 8) {
+                        Picker("Zeit", selection: $isArrival) {
+                            Label("Abfahrt", systemImage: "arrow.up.right").tag(false)
+                            Label("Ankunft", systemImage: "arrow.down.right").tag(true)
+                        }
+                        .pickerStyle(.segmented)
+                        .fixedSize()
+                        .disabled(!viaRows.isEmpty)
+
+                        Spacer()
+
+                        TimeSelector(date: $date, useNow: $useNow)
                     }
-                    .pickerStyle(.segmented)
-                    .fixedSize()
-                    .disabled(!viaRows.isEmpty)
 
-                    Spacer()
-
-                    TimeSelector(date: $date, useNow: $useNow)
-                }
-
-                if !viaRows.isEmpty {
-                    Label("Mit Zwischenhalten suchen wir ab der gewählten Abfahrtszeit.", systemImage: "info.circle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Divider()
-
-                Toggle(isOn: $onlyValidTicket) {
-                    let ticket = model.settings.ticketType
-                    optionLabel(ticket.filterTitle, subtitle: ticket.filterSubtitle, icon: ticket.symbolName, color: .brand)
-                }
-                .tint(.brand)
-
-                Divider()
-
-                if let title = model.settings.bikeOption.searchTitle {
-                    Toggle(isOn: Bindable(model.settings).searchWithBike) {
-                        optionLabel(title, subtitle: model.settings.bikeOption == .foldingBike
-                                    ? String(localized: "Zeigt, wo dein Klapprad mitkommt") : String(localized: "Zeigt, ob dein Fahrrad mitkommt"),
-                                    icon: "bicycle", color: .secondary)
+                    if !viaRows.isEmpty {
+                        Label("Mit Zwischenhalten suchen wir ab der gewählten Abfahrtszeit.", systemImage: "info.circle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    .tint(.brand)
-
-                    Divider()
                 }
+                .padding(16)
 
-                transfersPicker
+                Divider().padding(.leading, 16)
 
-                productsButton
+                optionsToggleRow
+
+                if showsOptions {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Divider()
+
+                        Toggle(isOn: $onlyValidTicket) {
+                            let ticket = model.settings.ticketType
+                            optionLabel(ticket.filterTitle, subtitle: ticket.filterSubtitle, icon: ticket.symbolName, color: .brand)
+                        }
+                        .tint(.brand)
+
+                        Divider()
+
+                        if let title = model.settings.bikeOption.searchTitle {
+                            Toggle(isOn: Bindable(model.settings).searchWithBike) {
+                                optionLabel(title, subtitle: model.settings.bikeOption == .foldingBike
+                                            ? String(localized: "Zeigt, wo dein Klapprad mitkommt") : String(localized: "Zeigt, ob dein Fahrrad mitkommt"),
+                                            icon: "bicycle", color: .secondary)
+                            }
+                            .tint(.brand)
+
+                            Divider()
+                        }
+
+                        transfersPicker
+
+                        productsButton
+                    }
+                    .padding([.horizontal, .bottom], 16)
+                    .transition(.opacity)
+                }
             }
         }
+    }
+
+    /// The single row that opens the options; it names what differs from the defaults.
+    private var optionsToggleRow: some View {
+        Button {
+            withAnimation(.snappy) { showsOptions.toggle() }
+        } label: {
+            HStack {
+                optionLabel(String(localized: "Optionen"), subtitle: optionsSummary ?? String(localized: "Keine Einschränkungen"),
+                            icon: "slider.horizontal.3", color: .secondary)
+                Spacer()
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(showsOptions ? 180 : 0))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint(showsOptions ? String(localized: "Optionen ausblenden") : String(localized: "Optionen einblenden"))
+    }
+
+    /// The options that differ from the defaults, or nil when none do.
+    private var optionsSummary: String? {
+        var parts: [String] = []
+        if onlyValidTicket { parts.append(model.settings.ticketType.shortName) }
+        if model.settings.searchWithBike, let title = model.settings.bikeOption.searchTitle { parts.append(title) }
+        if let maxTransfers {
+            parts.append(maxTransfers == 0 ? String(localized: "Direkt") : String(localized: "Max. \(maxTransfers) Umstiege"))
+        }
+        if perLeg || products != all { parts.append(productSummary) }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     private var transfersPicker: some View {

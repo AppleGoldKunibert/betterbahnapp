@@ -248,10 +248,10 @@ in `project.pbxproj`: new files join their target automatically.
   attribution/license; keep current when adding one), `BC100RulesView`, quick tags.
 - `Shared/DesignSystem.swift` – `Card`, `SectionHeader`, `LineBadge`, `TimeStack`, `DelayPill`, `PlatformBadge`,
   `InfoChip`, `OperatorLabel`, `Color.brand`, `.transition(.fold)` …; reuse these instead of new styling.
-  `.calmDesign()` (#504) switches a page to the calm look (flat cards, `Color.canvas`, plain section titles, grey
-  symbols instead of `IconTile`s); rolled out page by page. `RouteMarkerKey` (from `StationInput`) lets a route card
-  join its stops with one line. `.refinedDesign()` is the gentler variant on the connection search: the classic look
-  with lighter card shadows, a fainter glow, sentence-case section titles and softly tinted `IconTile`s.
+  `.refinedDesign()` (#504) switches a page to the quieter look, so far on the connection search: the classic cards
+  with lighter shadows and a hairline edge, a fainter glow, sentence-case section titles, softly tinted `IconTile`s
+  and a grey `AddTicketButton`, so red stays for the main action. There the rarely changed search options sit behind
+  one foldable "Optionen" row that names what differs from the defaults.
 - `Shared/ClosesMenusOnScroll.swift` – `.closesMenusOnScroll()` on scroll views with a `Menu` or menu `Picker` in their
   content (journey details, Settings, check-in): an open menu otherwise slides along while the content scrolls.
   `.resetsWhenMenusCloseOnScroll()` rebuilds a glass menu button (`JourneyShareButton`) that stayed where its menu was.

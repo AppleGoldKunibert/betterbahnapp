@@ -21,7 +21,6 @@ struct StationInput<Focus: Hashable>: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.stationSearchArea) private var searchArea
-    @Environment(\.calmDesign) private var calm
     /// This field's key in `searchArea`.
     @State private var areaID = UUID()
     @State private var query = ""
@@ -71,10 +70,7 @@ struct StationInput<Focus: Hashable>: View {
                 Image(systemName: systemImage)
                     .font(.title3)
                     .foregroundStyle(iconColor)
-                    // Covers the line a calm route card draws between its stops.
-                    .background(Circle().fill(calm ? Color.card : .clear).padding(-2))
                     .frame(width: 24)
-                    .anchorPreference(key: RouteMarkerKey.self, value: .center) { [$0] }
                     .allowsHitTesting(false)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(label)
@@ -364,14 +360,6 @@ struct StationInput<Focus: Hashable>: View {
         query = suggestion.displayName
         model.rememberStation(suggestion)
         focus.wrappedValue = nil
-    }
-}
-
-/// Centers of the station fields' icons, so a route card can join its stops with a line.
-struct RouteMarkerKey: PreferenceKey {
-    static let defaultValue: [Anchor<CGPoint>] = []
-    static func reduce(value: inout [Anchor<CGPoint>], nextValue: () -> [Anchor<CGPoint>]) {
-        value += nextValue()
     }
 }
 

@@ -29,6 +29,7 @@ struct TicketButton: View {
 
 /// Icon next to "Verbindungen suchen": fetches a ticket by order number and links it to its journey.
 struct AddTicketButton: View {
+    @Environment(\.refinedDesign) private var refined
     @State private var showLookup = false
     @State private var notMatched = false
     @State private var lookupFoundNoJourney = false
@@ -44,7 +45,8 @@ struct AddTicketButton: View {
                 .padding(.vertical, 6)
         }
         .buttonStyle(.glass)
-        .tint(.brand)
+        // The refined search page keeps its red for the search button next to it.
+        .tint(refined ? .primary : .brand)
         .controlSize(.large)
         .sheet(isPresented: $showLookup, onDismiss: {
             notMatched = lookupFoundNoJourney
