@@ -211,7 +211,9 @@ struct ConnectionsView: View {
         } destination: { route in
             switch route {
             case .search(let search):
+                // A new search next to open results (iPad) must not keep the old results.
                 JourneyResultsView(search: search)
+                    .id(search)
             case .journey(let journey):
                 JourneyDetailView(journey: journey.journey, finalDestination: journey.finalDestination,
                                   readOnly: journey.readOnly, title: journey.title, search: journey.search)
@@ -291,6 +293,8 @@ struct ConnectionsView: View {
 
     private var swapButton: some View {
         Button {
+            // Close an open station search first, so its suggestions don't linger over the swapped fields.
+            focused = nil
             withAnimation(.spring(duration: 0.4)) {
                 swap(&from, &to)
                 swapRotation += 180
@@ -542,6 +546,7 @@ struct ConnectionsView: View {
 
     private func search() {
         guard let from, let to else { return }
+        focused = nil
         let via = viaRows.compactMap { row in row.station.map { ViaWaypoint(station: $0, minStayMinutes: row.minStayMinutes, products: perLeg ? legProducts[row.id] ?? all : nil) } }
         model.remember(from: from, to: to)
         // Via routing only supports "depart at" — an arrival deadline doesn't compose with per-stop minimum stays.
