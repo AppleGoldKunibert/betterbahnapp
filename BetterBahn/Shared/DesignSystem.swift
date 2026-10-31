@@ -17,8 +17,11 @@ extension UIImage {
 
 // MARK: - Tokens
 
+/// The accent color's components: the single source `Color.brand` and the colors derived from it are built from.
+nonisolated private let brandComponents: (red: CGFloat, green: CGFloat, blue: CGFloat) = (0.86, 0.09, 0.19)
+
 extension Color {
-    static let brand = Color(red: 0.86, green: 0.09, blue: 0.19)
+    static let brand = Color(red: brandComponents.red, green: brandComponents.green, blue: brandComponents.blue)
     static let brandDeep = Color(red: 0.55, green: 0.03, blue: 0.14)
     static let punctual = Color(red: 0.13, green: 0.62, blue: 0.35)
     static let slightDelay = Color(red: 0.95, green: 0.55, blue: 0.05)
@@ -33,6 +36,24 @@ extension Color {
     })
     /// Thin outline of flat cards.
     static let hairline = Color.primary.opacity(0.08)
+    /// Surface of the ticket-style cards, accent-dependent: white (dark gray in dark mode) tinted a little
+    /// towards the accent color, so another accent tints the tickets alike.
+    static let ticket = Color(UIColor { traits in
+        let base: CGFloat = traits.userInterfaceStyle == .dark ? 0.11 : 1
+        let share: CGFloat = 0.035
+        return UIColor(red: base + (brandComponents.red - base) * share,
+                       green: base + (brandComponents.green - base) * share,
+                       blue: base + (brandComponents.blue - base) * share, alpha: 1)
+    })
+}
+
+nonisolated private struct CardSurfaceKey: EnvironmentKey {
+    // `Color.card`, spelled out: that one is main-actor isolated.
+    static let defaultValue = Color(.secondarySystemGroupedBackground)
+}
+
+nonisolated private struct HeadingDesignKey: EnvironmentKey {
+    static let defaultValue: Font.Design? = nil
 }
 
 nonisolated private struct CalmDesignKey: EnvironmentKey {
@@ -45,6 +66,18 @@ extension EnvironmentValues {
     nonisolated var calmDesign: Bool {
         get { self[CalmDesignKey.self] }
         set { self[CalmDesignKey.self] = newValue }
+    }
+
+    /// The surface of the card a view sits on, so marks drawn on it can cover what lies beneath.
+    nonisolated var cardSurface: Color {
+        get { self[CardSurfaceKey.self] }
+        set { self[CardSurfaceKey.self] = newValue }
+    }
+
+    /// Font design of the calm section titles; nil keeps the system font.
+    nonisolated var headingDesign: Font.Design? {
+        get { self[HeadingDesignKey.self] }
+        set { self[HeadingDesignKey.self] = newValue }
     }
 }
 
@@ -157,12 +190,14 @@ struct SectionHeader: View {
     let systemImage: String
     var trailing: String?
     @Environment(\.calmDesign) private var calm
+    @Environment(\.headingDesign) private var headingDesign
 
     var body: some View {
         if calm {
             HStack(alignment: .firstTextBaseline) {
                 Text(title)
                     .font(.title3.weight(.bold))
+                    .fontDesign(headingDesign)
                 Spacer()
                 if let trailing {
                     Text(trailing).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary).monospacedDigit()

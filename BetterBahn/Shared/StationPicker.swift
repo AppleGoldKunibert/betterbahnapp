@@ -22,6 +22,8 @@ struct StationInput<Focus: Hashable>: View {
     @Environment(AppModel.self) private var model
     @Environment(\.stationSearchArea) private var searchArea
     @Environment(\.calmDesign) private var calm
+    @Environment(\.cardSurface) private var cardSurface
+    @Environment(\.ticketStationFields) private var ticketStyle
     /// This field's key in `searchArea`.
     @State private var areaID = UUID()
     @State private var query = ""
@@ -72,17 +74,19 @@ struct StationInput<Focus: Hashable>: View {
                     .font(.title3)
                     .foregroundStyle(iconColor)
                     // Covers the line a calm route card draws between its stops.
-                    .background(Circle().fill(calm ? Color.card : .clear).padding(-2))
+                    .background(Circle().fill(calm ? cardSurface : .clear).padding(-2))
                     .frame(width: 24)
                     .anchorPreference(key: RouteMarkerKey.self, value: .center) { [$0] }
                     .allowsHitTesting(false)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(label)
-                        .font(.caption)
+                        .font(ticketStyle ? .caption2.weight(.semibold) : .caption)
+                        .tracking(ticketStyle ? 0.6 : 0)
+                        .textCase(ticketStyle ? .uppercase : nil)
                         .foregroundStyle(.secondary)
                         .allowsHitTesting(false)
                     TextField(placeholder, text: $query)
-                        .font(.headline)
+                        .font(ticketStyle ? .title2.weight(.bold) : .headline)
                         .focused(focus, equals: focusValue)
                         .submitLabel(.search)
                         .autocorrectionDisabled()
@@ -367,6 +371,18 @@ struct StationInput<Focus: Hashable>: View {
     }
 }
 
+nonisolated private struct TicketStationFieldsKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// Station fields drawn like a ticket's "Von" and "Nach": a small upper-case label over a large name.
+    nonisolated var ticketStationFields: Bool {
+        get { self[TicketStationFieldsKey.self] }
+        set { self[TicketStationFieldsKey.self] = newValue }
+    }
+}
+
 /// Centers of the station fields' icons, so a route card can join its stops with a line.
 struct RouteMarkerKey: PreferenceKey {
     static let defaultValue: [Anchor<CGPoint>] = []
@@ -505,7 +521,7 @@ struct TimeSelector: View {
             Button {
                 showPicker = true
             } label: {
-                Text(useNow ? String(localized: "Jetzt") : label)
+                Text(useNow ? String(localized: "Jetzt") : Self.label(for: date))
                     .font(.subheadline.weight(.semibold))
                     .monospacedDigit()
                     .lineLimit(1)
@@ -545,7 +561,8 @@ struct TimeSelector: View {
         }
     }
 
-    private var label: String {
+    /// The time alone today, else with the day.
+    static func label(for date: Date) -> String {
         if Calendar.current.isDateInToday(date) {
             return date.formatted(date: .omitted, time: .shortened)
         }
