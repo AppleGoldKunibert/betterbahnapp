@@ -421,22 +421,26 @@ struct YearReviewBanner: View {
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: "sparkles")
-                    .font(.title2.weight(.semibold))
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Color.brand)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Dein Bahnjahr \(String(year))").font(.headline)
                     Text("Kilometer, Lieblingszüge und mehr im Jahresrückblick.")
                         .font(.subheadline)
-                        .opacity(0.85)
+                        .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 Image(systemName: "chevron.right")
-                    .font(.subheadline.weight(.bold))
-                    .opacity(0.8)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
             }
-            .foregroundStyle(.white)
             .padding(16)
-            .background(LinearGradient(colors: [.brand, .brandDeep], startPoint: .topLeading, endPoint: .bottomTrailing),
-                        in: .rect(cornerRadius: 22, style: .continuous))
+            // Flat like the page's other cards, the red only in the symbol.
+            .background(Color.card, in: .rect(cornerRadius: 22, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .strokeBorder(Color.hairline, lineWidth: 1)
+            }
             .contentShape(.rect)
         }
         .buttonStyle(.plain)

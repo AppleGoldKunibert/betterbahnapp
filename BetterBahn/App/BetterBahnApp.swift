@@ -25,6 +25,7 @@ struct BetterBahnApp: App {
         WindowGroup {
             RootView()
                 .environment(model)
+                .appTheme()
                 .phoneColumnsWhenUnfolded()
         }
     }

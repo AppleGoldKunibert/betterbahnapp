@@ -17,35 +17,59 @@ extension UIImage {
 
 // MARK: - Tokens
 
+extension RGBColor {
+    var swiftUIColor: Color { Color(red: red, green: green, blue: blue) }
+}
+
 extension Color {
-    static let brand = Color(red: 0.86, green: 0.09, blue: 0.19)
-    static let brandDeep = Color(red: 0.55, green: 0.03, blue: 0.14)
+    /// The accent color picked in Settings › Design (#504); views reading it redraw when it changes.
+    static var brand: Color { Theme.shared.accent.color.swiftUIColor }
+    /// The accent color, darker: the deep end of accent gradients.
+    static var brandDeep: Color { Theme.shared.accent.color.mixed(with: RGBColor(red: 0, green: 0, blue: 0), by: 0.4).swiftUIColor }
     static let punctual = Color(red: 0.13, green: 0.62, blue: 0.35)
     static let slightDelay = Color(red: 0.95, green: 0.55, blue: 0.05)
     static let heavyDelay = Color(red: 0.88, green: 0.15, blue: 0.20)
     /// Card surface: white in light mode, elevated gray in dark mode.
     static let card = Color(.secondarySystemGroupedBackground)
-    /// Thin card outline of the refined look.
+    /// Page background of the Fahrkarte design: a warm off-white, near-black in dark mode.
+    static let canvas = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0.05, green: 0.05, blue: 0.06, alpha: 1)
+            : UIColor(red: 0.96, green: 0.955, blue: 0.945, alpha: 1)
+    })
+    /// Thin card outline.
     static let hairline = Color.primary.opacity(0.08)
-}
-
-extension View {
-    /// Draws this page in the refined classic look: the usual cards and glow, only quieter (#504).
-    func refinedDesign() -> some View {
-        environment(\.refinedDesign, true)
+    /// Surface of the ticket-style cards: white (dark gray in dark mode) tinted a little towards the accent.
+    static var ticket: Color {
+        let accent = Theme.shared.accent.color
+        return Color(UIColor { traits in
+            let base: Double = traits.userInterfaceStyle == .dark ? 0.11 : 1
+            let tinted = RGBColor(red: base, green: base, blue: base).mixed(with: accent, by: 0.035)
+            return UIColor(red: tinted.red, green: tinted.green, blue: tinted.blue, alpha: 1)
+        })
     }
 }
 
-nonisolated private struct RefinedDesignKey: EnvironmentKey {
-    static let defaultValue = false
+nonisolated private struct AppDesignKey: EnvironmentKey {
+    static let defaultValue = AppDesign.default
+}
+
+nonisolated private struct CardSurfaceKey: EnvironmentKey {
+    // `Color.card`, spelled out: that one is main-actor isolated.
+    static let defaultValue = Color(.secondarySystemGroupedBackground)
 }
 
 extension EnvironmentValues {
-    /// The refined classic look (softer shadows, fainter glow, sentence-case section titles, tinted icon
-    /// tiles, red kept for the main action), switched on page by page. Set with `refinedDesign()` at a page's root.
-    nonisolated var refinedDesign: Bool {
-        get { self[RefinedDesignKey.self] }
-        set { self[RefinedDesignKey.self] = newValue }
+    /// The design picked in Settings › Design (#504); set once at the app's root by `appTheme()`.
+    nonisolated var appDesign: AppDesign {
+        get { self[AppDesignKey.self] }
+        set { self[AppDesignKey.self] = newValue }
+    }
+
+    /// The surface of the card a view sits on, so marks drawn on it can cover what lies beneath.
+    nonisolated var cardSurface: Color {
+        get { self[CardSurfaceKey.self] }
+        set { self[CardSurfaceKey.self] = newValue }
     }
 }
 
@@ -108,54 +132,65 @@ func transferColor(_ minutes: Int) -> Color {
 struct Card<Content: View>: View {
     var padding: CGFloat = 16
     @ViewBuilder var content: Content
-    @Environment(\.refinedDesign) private var refined
+    @Environment(\.appDesign) private var design
 
     var body: some View {
+        let fahrkarte = design == .fahrkarte
         content
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.card, in: .rect(cornerRadius: 22, style: .continuous))
-            // The refined look lifts cards with a lighter, tighter shadow.
-            .shadow(color: .black.opacity(refined ? 0.04 : 0.06), radius: refined ? 8 : 12, y: refined ? 2 : 4)
+            // Alternativ lifts cards with a light, tight shadow; Fahrkarte separates them by their outline alone.
+            .shadow(color: .black.opacity(fahrkarte ? 0 : 0.04), radius: 8, y: 2)
             .overlay {
                 // Subtle edge so cards stay visible on dark backgrounds.
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .strokeBorder(refined ? Color.hairline : Color.primary.opacity(0.06), lineWidth: 0.5)
+                    .strokeBorder(Color.hairline, lineWidth: fahrkarte ? 1 : 0.5)
             }
     }
 }
 
-/// Grouped background with a soft brand glow at the top.
+/// Alternativ: the grouped background with a faint accent glow at the top. Fahrkarte: a plain warm page.
 struct AppBackground: View {
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.refinedDesign) private var refined
+    @Environment(\.appDesign) private var design
 
     var body: some View {
         ZStack(alignment: .top) {
-            Color(.systemGroupedBackground)
-            LinearGradient(colors: [Color.brand.opacity(glowOpacity), .clear], startPoint: .top, endPoint: .bottom)
-                .frame(height: 340)
+            if design == .fahrkarte {
+                Color.canvas
+            } else {
+                Color(.systemGroupedBackground)
+                LinearGradient(colors: [Color.brand.opacity(colorScheme == .dark ? 0.16 : 0.08), .clear],
+                               startPoint: .top, endPoint: .bottom)
+                    .frame(height: 340)
+            }
         }
         .ignoresSafeArea()
     }
-
-    /// The refined look keeps the glow, only fainter.
-    private var glowOpacity: Double {
-        let dark = colorScheme == .dark
-        if refined { return dark ? 0.16 : 0.08 }
-        return dark ? 0.28 : 0.16
-    }
 }
 
-/// In the refined look a readable sentence-case title with a grey icon.
+/// Alternativ: a sentence-case title with a grey icon. Fahrkarte: a bold rounded title without icon.
 struct SectionHeader: View {
     let title: String
     let systemImage: String
     var trailing: String?
-    @Environment(\.refinedDesign) private var refined
+    @Environment(\.appDesign) private var design
 
     var body: some View {
-        if refined {
+        if design == .fahrkarte {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title)
+                    .font(.title3.weight(.bold))
+                    .fontDesign(.rounded)
+                Spacer()
+                if let trailing {
+                    Text(trailing).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary).monospacedDigit()
+                }
+            }
+            .padding(.horizontal, 4)
+            .padding(.top, 8)
+        } else {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Image(systemName: systemImage)
                     .font(.footnote.weight(.semibold))
@@ -168,26 +203,7 @@ struct SectionHeader: View {
                 }
             }
             .padding(.horizontal, 4)
-        } else {
-            classic
         }
-    }
-
-    private var classic: some View {
-        HStack(spacing: 6) {
-            Image(systemName: systemImage)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(Color.brand)
-            Text(title.uppercased())
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .tracking(0.6)
-            Spacer()
-            if let trailing {
-                Text(trailing).font(.caption).foregroundStyle(.tertiary)
-            }
-        }
-        .padding(.horizontal, 4)
     }
 }
 
@@ -199,7 +215,7 @@ nonisolated enum PageButtonKind {
 }
 
 extension View {
-    /// Liquid Glass, or in the refined look a flat button on the card surface (#504).
+    /// Alternativ: a flat button on the card surface. Fahrkarte: Liquid Glass (#504).
     func pageButtonStyle(_ kind: PageButtonKind = .regular) -> some View {
         modifier(PageButtonStyleModifier(kind: kind))
     }
@@ -207,10 +223,10 @@ extension View {
 
 private struct PageButtonStyleModifier: ViewModifier {
     let kind: PageButtonKind
-    @Environment(\.refinedDesign) private var refined
+    @Environment(\.appDesign) private var design
 
     func body(content: Content) -> some View {
-        if refined {
+        if design == .alternativ {
             content.buttonStyle(FlatButtonStyle(kind: kind))
         } else {
             switch kind {
@@ -222,7 +238,7 @@ private struct PageButtonStyleModifier: ViewModifier {
     }
 }
 
-/// The refined look's button: card surface with a hairline edge, or filled with the accent color for the
+/// The Alternativ design's button: card surface with a hairline edge, or filled with the accent color for the
 /// main action, without Liquid Glass shine.
 private struct FlatButtonStyle: ButtonStyle {
     let kind: PageButtonKind
@@ -257,14 +273,14 @@ private struct FlatButtonBody: View {
 }
 
 /// iOS-Settings style colored icon square. With a `logo` (S-Bahn, U-Bahn, #350) the logo itself takes
-/// the tile's place, in its own colors and with the tile's rounded corners. The refined look draws a softly
-/// tinted tile with the symbol in the tile's color.
+/// the tile's place, in its own colors and with the tile's rounded corners. Alternativ draws a softly tinted
+/// tile with the symbol in the tile's color, Fahrkarte only the symbol, in grey.
 struct IconTile: View {
     let systemImage: String
     let color: Color
     var size: CGFloat = 30
     var logo: TransitLogo? = nil
-    @Environment(\.refinedDesign) private var refined
+    @Environment(\.appDesign) private var design
 
     var body: some View {
         if let logo, UIImage(named: logo.assetName) != nil {
@@ -275,18 +291,17 @@ struct IconTile: View {
                 .frame(width: size, height: size)
                 .clipShape(.rect(cornerRadius: size * 0.28, style: .continuous))
                 .accessibilityHidden(true)
-        } else if refined {
+        } else if design == .fahrkarte {
+            Image(systemName: systemImage)
+                .font(.system(size: size * 0.6, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: size, height: size)
+        } else {
             Image(systemName: systemImage)
                 .font(.system(size: size * 0.5, weight: .medium))
                 .foregroundStyle(color)
                 .frame(width: size, height: size)
                 .background(color.opacity(0.12), in: .rect(cornerRadius: size * 0.28, style: .continuous))
-        } else {
-            Image(systemName: systemImage)
-                .font(.system(size: size * 0.5, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: size, height: size)
-                .background(color.gradient, in: .rect(cornerRadius: size * 0.28, style: .continuous))
         }
     }
 }
