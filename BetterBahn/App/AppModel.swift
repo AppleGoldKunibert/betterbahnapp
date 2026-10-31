@@ -396,6 +396,8 @@ final class AppModel {
         }
     }
     @ObservationIgnored private var traewellingTripsLoaded = false
+    /// The collection as last opened, for its category pages (`ConnectionsRoute.collectionCategory`).
+    var collectionSnapshot: CollectionSnapshot?
     @ObservationIgnored private var traewellingTripsLoadTask: Task<Void, Never>?
     @ObservationIgnored private var traewellingTripsSaveTask: Task<Void, Never>?
 
