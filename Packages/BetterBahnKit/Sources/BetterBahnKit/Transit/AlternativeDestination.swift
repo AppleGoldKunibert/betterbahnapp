@@ -3,6 +3,12 @@ import Foundation
 /// A search to the destination and to an alternative one, e.g. another station in the same city (#516):
 /// both result lists become one, in order of departure.
 public enum AlternativeDestination {
+    /// The alternative destination to search, nil when there is none or it is the start or the destination itself.
+    public static func usable(_ alternative: Station?, from: Station, to: Station) -> Station? {
+        guard let alternative, !alternative.isSamePlace(as: to), !alternative.isSamePlace(as: from) else { return nil }
+        return alternative
+    }
+
     /// The connections to both destinations by planned departure (then arrival). A connection to one
     /// destination is dropped when one to the other rides the same trains up to its last one and arrives
     /// no later: the same train serving both stations, or a change at the first just to get to the second.

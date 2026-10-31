@@ -361,6 +361,9 @@ struct ConnectionsView: View {
         Button {
             withAnimation(.spring(duration: 0.4)) {
                 swap(&from, &to)
+                // The alternative belonged to the old destination.
+                alternative = nil
+                showsAlternative = false
                 swapRotation += 180
             }
         } label: {
@@ -608,10 +611,10 @@ struct ConnectionsView: View {
         }
     }
 
-    /// The alternative destination if it is set and differs from the destination.
+    /// The alternative destination if it is set and differs from start and destination.
     private var alternativeDestination: Station? {
-        guard showsAlternative, let alternative, let to, !alternative.isSamePlace(as: to) else { return nil }
-        return alternative
+        guard showsAlternative, let from, let to else { return nil }
+        return AlternativeDestination.usable(alternative, from: from, to: to)
     }
 
     private func search() {

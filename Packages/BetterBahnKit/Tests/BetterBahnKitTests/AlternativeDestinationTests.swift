@@ -61,4 +61,13 @@ import Testing
 
         #expect(AlternativeDestination.merging([toHbf], alternative: [toSüd]) == [toHbf])
     }
+
+    @Test func alternativeMatchingStartOrDestinationIsNotSearched() {
+        let a = station("A", "A"), hbf = station("Hbf", "Hbf"), süd = station("Süd", "Süd")
+
+        #expect(AlternativeDestination.usable(süd, from: a, to: hbf) == süd)
+        #expect(AlternativeDestination.usable(a, from: a, to: hbf) == nil)
+        #expect(AlternativeDestination.usable(hbf, from: a, to: hbf) == nil)
+        #expect(AlternativeDestination.usable(nil, from: a, to: hbf) == nil)
+    }
 }
