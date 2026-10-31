@@ -230,7 +230,7 @@ struct SettingsView: View {
                         }
                     }
                 } footer: {
-                    Text("Zeigt auf den Karten auch die anderen fahrenden Züge. Über Mobilfunk fahren sie nur mit geladenen Strecken flüssig, das kostet einige MB pro Karte.")
+                    Text("Zeigt auf den Karten auch die anderen fahrenden Züge. Über Mobilfunk kann das einige MB pro Karte kosten.")
                 }
 
                 Section {

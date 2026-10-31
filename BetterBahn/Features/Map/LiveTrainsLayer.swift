@@ -35,7 +35,13 @@ final class LiveTrainsLayer {
     @ObservationIgnored private var smoother = LiveTrainSmoother()
     @ObservationIgnored private var dataChanged = false
     @ObservationIgnored private var loading: Task<Void, Never>?
-    @ObservationIgnored private var savingData = false
+    /// Which load `loading` is, so a cancelled one finishing late doesn't clear a newer one.
+    @ObservationIgnored private var loadingID: UUID?
+    /// After a failed load nothing is asked for a while, rather than on every pan and refresh.
+    @ObservationIgnored private var failedAt: Date?
+    static let retryDelay: TimeInterval = 60
+    /// Unknown (nil) until the first network path comes in: nothing large is loaded before that.
+    @ObservationIgnored private var savingData: Bool?
 
     /// Runs for as long as the map shows: fetches bahn.jetzt's list at the position interval, loads
     /// the tracks of what's on screen, and moves the markers every second.
@@ -108,6 +114,7 @@ final class LiveTrainsLayer {
         coverage = nil
         loading?.cancel()
         loading = nil
+        loadingID = nil
         field = LiveTrainField(segments: [], running: [])
         tick()
     }
@@ -115,13 +122,27 @@ final class LiveTrainsLayer {
     /// Loads Transitous' trains for the visible area when what's loaded doesn't cover it (or runs out
     /// soon). Never on mobile data unless allowed, never in Low Data Mode, never zoomed far out.
     private func loadSegmentsIfNeeded(model: AppModel) {
-        guard model.settings.showOtherTrains, loading == nil, let visible,
+        guard model.settings.showOtherTrains, loading == nil, let visible, let savingData,
               !savingData || model.settings.otherTrainsOnMobileData,
+              failedAt.map({ Date.now.timeIntervalSince($0) > Self.retryDelay }) ?? true,
               let area = LiveTrainCoverage.areaToLoad(visible: visible, loaded: coverage) else { return }
         let zoom = LiveTrainCoverage.zoom(for: visible)
+        let id = UUID()
+        loadingID = id
         loading = Task {
-            defer { loading = nil }
-            guard let segments = await model.liveTrainSegments(in: area, zoom: zoom), !Task.isCancelled else { return }
+            defer {
+                if loadingID == id {
+                    loading = nil
+                    loadingID = nil
+                }
+            }
+            let segments = await model.liveTrainSegments(in: area, zoom: zoom)
+            guard !Task.isCancelled else { return }
+            guard let segments else {
+                failedAt = .now
+                return
+            }
+            failedAt = nil
             self.segments = segments
             coverage = LiveTrainCoverage(area: area, until: .now.addingTimeInterval(LiveTrainCoverage.window))
             await rebuildField()

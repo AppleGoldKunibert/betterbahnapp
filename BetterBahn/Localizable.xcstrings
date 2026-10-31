@@ -5929,12 +5929,12 @@
         }
       }
     },
-    "Zeigt auf den Karten auch die anderen fahrenden Züge. Über Mobilfunk fahren sie nur mit geladenen Strecken flüssig, das kostet einige MB pro Karte." : {
+    "Zeigt auf den Karten auch die anderen fahrenden Züge. Über Mobilfunk kann das einige MB pro Karte kosten." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Shows the other running trains on the maps too. On mobile data they only move smoothly with their tracks loaded, which costs a few MB per map."
+            "value" : "Shows the other running trains on the maps too. On mobile data this can cost a few MB per map."
           }
         }
       }
