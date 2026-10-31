@@ -43,7 +43,7 @@ public struct SavedSeat: Codable, Sendable, Hashable {
 
     /// "Wagen 7 · Platz 45"
     public var description: String {
-        (["Wagen \(coach)"] + (seat.map { ["Platz \($0)"] } ?? [])).joined(separator: " · ")
+        ([String(kit: "Wagen %@", coach)] + (seat.map { [String(kit: "Platz %@", $0)] } ?? [])).joined(separator: " · ")
     }
 
     public func isOver(now: Date = .now) -> Bool {

@@ -62,8 +62,8 @@ extension TravelCollection.Category {
     /// When an item of this category counts, shown for one not collected yet.
     var hint: String {
         switch self {
-        case .liveries, .series, .trainsets: "Zählt, sobald du in einer gespeicherten Reise mit diesem Zug gefahren bist."
-        case .stations: "Zählt, wenn du hier ein-, aus- oder umsteigst."
+        case .liveries, .series, .trainsets: String(localized: "Zählt, sobald du in einer gespeicherten Reise mit diesem Zug gefahren bist.")
+        case .stations: String(localized: "Zählt, wenn du hier ein-, aus- oder umsteigst.")
         }
     }
 }
@@ -102,7 +102,7 @@ private struct CollectionGroupCard: View {
 }
 
 private struct NewBadge: View {
-    var text = "Neu"
+    var text: LocalizedStringKey = "Neu"
 
     var body: some View {
         Text(text)
@@ -264,7 +264,7 @@ struct CollectionButton: View {
         }
         .buttonStyle(.glass)
         .controlSize(.large)
-        .accessibilityValue(newCount > 0 ? "\(newCount) neu gesammelt" : "")
+        .accessibilityValue(newCount > 0 ? String(localized: "\(newCount) neu gesammelt") : "")
         .task(id: "\(model.savedJourneys.count)|\(model.traewellingTrips.count)") {
             newCount = model.newCollectionIDs(in: await model.travelCollection()).count
         }

@@ -100,7 +100,7 @@ struct SeatMapSheet: View {
 
     private func coachColumn(_ item: Item) -> some View {
         let reserved = reservedSeats(in: item.coach)
-        let title = [item.coach.number.map { "Wagen \($0)" }, item.coach.title == "Wagen" ? nil : item.coach.title]
+        let title = [item.coach.number.map { String(localized: "Wagen \($0)") }, item.coach.hasKindOrClass ? item.coach.title : nil]
             .compactMap(\.self).joined(separator: " · ")
         return VStack(alignment: .leading, spacing: 6) {
             Text(title)
@@ -110,7 +110,7 @@ struct SeatMapSheet: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)
-        .accessibilityValue(reserved.isEmpty ? "" : "Dein Platz " + reserved.sorted().joined(separator: ", "))
+        .accessibilityValue(reserved.isEmpty ? "" : String(localized: "Dein Platz \(reserved.sorted().joined(separator: ", "))"))
     }
 }
 

@@ -138,7 +138,7 @@ public extension TraewellingClient {
                            arrival: Date? = nil) async throws -> TraewellingStatus {
         let lineName = status.checkin.lineName ?? ""
         guard let hafasId = status.checkin.hafasId, !hafasId.isEmpty else {
-            throw TraewellingError.tripNotFound(lineName.isEmpty ? "Fahrt" : lineName)
+            throw TraewellingError.tripNotFound(lineName.isEmpty ? String(kit: "Fahrt") : lineName)
         }
         let trip = try await trip(tripID: hafasId, lineName: lineName)
         guard let stop = Self.matchStop(trip.stopovers, station: station, arrival: arrival),

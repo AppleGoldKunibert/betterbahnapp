@@ -55,9 +55,9 @@ public enum Product: String, Codable, Sendable, CaseIterable, Hashable {
 
     public var displayName: String {
         switch self {
-        case .highSpeed: "Hochgeschwindigkeit"
+        case .highSpeed: String(kit: "Hochgeschwindigkeit")
         case .longDistance: "IC / EC"
-        case .nightTrain: "Nachtzug"
+        case .nightTrain: String(kit: "Nachtzug")
         case .interregio: "IR / FLX"
         case .regionalExpress: "RE"
         case .regional: "RB"
@@ -65,9 +65,9 @@ public enum Product: String, Codable, Sendable, CaseIterable, Hashable {
         case .subway: "U-Bahn"
         case .tram: "Tram"
         case .bus: "Bus"
-        case .coach: "Fernbus"
-        case .ferry: "Fähre"
-        case .other: "Sonstige"
+        case .coach: String(kit: "Fernbus")
+        case .ferry: String(kit: "Fähre")
+        case .other: String(kit: "Sonstige")
         }
     }
 }

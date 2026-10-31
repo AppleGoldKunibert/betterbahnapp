@@ -20,10 +20,10 @@ public struct QuickTag: Codable, Sendable, Hashable, Identifiable {
     }
 
     public static let defaults: [QuickTag] = [
-        QuickTag(label: "Sitzplatz", key: "trwl:seat", systemImage: "chair.fill"),
-        QuickTag(label: "Wagen", key: "trwl:wagon", systemImage: "train.side.front.car"),
+        QuickTag(label: String(kit: "Sitzplatz"), key: "trwl:seat", systemImage: "chair.fill"),
+        QuickTag(label: String(kit: "Wagen"), key: "trwl:wagon", systemImage: "train.side.front.car"),
         QuickTag(label: "Ticket", key: "trwl:ticket", systemImage: "ticket.fill"),
-        QuickTag(label: "Reiseklasse", key: "trwl:travel_class", systemImage: "star.fill"),
-        QuickTag(label: "Baureihe", key: "trwl:locomotive_class", systemImage: "tram.fill"),
+        QuickTag(label: String(kit: "Reiseklasse"), key: "trwl:travel_class", systemImage: "star.fill"),
+        QuickTag(label: String(kit: "Baureihe"), key: "trwl:locomotive_class", systemImage: "tram.fill"),
     ]
 }

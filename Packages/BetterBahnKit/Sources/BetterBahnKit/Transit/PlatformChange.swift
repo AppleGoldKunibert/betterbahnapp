@@ -24,12 +24,14 @@ public struct PlatformChange: Sendable, Hashable, Identifiable {
     public var isTight: Bool { transferMinutes.map { $0 < 5 } ?? false }
 
     /// "ICE 578: Gleiswechsel"
-    public var title: String { "\(line): Gleiswechsel" }
+    public var title: String { String(kit: "%@: Gleiswechsel", line) }
 
     /// "Abfahrt Frankfurt (Main) Hbf jetzt von Gleis 9 (statt 7)\nUmstieg: 6 Min."
     public var message: String {
-        let text = "\(kind == .departure ? "Abfahrt" : "Ankunft") \(station) jetzt \(kind == .departure ? "von" : "auf") Gleis \(newPlatform) (statt \(oldPlatform))"
-        return transferMinutes.map { text + "\nUmstieg: \($0) Min." } ?? text
+        let text = kind == .departure
+            ? String(kit: "Abfahrt %@ jetzt von Gleis %@ (statt %@)", station, newPlatform, oldPlatform)
+            : String(kit: "Ankunft %@ jetzt auf Gleis %@ (statt %@)", station, newPlatform, oldPlatform)
+        return transferMinutes.map { String(kit: "%@\nUmstieg: %lld Min.", text, $0) } ?? text
     }
 }
 
@@ -61,7 +63,7 @@ public extension Journey {
         for index in legs.indices {
             let leg = legs[index], old = oldLegs[index]
             guard leg.id == old.id, !leg.cancelled else { continue }
-            let line = leg.line?.name ?? "Zug"
+            let line = leg.line?.name ?? String(kit: "Zug")
             if soon(leg.departure.best),
                let new = leg.departurePlatform?.best, let before = old.departurePlatform?.best,
                PlatformInfo.isDifferentTrack(before, new) {

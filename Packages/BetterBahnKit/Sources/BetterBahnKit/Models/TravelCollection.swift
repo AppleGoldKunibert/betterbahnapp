@@ -28,10 +28,10 @@ public struct TravelCollection: Sendable, Hashable {
 
         public var title: String {
             switch self {
-            case .liveries: "Sonderlackierungen"
-            case .series: "Baureihen"
-            case .trainsets: "Triebzüge"
-            case .stations: "Große Bahnhöfe"
+            case .liveries: String(kit: "Sonderlackierungen")
+            case .series: String(kit: "Baureihen")
+            case .trainsets: String(kit: "Triebzüge")
+            case .stations: String(kit: "Große Bahnhöfe")
             }
         }
     }
@@ -133,7 +133,7 @@ public struct TravelCollection: Sendable, Hashable {
         }
 
         let liveryItems = liveries.sorted { ($0.value, $0.key) < ($1.value, $1.key) }.map { number, livery in
-            Item(id: "livery:\(number)", category: .liveries, title: livery, subtitle: "Tz \(number)",
+            Item(id: "livery:\(number)", category: .liveries, title: livery, subtitle: String(kit: "Tz %@", number),
                  sightings: newestFirst(trainSightings["livery:\(number)"]))
         }
         let seriesItems = Self.series.map { name in
@@ -141,12 +141,12 @@ public struct TravelCollection: Sendable, Hashable {
                  sightings: newestFirst(trainSightings["series:\(name)"]))
         }
         let trainsetItems = trainsetNames.sorted { $0.key < $1.key }.map { number, name in
-            Item(id: "trainset:\(number)", category: .trainsets, title: "Tz \(number)", subtitle: name,
+            Item(id: "trainset:\(number)", category: .trainsets, title: String(kit: "Tz %@", number), subtitle: name,
                  sightings: newestFirst(trainSightings["trainset:\(number)"]))
         }
         let stationItems = stations.sorted { ($0.priceClass, $0.name) < ($1.priceClass, $1.name) }.map { station in
             Item(id: "station:\(station.dhid)", category: .stations, title: Station.displayName(for: station.name),
-                 subtitle: station.priceClass == 1 ? "Großer Bahnhof" : "Mittlerer Bahnhof",
+                 subtitle: station.priceClass == 1 ? String(kit: "Großer Bahnhof") : String(kit: "Mittlerer Bahnhof"),
                  sightings: Self.visits(newestFirst(stationSightings[station.dhid])))
         }
         groups = [

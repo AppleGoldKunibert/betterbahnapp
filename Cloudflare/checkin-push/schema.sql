@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     login_id TEXT,                    -- #452: the app's login (logins.id) the Worker reads with
     known TEXT,                       -- JSON array of the status IDs reported or seen; NULL until the first look
     kinds TEXT,                       -- JSON array: "followed", "likes", "companions" (#447); NULL: only "followed"
+    language TEXT,                    -- the app's language for the notifications ("de", "en", #479); NULL: German + iOS keys
     notified TEXT,                    -- JSON array of Träwelling's notification IDs reported or seen; NULL until the first look
     webhook_id INTEGER,               -- Träwelling's webhook for the user's notifications (#447), if the login made one
     webhook TEXT,                     -- its signing secret, AES-GCM with TOKEN_KEY
@@ -47,6 +48,7 @@ CREATE TABLE IF NOT EXISTS commutes (
     sandbox INTEGER NOT NULL DEFAULT 0, -- 1: development build (APNs sandbox)
     journeys TEXT NOT NULL,           -- JSON: trains (category, number), stations (EVA, name), planned times,
                                       -- the stop IDs found in IRIS and what was reported
+    language TEXT,                    -- the app's language for the notifications ("de", "en", #479); NULL: German + iOS keys
     slot INTEGER NOT NULL,            -- minute (0–59) the look is due in, modulo INTERVAL_MINUTES
     updated INTEGER NOT NULL          -- unix seconds
 );

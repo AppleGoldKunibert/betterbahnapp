@@ -149,7 +149,7 @@ public struct BahnExpertClient: Sendable {
                           administration: String = BahnDeClient.dbAdministration) async throws -> TrainTypeLookup? {
         let category = category.uppercased()
         guard let journeyNumber = Int(number), Self.isValidDay(date) else {
-            throw TransitError.invalidInput("Zugnummer oder Datum ungültig.")
+            throw TransitError.invalidInput(String(kit: "Zugnummer oder Datum ungültig."))
         }
         let found: [FoundJourney] = try await call("journey/find", input: [
             "json": [

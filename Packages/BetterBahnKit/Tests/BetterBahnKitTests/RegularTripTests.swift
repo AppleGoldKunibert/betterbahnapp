@@ -202,6 +202,7 @@ import Testing
         #expect(request.body["deviceToken"] as? String == "ff00")
         #expect(request.body["sandbox"] as? Bool == true)
         #expect((request.body["journeys"] as? [[String: Any]])?.first?["id"] as? String == "J1")
+        #expect(request.body["language"] as? String == "de")
         let made = CommutePushRegistration.make()
         #expect(made.id.count == 32 && made.secret.count == 64 && made != CommutePushRegistration.make())
     }

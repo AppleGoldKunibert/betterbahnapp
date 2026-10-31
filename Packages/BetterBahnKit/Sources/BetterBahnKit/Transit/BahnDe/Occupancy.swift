@@ -10,8 +10,8 @@ public enum TravelClass: String, Codable, CaseIterable, Sendable, Hashable {
 
     public var displayName: String {
         switch self {
-        case .first: "1. Klasse"
-        case .second: "2. Klasse"
+        case .first: String(kit: "1. Klasse")
+        case .second: String(kit: "2. Klasse")
         }
     }
 
@@ -55,20 +55,20 @@ public enum OccupancyLevel: Int, Codable, Sendable, Hashable, Comparable {
     /// DB's short text, e.g. "Hohe Auslastung erwartet".
     public var text: String {
         switch self {
-        case .low: "Geringe Auslastung erwartet"
-        case .medium: "Mittlere Auslastung erwartet"
-        case .high: "Hohe Auslastung erwartet"
-        case .exceptional, .exceptionalInBothClasses: "Außergewöhnlich hohe Auslastung erwartet"
+        case .low: String(kit: "Geringe Auslastung erwartet")
+        case .medium: String(kit: "Mittlere Auslastung erwartet")
+        case .high: String(kit: "Hohe Auslastung erwartet")
+        case .exceptional, .exceptionalInBothClasses: String(kit: "Außergewöhnlich hohe Auslastung erwartet")
         }
     }
 
     /// For a line naming the class: "1. Klasse: Auslastung gering".
     public var shortText: String {
         switch self {
-        case .low: "gering"
-        case .medium: "mittel"
-        case .high: "hoch"
-        case .exceptional, .exceptionalInBothClasses: "außergewöhnlich hoch"
+        case .low: String(kit: "gering")
+        case .medium: String(kit: "mittel")
+        case .high: String(kit: "hoch")
+        case .exceptional, .exceptionalInBothClasses: String(kit: "außergewöhnlich hoch")
         }
     }
 

@@ -240,16 +240,16 @@ public struct TrainPicker: Sendable {
     public func journey(withTrain trainName: String, from origin: Station, to destination: Station,
                         date: Date, windowMinutes: Int = 240) async throws -> TrainMatch {
         let wanted = TrainNameQuery(trainName)
-        guard !wanted.isEmpty else { throw TransitError.invalidInput("Bitte einen Zug angeben, z. B. „ICE 423“.") }
+        guard !wanted.isEmpty else { throw TransitError.invalidInput(String(kit: "Bitte einen Zug angeben, z. B. „ICE 423“.")) }
         let entries = try await provider.departures(at: origin, date: date, duration: windowMinutes)
         // "ICE 423" matches the line name, "423" the train or run number, "RE 3 (3300)" that run.
         let matches = entries.filter { wanted.matches($0.line) }
         guard !matches.isEmpty else {
-            throw TransitError.notFound("\(trainName) ab \(origin.name)")
+            throw TransitError.notFound(String(kit: "%@ ab %@", trainName, origin.name))
         }
         let legs = await legs(for: matches, from: origin, to: destination)
         guard let leg = legs.min(by: { $0.departure.planned < $1.departure.planned }) else {
-            throw TransitError.notFound("\(trainName) nach \(destination.name) (hält dort nicht)")
+            throw TransitError.notFound(String(kit: "%@ nach %@ (hält dort nicht)", trainName, destination.name))
         }
         let breaksBoardingRules = leg.breaksBoardingRules
         var alternative: Journey?
@@ -310,7 +310,7 @@ public struct TrainPicker: Sendable {
                           finalDestination: Station) async throws -> LegReplacement {
         guard let firstLeg = newLegs.first, let newLeg = newLegs.last,
               journey.legs.indices.contains(range.lowerBound), journey.legs.indices.contains(range.upperBound) else {
-            throw TransitError.invalidInput("Keine Verbindung ausgewählt.")
+            throw TransitError.invalidInput(String(kit: "Keine Verbindung ausgewählt."))
         }
         var legs = Array(journey.legs.prefix(range.lowerBound))
         // Drop a walking leg right before the replaced leg if it no longer fits.
@@ -332,7 +332,7 @@ public struct TrainPicker: Sendable {
         guard let rest = page.journeys.first(where: {
             ($0.departure?.best ?? .distantPast) >= newLeg.arrival.best && !$0.isCancelled
         }) else {
-            throw TransitError.notFound("Anschluss ab \(newLeg.destination.name)")
+            throw TransitError.notFound(String(kit: "Anschluss ab %@", newLeg.destination.name))
         }
         var restLegs = rest.legs
         // The replan often continues in the same train – merge instead of showing it twice.

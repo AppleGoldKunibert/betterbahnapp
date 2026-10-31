@@ -154,6 +154,7 @@ public struct FollowedCheckinPush: Sendable {
         var sandbox: Bool
         var userId: Int
         var kinds: [CheckinPushKind]
+        var language = KitLocalization.notificationLanguage
     }
 
     private struct UpdateBody: Encodable {
@@ -161,6 +162,7 @@ public struct FollowedCheckinPush: Sendable {
         var deviceToken: String
         var sandbox: Bool
         var kinds: [CheckinPushKind]
+        var language = KitLocalization.notificationLanguage
     }
 
     private struct DeleteBody: Encodable {

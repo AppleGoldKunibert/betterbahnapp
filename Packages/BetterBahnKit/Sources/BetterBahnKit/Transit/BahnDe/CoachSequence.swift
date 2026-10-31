@@ -220,14 +220,14 @@ extension CoachSequence {
             var notes: [String] = []
             let missing = plannedNumbers.filter { !actualNumbers.contains($0) }
             if !missing.isEmpty {
-                notes.append("Wagen \(Self.numberList(missing)) \(missing.count == 1 ? "fehlt" : "fehlen")")
+                notes.append(missing.count == 1 ? String(kit: "Wagen %@ fehlt", Self.numberList(missing)) : String(kit: "Wagen %@ fehlen", Self.numberList(missing)))
             }
             // Coaches of trains coupled to this one aren't in its plan.
             if !hasSeveralTrains {
                 let extra = actual.filter { coach in
                     groups.indices.contains(coach.group) && groups[coach.group].isRequestedTrain && !plannedNumbers.contains(coach.number!)
                 }.compactMap(\.number)
-                if !extra.isEmpty { notes.append("Zusätzlich Wagen \(Self.numberList(extra))") }
+                if !extra.isEmpty { notes.append(String(kit: "Zusätzlich Wagen %@", Self.numberList(extra))) }
             }
             let plannedByNumber = Dictionary(planned.map { ($0.number!, $0) }, uniquingKeysWith: { first, _ in first })
             var nowFirst: [String] = []
@@ -237,20 +237,20 @@ extension CoachSequence {
                       plannedCoach.firstClass != coach.firstClass else { continue }
                 if coach.firstClass { nowFirst.append(coach.number!) } else { nowSecond.append(coach.number!) }
             }
-            if !nowFirst.isEmpty { notes.append("Wagen \(Self.numberList(nowFirst)): 1. statt 2. Klasse") }
-            if !nowSecond.isEmpty { notes.append("Wagen \(Self.numberList(nowSecond)): 2. statt 1. Klasse") }
+            if !nowFirst.isEmpty { notes.append(String(kit: "Wagen %@: 1. statt 2. Klasse", Self.numberList(nowFirst))) }
+            if !nowSecond.isEmpty { notes.append(String(kit: "Wagen %@: 2. statt 1. Klasse", Self.numberList(nowSecond))) }
             return notes
         }
 
         // Otherwise only the number of coaches and of first-class ones.
         var notes: [String] = []
         if actual.count != planned.count {
-            notes.append("\(actual.count) statt \(planned.count) Wagen")
+            notes.append(String(kit: "%lld statt %lld Wagen", actual.count, planned.count))
         }
         let actualFirst = actual.count { $0.firstClass }
         let plannedFirst = planned.count { $0.firstClass }
         if actualFirst != plannedFirst {
-            notes.append("\(actualFirst) statt \(plannedFirst) Wagen mit 1. Klasse")
+            notes.append(String(kit: "%lld statt %lld Wagen mit 1. Klasse", actualFirst, plannedFirst))
         }
         return notes
     }

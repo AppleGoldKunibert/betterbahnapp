@@ -9,7 +9,7 @@ public struct DBTicket: Codable, Sendable, Hashable, Identifiable {
     public enum Direction: String, Codable, Sendable {
         case outward, `return`
 
-        public var displayName: String { self == .outward ? "Hinfahrt" : "Rückfahrt" }
+        public var displayName: String { self == .outward ? String(kit: "Hinfahrt") : String(kit: "Rückfahrt") }
     }
 
     public struct Traveller: Codable, Sendable, Hashable {
@@ -20,14 +20,14 @@ public struct DBTicket: Codable, Sendable, Hashable, Identifiable {
         public var reductions: [String]
 
         public var displayName: String {
-            let name = switch type {
-            case "ERWACHSENER": count == 1 ? "Erwachsener" : "Erwachsene"
-            case "KIND", "FAMILIENKIND": count == 1 ? "Kind" : "Kinder"
-            case "JUGENDLICHER": "Jugendliche"
-            case "SENIOR": "Senioren"
-            default: type.capitalized
+            // "1 Erwachsener", "2 Kinder": count and name as one text, so other languages can follow the count.
+            let base = switch type {
+            case "ERWACHSENER": count == 1 ? String(kit: "1 Erwachsener") : String(kit: "%lld Erwachsene", count)
+            case "KIND", "FAMILIENKIND": count == 1 ? String(kit: "1 Kind") : String(kit: "%lld Kinder", count)
+            case "JUGENDLICHER": count == 1 ? String(kit: "1 Jugendliche") : String(kit: "%lld Jugendliche", count)
+            case "SENIOR": count == 1 ? String(kit: "1 Senioren") : String(kit: "%lld Senioren", count)
+            default: "\(count) \(type.capitalized)"
             }
-            let base = "\(count) \(name)"
             return reductions.isEmpty ? base : base + " (" + reductions.joined(separator: ", ") + ")"
         }
     }
@@ -58,7 +58,7 @@ public struct DBTicket: Codable, Sendable, Hashable, Identifiable {
 
         /// "EUROSTAR 9149: Wagen 2, Platz 37, 38"
         public var description: String {
-            "\(train): Wagen \(coach), Platz " + seats.joined(separator: ", ")
+            String(kit: "%@: Wagen %@, Platz %@", train, coach, seats.joined(separator: ", "))
         }
     }
 
@@ -117,7 +117,16 @@ public struct DBTicket: Codable, Sendable, Hashable, Identifiable {
     public var isReservationOnly: Bool { reservationOnly ?? false }
 
     /// "1. Klasse"
-    public var classDescription: String? { travelClass.map { "\($0). Klasse" } }
+    public var classDescription: String? { travelClass.map(Self.classText) }
+
+    /// "1. Klasse"; first and second class as texts of their own, for languages that write them differently.
+    static func classText(_ travelClass: Int) -> String {
+        switch travelClass {
+        case 1: String(kit: "1. Klasse")
+        case 2: String(kit: "2. Klasse")
+        default: String(kit: "%lld. Klasse", travelClass)
+        }
+    }
 
     public var routeDescription: String {
         "\(Station.displayName(for: validOrigin)) → \(Station.displayName(for: validDestination))"

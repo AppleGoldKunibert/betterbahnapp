@@ -191,14 +191,14 @@ enum CommuteNotifier {
     /// The category with "Ja, ich fahre" and "Heute nicht", registered at launch.
     static var notificationCategory: UNNotificationCategory {
         UNNotificationCategory(identifier: category, actions: [
-            UNNotificationAction(identifier: yesAction, title: "Ja, ich fahre", options: []),
-            UNNotificationAction(identifier: noAction, title: "Heute nicht", options: []),
+            UNNotificationAction(identifier: yesAction, title: String(localized: "Ja, ich fahre"), options: []),
+            UNNotificationAction(identifier: noAction, title: String(localized: "Heute nicht"), options: []),
         ], intentIdentifiers: [], options: [])
     }
 
     static func request(for question: RegularTrip.Question, of trip: RegularTrip) -> UNNotificationRequest {
         let content = UNMutableNotificationContent()
-        content.title = "Fährst du heute?"
+        content.title = String(localized: "Fährst du heute?")
         content.body = trip.questionBody(departure: question.departure)
         content.sound = .default
         content.interruptionLevel = .timeSensitive
@@ -219,8 +219,8 @@ enum CommuteNotifier {
     /// Tapping it tries again and opens the journey.
     static func notifyLoadingFailed(_ question: CommuteQuestion, of trip: RegularTrip) async {
         let content = UNMutableNotificationContent()
-        content.title = "Fahrt nicht geladen"
-        content.body = "\(trip.summary) konnte gerade nicht geladen werden. Tippe hier, um es noch mal zu versuchen."
+        content.title = String(localized: "Fahrt nicht geladen")
+        content.body = String(localized: "\(trip.summary) konnte gerade nicht geladen werden. Tippe hier, um es noch mal zu versuchen.")
         content.sound = .default
         content.userInfo = [tripKey: question.tripID.uuidString, dayKey: question.dayKey, retryKey: true]
         let request = UNNotificationRequest(identifier: "commute-failed|\(question.tripID)|\(question.dayKey)", content: content, trigger: nil)

@@ -29,12 +29,12 @@ extension Color {
 
 extension TicketType {
     /// Title of the "only valid with this ticket" filter toggle.
-    var filterTitle: String { "Nur \(displayName)" }
+    var filterTitle: String { String(localized: "Nur \(displayName)") }
 
     var filterSubtitle: String {
         switch self {
-        case .deutschlandticket: "ICE, IC & Co. ausblenden"
-        case .bahnCard100: "FlixTrain & Co. ausblenden"
+        case .deutschlandticket: String(localized: "ICE, IC & Co. ausblenden")
+        case .bahnCard100: String(localized: "FlixTrain & Co. ausblenden")
         }
     }
 
@@ -827,7 +827,7 @@ struct TrainMessageList: View {
                     Text(message.timestamp?.timeString ?? "–")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
-                    Text(message.text)
+                    Text(message.displayText)
                         .font(.caption)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -857,7 +857,7 @@ struct ErrorBanner: View {
 
 struct SourceNotice: View {
     var body: some View {
-        InfoChip(text: "Fahrplandaten: Transitous",
+        InfoChip(text: String(localized: "Fahrplandaten: Transitous"),
                  systemImage: "point.3.connected.trianglepath.dotted", tint: .secondary)
     }
 }

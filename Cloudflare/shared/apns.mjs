@@ -52,6 +52,60 @@ export class APNs {
     }
 }
 
+/// A notification text the app translates on the device: `key` is the German text with `%@` for each of
+/// `args`, an entry of the app's `Localizable.xcstrings` (iOS looks it up via `loc-key`).
+export const text = (key, ...args) => ({ key, args: args.map(String) });
+
+/// The languages the app sends (`language` when signing up), besides German; the texts are the same as in the
+/// app's `Localizable.xcstrings` (worker.test.mjs checks).
+export const TRANSLATIONS = {
+    en: {
+        "%@ ist eingecheckt": "%@ checked in",
+        "Jemand ist eingecheckt": "Someone checked in",
+        "%@ gefällt dein Check-in": "%@ likes your check-in",
+        "Jemand gefällt dein Check-in": "Someone likes your check-in",
+        "%@ fährt mit dir": "%@ is travelling with you",
+        "Jemand fährt mit dir": "Someone is travelling with you",
+        "%@ fällt aus": "%@ is cancelled",
+        "Die Fahrt von %@ nach %@ findet nicht statt.": "The trip from %@ to %@ will not run.",
+        "%@: +%@ Min.": "%@: +%@ min",
+        "Ab %@ um %@ statt %@.": "From %@ at %@ instead of %@.",
+        "%@: Gleiswechsel": "%@: platform change",
+        "Abfahrt %@ jetzt von Gleis %@ (statt %@)": "Departure from %@ now from platform %@ (instead of %@)",
+        "Ankunft %@ jetzt auf Gleis %@ (statt %@)": "Arrival at %@ now on platform %@ (instead of %@)",
+        "Abfahrt %@ jetzt von Gleis %@ (statt %@)\nUmstieg: %@ Min.": "Departure from %@ now from platform %@ (instead of %@)\nChange: %@ min",
+        "Ankunft %@ jetzt auf Gleis %@ (statt %@)\nUmstieg: %@ Min.": "Arrival at %@ now on platform %@ (instead of %@)\nChange: %@ min",
+        "Umstieg in %@ klappt nicht mehr": "You'll miss your change at %@",
+        "Umstieg in %@ wird knapp": "Your change at %@ is getting tight",
+        "%@ Min. zum Umsteigen von %@ in %@.": "%@ min to change from %@ to %@.",
+        "Nur %@ Min. zum Umsteigen von %@ in %@.": "Only %@ min to change from %@ to %@.",
+        "%@ fährt %@ Min. bevor %@ ankommt.": "%@ leaves %@ min before %@ arrives.",
+    },
+};
+
+/// The `language` an app sent: "de", "en", or null when it sent none (versions before #479).
+export function parseLanguage(value) {
+    return value === "de" || Object.hasOwn(TRANSLATIONS, value) ? value : null;
+}
+
+/// An APNs alert from `text()`s (or plain strings that need no translation) in the app's `language`. Without
+/// one (apps before #479) the alert is German and carries the keys, which iOS looks up in the device's
+/// language; it ignores a language chosen for the app alone, hence `language`.
+export function localizedAlert(title, body, language = null) {
+    const translations = TRANSLATIONS[language] ?? {};
+    const alert = { title: filled(title, translations), body: filled(body, translations) };
+    if (language) return alert;
+    if (typeof title === "object") Object.assign(alert, { "title-loc-key": title.key, "title-loc-args": title.args });
+    if (typeof body === "object") Object.assign(alert, { "loc-key": body.key, "loc-args": body.args });
+    return alert;
+}
+
+function filled(value, translations) {
+    if (typeof value !== "object") return value;
+    let next = 0;
+    return (translations[value.key] ?? value.key).replace(/%@/g, () => value.args[next++] ?? "");
+}
+
 export async function signProviderToken(pem, keyId, teamId, issuedAt) {
     const der = fromBase64(pem.replace(/-----[^-]+-----/g, "").replace(/\s+/g, ""));
     const key = await crypto.subtle.importKey("pkcs8", der, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);

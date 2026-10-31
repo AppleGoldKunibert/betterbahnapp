@@ -19,10 +19,10 @@ struct CheckinNotificationsView: View {
     var body: some View {
         Form {
             Section {
-                toggle(.followed, title: "Check-ins von Gefolgten", systemImage: "bell.badge.fill", color: .orange)
-                toggle(.likes, title: "Likes auf deine Check-ins", systemImage: "heart.fill", color: .pink)
-                toggle(.companions, title: "Mitreisende", systemImage: "person.2.fill", color: .teal,
-                       subtitle: "Wenn jemand in deinen Zug eincheckt.")
+                toggle(.followed, title: String(localized: "Check-ins von Gefolgten"), systemImage: "bell.badge.fill", color: .orange)
+                toggle(.likes, title: String(localized: "Likes auf deine Check-ins"), systemImage: "heart.fill", color: .pink)
+                toggle(.companions, title: String(localized: "Mitreisende"), systemImage: "person.2.fill", color: .teal,
+                       subtitle: String(localized: "Wenn jemand in deinen Zug eincheckt."))
                 if let error {
                     ErrorBanner(error: error)
                 }
