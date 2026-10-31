@@ -15,6 +15,8 @@ final class LiveTrainsLayer {
         var track: [Coordinate]?
         /// The stops it calls at, where it waits instead of running on.
         var stops: [Coordinate] = []
+        /// The leg it rides, to look up its track when it came without.
+        var leg: Leg?
     }
 
     /// At most this many other trains are drawn, the ones nearest the middle of the map.
@@ -24,6 +26,8 @@ final class LiveTrainsLayer {
     private(set) var markers: [LiveTrainMarker] = []
     /// The own trains, where they are this second, by name.
     private(set) var ownCoordinates: [String: Coordinate] = [:]
+    /// The own trains' speed, by name: bahn.jetzt's, else worked out from their last fixes.
+    private(set) var ownSpeeds: [String: Double] = [:]
 
     @ObservationIgnored private var field = LiveTrainField(segments: [], running: [])
     @ObservationIgnored private var segments: [LiveTrainSegment] = []
@@ -32,6 +36,10 @@ final class LiveTrainsLayer {
     @ObservationIgnored private var visible: MapArea?
     @ObservationIgnored private var ownTrains: [OwnTrain] = []
     @ObservationIgnored private var motions: [String: LiveTrainMotion] = [:]
+    /// Tracks of own trains' legs that came without, by leg ID.
+    @ObservationIgnored private var legTracks: [String: [Coordinate]] = [:]
+    @ObservationIgnored private var requestedLegTracks: Set<String> = []
+    @ObservationIgnored private weak var model: AppModel?
     @ObservationIgnored private var smoother = LiveTrainSmoother()
     @ObservationIgnored private var dataChanged = false
     @ObservationIgnored private var loading: Task<Void, Never>?
@@ -46,6 +54,7 @@ final class LiveTrainsLayer {
     /// Runs for as long as the map shows: fetches bahn.jetzt's list at the position interval, loads
     /// the tracks of what's on screen, and moves the markers every second.
     func run(model: AppModel) async {
+        self.model = model
         let monitor = NWPathMonitor()
         monitor.pathUpdateHandler = { [weak self] path in
             let saving = path.isExpensive || path.isConstrained
@@ -93,9 +102,14 @@ final class LiveTrainsLayer {
     /// The user's own trains, drawn by the map itself and left out of `markers`.
     func setOwnTrains(_ trains: [OwnTrain]) {
         guard trains != ownTrains else { return }
+        applyOwnTrains(trains)
+    }
+
+    private func applyOwnTrains(_ trains: [OwnTrain]) {
         var motions: [String: LiveTrainMotion] = [:]
         for train in trains {
-            guard let track = train.track, track.count > 1 else { continue }
+            if train.track == nil, let leg = train.leg, legTracks[leg.id] == nil { loadTrack(of: leg) }
+            guard let track = train.track ?? train.leg.flatMap({ legTracks[$0.id] }), track.count > 1 else { continue }
             var motion = self.motions[train.name].flatMap { $0.track.points == track ? $0 : nil }
                 ?? LiveTrainMotion(track: track, stops: train.stops)
             motion.update(with: train.position)
@@ -106,6 +120,16 @@ final class LiveTrainsLayer {
         dataChanged = true
         Task { await rebuildField() }
         tick()
+    }
+
+    /// A saved leg's track usually isn't stored with it; without one the train couldn't run on.
+    private func loadTrack(of leg: Leg) {
+        guard let model, requestedLegTracks.insert(leg.id).inserted else { return }
+        Task {
+            guard let track = await model.geometry(for: leg) else { return }
+            legTracks[leg.id] = track
+            applyOwnTrains(ownTrains)
+        }
     }
 
     private func clearOthers() {
@@ -177,7 +201,12 @@ final class LiveTrainsLayer {
             if let coordinate = shown[others[index].id] { others[index].coordinate = coordinate }
         }
         var own: [String: Coordinate] = [:]
-        for train in ownTrains { own[train.name] = shown["own:" + train.name] }
+        var speeds: [String: Double] = [:]
+        for train in ownTrains {
+            own[train.name] = shown["own:" + train.name]
+            speeds[train.name] = motions[train.name]?.speedKmh ?? train.position.speedKmh
+        }
+        if speeds != ownSpeeds { ownSpeeds = speeds }
         // The maps move markers over the second in a straight line to the next spot.
         withAnimation(.linear(duration: 1)) {
             markers = others
@@ -193,6 +222,7 @@ extension LiveTrainsLayer.OwnTrain {
         position = live.position
         track = leg?.geometry.flatMap { RouteGeometryService.followsTracks($0) ? $0 : nil }
         stops = leg.map { leg in ([leg.origin] + leg.stopovers.map(\.station) + [leg.destination]).compactMap(\.coordinate) } ?? []
+        self.leg = leg
     }
 }
 
@@ -201,6 +231,7 @@ extension LiveTrainsLayer.OwnTrain {
 /// Another train on a UIKit map; its coordinate moves every second.
 final class OtherTrainAnnotation: NSObject, MKAnnotation {
     let id: String
+    let tripId: String?
     @objc dynamic var coordinate: CLLocationCoordinate2D
     @objc dynamic var title: String?
     @objc dynamic var subtitle: String?
@@ -208,6 +239,7 @@ final class OtherTrainAnnotation: NSObject, MKAnnotation {
 
     init(_ marker: LiveTrainMarker) {
         id = marker.id
+        tripId = marker.tripId
         coordinate = CLLocationCoordinate2D(latitude: marker.coordinate.latitude, longitude: marker.coordinate.longitude)
         isLongDistance = marker.isLongDistance
         super.init()
@@ -262,6 +294,8 @@ final class OtherTrainsAnnotator {
         view.annotation = annotation
         view.image = Self.image(longDistance: annotation.isLongDistance)
         view.canShowCallout = true
+        // Opens the train's route (`mapView(_:annotationView:calloutAccessoryControlTapped:)`).
+        view.rightCalloutAccessoryView = annotation.tripId == nil ? nil : UIButton(type: .detailDisclosure)
         // Crowded stations: MapKit hides the trains that would overlap, the own train always stays.
         view.displayPriority = annotation.isLongDistance ? .defaultHigh : .defaultLow
         view.collisionMode = .circle
@@ -294,29 +328,101 @@ final class OtherTrainsAnnotator {
 
 // MARK: - SwiftUI maps
 
-/// Another train on a SwiftUI map: a small grey dot, its name next to it once zoomed in.
+/// Another train on a SwiftUI map: a small grey dot, its name next to it once zoomed in. Tapped, it
+/// shows which train it is and where it runs to; tapping that opens the train's route.
 struct OtherTrainMarkerView: View {
     let marker: LiveTrainMarker
     var showsName: Bool
+    var isSelected = false
+    var onTap: () -> Void = {}
+    var onOpen: () -> Void = {}
 
     var body: some View {
         HStack(spacing: 4) {
-            Image(systemName: "tram.fill")
-                .font(.system(size: marker.isLongDistance ? 11 : 9, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: marker.isLongDistance ? 22 : 18, height: marker.isLongDistance ? 22 : 18)
-                .background(Color.gray.opacity(marker.isLongDistance ? 0.95 : 0.8), in: .circle)
-                .overlay { Circle().stroke(.white, lineWidth: 1.5) }
-            if showsName {
+            Button(action: onTap) {
+                Image(systemName: "tram.fill")
+                    .font(.system(size: marker.isLongDistance ? 11 : 9, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: marker.isLongDistance ? 22 : 18, height: marker.isLongDistance ? 22 : 18)
+                    .background(Color.gray.opacity(marker.isLongDistance ? 0.95 : 0.8), in: .circle)
+                    .overlay { Circle().stroke(.white, lineWidth: 1.5) }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text([marker.name, marker.subtitle].compactMap { $0 }.joined(separator: ", ")))
+            if isSelected {
+                Button(action: onOpen) {
+                    HStack(spacing: 6) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(marker.name).font(.caption.weight(.bold))
+                            if let subtitle = marker.subtitle {
+                                Text(subtitle).font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                        if marker.tripId != nil {
+                            Image(systemName: "chevron.right").font(.caption2.weight(.bold)).foregroundStyle(.tertiary)
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(.regularMaterial, in: .rect(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                .disabled(marker.tripId == nil)
+                .accessibilityHint(marker.tripId == nil ? Text(verbatim: "") : Text("Zeigt die ganze Fahrt"))
+            } else if showsName {
                 Text(marker.name)
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 2)
                     .background(.regularMaterial, in: .capsule)
+                    .accessibilityHidden(true)
             }
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(Text([marker.name, marker.subtitle].compactMap { $0 }.joined(separator: ", ")))
+    }
+}
+
+// MARK: - A tapped train's route
+
+/// Which train's route to show (`tripId` from `LiveTrainMarker`).
+struct LiveTrainTripRequest: Identifiable, Hashable {
+    let tripId: String
+    var id: String { tripId }
+}
+
+/// A train tapped on the map: its whole route, opened at the stop it runs to next.
+struct LiveTrainTripSheet: View {
+    let tripId: String
+
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    @State private var entry: BoardEntry?
+    @State private var failed = false
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let entry {
+                    TripView(entry: entry)
+                } else if failed {
+                    ContentUnavailableView("Zug nicht gefunden", systemImage: "tram.fill")
+                } else {
+                    ProgressView()
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Fertig", systemImage: "xmark", role: .cancel) { dismiss() }
+                }
+            }
+        }
+        .task(id: tripId) {
+            guard let trip = try? await model.provider.plainTrip(id: tripId, source: .transitous),
+                  let entry = BoardEntry.liveTrain(trip) else {
+                failed = true
+                return
+            }
+            self.entry = entry
+        }
     }
 }

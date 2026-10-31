@@ -3,6 +3,8 @@ import Foundation
 /// A train drawn on a map at one moment.
 public struct LiveTrainMarker: Sendable, Hashable, Identifiable {
     public var id: String
+    /// Transitous' trip, to open the train's route; nil for trains only bahn.jetzt knows.
+    public var tripId: String?
     public var name: String
     public var coordinate: Coordinate
     /// The stop the train runs to next (display name), when known.
@@ -23,6 +25,8 @@ public struct LiveTrainField: Sendable {
     static let maxDistanceFromTrack: Double = 1_500
     /// How far a regional fix may be from where the timetable puts the train (several trains share a line name).
     static let maxDistanceFromSchedule: Double = 15_000
+    /// The same for S-Bahns, which run every few minutes in both directions on the same track.
+    static let maxDistanceFromScheduleSuburban: Double = 4_000
     /// Own trains are drawn separately; another marker with the same name this close is the same train.
     static let ownTrainRadius: Double = 3_000
 
@@ -31,6 +35,7 @@ public struct LiveTrainField: Sendable {
         var name: String
         var runNumber: Int?
         var isLongDistance: Bool
+        var isSuburban: Bool
         /// By departure.
         var segments: [LiveTrainSegment]
     }
@@ -54,7 +59,8 @@ public struct LiveTrainField: Sendable {
                 ownTrains: [(name: String, coordinate: Coordinate)] = []) {
         let trips = Dictionary(grouping: segments, by: \.tripId).map { id, segments in
             let sorted = segments.sorted { $0.departure < $1.departure }
-            return Trip(id: id, name: sorted[0].name, runNumber: sorted[0].runNumber, isLongDistance: sorted.contains(where: \.isLongDistance), segments: sorted)
+            return Trip(id: id, name: sorted[0].name, runNumber: sorted[0].runNumber, isLongDistance: sorted.contains(where: \.isLongDistance),
+                        isSuburban: sorted.allSatisfy(\.isSuburban), segments: sorted)
         }
         .sorted { $0.id < $1.id }
         let byName = Dictionary(grouping: running, by: { Self.normalized($0.name) })
@@ -100,7 +106,8 @@ public struct LiveTrainField: Sendable {
         // Off the timetable by more than a few kilometers: another train of the same line.
         let scheduled = schedulePosition(on: trip, at: fix.time)
         let offSchedule = scheduled?.coordinate.distance(to: fix.coordinate) ?? 0
-        if !trip.isLongDistance, offSchedule > maxDistanceFromSchedule { return nil }
+        if !trip.isLongDistance, offSchedule > (trip.isSuburban && trip.runNumber == nil
+                                                ? maxDistanceFromScheduleSuburban : maxDistanceFromSchedule) { return nil }
         let speed = max(0, fix.speedKmh ?? 0) / 3.6
         return (Anchor(segment: best.segment, meters: best.meters, time: fix.time, metersPerSecond: speed, speedKmh: fix.speedKmh),
                 best.distance + offSchedule * 0.1)
@@ -138,7 +145,7 @@ public struct LiveTrainField: Sendable {
             if let marker = marker(for: trip, at: date) { markers.append(marker) }
         }
         for train in unmatched {
-            markers.append(LiveTrainMarker(id: "bahn.jetzt:\(train.id)", name: train.name, coordinate: train.position.coordinate,
+            markers.append(LiveTrainMarker(id: "bahn.jetzt:\(train.id)", tripId: nil, name: train.name, coordinate: train.position.coordinate,
                                            nextStop: nil, speedKmh: train.position.speedKmh,
                                            isLongDistance: train.category.map { BahnDeClient.longDistanceCategories.contains($0.uppercased()) } ?? false,
                                            followsTrack: false))
@@ -155,20 +162,22 @@ public struct LiveTrainField: Sendable {
     func marker(for trip: Trip, at date: Date) -> LiveTrainMarker? {
         let place: (segment: Int, coordinate: Coordinate)
         var speed: Double?
-        if let anchor = anchors[trip.id], date.timeIntervalSince(anchor.time) <= Self.maxExtrapolation {
+        // S-Bahns are never placed by the timetable: an old fix just stops moving.
+        if let anchor = anchors[trip.id], trip.isSuburban || date.timeIntervalSince(anchor.time) <= Self.maxExtrapolation {
             let segment = trip.segments[anchor.segment]
             // Runs on at its last speed, but never past the next stop.
-            let meters = min(segment.track.length, anchor.meters + anchor.metersPerSecond * max(0, date.timeIntervalSince(anchor.time)))
+            let elapsed = min(max(0, date.timeIntervalSince(anchor.time)), Self.maxExtrapolation)
+            let meters = min(segment.track.length, anchor.meters + anchor.metersPerSecond * elapsed)
             guard let coordinate = segment.track.coordinate(at: meters) else { return nil }
             place = (anchor.segment, coordinate)
             speed = anchor.speedKmh
-        } else if let scheduled = Self.schedulePosition(on: trip, at: date) {
+        } else if !trip.isSuburban, let scheduled = Self.schedulePosition(on: trip, at: date) {
             place = scheduled
         } else {
             return nil
         }
         let segment = trip.segments[place.segment]
-        return LiveTrainMarker(id: trip.id, name: trip.name, coordinate: place.coordinate, nextStop: Station.displayName(for: segment.to),
+        return LiveTrainMarker(id: trip.id, tripId: trip.id, name: trip.name, coordinate: place.coordinate, nextStop: Station.displayName(for: segment.to),
                                speedKmh: speed, isLongDistance: trip.isLongDistance, followsTrack: true)
     }
 

@@ -146,8 +146,13 @@ struct LiveTrainMapView: View {
     @State private var layer = LiveTrainsLayer()
     /// Zoomed in this far (degrees north–south), the other trains show their names.
     @State private var showsTrainNames = false
+    /// The other train tapped on, showing its name and where it runs to.
+    @State private var selectedTrain: String?
+    @State private var tappedTrain: LiveTrainTripRequest?
 
     private var trainName: String { route.line?.name ?? String(localized: "Zug") }
+    /// bahn.jetzt's speed, else the one worked out from the last fixes.
+    private var speed: Double? { layer.ownSpeeds[trainName] ?? position?.speedKmh }
 
     private var color: Color { route.line?.color ?? .brand }
 
@@ -172,7 +177,9 @@ struct LiveTrainMapView: View {
                 }
                 ForEach(layer.markers) { marker in
                     Annotation(marker.name, coordinate: marker.coordinate.clCoordinate, anchor: .center) {
-                        OtherTrainMarkerView(marker: marker, showsName: showsTrainNames)
+                        OtherTrainMarkerView(marker: marker, showsName: showsTrainNames, isSelected: selectedTrain == marker.id,
+                                             onTap: { selectedTrain = selectedTrain == marker.id ? nil : marker.id },
+                                             onOpen: { tappedTrain = marker.tripId.map(LiveTrainTripRequest.init(tripId:)) })
                     }
                     .annotationTitles(.hidden)
                 }
@@ -185,6 +192,18 @@ struct LiveTrainMapView: View {
                             .background(position.isStale() ? Color.gray : color, in: .circle)
                             .overlay { Circle().stroke(.white, lineWidth: 2) }
                             .shadow(radius: 3)
+                            .overlay(alignment: .top) {
+                                if let speed {
+                                    Text("\(Int(speed.rounded())) km/h")
+                                        .font(.caption.weight(.semibold))
+                                        .monospacedDigit()
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(.regularMaterial, in: .capsule)
+                                        .fixedSize()
+                                        .offset(y: -24)
+                                }
+                            }
                     }
                 }
             }
@@ -229,6 +248,7 @@ struct LiveTrainMapView: View {
             }
         }
         .task { await layer.run(model: model) }
+        .sheet(item: $tappedTrain) { LiveTrainTripSheet(tripId: $0.tripId) }
         .onChange(of: track) { updateOwnTrain() }
     }
 
@@ -251,7 +271,7 @@ struct LiveTrainMapView: View {
             VStack(alignment: .leading, spacing: 6) {
                 if let position {
                     HStack(spacing: 12) {
-                        if let speed = position.speedKmh {
+                        if let speed {
                             Label("\(Int(speed.rounded())) km/h", systemImage: "gauge.with.dots.needle.67percent")
                                 .font(.subheadline.weight(.semibold))
                                 .monospacedDigit()

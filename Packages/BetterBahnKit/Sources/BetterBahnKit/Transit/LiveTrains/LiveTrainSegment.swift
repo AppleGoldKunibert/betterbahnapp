@@ -52,9 +52,11 @@ public struct LiveTrainSegment: Sendable, Hashable {
     public var arrival: Date
     public var track: TrackPath
     public var isLongDistance: Bool
+    /// S-Bahns run so often that the timetable can't tell which one is where: only shown with a real fix.
+    public var isSuburban: Bool
 
     public init(tripId: String, name: String, runNumber: Int? = nil, from: String, to: String, departure: Date, arrival: Date,
-                track: TrackPath, isLongDistance: Bool) {
+                track: TrackPath, isLongDistance: Bool, isSuburban: Bool = false) {
         self.tripId = tripId
         self.name = name
         self.runNumber = runNumber
@@ -64,6 +66,7 @@ public struct LiveTrainSegment: Sendable, Hashable {
         self.arrival = arrival
         self.track = track
         self.isLongDistance = isLongDistance
+        self.isSuburban = isSuburban
     }
 
     /// Meters along the track at `date`, assuming an even pace between the two stops.
@@ -137,7 +140,25 @@ extension TransitousProvider {
             guard points.count > 1 else { return nil }
             return LiveTrainSegment(tripId: trip.tripId, name: name, runNumber: runNumber, from: segment.from.name, to: segment.to.name,
                                     departure: segment.departure, arrival: segment.arrival, track: TrackPath(points),
-                                    isLongDistance: liveLongDistanceModes.contains(segment.mode))
+                                    isLongDistance: liveLongDistanceModes.contains(segment.mode),
+                                    isSuburban: segment.mode == "SUBURBAN" || segment.mode == "METRO")
         }
+    }
+}
+
+extension BoardEntry {
+    /// How a train tapped on the map opens its route: as if picked on the board of the stop it runs to
+    /// next, so that stop is highlighted; before it starts its first stop, after it ends its last.
+    public static func liveTrain(_ trip: Trip, at date: Date = .now) -> BoardEntry? {
+        guard let line = trip.line, let first = trip.stopovers.first else { return nil }
+        let next = trip.stopovers.first { stop in
+            !stop.cancelled && ((stop.arrival ?? stop.departure)?.best ?? .distantPast) > date
+        } ?? trip.stopovers.last ?? first
+        let departs = next.departure != nil
+        guard let time = next.departure ?? next.arrival else { return nil }
+        return BoardEntry(kind: departs ? .departures : .arrivals, tripId: trip.id, station: next.station, line: line,
+                          otherEnd: (departs ? trip.destination : trip.origin)?.displayName, time: time,
+                          platform: (departs ? next.departurePlatform : next.arrivalPlatform) ?? PlatformInfo(planned: nil, actual: nil),
+                          cancelled: trip.cancelled, terminatesOrOriginatesHere: nil, remarks: [], source: trip.source)
     }
 }

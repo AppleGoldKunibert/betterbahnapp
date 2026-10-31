@@ -5939,6 +5939,16 @@
         }
       }
     },
+    "Zeigt die ganze Fahrt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shows the whole trip"
+          }
+        }
+      }
+    },
     "Öffne eine gespeicherte Reise und tippe auf „Regelmäßig fahren“." : {
       "localizations" : {
         "en" : {

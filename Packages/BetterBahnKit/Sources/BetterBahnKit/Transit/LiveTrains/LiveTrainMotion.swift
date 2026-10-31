@@ -12,6 +12,16 @@ public struct LiveTrainMotion: Sendable {
     private(set) var fix: TrainPosition?
     /// Meters along the track of `fix`; nil while it isn't on the track.
     private(set) var fixMeters: Double?
+    /// The last fix that moved, to work out the speed when bahn.jetzt sends none.
+    private var lastMove: (meters: Double, time: Date)?
+    private var estimatedSpeedKmh: Double?
+    /// Fixes closer in time than this don't give a usable speed.
+    static let minEstimateInterval: TimeInterval = 5
+    static let maxSpeedKmh: Double = 330
+    static let standingAfter: TimeInterval = 60
+
+    /// bahn.jetzt's speed, else the one worked out from the last two fixes along the track.
+    public var speedKmh: Double? { fix?.speedKmh ?? estimatedSpeedKmh }
 
     /// - Parameter stops: the stops the train calls at, in order.
     public init(track: [Coordinate], stops: [Coordinate]) {
@@ -30,17 +40,31 @@ public struct LiveTrainMotion: Sendable {
         guard let fix, let located = track.locate(fix.coordinate, near: fixMeters),
               located.distance <= Self.maxDistanceFromTrack else {
             fixMeters = nil
+            lastMove = nil
+            estimatedSpeedKmh = nil
             return
         }
         fixMeters = located.meters
+        // bahn.jetzt repeats a position until it has a new one: only a changed one tells the speed,
+        // and one that stays put for a minute means the train stands.
+        if let lastMove, abs(located.meters - lastMove.meters) < 1 {
+            if fix.time.timeIntervalSince(lastMove.time) > Self.standingAfter { estimatedSpeedKmh = 0 }
+            return
+        }
+        if let lastMove, case let elapsed = fix.time.timeIntervalSince(lastMove.time), elapsed >= Self.minEstimateInterval {
+            estimatedSpeedKmh = min(Self.maxSpeedKmh, max(0, (located.meters - lastMove.meters) / elapsed * 3.6))
+        }
+        lastMove = (located.meters, fix.time)
     }
 
     /// Where the train is at `date`; nil without a fix.
     public func coordinate(at date: Date) -> Coordinate? {
         guard let fix else { return nil }
         guard let fixMeters else { return fix.coordinate }
-        let elapsed = min(max(0, date.timeIntervalSince(fix.time)), LiveTrainField.maxExtrapolation)
-        let speed = max(0, fix.speedKmh ?? 0) / 3.6
+        // An estimated speed runs from when the train was last seen moving, not from the repeated fix.
+        let since = fix.speedKmh == nil ? lastMove?.time ?? fix.time : fix.time
+        let elapsed = min(max(0, date.timeIntervalSince(since)), LiveTrainField.maxExtrapolation)
+        let speed = max(0, speedKmh ?? 0) / 3.6
         // A train standing at (or just about to reach) a stop waits there.
         let nextStop = stops.first { $0 > fixMeters + 30 } ?? track.length
         let meters = min(nextStop, fixMeters + speed * elapsed)

@@ -13,12 +13,16 @@ struct JourneyMapView: View {
     @State private var trains: [LiveTrainPosition] = []
     /// Moves the trains between fixes and shows the other trains around (#505).
     @State private var layer = LiveTrainsLayer()
+    @State private var tappedTrain: LiveTrainTripRequest?
 
     var body: some View {
         NavigationStack {
             JourneyMap(journey: journey, version: mapVersion, trains: trains, shownTrains: layer.ownCoordinates,
+                       trainSpeeds: layer.ownSpeeds,
                        otherTrains: layer.markers, onRegionChange: { layer.setVisible($0, model: model) },
+                       onTrainTap: { tappedTrain = LiveTrainTripRequest(tripId: $0) },
                        onMarkerTap: { selectedTransfer = $0 })
+                .sheet(item: $tappedTrain) { LiveTrainTripSheet(tripId: $0.tripId) }
                 .ignoresSafeArea(edges: .top)
                 .navigationTitle("\(journey.legs.first?.origin.displayName ?? String(localized: "Reise")) → \(finalDestination.displayName)")
                 .navigationBarTitleDisplayMode(.inline)
@@ -143,9 +147,13 @@ struct JourneyMap: UIViewRepresentable {
     var trains: [LiveTrainPosition] = []
     /// Where those trains are drawn this second, by name (they run on between fixes).
     var shownTrains: [String: Coordinate] = [:]
+    /// Their speeds, by name.
+    var trainSpeeds: [String: Double] = [:]
     /// The other trains around (#505).
     var otherTrains: [LiveTrainMarker] = []
     var onRegionChange: (MKCoordinateRegion) -> Void = { _ in }
+    /// A tapped other train's route, by Transitous trip ID.
+    var onTrainTap: (String) -> Void = { _ in }
     let onMarkerTap: (TransferPoint) -> Void
 
     func makeUIView(context: Context) -> MKMapView {
@@ -167,7 +175,8 @@ struct JourneyMap: UIViewRepresentable {
         let coordinator = context.coordinator
         coordinator.onMarkerTap = onMarkerTap
         coordinator.onRegionChange = onRegionChange
-        coordinator.syncTrains(trains, shown: shownTrains, on: map)
+        coordinator.onTrainTap = onTrainTap
+        coordinator.syncTrains(trains, shown: shownTrains, speeds: trainSpeeds, on: map)
         coordinator.otherTrains.sync(otherTrains, on: map)
 
         // Route and markers only when the journey changed, so the periodic train refresh doesn't
@@ -224,11 +233,12 @@ struct JourneyMap: UIViewRepresentable {
         var renderedJourney: Journey?
         var renderedVersion = -1
         var onRegionChange: (MKCoordinateRegion) -> Void = { _ in }
+        var onTrainTap: (String) -> Void = { _ in }
         let otherTrains = OtherTrainsAnnotator()
         private var trainAnnotations: [String: TrainAnnotation] = [:]
 
         /// Adds, moves and removes train markers in place so an open callout survives the refresh.
-        func syncTrains(_ trains: [LiveTrainPosition], shown: [String: Coordinate], on map: MKMapView) {
+        func syncTrains(_ trains: [LiveTrainPosition], shown: [String: Coordinate], speeds: [String: Double], on map: MKMapView) {
             let current = Dictionary(trains.map { ($0.trainName, $0) }, uniquingKeysWith: { $1 })
             for (name, annotation) in trainAnnotations where current[name] == nil {
                 map.removeAnnotation(annotation)
@@ -237,7 +247,7 @@ struct JourneyMap: UIViewRepresentable {
             for (name, live) in current {
                 if let annotation = trainAnnotations[name] {
                     UIView.animate(withDuration: 1, delay: 0, options: [.curveLinear, .beginFromCurrentState, .allowUserInteraction]) {
-                        annotation.update(live, shown: shown[name])
+                        annotation.update(live, shown: shown[name], speed: speeds[name])
                     }
                     (map.view(for: annotation) as? MKMarkerAnnotationView)?.markerTintColor = annotation.isStale ? .systemGray : UIColor(Color.brand)
                 } else {
@@ -258,6 +268,10 @@ struct JourneyMap: UIViewRepresentable {
                 return renderer
             }
             return MKOverlayRenderer(overlay: overlay)
+        }
+
+        func mapView(_ mapView: MKMapView, annotationView view: MKAnnotationView, calloutAccessoryControlTapped control: UIControl) {
+            if let other = view.annotation as? OtherTrainAnnotation, let tripId = other.tripId { onTrainTap(tripId) }
         }
 
         func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {

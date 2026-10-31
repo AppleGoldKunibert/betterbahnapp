@@ -228,4 +228,69 @@ import Testing
         let far = Coordinate(latitude: 51, longitude: 8)
         #expect(smoother.positions(["x": far], dataChanged: true, at: Self.start.addingTimeInterval(6))["x"] == far)
     }
+
+    @Test func sBahnsAreOnlyShownWithARealFix() throws {
+        var segment = Self.segment(trip: "s3", name: "S3", longDistance: false)
+        segment.isSuburban = true
+        let halfway = Self.start.addingTimeInterval(300)
+        // No fix: not placed by the timetable.
+        #expect(LiveTrainField(segments: [segment], running: []).markers(at: halfway).isEmpty)
+        // With a fix it runs on, and an old fix only stops it moving.
+        let fix = try #require(segment.track.coordinate(at: segment.scheduledMeters(at: halfway)))
+        let field = LiveTrainField(segments: [segment], running: [
+            Self.running("S3", category: "S", number: 35_123, at: fix, time: halfway, speed: 36),
+        ])
+        let moved = try #require(field.markers(at: halfway.addingTimeInterval(10)).first)
+        #expect(abs(moved.coordinate.distance(to: fix) - 100) < 5)
+        #expect(moved.tripId == "s3")
+        let frozen = try #require(field.markers(at: halfway.addingTimeInterval(600)).first)
+        #expect(abs(frozen.coordinate.distance(to: fix) - 10 * LiveTrainField.maxExtrapolation) < 10)
+        // An S3 far from where the timetable has this one is another train.
+        let elsewhere = try #require(segment.track.coordinate(at: segment.scheduledMeters(at: halfway) + 6_000))
+        let other = LiveTrainField(segments: [segment], running: [
+            Self.running("S3", category: "S", number: 35_125, at: elsewhere, time: halfway, speed: 36),
+        ])
+        #expect(other.markers(at: halfway).allSatisfy { $0.tripId == nil })
+    }
+
+    @Test func ownTrainSpeedIsWorkedOutWhenBahnJetztSendsNone() throws {
+        var motion = LiveTrainMotion(track: Self.track, stops: [])
+        let path = TrackPath(Self.track)
+        let a = try #require(path.coordinate(at: 1_000)), b = try #require(path.coordinate(at: 2_000))
+        motion.update(with: TrainPosition(coordinate: a, time: Self.start, speedKmh: nil, source: nil))
+        #expect(motion.speedKmh == nil)
+        // Repeated position: no speed yet.
+        motion.update(with: TrainPosition(coordinate: a, time: Self.start.addingTimeInterval(15), speedKmh: nil, source: nil))
+        #expect(motion.speedKmh == nil)
+        // 1 km in 30 s: 120 km/h, and it runs on from where it was last seen moving.
+        motion.update(with: TrainPosition(coordinate: b, time: Self.start.addingTimeInterval(30), speedKmh: nil, source: nil))
+        #expect(abs((motion.speedKmh ?? 0) - 120) < 1)
+        let on = try #require(motion.coordinate(at: Self.start.addingTimeInterval(45)))
+        #expect(abs(path.locate(on)!.meters - 2_500) < 10)
+        // bahn.jetzt's own speed wins; a position unchanged for over a minute means standing.
+        motion.update(with: TrainPosition(coordinate: b, time: Self.start.addingTimeInterval(45), speedKmh: 90, source: nil))
+        #expect(motion.speedKmh == 90)
+        motion.update(with: TrainPosition(coordinate: b, time: Self.start.addingTimeInterval(120), speedKmh: nil, source: nil))
+        #expect(motion.speedKmh == 0)
+    }
+
+    @Test func tappedTrainOpensAtItsNextStop() throws {
+        func stop(_ name: String, _ minutes: Double, last: Bool = false) -> Stopover {
+            let time = TimeInfo(planned: Self.start.addingTimeInterval(minutes * 60), actual: nil)
+            return Stopover(station: Station(id: name, name: name, coordinate: nil, evaNumber: nil, source: .transitous),
+                            arrival: minutes == 0 ? nil : time, departure: last ? nil : time,
+                            arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+        }
+        let trip = Trip(id: "t", line: Line(name: "ICE 79", number: "79", product: .highSpeed, operatorName: nil), direction: "C",
+                        stopovers: [stop("A", 0), stop("B", 10), stop("C", 20, last: true)], cancelled: false, remarks: [],
+                        source: .transitous)
+        let entry = try #require(BoardEntry.liveTrain(trip, at: Self.start.addingTimeInterval(5 * 60)))
+        #expect(entry.station.name == "B")
+        #expect(entry.kind == .departures)
+        #expect(entry.otherEnd == "C")
+        #expect(entry.tripId == "t")
+        let ended = try #require(BoardEntry.liveTrain(trip, at: Self.start.addingTimeInterval(30 * 60)))
+        #expect(ended.station.name == "C")
+        #expect(ended.kind == .arrivals)
+    }
 }
