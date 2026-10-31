@@ -112,6 +112,47 @@ public struct TravelCollection: Sendable, Hashable {
         public var total: Int { items.count }
     }
 
+    /// How the trainsets of one series (or length) are listed.
+    public enum TrainsetOrder: String, CaseIterable, Sendable, Hashable, Identifiable {
+        case number, mostRides, lastRidden, collectedFirst
+
+        public var id: String { rawValue }
+
+        public var title: String {
+            switch self {
+            case .number: String(kit: "Tz-Nummer")
+            case .mostRides: String(kit: "Meiste Fahrten")
+            case .lastRidden: String(kit: "Zuletzt gefahren")
+            case .collectedFirst: String(kit: "Gesammelte zuerst")
+            }
+        }
+
+        /// `items` (in Tz order) in this order; ties and the ones not collected keep the Tz order.
+        public func sorted(_ items: [Item]) -> [Item] {
+            let indexed = Array(items.enumerated())
+            func by(_ less: (Item, Item) -> Bool?) -> [Item] {
+                indexed.sorted { a, b in less(a.element, b.element) ?? (a.offset < b.offset) }.map(\.element)
+            }
+            switch self {
+            case .number:
+                return items
+            case .mostRides:
+                return by { a, b in a.sightings.count == b.sightings.count ? nil : a.sightings.count > b.sightings.count }
+            case .lastRidden:
+                return by { a, b in
+                    switch (a.sightings.first?.date, b.sightings.first?.date) {
+                    case let (x?, y?): x == y ? nil : x > y
+                    case (_?, nil): true
+                    case (nil, _?): false
+                    case (nil, nil): nil
+                    }
+                }
+            case .collectedFirst:
+                return by { a, b in a.isCollected == b.isCollected ? nil : a.isCollected }
+            }
+        }
+    }
+
     public var groups: [Group]
 
     /// The series that can be collected, in this order; a remembered unit's model is matched by `seriesName(of:)`.
@@ -143,7 +184,9 @@ public struct TravelCollection: Sendable, Hashable {
             let train = YearReview.trainName(leg)
             let from = leg.origin.displayName, to = leg.destination.displayName
             let sighting = Sighting(date: leg.departure.planned, train: train, from: from, to: to, journey: ride.journey)
-            let units = ride.formation?.isIC1 == true ? [] : ride.formation?.units ?? []
+            // A number longer than any Tz is an IC 1 coach set that older versions remembered as an "ICE L"
+            // ("IC450007" on IC 1189): neither a trainset nor that series.
+            let units = (ride.formation?.isIC1 == true ? [] : ride.formation?.units ?? []).filter { ($0.number?.count ?? 0) <= 4 }
             var keys: Set<String> = []
             for unit in units {
                 let model = unit.model.map(Self.seriesName(of:))

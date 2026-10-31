@@ -15,13 +15,9 @@ struct CollectionView: View {
             VStack(spacing: 14) {
                 if let collection {
                     ForEach(collection.groups) { group in
-                        NavigationLink {
-                            if group.category == .trainsets {
-                                CollectionTrainsetsView(group: group, series: collection.trainsetSeries, newIDs: newIDs)
-                            } else {
-                                CollectionCategoryView(group: group, newIDs: newIDs)
-                            }
-                        } label: {
+                        // Pushed by value like the journeys opened from there: a view-based link mixed with
+                        // the stack's path put this page back on top of an opened journey.
+                        NavigationLink(value: ConnectionsRoute.collectionCategory(group.category)) {
                             CollectionGroupCard(group: group, newCount: group.items.count(where: { newIDs.contains($0.id) }))
                         }
                         .buttonStyle(.plain)
@@ -48,7 +44,35 @@ struct CollectionView: View {
             let loaded = await model.travelCollection()
             newIDs = model.newCollectionIDs(in: loaded)
             model.markCollectionSeen(loaded)
+            model.collectionSnapshot = CollectionSnapshot(collection: loaded, newIDs: newIDs)
             collection = loaded
+        }
+    }
+}
+
+/// The collection with the items new on this visit, kept for its category pages.
+struct CollectionSnapshot {
+    var collection: TravelCollection
+    var newIDs: Set<String>
+}
+
+/// A category of the collection opened from `CollectionView`.
+struct CollectionCategoryPage: View {
+    let category: TravelCollection.Category
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        if let snapshot = model.collectionSnapshot, let group = snapshot.collection.group(category) {
+            if category == .trainsets {
+                CollectionTrainsetsView(group: group, series: snapshot.collection.trainsetSeries, newIDs: snapshot.newIDs)
+            } else {
+                CollectionCategoryView(group: group, newIDs: snapshot.newIDs)
+            }
+        } else {
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background { AppBackground() }
+                .task { model.collectionSnapshot = CollectionSnapshot(collection: await model.travelCollection(), newIDs: []) }
         }
     }
 }
@@ -245,6 +269,8 @@ struct CollectionTrainsetsView: View {
     let group: TravelCollection.Group
     let series: [TravelCollection.TrainsetSeries]
     let newIDs: Set<String>
+    /// The order picked per series, Tz number by default.
+    @State private var orders: [String: TravelCollection.TrainsetOrder] = [:]
 
     var body: some View {
         List {
@@ -260,12 +286,17 @@ struct CollectionTrainsetsView: View {
             ForEach(series) { series in
                 Section {
                     DisclosureGroup {
+                        let order = orders[series.name] ?? .number
+                        Picker("Sortieren", selection: orderBinding(series.name)) {
+                            ForEach(TravelCollection.TrainsetOrder.allCases) { Text($0.title).tag($0) }
+                        }
+                        .pickerStyle(.menu)
                         if series.variants.count == 1, series.variants[0].name == nil {
-                            TrainsetRows(items: series.variants[0].items, newIDs: newIDs)
+                            TrainsetRows(items: order.sorted(series.variants[0].items), newIDs: newIDs)
                         } else {
                             ForEach(series.variants) { variant in
                                 DisclosureGroup {
-                                    TrainsetRows(items: variant.items, newIDs: newIDs)
+                                    TrainsetRows(items: order.sorted(variant.items), newIDs: newIDs)
                                 } label: {
                                     TrainsetGroupLabel(title: variant.title, collected: variant.collected, total: variant.total,
                                                        newCount: variant.items.count(where: { newIDs.contains($0.id) }))
@@ -290,6 +321,10 @@ struct CollectionTrainsetsView: View {
         .background { AppBackground() }
         .navigationTitle(group.category.title)
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func orderBinding(_ series: String) -> Binding<TravelCollection.TrainsetOrder> {
+        Binding { orders[series] ?? .number } set: { orders[series] = $0 }
     }
 }
 
