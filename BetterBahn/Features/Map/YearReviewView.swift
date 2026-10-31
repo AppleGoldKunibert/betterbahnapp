@@ -414,6 +414,7 @@ private struct YearReviewHeatmap: View {
 struct YearReviewBanner: View {
     let year: Int
     @State private var showsReview = false
+    @Environment(\.calmDesign) private var calm
 
     var body: some View {
         Button {
@@ -435,8 +436,10 @@ struct YearReviewBanner: View {
             }
             .foregroundStyle(.white)
             .padding(16)
-            .background(LinearGradient(colors: [.brand, .brandDeep], startPoint: .topLeading, endPoint: .bottomTrailing),
-                        in: .rect(cornerRadius: 22, style: .continuous))
+            // The calm design keeps to a plain red.
+            .background(calm ? AnyShapeStyle(Color.brand)
+                             : AnyShapeStyle(LinearGradient(colors: [.brand, .brandDeep], startPoint: .topLeading, endPoint: .bottomTrailing)),
+                        in: .rect(cornerRadius: calm ? 14 : 22, style: .continuous))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)

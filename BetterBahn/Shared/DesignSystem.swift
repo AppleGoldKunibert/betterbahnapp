@@ -25,14 +25,20 @@ extension Color {
     static let heavyDelay = Color(red: 0.88, green: 0.15, blue: 0.20)
     /// Card surface: white in light mode, elevated gray in dark mode.
     static let card = Color(.secondarySystemGroupedBackground)
-    /// Page background of the calm design: a warm off-white, near-black in dark mode.
+    /// Page background of the calm design: warm paper, a warm dark grey in dark mode.
     static let canvas = Color(UIColor { traits in
         traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.05, green: 0.05, blue: 0.06, alpha: 1)
-            : UIColor(red: 0.96, green: 0.955, blue: 0.945, alpha: 1)
+            ? UIColor(red: 0.11, green: 0.105, blue: 0.10, alpha: 1)
+            : UIColor(red: 0.972, green: 0.962, blue: 0.940, alpha: 1)
     })
-    /// Thin outline of flat cards.
-    static let hairline = Color.primary.opacity(0.08)
+    /// Card surface of the calm design: a shade lighter than `canvas`.
+    static let calmCard = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0.16, green: 0.153, blue: 0.145, alpha: 1)
+            : UIColor(red: 0.995, green: 0.99, blue: 0.98, alpha: 1)
+    })
+    /// Thin outline of flat cards and the rules between rows.
+    static let hairline = Color.primary.opacity(0.12)
 }
 
 nonisolated private struct CalmDesignKey: EnvironmentKey {
@@ -120,7 +126,7 @@ struct Card<Content: View>: View {
         content
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.card, in: .rect(cornerRadius: 22, style: .continuous))
+            .background(calm ? Color.calmCard : Color.card, in: .rect(cornerRadius: 22, style: .continuous))
             // The calm design separates cards from the page by their outline alone.
             .shadow(color: .black.opacity(calm ? 0 : 0.06), radius: 12, y: 4)
             .overlay {
@@ -151,7 +157,7 @@ struct AppBackground: View {
     }
 }
 
-/// In the calm design a bold title in sentence case, without the icon.
+/// In the calm design a serif title below a thin rule, like a section in a printed timetable.
 struct SectionHeader: View {
     let title: String
     let systemImage: String
@@ -160,12 +166,17 @@ struct SectionHeader: View {
 
     var body: some View {
         if calm {
-            HStack(alignment: .firstTextBaseline) {
-                Text(title)
-                    .font(.title3.weight(.bold))
-                Spacer()
-                if let trailing {
-                    Text(trailing).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary).monospacedDigit()
+            VStack(alignment: .leading, spacing: 10) {
+                PageRule()
+                HStack(alignment: .firstTextBaseline) {
+                    Text(title)
+                        .font(.title2.weight(.semibold))
+                        .fontDesign(.serif)
+                        .accessibilityAddTraits(.isHeader)
+                    Spacer()
+                    if let trailing {
+                        Text(trailing).font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                    }
                 }
             }
             .padding(.horizontal, 4)
@@ -190,6 +201,48 @@ struct SectionHeader: View {
             }
         }
         .padding(.horizontal, 4)
+    }
+}
+
+/// A thin horizontal line between the parts of a calm page; `heavy` for the one below a page's headline.
+struct PageRule: View {
+    var heavy = false
+
+    var body: some View {
+        Rectangle()
+            .fill(heavy ? Color.primary : Color.hairline)
+            .frame(height: heavy ? 1.5 : 1)
+            .accessibilityHidden(true)
+    }
+}
+
+/// A plain list row of the calm design that opens another page: title, optional trailing content, chevron.
+struct CalmLinkRow<Trailing: View>: View {
+    let title: LocalizedStringKey
+    let trailing: Trailing
+
+    init(_ title: LocalizedStringKey, @ViewBuilder trailing: () -> Trailing) {
+        self.title = title
+        self.trailing = trailing()
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(title).font(.body)
+            Spacer()
+            trailing
+            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 14)
+        .contentShape(.rect)
+    }
+}
+
+extension CalmLinkRow where Trailing == EmptyView {
+    init(_ title: LocalizedStringKey) {
+        self.init(title) { EmptyView() }
     }
 }
 

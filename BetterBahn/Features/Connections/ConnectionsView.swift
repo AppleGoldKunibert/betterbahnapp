@@ -126,15 +126,23 @@ struct ConnectionsView: View {
         SplitNavigationStack(path: $path) {
             ScrollViewReader { proxy in
             ScrollView {
-                VStack(spacing: 20) {
-                    Text("Wohin geht’s?")
-                        .font(.largeTitle.weight(.heavy))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 4)
-                        .padding(.top, 4)
-                        .accessibilityAddTraits(.isHeader)
-                    routeCard
-                    optionsCard
+                VStack(spacing: 28) {
+                    // Set like a printed timetable: a serif headline, a rule, then the form as plain rows.
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Wohin geht’s?")
+                            .font(.largeTitle.weight(.semibold))
+                            .fontDesign(.serif)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 4)
+                            .padding(.top, 4)
+                            .padding(.bottom, 12)
+                            .accessibilityAddTraits(.isHeader)
+                        PageRule(heavy: true)
+                        routeCard
+                        PageRule()
+                        optionsCard
+                        PageRule()
+                    }
                     if sizeClass != .regular {
                         searchButtons
                     }
@@ -146,15 +154,15 @@ struct ConnectionsView: View {
                     if !model.recentSearches.isEmpty {
                         recentSection
                     }
-                    HStack(spacing: 10) {
+                    VStack(spacing: 0) {
+                        PageRule()
                         RouteLink(value: ConnectionsRoute.pastTrips) {
-                            Label("Vergangene Fahrten", systemImage: "clock.arrow.circlepath")
-                                .font(.subheadline.weight(.semibold))
-                                .frame(maxWidth: .infinity)
+                            CalmLinkRow("Vergangene Fahrten")
                         }
-                        .buttonStyle(.glass)
-                        .controlSize(.large)
+                        .buttonStyle(.plain)
+                        PageRule()
                         CollectionButton()
+                        PageRule()
                     }
                 }
                 .padding(.horizontal)
@@ -245,7 +253,7 @@ struct ConnectionsView: View {
     // MARK: Route
 
     private var routeCard: some View {
-        Card(padding: 0) {
+        VStack(spacing: 0) {
             VStack(spacing: 0) {
                 StationInput(label: String(localized: "Start"), placeholder: String(localized: "Von wo?"), systemImage: "circle.circle.fill",
                              iconColor: .primary, station: $from, focus: $focused, focusValue: .from)
@@ -273,11 +281,12 @@ struct ConnectionsView: View {
                             path.move(to: top)
                             path.addLine(to: CGPoint(x: top.x, y: bottom.y))
                         }
-                        .stroke(Color.primary.opacity(0.15), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                        .stroke(Color.primary.opacity(0.3), style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
                     }
                 }
             }
-            .clipShape(.rect(cornerRadius: 22, style: .continuous))
+            // The fields bring their own inset: their icons line up with the headline.
+            .padding(.horizontal, -12)
         }
         .onPreferenceChange(StationSuggestionsShownKey.self) { shown in
             withAnimation(.snappy(duration: 0.25)) { suggestionsShown = shown }
@@ -290,7 +299,7 @@ struct ConnectionsView: View {
     /// suggestions below it away from a finger still on one.
     private func routeDivider(showAdd: Bool, showSwap: Bool) -> some View {
         ZStack {
-            Divider().padding(.leading, 54).padding(.trailing, !suggestionsShown && showSwap ? 72 : 0)
+            PageRule().padding(.leading, 54).padding(.trailing, !suggestionsShown && showSwap ? 72 : 0)
             if !suggestionsShown {
                 if showAdd, viaRows.count < Self.maxViaPoints {
                     HStack {
@@ -317,13 +326,17 @@ struct ConnectionsView: View {
             }
         } label: {
             Image(systemName: "arrow.up.arrow.down")
-                .font(.headline)
+                .font(.subheadline.weight(.semibold))
                 .rotationEffect(.degrees(swapRotation))
+                .frame(width: 40, height: 40)
+                .background(Color.canvas, in: .circle)
+                .overlay { Circle().strokeBorder(Color.hairline, lineWidth: 1) }
                 .frame(width: 44, height: 44)
+                .contentShape(.circle)
         }
-        .buttonStyle(.glass)
-        .buttonBorderShape(.circle)
-        .padding(.trailing, 14)
+        .buttonStyle(.plain)
+        .foregroundStyle(.primary)
+        .padding(.trailing, 12)
         .disabled(from == nil && to == nil)
         .accessibilityLabel("Start und Ziel tauschen")
         .transition(.opacity)
@@ -336,66 +349,74 @@ struct ConnectionsView: View {
             }
         } label: {
             Image(systemName: "plus")
-                .font(.subheadline.weight(.bold))
-                .frame(width: 28, height: 28)
+                .font(.caption.weight(.bold))
+                .frame(width: 24, height: 24)
+                .background(Color.canvas, in: .circle)
+                .overlay { Circle().strokeBorder(Color.brand, lineWidth: 1) }
+                .frame(width: 44, height: 44)
+                .contentShape(.circle)
         }
-        .buttonStyle(.glass)
-        .buttonBorderShape(.circle)
-        .tint(.brand)
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.brand)
+        // Takes no more room than the drawn circle, so the row between the stops stays low.
+        .padding(-8)
         .accessibilityLabel("Zwischenhalt hinzufügen")
     }
 
     // MARK: Options
 
+    /// The search options as plain rows between thin rules.
     private var optionsCard: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 10) {
-                    Picker("Zeit", selection: $isArrival) {
-                        Label("Abfahrt", systemImage: "arrow.up.right").tag(false)
-                        Label("Ankunft", systemImage: "arrow.down.right").tag(true)
-                    }
-                    .pickerStyle(.segmented)
-                    .fixedSize()
-                    .disabled(!viaRows.isEmpty)
-
-                    Spacer()
-
-                    TimeSelector(date: $date, useNow: $useNow)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Picker("Zeit", selection: $isArrival) {
+                    Label("Abfahrt", systemImage: "arrow.up.right").tag(false)
+                    Label("Ankunft", systemImage: "arrow.down.right").tag(true)
                 }
+                .pickerStyle(.segmented)
+                .fixedSize()
+                .disabled(!viaRows.isEmpty)
 
-                if !viaRows.isEmpty {
-                    Label("Mit Zwischenhalten suchen wir ab der gewählten Abfahrtszeit.", systemImage: "info.circle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Spacer()
 
-                Divider()
+                TimeSelector(date: $date, useNow: $useNow)
+            }
 
-                Toggle(isOn: $onlyValidTicket) {
-                    let ticket = model.settings.ticketType
-                    optionLabel(ticket.filterTitle, subtitle: ticket.filterSubtitle, icon: ticket.symbolName, color: .brand)
+            if !viaRows.isEmpty {
+                Label("Mit Zwischenhalten suchen wir ab der gewählten Abfahrtszeit.", systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            PageRule()
+
+            Toggle(isOn: $onlyValidTicket) {
+                let ticket = model.settings.ticketType
+                optionLabel(ticket.filterTitle, subtitle: ticket.filterSubtitle, icon: ticket.symbolName, color: .brand)
+            }
+            .tint(.brand)
+
+            PageRule()
+
+            if let title = model.settings.bikeOption.searchTitle {
+                Toggle(isOn: Bindable(model.settings).searchWithBike) {
+                    optionLabel(title, subtitle: model.settings.bikeOption == .foldingBike
+                                ? String(localized: "Zeigt, wo dein Klapprad mitkommt") : String(localized: "Zeigt, ob dein Fahrrad mitkommt"),
+                                icon: "bicycle", color: .brand)
                 }
                 .tint(.brand)
 
-                Divider()
-
-                if let title = model.settings.bikeOption.searchTitle {
-                    Toggle(isOn: Bindable(model.settings).searchWithBike) {
-                        optionLabel(title, subtitle: model.settings.bikeOption == .foldingBike
-                                    ? String(localized: "Zeigt, wo dein Klapprad mitkommt") : String(localized: "Zeigt, ob dein Fahrrad mitkommt"),
-                                    icon: "bicycle", color: .brand)
-                    }
-                    .tint(.brand)
-
-                    Divider()
-                }
-
-                transfersPicker
-
-                productsButton
+                PageRule()
             }
+
+            transfersPicker
+
+            PageRule()
+
+            productsButton
         }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 16)
     }
 
     private var transfersPicker: some View {
@@ -484,13 +505,11 @@ struct ConnectionsView: View {
         .padding()
     }
 
+    /// Title and explanation of an option; the calm page leaves out the icon.
     private func optionLabel(_ title: String, subtitle: String, icon: String, color: Color) -> some View {
-        HStack(spacing: 12) {
-            IconTile(systemImage: icon, color: color, size: 32)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.subheadline.weight(.semibold))
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
-            }
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.body)
+            Text(subtitle).font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -519,40 +538,38 @@ struct ConnectionsView: View {
     private var recentSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionHeader(title: String(localized: "Zuletzt gesucht"), systemImage: "clock.arrow.circlepath")
-            Card(padding: 0) {
-                VStack(spacing: 0) {
-                    ForEach(Array(model.recentSearches.enumerated()), id: \.element.id) { index, recent in
-                        if index > 0 { Divider().padding(.leading, 60) }
-                        Button {
-                            withAnimation {
-                                from = recent.from
-                                to = recent.to
-                                viaRows = []
-                            }
-                        } label: {
-                            HStack(spacing: 14) {
-                                MiniRoute()
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(recent.from.displayName).font(.subheadline.weight(.semibold)).lineLimit(1)
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "arrow.turn.down.right").font(.caption2)
-                                        Text(recent.to.displayName).lineLimit(1)
-                                    }
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
-                            .contentShape(.rect)
+            VStack(spacing: 0) {
+                ForEach(Array(model.recentSearches.enumerated()), id: \.element.id) { index, recent in
+                    if index > 0 { PageRule().padding(.leading, 48) }
+                    Button {
+                        withAnimation {
+                            from = recent.from
+                            to = recent.to
+                            viaRows = []
                         }
-                        .buttonStyle(.plain)
-                        .contextMenu {
-                            Button("Entfernen", systemImage: "trash", role: .destructive) {
-                                model.recentSearches.removeAll { $0.id == recent.id }
+                    } label: {
+                        HStack(spacing: 14) {
+                            MiniRoute()
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(recent.from.displayName).font(.body).lineLimit(1)
+                                HStack(spacing: 4) {
+                                    Image(systemName: "arrow.turn.down.right").font(.caption2)
+                                    Text(recent.to.displayName).lineLimit(1)
+                                }
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
                             }
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                        }
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 12)
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button("Entfernen", systemImage: "trash", role: .destructive) {
+                            model.recentSearches.removeAll { $0.id == recent.id }
                         }
                     }
                 }

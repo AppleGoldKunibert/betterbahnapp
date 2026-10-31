@@ -71,8 +71,8 @@ struct StationInput<Focus: Hashable>: View {
                 Image(systemName: systemImage)
                     .font(.title3)
                     .foregroundStyle(iconColor)
-                    // Covers the line a calm route card draws between its stops.
-                    .background(Circle().fill(calm ? Color.card : .clear).padding(-2))
+                    // Covers the line the calm route form draws between its stops.
+                    .background(Circle().fill(calm ? Color.canvas : .clear).padding(-2))
                     .frame(width: 24)
                     .anchorPreference(key: RouteMarkerKey.self, value: .center) { [$0] }
                     .allowsHitTesting(false)

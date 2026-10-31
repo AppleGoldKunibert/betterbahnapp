@@ -251,19 +251,32 @@ private struct SightingRow: View {
 /// The entry on the Verbindungen tab, with how many items were collected since the last visit.
 struct CollectionButton: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.calmDesign) private var calm
     @State private var newCount = 0
 
     var body: some View {
-        RouteLink(value: ConnectionsRoute.collection) {
-            Label("Sammlung", systemImage: "square.grid.3x3.fill")
-                .font(.subheadline.weight(.semibold))
-                .frame(maxWidth: .infinity)
-                .overlay(alignment: .topTrailing) {
-                    if newCount > 0 { NewBadge(text: "\(newCount)").offset(x: 6, y: -10) }
+        Group {
+            if calm {
+                // A plain list row, the count next to the chevron.
+                RouteLink(value: ConnectionsRoute.collection) {
+                    CalmLinkRow("Sammlung") {
+                        if newCount > 0 { NewBadge(text: "\(newCount)") }
+                    }
                 }
+                .buttonStyle(.plain)
+            } else {
+                RouteLink(value: ConnectionsRoute.collection) {
+                    Label("Sammlung", systemImage: "square.grid.3x3.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .overlay(alignment: .topTrailing) {
+                            if newCount > 0 { NewBadge(text: "\(newCount)").offset(x: 6, y: -10) }
+                        }
+                }
+                .buttonStyle(.glass)
+                .controlSize(.large)
+            }
         }
-        .buttonStyle(.glass)
-        .controlSize(.large)
         .accessibilityValue(newCount > 0 ? String(localized: "\(newCount) neu gesammelt") : "")
         .task(id: "\(model.savedJourneys.count)|\(model.traewellingTrips.count)") {
             newCount = model.newCollectionIDs(in: await model.travelCollection()).count

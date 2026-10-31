@@ -4,6 +4,7 @@ import SwiftUI
 /// Upcoming saved journeys, shown below the connection search.
 struct UpcomingTripsSection: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.calmDesign) private var calm
 
     var body: some View {
         let upcoming = model.upcomingJourneys
@@ -11,7 +12,12 @@ struct UpcomingTripsSection: View {
             FollowedCheckinsSection()
             SectionHeader(title: String(localized: "Deine Reisen"), systemImage: "bookmark.fill",
                           trailing: upcoming.isEmpty ? nil : "\(upcoming.count)")
-            if upcoming.isEmpty {
+            if upcoming.isEmpty, calm {
+                Text("Hier erscheinen deine gespeicherten Reisen.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 4)
+            } else if upcoming.isEmpty {
                 Card {
                     HStack(spacing: 12) {
                         IconTile(systemImage: "bookmark", color: .secondary.opacity(0.6), size: 34)
