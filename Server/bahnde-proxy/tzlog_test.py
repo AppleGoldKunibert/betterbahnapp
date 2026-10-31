@@ -122,6 +122,47 @@ class ScannerTests(unittest.IsolatedAsyncioTestCase):
         boards = [p.split("zeit=")[1].split("&")[0] for p in bahn_de.paths if p.startswith("reiseloesung")]
         self.assertEqual(boards, ["10:00:00", "10:35:00", "11:35:00"])
 
+    async def test_next_scan_continues_where_the_last_window_ended(self):
+        boards = []
+
+        async def get(path):
+            if path.startswith("reiseloesung"):
+                boards.append(path.split("zeit=")[1].split("&")[0])
+            return 200, {"entries": []}
+
+        self.store = tzlog.TzStore()
+        clock = [dt.datetime(2026, 10, 31, 10, 0, tzinfo=tzlog.BERLIN).timestamp()]
+
+        async def sleep(seconds):
+            pass
+
+        scanner = tzlog.Scanner(self.store, get, hubs=[("1", "Berlin Hbf")], interval=0, every=3600,
+                                now=lambda: clock[0], sleep=sleep)
+        await scanner.scan()
+        clock[0] += 3600 + 20 * 60  # the next scan starts 20 minutes late
+        await scanner.scan()
+        # The first reads 10:00 up to 11:00, the second 11:00 (not 11:20) on, up to 12:20.
+        self.assertEqual(boards, ["10:00:00", "11:00:00", "12:00:00"])
+
+    async def test_scans_start_every_period_apart_whatever_one_took(self):
+        clock = [1000.0]
+        slept = []
+
+        async def sleep(seconds):
+            slept.append(seconds)
+            if len(slept) == 2:
+                raise asyncio.CancelledError
+
+        scanner = tzlog.Scanner(tzlog.TzStore(), None, hubs=[], every=3600, now=lambda: clock[0], sleep=sleep)
+
+        async def scan():
+            clock[0] += 900 if len(slept) == 0 else 4000  # the second one takes longer than the period
+
+        scanner.scan = scan
+        with self.assertRaises(asyncio.CancelledError):
+            await scanner.run()
+        self.assertEqual(slept, [2700, 0.0])
+
     async def test_sequence_asked_with_utc_time_and_berlin_day(self):
         path = tzlog.sequence_path("ICE", 1516, "8000105", dt.datetime(2026, 11, 1, 0, 41))
         self.assertIn("date=2026-11-01", path)

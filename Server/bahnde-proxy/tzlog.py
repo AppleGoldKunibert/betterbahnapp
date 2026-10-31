@@ -181,16 +181,21 @@ class Scanner:
         self.now = now
         self.sleep = sleep
         self.pause_left = pause_left
+        # Where the last finished scan's window ended (naive Berlin time): the next one starts there, so a scan
+        # that took a while, or ran late, leaves no trains between two windows.
+        self.covered_until = None
 
     async def run(self):
         while True:
+            started = self.now()
             try:
                 await self.scan()
             except asyncio.CancelledError:
                 raise
             except Exception:  # noqa: BLE001 - the next scan starts fresh
                 log.exception("Tz scan failed")
-            await self.sleep(self.every)
+            # Scans start `every` apart, however long one took.
+            await self.sleep(max(0.0, self.every - (self.now() - started)))
 
     async def _ask(self, path):
         """(status, parsed body or None) of a bahn.de path, after the proxy's pause if it is paused."""
@@ -206,8 +211,12 @@ class Scanner:
 
     async def scan(self):
         started = self.now()
-        start = dt.datetime.fromtimestamp(started, BERLIN).replace(tzinfo=None, second=0, microsecond=0)
-        end = start + dt.timedelta(seconds=self.every)
+        now = dt.datetime.fromtimestamp(started, BERLIN).replace(tzinfo=None, second=0, microsecond=0)
+        end = now + dt.timedelta(seconds=self.every)
+        # Continue where the last scan stopped; after a long break (or the first scan) start now.
+        start = now
+        if self.covered_until is not None and dt.timedelta(0) <= now - self.covered_until < dt.timedelta(hours=6):
+            start = self.covered_until
         done = set()
         found = 0
         for eva, name in self.hubs:
@@ -230,7 +239,8 @@ class Scanner:
                 for sighting in parse_sequence(body, category, number):
                     self.store.record(day, sighting, name, self.now())
                     found += 1
-        self.store.prune(dt.datetime.fromtimestamp(started, BERLIN).date())
+        self.covered_until = end
+        self.store.prune(now.date())
         log.info("Tz scan: %d trains, %d trainsets", len(done), found)
 
     async def entries(self, eva, start, end):
