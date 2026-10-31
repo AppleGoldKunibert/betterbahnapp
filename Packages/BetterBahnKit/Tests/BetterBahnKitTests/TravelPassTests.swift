@@ -59,6 +59,16 @@ import Testing
         }
     }
 
+    /// A sign in the compressed length ("-001") made the slice's range invert and crash the app.
+    @Test func rejectsNegativeLength() {
+        let header = Array("#UT01".utf8) + Array("1080".utf8) + Array("00001".utf8) + Array(repeating: 0, count: 50)
+        let payload = Data(header + Array("-001".utf8) + Array(repeating: 0x78, count: 8))
+        #expect(throws: UICBarcode.DecodingError.malformed) { try UICBarcode.content(of: payload) }
+        #expect(throws: TravelPass.ImportError.self) {
+            try TravelPass(barcode: DBTicket.Barcode(payload: payload, image: nil))
+        }
+    }
+
     @Test func readsBarcodeFromScreenshot() throws {
         let payload = try payload("uic-dticket-bc100")
         let image = try #require(Self.screenshot(withAztec: payload))
