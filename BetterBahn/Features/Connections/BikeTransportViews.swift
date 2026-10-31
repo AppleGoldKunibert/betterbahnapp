@@ -23,6 +23,7 @@ struct BikeTransportRow: View {
     let bike: BikeOption
 
     @Environment(AppModel.self) private var model
+    @Environment(\.appDesign) private var design
     @State private var transport: BikeTransport?
     /// "Wagen 1 und 7 · Abschnitt A, E" from the Wagenreihung.
     @State private var coaches: String?
@@ -47,9 +48,16 @@ struct BikeTransportRow: View {
                     }
                     Spacer()
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(color(of: transport).opacity(0.1), in: .rect(cornerRadius: 12, style: .continuous))
+                .padding(12)
+                .background {
+                    // Minimal: a softly tinted box. Fahrkarte: a flat one with a fine edge in the same color.
+                    let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    if design == .fahrkarte {
+                        shape.strokeBorder(color(of: transport).opacity(0.4), lineWidth: 1)
+                    } else {
+                        shape.fill(color(of: transport).opacity(0.1))
+                    }
+                }
                 .accessibilityElement(children: .combine)
                 .transition(.fold)
             }

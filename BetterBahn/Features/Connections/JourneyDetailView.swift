@@ -12,6 +12,7 @@ struct JourneyDetailView: View {
     var search: ConnectionSearch?
 
     @Environment(AppModel.self) private var model
+    @Environment(\.appDesign) private var design
     @State private var legToReplace: LegSelection?
     @State private var legToReplan: LegSelection?
     @State private var checkinLeg: Leg?
@@ -352,13 +353,22 @@ struct JourneyDetailView: View {
         let issues = journey.currentIssues()
         if !issues.isEmpty {
             Card {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 16) {
                     ForEach(issues) { issue in
                         HStack(alignment: .top, spacing: 12) {
-                            IconTile(systemImage: issue.isBlocking ? "exclamationmark.triangle.fill" : "clock.badge.exclamationmark.fill",
-                                     color: issue.isBlocking ? .heavyDelay : .slightDelay, size: 34)
+                            let symbol = issue.isBlocking ? "exclamationmark.triangle.fill" : "clock.badge.exclamationmark.fill"
+                            let tint: Color = issue.isBlocking ? .heavyDelay : .slightDelay
+                            if isTicket {
+                                // The warning keeps its color on the ticket, where tiles are grey.
+                                Image(systemName: symbol)
+                                    .font(.system(size: 20, weight: .medium))
+                                    .foregroundStyle(tint)
+                                    .frame(width: 34, height: 34)
+                            } else {
+                                IconTile(systemImage: symbol, color: tint, size: 34)
+                            }
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(issue.title).font(.headline)
+                                Text(issue.title).font(.headline).fontDesign(isTicket ? .rounded : nil)
                                 Text(issue.message).font(.subheadline).foregroundStyle(.secondary)
                             }
                         }
@@ -372,10 +382,18 @@ struct JourneyDetailView: View {
                                 .font(.headline)
                                 .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.glassProminent)
+                        .pageButtonStyle(.prominent)
                         .tint(.brand)
                         .controlSize(.large)
                     }
+                }
+            }
+            .overlay {
+                // Like a saved journey's ticket, a blocking problem frames the card in red.
+                if isTicket, issues.contains(where: \.isBlocking) {
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .strokeBorder(Color.heavyDelay, lineWidth: 2)
+                        .allowsHitTesting(false)
                 }
             }
         }
@@ -407,67 +425,114 @@ struct JourneyDetailView: View {
         }
     }
 
+    /// Minimal: a card with the times, the stations and the actions. Fahrkarte: the same as a ticket, the
+    /// day and "Von / Nach" above the times, the actions below a perforation.
+    @ViewBuilder
     private var summaryCard: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(alignment: .top) {
-                    if let departure = journey.departure, let first = journey.legs.first {
-                        VStack(alignment: .leading, spacing: 4) {
-                            TimeStack(time: departure, font: .largeTitle.weight(.bold))
-                            Text(first.origin.displayName).font(.subheadline.weight(.semibold)).lineLimit(2)
-                        }
-                    }
-                    Spacer(minLength: 12)
-                    if let arrival = journey.arrival, let last = journey.legs.last {
-                        VStack(alignment: .trailing, spacing: 4) {
-                            TimeStack(time: arrival, alignment: .trailing, font: .largeTitle.weight(.bold))
-                            Text(last.destination.displayName).font(.subheadline.weight(.semibold)).lineLimit(2)
-                                .multilineTextAlignment(.trailing)
-                            if let forecast = weather.destination {
-                                WeatherLabel(forecast: forecast, context: String(localized: "bei Ankunft"), station: last.destination.displayName)
-                                    .transition(.fold)
-                            }
-                        }
-                    }
+        if isTicket {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 16) {
+                    if let day = dayLabel { JourneyTicketCaption(text: day) }
+                    summaryEnds
+                    JourneySegmentBar(journey: journey)
+                    summaryFacts
                 }
-
-                JourneySegmentBar(journey: journey)
-
-                HStack(spacing: 8) {
-                    if let duration = journey.duration {
-                        InfoChip(text: duration.durationString, systemImage: "clock.fill")
-                    }
-                    InfoChip(text: journey.transfers == 0 ? String(localized: "Direkt")
-                             : journey.transfers == 1 ? String(localized: "1 Umstieg") : String(localized: "\(journey.transfers) Umstiege"),
-                             systemImage: "arrow.triangle.swap")
-                    if model.ticketFilter.isValid(journey) {
-                        let ticket = model.settings.ticketType
-                        InfoChip(text: ticket.shortName, systemImage: ticket.symbolName, tint: .punctual)
-                    }
-                    Spacer(minLength: 0)
-                    if !readOnly {
-                        Button {
-                            showJourneyMap = true
-                        } label: {
-                            Image(systemName: "map.fill")
-                                .font(.subheadline.weight(.semibold))
-                                .frame(width: 34, height: 34)
-                        }
-                        .buttonStyle(.plain)
-                        .glassEffect(.regular, in: .circle)
-                        .accessibilityLabel("Reise auf Karte anzeigen")
-                    }
-                }
-
-                if !readOnly {
-                    liveActivityButton
-                } else {
-                    Label("Alter Plan", systemImage: "archivebox.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity)
+                .padding(16)
+                TicketPerforation()
+                summaryActions
+                    .padding(16)
+            }
+            .fontDesign(.rounded)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .ticketBackground()
+        } else {
+            Card {
+                VStack(alignment: .leading, spacing: 16) {
+                    summaryEnds
+                    JourneySegmentBar(journey: journey)
+                    summaryFacts
+                    summaryActions
                 }
             }
+        }
+    }
+
+    /// The Fahrkarte design draws the summary as a ticket.
+    private var isTicket: Bool { design == .fahrkarte }
+
+    /// "Heute", "Morgen" or "Sa., 31. Okt." for the ticket's top line.
+    private var dayLabel: String? {
+        guard let date = journey.departure?.planned else { return nil }
+        if Calendar.current.isDateInToday(date) { return String(localized: "Heute") }
+        if Calendar.current.isDateInTomorrow(date) { return String(localized: "Morgen") }
+        return date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
+    }
+
+    /// Departure and arrival with their stations; on the ticket labelled "Von" and "Nach".
+    private var summaryEnds: some View {
+        HStack(alignment: .top) {
+            if let departure = journey.departure, let first = journey.legs.first {
+                VStack(alignment: .leading, spacing: 4) {
+                    if isTicket { JourneyTicketCaption(text: String(localized: "Von")) }
+                    TimeStack(time: departure, font: .largeTitle.weight(.bold))
+                    Text(first.origin.displayName).font(.subheadline.weight(.semibold)).lineLimit(2)
+                }
+            }
+            Spacer(minLength: 16)
+            if let arrival = journey.arrival, let last = journey.legs.last {
+                VStack(alignment: .trailing, spacing: 4) {
+                    if isTicket { JourneyTicketCaption(text: String(localized: "Nach")) }
+                    TimeStack(time: arrival, alignment: .trailing, font: .largeTitle.weight(.bold))
+                    Text(last.destination.displayName).font(.subheadline.weight(.semibold)).lineLimit(2)
+                        .multilineTextAlignment(.trailing)
+                    if let forecast = weather.destination {
+                        WeatherLabel(forecast: forecast, context: String(localized: "bei Ankunft"), station: last.destination.displayName)
+                            .transition(.fold)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Duration, transfers, the ticket it's valid with, and the map.
+    private var summaryFacts: some View {
+        HStack(spacing: 8) {
+            if let duration = journey.duration {
+                InfoChip(text: duration.durationString, systemImage: "clock.fill")
+            }
+            InfoChip(text: journey.transfers == 0 ? String(localized: "Direkt")
+                     : journey.transfers == 1 ? String(localized: "1 Umstieg") : String(localized: "\(journey.transfers) Umstiege"),
+                     systemImage: "arrow.triangle.swap")
+            if model.ticketFilter.isValid(journey) {
+                let ticket = model.settings.ticketType
+                InfoChip(text: ticket.shortName, systemImage: ticket.symbolName, tint: .punctual)
+            }
+            Spacer(minLength: 0)
+            if !readOnly {
+                Button {
+                    showJourneyMap = true
+                } label: {
+                    Image(systemName: "map.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(width: 34, height: 34)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(.regular, in: .circle)
+                .journeyRoundActionSurface()
+                .accessibilityLabel("Reise auf Karte anzeigen")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var summaryActions: some View {
+        if !readOnly {
+            liveActivityButton
+        } else {
+            Label("Alter Plan", systemImage: "archivebox.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
         }
     }
 
@@ -478,17 +543,21 @@ struct JourneyDetailView: View {
     }
 
     private var liveActivityButton: some View {
-        VStack(spacing: 8) {
-            SaveActionsLayout(spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
+            SaveActionsLayout(spacing: 8) {
                 SaveJourneyButton(journey: journey, search: search, shortLabel: true)
-                HStack(spacing: 10) {
+                HStack(spacing: 8) {
                     if !model.tickets(for: journey).isEmpty {
                         TicketButton(tickets: model.tickets(for: journey), journey: journey)
+                            .journeyRoundActionSurface()
                     }
                     JourneyShareButton(journey: journey, title: shareTitle)
+                        .journeyRoundActionSurface()
                     if !readOnly, let entry = model.savedEntry(for: journey) {
                         CalendarButton(entry: entry)
+                            .journeyRoundActionSurface()
                         RegularTripButton(journey: journey)
+                            .journeyRoundActionSurface()
                     }
                     if model.settings.editJourneyEnabled {
                         Button {
@@ -500,6 +569,7 @@ struct JourneyDetailView: View {
                         }
                         .buttonStyle(.plain)
                         .glassEffect(.regular, in: .circle)
+                        .journeyRoundActionSurface()
                         .tint(.brand)
                         .accessibilityLabel("Reise bearbeiten")
                     }
@@ -513,6 +583,7 @@ struct JourneyDetailView: View {
                           systemImage: "bolt.badge.clock.fill")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
                 }
                 if let entry = model.savedEntry(for: journey),
                    model.isLiveActivityEligible(journey) || model.dismissedLiveActivityJourneyIDs.contains(entry.id) {
@@ -521,8 +592,8 @@ struct JourneyDetailView: View {
                             && (model.manualLiveActivityJourneyID == entry.id || model.liveActivities.isActive(journey)) },
                         set: { model.setLiveActivity($0, for: entry.id) }
                     )) {
-                        Label(LiveActivityManager.isSupported ? "Als Widget und Live-Aktivität zeigen" : "Als Widget zeigen", systemImage: "arrow.left.arrow.right.circle.fill")
-                            .font(.caption.weight(.semibold))
+                        SummaryToggleLabel(title: LiveActivityManager.isSupported ? String(localized: "Als Widget und Live-Aktivität zeigen") : String(localized: "Als Widget zeigen"),
+                                           systemImage: "arrow.left.arrow.right.circle.fill")
                     }
                     .tint(.brand)
                 }
@@ -532,11 +603,75 @@ struct JourneyDetailView: View {
                     get: { entry.exitRemindersOff != true },
                     set: { model.setExitReminders($0, for: entry.id) }
                 )) {
-                    Label("Ans Aussteigen erinnern (\(model.settings.exitReminderLead.displayName))", systemImage: "bell.badge.fill")
-                        .font(.caption.weight(.semibold))
+                    SummaryToggleLabel(title: String(localized: "Ans Aussteigen erinnern (\(model.settings.exitReminderLead.displayName))"),
+                                       systemImage: "bell.badge.fill")
                 }
                 .tint(.brand)
             }
+        }
+    }
+}
+
+/// A switch's label in the journey's summary: the text with a grey symbol.
+private struct SummaryToggleLabel: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        Label {
+            Text(title)
+        } icon: {
+            Image(systemName: systemImage).foregroundStyle(.secondary)
+        }
+        .font(.subheadline)
+    }
+}
+
+/// A small label in capitals over a big value on the ticket ("VON", "NACH", the day).
+struct JourneyTicketCaption: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .tracking(0.6)
+            .textCase(.uppercase)
+            .foregroundStyle(.secondary)
+    }
+}
+
+extension View {
+    /// SF Rounded in the Fahrkarte design, the system font in Minimal: for titles and names on the
+    /// journey's pages and sheets.
+    func journeyRoundedType() -> some View {
+        modifier(JourneyRoundedType())
+    }
+
+    /// Under a round glass action of the journey's summary: in Minimal a card-colored disc with a hairline
+    /// edge, so the button reads flat like the page's other buttons; Fahrkarte keeps the glass alone.
+    func journeyRoundActionSurface() -> some View {
+        modifier(JourneyRoundActionSurface())
+    }
+}
+
+private struct JourneyRoundedType: ViewModifier {
+    @Environment(\.appDesign) private var design
+
+    func body(content: Content) -> some View {
+        content.fontDesign(design == .fahrkarte ? .rounded : nil)
+    }
+}
+
+private struct JourneyRoundActionSurface: ViewModifier {
+    @Environment(\.appDesign) private var design
+
+    func body(content: Content) -> some View {
+        if design == .minimal {
+            content
+                .background(Circle().fill(Color.card))
+                .overlay(Circle().strokeBorder(Color.hairline, lineWidth: 1).allowsHitTesting(false))
+        } else {
+            content
         }
     }
 }
@@ -602,6 +737,7 @@ struct TransferRow: View {
     var coachAdvice: CoachAdvice?
     /// Lifts out of order on the way from one platform to the other (#486).
     var liftWarnings: [String] = []
+    @Environment(\.appDesign) private var design
 
     private var minutes: Int {
         Int((to.departure.best.timeIntervalSince(from.arrival.best) / 60).rounded())
@@ -620,6 +756,7 @@ struct TransferRow: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 4)
+        .fontDesign(design == .fahrkarte ? .rounded : nil)
     }
 
     private var summary: some View {
@@ -629,7 +766,14 @@ struct TransferRow: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(color)
                 .frame(width: 30, height: 30)
-                .background(color.opacity(0.15), in: .circle)
+                .background {
+                    // Minimal: a softly tinted disc. Fahrkarte: an outlined one on the page, like the ticket's stops.
+                    if design == .fahrkarte {
+                        Circle().fill(Color.card).overlay(Circle().strokeBorder(color.opacity(0.5), lineWidth: 1.5))
+                    } else {
+                        Circle().fill(color.opacity(0.15))
+                    }
+                }
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(broken ? "Umstieg nicht erreichbar" : minutes < 0 ? "Umstieg" : "Umstieg · \(minutes) min")
@@ -720,6 +864,7 @@ struct LegCard: View {
     @State private var exitSide: ExitSide?
     @Environment(AppModel.self) private var model
     @Environment(\.bikeMode) private var bikeMode
+    @Environment(\.appDesign) private var design
 
     private var color: Color { leg.line?.color ?? .gray }
     private var statisticsStops: [StatisticsStop] {
@@ -741,7 +886,7 @@ struct LegCard: View {
 
     var body: some View {
         Card {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 16) {
                 // A tap gesture rather than a Button, so the warning triangle inside can be its own button.
                 HStack(spacing: 10) {
                     LiveTrainIconTile(route: LiveTrainRoute(leg: leg), systemImage: leg.line?.symbolName ?? "tram.fill",
@@ -853,12 +998,12 @@ struct LegCard: View {
                     CoachSequenceDisclosure(leg: leg, reservation: reservation ?? model.savedSeat(for: leg).map(SeatReservation.init),
                                             savesSeat: savesSeat && reservation == nil, coachAdvice: coachAdvice,
                                             // Said right below for getting off at the end.
-                                            notesCoachAdvice: !showsCoachAdvice, spacing: 14)
+                                            notesCoachAdvice: !showsCoachAdvice, spacing: 16)
 
                     if showsCoachAdvice, let coachAdvice {
                         CoachAdviceLabel(advice: coachAdvice, boarded: leg.departure.best < .now)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.top, 14)
+                            .padding(.top, 16)
                     }
 
                     let platformChanges = platformChangeHints
@@ -869,7 +1014,7 @@ struct LegCard: View {
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.top, 14)
+                        .padding(.top, 16)
                     }
                 }
 
@@ -923,18 +1068,19 @@ struct LegCard: View {
                         }
 
                         if onReplace != nil || onReplan != nil || onCheckin != nil || onShowCheckin != nil {
-                            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)],
-                                      spacing: 10) {
+                            // Quiet grey tiles: the accent stays for the page's main actions.
+                            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)],
+                                      spacing: 8) {
                                 if let onReplace {
                                     ActionTileButton(title: String(localized: "Anderer Zug"), systemImage: "arrow.left.arrow.right", tint: .primary, action: onReplace)
                                 }
                                 if let onReplan {
-                                    ActionTileButton(title: String(localized: "Ausstieg wechseln"), systemImage: "arrow.down.right.circle.fill", tint: .brand, action: onReplan)
+                                    ActionTileButton(title: String(localized: "Ausstieg wechseln"), systemImage: "arrow.down.right.circle.fill", tint: .primary, action: onReplan)
                                 }
                                 if let onShowCheckin {
-                                    ActionTileButton(title: String(localized: "Check-in ansehen"), systemImage: "text.bubble.fill", tint: .brand, action: onShowCheckin)
+                                    ActionTileButton(title: String(localized: "Check-in ansehen"), systemImage: "text.bubble.fill", tint: .primary, action: onShowCheckin)
                                 } else if let onCheckin {
-                                    ActionTileButton(title: "Träwelling", systemImage: "checkmark.seal.fill", tint: .brand, action: onCheckin)
+                                    ActionTileButton(title: "Träwelling", systemImage: "checkmark.seal.fill", tint: .primary, action: onCheckin)
                                 }
                             }
                             .transition(.fold)
@@ -942,6 +1088,8 @@ struct LegCard: View {
                     }
                 }
             }
+            // The ticket's rounded type for the train, the stations and the times.
+            .fontDesign(design == .fahrkarte ? .rounded : nil)
         }
         .sheet(isPresented: $showFullTrip) {
             LegTripSheet(leg: leg)
@@ -1024,6 +1172,7 @@ struct AlternativeTrainsSheet: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.appDesign) private var design
     @State private var alternatives: [Leg] = []
     @State private var connections: [Journey] = []
     @State private var reroutes: [Journey] = []
@@ -1053,10 +1202,10 @@ struct AlternativeTrainsSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 16) {
                     Card {
                         VStack(alignment: .leading, spacing: 12) {
-                            HStack(spacing: 10) {
+                            HStack(spacing: 12) {
                                 IconTile(systemImage: "arrow.left.arrow.right", color: .brand, size: 34)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text("\(leg.origin.displayName) → \(leg.destination.displayName)")
@@ -1074,11 +1223,16 @@ struct AlternativeTrainsSheet: View {
                             }
                             Divider()
                             Toggle(isOn: $onlyValidTicket) {
-                                Label(model.settings.ticketType.filterTitle, systemImage: model.settings.ticketType.symbolName)
-                                    .font(.subheadline.weight(.medium))
+                                Label {
+                                    Text(model.settings.ticketType.filterTitle)
+                                } icon: {
+                                    Image(systemName: model.settings.ticketType.symbolName).foregroundStyle(.secondary)
+                                }
+                                .font(.subheadline.weight(.medium))
                             }
                             .tint(.brand)
                         }
+                        .fontDesign(design == .fahrkarte ? .rounded : nil)
                     }
 
                     trainButton
@@ -1091,7 +1245,6 @@ struct AlternativeTrainsSheet: View {
                         ProgressView("Plane mit diesem Zug …").frame(maxWidth: .infinity).padding(.vertical, 8)
                     } else if let pinnedName, !pinnedRoutes.isEmpty {
                         SectionHeader(title: String(localized: "Mit \(pinnedName)"), systemImage: "pin.fill")
-                            .padding(.top, 6)
                         ForEach(pinnedRoutes) { route in
                             optionButton(journey: route, legs: route.legs, id: "pinned|" + route.id,
                                          note: route.transitLegs.count > 1 ? String(localized: "Mit Umstieg") : String(localized: "Direkt"),
@@ -1103,7 +1256,6 @@ struct AlternativeTrainsSheet: View {
                     if !options.isEmpty {
                         SectionHeader(title: "Andere Züge", systemImage: "tram.fill",
                                       trailing: notBefore == nil ? String(localized: "30 Min. vorher bis 3 Std. nachher") : String(localized: "3 Std. ab Ankunft"))
-                            .padding(.top, 6)
                     }
 
                     // One list by arrival; a note on each says how it gets there.
@@ -1169,7 +1321,7 @@ struct AlternativeTrainsSheet: View {
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.glass)
+            .pageButtonStyle()
             .controlSize(.large)
             .tint(.brand)
 
@@ -1183,10 +1335,10 @@ struct AlternativeTrainsSheet: View {
                     Label("Zurücksetzen", systemImage: "xmark")
                         .font(.subheadline.weight(.semibold))
                         .labelStyle(.iconOnly)
-                        .frame(width: 22, height: 22)
+                        // As tall as the button beside it: the flat circle adds less padding than the glass one.
+                        .frame(width: design == .minimal ? 32 : 22, height: design == .minimal ? 32 : 22)
                 }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
+                .pageButtonStyle(.circle)
                 .controlSize(.large)
                 .accessibilityLabel("Zugvorgabe entfernen")
             }
@@ -1465,6 +1617,7 @@ struct AlternativeJourneySheet: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.appDesign) private var design
     @State private var alternatives: [Journey] = []
     @State private var isLoading = true
     @State private var error: Error?
@@ -1489,13 +1642,14 @@ struct AlternativeJourneySheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 16) {
                     if let restart, let destination = entry.journey.legs.last?.destination {
                         Card {
                             HStack(spacing: 12) {
                                 IconTile(systemImage: "arrow.triangle.branch", color: .brand, size: 38)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text("Ab \(restart.from.displayName)").font(.headline)
+                                        .fontDesign(design == .fahrkarte ? .rounded : nil)
                                     Text("nach \(destination.displayName), frühestens \(restart.date.timeString)")
                                         .font(.subheadline)
                                         .foregroundStyle(.secondary)

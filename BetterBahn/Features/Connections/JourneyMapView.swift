@@ -405,6 +405,9 @@ struct TransferDetailsSheet: View {
                 }
                 .padding(.horizontal)
             }
+            .monospacedDigit()
+            // The ticket's rounded type for the station and the times.
+            .journeyRoundedType()
             .padding(.top, 28)
             .padding(.bottom)
             // Size the sheet to its content instead of a fixed half-screen detent.

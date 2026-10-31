@@ -9,6 +9,7 @@ struct ManualStopSheet: View {
     let onAdd: (Station, Date) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.appDesign) private var design
     @State private var station: Station?
     @State private var time: Date
     @FocusState private var focused: Field?
@@ -28,6 +29,8 @@ struct ManualStopSheet: View {
                     Card(padding: 0) {
                         StationInput(label: String(localized: "Halt"), placeholder: String(localized: "Wo hält der Zug?"), systemImage: "mappin.circle.fill",
                                      station: $station, focus: $focused, focusValue: .station)
+                            // On the ticket a small "HALT" over the big station name, like "Von" and "Nach".
+                            .environment(\.ticketStationFields, design == .fahrkarte)
                             .clipShape(.rect(cornerRadius: 22, style: .continuous))
                     }
                     Card {
