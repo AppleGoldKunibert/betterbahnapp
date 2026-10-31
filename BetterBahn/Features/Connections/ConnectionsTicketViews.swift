@@ -112,47 +112,6 @@ extension View {
     }
 }
 
-// MARK: - Fields
-
-/// One field of the ticket's options: a small upper-case label over its value, with a symbol showing that a
-/// tap opens something. Values that differ from the default are red, so a changed option stands out at a glance.
-struct TicketFieldLabel: View {
-    let title: String
-    let value: String
-    var changed = false
-    /// Menus show up-down chevrons, popovers a down chevron; nil leaves room for a button laid over the field.
-    var indicator: String? = "chevron.up.chevron.down"
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 6) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.caption.weight(.semibold))
-                    .tracking(0.5)
-                    .textCase(.uppercase)
-                    // Fixed colors: a menu would tint its label otherwise.
-                    .foregroundStyle(Color.secondary)
-                Text(value)
-                    .font(.headline)
-                    .foregroundStyle(changed ? Color.brand : Color.primary)
-                    .multilineTextAlignment(.leading)
-                    .lineLimit(3)
-            }
-            Spacer(minLength: 0)
-            if let indicator {
-                Image(systemName: indicator)
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(Color.secondary.opacity(0.7))
-            } else {
-                Color.clear.frame(width: 28, height: 1)
-            }
-        }
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        .padding(.vertical, 10)
-        .contentShape(.rect)
-    }
-}
-
 // MARK: - Your journeys
 
 /// The upcoming saved journeys as small tickets, one below the other, with the followed check-ins above.
@@ -308,52 +267,70 @@ private struct TripTicket: View {
             switch status.step {
             case .departure(let leg):
                 if leg.cancelled {
-                    liveRow(icon: "arrow.up.right", [lineName(leg), String(localized: "Fällt aus")], warning: true)
+                    liveRow(icon: "arrow.up.right", main: lineName(leg), time: String(localized: "Fällt aus"),
+                            timeColor: .heavyDelay, platform: nil)
                 } else {
-                    liveRow(icon: "arrow.up.right",
-                            [lineName(leg), platform(leg.departurePlatform), relative(leg.departure.best, now: now)],
-                            delay: leg.departure.delayMinutes)
+                    liveRow(icon: "arrow.up.right", main: lineName(leg), time: when(leg.departure.best, now: now),
+                            timeColor: liveColor(leg.departure), platform: platform(leg.departurePlatform))
                 }
             case .riding(let leg):
-                liveRow(icon: "tram.fill",
-                        [String(localized: "\(lineName(leg)) bis \(leg.destination.displayName)"),
-                         String(localized: "an \(leg.arrival.best.timeString)"), platform(leg.arrivalPlatform)],
-                        delay: leg.arrival.delayMinutes)
+                liveRow(icon: "tram.fill", main: String(localized: "\(lineName(leg)) bis \(leg.destination.displayName)"),
+                        time: String(localized: "an \(leg.arrival.best.timeString)"),
+                        timeColor: liveColor(leg.arrival), platform: platform(leg.arrivalPlatform))
             case .transfer(_, let next):
                 liveRow(icon: "arrow.triangle.swap",
-                        [String(localized: "Umstieg in \(next.origin.displayName)"),
-                         departure(of: next, now: now), platform(next.departurePlatform)],
-                        delay: next.departure.delayMinutes, warning: next.cancelled)
+                        main: "\(String(localized: "Umstieg in \(next.origin.displayName)")) · \(lineName(next))",
+                        time: next.cancelled ? String(localized: "Fällt aus") : when(next.departure.best, now: now),
+                        timeColor: next.cancelled ? .heavyDelay : liveColor(next.departure),
+                        platform: platform(next.departurePlatform))
             }
+            // Shown from 10 minutes before the arrival (`JourneyLiveStatus.transferLeadTime`).
             if let transfer = status.nextTransfer {
                 if transfer.minutes < 0 || transfer.next.cancelled {
-                    liveRow(icon: "exclamationmark.triangle.fill",
-                            [String(localized: "Anschluss nicht erreichbar"), transfer.next.origin.displayName], warning: true)
+                    liveRow(icon: "exclamationmark.triangle.fill", main: transfer.next.origin.displayName,
+                            time: String(localized: "Anschluss nicht erreichbar"), timeColor: .heavyDelay, platform: nil)
                 } else {
                     liveRow(icon: "arrow.triangle.swap",
-                            [String(localized: "Dann \(transfer.minutes) Min. Umstieg in \(transfer.next.origin.displayName)"),
-                             platform(transfer.next.departurePlatform)])
+                            main: "\(String(localized: "Dann Umstieg in \(transfer.next.origin.displayName)")) · \(lineName(transfer.next))",
+                            time: String(localized: "\(transfer.minutes) Min."), timeColor: transferColor(transfer.minutes),
+                            platform: platform(transfer.next.departurePlatform))
                 }
             }
         }
         .font(.footnote)
     }
 
-    private func liveRow(icon: String, _ parts: [String?], delay: Int? = nil, warning: Bool = false) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
+    /// Icon, what happens, then the time colored by its delay (or the transfer time by how comfortable it
+    /// is) and the platform. The description gives way when the line runs out of room.
+    private func liveRow(icon: String, main: String, time: String?, timeColor: Color, platform: String?) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
             Image(systemName: icon)
                 .font(.caption2.weight(.bold))
-                .foregroundStyle(warning ? Color.heavyDelay : Color.secondary)
+                .foregroundStyle(Color.secondary)
                 .frame(width: 14)
-            Text(parts.compactMap(\.self).joined(separator: " · "))
-                .foregroundStyle(warning ? Color.heavyDelay : Color.primary)
-            if let delay, delay > 0 {
-                Text(verbatim: "+\(delay)")
+                .padding(.trailing, 2)
+            Text(main)
+                .lineLimit(1)
+            if let time {
+                Text(verbatim: "·").foregroundStyle(.tertiary)
+                Text(time)
                     .fontWeight(.semibold)
                     .monospacedDigit()
-                    .foregroundStyle(delayColor(delay))
+                    .foregroundStyle(timeColor)
+                    .fixedSize()
+            }
+            if let platform {
+                Text(verbatim: "·").foregroundStyle(.tertiary)
+                Text(platform)
+                    .fixedSize()
             }
         }
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Green on time, orange or red when late; plain without live data.
+    private func liveColor(_ time: TimeInfo) -> Color {
+        time.actual == nil ? .primary : delayColor(time.delayMinutes)
     }
 
     private func lineName(_ leg: Leg) -> String {
@@ -364,19 +341,11 @@ private struct TripTicket: View {
         info?.best.map { String(localized: "Gleis \($0)") }
     }
 
-    /// "in 12 Min." within the hour, nothing further ahead (the times stand above).
-    private func relative(_ time: Date, now: Date) -> String? {
+    /// "in 12 Min." within the hour, else "ab 15:20".
+    private func when(_ time: Date, now: Date) -> String {
         let minutes = JourneyLiveStatus.minutes(from: now, to: time)
-        guard minutes >= 0, minutes <= 60 else { return nil }
-        return String(localized: "in \(minutes) Min.")
-    }
-
-    /// The next train of a transfer: "ICE 2 in 6 Min.", or "ICE 2 um 15:20" further ahead.
-    private func departure(of leg: Leg, now: Date) -> String {
-        if let relative = relative(leg.departure.best, now: now) {
-            return "\(lineName(leg)) \(relative)"
-        }
-        return String(localized: "\(lineName(leg)) um \(leg.departure.best.timeString)")
+        if minutes >= 0, minutes <= 60 { return String(localized: "in \(minutes) Min.") }
+        return String(localized: "ab \(time.timeString)")
     }
 
     /// Like `SavedJourneyRow`: the next journey is only framed once it departs within 24 hours.
@@ -390,42 +359,6 @@ private struct TripTicket: View {
         if Calendar.current.isDateInToday(date) { return String(localized: "Heute") }
         if Calendar.current.isDateInTomorrow(date) { return String(localized: "Morgen") }
         return date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
-    }
-}
-
-// MARK: - Links
-
-/// A plain row at the end of the page ("Vergangene Fahrten", "Sammlung").
-struct LinkRowLabel: View {
-    let title: String
-    let systemImage: String
-    /// A red count after the title, like "3" new items.
-    var badge: String?
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .font(.body.weight(.medium))
-                .foregroundStyle(.secondary)
-                .frame(width: 28)
-            Text(title)
-                .font(.body)
-                .foregroundStyle(.primary)
-            if let badge {
-                Text(badge)
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.brand, in: .capsule)
-            }
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.vertical, 12)
-        .contentShape(.rect)
     }
 }
 

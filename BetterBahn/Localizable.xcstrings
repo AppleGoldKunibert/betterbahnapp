@@ -31,26 +31,6 @@
         }
       }
     },
-    "%@ um %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@ at %2$@"
-          }
-        }
-      }
-    },
-    "Alle Verbindungen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "All connections"
-          }
-        }
-      }
-    },
     "an %@" : {
       "localizations" : {
         "en" : {
@@ -61,32 +41,12 @@
         }
       }
     },
-    "Dabei" : {
+    "Dann Umstieg in %@" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Coming along"
-          }
-        }
-      }
-    },
-    "Dann %lld Min. Umstieg in %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Then %1$lld min to change at %2$@"
-          }
-        }
-      }
-    },
-    "Höchstens %lld" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "At most %lld"
+            "value" : "Then change at %@"
           }
         }
       }
@@ -111,32 +71,12 @@
         }
       }
     },
-    "Nicht dabei" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Not coming along"
-          }
-        }
-      }
-    },
     "Umstieg in %@" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Change at %@"
-          }
-        }
-      }
-    },
-    "Umstiege" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Changes"
           }
         }
       }

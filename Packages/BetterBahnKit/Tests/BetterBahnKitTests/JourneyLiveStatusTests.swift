@@ -26,17 +26,25 @@ import Testing
         JourneyLiveStatus.at(base.addingTimeInterval(minutes * 60), of: journey)
     }
 
-    @Test func beforeTheStartShowsTheDepartureAndTheFirstTransfer() throws {
+    @Test func beforeTheStartShowsTheDepartureWithoutTheTransfer() throws {
         let status = try #require(at(-10))
         #expect(status.step == .departure(journey.legs[0]))
         #expect(status.upcomingLegs.compactMap(\.line?.name) == ["ICE 1", "ICE 2", "IC 3"])
-        // The first train runs 4 minutes late, leaving 6 of the planned 10 minutes; walks don't count.
+        #expect(status.nextTransfer == nil)
+    }
+
+    @Test func theTransferShowsFromTenMinutesBeforeArriving() throws {
+        // The first train arrives at 64 (4 late): at 50 that is too far off, at 55 the change shows,
+        // with 6 of the planned 10 minutes left; walks don't count.
+        #expect(try #require(at(50)).nextTransfer == nil)
+        let status = try #require(at(55))
+        #expect(status.step == .riding(journey.legs[0]))
         #expect(status.nextTransfer?.next.line?.name == "ICE 2")
         #expect(status.nextTransfer?.minutes == 6)
     }
 
     @Test func onATrainItComesFirstAndTheRidesBehindDropOut() throws {
-        let status = try #require(at(80))
+        let status = try #require(at(112))
         #expect(status.step == .riding(journey.legs[2]))
         #expect(status.upcomingLegs.compactMap(\.line?.name) == ["ICE 2", "IC 3"])
         #expect(status.nextTransfer?.minutes == 10)
@@ -46,12 +54,13 @@ import Testing
         let status = try #require(at(66))
         #expect(status.step == .transfer(previous: journey.legs[0], next: journey.legs[2]))
         #expect(status.upcomingLegs.first?.line?.name == "ICE 2")
+        #expect(status.nextTransfer == nil)
     }
 
     @Test func aMissedConnectionHasNegativeMinutes() throws {
         let late = Journey(legs: [leg("ICE 1", "A", "B", dep: 0, arr: 60, arrDelay: 15),
                                   leg("ICE 2", "B", "C", dep: 70, arr: 120)], source: .bahnDe)
-        let status = try #require(JourneyLiveStatus.at(base, of: late))
+        let status = try #require(JourneyLiveStatus.at(base.addingTimeInterval(70 * 60), of: late))
         #expect(status.nextTransfer?.minutes == -5)
     }
 

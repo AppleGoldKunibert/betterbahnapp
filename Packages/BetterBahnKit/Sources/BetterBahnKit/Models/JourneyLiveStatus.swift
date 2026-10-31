@@ -23,9 +23,13 @@ public struct JourneyLiveStatus: Sendable, Hashable {
     }
 
     public var step: Step
+    /// The change after the train being ridden, from `transferLeadTime` before its arrival.
     public var nextTransfer: Transfer?
     /// The trains not yet arrived, in order: the one being ridden or waited for first.
     public var upcomingLegs: [Leg]
+
+    /// How long before arriving the change after a train is shown: earlier it is only clutter.
+    public static let transferLeadTime: TimeInterval = 10 * 60
 
     /// The status of `journey` at `now`; nil once it has arrived (or without any train).
     public static func at(_ now: Date, of journey: Journey) -> JourneyLiveStatus? {
@@ -41,7 +45,7 @@ public struct JourneyLiveStatus: Sendable, Hashable {
             step = .transfer(previous: legs[index - 1], next: leg)
         }
         var transfer: Transfer?
-        if index + 1 < legs.count {
+        if index + 1 < legs.count, case .riding = step, leg.arrival.best.timeIntervalSince(now) <= transferLeadTime {
             let next = legs[index + 1]
             transfer = Transfer(next: next, minutes: minutes(from: leg.arrival.best, to: next.departure.best))
         }
