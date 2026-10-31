@@ -3,11 +3,11 @@ import Foundation
 /// The look of the app, chosen in Settings › Design (#504).
 public enum AppDesign: String, Codable, CaseIterable, Sendable {
     /// The familiar cards and glow, kept quiet: options folded away, flat buttons.
-    case alternativ
+    case minimal
     /// The search as a ticket: flat cards, rounded type, a warm page.
     case fahrkarte
 
-    public static let `default` = AppDesign.alternativ
+    public static let `default` = AppDesign.minimal
 }
 
 /// An sRGB color, components 0…1.

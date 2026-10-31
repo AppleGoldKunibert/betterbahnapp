@@ -104,7 +104,7 @@ struct ConnectionsView: View {
     /// Per-section selections; the section from the start is keyed by `startLegID`, the others by the via row they start at.
     @State private var legProducts: [UUID: Set<Product>] = [:]
     @State private var showProductsPopover = false
-    /// Alternativ: the rarely changed options (ticket, bike, transfers, vehicles) are folded away until opened.
+    /// Minimal: the rarely changed options (ticket, bike, transfers, vehicles) are folded away until opened.
     @State private var showsOptions = false
     @State private var productsTapCount = 0
     @FocusState private var focused: Field?
@@ -256,7 +256,7 @@ struct ConnectionsView: View {
         return false
     }
 
-    // MARK: Route (Alternativ)
+    // MARK: Route (Minimal)
 
     private var routeCard: some View {
         Card(padding: 0) {
@@ -463,7 +463,7 @@ struct ConnectionsView: View {
         }
     }
 
-    /// Alternativ: departure or arrival and the time, then one row that unfolds the rarely changed options.
+    /// Minimal: departure or arrival and the time, then one row that unfolds the rarely changed options.
     private var foldedOptionsCard: some View {
         Card(padding: 0) {
             VStack(alignment: .leading, spacing: 0) {
@@ -781,7 +781,7 @@ struct ConnectionsView: View {
     }
 }
 
-/// The ticket's swap button draws its own circle; Alternativ's is the page's round button.
+/// The ticket's swap button draws its own circle; Minimal's is the page's round button.
 private struct SwapButtonStyle: ViewModifier {
     let isTicket: Bool
 

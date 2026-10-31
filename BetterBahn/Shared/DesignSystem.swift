@@ -143,7 +143,7 @@ struct Card<Content: View>: View {
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.card, in: .rect(cornerRadius: 22, style: .continuous))
-            // Alternativ lifts cards with a light, tight shadow; Fahrkarte separates them by their outline alone.
+            // Minimal lifts cards with a light, tight shadow; Fahrkarte separates them by their outline alone.
             .shadow(color: .black.opacity(fahrkarte ? 0 : 0.04), radius: 8, y: 2)
             .overlay {
                 // Subtle edge so cards stay visible on dark backgrounds.
@@ -153,7 +153,7 @@ struct Card<Content: View>: View {
     }
 }
 
-/// Alternativ: the grouped background with a faint accent glow at the top. Fahrkarte: a plain warm page.
+/// Minimal: the grouped background with a faint accent glow at the top. Fahrkarte: a plain warm page.
 struct AppBackground: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.appDesign) private var design
@@ -173,7 +173,7 @@ struct AppBackground: View {
     }
 }
 
-/// Alternativ: a sentence-case title with a grey icon. Fahrkarte: a bold rounded title without icon.
+/// Minimal: a sentence-case title with a grey icon. Fahrkarte: a bold rounded title without icon.
 struct SectionHeader: View {
     let title: String
     let systemImage: String
@@ -218,7 +218,7 @@ nonisolated enum PageButtonKind {
 }
 
 extension View {
-    /// Alternativ: a flat button on the card surface. Fahrkarte: Liquid Glass (#504).
+    /// Minimal: a flat button on the card surface. Fahrkarte: Liquid Glass (#504).
     func pageButtonStyle(_ kind: PageButtonKind = .regular) -> some View {
         modifier(PageButtonStyleModifier(kind: kind))
     }
@@ -229,7 +229,7 @@ private struct PageButtonStyleModifier: ViewModifier {
     @Environment(\.appDesign) private var design
 
     func body(content: Content) -> some View {
-        if design == .alternativ {
+        if design == .minimal {
             content.buttonStyle(FlatButtonStyle(kind: kind))
         } else {
             switch kind {
@@ -241,7 +241,7 @@ private struct PageButtonStyleModifier: ViewModifier {
     }
 }
 
-/// The Alternativ design's button: card surface with a hairline edge, or filled with the accent color for the
+/// The Minimal design's button: card surface with a hairline edge, or filled with the accent color for the
 /// main action, without Liquid Glass shine.
 private struct FlatButtonStyle: ButtonStyle {
     let kind: PageButtonKind
@@ -276,7 +276,7 @@ private struct FlatButtonBody: View {
 }
 
 /// iOS-Settings style colored icon square. With a `logo` (S-Bahn, U-Bahn, #350) the logo itself takes
-/// the tile's place, in its own colors and with the tile's rounded corners. Alternativ draws a softly tinted
+/// the tile's place, in its own colors and with the tile's rounded corners. Minimal draws a softly tinted
 /// tile with the symbol in the tile's color, Fahrkarte only the symbol, in grey.
 struct IconTile: View {
     let systemImage: String

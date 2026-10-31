@@ -82,14 +82,14 @@ struct DesignSettingsView: View {
 extension AppDesign {
     var displayName: String {
         switch self {
-        case .alternativ: String(localized: "Alternativ")
+        case .minimal: String(localized: "Minimal")
         case .fahrkarte: String(localized: "Fahrkarte")
         }
     }
 
     var summary: String {
         switch self {
-        case .alternativ: String(localized: "Vertraut und aufgeräumt: Karten wie gewohnt, seltene Optionen eingeklappt.")
+        case .minimal: String(localized: "Vertraut und aufgeräumt: Karten wie gewohnt, seltene Optionen eingeklappt.")
         case .fahrkarte: String(localized: "Die Suche als Fahrkarte, mit runder Schrift und ruhigem Hintergrund.")
         }
     }

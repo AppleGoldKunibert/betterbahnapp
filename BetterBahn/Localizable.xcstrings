@@ -41,16 +41,6 @@
         }
       }
     },
-    "Alternativ" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Alternative"
-          }
-        }
-      }
-    },
     "an %@" : {
       "localizations" : {
         "en" : {
@@ -187,6 +177,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Purple"
+          }
+        }
+      }
+    },
+    "Minimal" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Minimal"
           }
         }
       }

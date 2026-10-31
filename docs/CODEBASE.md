@@ -119,7 +119,7 @@ in `project.pbxproj`: new files join their target automatically.
   them with their App Intents entities (`FavoriteStationEntity`, `SavedJourneyEntity`, `IndexedEntity`, queries via
   `AppDependencyManager`) and removes what's gone (IDs in UserDefaults `spotlightIDs`). Tapping opens the link via
   the entity's `OpenIntent` (`AppModel.linkToOpen`) or the `CSSearchableItemActionType` activity.
-- `Features/Connections/` – `ConnectionsView` (#504, two layouts by `\.appDesign`: Alternativ has the route card and
+- `Features/Connections/` – `ConnectionsView` (#504, two layouts by `\.appDesign`: Minimal has the route card and
   one card with the time and a foldable "Optionen" row naming what differs from the defaults; Fahrkarte has route and time on one ticket with `\.ticketStationFields`
   station fields, the options in their own card below; saved journeys as small tickets with live lines (Kit
   `JourneyLiveStatus`: departure, ridden train or transfer, from 10 min before arriving the change after it) and the
@@ -260,7 +260,7 @@ in `project.pbxproj`: new files join their target automatically.
   `Shared/Theme.swift` holds the picked design and accent (per device); `Color.brand`, `.brandDeep` and `.ticket` read
   the accent there, so views redraw when it changes, and `.appTheme()` at the root sets `\.appDesign` and the tint.
   Never hard-code the red: use `Color.brand` or derive from it. `Card`, `AppBackground`, `SectionHeader`, `IconTile`
-  and `.pageButtonStyle(.regular/.circle/.prominent)` draw either design: Alternativ has the classic cards with light
+  and `.pageButtonStyle(.regular/.circle/.prominent)` draw either design: Minimal has the classic cards with light
   shadows, a faint glow, sentence-case titles with a grey icon, softly tinted icon tiles and flat buttons (the main
   action filled with `Color.brand`); Fahrkarte has flat outlined cards on `Color.canvas`, bold rounded titles, grey
   symbols and Liquid Glass buttons. Branch on `@Environment(\.appDesign)` in a page only where the layout differs.
