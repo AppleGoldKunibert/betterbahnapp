@@ -1,6 +1,106 @@
 {
   "sourceLanguage" : "de",
   "strings" : {
+    "Alle Triebzüge" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All Trainsets"
+          }
+        }
+      }
+    },
+    "Baureihe" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Series"
+          }
+        }
+      }
+    },
+    "Der Verlauf ist gerade nicht verfügbar." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The history isn't available right now."
+          }
+        }
+      }
+    },
+    "Die Liste ist gerade nicht verfügbar." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The list isn't available right now."
+          }
+        }
+      }
+    },
+    "Dieser Triebzug ist unserem Server noch nicht aufgefallen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Our server hasn't seen this trainset yet."
+          }
+        }
+      }
+    },
+    "Du bist mit diesem Triebzug noch nicht gefahren." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You haven't ridden this trainset yet."
+          }
+        }
+      }
+    },
+    "Kurzfristig getauscht" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Swapped at short notice"
+          }
+        }
+      }
+    },
+    "Meine" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mine"
+          }
+        }
+      }
+    },
+    "Nur ICE und IC. Der Verlauf reicht ein Jahr zurück." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ICE and IC only. The history goes back one year."
+          }
+        }
+      }
+    },
+    "Schon gefahren" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Already ridden"
+          }
+        }
+      }
+    },
     " (seit %@)" : {
       "localizations" : {
         "en" : {
@@ -27,6 +127,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "· %@"
+          }
+        }
+      }
+    },
+    "Tz, Name oder Zug" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trainset, name or train"
+          }
+        }
+      }
+    },
+    "Unser Server sammelt die Züge erst seit Kurzem. Die Liste füllt sich nach und nach." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Our server has only just started collecting trains. The list fills up over time."
           }
         }
       }
@@ -8064,6 +8184,16 @@
         }
       }
     },
+    "Welcher Tz fährt heute auf welchem Zug?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Which trainset runs on which train today?"
+          }
+        }
+      }
+    },
     "Welche Zugarten und Länder die Suche zeigt, stellst du in den Einstellungen unter „Zugschnellsuche“ ein." : {
       "localizations" : {
         "en" : {
@@ -8772,6 +8902,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Reset chosen trains"
+          }
+        }
+      }
+    },
+    "zuletzt %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "last %@"
+          }
+        }
+      }
+    },
+    "Zuletzt am %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last on %@"
           }
         }
       }

@@ -32,6 +32,16 @@ verfügbar". The server keeps no logs of who asked.
 The `betterbahn` Worker also asks it for the live times of shared arrivals when IRIS doesn't have the train
 ("Ankunft teilen", `Cloudflare/arrival.mjs`: `fahrt` only, cached 30 s per train), with a token of its own (key `arrival-pages`, one rate limit for all of them).
 
+**Tz log (#502):** `tzlog.py` keeps which trainset (Tz) ran which ICE/IC on which day, for a year, in a SQLite file
+(`TZ_DB`), and serves it to the app: `GET /tz/list` (every Tz with its latest day's trains) and `GET /tz/history?tz=8043`
+(same token and rate limit as `/web/api/`). bahn.de names the Tz in the Wagenreihung hours before departure but cannot
+list where a Tz runs, so the server asks the other way round, slowly: every `TZ_SCAN_EVERY` seconds it reads the ICE/EC/IC
+departure boards of ~60 big stations in Germany, Switzerland, the Netherlands and Austria (`HUBS`) for that long ahead and
+asks each train's Wagenreihung once (about 2000 requests a day, `TZ_SCAN_INTERVAL` apart, through the proxy's own
+cache, turn-taking and pause: while bahn.de has the proxy paused the scan waits). Only ICE and ICD (IC 2) groups with a
+Tz are kept, no loco-hauled IC 1. It records nothing about who asks. On a panel server the file lives next to the code
+and survives restarts; with Docker it is the `tzlog` volume. `TZ_SCAN=false` stops the scan (the log is still served).
+
 | Variable | Default | |
 | --- | --- | --- |
 | `TOKEN_SECRET` | — | Required. The same value as in `betterbahn2`, `betterbahn`, `betterbahn-pass`. |
@@ -42,6 +52,10 @@ The `betterbahn` Worker also asks it for the live times of shared arrivals when 
 | `MAX_PARALLEL` | `4` | Requests going to bahn.de at the same time. |
 | `MIN_INTERVAL` | `0.25` | Seconds between the starts of two requests to bahn.de. |
 | `RATE_LIMIT` | `120` | Requests per minute per app install. |
+| `TZ_DB` | `tz.db` next to `proxy.py` (`/data/tz.db` in Docker) | The Tz log's SQLite file. |
+| `TZ_SCAN` | `true` | `false` turns the scan off. |
+| `TZ_SCAN_INTERVAL` | `3` | Seconds between two requests of the scan. |
+| `TZ_SCAN_EVERY` | `10800` | Seconds between two scans, also how far ahead each one reads the boards. |
 | `ALLOW_UNATTESTED` | — | `true` lets requests without a token through. Only for a quick test, never in production. |
 
 ## Run it
@@ -106,4 +120,4 @@ curl "http://localhost:8080/web/api/reiseloesung/orte?suchbegriff=Berlin&typ=ALL
 
 ## Tests
 
-`python3 -m unittest Server/bahnde-proxy/proxy_test.py` (needs `aiohttp`; no network).
+`python3 -m unittest Server/bahnde-proxy/proxy_test.py Server/bahnde-proxy/tzlog_test.py` (needs `aiohttp`; no network).
