@@ -22,6 +22,7 @@ struct StationInput<Focus: Hashable>: View {
     @Environment(AppModel.self) private var model
     @Environment(\.stationSearchArea) private var searchArea
     @Environment(\.calmDesign) private var calm
+    @Environment(\.cardSurface) private var cardSurface
     /// This field's key in `searchArea`.
     @State private var areaID = UUID()
     @State private var query = ""
@@ -72,7 +73,7 @@ struct StationInput<Focus: Hashable>: View {
                     .font(.title3)
                     .foregroundStyle(iconColor)
                     // Covers the line a calm route card draws between its stops.
-                    .background(Circle().fill(calm ? Color.card : .clear).padding(-2))
+                    .background(Circle().fill(calm ? cardSurface : .clear).padding(-2))
                     .frame(width: 24)
                     .anchorPreference(key: RouteMarkerKey.self, value: .center) { [$0] }
                     .allowsHitTesting(false)

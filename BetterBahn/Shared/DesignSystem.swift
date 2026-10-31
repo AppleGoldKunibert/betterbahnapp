@@ -33,6 +33,21 @@ extension Color {
     })
     /// Thin outline of flat cards.
     static let hairline = Color.primary.opacity(0.08)
+    /// Surface of the ticket-style route card: white with a faint warm red, a warm dark gray in dark mode.
+    static let ticket = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0.135, green: 0.11, blue: 0.11, alpha: 1)
+            : UIColor(red: 1, green: 0.975, blue: 0.968, alpha: 1)
+    })
+}
+
+nonisolated private struct CardSurfaceKey: EnvironmentKey {
+    // `Color.card`, spelled out: that one is main-actor isolated.
+    static let defaultValue = Color(.secondarySystemGroupedBackground)
+}
+
+nonisolated private struct HeadingDesignKey: EnvironmentKey {
+    static let defaultValue: Font.Design? = nil
 }
 
 nonisolated private struct CalmDesignKey: EnvironmentKey {
@@ -45,6 +60,18 @@ extension EnvironmentValues {
     nonisolated var calmDesign: Bool {
         get { self[CalmDesignKey.self] }
         set { self[CalmDesignKey.self] = newValue }
+    }
+
+    /// The surface of the card a view sits on, so marks drawn on it can cover what lies beneath.
+    nonisolated var cardSurface: Color {
+        get { self[CardSurfaceKey.self] }
+        set { self[CardSurfaceKey.self] = newValue }
+    }
+
+    /// Font design of the calm section titles; nil keeps the system font.
+    nonisolated var headingDesign: Font.Design? {
+        get { self[HeadingDesignKey.self] }
+        set { self[HeadingDesignKey.self] = newValue }
     }
 }
 
@@ -157,12 +184,14 @@ struct SectionHeader: View {
     let systemImage: String
     var trailing: String?
     @Environment(\.calmDesign) private var calm
+    @Environment(\.headingDesign) private var headingDesign
 
     var body: some View {
         if calm {
             HStack(alignment: .firstTextBaseline) {
                 Text(title)
                     .font(.title3.weight(.bold))
+                    .fontDesign(headingDesign)
                 Spacer()
                 if let trailing {
                     Text(trailing).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary).monospacedDigit()

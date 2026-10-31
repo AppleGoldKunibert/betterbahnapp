@@ -129,11 +129,12 @@ struct ConnectionsView: View {
                 VStack(spacing: 20) {
                     Text("Wohin geht’s?")
                         .font(.largeTitle.weight(.heavy))
+                        .fontDesign(.rounded)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 4)
                         .padding(.top, 4)
                         .accessibilityAddTraits(.isHeader)
-                    routeCard
+                    ticketCard
                     optionsCard
                     if sizeClass != .regular {
                         searchButtons
@@ -183,6 +184,7 @@ struct ConnectionsView: View {
             .tabBarSafePadding()
             .background { AppBackground() }
             .calmDesign()
+            .environment(\.headingDesign, .rounded)
             .navigationTitle("Verbindungen")
             // The page's own headline takes the title's place; the title stays for the back button.
             .toolbarTitleDisplayMode(.inline)
@@ -242,46 +244,70 @@ struct ConnectionsView: View {
         return false
     }
 
-    // MARK: Route
+    // MARK: Ticket
 
-    private var routeCard: some View {
-        Card(padding: 0) {
-            VStack(spacing: 0) {
-                StationInput(label: String(localized: "Start"), placeholder: String(localized: "Von wo?"), systemImage: "circle.circle.fill",
-                             iconColor: .primary, station: $from, focus: $focused, focusValue: .from)
-
-                // The swap button always sits right below Start, so it never drifts onto (and
-                // covers) a via row's own remove button as the card grows with more stops.
-                routeDivider(showAdd: viaRows.isEmpty, showSwap: true)
-
-                ForEach($viaRows) { $row in
-                    ViaRowView(row: $row, focus: $focused, focusValue: .via(row.id)) {
-                        withAnimation(.snappy) { viaRows.removeAll { $0.id == row.id } }
-                    }
-                    routeDivider(showAdd: row.id == viaRows.last?.id, showSwap: false)
+    /// The route and the time on one ticket, parted by a perforation between two notches.
+    private var ticketCard: some View {
+        VStack(spacing: 0) {
+            routeSection
+                .clipShape(TicketHalf())
+                .background(TicketHalf().fill(Color.ticket))
+                .overlay(TicketHalf(outlineOnly: true).stroke(Color.hairline, lineWidth: 1))
+            timeSection
+                .padding(16)
+                .padding(.top, 2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(TicketHalf(notchesAtTop: true).fill(Color.ticket))
+                .overlay(TicketHalf(notchesAtTop: true, outlineOnly: true).stroke(Color.hairline, lineWidth: 1))
+                .overlay(alignment: .top) {
+                    Perforation()
+                        .stroke(Color.primary.opacity(0.2), style: StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: [4, 5]))
+                        .frame(height: 1.5)
+                        .padding(.horizontal, TicketHalf.notchRadius + 8)
+                        .offset(y: -0.75)
+                        .accessibilityHidden(true)
                 }
-
-                StationInput(label: String(localized: "Ziel"), placeholder: String(localized: "Wohin?"), systemImage: "mappin.circle.fill",
-                             station: $to, focus: $focused, focusValue: .to)
-            }
-            .backgroundPreferenceValue(RouteMarkerKey.self) { anchors in
-                // The stops sit on one line, like on a route map; hidden while suggestions push between them.
-                GeometryReader { proxy in
-                    let points = anchors.map { proxy[$0] }
-                    if !suggestionsShown, let top = points.min(by: { $0.y < $1.y }), let bottom = points.max(by: { $0.y < $1.y }) {
-                        Path { path in
-                            path.move(to: top)
-                            path.addLine(to: CGPoint(x: top.x, y: bottom.y))
-                        }
-                        .stroke(Color.primary.opacity(0.15), style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                    }
-                }
-            }
-            .clipShape(.rect(cornerRadius: 22, style: .continuous))
         }
+        .fontDesign(.rounded)
+        .environment(\.cardSurface, Color.ticket)
         .onPreferenceChange(StationSuggestionsShownKey.self) { shown in
             withAnimation(.snappy(duration: 0.25)) { suggestionsShown = shown }
         }
+    }
+
+    private var routeSection: some View {
+        VStack(spacing: 0) {
+            StationInput(label: String(localized: "Start"), placeholder: String(localized: "Von wo?"), systemImage: "circle.circle.fill",
+                         iconColor: .primary, station: $from, focus: $focused, focusValue: .from)
+
+            // The swap button always sits right below Start, so it never drifts onto (and
+            // covers) a via row's own remove button as the card grows with more stops.
+            routeDivider(showAdd: viaRows.isEmpty, showSwap: true)
+
+            ForEach($viaRows) { $row in
+                ViaRowView(row: $row, focus: $focused, focusValue: .via(row.id)) {
+                    withAnimation(.snappy) { viaRows.removeAll { $0.id == row.id } }
+                }
+                routeDivider(showAdd: row.id == viaRows.last?.id, showSwap: false)
+            }
+
+            StationInput(label: String(localized: "Ziel"), placeholder: String(localized: "Wohin?"), systemImage: "mappin.circle.fill",
+                         station: $to, focus: $focused, focusValue: .to)
+        }
+        .backgroundPreferenceValue(RouteMarkerKey.self) { anchors in
+            // The stops sit on one line, like on a route map; hidden while suggestions push between them.
+            GeometryReader { proxy in
+                let points = anchors.map { proxy[$0] }
+                if !suggestionsShown, let top = points.min(by: { $0.y < $1.y }), let bottom = points.max(by: { $0.y < $1.y }) {
+                    Path { path in
+                        path.move(to: top)
+                        path.addLine(to: CGPoint(x: top.x, y: bottom.y))
+                    }
+                    .stroke(Color.primary.opacity(0.15), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
     }
 
     /// A divider row between two stops, optionally carrying the leading "add via point" button
@@ -347,31 +373,34 @@ struct ConnectionsView: View {
 
     // MARK: Options
 
+    /// Departure or arrival and the time: the ticket's lower part.
+    private var timeSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Picker("Zeit", selection: $isArrival) {
+                    Label("Abfahrt", systemImage: "arrow.up.right").tag(false)
+                    Label("Ankunft", systemImage: "arrow.down.right").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+                .disabled(!viaRows.isEmpty)
+
+                Spacer()
+
+                TimeSelector(date: $date, useNow: $useNow)
+            }
+
+            if !viaRows.isEmpty {
+                Label("Mit Zwischenhalten suchen wir ab der gewählten Abfahrtszeit.", systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
     private var optionsCard: some View {
         Card {
             VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 10) {
-                    Picker("Zeit", selection: $isArrival) {
-                        Label("Abfahrt", systemImage: "arrow.up.right").tag(false)
-                        Label("Ankunft", systemImage: "arrow.down.right").tag(true)
-                    }
-                    .pickerStyle(.segmented)
-                    .fixedSize()
-                    .disabled(!viaRows.isEmpty)
-
-                    Spacer()
-
-                    TimeSelector(date: $date, useNow: $useNow)
-                }
-
-                if !viaRows.isEmpty {
-                    Label("Mit Zwischenhalten suchen wir ab der gewählten Abfahrtszeit.", systemImage: "info.circle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Divider()
-
                 Toggle(isOn: $onlyValidTicket) {
                     let ticket = model.settings.ticketType
                     optionLabel(ticket.filterTitle, subtitle: ticket.filterSubtitle, icon: ticket.symbolName, color: .brand)
@@ -533,10 +562,10 @@ struct ConnectionsView: View {
                             HStack(spacing: 14) {
                                 MiniRoute()
                                 VStack(alignment: .leading, spacing: 1) {
-                                    Text(recent.from.displayName).font(.subheadline.weight(.semibold)).lineLimit(1)
+                                    Text(recent.from.displayName).font(.subheadline.weight(.semibold)).fontDesign(.rounded).lineLimit(1)
                                     HStack(spacing: 4) {
                                         Image(systemName: "arrow.turn.down.right").font(.caption2)
-                                        Text(recent.to.displayName).lineLimit(1)
+                                        Text(recent.to.displayName).fontDesign(.rounded).lineLimit(1)
                                     }
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
@@ -583,6 +612,43 @@ private struct MiniRoute: View {
         }
         .frame(width: 30)
         .accessibilityHidden(true)
+    }
+}
+
+/// One half of the ticket: rounded outer corners and, where the halves meet, a quarter of each side
+/// notch. `outlineOnly` leaves out the edge to the other half, for the outline.
+private struct TicketHalf: Shape {
+    static let notchRadius: CGFloat = 10
+    var notchesAtTop = false
+    var outlineOnly = false
+
+    func path(in rect: CGRect) -> Path {
+        let r = Self.notchRadius
+        let corner: CGFloat = 22
+        // Drawn with the notches at the bottom, then flipped for the lower half.
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX + r, y: rect.maxY))
+        path.addRelativeArc(center: CGPoint(x: rect.minX, y: rect.maxY), radius: r,
+                            startAngle: .degrees(0), delta: .degrees(-90))
+        path.addArc(tangent1End: CGPoint(x: rect.minX, y: rect.minY),
+                    tangent2End: CGPoint(x: rect.maxX, y: rect.minY), radius: corner)
+        path.addArc(tangent1End: CGPoint(x: rect.maxX, y: rect.minY),
+                    tangent2End: CGPoint(x: rect.maxX, y: rect.maxY), radius: corner)
+        path.addRelativeArc(center: CGPoint(x: rect.maxX, y: rect.maxY), radius: r,
+                            startAngle: .degrees(-90), delta: .degrees(-90))
+        if !outlineOnly { path.closeSubpath() }
+        guard notchesAtTop else { return path }
+        return path.applying(CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: rect.minY + rect.maxY))
+    }
+}
+
+/// The ticket's perforation: a line along the middle of its frame, stroked dashed.
+private struct Perforation: Shape {
+    func path(in rect: CGRect) -> Path {
+        Path { path in
+            path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+            path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+        }
     }
 }
 
