@@ -520,7 +520,8 @@ in `project.pbxproj`: new files join their target automatically.
   order API client: bahn.de blocks it outside its page.
 - `Tickets/PassengerRights.swift` (#311) – `PassengerRights.claim(for:earlierPlans:hasTicket:hasBahnCard100:)`: delay
   at the destination against the first booked plan (`previousVersions`), 25 % from 60 min, 50 % from 120; only with a
-  ticket, BahnCard 100 or a long-distance train; `requestFields` for DB's form.
+  ticket, BahnCard 100 or a long-distance train; `requestFields` for DB's form (day, departure and trains of the
+  booked plan, `bookedPlan`; after a replan also "Gefahrene Züge").
 - `Sharing/` – `JourneyShareLink` (encoding, payload limits, short IDs), `ShortShareLinkClient` (long link as
   fallback; `arrivalURL`), `ArrivalShare` (#317: last train from boarding to exit, bahn.de journey ID via
   `BahnDeClient.journeyId(for:)`, EVA numbers), `DBShare` + `DBShareImporter` (DB Navigator/bahn.de shared text).

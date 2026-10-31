@@ -131,7 +131,9 @@ struct PassengerRightsRequestSheet: View {
 
     var body: some View {
         let orderNumbers = model.orderNumbers(for: entry)
-        let fields = PassengerRights.requestFields(for: entry.journey, claim: claim, orderNumbers: orderNumbers)
+        let earlierPlans = (entry.previousVersions ?? []).map(\.journey)
+        let fields = PassengerRights.requestFields(for: entry.journey, earlierPlans: earlierPlans, claim: claim,
+                                                   orderNumbers: orderNumbers)
         NavigationStack {
             List {
                 Section {
@@ -156,7 +158,8 @@ struct PassengerRightsRequestSheet: View {
                 }
                 Section {
                     Button("Alles kopieren", systemImage: "doc.on.doc.fill") {
-                        copy(PassengerRights.requestText(for: entry.journey, claim: claim, orderNumbers: orderNumbers), id: "all")
+                        copy(PassengerRights.requestText(for: entry.journey, earlierPlans: earlierPlans, claim: claim,
+                                                         orderNumbers: orderNumbers), id: "all")
                     }
                     Link(destination: PassengerRights.formURL) {
                         Label("Antrag bei der Bahn öffnen", systemImage: "arrow.up.right.square")
