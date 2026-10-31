@@ -1734,6 +1734,16 @@
         }
       }
     },
+    "Andere Züge zeigen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show other trains"
+          }
+        }
+      }
+    },
     "Anderen Halt wählen" : {
       "localizations" : {
         "en" : {
@@ -5905,6 +5915,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Trains Only"
+          }
+        }
+      }
+    },
+    "Strecken über Mobilfunk laden" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Load tracks on mobile data"
+          }
+        }
+      }
+    },
+    "Zeigt auf den Karten auch die anderen fahrenden Züge. Über Mobilfunk kann das einige MB pro Karte kosten." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shows the other running trains on the maps too. On mobile data this can cost a few MB per map."
+          }
+        }
+      }
+    },
+    "Zeigt die ganze Fahrt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shows the whole trip"
           }
         }
       }

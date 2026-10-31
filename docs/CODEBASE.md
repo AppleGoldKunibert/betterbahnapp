@@ -174,7 +174,16 @@ in `project.pbxproj`: new files join their target automatically.
   `TravelMapSelection` and cached heatmap, km from cached geometry, series from `rememberedFormation`), shared as an
   image (`ImageRenderer`, heatmap card via `Canvas`). `LiveTrainMapView`: one train live on its track
   (`AppModel.geometry(for:)`, never straight lines), opened from `LiveTrainIconTile`; `JourneyMapView` shows running
-  trains too.
+  trains too. `LiveTrainsLayer.swift` (#505, all three maps): moves the own trains once a second along their track
+  (Kit `LiveTrainMotion`, `OwnTrain` from the leg) and, with `AppSettings.showOtherTrains`, shows every other train
+  around (Kit `LiveTrainField`, at most 150, nearest the middle; `OtherTrainsAnnotator` for the MKMapView maps,
+  `OtherTrainMarkerView` for the SwiftUI one). bahn.jetzt's list comes at the position interval; Transitous' tracks
+  only for the visible area up to 2.5° × 4° (`LiveTrainCoverage`, 20 min ahead, reloaded on leaving the area), never
+  in Low Data Mode, on mobile data only with `otherTrainsOnMobileData`. Jumps on new data are blended over 3 s
+  (`LiveTrainSmoother`); markers animate linearly between the seconds. Own trains show their speed (`ownSpeeds`; in
+  the MKMapView maps in the marker's title), legs saved without a track get it via `AppModel.geometry(for:)`. A
+  tapped other train (callout button; on the live map a tap shows name and next stop, a second tap opens it) opens
+  `LiveTrainTripSheet`: `TripView` at the stop it runs to next (Kit `BoardEntry.liveTrain`).
 - `Features/Collection/` – `CollectionView` (#384, "Sammlung", `CollectionButton` next to "Vergangene Fahrten" on
   Verbindungen): progress per category, `CollectionCategoryView` grid (not collected greyed out), sheet with the first and
   all rides. Kit `TravelCollection` from the travel map's rides (`AppModel.travelCollection()`); trains only from
@@ -445,7 +454,17 @@ in `project.pbxproj`: new files join their target automatically.
   the 2 latest of the previous 30 min at the origin (`TrainRoutePlanner.plan(pickedEarlier:)`). Picked run pinned in
   `TrainRequirement.tripId`.
 - `Transit/BahnJetzt/` – live positions from `/api/journeys` (`AppModel.followTrainPositions()` while a map shows);
-  long-distance by number, regional/S-Bahn by `Line.tripNumber`.
+  long-distance by number, regional/S-Bahn by `Line.tripNumber`. `runningTrains()`: the whole list (other trains, #505).
+- `Transit/LiveTrains/` (#505) – `TrackPath` (meters along a polyline, `locate`), `LiveTrainSegment` + `MapArea` and
+  `TransitousProvider.liveTrainSegments(in:zoom:from:to:)` (`v1/map/trips`: each train's stretch between two stops with
+  track (polyline precision 5) and real-time times; trains only, S-Bahns filed as `METRO` too, night buses named
+  "20N" dropped, "RB58 (4761)" split into line and run number). `LiveTrainField`: per trip the bahn.jetzt fix
+  (long-distance by name, regional by run number, else line name nearest the timetable), runs on at its speed for
+  90 s at most and never past the next stop, else by timetable; S-Bahns (`isSuburban`, too frequent to tell apart)
+  never by timetable, only with a fix within 4 km of their timetable spot; own trains left out by name within 3 km;
+  unmatched bahn.jetzt trains stay put. `LiveTrainMotion` (own train on its leg's track, waits at its stops; without bahn.jetzt speed it works one out
+  from the last two different fixes, standing after a minute unmoved), `LiveTrainSmoother`,
+  `LiveTrainCoverage` (when to load which area).
 - `Transit/Lifts/` – lifts out of order (#486). `FacilityClient.brokenLifts()`: DB FaSta's whole list through `betterbahn2`
   (never a station; cached 5 min). FaSta numbers stations its own way, so `LiftCheck.alerts(at:)` goes by position: within
   60 m of a platform edge in `StationPlatforms`, else 300 m (150 m with platforms) of the station. Tracks from the

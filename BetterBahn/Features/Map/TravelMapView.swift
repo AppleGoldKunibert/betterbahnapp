@@ -41,15 +41,13 @@ struct TravelMapView: View {
 
     var body: some View {
         NavigationStack {
-            TravelMap(runs: runs, version: runsVersion, showRailwayLayer: showRailwayLayer,
-                      trains: Array(model.trainPositions.values))
+            LiveTravelMap(runs: runs, version: runsVersion, showRailwayLayer: showRailwayLayer)
                 .ignoresSafeArea(edges: [.top, .bottom])
                 .overlay(alignment: .top) { header }
                 .overlay(alignment: .bottomTrailing) { legend }
                 .toolbar(.hidden, for: .navigationBar)
                 .task(id: selection) { await load() }
                 .task { await model.syncTraewelling() }
-                .task { await model.followTrainPositions() }
                 .sheet(isPresented: $showRangeSheet) { rangeSheet }
         }
     }
@@ -333,12 +331,16 @@ final class TrainAnnotation: NSObject, MKAnnotation {
         update(live)
     }
 
-    func update(_ live: LiveTrainPosition) {
+    /// - Parameters:
+    ///   - shown: where the train is drawn this second (it runs on between fixes), else the fix.
+    ///   - speed: the speed to show, also worked out when bahn.jetzt sends none; else the fix's.
+    func update(_ live: LiveTrainPosition, shown: Coordinate? = nil, speed: Double? = nil) {
         let position = live.position
-        coordinate = position.coordinate.clCoordinate
-        title = live.trainName
+        coordinate = (shown ?? position.coordinate).clCoordinate
+        let speed = speed ?? position.speedKmh
+        // The speed sits in the title, so it shows under the marker without tapping it.
+        title = speed.map { "\(live.trainName) · \(Int($0.rounded())) km/h" } ?? live.trainName
         var parts: [String] = []
-        if let speed = position.speedKmh { parts.append("\(Int(speed.rounded())) km/h") }
         parts.append(String(localized: "Stand \(position.time.formatted(date: .omitted, time: .standard))"))
         subtitle = parts.joined(separator: " · ")
         isStale = position.isStale()
@@ -347,6 +349,36 @@ final class TrainAnnotation: NSObject, MKAnnotation {
 
 private extension Coordinate {
     var clCoordinate: CLLocationCoordinate2D { CLLocationCoordinate2D(latitude: latitude, longitude: longitude) }
+}
+
+/// The travel map with the live trains: the own trains of saved journeys and the others around
+/// (#505). Kept apart so the once-a-second movement only redraws the map, not the whole screen.
+private struct LiveTravelMap: View {
+    let runs: [SegmentHeatmap.Run]
+    let version: Int
+    let showRailwayLayer: Bool
+
+    @Environment(AppModel.self) private var model
+    @State private var layer = LiveTrainsLayer()
+    @State private var tappedTrain: LiveTrainTripRequest?
+
+    var body: some View {
+        TravelMap(runs: runs, version: version, showRailwayLayer: showRailwayLayer,
+                  trains: Array(model.trainPositions.values), shownTrains: layer.ownCoordinates, trainSpeeds: layer.ownSpeeds,
+                  otherTrains: layer.markers, onRegionChange: { layer.setVisible($0, model: model) },
+                  onTrainTap: { tappedTrain = LiveTrainTripRequest(tripId: $0) })
+            .sheet(item: $tappedTrain) { LiveTrainTripSheet(tripId: $0.tripId) }
+            .task { await model.followTrainPositions() }
+            .task { await layer.run(model: model) }
+            .onChange(of: model.trainPositions, initial: true) { updateOwnTrains() }
+    }
+
+    private func updateOwnTrains() {
+        let legs = model.upcomingJourneys.flatMap(\.journey.transitLegs)
+        layer.setOwnTrains(model.trainPositions.values.sorted { $0.trainName < $1.trainName }.map { live in
+            LiveTrainsLayer.OwnTrain(live, leg: legs.first { $0.line?.name == live.trainName && !$0.cancelled })
+        })
+    }
 }
 
 nonisolated final class HeatPolyline: MKPolyline, @unchecked Sendable {
@@ -359,6 +391,15 @@ struct TravelMap: UIViewRepresentable {
     let showRailwayLayer: Bool
     /// Running trains of saved journeys, shown as train markers with speed and fix time in the callout.
     var trains: [LiveTrainPosition] = []
+    /// Where those trains are drawn this second, by name (they run on between fixes).
+    var shownTrains: [String: Coordinate] = [:]
+    /// Their speeds, by name.
+    var trainSpeeds: [String: Double] = [:]
+    /// The other trains around (#505).
+    var otherTrains: [LiveTrainMarker] = []
+    var onRegionChange: (MKCoordinateRegion) -> Void = { _ in }
+    /// A tapped other train's route, by Transitous trip ID.
+    var onTrainTap: (String) -> Void = { _ in }
 
     func makeUIView(context: Context) -> MKMapView {
         let map = MKMapView()
@@ -383,7 +424,10 @@ struct TravelMap: UIViewRepresentable {
             coordinator.railwayOverlay = nil
         }
 
-        coordinator.syncTrains(trains, on: map)
+        coordinator.onRegionChange = onRegionChange
+        coordinator.onTrainTap = onTrainTap
+        coordinator.syncTrains(trains, shown: shownTrains, speeds: trainSpeeds, on: map)
+        coordinator.otherTrains.sync(otherTrains, on: map)
 
         // Route lines: only rebuild when data changed. Draw rare stretches first so frequent ones are on top.
         guard coordinator.renderedVersion != version else { return }
@@ -409,10 +453,13 @@ struct TravelMap: UIViewRepresentable {
         var railwayOverlay: RailwayTileOverlay?
         var renderedVersion = -1
         var didFit = false
+        var onRegionChange: (MKCoordinateRegion) -> Void = { _ in }
+        var onTrainTap: (String) -> Void = { _ in }
+        let otherTrains = OtherTrainsAnnotator()
         private var trainAnnotations: [String: TrainAnnotation] = [:]
 
         /// Adds, moves and removes train markers in place so an open callout survives the periodic refresh.
-        func syncTrains(_ trains: [LiveTrainPosition], on map: MKMapView) {
+        func syncTrains(_ trains: [LiveTrainPosition], shown: [String: Coordinate], speeds: [String: Double], on map: MKMapView) {
             let current = Dictionary(trains.map { ($0.trainName, $0) }, uniquingKeysWith: { $1 })
             for (name, annotation) in trainAnnotations where current[name] == nil {
                 map.removeAnnotation(annotation)
@@ -420,7 +467,9 @@ struct TravelMap: UIViewRepresentable {
             }
             for (name, live) in current {
                 if let annotation = trainAnnotations[name] {
-                    annotation.update(live)
+                    UIView.animate(withDuration: 1, delay: 0, options: [.curveLinear, .beginFromCurrentState, .allowUserInteraction]) {
+                        annotation.update(live, shown: shown[name], speed: speeds[name])
+                    }
                 } else {
                     let annotation = TrainAnnotation(live)
                     trainAnnotations[name] = annotation
@@ -429,7 +478,16 @@ struct TravelMap: UIViewRepresentable {
             }
         }
 
+        func mapView(_ mapView: MKMapView, annotationView view: MKAnnotationView, calloutAccessoryControlTapped control: UIControl) {
+            if let other = view.annotation as? OtherTrainAnnotation, let tripId = other.tripId { onTrainTap(tripId) }
+        }
+
+        func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
+            onRegionChange(mapView.region)
+        }
+
         func mapView(_ mapView: MKMapView, viewFor annotation: any MKAnnotation) -> MKAnnotationView? {
+            if let other = annotation as? OtherTrainAnnotation { return otherTrains.view(for: other, on: mapView) }
             guard let train = annotation as? TrainAnnotation else { return nil }
             let id = "train"
             let view = (mapView.dequeueReusableAnnotationView(withIdentifier: id) as? MKMarkerAnnotationView)
