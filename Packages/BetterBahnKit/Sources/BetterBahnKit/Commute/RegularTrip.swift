@@ -165,14 +165,15 @@ public struct RegularTrip: Codable, Sendable, Hashable, Identifiable {
     /// "Mo–Fr", "Mo, Mi, Fr", "Sa, So", "täglich".
     public var weekdaysDescription: String {
         let days = weekdays.sorted()
-        if days == Array(1...7) { return "täglich" }
+        if days == Array(1...7) { return String(kit: "täglich") }
         if days.count >= 3, days.last! - days.first! == days.count - 1 {
             return "\(Self.weekdayNames[days.first! - 1])–\(Self.weekdayNames[days.last! - 1])"
         }
         return days.map { Self.weekdayNames[$0 - 1] }.joined(separator: ", ")
     }
 
-    public static let weekdayNames = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+    public static let weekdayNames = [String(kit: "Mo"), String(kit: "Di"), String(kit: "Mi"), String(kit: "Do"),
+                                      String(kit: "Fr"), String(kit: "Sa"), String(kit: "So")]
 
     static func timeString(_ date: Date) -> String {
         let parts = calendar.dateComponents([.hour, .minute], from: date)
@@ -181,10 +182,10 @@ public struct RegularTrip: Codable, Sendable, Hashable, Identifiable {
 
     /// The question's text: "RE 3 um 7:42 ab Eberswalde Hbf nach Berlin Gesundbrunnen".
     public func questionBody(departure: Date) -> String {
-        let trains = template.transitLegs.first?.line?.displayName ?? "Zug"
+        let trains = template.transitLegs.first?.line?.displayName ?? String(kit: "Zug")
         let origin = template.legs.first?.origin.displayName ?? ""
         let destination = template.legs.last?.destination.displayName ?? ""
-        return "\(trains) um \(Self.timeString(departure)) ab \(origin) nach \(destination)"
+        return String(kit: "%@ um %@ ab %@ nach %@", trains, Self.timeString(departure), origin, destination)
     }
 
     // MARK: Template

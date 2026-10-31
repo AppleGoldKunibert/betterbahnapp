@@ -10,9 +10,9 @@ public enum DBShareError: Error, Sendable, Equatable, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .notAConnection: "Das ist keine Verbindung aus dem DB Navigator oder von bahn.de."
-        case .unreadable: "Die geteilte Verbindung konnte nicht geladen werden. Bitte versuch es später noch mal."
-        case .notFound: "Diese Verbindung wurde in den Fahrplandaten nicht gefunden."
+        case .notAConnection: String(kit: "Das ist keine Verbindung aus dem DB Navigator oder von bahn.de.")
+        case .unreadable: String(kit: "Die geteilte Verbindung konnte nicht geladen werden. Bitte versuch es später noch mal.")
+        case .notFound: String(kit: "Diese Verbindung wurde in den Fahrplandaten nicht gefunden.")
         }
     }
 }

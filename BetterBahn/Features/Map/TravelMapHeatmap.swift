@@ -6,6 +6,17 @@ enum TravelMapRange: String, CaseIterable, Identifiable, Hashable {
     case week = "7 Tage", month = "30 Tage", year = "1 Jahr", all = "Alle", custom = "Eigene"
     var id: String { rawValue }
 
+    /// Shown in the range picker; `rawValue` stays German as it is part of the heatmap cache key.
+    var title: String {
+        switch self {
+        case .week: String(localized: "7 Tage")
+        case .month: String(localized: "30 Tage")
+        case .year: String(localized: "1 Jahr")
+        case .all: String(localized: "Alle")
+        case .custom: String(localized: "Eigene")
+        }
+    }
+
     /// Warmed at launch in this order: what the map opens with first, then the wider ranges.
     /// `.custom` has no fixed range to warm.
     static let prewarmOrder: [TravelMapRange] = [.month, .week, .year, .all]

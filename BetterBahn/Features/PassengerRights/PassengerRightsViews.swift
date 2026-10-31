@@ -51,9 +51,9 @@ extension AppModel {
 extension ConnectionNotifier {
     static func notify(_ claim: PassengerRightsClaim, journey: Journey) async {
         let content = UNMutableNotificationContent()
-        content.title = "Anspruch auf \(claim.compensation.percent) % Entschädigung"
-        let destination = journey.legs.last?.destination.displayName ?? "deinem Ziel"
-        content.body = "Du bist \(claim.delayMinutes) Min. später in \(destination) angekommen. Unter „Vergangene Fahrten“ kannst du den Antrag vorbereiten."
+        content.title = String(localized: "Anspruch auf \(claim.compensation.percent) % Entschädigung")
+        let destination = journey.legs.last?.destination.displayName ?? String(localized: "deinem Ziel")
+        content.body = String(localized: "Du bist \(claim.delayMinutes) Min. später in \(destination) angekommen. Unter „Vergangene Fahrten“ kannst du den Antrag vorbereiten.")
         content.sound = .default
         content.interruptionLevel = .active
         let request = UNNotificationRequest(identifier: claim.notificationID + journey.id, content: content, trigger: nil)
@@ -64,13 +64,13 @@ extension ConnectionNotifier {
 // MARK: - Views
 
 extension PassengerRightsClaim {
-    var title: String { "Du hast Anspruch auf \(compensation.percent) % Entschädigung" }
+    var title: String { String(localized: "Du hast Anspruch auf \(compensation.percent) % Entschädigung") }
 
     var explanation: String {
         switch cause {
-        case .delay: "Du bist \(delayMinutes) Minuten später angekommen als geplant."
-        case .missedConnection: "Du hast wegen einer Verspätung einen Anschluss verpasst und kamst \(delayMinutes) Minuten später an als geplant."
-        case .replanned: "Wegen eines Ausfalls kamst du \(delayMinutes) Minuten später an als geplant."
+        case .delay: String(localized: "Du bist \(delayMinutes) Minuten später angekommen als geplant.")
+        case .missedConnection: String(localized: "Du hast wegen einer Verspätung einen Anschluss verpasst und kamst \(delayMinutes) Minuten später an als geplant.")
+        case .replanned: String(localized: "Wegen eines Ausfalls kamst du \(delayMinutes) Minuten später an als geplant.")
         }
     }
 }

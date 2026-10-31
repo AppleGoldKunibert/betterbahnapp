@@ -6,9 +6,11 @@ public enum ExitSide: String, Codable, Sendable, Hashable {
     case right
 
     /// "Ausstieg in Fahrtrichtung links"
-    public var displayName: String { "Ausstieg in Fahrtrichtung \(german)" }
+    public var displayName: String {
+        self == .left ? String(kit: "Ausstieg in Fahrtrichtung links") : String(kit: "Ausstieg in Fahrtrichtung rechts")
+    }
     /// "Ausstieg links", where space is short (the reminder).
-    public var shortName: String { "Ausstieg \(german)" }
+    public var shortName: String { self == .left ? String(kit: "Ausstieg links") : String(kit: "Ausstieg rechts") }
 
     var german: String { self == .left ? "links" : "rechts" }
     var opposite: ExitSide { self == .left ? .right : .left }

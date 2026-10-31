@@ -8,8 +8,8 @@ public enum ShortShareLinkError: Error, Sendable, Equatable, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .expired: "Dieser Link ist abgelaufen. Lass dir die Reise noch einmal schicken."
-        case .invalid: "Dieser Link funktioniert leider nicht."
+        case .expired: String(kit: "Dieser Link ist abgelaufen. Lass dir die Reise noch einmal schicken.")
+        case .invalid: String(kit: "Dieser Link funktioniert leider nicht.")
         }
     }
 }

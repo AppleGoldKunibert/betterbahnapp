@@ -5,12 +5,12 @@ public enum TraewellingVisibility: Int, CaseIterable, Codable, Sendable {
 
     public var label: String {
         switch self {
-        case .publicVisible: "Öffentlich"
-        case .unlisted: "Nicht gelistet"
-        case .followers: "Nur Follower"
-        case .privateVisible: "Privat"
-        case .authenticated: "Angemeldete Nutzer"
-        case .trusted: "Vertraute Nutzer"
+        case .publicVisible: String(kit: "Öffentlich")
+        case .unlisted: String(kit: "Nicht gelistet")
+        case .followers: String(kit: "Nur Follower")
+        case .privateVisible: String(kit: "Privat")
+        case .authenticated: String(kit: "Angemeldete Nutzer")
+        case .trusted: String(kit: "Vertraute Nutzer")
         }
     }
 }
@@ -20,9 +20,9 @@ public enum TraewellingBusiness: Int, CaseIterable, Codable, Sendable {
 
     public var label: String {
         switch self {
-        case .privateTrip: "Privat"
-        case .business: "Geschäftlich"
-        case .commute: "Pendeln"
+        case .privateTrip: String(kit: "Privat")
+        case .business: String(kit: "Geschäftlich")
+        case .commute: String(kit: "Pendeln")
         }
     }
 }
@@ -174,14 +174,14 @@ public enum TraewellingError: Error, LocalizedError, Equatable {
 
     public var errorDescription: String? {
         switch self {
-        case .stationNotFound(let name): "Träwelling kennt den Bahnhof „\(name)“ nicht."
+        case .stationNotFound(let name): String(kit: "Träwelling kennt den Bahnhof „%@“ nicht.", name)
         case .stopNotOnTrip(let name, let stops):
-            "„\(name)“ ist auf der Träwelling-Fahrt nicht enthalten. Halte dort: \(stops.joined(separator: ", "))."
-        case .tripNotFound(let line): "\(line) wurde auf Träwelling nicht gefunden."
-        case .collision: "Du bist zu dieser Zeit schon eingecheckt."
+            String(kit: "„%@“ ist auf der Träwelling-Fahrt nicht enthalten. Halte dort: %@.", name, stops.joined(separator: ", "))
+        case .tripNotFound(let line): String(kit: "%@ wurde auf Träwelling nicht gefunden.", line)
+        case .collision: String(kit: "Du bist zu dieser Zeit schon eingecheckt.")
         case .likeNotAllowed:
-            "Träwelling lässt das Liken nicht zu. Melde dich in den Einstellungen einmal ab und wieder bei Träwelling an, damit BetterBahn Likes vergeben darf."
-        case .api(let status, let message): message ?? "Träwelling-Fehler (\(status))"
+            String(kit: "Träwelling lässt das Liken nicht zu. Melde dich in den Einstellungen einmal ab und wieder bei Träwelling an, damit BetterBahn Likes vergeben darf.")
+        case .api(let status, let message): message ?? String(kit: "Träwelling-Fehler (%lld)", status)
         }
     }
 
@@ -563,7 +563,7 @@ public actor TraewellingClient {
     /// in which case a manual trip is created and checked into instead.
     public func checkin(_ draft: CheckinDraft, allowManualTrip: Bool = false) async throws -> CheckinResult {
         let leg = draft.leg
-        guard let line = leg.line else { throw TraewellingError.tripNotFound("Fußweg") }
+        guard let line = leg.line else { throw TraewellingError.tripNotFound(String(kit: "Fußweg")) }
 
         if let match = try await findDeparture(for: leg) {
             return try await checkin(draft, departures: match.departures)
@@ -606,7 +606,7 @@ public actor TraewellingClient {
             if let statusId = part.statusId { combined.connectingStatusIds.append(statusId) }
             result = combined
         }
-        guard let result else { throw TraewellingError.tripNotFound(draft.leg.line?.name ?? "Fußweg") }
+        guard let result else { throw TraewellingError.tripNotFound(draft.leg.line?.name ?? String(kit: "Fußweg")) }
         return result
     }
 
@@ -624,7 +624,7 @@ public actor TraewellingClient {
                 firstError = firstError ?? error
             }
         }
-        throw firstError ?? TraewellingError.tripNotFound(leg.line?.name ?? "Fußweg")
+        throw firstError ?? TraewellingError.tripNotFound(leg.line?.name ?? String(kit: "Fußweg"))
     }
 
     /// The Träwelling trips covering `leg`, starting with `departure`'s. Usually just one, but
@@ -632,7 +632,7 @@ public actor TraewellingClient {
     /// single run are split by Träwelling into one trip per network, the first of which ends at the
     /// border station. In that case this continues from wherever that trip ends with the next one.
     private func segments(for leg: Leg, departure: TraewellingDeparture, remainingSplits: Int = 3) async throws -> [Segment] {
-        guard let line = leg.line else { throw TraewellingError.tripNotFound("Fußweg") }
+        guard let line = leg.line else { throw TraewellingError.tripNotFound(String(kit: "Fußweg")) }
         let lineName = departure.line.name ?? line.name
         let trip = try await trip(tripID: departure.tripId, lineName: lineName)
         // Träwelling's own timetable can list a station under a different internal ID than the one our
@@ -721,7 +721,7 @@ public actor TraewellingClient {
 
     /// Creates a Träwelling trip for `leg`'s train, running from its origin to its destination.
     private func createManualTrip(for leg: Leg) async throws -> ManualTrip {
-        guard let line = leg.line else { throw TraewellingError.tripNotFound("Fußweg") }
+        guard let line = leg.line else { throw TraewellingError.tripNotFound(String(kit: "Fußweg")) }
         let origin = try await matchStation(leg.origin)
         let destination = try await matchStation(leg.destination)
 
@@ -774,7 +774,7 @@ public actor TraewellingClient {
     /// exactly what Träwelling's timetable already has.
     public func checkin(_ draft: CheckinDraft, fromZusatzhalt zusatzhalt: JourneyStop, toNextRegularStop nextRegular: JourneyStop) async throws -> CheckinResult {
         let leg = draft.leg
-        guard let line = leg.line else { throw TraewellingError.tripNotFound("Fußweg") }
+        guard let line = leg.line else { throw TraewellingError.tripNotFound(String(kit: "Fußweg")) }
         guard let departure = zusatzhalt.departure ?? zusatzhalt.arrival,
               let arrival = nextRegular.arrival ?? nextRegular.departure else {
             throw TraewellingError.tripNotFound(line.name)

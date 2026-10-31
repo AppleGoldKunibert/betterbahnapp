@@ -75,7 +75,7 @@ struct EmojiText: View {
 struct EmojiMessageField: View {
     @Binding var message: String
     let emojis: [CustomEmoji]
-    var placeholder = "Was geht ab? (optional)"
+    var placeholder = String(localized: "Was geht ab? (optional)")
     /// Lets the form put the keyboard away (and bring it back) itself; the field's own focus otherwise.
     var isFocused: FocusState<Bool>.Binding?
 

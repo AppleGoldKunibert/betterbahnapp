@@ -267,20 +267,20 @@ struct StationInput<Focus: Hashable>: View {
     private var shortcutChips: some View {
         HStack(spacing: 6) {
             if search.modes.contains(.bus) {
-                InfoChip(text: "Bus", systemImage: "bus.fill", tint: .brand)
+                InfoChip(text: String(localized: "Bus"), systemImage: "bus.fill", tint: .brand)
             }
             if search.modes.contains(.tram) {
-                InfoChip(text: "Tram", systemImage: "tram.fill", tint: .brand)
+                InfoChip(text: String(localized: "Tram"), systemImage: "tram.fill", tint: .brand)
             }
             if search.byDistance {
                 if LocationService.shared.coordinate == nil {
-                    InfoChip(text: "Standort unbekannt", systemImage: "location.slash.fill")
+                    InfoChip(text: String(localized: "Standort unbekannt"), systemImage: "location.slash.fill")
                 } else {
-                    InfoChip(text: "Nach Entfernung", systemImage: "location.fill", tint: .brand)
+                    InfoChip(text: String(localized: "Nach Entfernung"), systemImage: "location.fill", tint: .brand)
                 }
             }
             if let country = search.country {
-                InfoChip(text: "\(TrainSearchCountry.flag(forCode: country) ?? "") nur dieses Land", systemImage: "flag.fill", tint: .brand)
+                InfoChip(text: String(localized: "\(TrainSearchCountry.flag(forCode: country) ?? "") nur dieses Land"), systemImage: "flag.fill", tint: .brand)
             }
             Spacer()
         }
@@ -493,7 +493,7 @@ struct TimeSelector: View {
             Button {
                 showPicker = true
             } label: {
-                Text(useNow ? "Jetzt" : label)
+                Text(useNow ? String(localized: "Jetzt") : label)
                     .font(.subheadline.weight(.semibold))
                     .monospacedDigit()
                     .lineLimit(1)

@@ -1,0 +1,763 @@
+{
+  "sourceLanguage" : "de",
+  "strings" : {
+    "%@" : {
+      "comment" : "App Intent entity title (station name), stays as is",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@"
+          }
+        }
+      }
+    },
+    "%@ %@ → %@%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ %2$@ → %3$@%4$@"
+          }
+        }
+      }
+    },
+    "%@ · %@ +%lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · %2$@ +%3$lld"
+          }
+        }
+      }
+    },
+    "%@ · %lld km/h" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · %2$lld km/h"
+          }
+        }
+      }
+    },
+    "%@ → %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ → %2$@"
+          }
+        }
+      }
+    },
+    "%lld" : {
+      "comment" : "Like count",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld"
+          }
+        }
+      }
+    },
+    "%lld Umstiege" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld change"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld changes"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld km/h" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld km/h"
+          }
+        }
+      }
+    },
+    "+%lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "+%lld"
+          }
+        }
+      }
+    },
+    "+%lld min" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "+%lld min"
+          }
+        }
+      }
+    },
+    "1 Umstieg" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 change"
+          }
+        }
+      }
+    },
+    "Abfahrt" : {
+      "comment" : "Spotlight search keyword",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Departure"
+          }
+        }
+      }
+    },
+    "Abfahrt %@" : {
+      "comment" : "Widget heading with the departure date, or Live Activity: departure from station",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Departure %@"
+          }
+        }
+      }
+    },
+    "Abfahrten" : {
+      "comment" : "Spotlight search keyword",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Departures"
+          }
+        }
+      }
+    },
+    "Aktualisieren" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refresh"
+          }
+        }
+      }
+    },
+    "Aktueller Zug" : {
+      "comment" : "Widget gallery name",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Current Train"
+          }
+        }
+      }
+    },
+    "Alle" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All"
+          }
+        }
+      }
+    },
+    "Angekommen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arrived"
+          }
+        }
+      }
+    },
+    "Ankunft" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arrival"
+          }
+        }
+      }
+    },
+    "Ankunft %@" : {
+      "comment" : "Live Activity: arrival at station",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arrival %@"
+          }
+        }
+      }
+    },
+    "Ausfall" : {
+      "comment" : "Shown under a cancelled stop's time",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cancelled"
+          }
+        }
+      }
+    },
+    "Bahnhof" : {
+      "comment" : "Spotlight search keyword",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Station"
+          }
+        }
+      }
+    },
+    "Bahnhof wählen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose a station"
+          }
+        }
+      }
+    },
+    "Bis zum Ziel" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Until Destination"
+          }
+        }
+      }
+    },
+    "Bis zum nächsten Zug" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Until Next Train"
+          }
+        }
+      }
+    },
+    "Dein Zug mit den nächsten Halten, Verspätungen und deinem Ausstieg." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your train with its next stops, delays and where you get off."
+          }
+        }
+      }
+    },
+    "Demnächst fährt hier nichts hin." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No trains go there soon."
+          }
+        }
+      }
+    },
+    "Die nächsten Abfahrten an einem Bahnhof, auf Wunsch nur zu einem Ziel." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The next departures from a station, optionally only to one destination."
+          }
+        }
+      }
+    },
+    "Die nächsten Züge an deinem Bahnhof oder auf deiner Strecke." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The next trains at your station or on your route."
+          }
+        }
+      }
+    },
+    "Fällt aus" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cancelled"
+          }
+        }
+      }
+    },
+    "Gerade nicht erreichbar." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can't be reached right now."
+          }
+        }
+      }
+    },
+    "Gl. %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pl. %@"
+          }
+        }
+      }
+    },
+    "Gl. %@ → Gl. %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pl. %1$@ → Pl. %2$@"
+          }
+        }
+      }
+    },
+    "Gleis" : {
+      "comment" : "Tiny uppercase caption above the platform number in the platform badge",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Platform"
+          }
+        }
+      }
+    },
+    "Gleis %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Platform %@"
+          }
+        }
+      }
+    },
+    "Gleis %@, statt %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Platform %1$@, instead of %2$@"
+          }
+        }
+      }
+    },
+    "In den nächsten 2 Stunden fährt hier nichts." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing leaves here in the next 2 hours."
+          }
+        }
+      }
+    },
+    "Keine Abfahrten" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No departures"
+          }
+        }
+      }
+    },
+    "Keine Daten" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No data"
+          }
+        }
+      }
+    },
+    "Keine Reise geplant" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No journey planned"
+          }
+        }
+      }
+    },
+    "Keine Verbindung" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No connection"
+          }
+        }
+      }
+    },
+    "Kleine Karte mit der Position deines Zugs und seiner Geschwindigkeit." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A small map showing where your train is and how fast it's going."
+          }
+        }
+      }
+    },
+    "Live-Geschwindigkeit" : {
+      "comment" : "Widget gallery name",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live Speed"
+          }
+        }
+      }
+    },
+    "Live-Position" : {
+      "comment" : "Widget gallery name",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live Position"
+          }
+        }
+      }
+    },
+    "Nicht möglich" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not possible"
+          }
+        }
+      }
+    },
+    "Nur Fernverkehr" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Long-Distance Only"
+          }
+        }
+      }
+    },
+    "Nur Regionalverkehr" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Regional Only"
+          }
+        }
+      }
+    },
+    "Nur Verbindungen zu diesem Bahnhof, z. B. zur Arbeit." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only connections to this station, e.g. to work."
+          }
+        }
+      }
+    },
+    "Nur Züge" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trains Only"
+          }
+        }
+      }
+    },
+    "Nur zu einem Ziel" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only to One Destination"
+          }
+        }
+      }
+    },
+    "Nächste Reise" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Next journey"
+          }
+        }
+      }
+    },
+    "Nächster Halt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Next stop"
+          }
+        }
+      }
+    },
+    "Regionalverkehr und S-Bahn" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Regional and S-Bahn"
+          }
+        }
+      }
+    },
+    "Reiseübersicht" : {
+      "comment" : "Widget gallery name / configuration intent title",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Journey Overview"
+          }
+        }
+      }
+    },
+    "Speichere eine Verbindung, um sie hier zu sehen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save a connection to see it here."
+          }
+        }
+      }
+    },
+    "Stand %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "As of %@"
+          }
+        }
+      }
+    },
+    "Timer" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Timer"
+          }
+        }
+      }
+    },
+    "Umstieg %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Change at %@"
+          }
+        }
+      }
+    },
+    "Umstieg in %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Change at %@"
+          }
+        }
+      }
+    },
+    "Verkehrsmittel" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Modes of Transport"
+          }
+        }
+      }
+    },
+    "Verspätungen, nächster Halt, Umstieg und ein Timer bis zum nächsten Zug oder zum Ziel." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delays, next stop, changes and a timer to your next train or destination."
+          }
+        }
+      }
+    },
+    "Widget gedrückt halten und bearbeiten." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Touch and hold the widget, then edit it."
+          }
+        }
+      }
+    },
+    "Wie schnell dein Zug gerade fährt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "How fast your train is going right now."
+          }
+        }
+      }
+    },
+    "Zeigt deine aktuelle oder nächste gespeicherte Reise." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shows your current or next saved journey."
+          }
+        }
+      }
+    },
+    "Ziel" : {
+      "comment" : "Label of the destination station field and fallback name in a route section",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Destination"
+          }
+        }
+      }
+    },
+    "ab %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "from %@"
+          }
+        }
+      }
+    },
+    "an %@" : {
+      "comment" : "Arrival time of a connection on the departure board widget",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "arr. %@"
+          }
+        }
+      }
+    },
+    "an %@ · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "arr. %1$@ · %2$@"
+          }
+        }
+      }
+    },
+    "direkt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "direct"
+          }
+        }
+      }
+    },
+    "km/h" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "km/h"
+          }
+        }
+      }
+    },
+    "pünktlich" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "on time"
+          }
+        }
+      }
+    },
+    "· %lld km/h" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "· %lld km/h"
+          }
+        }
+      }
+    },
+    "→ %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "→ %@"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

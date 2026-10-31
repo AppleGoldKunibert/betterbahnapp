@@ -356,7 +356,7 @@ struct TripContent: View {
                         LiveTrainIconTile(route: LiveTrainRoute(trip: trip), systemImage: trip.line?.symbolName ?? "tram.fill",
                                           color: color, size: 46, logo: trip.line?.transitLogo)
                         VStack(alignment: .leading, spacing: 3) {
-                            TrainNameRow(name: trip.line?.nameWithTripNumber ?? "Zug", font: .title3.weight(.bold), spacing: 8) {
+                            TrainNameRow(name: trip.line?.nameWithTripNumber ?? String(localized: "Zug"), font: .title3.weight(.bold), spacing: 8) {
                                 TrainSeriesTag(trip: trip, savedLeg: savedLeg)
                             }
                             if let origin = trip.origin, let destination = trip.destination {
@@ -458,7 +458,7 @@ struct TripContent: View {
     }
 
     /// Loads the lap before / after the one shown, at the top / bottom of the stops.
-    private func lapButton(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+    private func lapButton(_ title: LocalizedStringKey, systemImage: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 8) {
                 if isLoadingLap { ProgressView().controlSize(.small) } else { Image(systemName: systemImage) }
@@ -526,15 +526,15 @@ struct TripContent: View {
                                     .fontWeight(highlight.map { stop.station.isSamePlace(as: $0) } == true ? .bold : nil)
                                     .lineLimit(2)
                                 if isBoarding {
-                                    InfoChip(text: "Einstieg", systemImage: "arrow.up.right.circle.fill", tint: .punctual)
+                                    InfoChip(text: String(localized: "Einstieg"), systemImage: "arrow.up.right.circle.fill", tint: .punctual)
                                 } else if isExit {
-                                    InfoChip(text: "Ausstieg", systemImage: "arrow.down.right.circle.fill", tint: .brand)
+                                    InfoChip(text: String(localized: "Ausstieg"), systemImage: "arrow.down.right.circle.fill", tint: .brand)
                                 }
                                 if stop.isAdditional {
-                                    InfoChip(text: "Zusatzhalt", systemImage: "plus.circle.fill", tint: .brand)
+                                    InfoChip(text: String(localized: "Zusatzhalt"), systemImage: "plus.circle.fill", tint: .brand)
                                 }
                                 if stop.isManual {
-                                    InfoChip(text: "Selbst eingetragen", systemImage: "hand.point.up.left.fill", tint: .brand)
+                                    InfoChip(text: String(localized: "Selbst eingetragen"), systemImage: "hand.point.up.left.fill", tint: .brand)
                                 }
                                 if let operators = operatorStops[stop.id] {
                                     HStack(spacing: 6) {
@@ -712,7 +712,7 @@ struct LegTripSheet: View {
                         ErrorBanner(error: error)
                     }
                     if showsSavedStops {
-                        InfoChip(text: "Der ganze Zuglauf ist nicht mehr abrufbar. Hier siehst du die gespeicherten Halte deiner Fahrt.",
+                        InfoChip(text: String(localized: "Der ganze Zuglauf ist nicht mehr abrufbar. Hier siehst du die gespeicherten Halte deiner Fahrt."),
                                  systemImage: "clock.arrow.circlepath", tint: .secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -728,7 +728,7 @@ struct LegTripSheet: View {
                 .padding(.bottom, 16)
             }
             .background { AppBackground() }
-            .navigationTitle(leg.line?.displayName ?? "Zug")
+            .navigationTitle(leg.line?.displayName ?? String(localized: "Zug"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -793,7 +793,7 @@ struct LegTripSheet: View {
 
     private func load() async {
         guard let tripId else {
-            error = TransitError.notFound("Fahrt")
+            error = TransitError.notFound(String(localized: "Fahrt"))
             return
         }
         do {

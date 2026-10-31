@@ -43,10 +43,10 @@ public struct JourneyCalendarEvent: Sendable, Hashable {
         var lines = [Self.train(first, from: origin) + seat(first)]
         for (previous, next) in zip(trains, trains.dropFirst()) {
             let minutes = Int(next.departure.best.timeIntervalSince(previous.arrival.best) / 60)
-            lines.append("Umstieg in \(previous.destination.displayName) (\(max(minutes, 0)) Min.): "
+            lines.append(String(kit: "Umstieg in %@ (%lld Min.): ", previous.destination.displayName, max(minutes, 0))
                          + Self.train(next, from: previous.destination) + seat(next))
         }
-        if let link { lines += ["", "In BetterBahn öffnen: \(link.absoluteString)"] }
+        if let link { lines += ["", String(kit: "In BetterBahn öffnen: %@", link.absoluteString)] }
         notes = lines.joined(separator: "\n")
         url = link
     }
@@ -59,10 +59,10 @@ public struct JourneyCalendarEvent: Sendable, Hashable {
     private static func train(_ leg: Leg, from station: Station) -> String {
         var place: [String] = []
         if !leg.origin.isSamePlace(as: station) { place.append(leg.origin.displayName) }
-        if let platform = leg.departurePlatform?.best { place.append("Gl. \(platform)") }
-        var text = leg.line?.displayName ?? "Zug"
-        if !place.isEmpty { text += " ab " + place.joined(separator: ", ") }
-        if leg.cancelled { text += " – fällt aus" }
+        if let platform = leg.departurePlatform?.best { place.append(String(kit: "Gl. %@", platform)) }
+        var text = leg.line?.displayName ?? String(kit: "Zug")
+        if !place.isEmpty { text = String(kit: "%@ ab %@", text, place.joined(separator: ", ")) }
+        if leg.cancelled { text += String(kit: " – fällt aus") }
         return text
     }
 }
@@ -77,8 +77,8 @@ public enum CalendarAccessMode: String, Codable, Sendable, CaseIterable {
 
     public var displayName: String {
         switch self {
-        case .full: "Voller Zugriff"
-        case .addOnly: "Nur hinzufügen"
+        case .full: String(kit: "Voller Zugriff")
+        case .addOnly: String(kit: "Nur hinzufügen")
         }
     }
 }
@@ -94,9 +94,9 @@ public enum CalendarAutoAdd: String, Codable, Sendable, CaseIterable {
 
     public var displayName: String {
         switch self {
-        case .off: "Aus"
-        case .onDeparture: "Bei Abfahrt"
-        case .onSave: "Beim Speichern"
+        case .off: String(kit: "Aus")
+        case .onDeparture: String(kit: "Bei Abfahrt")
+        case .onSave: String(kit: "Beim Speichern")
         }
     }
 

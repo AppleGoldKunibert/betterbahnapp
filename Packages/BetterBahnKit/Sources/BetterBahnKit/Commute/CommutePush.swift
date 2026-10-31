@@ -102,6 +102,7 @@ public struct CommutePush: Sendable {
         var deviceToken: String
         var sandbox: Bool
         var journeys: [CommuteWatch]
+        var language = KitLocalization.notificationLanguage
     }
 
     private struct Answer: Decodable {

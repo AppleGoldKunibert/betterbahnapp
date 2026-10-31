@@ -1,0 +1,46 @@
+{
+  "sourceLanguage" : "de",
+  "strings" : {
+    "BetterBahn" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BetterBahn"
+          }
+        }
+      }
+    },
+    "BetterBahn kann nur Verbindungen öffnen, die aus dem DB Navigator oder von bahn.de geteilt wurden." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BetterBahn can only open connections shared from DB Navigator or bahn.de."
+          }
+        }
+      }
+    },
+    "Keine Verbindung" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No Connection"
+          }
+        }
+      }
+    },
+    "Schließen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Close"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

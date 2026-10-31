@@ -9,7 +9,7 @@ struct UpcomingTripsSection: View {
         let upcoming = model.upcomingJourneys
         VStack(alignment: .leading, spacing: 10) {
             FollowedCheckinsSection()
-            SectionHeader(title: "Deine Reisen", systemImage: "bookmark.fill",
+            SectionHeader(title: String(localized: "Deine Reisen"), systemImage: "bookmark.fill",
                           trailing: upcoming.isEmpty ? nil : "\(upcoming.count)")
             if upcoming.isEmpty {
                 Card {
@@ -104,8 +104,8 @@ struct SavedJourneyRow: View {
 
     private var dayLabel: String {
         guard let date = entry.journey.departure?.planned else { return "" }
-        if Calendar.current.isDateInToday(date) { return "Heute" }
-        if Calendar.current.isDateInTomorrow(date) { return "Morgen" }
+        if Calendar.current.isDateInToday(date) { return String(localized: "Heute") }
+        if Calendar.current.isDateInTomorrow(date) { return String(localized: "Morgen") }
         return date.formatted(.dateTime.weekday(.wide).day().month(.wide))
     }
 }
@@ -149,8 +149,8 @@ struct SaveJourneyButton: View {
     @State private var isCheckingReservation = false
 
     private var title: String {
-        if shortLabel { return model.isSaved(journey) ? "Gespeichert" : "Speichern" }
-        return model.isSaved(journey) ? "Reise gespeichert" : "Reise speichern"
+        if shortLabel { return model.isSaved(journey) ? String(localized: "Gespeichert") : String(localized: "Speichern") }
+        return model.isSaved(journey) ? String(localized: "Reise gespeichert") : String(localized: "Reise speichern")
     }
 
     var body: some View {
@@ -178,22 +178,22 @@ struct SaveJourneyButton: View {
 
     private var warningTitle: String {
         if warnings.seatReservation.isEmpty {
-            return warnings.bikeReservation.isEmpty ? "Achtung: Keine Fahrradmitnahme" : "Achtung: Fahrradreservierung nötig"
+            return warnings.bikeReservation.isEmpty ? String(localized: "Achtung: Keine Fahrradmitnahme") : String(localized: "Achtung: Fahrradreservierung nötig")
         }
-        return warnings.bikeReservation.isEmpty && warnings.noBikes.isEmpty ? "Achtung: Zug ist reservierungspflichtig" : "Achtung: Reservierung nötig"
+        return warnings.bikeReservation.isEmpty && warnings.noBikes.isEmpty ? String(localized: "Achtung: Zug ist reservierungspflichtig") : String(localized: "Achtung: Reservierung nötig")
     }
 
     private var warningMessage: String {
         func trains(_ legs: [Leg]) -> String { legs.compactMap { $0.line?.displayName }.formatted(.list(type: .and)) }
         var lines: [String] = []
         if !warnings.seatReservation.isEmpty {
-            lines.append("\(trains(warnings.seatReservation)): Nur mit Reservierung. Du kannst sie über „Via Ticket hinzufügen“ importieren.")
+            lines.append(String(localized: "\(trains(warnings.seatReservation)): Nur mit Reservierung. Du kannst sie über „Via Ticket hinzufügen“ importieren."))
         }
         if !warnings.bikeReservation.isEmpty {
-            lines.append("\(trains(warnings.bikeReservation)): Fahrrad nur mit Fahrradreservierung.")
+            lines.append(String(localized: "\(trains(warnings.bikeReservation)): Fahrrad nur mit Fahrradreservierung."))
         }
         if !warnings.noBikes.isEmpty {
-            lines.append("\(trains(warnings.noBikes)): Keine Fahrradmitnahme.")
+            lines.append(String(localized: "\(trains(warnings.noBikes)): Keine Fahrradmitnahme."))
         }
         return lines.joined(separator: "\n")
     }

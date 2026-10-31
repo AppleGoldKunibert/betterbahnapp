@@ -51,7 +51,7 @@ public struct VagonwebClient: Sendable {
     ///   - countries: where to look, in this order; the first with a composition wins.
     public func composition(category: String, number: String, on date: Date, route: [String]? = nil,
                             countries: [String]? = nil) async throws -> VagonwebComposition? {
-        guard Int(number) != nil else { throw TransitError.invalidInput("Zugnummer ungültig.") }
+        guard Int(number) != nil else { throw TransitError.invalidInput(String(kit: "Zugnummer ungültig.")) }
         for (index, country) in (countries ?? Self.countries(for: category)).enumerated() {
             let url = Self.trainURL(category: category, number: number, timetableYear: Self.timetableYear(of: date), country: country)
             let found: [VagonwebComposition]

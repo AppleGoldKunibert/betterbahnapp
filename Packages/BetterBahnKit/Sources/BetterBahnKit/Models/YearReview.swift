@@ -111,7 +111,7 @@ public struct YearReview: Sendable, Hashable {
             }
             for unit in units {
                 guard let number = unit.number else { continue }
-                let name = unit.name.map { "Tz \(number) „\($0)“" } ?? "Tz \(number)"
+                let name = unit.name.map { String(kit: "Tz %@ „%@“", number, $0) } ?? String(kit: "Tz %@", number)
                 trainsetCounts[name, default: 0] += 1
             }
         }
@@ -208,6 +208,6 @@ public struct YearReview: Sendable, Hashable {
 
     static func countryName(_ code: String) -> String {
         TrainSearchCountry.all.first { $0.code == code }?.name
-            ?? Locale(identifier: "de_DE").localizedString(forRegionCode: code) ?? code
+            ?? KitLocalization.locale.localizedString(forRegionCode: code) ?? code
     }
 }
