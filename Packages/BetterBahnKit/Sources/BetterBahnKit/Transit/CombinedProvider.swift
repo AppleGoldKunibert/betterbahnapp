@@ -65,7 +65,7 @@ public final class CombinedProvider: TransitProvider {
             }
         }
         try Task.checkCancellation()
-        guard let fallback else { throw TransitError.invalidInput("Keine Ersatzdatenquelle verfügbar.") }
+        guard let fallback else { throw TransitError.invalidInput(String(kit: "Keine Ersatzdatenquelle verfügbar.")) }
         return try await fallbackWork(fallback)
     }
 
@@ -358,7 +358,7 @@ public final class CombinedProvider: TransitProvider {
     }
 
     private func uncorrectedTrip(for leg: Leg) async throws -> Trip {
-        guard let tripId = leg.tripId else { throw TransitError.notFound("Fahrt") }
+        guard let tripId = leg.tripId else { throw TransitError.notFound(String(kit: "Fahrt")) }
         let id = await renumbered.id(for: tripId) ?? tripId
         do {
             return try await plainTrip(id: id, source: leg.source)
@@ -397,7 +397,7 @@ public final class CombinedProvider: TransitProvider {
     private func provider(for source: DataSource?) throws -> any TransitProvider {
         if source == primary.source { return primary }
         if let fallback, source == fallback.source { return fallback }
-        throw TransitError.invalidInput("Diese Datenquelle ist nicht mehr verfügbar. Bitte die Verbindung neu suchen.")
+        throw TransitError.invalidInput(String(kit: "Diese Datenquelle ist nicht mehr verfügbar. Bitte die Verbindung neu suchen."))
     }
 
     static func cursorSource(_ cursor: String) -> DataSource? {

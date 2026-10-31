@@ -26,8 +26,11 @@ public struct SeatReservation: Codable, Sendable, Hashable, Identifiable {
     /// "Wagen 2 · Platz 37, 38"
     public var description: String {
         var parts: [String] = []
-        if !coach.isEmpty { parts.append("Wagen \(coach)") }
-        if !seats.isEmpty { parts.append((seats.count == 1 ? "Platz " : "Plätze ") + seats.joined(separator: ", ")) }
+        if !coach.isEmpty { parts.append(String(kit: "Wagen %@", coach)) }
+        if !seats.isEmpty {
+            let list = seats.joined(separator: ", ")
+            parts.append(seats.count == 1 ? String(kit: "Platz %@", list) : String(kit: "Plätze %@", list))
+        }
         return parts.joined(separator: " · ")
     }
 

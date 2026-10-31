@@ -12,8 +12,8 @@ public enum DBOrder {
 
         public var errorDescription: String? {
             switch self {
-            case .unreadable: "Die Buchung konnte nicht gelesen werden."
-            case .noTickets: "In dieser Buchung ist kein Ticket enthalten."
+            case .unreadable: String(kit: "Die Buchung konnte nicht gelesen werden.")
+            case .noTickets: String(kit: "In dieser Buchung ist kein Ticket enthalten.")
             }
         }
     }
@@ -91,7 +91,7 @@ public enum DBOrder {
                     materialisationType: info?.materialisierungsArtId ?? "",
                     isPartnerDocument: info?.multiDokument ?? false,
                     issuer: nil,
-                    offerName: fee?.name ?? offers.first?.name ?? "Sitzplatzreservierung",
+                    offerName: fee?.name ?? offers.first?.name ?? String(kit: "Sitzplatzreservierung"),
                     travelClass: offers.first?.klasse.flatMap(Self.travelClass),
                     isTrainBound: false,
                     conditions: conditions,

@@ -2102,14 +2102,14 @@ enum ConnectionNotifier {
 
     static func notify(_ message: TrainMessage, leg: Leg, id: String) async {
         let content = UNMutableNotificationContent()
-        let line = leg.line?.name ?? "Zug"
+        let line = leg.line?.name ?? String(localized: "Zug")
         if let delay = leg.departure.delayMinutes, delay > 0 {
-            content.title = "\(line): +\(delay) Min."
+            content.title = String(localized: "\(line): +\(delay) Min.")
         } else {
-            content.title = "\(line): Verspätungsgrund"
+            content.title = String(localized: "\(line): Verspätungsgrund")
         }
-        let since = message.timestamp.map { " (seit \($0.timeString))" } ?? ""
-        content.body = message.text + since + "\n\(leg.origin.displayName) → \(leg.destination.displayName)"
+        let since = message.timestamp.map { String(localized: " (seit \($0.timeString))") } ?? ""
+        content.body = message.displayText + since + "\n\(leg.origin.displayName) → \(leg.destination.displayName)"
         content.sound = .default
         content.interruptionLevel = .timeSensitive
         let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)

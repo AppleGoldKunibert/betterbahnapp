@@ -10,11 +10,15 @@ public struct CommuteDelay: Sendable, Hashable {
     public var notificationID: String { "\(CommuteAlerts.delayPrefix)\(CommuteAlerts.legKey(leg))|\(minutes)" }
 
     /// "RE 3: +12 Min."
-    public var title: String { "\(leg.line?.displayName ?? "Zug"): +\(minutes) Min." }
+    public var title: String {
+        let train = leg.line?.displayName ?? String(kit: "Zug")
+        return String(kit: "%@: +%lld Min.", train, minutes)
+    }
 
     /// "Ab Eberswalde Hbf um 7:54 statt 7:42."
     public var message: String {
-        "Ab \(leg.origin.displayName) um \(RegularTrip.timeString(leg.departure.best)) statt \(RegularTrip.timeString(leg.departure.planned))."
+        String(kit: "Ab %@ um %@ statt %@.", leg.origin.displayName, RegularTrip.timeString(leg.departure.best),
+               RegularTrip.timeString(leg.departure.planned))
     }
 }
 

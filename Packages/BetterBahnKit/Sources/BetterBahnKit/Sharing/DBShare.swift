@@ -250,7 +250,7 @@ extension BahnDeClient {
         let response = try await get(url, as: SharedConnectionResponse.self)
         guard let legs = DBShare.legs(fromRecon: response.hinfahrtRecon),
               let first = legs.first, let last = legs.last
-        else { throw TransitError.decoding("Verbindung \(vbid)") }
+        else { throw TransitError.decoding(String(kit: "Verbindung %@", vbid)) }
         return SharedConnection(origin: first.origin, destination: last.destination, departure: first.departure,
                                 arrival: last.arrival, legs: legs, firstTrain: first.trainName, lastTrain: last.trainName)
     }

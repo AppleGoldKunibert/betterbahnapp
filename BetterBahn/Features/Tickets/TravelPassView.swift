@@ -19,10 +19,10 @@ struct TravelPassView: View {
                     }
 
                     if pass.isExpired() {
-                        notice("Abgelaufen. Füg die neue Karte mit einem aktuellen Screenshot hinzu.",
+                        notice(String(localized: "Abgelaufen. Füg die neue Karte mit einem aktuellen Screenshot hinzu."),
                                systemImage: "exclamationmark.triangle.fill", color: .slightDelay)
                     } else if !pass.isValid(), let from = pass.validFrom {
-                        notice("Gilt erst ab \(from.formatted(date: .abbreviated, time: .shortened)).",
+                        notice(String(localized: "Gilt erst ab \(from.formatted(date: .abbreviated, time: .shortened))."),
                                systemImage: "clock.fill", color: .slightDelay)
                     }
 

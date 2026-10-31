@@ -74,17 +74,17 @@ struct WeatherDetails: View {
     /// "Regen 60 % · 2,7 mm", without the parts the forecast lacks.
     private var rainText: String? {
         var parts: [String] = []
-        if let chance = forecast.precipitationProbability { parts.append("\(chance) %") }
+        if let chance = forecast.precipitationProbability { parts.append(String(localized: "\(chance) %")) }
         if let amount = forecast.precipitation, amount > 0 {
             parts.append("\(amount.formatted(.number.precision(.fractionLength(1)))) mm")
         }
-        return parts.isEmpty ? nil : "Regen " + parts.joined(separator: " · ")
+        return parts.isEmpty ? nil : String(localized: "Regen \(parts.joined(separator: " · "))")
     }
 
     private var hourLabel: String {
         let date = forecast.date
-        if Calendar.current.isDateInToday(date) { return "heute \(date.timeString)" }
-        if Calendar.current.isDateInTomorrow(date) { return "morgen \(date.timeString)" }
+        if Calendar.current.isDateInToday(date) { return String(localized: "heute \(date.timeString)") }
+        if Calendar.current.isDateInTomorrow(date) { return String(localized: "morgen \(date.timeString)") }
         return "\(date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))) \(date.timeString)"
     }
 }

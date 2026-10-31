@@ -299,8 +299,8 @@ enum FollowedCheckinPushError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .notificationsDenied: "Mitteilungen sind für BetterBahn aus. Erlaube sie in den iOS-Einstellungen."
-        case .noDeviceToken: "iOS hat keine Mitteilungen eingerichtet. Bitte versuch es später noch mal."
+        case .notificationsDenied: String(localized: "Mitteilungen sind für BetterBahn aus. Erlaube sie in den iOS-Einstellungen.")
+        case .noDeviceToken: String(localized: "iOS hat keine Mitteilungen eingerichtet. Bitte versuch es später noch mal.")
         }
     }
 }
@@ -415,8 +415,8 @@ struct FollowedCheckinsSection: View {
 
     private func toggleButton(_ people: [FollowedPerson]) -> some View {
         let title = people.count == 1
-            ? "\(people[0].user.displayName) ist eingecheckt"
-            : "\(people.count) Leute sind eingecheckt"
+            ? String(localized: "\(people[0].user.displayName) ist eingecheckt")
+            : String(localized: "\(people.count) Leute sind eingecheckt")
         return Button {
             withAnimation(.snappy) { showsList.toggle() }
         } label: {
@@ -577,7 +577,7 @@ private struct FollowedCheckinCard: View {
                 VStack(alignment: .leading, spacing: 5) {
                     if showsPerson {
                         HStack(spacing: 4) {
-                            Text(status.user?.displayName ?? "Träwelling-Nutzer")
+                            Text(status.user?.displayName ?? String(localized: "Träwelling-Nutzer"))
                                 .font(.subheadline.weight(.semibold))
                             if let username = status.user?.username {
                                 Text("@\(username)")
@@ -806,7 +806,7 @@ private struct FollowedRideMap: View {
                     }
                 }
                 if let position {
-                    Annotation(route.line?.name ?? "Zug", coordinate: position.coordinate.clCoordinate, anchor: .center) {
+                    Annotation(route.line?.name ?? String(localized: "Zug"), coordinate: position.coordinate.clCoordinate, anchor: .center) {
                         Image(systemName: route.line?.symbolName ?? "tram.fill")
                             .font(.system(size: 12, weight: .bold))
                             .foregroundStyle(.white)

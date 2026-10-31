@@ -356,7 +356,7 @@ struct BoardWidgetView: View {
                         HStack(spacing: 4) {
                             Text(row.departure.planned, style: .time).monospacedDigit().strikethrough(row.cancelled)
                             Text(row.lineName).lineLimit(1).fixedSize()
-                            Text(entry.isRoute ? row.arrival.map { "an \($0.best.formatted(date: .omitted, time: .shortened))" } ?? "" : row.destination)
+                            Text(entry.isRoute ? row.arrival.map { String(localized: "an \($0.best.formatted(date: .omitted, time: .shortened))") } ?? "" : row.destination)
                                 .lineLimit(1)
                             Spacer(minLength: 0)
                             DelayBadge(minutes: row.delayMinutes, cancelled: row.cancelled)
@@ -376,7 +376,7 @@ struct BoardWidgetView: View {
         if entry.station == nil {
             Text("Bahnhof wählen")
         } else if let row = rows.first {
-            let delay = row.cancelled ? " Ausfall" : row.delayMinutes.map { $0 > 0 ? " +\($0)" : "" } ?? ""
+            let delay = row.cancelled ? " " + String(localized: "Ausfall") : row.delayMinutes.map { $0 > 0 ? " +\($0)" : "" } ?? ""
             Text("\(row.departure.planned.formatted(date: .omitted, time: .shortened)) \(row.lineName) → \(row.destination)\(delay)")
         } else {
             Text(entry.failed ? "Keine Daten" : entry.isRoute ? "Keine Verbindung" : "Keine Abfahrten")
@@ -447,9 +447,9 @@ private struct WideBoardRow: View {
 
     static func transfersText(_ transfers: Int?) -> String {
         switch transfers ?? 0 {
-        case 0: "direkt"
-        case 1: "1 Umstieg"
-        case let count: "\(count) Umstiege"
+        case 0: String(localized: "direkt")
+        case 1: String(localized: "1 Umstieg")
+        case let count: String(localized: "\(count) Umstiege")
         }
     }
 }

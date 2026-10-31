@@ -173,9 +173,9 @@ struct RegularTripsView: View {
 
     private func details(_ trip: RegularTrip) -> String {
         if let pausedUntil = trip.pausedUntil, trip.isPaused(on: .now) {
-            return "\(trip.weekdaysDescription) · pausiert bis \(pausedUntil.formatted(.dateTime.day().month()))"
+            return String(localized: "\(trip.weekdaysDescription) · pausiert bis \(pausedUntil.formatted(.dateTime.day().month()))")
         }
-        return "\(trip.weekdaysDescription) · Frage \(trip.questionLead) Min. vorher"
+        return String(localized: "\(trip.weekdaysDescription) · Frage \(trip.questionLead) Min. vorher")
     }
 }
 

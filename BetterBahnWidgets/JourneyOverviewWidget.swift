@@ -189,9 +189,9 @@ struct JourneyWidgetView: View {
 
     private func heading(_ state: JourneyWidgetState) -> String {
         switch state.phase {
-        case .beforeDeparture: Calendar.current.isDateInToday(state.nextStopTime) ? "Abfahrt" : "Abfahrt \(state.nextStopTime.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))"
-        case .riding, .transfer: "Nächster Halt"
-        case .arrived: "Angekommen"
+        case .beforeDeparture: Calendar.current.isDateInToday(state.nextStopTime) ? String(localized: "Abfahrt") : String(localized: "Abfahrt \(state.nextStopTime.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))")
+        case .riding, .transfer: String(localized: "Nächster Halt")
+        case .arrived: String(localized: "Angekommen")
         }
     }
 

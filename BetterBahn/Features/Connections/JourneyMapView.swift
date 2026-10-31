@@ -16,7 +16,7 @@ struct JourneyMapView: View {
         NavigationStack {
             JourneyMap(journey: journey, version: mapVersion, trains: trains, onMarkerTap: { selectedTransfer = $0 })
                 .ignoresSafeArea(edges: .top)
-                .navigationTitle("\(journey.legs.first?.origin.displayName ?? "Reise") → \(finalDestination.displayName)")
+                .navigationTitle("\(journey.legs.first?.origin.displayName ?? String(localized: "Reise")) → \(finalDestination.displayName)")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -313,13 +313,13 @@ final class JourneyMarkerAnnotation: NSObject, MKAnnotation {
     @objc dynamic var subtitle: String? {
         var parts: [String] = []
         if let arrival = transfer.arrivalTime {
-            parts.append("An: \(arrival.formatted(date: .omitted, time: .shortened))")
+            parts.append(String(localized: "An: \(arrival.formatted(date: .omitted, time: .shortened))"))
         }
         if let departure = transfer.departureTime {
-            parts.append("Ab: \(departure.formatted(date: .omitted, time: .shortened))")
+            parts.append(String(localized: "Ab: \(departure.formatted(date: .omitted, time: .shortened))"))
         }
         if let platform = transfer.platform?.best {
-            parts.append("Gleis \(platform)")
+            parts.append(String(localized: "Gleis \(platform)"))
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }

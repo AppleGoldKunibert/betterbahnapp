@@ -37,9 +37,9 @@ struct ReservationRow: View {
             guard let request, !reservation.coach.isEmpty,
                   let sequence = try? await model.coachSequence(for: request), !sequence.coaches.isEmpty else { return }
             hint = switch sequence.position(ofCoach: reservation.coach, train: reservation.trainName) {
-            case .sectors(let names, _): "Wagen \(reservation.coach) hält in Abschnitt \(names.joined(separator: "/"))"
+            case .sectors(let names, _): String(localized: "Wagen \(reservation.coach) hält in Abschnitt \(names.joined(separator: "/"))")
             case .noSectors: nil
-            case .coachMissing: "Wagen \(reservation.coach) ist in der aktuellen Wagenreihung nicht dabei"
+            case .coachMissing: String(localized: "Wagen \(reservation.coach) ist in der aktuellen Wagenreihung nicht dabei")
             }
         }
     }
@@ -61,7 +61,7 @@ struct SaveSeatButton: View {
         Button { picking = true } label: {
             // Only the symbol next to a long title.
             ViewThatFits(in: .horizontal) {
-                Label(saved?.description ?? "Sitzplatz speichern", systemImage: symbol)
+                Label(saved?.description ?? String(localized: "Sitzplatz speichern"), systemImage: symbol)
                 Image(systemName: symbol)
             }
             .font(.caption.weight(.semibold))
@@ -70,7 +70,7 @@ struct SaveSeatButton: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(saved.map { "Dein Sitzplatz: \($0.description)" } ?? "Sitzplatz speichern")
+        .accessibilityLabel(saved.map { String(localized: "Dein Sitzplatz: \($0.description)") } ?? String(localized: "Sitzplatz speichern"))
         .sheet(isPresented: $picking) {
             SaveSeatSheet(leg: leg, coaches: coaches, saved: saved)
         }

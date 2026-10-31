@@ -125,32 +125,32 @@ public enum PassengerRights {
         }
         func trains(of plan: Journey) -> String {
             plan.transitLegs.map { leg in
-                let name = leg.line?.displayName ?? "Zug"
+                let name = leg.line?.displayName ?? String(kit: "Zug")
                 return "\(name): \(leg.origin.displayName) \(time(leg.departure.planned)) → \(leg.destination.displayName) \(time(leg.arrival.planned))"
             }.joined(separator: "\n")
         }
         let original = bookedPlan(replacedBy: journey, earlierPlans: earlierPlans)
         let booked = original ?? journey
         var fields: [RequestField] = []
-        if let departure = booked.departure?.planned { fields.append(RequestField(label: "Reisedatum", value: day(departure))) }
+        if let departure = booked.departure?.planned { fields.append(RequestField(label: String(kit: "Reisedatum"), value: day(departure))) }
         if let first = booked.legs.first, let last = booked.legs.last {
-            fields.append(RequestField(label: "Von", value: first.origin.displayName))
-            fields.append(RequestField(label: "Nach", value: last.destination.displayName))
+            fields.append(RequestField(label: String(kit: "Von"), value: first.origin.displayName))
+            fields.append(RequestField(label: String(kit: "Nach"), value: last.destination.displayName))
         }
-        if let departure = booked.departure?.planned { fields.append(RequestField(label: "Geplante Abfahrt", value: time(departure))) }
+        if let departure = booked.departure?.planned { fields.append(RequestField(label: String(kit: "Geplante Abfahrt"), value: time(departure))) }
         let bookedTrains = trains(of: booked)
         if original == nil {
-            if !bookedTrains.isEmpty { fields.append(RequestField(label: "Züge", value: bookedTrains)) }
+            if !bookedTrains.isEmpty { fields.append(RequestField(label: String(kit: "Züge"), value: bookedTrains)) }
         } else {
-            if !bookedTrains.isEmpty { fields.append(RequestField(label: "Gebuchte Züge", value: bookedTrains)) }
+            if !bookedTrains.isEmpty { fields.append(RequestField(label: String(kit: "Gebuchte Züge"), value: bookedTrains)) }
             let takenTrains = trains(of: journey)
-            if !takenTrains.isEmpty { fields.append(RequestField(label: "Gefahrene Züge", value: takenTrains)) }
+            if !takenTrains.isEmpty { fields.append(RequestField(label: String(kit: "Gefahrene Züge"), value: takenTrains)) }
         }
-        fields.append(RequestField(label: "Geplante Ankunft", value: time(claim.plannedArrival)))
-        fields.append(RequestField(label: "Tatsächliche Ankunft", value: time(claim.actualArrival)))
-        fields.append(RequestField(label: "Verspätung am Ziel", value: "\(claim.delayMinutes) Minuten"))
+        fields.append(RequestField(label: String(kit: "Geplante Ankunft"), value: time(claim.plannedArrival)))
+        fields.append(RequestField(label: String(kit: "Tatsächliche Ankunft"), value: time(claim.actualArrival)))
+        fields.append(RequestField(label: String(kit: "Verspätung am Ziel"), value: String(kit: "%lld Minuten", claim.delayMinutes)))
         if !orderNumbers.isEmpty {
-            fields.append(RequestField(label: "Auftragsnummer", value: orderNumbers.joined(separator: ", ")))
+            fields.append(RequestField(label: String(kit: "Auftragsnummer"), value: orderNumbers.joined(separator: ", ")))
         }
         return fields
     }

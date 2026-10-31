@@ -129,7 +129,7 @@ struct CheckinDetailSheet: View {
 
     private var fellowTravellersSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SectionHeader(title: "Mitreisende", systemImage: "person.2.fill", trailing: "\(fellowTravellers.count)")
+            SectionHeader(title: String(localized: "Mitreisende"), systemImage: "person.2.fill", trailing: "\(fellowTravellers.count)")
             Card {
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(Array(fellowTravellers.enumerated()), id: \.element.id) { index, fellow in
@@ -162,7 +162,7 @@ struct CheckinDetailSheet: View {
                 .clipShape(.circle)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 4) {
-                        Text(fellow.user?.displayName ?? "Träwelling-Nutzer")
+                        Text(fellow.user?.displayName ?? String(localized: "Träwelling-Nutzer"))
                             .font(.subheadline.weight(.semibold))
                         if let username = fellow.user?.username {
                             Text("@\(username)")
@@ -189,12 +189,12 @@ struct CheckinDetailSheet: View {
     private var editCard: some View {
         Card {
             VStack(alignment: .leading, spacing: 14) {
-                EmojiMessageField(message: $message, emojis: emojis, placeholder: "Text (optional)", isFocused: $messageFocused)
+                EmojiMessageField(message: $message, emojis: emojis, placeholder: String(localized: "Text (optional)"), isFocused: $messageFocused)
                 Divider()
-                MenuPickerRow(title: "Sichtbarkeit", icon: "eye.fill", color: .purple, selection: $visibility,
+                MenuPickerRow(title: String(localized: "Sichtbarkeit"), icon: "eye.fill", color: .purple, selection: $visibility,
                               options: TraewellingVisibility.allCases) { $0.label }
                 Divider()
-                MenuPickerRow(title: "Reiseart", icon: "briefcase.fill", color: .orange, selection: $business,
+                MenuPickerRow(title: String(localized: "Reiseart"), icon: "briefcase.fill", color: .orange, selection: $business,
                               options: TraewellingBusiness.allCases) { $0.label }
                 Divider()
                 tagsEditor

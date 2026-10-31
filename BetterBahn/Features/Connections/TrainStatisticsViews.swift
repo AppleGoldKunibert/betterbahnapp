@@ -48,7 +48,7 @@ struct TrainStatisticsRows {
         func addCancellations(_ text: String, share: Double, percent: String) {
             let tint: Color = share >= 0.1 ? .heavyDelay : .slightDelay
             add("xmark.octagon.fill", text, tint: tint)
-            if cancellations == nil { cancellations = Headline(text: "\(percent) Ausfälle", tint: tint) }
+            if cancellations == nil { cancellations = Headline(text: String(localized: "\(percent) Ausfälle"), tint: tint) }
         }
 
         for stop in stops {
@@ -56,27 +56,29 @@ struct TrainStatisticsRows {
             let name = stop.station.displayName
             let summary = stop.role == .departure ? figures.departureSummary() : figures.arrivalSummary()
             if let summary {
-                let verb = stop.role == .departure ? "Abfahrt" : "Ankunft"
-                add("clock.fill", "\(verb) in \(name): im Schnitt \(Self.minutes(summary.average)), \(Self.percentText(summary.onTimeShare)) pünktlich",
+                let average = Self.minutes(summary.average), onTime = Self.percentText(summary.onTimeShare)
+                add("clock.fill", stop.role == .departure
+                    ? String(localized: "Abfahrt in \(name): im Schnitt \(average), \(onTime) pünktlich")
+                    : String(localized: "Ankunft in \(name): im Schnitt \(average), \(onTime) pünktlich"),
                     tint: delayColor(summary.average))
-                headline = Headline(text: "\(Self.percentText(summary.onTimeShare)) pünktlich", tint: delayColor(summary.average))
+                headline = Headline(text: String(localized: "\(onTime) pünktlich"), tint: delayColor(summary.average))
             }
             if let share = figures.cancelledShare, share >= 0.01, let text = Self.percent(share) {
-                addCancellations("Fällt in \(name) bei \(text) der Fahrten aus", share: share, percent: text)
+                addCancellations(String(localized: "Fällt in \(name) bei \(text) der Fahrten aus"), share: share, percent: text)
             }
         }
 
         // The whole run cancelled only matters when no stop said it already.
         if !rows.contains(where: { $0.systemImage == "xmark.octagon.fill" }),
            let share = lookup.statistics.cancelledShare, let text = Self.percent(share), share >= 0.01 {
-            addCancellations("Fällt bei \(text) der Fahrten aus", share: share, percent: text)
+            addCancellations(String(localized: "Fällt bei \(text) der Fahrten aus"), share: share, percent: text)
         }
 
         if TrainStatistics.testMode { rows += Self.testRows(lookup: lookup, stops: stops, from: rows.count) }
 
         guard !rows.isEmpty else { return nil }
         self.rows = rows
-        self.subtitle = "Letzte \(lookup.statistics.days) Tage · \(lookup.statistics.runs) Fahrten"
+        self.subtitle = String(localized: "Letzte \(lookup.statistics.days) Tage · \(lookup.statistics.runs) Fahrten")
         self.headline = headline ?? cancellations
     }
 
@@ -108,7 +110,7 @@ struct TrainStatisticsRows {
     static func minutes(_ value: Int) -> String { value >= 0 ? "+\(value) min" : "\(value) min" }
 
     /// "33 %".
-    static func percentText(_ share: Double) -> String { "\(Int((share * 100).rounded())) %" }
+    static func percentText(_ share: Double) -> String { String(localized: "\(Int((share * 100).rounded())) %") }
 
     /// "33 %"; nil when it rounds to nothing.
     static func percent(_ share: Double) -> String? {
@@ -120,9 +122,11 @@ struct TrainStatisticsRows {
     static func transferWarning(station: String? = nil, outlook: TrainStatistics.Stop.TransferOutlook) -> String? {
         guard outlook.isRisky else { return nil }
         let works = Int(((1 - outlook.lateShare) * 10).rounded())
-        let often = works > 0 ? "\(works) von 10 Mal" : "fast nie"
-        guard let station else { return "Klappt \(often)" }
-        return "Umstieg in \(station) klappt \(often)"
+        guard let station else {
+            return works > 0 ? String(localized: "Klappt \(works) von 10 Mal") : String(localized: "Klappt fast nie")
+        }
+        return works > 0 ? String(localized: "Umstieg in \(station) klappt \(works) von 10 Mal")
+            : String(localized: "Umstieg in \(station) klappt fast nie")
     }
 }
 
@@ -137,10 +141,11 @@ struct PlatformChangeHint: Hashable {
         guard let outlook, outlook.changeShare > 0.1, let changed = TrainStatisticsRows.percent(outlook.changeShare) else { return nil }
         let onlyOne = outlook.alternatives.count == 1
         let others = outlook.alternatives.prefix(2).compactMap { option -> String? in
-            if onlyOne { return "Gleis \(option.platform)" }
-            return TrainStatisticsRows.percent(option.shareOfChanges).map { "Gleis \(option.platform) (\($0))" }
+            if onlyOne { return String(localized: "Gleis \(option.platform)") }
+            return TrainStatisticsRows.percent(option.shareOfChanges).map { String(localized: "Gleis \(option.platform) (\($0))") }
         }
-        text = "Gleiswechsel in \(changed) der Fälle" + (others.isEmpty ? "" : " (meist \(others.joined(separator: " / ")))")
+        text = others.isEmpty ? String(localized: "Gleiswechsel in \(changed) der Fälle")
+            : String(localized: "Gleiswechsel in \(changed) der Fälle (meist \(others.joined(separator: " / ")))")
         severe = outlook.changeShare >= 0.3
     }
 }

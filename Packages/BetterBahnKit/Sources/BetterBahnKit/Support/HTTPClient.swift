@@ -12,13 +12,13 @@ public enum TransitError: Error, Sendable, Equatable, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .http(let status, _): "Serverfehler (\(status))"
-        case .rateLimited: "Zu viele Anfragen – bitte kurz warten."
-        case .unauthorized: "Anmeldung bei unserem Server fehlgeschlagen. Bitte versuch es gleich noch mal."
-        case .decoding(let detail): "Antwort konnte nicht gelesen werden: \(detail)"
-        case .notFound(let what): "\(what) nicht gefunden."
+        case .http(let status, _): String(kit: "Serverfehler (%lld)", status)
+        case .rateLimited: String(kit: "Zu viele Anfragen – bitte kurz warten.")
+        case .unauthorized: String(kit: "Anmeldung bei unserem Server fehlgeschlagen. Bitte versuch es gleich noch mal.")
+        case .decoding(let detail): String(kit: "Antwort konnte nicht gelesen werden: %@", detail)
+        case .notFound(let what): String(kit: "%@ nicht gefunden.", what)
         case .invalidInput(let detail): detail
-        case .timeout: "Keine Antwort. Bitte versuch es später noch mal."
+        case .timeout: String(kit: "Keine Antwort. Bitte versuch es später noch mal.")
         }
     }
 

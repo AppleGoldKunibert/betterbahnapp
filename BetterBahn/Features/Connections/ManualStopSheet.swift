@@ -26,13 +26,13 @@ struct ManualStopSheet: View {
             ScrollView {
                 VStack(spacing: 16) {
                     Card(padding: 0) {
-                        StationInput(label: "Halt", placeholder: "Wo hält der Zug?", systemImage: "mappin.circle.fill",
+                        StationInput(label: String(localized: "Halt"), placeholder: String(localized: "Wo hält der Zug?"), systemImage: "mappin.circle.fill",
                                      station: $station, focus: $focused, focusValue: .station)
                             .clipShape(.rect(cornerRadius: 22, style: .continuous))
                     }
                     Card {
                         DatePicker(selection: $time, in: earliest..., displayedComponents: .hourAndMinute) {
-                            OptionLabel(title: "Ankunft", subtitle: "Wann der Zug dort hält", icon: "clock")
+                            OptionLabel(title: String(localized: "Ankunft"), subtitle: String(localized: "Wann der Zug dort hält"), icon: "clock")
                         }
                     }
                     Text("Für Halte, die nicht im Fahrplan stehen, z. B. bei einer Störung.")
