@@ -93,15 +93,18 @@ struct MinimumStayPopover: View {
     @Binding var isPresented: Bool
 
     var body: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 16) {
             Text("Mindestaufenthalt in \(stationName ?? String(localized: "diesem Ort"))")
                 .font(.subheadline.weight(.semibold))
                 .multilineTextAlignment(.center)
             Stepper("\(minutes) Minuten", value: $minutes, in: 0...120, step: 5)
                 .fixedSize()
-            Button("Fertig") { isPresented = false }
-                .buttonStyle(.glassProminent)
-                .tint(.brand)
+            Button {
+                isPresented = false
+            } label: {
+                Text("Fertig").font(.subheadline.weight(.semibold))
+            }
+            .pageButtonStyle(.prominent)
         }
         .padding()
         .frame(minWidth: 260)
@@ -112,6 +115,7 @@ struct MinimumStayPopover: View {
 /// Quick presets and toggle chips for choosing which vehicle types may be used.
 struct ProductChips: View {
     @Binding var products: Set<Product>
+    @Environment(\.appDesign) private var design
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -122,6 +126,7 @@ struct ProductChips: View {
             }
             .font(.caption.weight(.semibold))
             .buttonStyle(.bordered)
+            .buttonBorderShape(.capsule)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 8)], alignment: .leading, spacing: 8) {
                 ForEach(Product.allCases, id: \.self) { product in
                     let isOn = products.contains(product)
@@ -136,9 +141,20 @@ struct ProductChips: View {
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 8)
                             .foregroundStyle(isOn ? Color.white : Color.primary)
-                            .background(isOn ? product.color : Color.secondary.opacity(0.15), in: .capsule)
+                            .background {
+                                if isOn {
+                                    Capsule().fill(product.color)
+                                } else if design == .fahrkarte {
+                                    // Flat like the ticket: an outline instead of a grey fill.
+                                    Capsule().strokeBorder(Color.primary.opacity(0.15), lineWidth: 1)
+                                } else {
+                                    Capsule().fill(Color.secondary.opacity(0.15))
+                                }
+                            }
+                            .contentShape(.capsule)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityAddTraits(isOn ? .isSelected : [])
                 }
             }
         }

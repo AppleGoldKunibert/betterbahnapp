@@ -7,6 +7,7 @@ import SwiftUI
 /// lists only the kinds of trains and countries picked in Settings → Zugschnellsuche.
 struct TrainSearchOverlay: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.appDesign) private var design
     @State private var text = ""
     @State private var date = Date.now
     @State private var showsCalendar = false
@@ -115,12 +116,13 @@ struct TrainSearchOverlay: View {
     // MARK: Bar
 
     private var bar: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 12) {
             Image(systemName: "magnifyingglass")
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(.secondary)
             TextField("Zugnummer, z. B. ICE 123", text: $text)
-                .font(.title3.weight(.medium))
+                .font(.title3.weight(design == .fahrkarte ? .semibold : .medium))
+                .fontDesign(design == .fahrkarte ? .rounded : nil)
                 .textInputAutocapitalization(.characters)
                 .autocorrectionDisabled()
                 .submitLabel(.search)
@@ -158,9 +160,9 @@ struct TrainSearchOverlay: View {
             .accessibilityLabel(isToday ? String(localized: "Tag wählen, heute")
                                 : String(localized: "Tag wählen, \(date.formatted(date: .complete, time: .omitted))"))
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 14)
-        .glassEffect(.regular, in: .capsule)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .modifier(OverlaySurface(shape: Capsule()))
         .onTapGesture { focused = true }
     }
 
@@ -179,7 +181,7 @@ struct TrainSearchOverlay: View {
             }
         }
         .padding(12)
-        .glassEffect(.regular, in: .rect(cornerRadius: 26))
+        .modifier(OverlaySurface(shape: RoundedRectangle(cornerRadius: 26, style: .continuous)))
         // No tap gesture here, not even an empty one: it would block the DatePicker's day taps.
     }
 
@@ -204,8 +206,7 @@ struct TrainSearchOverlay: View {
                         Label("Erneut versuchen", systemImage: "arrow.clockwise")
                             .font(.subheadline.weight(.semibold))
                     }
-                    .buttonStyle(.glass)
-                    .tint(.brand)
+                    .pageButtonStyle()
                 }
                 .padding(16)
             } else if let results {
@@ -220,7 +221,7 @@ struct TrainSearchOverlay: View {
                 } else {
                     ForEach(Array(results.enumerated()), id: \.element.id) { index, result in
                         if index > 0 {
-                            Divider().padding(.leading, 60)
+                            Divider().padding(.leading, 64)
                         }
                         Button {
                             focused = false
@@ -234,7 +235,7 @@ struct TrainSearchOverlay: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: .rect(cornerRadius: 26))
+        .modifier(OverlaySurface(shape: RoundedRectangle(cornerRadius: 26, style: .continuous)))
         .onTapGesture {}
     }
 
@@ -278,14 +279,17 @@ struct TrainSearchOverlay: View {
 /// One train found by its number: what it is and where it runs.
 private struct TrainSearchRow: View {
     let result: TrainSearchResult
+    @Environment(\.appDesign) private var design
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 16) {
             IconTile(systemImage: result.product.symbolName(nightTrain: result.product.isTrain && Line.isNightTrainCategory(result.category)),
                      color: result.product.color, size: 34, logo: TransitLogo(product: result.product, operatorName: nil))
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(result.name).font(.headline)
+                HStack(spacing: 8) {
+                    Text(result.name)
+                        .font(.headline)
+                        .fontDesign(design == .fahrkarte ? .rounded : nil)
                     if let line = result.lineName {
                         InfoChip(text: line, systemImage: "point.topleft.down.to.point.bottomright.curvepath")
                     }
@@ -300,8 +304,8 @@ private struct TrainSearchRow: View {
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.tertiary)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
         .contentShape(.rect)
     }
 }
@@ -312,6 +316,7 @@ struct TrainSearchResultView: View {
     let result: TrainSearchResult
 
     @Environment(AppModel.self) private var model
+    @Environment(\.appDesign) private var design
     @State private var entry: BoardEntry?
     @State private var trip: Trip?
     @State private var error: Error?
@@ -355,32 +360,76 @@ struct TrainSearchResultView: View {
         .task(id: trip?.id) { await checkLivePosition() }
     }
 
+    /// Minimal: a card with the train and where it runs. Fahrkarte: a ticket, the train above the perforation,
+    /// "Von" and "Nach" and the day below it.
+    @ViewBuilder
     private var header: some View {
-        Card {
-            HStack(spacing: 12) {
-                IconTile(systemImage: (trip?.line?.product ?? result.product).symbolName, color: color, size: 46,
-                         logo: trip == nil ? TransitLogo(product: result.product, operatorName: nil) : trip?.line?.transitLogo)
-                VStack(alignment: .leading, spacing: 3) {
-                    if let trip {
-                        TrainNameRow(name: trip.line?.nameWithTripNumber ?? result.name, font: .title3.weight(.bold), spacing: 8) {
-                            TrainSeriesTag(trip: trip, savedLeg: nil)
-                        }
-                    } else {
-                        Text(result.name).font(.title3.weight(.bold))
+        if design == .fahrkarte {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 12) {
+                    headerIcon(size: 40)
+                    trainName
+                    Spacer(minLength: 0)
+                }
+                .padding(16)
+                TicketPerforation()
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .top, spacing: 16) {
+                        TicketValueField(label: String(localized: "Von"), value: origin, font: .headline)
+                        TicketValueField(label: String(localized: "Nach"), value: destination, font: .headline)
                     }
-                    Text("\(trip?.origin?.displayName ?? result.origin) → \(trip?.destination?.displayName ?? result.destination)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    if let departure = trip?.stopovers.lazy.compactMap(\.departure).first?.planned {
+                    if let departure = firstDeparture {
                         Text(departure.formatted(.dateTime.weekday(.wide).day().month().hour().minute()))
                             .font(.caption)
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(.secondary)
                     }
                 }
-                Spacer(minLength: 0)
+                .padding(16)
+            }
+            .fontDesign(.rounded)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .ticketBackground()
+            .environment(\.cardSurface, Color.ticket)
+        } else {
+            Card {
+                HStack(spacing: 12) {
+                    headerIcon(size: 46)
+                    VStack(alignment: .leading, spacing: 4) {
+                        trainName
+                        Text("\(origin) → \(destination)")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        if let departure = firstDeparture {
+                            Text(departure.formatted(.dateTime.weekday(.wide).day().month().hour().minute()))
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
             }
         }
     }
+
+    private func headerIcon(size: CGFloat) -> some View {
+        IconTile(systemImage: (trip?.line?.product ?? result.product).symbolName, color: color, size: size,
+                 logo: trip == nil ? TransitLogo(product: result.product, operatorName: nil) : trip?.line?.transitLogo)
+    }
+
+    @ViewBuilder
+    private var trainName: some View {
+        if let trip {
+            TrainNameRow(name: trip.line?.nameWithTripNumber ?? result.name, font: .title3.weight(.bold), spacing: 8) {
+                TrainSeriesTag(trip: trip, savedLeg: nil)
+            }
+        } else {
+            Text(result.name).font(.title3.weight(.bold))
+        }
+    }
+
+    private var origin: String { trip?.origin?.displayName ?? result.origin }
+    private var destination: String { trip?.destination?.displayName ?? result.destination }
+    private var firstDeparture: Date? { trip?.stopovers.lazy.compactMap(\.departure).first?.planned }
 
     @ViewBuilder
     private func options(entry: BoardEntry, trip: Trip) -> some View {
@@ -624,6 +673,26 @@ private struct OptionRow: View {
                         .foregroundStyle(.tertiary)
                 }
             }
+        }
+    }
+}
+
+/// The search's bar and panels over the page. Minimal: solid card surfaces with a soft shadow. Fahrkarte:
+/// Liquid Glass.
+private struct OverlaySurface<S: Shape>: ViewModifier {
+    let shape: S
+    @Environment(\.appDesign) private var design
+
+    func body(content: Content) -> some View {
+        if design == .fahrkarte {
+            content.glassEffect(.regular, in: shape)
+        } else {
+            content
+                .background {
+                    shape.fill(Color.card)
+                        .shadow(color: .black.opacity(0.15), radius: 16, y: 6)
+                }
+                .overlay { shape.stroke(Color.hairline, lineWidth: 1) }
         }
     }
 }
