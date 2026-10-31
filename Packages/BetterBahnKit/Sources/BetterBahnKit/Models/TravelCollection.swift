@@ -67,6 +67,12 @@ public struct TravelCollection: Sendable, Hashable {
         /// Newest first.
         public var sightings: [Sighting]
 
+        /// The Tz of a trainset or livery item ("trainset:9018" → 9018); nil for any other.
+        public var unitNumber: Int? {
+            guard category == .trainsets || category == .liveries else { return nil }
+            return id.split(separator: ":").last.flatMap { Int($0) }
+        }
+
         public var isCollected: Bool { !sightings.isEmpty }
         public var firstSighting: Sighting? { sightings.last }
     }
@@ -81,6 +87,8 @@ public struct TravelCollection: Sendable, Hashable {
     }
 
     public var groups: [Group]
+    /// The rides each Tz was seen on (newest first), for every Tz remembered, named or not (#502).
+    public var unitSightings: [Int: [Sighting]]
 
     /// The series that can be collected, in this order; a remembered unit's model is matched by `seriesName(of:)`.
     public static let series = [
@@ -148,6 +156,10 @@ public struct TravelCollection: Sendable, Hashable {
             Item(id: "station:\(station.dhid)", category: .stations, title: Station.displayName(for: station.name),
                  subtitle: station.priceClass == 1 ? String(kit: "Großer Bahnhof") : String(kit: "Mittlerer Bahnhof"),
                  sightings: Self.visits(newestFirst(stationSightings[station.dhid])))
+        }
+        unitSightings = trainSightings.reduce(into: [:]) { result, entry in
+            guard entry.key.hasPrefix("trainset:"), let number = Int(entry.key.dropFirst("trainset:".count)) else { return }
+            result[number] = newestFirst(entry.value)
         }
         groups = [
             Group(category: .liveries, items: liveryItems),

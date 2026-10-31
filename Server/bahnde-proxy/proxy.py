@@ -21,7 +21,8 @@ bahn.de tolerates this as long as the traffic stays small, so the server keeps i
 
 Environment: TOKEN_SECRET (required, same as in the Workers), PORT (8080), IMPERSONATE (safari),
 FIRST_PAUSE (60), BLOCK_PAUSE (600), MAX_PARALLEL (4), MIN_INTERVAL (0.25), RATE_LIMIT (120),
-ALLOW_UNATTESTED ("true" lets requests without a token through, for testing only).
+ALLOW_UNATTESTED ("true" lets requests without a token through, for testing only). The Tz log (`tzlog.py`,
+#502) has TZ_DB, TZ_SCAN, TZ_SCAN_INTERVAL and TZ_SCAN_EVERY.
 """
 
 import asyncio
@@ -38,6 +39,8 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 
 from aiohttp import web
+
+import tzlog
 
 UPSTREAM = "https://www.bahn.de/web/api/"
 TOKEN_HEADER = "X-BetterBahn-Token"
@@ -141,6 +144,8 @@ class Proxy:
     next_start: float = 0
     requests: dict = field(default_factory=dict)
     slots: asyncio.Semaphore = None
+    # The Tz log (`tzlog.TzStore`, #502) served under /tz/…, None without one.
+    tz_store: object = None
 
     def __post_init__(self):
         self.slots = asyncio.Semaphore(self.max_parallel)
@@ -234,9 +239,50 @@ class Proxy:
     def paused(self):
         return self.paused_until > self.clock()
 
+    async def ask_json(self, path):
+        """(status, parsed body or None) of a bahn.de path below /web/api/, through the cache, the pause and the
+        turn-taking like an app request (the Tz scan's way to bahn.de)."""
+        ttl = route_ttl(path.split("?")[0])
+        if ttl is None:
+            return 404, None
+        url = UPSTREAM + path
+        if self.cached(url) is None and self.paused:
+            return 503, None
+        try:
+            answer, _ = await self.upstream(url, ttl)
+            body = json.loads(answer.body) if 200 <= answer.status < 300 else None
+        except Exception:  # noqa: BLE001 - the scan just goes on with the next request
+            return 502, None
+        return answer.status, body
+
+    def pause_left(self):
+        return max(0.0, self.paused_until - self.clock())
+
+    async def handle_tz(self, request):
+        if self.tz_store is None:
+            return json_response(404, {"error": "not_found"})
+        if request.method != "GET":
+            return json_response(405, {"error": "method_not_allowed"}, {"Allow": "GET"})
+        key = self.authorized(request)
+        if key is None:
+            return json_response(401, {"error": "unauthorized"})
+        if not self.within_rate(key):
+            return json_response(429, {"error": "rate_limited"})
+        if request.path == "/tz/list":
+            return json_response(200, {"units": self.tz_store.units()}, {"Cache-Control": "public, max-age=300"})
+        if request.path == "/tz/history":
+            tz = request.query.get("tz", "")
+            if not tz.isdigit() or len(tz) > 5:
+                return json_response(400, {"error": "bad_request"})
+            return json_response(200, {"tz": tz.lstrip("0"), "trains": self.tz_store.history(tz.lstrip("0"))},
+                                 {"Cache-Control": "public, max-age=300"})
+        return json_response(404, {"error": "not_found"})
+
     async def handle(self, request):
         if request.path == "/health":
             return json_response(200, {"ok": True, "paused": self.paused})
+        if request.path.startswith("/tz/"):
+            return await self.handle_tz(request)
         if not request.path.startswith("/web/api/"):
             return json_response(404, {"error": "not_found"})
         path = request.path[len("/web/api/"):]
@@ -383,9 +429,20 @@ class BrowserFetch:
                       response.headers.get("Content-Type") or "application/json; charset=utf-8")
 
 
-def make_app(proxy):
+def make_app(proxy, scan=None):
+    """`scan`: the Tz scan's settings (`tzlog.Scanner` options), None for no scan."""
     app = web.Application(client_max_size=4096)
     app.router.add_route("*", "/{tail:.*}", proxy.handle)
+    if scan is not None and proxy.tz_store is not None:
+        async def start_scan(app):
+            scanner = tzlog.Scanner(proxy.tz_store, proxy.ask_json, pause_left=proxy.pause_left, **scan)
+            app["tz_scan"] = asyncio.ensure_future(scanner.run())
+
+        async def stop_scan(app):
+            app["tz_scan"].cancel()
+
+        app.on_startup.append(start_scan)
+        app.on_cleanup.append(stop_scan)
     return app
 
 
@@ -406,8 +463,13 @@ def main():
         max_parallel=int(os.environ.get("MAX_PARALLEL", "4")),
         min_interval=float(os.environ.get("MIN_INTERVAL", "0.25")),
         rate_limit=int(os.environ.get("RATE_LIMIT", "120")),
+        tz_store=tzlog.TzStore(os.environ.get("TZ_DB") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "tz.db")),
     )
-    web.run_app(make_app(proxy), port=int(os.environ.get("PORT", "8080")), access_log=None)
+    scan = None
+    if os.environ.get("TZ_SCAN", "true") != "false":
+        scan = {"interval": float(os.environ.get("TZ_SCAN_INTERVAL", "3")),
+                "every": int(os.environ.get("TZ_SCAN_EVERY", "10800"))}
+    web.run_app(make_app(proxy, scan), port=int(os.environ.get("PORT", "8080")), access_log=None)
 
 
 if __name__ == "__main__":

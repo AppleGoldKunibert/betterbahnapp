@@ -182,6 +182,11 @@ in `project.pbxproj`: new files join their target automatically.
   saved leg of the same train it replaced), so other check-ins count only for stations. Series also count a planned
   series (`TrainSeriesTag` remembers it until a Tz is seen); liveries and trainsets need the Tz. "Neu" badges: IDs collected since the last
   visit (`newCollectionIDs`, UserDefaults `collectionSeenIDs`, the first computation is the starting point).
+  "Alle Triebzüge" (#502, `TzListView`, a card below the categories): every ICE/IC trainset from the server's Tz log
+  (`TzLogClient.units()`, searchable, filter by series, ridden ones marked, today's train or the last day) and
+  `TzRunsView` per Tz: "Meine" (own rides, `TravelCollection.unitSightings` for every Tz remembered, named or not)
+  and "Alle" (`TzLogClient.history(of:)`: today, then each day of the last year). A liveries/trainsets item's sheet
+  has "Fahrten" on top, which opens `TzRunsView`.
 - `Features/Tickets/` – `TicketLookupView` (bahn.de's "Auftragssuche" in a hidden SwiftUI `WebView`:
   `DBOrderPage.fillScript` fills the form, `fetchScript` fetches order + PDFs inside the page; shown only when bahn.de
   asks for more, e.g. a captcha), `TicketView` (full-brightness barcode, PDF, `AddToWalletButton`, "Zugbindung
@@ -412,6 +417,10 @@ in `project.pbxproj`: new files join their target automatically.
   departure; the feed's trip ID can change), `trainName` as reservations name it ("RE 3307" for a regional line's
   run), `offered(on:)` from 15 min before the departure until the arrival, `saving(_:for:in:)` keeps one per ride
   and drops those 6 h past their arrival. `AppModel.savedSeats` (`savedSeats.json`, this device only).
+- `Transit/TzLog/TzLogClient.swift` (#502) – reads our server's Tz log (`BahnDeProxy.baseURL` + `/tz/list`, `/tz/history?tz=`,
+  App Attest token like the bahn.de requests): `TzUnit` (Tz, group name "ICE8043"/"ICD4886", vehicle construction types
+  → `series` via `BahnDeClient.model`, Taufname, livery, trains of the latest day) and `TzRun` (day in Germany,
+  train, destination, `changedFromPlan` when bahn.de's `sequenceStatus` is `DIFFERS_FROM_SCHEDULE`).
 - `Transit/Vagonweb/` – vagonweb.cz (with permission, #95): planned compositions for the timetable year from the train's
   HTML (`VagonwebComposition.scheduled`, fixtures `vagonweb-ice*.html`), used when bahn.de has none: `AppModel.trainType`
   and "Plan-Wagenreihung" (`CoachSequence.source == .vagonweb`). Cloudflare bot check → hidden `WebPage`

@@ -22,6 +22,12 @@ struct CollectionView: View {
                         }
                         .buttonStyle(.plain)
                     }
+                    NavigationLink {
+                        TzListView(collection: collection)
+                    } label: {
+                        TzListCard()
+                    }
+                    .buttonStyle(.plain)
                     Text("Zählt deine gespeicherten Reisen und Träwelling-Check-ins. Züge zählen, wenn wir die Wagenreihung kennen.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -95,6 +101,32 @@ private struct CollectionGroupCard: View {
                 }
                 ProgressView(value: Double(group.collected), total: Double(max(group.total, 1)))
                     .tint(.brand)
+            }
+        }
+        .contentShape(.rect)
+    }
+}
+
+/// The entry to the list of every ICE and IC trainset and where it runs (#502).
+private struct TzListCard: View {
+    var body: some View {
+        Card {
+            HStack(spacing: 12) {
+                Image(systemName: "list.number")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 42, height: 42)
+                    .background(Color.brand.gradient, in: .rect(cornerRadius: 12, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Alle Triebzüge").font(.headline)
+                    Text("Welcher Tz fährt heute auf welchem Zug?")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.tertiary)
             }
         }
         .contentShape(.rect)
@@ -211,16 +243,39 @@ private struct CollectionItemSheet: View {
                     }
                 }
                 if let first = item.firstSighting {
-                    Section("Zuerst gesammelt") { SightingRow(sighting: first) }
-                    if item.sightings.count > 1 {
-                        Section("Alle \(item.sightings.count) Fahrten") {
-                            ForEach(Array(item.sightings.enumerated()), id: \.offset) { SightingRow(sighting: $0.element) }
+                    if let number = item.unitNumber {
+                        // A Tz or livery: its trips on top, yours and every one the server saw.
+                        Section {
+                            NavigationLink {
+                                TzRunsView(number: number, title: item.title, subtitle: item.subtitle,
+                                           rides: item.sightings, startsWithAll: false)
+                            } label: {
+                                Label("Fahrten", systemImage: "train.side.front.car")
+                            }
+                        }
+                        Section("Zuerst gesammelt") { SightingRow(sighting: first) }
+                    } else {
+                        Section("Zuerst gesammelt") { SightingRow(sighting: first) }
+                        if item.sightings.count > 1 {
+                            Section("Alle \(item.sightings.count) Fahrten") {
+                                ForEach(Array(item.sightings.enumerated()), id: \.offset) { SightingRow(sighting: $0.element) }
+                            }
                         }
                     }
                 } else {
                     Section {
                         Text("Noch nicht gesammelt.").font(.headline)
                         Text(item.category.hint).foregroundStyle(.secondary)
+                    }
+                    if let number = item.unitNumber {
+                        Section {
+                            NavigationLink {
+                                TzRunsView(number: number, title: item.title, subtitle: item.subtitle,
+                                           rides: [], startsWithAll: true)
+                            } label: {
+                                Label("Fahrten", systemImage: "train.side.front.car")
+                            }
+                        }
                     }
                 }
             }
@@ -235,7 +290,7 @@ private struct CollectionItemSheet: View {
     }
 }
 
-private struct SightingRow: View {
+struct SightingRow: View {
     let sighting: TravelCollection.Sighting
 
     var body: some View {

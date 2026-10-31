@@ -4,7 +4,7 @@ Put it next to a .env file and make it the panel's app file (no requirements fil
     TOKEN_SECRET=…          same value as in the Cloudflare Workers
     BRANCH=indevelopment    the branch to take the server code from
     REPO=AppleGoldKunibert/betterbahnapp   (optional)
-On each start it downloads proxy.py, panel_start.py and requirements.txt of Server/bahnde-proxy from that
+On each start it downloads proxy.py, tzlog.py, panel_start.py and requirements.txt of Server/bahnde-proxy from that
 branch, installs the requirements when they changed and hands over to panel_start.py (HTTPS through Tailscale
 Funnel, see there). If GitHub can't be reached, it starts the code it downloaded last time.
 """
@@ -17,7 +17,7 @@ import urllib.request
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-FILES = ("proxy.py", "panel_start.py", "requirements.txt")
+FILES = ("proxy.py", "tzlog.py", "panel_start.py", "requirements.txt")
 
 
 def load_env():

@@ -68,6 +68,23 @@ import Testing
         #expect(!trainsets.items[0].isCollected)
     }
 
+    /// #502: the rides of every Tz seen, also one without a name or livery, newest first; items know their Tz.
+    @Test func remembersTheRidesOfEveryTz() {
+        let result = collection([
+            ride("ICE 597", berlin, hamburg, departure: "2026-05-01T08:00:00Z", units: [.init(model: "ICE 4", number: "9018")]),
+            ride("ICE 598", hamburg, berlin, departure: "2026-06-01T08:00:00Z", units: [.init(model: "ICE 4", number: "9018")]),
+            ride("ICE 1000", berlin, hamburg, departure: "2026-07-01T08:00:00Z", units: [.init(model: "ICE 3", number: "4601")]),
+        ])
+        #expect(result.unitSightings[9018]?.map(\.train) == ["ICE 598", "ICE 597"])
+        #expect(result.unitSightings[4601]?.count == 1)
+        #expect(result.unitSightings[304] == nil)
+        let items = result.groups.flatMap(\.items)
+        #expect(items.first { $0.id == "trainset:9018" }?.unitNumber == 9018)
+        #expect(items.first { $0.id == "livery:304" }?.unitNumber == 304)
+        #expect(items.first { $0.id.hasPrefix("series:") }?.unitNumber == nil)
+        #expect(items.first { $0.id.hasPrefix("station:") }?.unitNumber == nil)
+    }
+
     /// A ride whose Tz was never seen still counts for its planned series, not for a trainset or livery.
     @Test func plannedSeriesCountsOnlyForSeries() {
         let result = collection([

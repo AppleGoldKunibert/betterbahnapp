@@ -5,6 +5,11 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
+    volumes:
+      - tzlog:/data
     environment:
       TOKEN_SECRET: ${TOKEN_SECRET:?same value as in the Cloudflare Workers}
       IMPERSONATE: ${IMPERSONATE:-safari}
+
+volumes:
+  tzlog:
