@@ -10,7 +10,7 @@ import Testing
             departure: TimeInfo(planned: time(depart), actual: nil),
             arrival: TimeInfo(planned: time(arrive), actual: nil),
             departurePlatform: nil, arrivalPlatform: nil, tripId: "trip-\(line)-\(depart)",
-            line: Line(name: line, number: line, product: .nationalExpress, operatorName: nil),
+            line: Line(name: line, number: line, product: .highSpeed, operatorName: nil),
             direction: nil, isWalking: false, cancelled: false,
             stopovers: [], remarks: [], source: .bahnDe)
     }
