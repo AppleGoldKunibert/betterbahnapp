@@ -186,6 +186,8 @@ private struct TripTicket: View {
     var isNext = false
     @Environment(AppModel.self) private var model
     @State private var journeyToRemove: Journey?
+    /// Series of the trains still ahead, in order ("ICE 3", "ICE 2", "IC 2 Twindexx").
+    @State private var series: [String] = []
 
     private static let notchRadius: CGFloat = 7
     private static let cornerRadius: CGFloat = 18
@@ -195,46 +197,10 @@ private struct TripTicket: View {
         let blocking = entry.issues.first(where: \.isBlocking)
         let claim = model.passengerRightsClaim(for: entry)
         RouteLink(value: ConnectionsRoute.journey(entry.route())) {
-            VStack(alignment: .leading, spacing: 0) {
-                header
-                    .padding(.horizontal, 14)
-                    .padding(.top, 12)
-                    .padding(.bottom, 9)
-                TicketPerforation(notchRadius: Self.notchRadius)
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            if let departure = journey.departure {
-                                TimeStack(time: departure, cancelled: journey.isCancelled, font: .title3.weight(.bold))
-                            }
-                            Image(systemName: "arrow.right")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(.tertiary)
-                            if let arrival = journey.arrival {
-                                TimeStack(time: arrival, cancelled: journey.isCancelled, font: .title3.weight(.bold))
-                            }
-                        }
-                        if let first = journey.legs.first, let last = journey.legs.last {
-                            Text("\(first.origin.displayName) → \(last.destination.displayName)")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                        }
-                        if let blocking {
-                            Label(blocking.title, systemImage: "exclamationmark.triangle.fill")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(Color.heavyDelay)
-                        }
-                        if let claim {
-                            PassengerRightsBadge(claim: claim)
-                                .padding(.horizontal, -6)
-                        }
-                    }
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                }
-                .padding(14)
+            // Live lines and the trains ahead follow the clock.
+            TimelineView(.everyMinute) { context in
+                content(status: JourneyLiveStatus.at(context.date, of: journey), now: context.date,
+                        blocking: blocking, claim: claim)
             }
             .fontDesign(.rounded)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -253,6 +219,58 @@ private struct TripTicket: View {
         .checkoutPrompt($journeyToRemove)
     }
 
+    private func content(status: JourneyLiveStatus?, now: Date, blocking: ConnectionIssue?,
+                         claim: PassengerRightsClaim?) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+                .padding(.horizontal, 14)
+                .padding(.top, 12)
+                .padding(.bottom, 9)
+            TicketPerforation(notchRadius: Self.notchRadius)
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        if let departure = entry.journey.departure {
+                            TimeStack(time: departure, cancelled: entry.journey.isCancelled, font: .title3.weight(.bold))
+                        }
+                        Image(systemName: "arrow.right")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.tertiary)
+                        if let arrival = entry.journey.arrival {
+                            TimeStack(time: arrival, cancelled: entry.journey.isCancelled, font: .title3.weight(.bold))
+                        }
+                    }
+                    if let first = entry.journey.legs.first, let last = entry.journey.legs.last {
+                        Text("\(first.origin.displayName) → \(last.destination.displayName)")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    if let status {
+                        liveLines(status, now: now)
+                            .padding(.top, 2)
+                    }
+                    if let blocking {
+                        Label(blocking.title, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color.heavyDelay)
+                    }
+                    if let claim {
+                        PassengerRightsBadge(claim: claim)
+                            .padding(.horizontal, -6)
+                    }
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(14)
+        }
+        .task(id: status?.upcomingLegs.map(\.id)) {
+            series = await model.trainSeries(of: status?.upcomingLegs ?? [])
+        }
+    }
+
     private var header: some View {
         HStack(spacing: 5) {
             Text(dayLabel)
@@ -267,9 +285,98 @@ private struct TripTicket: View {
                 Image(systemName: onlyReservations ? "carseat.right.fill" : "ticket.fill").foregroundStyle(Color.brand)
                     .accessibilityLabel(onlyReservations ? "Reservierung gespeichert" : "Ticket gespeichert")
             }
+            Spacer(minLength: 8)
+            // The trains still ahead, the next one first: a finished ride drops out.
+            if !series.isEmpty {
+                Text(series.joined(separator: " · "))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .layoutPriority(-1)
+                    .accessibilityLabel(String(localized: "Züge: \(series.formatted(.list(type: .and)))"))
+            }
         }
         .font(.caption.weight(.semibold))
         .foregroundStyle(.secondary)
+    }
+
+    // MARK: Live
+
+    /// One or two lines of what comes next: the departure, the train being ridden or the transfer
+    /// underway, then the change after it.
+    private func liveLines(_ status: JourneyLiveStatus, now: Date) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            switch status.step {
+            case .departure(let leg):
+                if leg.cancelled {
+                    liveRow(icon: "arrow.up.right", [lineName(leg), String(localized: "Fällt aus")], warning: true)
+                } else {
+                    liveRow(icon: "arrow.up.right",
+                            [lineName(leg), platform(leg.departurePlatform), relative(leg.departure.best, now: now)],
+                            delay: leg.departure.delayMinutes)
+                }
+            case .riding(let leg):
+                liveRow(icon: "tram.fill",
+                        [String(localized: "\(lineName(leg)) bis \(leg.destination.displayName)"),
+                         String(localized: "an \(leg.arrival.best.timeString)"), platform(leg.arrivalPlatform)],
+                        delay: leg.arrival.delayMinutes)
+            case .transfer(_, let next):
+                liveRow(icon: "arrow.triangle.swap",
+                        [String(localized: "Umstieg in \(next.origin.displayName)"),
+                         departure(of: next, now: now), platform(next.departurePlatform)],
+                        delay: next.departure.delayMinutes, warning: next.cancelled)
+            }
+            if let transfer = status.nextTransfer {
+                if transfer.minutes < 0 || transfer.next.cancelled {
+                    liveRow(icon: "exclamationmark.triangle.fill",
+                            [String(localized: "Anschluss nicht erreichbar"), transfer.next.origin.displayName], warning: true)
+                } else {
+                    liveRow(icon: "arrow.triangle.swap",
+                            [String(localized: "Dann \(transfer.minutes) Min. Umstieg in \(transfer.next.origin.displayName)"),
+                             platform(transfer.next.departurePlatform)])
+                }
+            }
+        }
+        .font(.footnote)
+    }
+
+    private func liveRow(icon: String, _ parts: [String?], delay: Int? = nil, warning: Bool = false) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: icon)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(warning ? Color.heavyDelay : Color.secondary)
+                .frame(width: 14)
+            Text(parts.compactMap(\.self).joined(separator: " · "))
+                .foregroundStyle(warning ? Color.heavyDelay : Color.primary)
+            if let delay, delay > 0 {
+                Text(verbatim: "+\(delay)")
+                    .fontWeight(.semibold)
+                    .monospacedDigit()
+                    .foregroundStyle(delayColor(delay))
+            }
+        }
+    }
+
+    private func lineName(_ leg: Leg) -> String {
+        leg.line?.name ?? String(localized: "Zug")
+    }
+
+    private func platform(_ info: PlatformInfo?) -> String? {
+        info?.best.map { String(localized: "Gleis \($0)") }
+    }
+
+    /// "in 12 Min." within the hour, nothing further ahead (the times stand above).
+    private func relative(_ time: Date, now: Date) -> String? {
+        let minutes = JourneyLiveStatus.minutes(from: now, to: time)
+        guard minutes >= 0, minutes <= 60 else { return nil }
+        return String(localized: "in \(minutes) Min.")
+    }
+
+    /// The next train of a transfer: "ICE 2 in 6 Min.", or "ICE 2 um 15:20" further ahead.
+    private func departure(of leg: Leg, now: Date) -> String {
+        if let relative = relative(leg.departure.best, now: now) {
+            return "\(lineName(leg)) \(relative)"
+        }
+        return String(localized: "\(lineName(leg)) um \(leg.departure.best.timeString)")
     }
 
     /// Like `SavedJourneyRow`: the next journey is only framed once it departs within 24 hours.
@@ -319,5 +426,25 @@ struct LinkRowLabel: View {
         }
         .padding(.vertical, 12)
         .contentShape(.rect)
+    }
+}
+
+extension AppModel {
+    /// The series of each of `legs` ("ICE 3", "IC 2 Twindexx"): the formation remembered for it, else the
+    /// planned one (cached per train and day), else the line ("RE 3").
+    func trainSeries(of legs: [Leg]) async -> [String] {
+        var names: [String] = []
+        for leg in legs {
+            if let remembered = rememberedFormation(for: leg)?.modelSummary {
+                names.append(remembered)
+            } else if let planned = await trainType(for: leg.line, on: leg.departure.planned), let summary = planned.summary {
+                names.append(summary)
+                // Kept like `TrainSeriesTag` does, for the collection and the next look.
+                rememberFormation(planned.formation, for: leg)
+            } else if let line = leg.line?.name {
+                names.append(line)
+            }
+        }
+        return names
     }
 }

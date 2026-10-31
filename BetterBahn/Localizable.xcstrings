@@ -11,12 +11,32 @@
         }
       }
     },
+    "%@ bis %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ to %2$@"
+          }
+        }
+      }
+    },
     "%@ nach %@" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "%1$@ to %2$@"
+          }
+        }
+      }
+    },
+    "%@ um %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ at %2$@"
           }
         }
       }
@@ -31,6 +51,16 @@
         }
       }
     },
+    "an %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "arr. %@"
+          }
+        }
+      }
+    },
     "Dabei" : {
       "localizations" : {
         "en" : {
@@ -41,12 +71,32 @@
         }
       }
     },
+    "Dann %lld Min. Umstieg in %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Then %1$lld min to change at %2$@"
+          }
+        }
+      }
+    },
     "Höchstens %lld" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "At most %lld"
+          }
+        }
+      }
+    },
+    "in %lld Min." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "in %lld min"
           }
         }
       }
@@ -71,12 +121,32 @@
         }
       }
     },
+    "Umstieg in %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Change at %@"
+          }
+        }
+      }
+    },
     "Umstiege" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Changes"
+          }
+        }
+      }
+    },
+    "Züge: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trains: %@"
           }
         }
       }

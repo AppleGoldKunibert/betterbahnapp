@@ -121,7 +121,9 @@ in `project.pbxproj`: new files join their target automatically.
   the entity's `OpenIntent` (`AppModel.linkToOpen`) or the `CSSearchableItemActionType` activity.
 - `Features/Connections/` – `ConnectionsView` (the search as one ticket, #504: route with `\.ticketStationFields`
   station fields, the options as `TicketFieldLabel` fields, the search button as its stub; saved journeys as small
-  tickets one below the other, recent searches as rows; in `ConnectionsTicketViews.swift`, `.ticketBackground()` notches the ticket at
+  tickets one below the other with live lines (Kit `JourneyLiveStatus`: departure, ridden train or transfer, the
+  change after it) and the series of the trains ahead (`AppModel.trainSeries(of:)`); recent searches as rows; in
+  `ConnectionsTicketViews.swift`, `.ticketBackground()` notches the ticket at
   each `TicketPerforation`), `ConnectionSearch`, `RouteOptionsEditor` (vias, products, max
   transfers), `JourneyResultsView` + `JourneyCard`, `TrainNumberSheet` ("Bestimmten Zug wählen", #225: trains fitting
   the input via Kit `TrainCandidateFinder`; picking one shows its stops in `TripContent` with boarding/exit preselected
