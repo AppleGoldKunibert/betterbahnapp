@@ -367,8 +367,6 @@ struct StationInput<Focus: Hashable>: View {
     }
 }
 
-/// Whether any `StationInput` in the view shows its suggestions, so a screen can keep its layout
-/// around the field still while it does (see `StationInput.showsSuggestions`).
 /// Centers of the station fields' icons, so a route card can join its stops with a line.
 struct RouteMarkerKey: PreferenceKey {
     static let defaultValue: [Anchor<CGPoint>] = []
@@ -377,6 +375,8 @@ struct RouteMarkerKey: PreferenceKey {
     }
 }
 
+/// Whether any `StationInput` in the view shows its suggestions, so a screen can keep its layout
+/// around the field still while it does (see `StationInput.showsSuggestions`).
 struct StationSuggestionsShownKey: PreferenceKey {
     static let defaultValue = false
     static func reduce(value: inout Bool, nextValue: () -> Bool) {
