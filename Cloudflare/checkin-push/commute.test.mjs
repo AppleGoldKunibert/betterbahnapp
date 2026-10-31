@@ -197,6 +197,17 @@ test("reports a cancellation once", async () => {
     assert.deepEqual(german(pushes[0].payload.aps.alert), { title: "RE 3 fällt aus", body: "Die Fahrt von Eberswalde Hbf nach Berlin Gesundbrunnen findet nicht statt." });
 });
 
+test("reports in the app's language", async () => {
+    const env = await environment();
+    const iris = { ...baseIris, "fchg/8010093": plan(`<s id="e-1" eva="8010093"><dp cs="c" clt="2610190700"/></s>`) };
+    const { fetch, pushes } = upstream(iris);
+    await put(env, { journeys: [journey], language: "en" }, fetch);
+    await processDueCommutes(env, now, { fetch });
+    assert.deepEqual(pushes[0].payload.aps.alert, {
+        title: "RE 3 is cancelled", body: "The trip from Eberswalde Hbf to Berlin Gesundbrunnen will not run.",
+    });
+});
+
 test("reports a platform change, not a sector", async () => {
     const env = await environment();
     let platform = "2 A-C";

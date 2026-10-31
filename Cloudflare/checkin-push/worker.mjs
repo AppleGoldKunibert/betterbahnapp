@@ -16,7 +16,7 @@
 //
 // It also looks after the journeys of regular trips (#397, `/commutes`, see commute.mjs).
 
-import { APNs, localizedAlert, text } from "../shared/apns.mjs";
+import { APNs, localizedAlert, parseLanguage, text } from "../shared/apns.mjs";
 import { TOKEN_HEADER, unauthorized, verifyToken } from "../shared/appattest.mjs";
 import { handleCommute, processDueCommutes } from "./commute.mjs";
 import {
@@ -102,7 +102,7 @@ export async function handleRequest(request, env = {}, now = Date.now(), deps = 
         return subscribe(body, env, now, deps.fetch ?? fetch);
     }
     if (!ID_PATTERN.test(id)) return json(404, { error: "not_found" });
-    const row = await env.DB.prepare("SELECT id, secret_hash, tokens, kinds, login_id, webhook_id FROM subscriptions WHERE id = ?").bind(id).first();
+    const row = await env.DB.prepare("SELECT id, secret_hash, tokens, kinds, language, login_id, webhook_id FROM subscriptions WHERE id = ?").bind(id).first();
     if (!row || typeof body.secret !== "string" || await sha256Hex(body.secret) !== row.secret_hash) {
         return json(404, { error: "not_found" });
     }
@@ -116,9 +116,10 @@ export async function handleRequest(request, env = {}, now = Date.now(), deps = 
         const before = storedKinds(row.kinds);
         const restartsFollowed = kinds.includes("followed") && !before.includes("followed");
         const restartsNotifications = readsNotifications(kinds) && !readsNotifications(before);
+        const language = body.language === undefined ? row.language : parseLanguage(body.language);
         await env.DB.prepare(
-            `UPDATE subscriptions SET device_token = ?, sandbox = ?, kinds = ?${restartsFollowed ? ", known = NULL" : ""}${restartsNotifications ? ", notified = NULL" : ""} WHERE id = ?`,
-        ).bind(body.deviceToken, body.sandbox ? 1 : 0, JSON.stringify(kinds), id).run();
+            `UPDATE subscriptions SET device_token = ?, sandbox = ?, kinds = ?, language = ?${restartsFollowed ? ", known = NULL" : ""}${restartsNotifications ? ", notified = NULL" : ""} WHERE id = ?`,
+        ).bind(body.deviceToken, body.sandbox ? 1 : 0, JSON.stringify(kinds), language, id).run();
         return json(200, {});
     }
     if (request.method === "DELETE") {
@@ -140,6 +141,7 @@ export async function handleRequest(request, env = {}, now = Date.now(), deps = 
 async function subscribe(body, env, now, fetchUpstream) {
     const { code, codeVerifier, deviceToken, sandbox, userId } = body;
     const kinds = body.kinds === undefined ? ["followed"] : parseKinds(body.kinds);
+    const language = parseLanguage(body.language);
     const withLogin = body.loginId !== undefined;
     if (!withLogin && (typeof code !== "string" || !code || code.length > 2048 || typeof codeVerifier !== "string"
         || !/^[A-Za-z0-9._~-]{43,128}$/.test(codeVerifier))) {
@@ -151,7 +153,7 @@ async function subscribe(body, env, now, fetchUpstream) {
     if (withLogin) {
         // The app's login (#452): no second one.
         if (!await verifiedLogin(env, body.loginId, body.loginSecret)) return json(404, { error: "login_not_found" });
-        return insertSubscription(env, now, { deviceToken, sandbox, userId, kinds, loginID: body.loginId });
+        return insertSubscription(env, now, { deviceToken, sandbox, userId, kinds, language, loginID: body.loginId });
     }
 
     let tokens;
@@ -167,11 +169,11 @@ async function subscribe(body, env, now, fetchUpstream) {
         return json(error instanceof RejectedGrant ? 400 : 502, { error: error instanceof RejectedGrant ? "invalid_code" : "traewelling_unavailable" });
     }
 
-    return insertSubscription(env, now, { deviceToken, sandbox, userId, kinds, tokens });
+    return insertSubscription(env, now, { deviceToken, sandbox, userId, kinds, language, tokens });
 }
 
 /// A new sign-up with the app's login (`loginID`) or one of its own (`tokens`).
-async function insertSubscription(env, now, { deviceToken, sandbox, userId, kinds, loginID = null, tokens = null }) {
+async function insertSubscription(env, now, { deviceToken, sandbox, userId, kinds, language, loginID = null, tokens = null }) {
     const id = randomHex(16);
     const secret = randomHex(32);
     const slot = crypto.getRandomValues(new Uint8Array(1))[0] % 60;
@@ -179,9 +181,9 @@ async function insertSubscription(env, now, { deviceToken, sandbox, userId, kind
     // sealed. With the app's login, the webhook is the login's (logins.mjs).
     const { webhook = null, ...login } = tokens ?? {};
     await env.DB.prepare(
-        "INSERT INTO subscriptions (id, secret_hash, device_token, sandbox, user_id, tokens, login_id, known, kinds, notified, webhook_id, webhook, slot, created) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?)",
+        "INSERT INTO subscriptions (id, secret_hash, device_token, sandbox, user_id, tokens, login_id, known, kinds, language, notified, webhook_id, webhook, slot, created) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?, ?, ?)",
     ).bind(id, await sha256Hex(secret), deviceToken, sandbox ? 1 : 0, userId, tokens ? await encryptTokens(login, id, env.TOKEN_KEY) : "",
-        loginID, JSON.stringify(kinds), webhook?.id ?? null, webhook ? await encryptTokens({ secret: webhook.secret }, id, env.TOKEN_KEY) : null,
+        loginID, JSON.stringify(kinds), language, webhook?.id ?? null, webhook ? await encryptTokens({ secret: webhook.secret }, id, env.TOKEN_KEY) : null,
         slot, Math.floor(now / 1000)).run();
     return json(201, { id, secret });
 }
@@ -222,14 +224,14 @@ async function handleWebhook(request, env, now, deps) {
     }
     const item = payload?.event === "notification" ? payload.notification : null;
     if (typeof item?.id !== "string" || item.id.length > 64) return json(200, {});
-    const columns = "id, device_token, sandbox, kinds, notified";
+    const columns = "id, device_token, sandbox, kinds, language, notified";
     rows = rows.length > 0
         ? [await env.DB.prepare(`SELECT ${columns} FROM subscriptions WHERE id = ?`).bind(owner.id).first()]
         : (await env.DB.prepare(`SELECT ${columns} FROM subscriptions WHERE login_id = ?`).bind(owner.id).all()).results ?? [];
 
     const apns = new APNs(env, now, deps.fetch ?? fetch);
     const deliver = Promise.all(rows.map(async row => {
-        const push = ownCheckinNotification(item, storedKinds(row.kinds));
+        const push = ownCheckinNotification(item, storedKinds(row.kinds), row.language);
         const notified = row.notified ? JSON.parse(row.notified) : null;
         if (!push || notified?.includes(item.id)) return;
         const result = await apns.send(row.device_token, row.sandbox, push.payload, {
@@ -287,7 +289,7 @@ export async function processDueSubscriptions(env, now = Date.now(), deps = {}) 
     const interval = Math.min(60, Math.max(1, Number(env.INTERVAL_MINUTES) || 2));
     const minute = Math.floor(now / 60000) % 60;
     const { results } = await env.DB.prepare(
-        "SELECT id, device_token, sandbox, user_id, tokens, login_id, known, kinds, notified FROM subscriptions WHERE slot % ? = ?",
+        "SELECT id, device_token, sandbox, user_id, tokens, login_id, known, kinds, language, notified FROM subscriptions WHERE slot % ? = ?",
     ).bind(interval, minute % interval).all();
 
     const apns = new APNs(env, now, fetchUpstream);
@@ -392,7 +394,7 @@ async function checkFollowed(subscription, env, now, load, send) {
     // Only what was delivered counts as reported; the others are tried again on the next look.
     const sent = [];
     for (const status of fresh) {
-        const payload = notification(status);
+        const payload = notification(status, subscription.language);
         if (await send(payload, `followed-${payload.followedStatusID}`) === "sent") sent.push(status.id);
     }
     if (sent.length > 0) await saveKnown(env, id, [...known, ...sent]);
@@ -424,7 +426,7 @@ async function checkNotifications(subscription, kinds, env, load, send) {
 
     const handled = [];
     for (const item of fresh) {
-        const push = ownCheckinNotification(item, kinds);
+        const push = ownCheckinNotification(item, kinds, subscription.language);
         if (!push || await send(push.payload, push.collapseID) === "sent") handled.push(item.id);
     }
     if (handled.length > 0) await saveNotified(env, id, [...notified, ...handled]);
@@ -475,8 +477,9 @@ function rideTimes(checkin) {
 }
 
 /// The notification for someone's check-in: who, and the train from where to where (as the app's
-/// `FollowedCheckinNotifier`). Tapping it opens the check-in (`followedStatusID`).
-export function notification(status) {
+/// `FollowedCheckinNotifier`), in the app's `language` (`localizedAlert`). Tapping it opens the check-in
+/// (`followedStatusID`).
+export function notification(status, language = null) {
     const checkin = status.checkin ?? status.train ?? {};
     const name = (stop) => stop?.station?.name ?? stop?.name ?? "?";
     const route = `${name(checkin.origin)} → ${name(checkin.destination)}`;
@@ -485,7 +488,7 @@ export function notification(status) {
         aps: {
             alert: localizedAlert(
                 status.user?.displayName ? text("%@ ist eingecheckt", status.user.displayName) : text("Jemand ist eingecheckt"),
-                line ? `${line}: ${route}` : route),
+                line ? `${line}: ${route}` : route, language),
             sound: "default",
             "thread-id": "followed-checkins",
         },
@@ -496,7 +499,7 @@ export function notification(status) {
 /// The push for one of Träwelling's notifications, if it is a like or a fellow traveller and that kind is on.
 /// A like opens the user's own check-in (`ownStatusID`), a fellow traveller theirs (`companionStatusID`);
 /// that one replaces a followed check-in's push about the same check-in (same collapse ID).
-export function ownCheckinNotification(item, kinds) {
+export function ownCheckinNotification(item, kinds, language = null) {
     const data = item?.data ?? {};
     const trimmed = (value) => typeof value === "string" ? value.trim() : "";
     const person = (user) => trimmed(user?.name) || (trimmed(user?.username) ? `@${trimmed(user.username)}` : null);
@@ -513,7 +516,7 @@ export function ownCheckinNotification(item, kinds) {
         return {
             payload: {
                 aps: {
-                    alert: localizedAlert(about(data.liker, "gefällt dein Check-in"), ride(trip.lineName, trip.origin?.name, trip.destination?.name)),
+                    alert: localizedAlert(about(data.liker, "gefällt dein Check-in"), ride(trip.lineName, trip.origin?.name, trip.destination?.name), language),
                     sound: "default",
                     "thread-id": "own-checkins",
                 },
@@ -527,7 +530,7 @@ export function ownCheckinNotification(item, kinds) {
         return {
             payload: {
                 aps: {
-                    alert: localizedAlert(about(data.user, "fährt mit dir"), ride(checkin.linename, checkin.origin, checkin.destination)),
+                    alert: localizedAlert(about(data.user, "fährt mit dir"), ride(checkin.linename, checkin.origin, checkin.destination), language),
                     sound: "default",
                     "thread-id": "own-checkins",
                 },

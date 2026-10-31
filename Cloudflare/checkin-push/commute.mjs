@@ -6,7 +6,7 @@
 // same rules and texts as the app (`CommuteAlerts`, `ConnectionIssue`, `PlatformChange`). It never asks
 // bahn.de (#334). Stored per device: the APNs device token and those journeys. No location, no account.
 
-import { APNs, localizedAlert, text } from "../shared/apns.mjs";
+import { APNs, localizedAlert, parseLanguage, text } from "../shared/apns.mjs";
 import { Iris, findStop, liveChange, parseStops, planPath } from "../shared/iris.mjs";
 
 const MINUTE = 60 * 1000;
@@ -41,7 +41,7 @@ export async function handleCommute(id, body, env, now, fetchUpstream) {
     const journeys = validJourneys(body.journeys);
     if (!journeys) return json(400, { error: "invalid_journeys" });
 
-    const row = await env.DB.prepare("SELECT secret_hash, journeys FROM commutes WHERE id = ?").bind(id).first();
+    const row = await env.DB.prepare("SELECT secret_hash, journeys, language FROM commutes WHERE id = ?").bind(id).first();
     const secretHash = await sha256Hex(secret);
     if (row && row.secret_hash !== secretHash) return json(404, { error: "not_found" });
     if (journeys.length === 0) {
@@ -71,16 +71,17 @@ export async function handleCommute(id, body, env, now, fetchUpstream) {
         }
     }
 
+    const language = body.language === undefined ? row?.language ?? null : parseLanguage(body.language);
     if (watched.length === 0) {
         if (row) await env.DB.prepare("DELETE FROM commutes WHERE id = ?").bind(id).run();
     } else if (row) {
-        await env.DB.prepare("UPDATE commutes SET device_token = ?, sandbox = ?, journeys = ?, updated = ? WHERE id = ?")
-            .bind(deviceToken, sandbox ? 1 : 0, JSON.stringify(watched), Math.floor(now / 1000), id).run();
+        await env.DB.prepare("UPDATE commutes SET device_token = ?, sandbox = ?, journeys = ?, language = ?, updated = ? WHERE id = ?")
+            .bind(deviceToken, sandbox ? 1 : 0, JSON.stringify(watched), language, Math.floor(now / 1000), id).run();
     } else {
         const slot = crypto.getRandomValues(new Uint8Array(1))[0] % 60;
         await env.DB.prepare(
-            "INSERT INTO commutes (id, secret_hash, device_token, sandbox, journeys, slot, updated) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        ).bind(id, secretHash, deviceToken, sandbox ? 1 : 0, JSON.stringify(watched), slot, Math.floor(now / 1000)).run();
+            "INSERT INTO commutes (id, secret_hash, device_token, sandbox, journeys, language, slot, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        ).bind(id, secretHash, deviceToken, sandbox ? 1 : 0, JSON.stringify(watched), language, slot, Math.floor(now / 1000)).run();
     }
     return json(200, { watched: watched.map(journey => journey.id) });
 }
@@ -135,7 +136,7 @@ export async function processDueCommutes(env, now = Date.now(), deps = {}) {
     const interval = Math.min(60, Math.max(1, Number(env.INTERVAL_MINUTES) || 2));
     const minute = Math.floor(now / 60000) % 60;
     const { results } = await env.DB.prepare(
-        "SELECT id, device_token, sandbox, journeys FROM commutes WHERE slot % ? = ?",
+        "SELECT id, device_token, sandbox, journeys, language FROM commutes WHERE slot % ? = ?",
     ).bind(interval, minute % interval).all();
 
     const apns = new APNs(env, now, fetchUpstream);
@@ -161,7 +162,7 @@ async function look(row, env, now, iris, apns) {
         if (now < firstDeparture(journey) - LOOK_BEFORE || now > lastArrival(journey) + LOOK_AFTER) continue;
         const live = await Promise.all(journey.legs.map(leg => liveLeg(leg, iris)));
         for (const alert of alerts(journey, live, now)) {
-            const result = await apns.send(row.device_token, row.sandbox, payload(journey, alert), {
+            const result = await apns.send(row.device_token, row.sandbox, payload(journey, alert, row.language), {
                 "apns-topic": env.APNS_TOPIC,
                 "apns-push-type": "alert",
                 "apns-priority": "10",
@@ -282,10 +283,10 @@ export function alerts(journey, live, now) {
     return found;
 }
 
-function payload(journey, alert) {
+function payload(journey, alert, language) {
     return {
         aps: {
-            alert: localizedAlert(alert.title, alert.body),
+            alert: localizedAlert(alert.title, alert.body, language),
             sound: "default",
             "interruption-level": "time-sensitive",
             "thread-id": `commute-${journey.id}`,

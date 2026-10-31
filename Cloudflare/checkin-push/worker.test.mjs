@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
+import { TRANSLATIONS } from "../shared/apns.mjs";
 import { signToken, toBase64 } from "../shared/appattest.mjs";
 import { IDLE_RENEWAL, UNUSED, loginAAD, maintainLogins } from "./logins.mjs";
 import { checkedIn, decryptTokens, handleRequest, notification, ownCheckinNotification, parseKinds, processDueSubscriptions, signProviderToken, WEBHOOK_PATH } from "./worker.mjs";
@@ -372,6 +373,44 @@ async function deliver(env, upstream, { webhookID = 77, secret: webhookSecret = 
         body,
     }), env, now, upstream);
 }
+
+test("writes the notifications in the app's language, else German with the keys iOS translates", () => {
+    const english = ownCheckinNotification(liked("n", 1), ["likes"], "en").payload.aps.alert;
+    assert.deepEqual(english, { title: "Anna likes your check-in", body: "RE 5: Köln Hbf → Bonn Hbf" });
+    assert.equal(notification({ ...status(1), user: null }, "en").aps.alert.title, "Someone checked in");
+    // An app set to German gets German even on an English iPhone: no keys.
+    assert.deepEqual(Object.keys(notification(status(1), "de").aps.alert), ["title", "body"]);
+    assert.equal(notification(status(1)).aps.alert["title-loc-key"], "%@ ist eingecheckt");
+});
+
+test("keeps the app's language and sends in it", async () => {
+    const env = await environment();
+    const { id, secret: subscriptionSecret } = await subscribed(env, undefined, ["likes"]);
+    assert.equal(env.DB.rows()[0].language, null);
+    await request(env, `/subscriptions/${id}`, "PUT", { secret: subscriptionSecret, deviceToken, kinds: ["likes"], language: "en" });
+    assert.equal(env.DB.rows()[0].language, "en");
+    // Without it (apps before #479) it stays; an unknown one is none.
+    await request(env, `/subscriptions/${id}`, "PUT", { secret: subscriptionSecret, deviceToken, kinds: ["likes"] });
+    assert.equal(env.DB.rows()[0].language, "en");
+    env.DB.db.prepare("UPDATE subscriptions SET notified = '[]'").run();
+    const pushes = [];
+    await processDueSubscriptions(env, now, fakeUpstream({
+        "api/v1/notifications": { body: { data: [liked("n1")] } },
+        "push.apple.com": (url, init) => { pushes.push(JSON.parse(init.body)); return { body: {} }; },
+    }));
+    assert.deepEqual(pushes.map(push => push.aps.alert.title), ["Anna likes your check-in"]);
+    await request(env, `/subscriptions/${id}`, "PUT", { secret: subscriptionSecret, deviceToken, kinds: ["likes"], language: "fr" });
+    assert.equal(env.DB.rows()[0].language, null);
+});
+
+test("the translations match the app's string catalog", () => {
+    const catalog = JSON.parse(readFileSync(new URL("../../BetterBahn/Localizable.xcstrings", import.meta.url), "utf8")).strings;
+    for (const [language, texts] of Object.entries(TRANSLATIONS)) {
+        for (const [key, value] of Object.entries(texts)) {
+            assert.equal(catalog[key]?.localizations?.[language]?.stringUnit?.value, value, key);
+        }
+    }
+});
 
 test("offers Träwelling's webhook to the login only while it is turned on", async () => {
     const options = async (extra) => (await handleRequest(new Request("https://betterbahn-push.example/login-options"), await environment(extra), now)).json();

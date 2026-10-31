@@ -15,6 +15,10 @@ public enum KitLocalization {
     /// Whether Kit texts are German (the app runs in German, or outside the app).
     public static var isGerman: Bool { languagePath == nil }
 
+    /// The language our servers write their notifications in ("de", "en"): iOS translates a notification's keys
+    /// in the device's language, not in one chosen for the app alone.
+    public static var notificationLanguage: String { isGerman ? "de" : "en" }
+
     /// Locale for dates and numbers inside Kit texts: German while the texts are German, else the device's.
     public static var locale: Locale { isGerman ? Locale(identifier: "de_DE") : .current }
 

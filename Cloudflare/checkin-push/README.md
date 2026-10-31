@@ -21,13 +21,18 @@ background, often hours later, so the app doesn't look itself; this Worker does.
    already; a kind turned on again starts over.
    Likes and fellow travellers also come right away through Träwelling's webhook (below); the look every
    2 minutes stays as the fallback and skips what the webhook already reported.
-3. `PUT /subscriptions/<id> { secret, deviceToken, sandbox, kinds }` keeps the device token and kinds
-   current (the app sends them on every start and when a setting changes); `DELETE /subscriptions/<id>
+3. `PUT /subscriptions/<id> { secret, deviceToken, sandbox, kinds, language }` keeps the device token, kinds
+   and language current (the app sends them on every start and when a setting changes); `DELETE /subscriptions/<id>
    { secret }` (all settings off, Träwelling logout) deletes the row and ends the Worker's Träwelling login.
+
+The notifications are written in the app's `language` ("de" or "en", #479; also on `POST /subscriptions` and
+`PUT /commutes/<id>`): iOS translates `loc-key`s only in the device's language, not in a language chosen for the
+app alone. Apps that send none get German with `loc-key`s. Before deploying this, run
+`npx wrangler d1 execute betterbahn-push --remote --file=migrations/0003_notification_language.sql`.
 
 When Träwelling ends the login or APNs says the app is gone, the row is deleted; the app then gets a
 404 and turns the setting off. Stored per device: device token, Träwelling user ID, the login (or its
-ID), the kinds and the IDs of the check-ins and notifications already seen. No location, no names.
+ID), the kinds, the app's language and the IDs of the check-ins and notifications already seen. No location, no names.
 
 ## The app's Träwelling login (`/logins`, #452)
 
