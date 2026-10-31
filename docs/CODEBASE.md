@@ -186,7 +186,11 @@ in `project.pbxproj`: new files join their target automatically.
   `LiveTrainTripSheet`: `TripView` at the stop it runs to next (Kit `BoardEntry.liveTrain`).
 - `Features/Collection/` – `CollectionView` (#384, "Sammlung", `CollectionButton` next to "Vergangene Fahrten" on
   Verbindungen): progress per category, `CollectionCategoryView` grid (not collected greyed out), sheet with the first and
-  all rides. Kit `TravelCollection` from the travel map's rides (`AppModel.travelCollection()`); trains only from
+  all rides. Triebzüge (#521): `CollectionTrainsetsView` list to expand by series, then length (ICE 4 7-/12-/13-teilig),
+  then Tz to its rides, sorted per series (`TrainsetOrder`: Tz, most rides, last ridden, collected first); a ride
+  opens its journey (`AppModel.collectionRoute(for:)`: the saved journey, also one a check-in replaced, else the
+  check-in). Category pages are pushed by value (`ConnectionsRoute.collectionCategory`, data from
+  `AppModel.collectionSnapshot`): a view-based link mixed with the path put the page back on top of the journey. Kit `TravelCollection` from the travel map's rides (`AppModel.travelCollection()`); trains only from
   `rememberedFormations` (Kit `RideMatch.rememberedFormation`: a Träwelling check-in gets the Tz remembered for the
   saved leg of the same train it replaced), so other check-ins count only for stations. Series also count a planned
   series (`TrainSeriesTag` remembers it until a Tz is seen); liveries and trainsets need the Tz. "Neu" badges: IDs collected since the last
@@ -273,7 +277,10 @@ in `project.pbxproj`: new files join their target automatically.
   `CO2Comparison` (#386: km × Umweltbundesamt g/Pkm per product, reference year 2024; car and domestic flight over the
   same km; walks, ferries and unknown products left out).
 - `TravelCollection` (#384) – collected special liveries (`TrainsetLiveries`, per Tz), series (`TravelCollection.series`,
-  unit model via `seriesName(of:)`: "ICE 3neo Redesign" → "ICE 3neo"), named trainsets (`TrainsetNames`) and
+  unit model via `seriesName(of:)`: "ICE 3neo Redesign" → "ICE 3neo"), trainsets (#521: every Tz of `TrainsetFleet`, DB
+  Fernverkehr's active fleet per series and ICE 4 length from Wikipedia, plus ridden ones outside it that are long-distance
+  or named in `TrainsetNames`; `trainsetSeries` groups them; unnamed ones collected before the update aren't "Neu"; a
+  number longer than 4 digits is an IC 1 coach set remembered by older versions and counts for nothing) and
   `BigStations` (DB price class 1 and 2, shown as "Großer"/"Mittlerer Bahnhof", by DHID via `StationNames.dhid(for:)`; boarding, alighting, changing; arriving
   and leaving within 3 h is one visit). Only arrived, not cancelled legs; IC 1 coach sets don't count.
 - `StationNames` (#205) – `Station.displayName`: DB's name for German stations, the national railway's with accents
