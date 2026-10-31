@@ -22,6 +22,7 @@ struct StationInput<Focus: Hashable>: View {
     @Environment(AppModel.self) private var model
     @Environment(\.stationSearchArea) private var searchArea
     @Environment(\.calmDesign) private var calm
+    @Environment(\.boardStyle) private var board
     /// This field's key in `searchArea`.
     @State private var areaID = UUID()
     @State private var query = ""
@@ -72,17 +73,25 @@ struct StationInput<Focus: Hashable>: View {
                     .font(.title3)
                     .foregroundStyle(iconColor)
                     // Covers the line a calm route card draws between its stops.
-                    .background(Circle().fill(calm ? Color.card : .clear).padding(-2))
+                    .background(Circle().fill(board ? Color.board : calm ? Color.card : .clear).padding(-2))
                     .frame(width: 24)
                     .anchorPreference(key: RouteMarkerKey.self, value: .center) { [$0] }
                     .allowsHitTesting(false)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(label)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .allowsHitTesting(false)
+                    Group {
+                        if board {
+                            Text(label.uppercased())
+                                .font(.caption2.monospaced().weight(.semibold))
+                                .tracking(1.2)
+                        } else {
+                            Text(label)
+                                .font(.caption)
+                        }
+                    }
+                    .foregroundStyle(.secondary)
+                    .allowsHitTesting(false)
                     TextField(placeholder, text: $query)
-                        .font(.headline)
+                        .font(board ? .title3.weight(.bold) : .headline)
                         .focused(focus, equals: focusValue)
                         .submitLabel(.search)
                         .autocorrectionDisabled()

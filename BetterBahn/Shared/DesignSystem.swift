@@ -33,6 +33,8 @@ extension Color {
     })
     /// Thin outline of flat cards.
     static let hairline = Color.primary.opacity(0.08)
+    /// A station board's deep blue, the same in light and dark mode (its contents are always drawn light on dark).
+    static let board = Color(red: 0.06, green: 0.10, blue: 0.19)
 }
 
 nonisolated private struct CalmDesignKey: EnvironmentKey {
@@ -45,6 +47,28 @@ extension EnvironmentValues {
     nonisolated var calmDesign: Bool {
         get { self[CalmDesignKey.self] }
         set { self[CalmDesignKey.self] = newValue }
+    }
+}
+
+nonisolated private struct CardCornerRadiusKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 22
+}
+
+nonisolated private struct BoardStyleKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// Corner radius of `Card`s (and what is drawn to match them) below this point.
+    nonisolated var cardCornerRadius: CGFloat {
+        get { self[CardCornerRadiusKey.self] }
+        set { self[CardCornerRadiusKey.self] = newValue }
+    }
+
+    /// Station fields drawn like a station board: small upper-case labels and large bold names on `Color.board`.
+    nonisolated var boardStyle: Bool {
+        get { self[BoardStyleKey.self] }
+        set { self[BoardStyleKey.self] = newValue }
     }
 }
 
@@ -115,17 +139,18 @@ struct Card<Content: View>: View {
     var padding: CGFloat = 16
     @ViewBuilder var content: Content
     @Environment(\.calmDesign) private var calm
+    @Environment(\.cardCornerRadius) private var cornerRadius
 
     var body: some View {
         content
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.card, in: .rect(cornerRadius: 22, style: .continuous))
+            .background(Color.card, in: .rect(cornerRadius: cornerRadius, style: .continuous))
             // The calm design separates cards from the page by their outline alone.
             .shadow(color: .black.opacity(calm ? 0 : 0.06), radius: 12, y: 4)
             .overlay {
                 // Subtle edge so cards stay visible on dark backgrounds.
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .strokeBorder(calm ? Color.hairline : Color.primary.opacity(0.06), lineWidth: calm ? 1 : 0.5)
             }
     }

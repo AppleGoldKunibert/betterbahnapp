@@ -118,6 +118,9 @@ struct ConnectionsView: View {
     /// Up to this many intermediate stops can be added to a single search.
     private static let maxViaPoints = 4
 
+    /// Clear edges: the page's cards, board and buttons are less rounded than elsewhere.
+    private static let cornerRadius: CGFloat = 12
+
     enum Field: Hashable {
         case from, to, via(UUID)
     }
@@ -156,6 +159,7 @@ struct ConnectionsView: View {
                         .controlSize(.large)
                         CollectionButton()
                     }
+                    .buttonBorderShape(.roundedRectangle(radius: Self.cornerRadius))
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 32)
@@ -183,6 +187,7 @@ struct ConnectionsView: View {
             .tabBarSafePadding()
             .background { AppBackground() }
             .calmDesign()
+            .environment(\.cardCornerRadius, Self.cornerRadius)
             .navigationTitle("Verbindungen")
             // The page's own headline takes the title's place; the title stays for the back button.
             .toolbarTitleDisplayMode(.inline)
@@ -244,41 +249,51 @@ struct ConnectionsView: View {
 
     // MARK: Route
 
+    /// The route as a station board: light text on deep blue, the page's one dark element.
     private var routeCard: some View {
-        Card(padding: 0) {
-            VStack(spacing: 0) {
-                StationInput(label: String(localized: "Start"), placeholder: String(localized: "Von wo?"), systemImage: "circle.circle.fill",
-                             iconColor: .primary, station: $from, focus: $focused, focusValue: .from)
+        VStack(spacing: 0) {
+            StationInput(label: String(localized: "Start"), placeholder: String(localized: "Von wo?"), systemImage: "circle.circle.fill",
+                         iconColor: .primary, station: $from, focus: $focused, focusValue: .from)
 
-                // The swap button always sits right below Start, so it never drifts onto (and
-                // covers) a via row's own remove button as the card grows with more stops.
-                routeDivider(showAdd: viaRows.isEmpty, showSwap: true)
+            // The swap button always sits right below Start, so it never drifts onto (and
+            // covers) a via row's own remove button as the card grows with more stops.
+            routeDivider(showAdd: viaRows.isEmpty, showSwap: true)
 
-                ForEach($viaRows) { $row in
-                    ViaRowView(row: $row, focus: $focused, focusValue: .via(row.id)) {
-                        withAnimation(.snappy) { viaRows.removeAll { $0.id == row.id } }
-                    }
-                    routeDivider(showAdd: row.id == viaRows.last?.id, showSwap: false)
+            ForEach($viaRows) { $row in
+                ViaRowView(row: $row, focus: $focused, focusValue: .via(row.id)) {
+                    withAnimation(.snappy) { viaRows.removeAll { $0.id == row.id } }
                 }
+                routeDivider(showAdd: row.id == viaRows.last?.id, showSwap: false)
+            }
 
-                StationInput(label: String(localized: "Ziel"), placeholder: String(localized: "Wohin?"), systemImage: "mappin.circle.fill",
-                             station: $to, focus: $focused, focusValue: .to)
-            }
-            .backgroundPreferenceValue(RouteMarkerKey.self) { anchors in
-                // The stops sit on one line, like on a route map; hidden while suggestions push between them.
-                GeometryReader { proxy in
-                    let points = anchors.map { proxy[$0] }
-                    if !suggestionsShown, let top = points.min(by: { $0.y < $1.y }), let bottom = points.max(by: { $0.y < $1.y }) {
-                        Path { path in
-                            path.move(to: top)
-                            path.addLine(to: CGPoint(x: top.x, y: bottom.y))
-                        }
-                        .stroke(Color.primary.opacity(0.15), style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                    }
-                }
-            }
-            .clipShape(.rect(cornerRadius: 22, style: .continuous))
+            StationInput(label: String(localized: "Ziel"), placeholder: String(localized: "Wohin?"), systemImage: "mappin.circle.fill",
+                         station: $to, focus: $focused, focusValue: .to)
         }
+        .padding(.vertical, 4)
+        .backgroundPreferenceValue(RouteMarkerKey.self) { anchors in
+            // The stops sit on one line, like on a route map; hidden while suggestions push between them.
+            GeometryReader { proxy in
+                let points = anchors.map { proxy[$0] }
+                if !suggestionsShown, let top = points.min(by: { $0.y < $1.y }), let bottom = points.max(by: { $0.y < $1.y }) {
+                    Path { path in
+                        path.move(to: top)
+                        path.addLine(to: CGPoint(x: top.x, y: bottom.y))
+                    }
+                    .stroke(Color.white.opacity(0.3), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                }
+            }
+        }
+        .environment(\.boardStyle, true)
+        // Its contents are always drawn light on dark, in light mode too.
+        .environment(\.colorScheme, .dark)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.board, in: .rect(cornerRadius: Self.cornerRadius, style: .continuous))
+        .overlay {
+            // Keeps the board's edge visible on the near-black page in dark mode.
+            RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+        }
+        .clipShape(.rect(cornerRadius: Self.cornerRadius, style: .continuous))
         .onPreferenceChange(StationSuggestionsShownKey.self) { shown in
             withAnimation(.snappy(duration: 0.25)) { suggestionsShown = shown }
         }
@@ -395,6 +410,8 @@ struct ConnectionsView: View {
 
                 productsButton
             }
+            // Times and numbers in even-width digits, like on a board.
+            .monospacedDigit()
         }
     }
 
@@ -501,6 +518,7 @@ struct ConnectionsView: View {
             searchButton
             AddTicketButton()
         }
+        .buttonBorderShape(.roundedRectangle(radius: Self.cornerRadius))
     }
 
     private var searchButton: some View {

@@ -42,6 +42,7 @@ struct SavedJourneyRow: View {
     var isNext = false
     var readOnly = false
     @Environment(AppModel.self) private var model
+    @Environment(\.cardCornerRadius) private var cornerRadius
     @State private var journeyToRemove: Journey?
 
     var body: some View {
@@ -71,7 +72,7 @@ struct SavedJourneyRow: View {
 
                 JourneyCard(journey: entry.journey)
                     .overlay {
-                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                             .strokeBorder(blocking != nil ? Color.heavyDelay : (highlightsAsNext ? Color.brand : .clear), lineWidth: 2)
                     }
 
