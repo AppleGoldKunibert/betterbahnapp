@@ -179,7 +179,10 @@ in `project.pbxproj`: new files join their target automatically.
   `TravelMapSelection` and cached heatmap, km from cached geometry, series from `rememberedFormation`), shared as an
   image (`ImageRenderer`, heatmap card via `Canvas`). `LiveTrainMapView`: one train live on its track
   (`AppModel.geometry(for:)`, never straight lines), opened from `LiveTrainIconTile`; `JourneyMapView` shows running
-  trains too.
+  trains too. Both designs (#504): `.mapPanel(in:)` draws what floats on a map (Minimal: card surface with shadow,
+  Fahrkarte: Liquid Glass); on Fahrkarte the travel map's range and numbers and the live map's status are tickets
+  with `MapTicketLabel` fields. The year review's cards are accent-colored stories on black (Minimal) or tickets on
+  `Color.canvas` (Fahrkarte), in the shared image too.
 - `Features/Collection/` – `CollectionView` (#384, "Sammlung", `CollectionButton` next to "Vergangene Fahrten" on
   Verbindungen): progress per category, `CollectionCategoryView` grid (not collected greyed out), sheet with the first and
   all rides. Kit `TravelCollection` from the travel map's rides (`AppModel.travelCollection()`); trains only from
@@ -187,6 +190,7 @@ in `project.pbxproj`: new files join their target automatically.
   saved leg of the same train it replaced), so other check-ins count only for stations. Series also count a planned
   series (`TrainSeriesTag` remembers it until a Tz is seen); liveries and trainsets need the Tz. "Neu" badges: IDs collected since the last
   visit (`newCollectionIDs`, UserDefaults `collectionSeenIDs`, the first computation is the starting point).
+  Fahrkarte (#504) shows the categories as small tickets and items as round stamps, dashed until collected.
 - `Features/Tickets/` – `TicketLookupView` (bahn.de's "Auftragssuche" in a hidden SwiftUI `WebView`:
   `DBOrderPage.fillScript` fills the form, `fetchScript` fetches order + PDFs inside the page; shown only when bahn.de
   asks for more, e.g. a captcha), `TicketView` (full-brightness barcode, PDF, `AddToWalletButton`, "Zugbindung

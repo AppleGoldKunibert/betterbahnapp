@@ -121,6 +121,16 @@
         }
       }
     },
+    "Geschwindigkeit" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speed"
+          }
+        }
+      }
+    },
     "Gold" : {
       "localizations" : {
         "en" : {
@@ -201,6 +211,16 @@
         }
       }
     },
+    "Nächster Halt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Next stop"
+          }
+        }
+      }
+    },
     "Orange" : {
       "localizations" : {
         "en" : {
@@ -241,6 +261,16 @@
         }
       }
     },
+    "Stand" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Updated"
+          }
+        }
+      }
+    },
     "Suchen" : {
       "localizations" : {
         "en" : {
@@ -277,6 +307,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Familiar and tidy: the usual cards, rarely used options folded away."
+          }
+        }
+      }
+    },
+    "von %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "of %lld"
+          }
+        }
+      }
+    },
+    "von %lld gesammelt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "of %lld collected"
           }
         }
       }

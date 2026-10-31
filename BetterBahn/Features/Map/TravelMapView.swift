@@ -6,6 +6,7 @@ import SwiftUI
 /// stronger colors. Lines follow the real tracks, OpenRailwayMap is shown as base layer.
 struct TravelMapView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.appDesign) private var design
     @State private var range: TravelMapRange = .month
     @State private var customFrom = Calendar.current.date(byAdding: .day, value: -30, to: .now)!
     @State private var customTo = Date.now
@@ -56,118 +57,21 @@ struct TravelMapView: View {
 
     // MARK: Overlays
 
+    /// Fahrkarte lays the range and the numbers out as a ticket; Minimal as one card.
+    private var isTicket: Bool { design == .fahrkarte }
+
     private var header: some View {
-        VStack(spacing: 10) {
-            // Fixed-width segments so nothing scrolls out of the capsule.
-            HStack(spacing: 2) {
-                ForEach(TravelMapRange.allCases) { preset in
-                    Button {
-                        if preset == .custom { showRangeSheet = true }
-                        withAnimation(.snappy) { range = preset }
-                    } label: {
-                        Group {
-                            if preset == .custom {
-                                Image(systemName: "calendar")
-                            } else {
-                                Text(preset.title)
-                            }
-                        }
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .frame(maxWidth: preset == .custom ? 44 : .infinity)
-                        .padding(.vertical, 8)
-                        .foregroundStyle(range == preset ? .white : .primary)
-                        .background(range == preset ? Color.brand : Color.clear, in: .capsule)
-                        .contentShape(.capsule)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(preset.title)
-                }
-            }
-            .padding(4)
-            .glassEffect(.regular, in: .capsule)
-
-            if range == .custom {
-                Button {
-                    showRangeSheet = true
-                } label: {
-                    Label(customLabel, systemImage: "calendar")
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                }
-                .buttonStyle(.plain)
-                .glassEffect(.regular, in: .capsule)
-            }
-
-            HStack(spacing: 0) {
-                stat(value: "\(stats.legs)", label: "Fahrten", icon: "tram.fill")
-                Divider().frame(height: 28)
-                stat(value: stats.kilometers.formatted(.number.precision(.fractionLength(0))), label: "km", icon: "point.topleft.down.to.point.bottomright.curvepath.fill")
-                Divider().frame(height: 28)
-                stat(value: stats.hours.formatted(.number.precision(.fractionLength(1))), label: "Std.", icon: "clock.fill")
-                Divider().frame(height: 28)
-                Button {
-                    withAnimation { showRailwayLayer.toggle() }
-                } label: {
-                    VStack(spacing: 2) {
-                        Image(systemName: showRailwayLayer ? "square.3.layers.3d.top.filled" : "square.3.layers.3d")
-                            .font(.headline)
-                        Text("Gleise").font(.caption2)
-                    }
-                    .foregroundStyle(showRailwayLayer ? Color.brand : .secondary)
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("OpenRailwayMap-Ebene")
-            }
-            .padding(.vertical, 10)
-            .glassEffect(.regular, in: .rect(cornerRadius: 20))
-
-            HStack(spacing: 8) {
-                sourceToggle("Gespeichert", icon: "bookmark.fill", isOn: $includeSaved)
-                if model.settings.traewellingEnabled {
-                    sourceToggle("Träwelling", icon: "checkmark.seal.fill", isOn: $includeTraewelling)
-                }
-                Spacer(minLength: 0)
-                Button {
-                    model.showsTrainSearch = true
-                } label: {
-                    Image(systemName: "magnifyingglass")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(width: 34, height: 34)
-                }
-                .buttonStyle(.plain)
-                .glassEffect(.regular, in: .circle)
-                .accessibilityLabel("Zug suchen")
-                if !model.settings.traewellingEnabled {
-                    EmptyView()
-                } else if model.isSyncingTraewelling {
-                    ProgressView().controlSize(.small)
-                        .padding(8)
-                        .glassEffect(.regular, in: .circle)
-                } else {
-                    Button {
-                        Task { await model.syncTraewelling(force: true) }
-                    } label: {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(width: 34, height: 34)
-                    }
-                    .buttonStyle(.plain)
-                    .glassEffect(.regular, in: .circle)
-                    .accessibilityLabel("Träwelling synchronisieren")
-                }
-            }
+        VStack(spacing: 8) {
+            summaryPanel
+            controls
 
             if model.settings.traewellingEnabled, let error = model.traewellingSyncError {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundStyle(Color.slightDelay)
                     .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .glassEffect(.regular, in: .capsule)
+                    .padding(.vertical, 8)
+                    .mapPanel(in: .capsule)
             }
 
             if let progress, progress.done < progress.total {
@@ -177,13 +81,164 @@ struct TravelMapView: View {
                     Text("Strecken \(progress.done)/\(progress.total)")
                         .font(.caption.monospacedDigit())
                 }
-                .padding(.horizontal, 14)
+                .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-                .glassEffect(.regular, in: .capsule)
+                .mapPanel(in: .capsule)
             }
         }
+        .frame(maxWidth: 560)
         .padding(.horizontal)
         .padding(.top, 8)
+    }
+
+    /// The range on top, the numbers of the rides in it below.
+    @ViewBuilder private var summaryPanel: some View {
+        if isTicket {
+            summaryContent
+                .fontDesign(.rounded)
+                .ticketBackground(outline: Color.primary.opacity(0.12))
+                .environment(\.cardSurface, Color.ticket)
+        } else {
+            summaryContent
+                .mapPanel(in: .rect(cornerRadius: 22, style: .continuous))
+        }
+    }
+
+    private var summaryContent: some View {
+        VStack(spacing: 0) {
+            rangePicker
+                .padding(4)
+            if range == .custom {
+                customRangeButton
+                    .padding(.top, 4)
+                    .padding(.bottom, 8)
+            }
+            if isTicket {
+                TicketPerforation()
+                    .padding(.vertical, 4)
+            } else {
+                Divider()
+                    .padding(.horizontal, 16)
+            }
+            HStack(spacing: 0) {
+                stat(value: "\(stats.legs)", label: "Fahrten")
+                stat(value: stats.kilometers.formatted(.number.precision(.fractionLength(0))), label: "km")
+                stat(value: stats.hours.formatted(.number.precision(.fractionLength(1))), label: "Std.")
+            }
+            .padding(.vertical, 12)
+        }
+    }
+
+    /// Fixed-width segments so nothing scrolls out of the panel.
+    private var rangePicker: some View {
+        HStack(spacing: 2) {
+            ForEach(TravelMapRange.allCases) { preset in
+                Button {
+                    if preset == .custom { showRangeSheet = true }
+                    withAnimation(.snappy) { range = preset }
+                } label: {
+                    Group {
+                        if preset == .custom {
+                            Image(systemName: "calendar")
+                        } else {
+                            Text(preset.title)
+                        }
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .frame(maxWidth: preset == .custom ? 44 : .infinity)
+                    .padding(.vertical, 8)
+                    .foregroundStyle(range == preset ? .white : .primary)
+                    .background(range == preset ? Color.brand : Color.clear, in: .capsule)
+                    .contentShape(.capsule)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(preset.title)
+                .accessibilityAddTraits(range == preset ? .isSelected : [])
+            }
+        }
+    }
+
+    private var customRangeButton: some View {
+        Button {
+            showRangeSheet = true
+        } label: {
+            HStack(spacing: 4) {
+                Text(customLabel)
+                Image(systemName: "chevron.down").font(.caption2.weight(.bold))
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Color.brand)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Zeitraum")
+        .accessibilityValue(customLabel)
+    }
+
+    /// Minimal: the value over a small label. Fahrkarte: a ticket's upper-case label over a large value.
+    private func stat(value: String, label: LocalizedStringKey) -> some View {
+        VStack(spacing: isTicket ? 2 : 0) {
+            if isTicket {
+                MapTicketLabel(label)
+                Text(value).font(.title3.weight(.bold)).monospacedDigit()
+            } else {
+                Text(value).font(.headline.monospacedDigit())
+                Text(label).font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// What's drawn (saved journeys, check-ins) on the left, the map's buttons on the right.
+    private var controls: some View {
+        HStack(spacing: 8) {
+            sourceToggle("Gespeichert", icon: "bookmark.fill", isOn: $includeSaved)
+            if model.settings.traewellingEnabled {
+                sourceToggle("Träwelling", icon: "checkmark.seal.fill", isOn: $includeTraewelling)
+            }
+            Spacer(minLength: 0)
+            circleButton(showRailwayLayer ? "square.3.layers.3d.top.filled" : "square.3.layers.3d",
+                         active: showRailwayLayer) {
+                withAnimation { showRailwayLayer.toggle() }
+            }
+            .accessibilityLabel("OpenRailwayMap-Ebene")
+            .accessibilityValue(showRailwayLayer ? String(localized: "An") : String(localized: "Aus"))
+            circleButton("magnifyingglass") {
+                model.showsTrainSearch = true
+            }
+            .accessibilityLabel("Zug suchen")
+            if !model.settings.traewellingEnabled {
+                EmptyView()
+            } else if model.isSyncingTraewelling {
+                ProgressView().controlSize(.small)
+                    .frame(width: 38, height: 38)
+                    .mapPanel(in: .circle)
+            } else {
+                circleButton("arrow.triangle.2.circlepath") {
+                    Task { await model.syncTraewelling(force: true) }
+                }
+                .accessibilityLabel("Träwelling synchronisieren")
+            }
+        }
+    }
+
+    private func circleButton(_ systemImage: String, active: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(active ? Color.brand : Color.primary)
+                .frame(width: 38, height: 38)
+                .contentShape(.circle)
+        }
+        .buttonStyle(.plain)
+        .mapPanel(in: .circle)
     }
 
     private func sourceToggle(_ title: LocalizedStringKey, icon: String, isOn: Binding<Bool>) -> some View {
@@ -193,33 +248,28 @@ struct TravelMapView: View {
             Label(title, systemImage: icon)
                 .font(.caption.weight(.semibold))
                 .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .frame(height: 38)
                 .foregroundStyle(isOn.wrappedValue ? Color.brand : .secondary)
+                .contentShape(.capsule)
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular, in: .capsule)
-        .opacity(isOn.wrappedValue ? 1 : 0.7)
-    }
-
-    private func stat(value: String, label: LocalizedStringKey, icon: String) -> some View {
-        VStack(spacing: 2) {
-            Text(value).font(.headline.monospacedDigit())
-            Label(label, systemImage: icon)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .labelStyle(.titleOnly)
-        }
-        .frame(maxWidth: .infinity)
+        .mapPanel(in: .capsule)
+        .opacity(isOn.wrappedValue ? 1 : 0.75)
+        .accessibilityAddTraits(isOn.wrappedValue ? .isSelected : [])
     }
 
     private var legend: some View {
         Group {
             if legendExpanded {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Wie oft gefahren").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    if isTicket {
+                        MapTicketLabel("Wie oft gefahren")
+                    } else {
+                        Text("Wie oft gefahren").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    }
                     ForEach(HeatColor.legend, id: \.label) { item in
                         HStack(spacing: 8) {
-                            Capsule().fill(Color(item.color)).frame(width: 22, height: 5)
+                            Capsule().fill(Color(item.color)).frame(width: 24, height: 6)
                             Text(item.label).font(.caption2.monospacedDigit())
                         }
                     }
@@ -229,20 +279,16 @@ struct TravelMapView: View {
                     }
                     .font(.system(size: 8))
                     .tint(.secondary)
+                    .padding(.top, 2)
                 }
+                .fontDesign(isTicket ? .rounded : nil)
                 .padding(12)
-                .glassEffect(.regular, in: .rect(cornerRadius: 16))
+                .mapPanel(in: .rect(cornerRadius: 16, style: .continuous))
                 .onTapGesture { withAnimation(.snappy) { legendExpanded = false } }
             } else {
-                Button {
+                circleButton("list.bullet") {
                     withAnimation(.snappy) { legendExpanded = true }
-                } label: {
-                    Image(systemName: "list.bullet")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(width: 38, height: 38)
                 }
-                .buttonStyle(.plain)
-                .glassEffect(.regular, in: .circle)
                 .accessibilityLabel("Legende anzeigen")
             }
         }
@@ -293,6 +339,50 @@ struct TravelMapView: View {
             stats = Stats(legs: heatmap.legsCount, kilometers: heatmap.kilometers, hours: heatmap.hours)
         }
         progress = nil
+    }
+}
+
+// MARK: - Map overlays
+
+/// A ticket's small upper-case field label ("FAHRTEN", "NÄCHSTER HALT") over a large value, as the
+/// Fahrkarte design (#504) draws it on the map pages.
+struct MapTicketLabel: View {
+    let text: LocalizedStringKey
+
+    init(_ text: LocalizedStringKey) {
+        self.text = text
+    }
+
+    var body: some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .tracking(0.6)
+            .textCase(.uppercase)
+            .foregroundStyle(.secondary)
+    }
+}
+
+extension View {
+    /// The surface of a panel or button floating on a map: Liquid Glass in the Fahrkarte design, the card
+    /// surface with a hairline and a light shadow in Minimal (#504).
+    func mapPanel(in shape: some Shape) -> some View {
+        modifier(MapPanelModifier(shape: shape))
+    }
+}
+
+private struct MapPanelModifier<PanelShape: Shape>: ViewModifier {
+    let shape: PanelShape
+    @Environment(\.appDesign) private var design
+
+    func body(content: Content) -> some View {
+        if design == .fahrkarte {
+            content.glassEffect(.regular, in: shape)
+        } else {
+            content
+                .background(Color.card, in: shape)
+                .overlay { shape.stroke(Color.hairline, lineWidth: 1) }
+                .shadow(color: .black.opacity(0.1), radius: 8, y: 2)
+        }
     }
 }
 
