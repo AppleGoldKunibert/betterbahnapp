@@ -371,8 +371,6 @@ struct StationInput<Focus: Hashable>: View {
     }
 }
 
-/// Whether any `StationInput` in the view shows its suggestions, so a screen can keep its layout
-/// around the field still while it does (see `StationInput.showsSuggestions`).
 nonisolated private struct TicketStationFieldsKey: EnvironmentKey {
     static let defaultValue = false
 }
@@ -393,6 +391,8 @@ struct RouteMarkerKey: PreferenceKey {
     }
 }
 
+/// Whether any `StationInput` in the view shows its suggestions, so a screen can keep its layout
+/// around the field still while it does (see `StationInput.showsSuggestions`).
 struct StationSuggestionsShownKey: PreferenceKey {
     static let defaultValue = false
     static func reduce(value: inout Bool, nextValue: () -> Bool) {
