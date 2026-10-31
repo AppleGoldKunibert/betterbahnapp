@@ -18,6 +18,8 @@ enum ConnectionsRoute: Hashable {
     case journey(JourneyRoute)
     case pastTrips
     case collection
+    /// One category of the collection, from `AppModel.collectionSnapshot`.
+    case collectionCategory(TravelCollection.Category)
 }
 
 nonisolated struct ConnectionSearch: Hashable, Codable {
@@ -219,6 +221,8 @@ struct ConnectionsView: View {
                 PastTripsView()
             case .collection:
                 CollectionView()
+            case .collectionCategory(let category):
+                CollectionCategoryPage(category: category)
             }
         } placeholder: {
             SplitPlaceholder(title: String(localized: "Verbindungen"), systemImage: "arrow.triangle.swap",
