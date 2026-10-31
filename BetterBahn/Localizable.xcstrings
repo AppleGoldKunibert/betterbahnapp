@@ -6470,6 +6470,26 @@
         }
       }
     },
+    "Wendet aus %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turns from %@"
+          }
+        }
+      }
+    },
+    "Wendet zu %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turns into %@"
+          }
+        }
+      }
+    },
     "Richtung %@" : {
       "localizations" : {
         "en" : {
