@@ -1,8 +1,32 @@
 {
   "sourceLanguage" : "de",
   "strings" : {
-    "NSCalendarsFullAccessUsageDescription" : {
+    "CFBundleDisplayName" : {
+      "comment" : "Bundle display name",
       "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "BetterBahn"
+          }
+        }
+      }
+    },
+    "CFBundleName" : {
+      "comment" : "Bundle name",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "BetterBahn"
+          }
+        }
+      }
+    },
+    "NSCalendarsFullAccessUsageDescription" : {
+      "comment" : "Privacy - Calendars Full Access Usage Description",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -19,7 +43,7 @@
       }
     },
     "NSCalendarsWriteOnlyAccessUsageDescription" : {
-      "extractionState" : "extracted_with_value",
+      "comment" : "Privacy - Calendars Write Only Usage Description",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -36,7 +60,7 @@
       }
     },
     "NSLocationWhenInUseUsageDescription" : {
-      "extractionState" : "extracted_with_value",
+      "comment" : "Privacy - Location When In Use Usage Description",
       "localizations" : {
         "de" : {
           "stringUnit" : {
