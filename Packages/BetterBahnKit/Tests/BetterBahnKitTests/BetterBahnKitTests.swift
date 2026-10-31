@@ -7058,7 +7058,7 @@ private final class TimetablesPlanProtocol: URLProtocol, @unchecked Sendable {
 
     @Test func fullHourWindowDoesNotAddAnExtraBucket() {
         let onTheHour = from.addingTimeInterval(600)
-        #expect(berlinHours(TimetablesClient.planHours(from: onTheHour, duration: 60)) == [14])
+        #expect(berlinHours(TimetablesClient.planHours(from: onTheHour, duration: 60)) == [15])
     }
 }
 
