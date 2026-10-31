@@ -411,9 +411,11 @@ private struct YearReviewHeatmap: View {
 
 /// Offers the review on the Verbindungen tab in December (the running year) and January (the year
 /// just ended), for the whole month.
+/// A plain card in the calm design.
 struct YearReviewBanner: View {
     let year: Int
     @State private var showsReview = false
+    @Environment(\.calmDesign) private var calm
 
     var body: some View {
         Button {
@@ -433,10 +435,16 @@ struct YearReviewBanner: View {
                     .font(.subheadline.weight(.bold))
                     .opacity(0.8)
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(calm ? Color.primary : .white)
             .padding(16)
-            .background(LinearGradient(colors: [.brand, .brandDeep], startPoint: .topLeading, endPoint: .bottomTrailing),
-                        in: .rect(cornerRadius: 22, style: .continuous))
+            .background {
+                let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
+                if calm {
+                    shape.fill(Color.card).overlay { shape.strokeBorder(Color.hairline, lineWidth: 1) }
+                } else {
+                    shape.fill(LinearGradient(colors: [.brand, .brandDeep], startPoint: .topLeading, endPoint: .bottomTrailing))
+                }
+            }
             .contentShape(.rect)
         }
         .buttonStyle(.plain)

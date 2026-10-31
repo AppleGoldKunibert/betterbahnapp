@@ -39,6 +39,7 @@ struct ViaRowView<Focus: Hashable>: View {
     let onRemove: () -> Void
 
     @State private var showStayPopover = false
+    @Environment(\.calmDesign) private var calm
 
     var body: some View {
         VStack(spacing: 0) {
@@ -52,7 +53,7 @@ struct ViaRowView<Focus: Hashable>: View {
                     Label(row.minStayMinutes > 0 ? String(localized: "Mind. \(row.minStayMinutes) Min.") : String(localized: "Mindestaufenthalt"),
                           systemImage: "clock.badge.checkmark")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(row.minStayMinutes > 0 ? Color.brand : Color.secondary)
+                        .foregroundStyle(row.minStayMinutes > 0 ? (calm ? Color.primary : Color.brand) : Color.secondary)
                         .padding(Self.hitPadding)
                         .contentShape(.rect)
                 }

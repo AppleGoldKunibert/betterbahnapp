@@ -478,10 +478,12 @@ private struct WindowTapObserver: UIViewRepresentable {
 }
 
 /// Time button with a clock icon: the label opens a date picker, the clock resets to now.
+/// Grey in the calm design.
 struct TimeSelector: View {
     @Binding var date: Date
     @Binding var useNow: Bool
     @State private var showPicker = false
+    @Environment(\.calmDesign) private var calm
 
     var body: some View {
         HStack(spacing: 0) {
@@ -493,7 +495,7 @@ struct TimeSelector: View {
             } label: {
                 Image(systemName: useNow ? "clock.fill" : "clock.arrow.circlepath")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(useNow ? Color.brand : Color.secondary)
+                    .foregroundStyle(useNow ? (calm ? Color.primary : Color.brand) : Color.secondary)
                     .frame(width: 36, height: 34)
                     .contentShape(.rect)
             }
@@ -516,7 +518,7 @@ struct TimeSelector: View {
             }
             .buttonStyle(.plain)
         }
-        .background(Color.brand.opacity(0.1), in: .capsule)
+        .background(calm ? Color.primary.opacity(0.06) : Color.brand.opacity(0.1), in: .capsule)
         .popover(isPresented: $showPicker) {
             VStack(spacing: 12) {
                 DatePicker("Zeit", selection: Binding(get: { date }, set: { date = $0; useNow = false }))

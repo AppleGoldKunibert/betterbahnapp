@@ -42,6 +42,7 @@ struct SavedJourneyRow: View {
     var isNext = false
     var readOnly = false
     @Environment(AppModel.self) private var model
+    @Environment(\.calmDesign) private var calm
     @State private var journeyToRemove: Journey?
 
     var body: some View {
@@ -52,12 +53,12 @@ struct SavedJourneyRow: View {
                     Image(systemName: "calendar")
                     Text(dayLabel)
                     if isNext, model.liveActivities.isActive(entry.journey) {
-                        Image(systemName: "bolt.badge.clock.fill").foregroundStyle(Color.brand)
+                        Image(systemName: "bolt.badge.clock.fill").foregroundStyle(accent)
                     }
                     let tickets = model.tickets(for: entry)
                     if !tickets.isEmpty {
                         let onlyReservations = tickets.allSatisfy(\.ticket.isReservationOnly)
-                        Image(systemName: onlyReservations ? "carseat.right.fill" : "ticket.fill").foregroundStyle(Color.brand)
+                        Image(systemName: onlyReservations ? "carseat.right.fill" : "ticket.fill").foregroundStyle(accent)
                             .accessibilityLabel(onlyReservations ? "Reservierung gespeichert" : "Ticket gespeichert")
                     }
                     Spacer()
@@ -72,7 +73,7 @@ struct SavedJourneyRow: View {
                 JourneyCard(journey: entry.journey)
                     .overlay {
                         RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .strokeBorder(blocking != nil ? Color.heavyDelay : (highlightsAsNext ? Color.brand : .clear), lineWidth: 2)
+                            .strokeBorder(blocking != nil ? Color.heavyDelay : (highlightsAsNext ? accent : .clear), lineWidth: 2)
                     }
 
                 if let blocking {
@@ -94,6 +95,9 @@ struct SavedJourneyRow: View {
         }
         .checkoutPrompt($journeyToRemove)
     }
+
+    /// Brand red, grey in the calm design.
+    private var accent: Color { calm ? .primary : .brand }
 
     /// The next journey is only framed once it departs within the next 24 hours (or is already
     /// underway), so a trip days away doesn't look as urgent as a broken connection.

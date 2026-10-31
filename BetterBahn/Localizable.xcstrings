@@ -11,6 +11,58 @@
         }
       }
     },
+    "Max. %lld Umstiege" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Max. %lld change"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Max. %lld changes"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Optionen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Options"
+          }
+        }
+      }
+    },
+    "Optionen ausblenden" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide options"
+          }
+        }
+      }
+    },
+    "Optionen einblenden" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show options"
+          }
+        }
+      }
+    },
     "·" : {
       "localizations" : {
         "en" : {
@@ -8240,16 +8292,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Where Are You Sitting?"
-          }
-        }
-      }
-    },
-    "Wohin geht’s?" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Where to next?"
           }
         }
       }

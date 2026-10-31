@@ -103,6 +103,8 @@ struct ConnectionsView: View {
     /// Per-section selections; the section from the start is keyed by `startLegID`, the others by the via row they start at.
     @State private var legProducts: [UUID: Set<Product>] = [:]
     @State private var showProductsPopover = false
+    /// The rarely changed options (ticket, bike, transfers, vehicles) are folded away until opened.
+    @State private var showsOptions = false
     @State private var productsTapCount = 0
     @FocusState private var focused: Field?
     /// A station field shows its suggestions (they stay a moment after it loses focus).
@@ -127,12 +129,6 @@ struct ConnectionsView: View {
             ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 20) {
-                    Text("Wohin geht’s?")
-                        .font(.largeTitle.weight(.heavy))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 4)
-                        .padding(.top, 4)
-                        .accessibilityAddTraits(.isHeader)
                     routeCard
                     optionsCard
                     if sizeClass != .regular {
@@ -184,10 +180,7 @@ struct ConnectionsView: View {
             .background { AppBackground() }
             .calmDesign()
             .navigationTitle("Verbindungen")
-            // The page's own headline takes the title's place; the title stays for the back button.
-            .toolbarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .principal) { Color.clear.frame(width: 1, height: 1) }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Zug suchen", systemImage: "train.side.front.car") { model.showsTrainSearch = true }
                 }
@@ -262,7 +255,7 @@ struct ConnectionsView: View {
                 }
 
                 StationInput(label: String(localized: "Ziel"), placeholder: String(localized: "Wohin?"), systemImage: "mappin.circle.fill",
-                             station: $to, focus: $focused, focusValue: .to)
+                             iconColor: .primary, station: $to, focus: $focused, focusValue: .to)
             }
             .backgroundPreferenceValue(RouteMarkerKey.self) { anchors in
                 // The stops sit on one line, like on a route map; hidden while suggestions push between them.
@@ -273,7 +266,7 @@ struct ConnectionsView: View {
                             path.move(to: top)
                             path.addLine(to: CGPoint(x: top.x, y: bottom.y))
                         }
-                        .stroke(Color.primary.opacity(0.15), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                        .stroke(Color.primary.opacity(0.12), style: StrokeStyle(lineWidth: 2, lineCap: .round))
                     }
                 }
             }
@@ -341,66 +334,117 @@ struct ConnectionsView: View {
         }
         .buttonStyle(.glass)
         .buttonBorderShape(.circle)
-        .tint(.brand)
         .accessibilityLabel("Zwischenhalt hinzufügen")
     }
 
     // MARK: Options
 
     private var optionsCard: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 10) {
-                    Picker("Zeit", selection: $isArrival) {
-                        Label("Abfahrt", systemImage: "arrow.up.right").tag(false)
-                        Label("Ankunft", systemImage: "arrow.down.right").tag(true)
+        Card(padding: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 10) {
+                        Picker("Zeit", selection: $isArrival) {
+                            Label("Abfahrt", systemImage: "arrow.up.right").tag(false)
+                            Label("Ankunft", systemImage: "arrow.down.right").tag(true)
+                        }
+                        .pickerStyle(.segmented)
+                        .fixedSize()
+                        .disabled(!viaRows.isEmpty)
+
+                        Spacer()
+
+                        TimeSelector(date: $date, useNow: $useNow)
                     }
-                    .pickerStyle(.segmented)
-                    .fixedSize()
-                    .disabled(!viaRows.isEmpty)
 
-                    Spacer()
-
-                    TimeSelector(date: $date, useNow: $useNow)
-                }
-
-                if !viaRows.isEmpty {
-                    Label("Mit Zwischenhalten suchen wir ab der gewählten Abfahrtszeit.", systemImage: "info.circle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Divider()
-
-                Toggle(isOn: $onlyValidTicket) {
-                    let ticket = model.settings.ticketType
-                    optionLabel(ticket.filterTitle, subtitle: ticket.filterSubtitle, icon: ticket.symbolName, color: .brand)
-                }
-                .tint(.brand)
-
-                Divider()
-
-                if let title = model.settings.bikeOption.searchTitle {
-                    Toggle(isOn: Bindable(model.settings).searchWithBike) {
-                        optionLabel(title, subtitle: model.settings.bikeOption == .foldingBike
-                                    ? String(localized: "Zeigt, wo dein Klapprad mitkommt") : String(localized: "Zeigt, ob dein Fahrrad mitkommt"),
-                                    icon: "bicycle", color: .brand)
+                    if !viaRows.isEmpty {
+                        Label("Mit Zwischenhalten suchen wir ab der gewählten Abfahrtszeit.", systemImage: "info.circle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    .tint(.brand)
-
-                    Divider()
                 }
+                .padding(16)
 
-                transfersPicker
+                Divider().padding(.leading, 16)
 
-                productsButton
+                optionsToggleRow
+
+                if showsOptions {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Divider()
+
+                        Toggle(isOn: $onlyValidTicket) {
+                            let ticket = model.settings.ticketType
+                            optionLabel(ticket.filterTitle, subtitle: ticket.filterSubtitle)
+                        }
+                        .tint(Self.toggleTint)
+
+                        if let title = model.settings.bikeOption.searchTitle {
+                            Toggle(isOn: Bindable(model.settings).searchWithBike) {
+                                optionLabel(title, subtitle: model.settings.bikeOption == .foldingBike
+                                            ? String(localized: "Zeigt, wo dein Klapprad mitkommt") : String(localized: "Zeigt, ob dein Fahrrad mitkommt"))
+                            }
+                            .tint(Self.toggleTint)
+                        }
+
+                        transfersPicker
+
+                        productsButton
+                    }
+                    .padding([.horizontal, .bottom], 16)
+                    .transition(.opacity)
+                }
             }
         }
     }
 
+    /// The single row that opens the options; it names what differs from the defaults.
+    private var optionsToggleRow: some View {
+        Button {
+            withAnimation(.snappy) { showsOptions.toggle() }
+        } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Optionen").font(.subheadline.weight(.semibold))
+                    if let summary = optionsSummary {
+                        Text(summary).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(showsOptions ? 180 : 0))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityValue(optionsSummary ?? "")
+        .accessibilityHint(showsOptions ? String(localized: "Optionen ausblenden") : String(localized: "Optionen einblenden"))
+    }
+
+    /// The options that differ from the defaults, or nil when none do.
+    private var optionsSummary: String? {
+        var parts: [String] = []
+        if onlyValidTicket { parts.append(model.settings.ticketType.shortName) }
+        if model.settings.searchWithBike, let title = model.settings.bikeOption.searchTitle { parts.append(title) }
+        if let maxTransfers {
+            parts.append(maxTransfers == 0 ? String(localized: "Direkt") : String(localized: "Max. \(maxTransfers) Umstiege"))
+        }
+        if perLeg || products != all { parts.append(productSummary) }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// Switches stay grey: the page keeps its red for the search button.
+    private static let toggleTint = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark ? .systemGray : .label
+    })
+
     private var transfersPicker: some View {
         VStack(alignment: .leading, spacing: 8) {
-            optionLabel(String(localized: "Max. Umstiege"), subtitle: String(localized: "Weniger Umsteigen, evtl. länger unterwegs"), icon: "arrow.triangle.swap", color: .brand)
+            optionLabel(String(localized: "Max. Umstiege"), subtitle: String(localized: "Weniger Umsteigen, evtl. länger unterwegs"))
             MaxTransfersPicker(maxTransfers: $maxTransfers)
         }
     }
@@ -410,8 +454,7 @@ struct ConnectionsView: View {
             productsTapCount += 1
         } label: {
             HStack {
-                optionLabel(String(localized: "Verkehrsmittel"), subtitle: productSummary,
-                            icon: "train.side.front.car", color: .brand)
+                optionLabel(String(localized: "Verkehrsmittel"), subtitle: productSummary)
                 Spacer()
                 Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
             }
@@ -484,13 +527,10 @@ struct ConnectionsView: View {
         .padding()
     }
 
-    private func optionLabel(_ title: String, subtitle: String, icon: String, color: Color) -> some View {
-        HStack(spacing: 12) {
-            IconTile(systemImage: icon, color: color, size: 32)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.subheadline.weight(.semibold))
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
-            }
+    private func optionLabel(_ title: String, subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title).font(.subheadline.weight(.semibold))
+            Text(subtitle).font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -579,7 +619,7 @@ private struct MiniRoute: View {
         VStack(spacing: 2) {
             Circle().strokeBorder(Color.secondary, lineWidth: 2).frame(width: 9, height: 9)
             Capsule().fill(Color.secondary.opacity(0.4)).frame(width: 2, height: 12)
-            Circle().fill(Color.brand).frame(width: 9, height: 9)
+            Circle().fill(Color.primary).frame(width: 9, height: 9)
         }
         .frame(width: 30)
         .accessibilityHidden(true)
