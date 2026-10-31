@@ -248,22 +248,17 @@ private struct SightingRow: View {
     }
 }
 
-/// The entry on the Verbindungen tab, with how many items were collected since the last visit.
+/// The entry on the Verbindungen tab, a plain row with how many items were collected since the last visit.
 struct CollectionButton: View {
     @Environment(AppModel.self) private var model
     @State private var newCount = 0
 
     var body: some View {
         RouteLink(value: ConnectionsRoute.collection) {
-            Label("Sammlung", systemImage: "square.grid.3x3.fill")
-                .font(.subheadline.weight(.semibold))
-                .frame(maxWidth: .infinity)
-                .overlay(alignment: .topTrailing) {
-                    if newCount > 0 { NewBadge(text: "\(newCount)").offset(x: 6, y: -10) }
-                }
+            LinkRowLabel(title: String(localized: "Sammlung"), systemImage: "square.grid.3x3",
+                         badge: newCount > 0 ? "\(newCount)" : nil)
         }
-        .buttonStyle(.glass)
-        .controlSize(.large)
+        .buttonStyle(.plain)
         .accessibilityValue(newCount > 0 ? String(localized: "\(newCount) neu gesammelt") : "")
         .task(id: "\(model.savedJourneys.count)|\(model.traewellingTrips.count)") {
             newCount = model.newCollectionIDs(in: await model.travelCollection()).count

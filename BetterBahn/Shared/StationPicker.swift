@@ -23,6 +23,7 @@ struct StationInput<Focus: Hashable>: View {
     @Environment(\.stationSearchArea) private var searchArea
     @Environment(\.calmDesign) private var calm
     @Environment(\.cardSurface) private var cardSurface
+    @Environment(\.ticketStationFields) private var ticketStyle
     /// This field's key in `searchArea`.
     @State private var areaID = UUID()
     @State private var query = ""
@@ -79,11 +80,13 @@ struct StationInput<Focus: Hashable>: View {
                     .allowsHitTesting(false)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(label)
-                        .font(.caption)
+                        .font(ticketStyle ? .caption2.weight(.semibold) : .caption)
+                        .tracking(ticketStyle ? 0.6 : 0)
+                        .textCase(ticketStyle ? .uppercase : nil)
                         .foregroundStyle(.secondary)
                         .allowsHitTesting(false)
                     TextField(placeholder, text: $query)
-                        .font(.headline)
+                        .font(ticketStyle ? .title2.weight(.bold) : .headline)
                         .focused(focus, equals: focusValue)
                         .submitLabel(.search)
                         .autocorrectionDisabled()
@@ -370,6 +373,18 @@ struct StationInput<Focus: Hashable>: View {
 
 /// Whether any `StationInput` in the view shows its suggestions, so a screen can keep its layout
 /// around the field still while it does (see `StationInput.showsSuggestions`).
+nonisolated private struct TicketStationFieldsKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// Station fields drawn like a ticket's "Von" and "Nach": a small upper-case label over a large name.
+    nonisolated var ticketStationFields: Bool {
+        get { self[TicketStationFieldsKey.self] }
+        set { self[TicketStationFieldsKey.self] = newValue }
+    }
+}
+
 /// Centers of the station fields' icons, so a route card can join its stops with a line.
 struct RouteMarkerKey: PreferenceKey {
     static let defaultValue: [Anchor<CGPoint>] = []
@@ -506,7 +521,7 @@ struct TimeSelector: View {
             Button {
                 showPicker = true
             } label: {
-                Text(useNow ? String(localized: "Jetzt") : label)
+                Text(useNow ? String(localized: "Jetzt") : Self.label(for: date))
                     .font(.subheadline.weight(.semibold))
                     .monospacedDigit()
                     .lineLimit(1)
@@ -546,7 +561,8 @@ struct TimeSelector: View {
         }
     }
 
-    private var label: String {
+    /// The time alone today, else with the day.
+    static func label(for date: Date) -> String {
         if Calendar.current.isDateInToday(date) {
             return date.formatted(date: .omitted, time: .shortened)
         }

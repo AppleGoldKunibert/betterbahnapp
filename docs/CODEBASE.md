@@ -119,7 +119,10 @@ in `project.pbxproj`: new files join their target automatically.
   them with their App Intents entities (`FavoriteStationEntity`, `SavedJourneyEntity`, `IndexedEntity`, queries via
   `AppDependencyManager`) and removes what's gone (IDs in UserDefaults `spotlightIDs`). Tapping opens the link via
   the entity's `OpenIntent` (`AppModel.linkToOpen`) or the `CSSearchableItemActionType` activity.
-- `Features/Connections/` – `ConnectionsView`, `ConnectionSearch`, `RouteOptionsEditor` (vias, products, max
+- `Features/Connections/` – `ConnectionsView` (the search as one ticket, #504: route with `\.ticketStationFields`
+  station fields, the options as `TicketFieldLabel` fields, the search button as its stub; saved journeys as small
+  tickets, recent searches as chips; in `ConnectionsTicketViews.swift`, `.ticketBackground()` notches the ticket at
+  each `TicketPerforation`), `ConnectionSearch`, `RouteOptionsEditor` (vias, products, max
   transfers), `JourneyResultsView` + `JourneyCard`, `TrainNumberSheet` ("Bestimmten Zug wählen", #225: trains fitting
   the input via Kit `TrainCandidateFinder`; picking one shows its stops in `TripContent` with boarding/exit preselected
   and pins that run; "Ein- und Ausstieg selbst angeben"), `JourneyDetailView` (+ `LegCard`, `TransferRow`,
