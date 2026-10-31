@@ -85,6 +85,19 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Toggle(isOn: $settings.stepFree) {
+                        IconLabel(title: "Stufenfrei reisen", systemImage: "figure.roll", color: .brand)
+                    }
+                    .tint(.brand)
+                    .onChange(of: settings.stepFree) { _, enabled in
+                        if enabled { Task { await ConnectionNotifier.requestAuthorization() } }
+                        model.scheduleExitReminderSync()
+                    }
+                } footer: {
+                    Text("Die Suche zeigt, wo ein Aufzug auf deinem Weg außer Betrieb ist. Für gespeicherte Reisen bekommst du dann eine Mitteilung.")
+                }
+
+                Section {
                     Toggle(isOn: $settings.connectionWarnings) {
                         IconLabel(title: String(localized: "Bei Problemen benachrichtigen"), systemImage: "exclamationmark.triangle.fill", color: .orange)
                     }

@@ -38,6 +38,8 @@ extension AppModel {
         let center = UNUserNotificationCenter.current()
         var scheduled = ExitReminderLog.load()
         var wanted: [String: (reminder: ExitReminder, journey: Journey)] = [:]
+        // "Stufenfrei reisen" (#486): the reminder names a lift out of order where the user gets off.
+        let lifts = settings.exitReminders && settings.stepFree ? await brokenLifts() : []
         if settings.exitReminders {
             for entry in upcomingJourneys where entry.exitRemindersOff != true
                 && (entry.journey.departure?.best ?? .distantFuture) < now.addingTimeInterval(Self.exitReminderHorizon) {
@@ -46,8 +48,11 @@ extension AppModel {
                 let known = Dictionary(entry.journey.transitLegs.compactMap { leg in
                     scheduled[prefix + leg.id].map { ("exit|\(leg.id)", $0) }
                 }, uniquingKeysWith: { first, _ in first })
+                let journey = entry.journey
+                let liftAlerts = lifts.isEmpty ? [] : await Task.detached { journey.liftAlerts(among: lifts, now: now) }.value
                 for reminder in entry.journey.exitReminders(lead: settings.exitReminderLead.interval, now: now,
-                                                            scheduled: known, dispositions: transferDispositions) {
+                                                            scheduled: known, dispositions: transferDispositions,
+                                                            liftAlerts: liftAlerts) {
                     wanted[prefix + reminder.legID] = (reminder, entry.journey)
                 }
             }

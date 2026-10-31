@@ -10,6 +10,8 @@ struct StationBoardView: View {
     @State private var products: Set<Product> = Set(Product.allCases)
     @State private var onlyValidTicket = false
     @State private var entries: [BoardEntry] = []
+    /// Lifts out of order at the station (#486).
+    @State private var liftAlerts: [LiftAlert] = []
     /// Open trips; the tab bar is hidden while one is showing (see `ConnectionsRoute` for why it's done here).
     @State private var path: [BoardEntry] = []
     @State private var isLoading = false
@@ -67,6 +69,10 @@ struct StationBoardView: View {
 
                     if let error {
                         ErrorBanner(error: error)
+                    }
+
+                    if station != nil, !liftAlerts.isEmpty {
+                        LiftBanner(alerts: liftAlerts)
                     }
 
                     if station != nil {
@@ -147,6 +153,7 @@ struct StationBoardView: View {
             .task(id: reloadKey) {
                 if loadedKey != boardKey {
                     entries = []
+                    liftAlerts = []
                     lastUpdate = nil
                     loadedKey = boardKey
                     resetWindow()
@@ -328,11 +335,19 @@ struct StationBoardView: View {
                 guard window == (windowOffset, windowLength) else { return }
                 if filled != entries { show(filled) }
             }
+            await loadLiftAlerts(at: station)
         } catch is CancellationError {
         } catch let urlError as URLError where urlError.code == .cancelled {
         } catch {
             self.error = error
         }
+    }
+
+    /// Lifts out of order at `station` (#486); DB's list is asked at most every 5 minutes.
+    private func loadLiftAlerts(at station: Station) async {
+        let alerts = await model.liftAlerts(at: station)
+        guard self.station == station, alerts != liftAlerts else { return }
+        withAnimation { liftAlerts = alerts }
     }
 
     private func pageButton(_ title: LocalizedStringKey, systemImage: String, action: @escaping () async -> Void) -> some View {
