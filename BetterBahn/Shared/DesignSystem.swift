@@ -53,6 +53,24 @@ extension View {
     func calmDesign() -> some View {
         environment(\.calmDesign, true)
     }
+
+    /// Draws this page in the refined classic look: the usual cards and glow, only quieter (#504).
+    func refinedDesign() -> some View {
+        environment(\.refinedDesign, true)
+    }
+}
+
+nonisolated private struct RefinedDesignKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// The refined classic look (softer shadows, fainter glow, sentence-case section titles, tinted icon
+    /// tiles), switched on page by page. Set with `refinedDesign()` at a page's root.
+    nonisolated var refinedDesign: Bool {
+        get { self[RefinedDesignKey.self] }
+        set { self[RefinedDesignKey.self] = newValue }
+    }
 }
 
 extension TicketType {
@@ -115,18 +133,20 @@ struct Card<Content: View>: View {
     var padding: CGFloat = 16
     @ViewBuilder var content: Content
     @Environment(\.calmDesign) private var calm
+    @Environment(\.refinedDesign) private var refined
 
     var body: some View {
         content
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.card, in: .rect(cornerRadius: 22, style: .continuous))
-            // The calm design separates cards from the page by their outline alone.
-            .shadow(color: .black.opacity(calm ? 0 : 0.06), radius: 12, y: 4)
+            // The calm design separates cards from the page by their outline alone; the refined one lifts
+            // them with a lighter, tighter shadow.
+            .shadow(color: .black.opacity(calm ? 0 : refined ? 0.04 : 0.06), radius: refined ? 8 : 12, y: refined ? 2 : 4)
             .overlay {
                 // Subtle edge so cards stay visible on dark backgrounds.
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .strokeBorder(calm ? Color.hairline : Color.primary.opacity(0.06), lineWidth: calm ? 1 : 0.5)
+                    .strokeBorder(calm || refined ? Color.hairline : Color.primary.opacity(0.06), lineWidth: calm ? 1 : 0.5)
             }
     }
 }
@@ -136,6 +156,7 @@ struct Card<Content: View>: View {
 struct AppBackground: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.calmDesign) private var calm
+    @Environment(\.refinedDesign) private var refined
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -143,23 +164,45 @@ struct AppBackground: View {
                 Color.canvas
             } else {
                 Color(.systemGroupedBackground)
-                LinearGradient(colors: [Color.brand.opacity(colorScheme == .dark ? 0.28 : 0.16), .clear], startPoint: .top, endPoint: .bottom)
+                LinearGradient(colors: [Color.brand.opacity(glowOpacity), .clear], startPoint: .top, endPoint: .bottom)
                     .frame(height: 340)
             }
         }
         .ignoresSafeArea()
     }
+
+    /// The refined look keeps the glow, only fainter.
+    private var glowOpacity: Double {
+        let dark = colorScheme == .dark
+        if refined { return dark ? 0.16 : 0.08 }
+        return dark ? 0.28 : 0.16
+    }
 }
 
-/// In the calm design a bold title in sentence case, without the icon.
+/// In the calm design a bold title in sentence case, without the icon; in the refined look a readable
+/// sentence-case title with a grey icon.
 struct SectionHeader: View {
     let title: String
     let systemImage: String
     var trailing: String?
     @Environment(\.calmDesign) private var calm
+    @Environment(\.refinedDesign) private var refined
 
     var body: some View {
-        if calm {
+        if refined {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: systemImage)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                if let trailing {
+                    Text(trailing).font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+                }
+            }
+            .padding(.horizontal, 4)
+        } else if calm {
             HStack(alignment: .firstTextBaseline) {
                 Text(title)
                     .font(.title3.weight(.bold))
@@ -195,13 +238,14 @@ struct SectionHeader: View {
 
 /// iOS-Settings style colored icon square. With a `logo` (S-Bahn, U-Bahn, #350) the logo itself takes
 /// the tile's place, in its own colors and with the tile's rounded corners. The calm design draws only
-/// the symbol, in grey.
+/// the symbol, in grey; the refined look a softly tinted tile with the symbol in the tile's color.
 struct IconTile: View {
     let systemImage: String
     let color: Color
     var size: CGFloat = 30
     var logo: TransitLogo? = nil
     @Environment(\.calmDesign) private var calm
+    @Environment(\.refinedDesign) private var refined
 
     var body: some View {
         if let logo, UIImage(named: logo.assetName) != nil {
@@ -212,6 +256,12 @@ struct IconTile: View {
                 .frame(width: size, height: size)
                 .clipShape(.rect(cornerRadius: size * 0.28, style: .continuous))
                 .accessibilityHidden(true)
+        } else if refined {
+            Image(systemName: systemImage)
+                .font(.system(size: size * 0.5, weight: .medium))
+                .foregroundStyle(color)
+                .frame(width: size, height: size)
+                .background(color.opacity(0.12), in: .rect(cornerRadius: size * 0.28, style: .continuous))
         } else if calm {
             Image(systemName: systemImage)
                 .font(.system(size: size * 0.6, weight: .medium))

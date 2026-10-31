@@ -8244,16 +8244,6 @@
         }
       }
     },
-    "Wohin geht’s?" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Where to next?"
-          }
-        }
-      }
-    },
     "Wohin?" : {
       "localizations" : {
         "en" : {

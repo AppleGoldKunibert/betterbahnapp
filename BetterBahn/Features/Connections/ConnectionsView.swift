@@ -126,13 +126,7 @@ struct ConnectionsView: View {
         SplitNavigationStack(path: $path) {
             ScrollViewReader { proxy in
             ScrollView {
-                VStack(spacing: 20) {
-                    Text("Wohin geht’s?")
-                        .font(.largeTitle.weight(.heavy))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 4)
-                        .padding(.top, 4)
-                        .accessibilityAddTraits(.isHeader)
+                VStack(spacing: 16) {
                     routeCard
                     optionsCard
                     if sizeClass != .regular {
@@ -146,7 +140,7 @@ struct ConnectionsView: View {
                     if !model.recentSearches.isEmpty {
                         recentSection
                     }
-                    HStack(spacing: 10) {
+                    HStack(spacing: 8) {
                         RouteLink(value: ConnectionsRoute.pastTrips) {
                             Label("Vergangene Fahrten", systemImage: "clock.arrow.circlepath")
                                 .font(.subheadline.weight(.semibold))
@@ -182,12 +176,9 @@ struct ConnectionsView: View {
             }
             .tabBarSafePadding()
             .background { AppBackground() }
-            .calmDesign()
+            .refinedDesign()
             .navigationTitle("Verbindungen")
-            // The page's own headline takes the title's place; the title stays for the back button.
-            .toolbarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .principal) { Color.clear.frame(width: 1, height: 1) }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Zug suchen", systemImage: "train.side.front.car") { model.showsTrainSearch = true }
                 }
@@ -264,19 +255,6 @@ struct ConnectionsView: View {
                 StationInput(label: String(localized: "Ziel"), placeholder: String(localized: "Wohin?"), systemImage: "mappin.circle.fill",
                              station: $to, focus: $focused, focusValue: .to)
             }
-            .backgroundPreferenceValue(RouteMarkerKey.self) { anchors in
-                // The stops sit on one line, like on a route map; hidden while suggestions push between them.
-                GeometryReader { proxy in
-                    let points = anchors.map { proxy[$0] }
-                    if !suggestionsShown, let top = points.min(by: { $0.y < $1.y }), let bottom = points.max(by: { $0.y < $1.y }) {
-                        Path { path in
-                            path.move(to: top)
-                            path.addLine(to: CGPoint(x: top.x, y: bottom.y))
-                        }
-                        .stroke(Color.primary.opacity(0.15), style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                    }
-                }
-            }
             .clipShape(.rect(cornerRadius: 22, style: .continuous))
         }
         .onPreferenceChange(StationSuggestionsShownKey.self) { shown in
@@ -294,8 +272,7 @@ struct ConnectionsView: View {
             if !suggestionsShown {
                 if showAdd, viaRows.count < Self.maxViaPoints {
                     HStack {
-                        // Centered on the line between the stops.
-                        addViaButton.padding(.leading, 14)
+                        addViaButton.padding(.leading, 20)
                         Spacer()
                     }
                 }
@@ -349,8 +326,8 @@ struct ConnectionsView: View {
 
     private var optionsCard: some View {
         Card {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
                     Picker("Zeit", selection: $isArrival) {
                         Label("Abfahrt", systemImage: "arrow.up.right").tag(false)
                         Label("Ankunft", systemImage: "arrow.down.right").tag(true)
@@ -384,7 +361,7 @@ struct ConnectionsView: View {
                     Toggle(isOn: Bindable(model.settings).searchWithBike) {
                         optionLabel(title, subtitle: model.settings.bikeOption == .foldingBike
                                     ? String(localized: "Zeigt, wo dein Klapprad mitkommt") : String(localized: "Zeigt, ob dein Fahrrad mitkommt"),
-                                    icon: "bicycle", color: .brand)
+                                    icon: "bicycle", color: .secondary)
                     }
                     .tint(.brand)
 
@@ -400,7 +377,7 @@ struct ConnectionsView: View {
 
     private var transfersPicker: some View {
         VStack(alignment: .leading, spacing: 8) {
-            optionLabel(String(localized: "Max. Umstiege"), subtitle: String(localized: "Weniger Umsteigen, evtl. länger unterwegs"), icon: "arrow.triangle.swap", color: .brand)
+            optionLabel(String(localized: "Max. Umstiege"), subtitle: String(localized: "Weniger Umsteigen, evtl. länger unterwegs"), icon: "arrow.triangle.swap", color: .secondary)
             MaxTransfersPicker(maxTransfers: $maxTransfers)
         }
     }
@@ -411,7 +388,7 @@ struct ConnectionsView: View {
         } label: {
             HStack {
                 optionLabel(String(localized: "Verkehrsmittel"), subtitle: productSummary,
-                            icon: "train.side.front.car", color: .brand)
+                            icon: "train.side.front.car", color: .secondary)
                 Spacer()
                 Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
             }
@@ -488,7 +465,7 @@ struct ConnectionsView: View {
         HStack(spacing: 12) {
             IconTile(systemImage: icon, color: color, size: 32)
             VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.subheadline.weight(.semibold))
+                Text(title).font(.subheadline.weight(.medium))
                 Text(subtitle).font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -497,7 +474,7 @@ struct ConnectionsView: View {
     // MARK: Search
 
     private var searchButtons: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             searchButton
             AddTicketButton()
         }
@@ -517,12 +494,12 @@ struct ConnectionsView: View {
     }
 
     private var recentSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             SectionHeader(title: String(localized: "Zuletzt gesucht"), systemImage: "clock.arrow.circlepath")
             Card(padding: 0) {
                 VStack(spacing: 0) {
                     ForEach(Array(model.recentSearches.enumerated()), id: \.element.id) { index, recent in
-                        if index > 0 { Divider().padding(.leading, 60) }
+                        if index > 0 { Divider().padding(.leading, 58) }
                         Button {
                             withAnimation {
                                 from = recent.from
@@ -530,10 +507,10 @@ struct ConnectionsView: View {
                                 viaRows = []
                             }
                         } label: {
-                            HStack(spacing: 14) {
-                                MiniRoute()
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(recent.from.displayName).font(.subheadline.weight(.semibold)).lineLimit(1)
+                            HStack(spacing: 12) {
+                                IconTile(systemImage: "arrow.triangle.swap", color: .secondary, size: 30)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(recent.from.displayName).font(.subheadline.weight(.medium)).lineLimit(1)
                                     HStack(spacing: 4) {
                                         Image(systemName: "arrow.turn.down.right").font(.caption2)
                                         Text(recent.to.displayName).lineLimit(1)
@@ -545,7 +522,7 @@ struct ConnectionsView: View {
                                 Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
                             }
                             .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
+                            .padding(.vertical, 12)
                             .contentShape(.rect)
                         }
                         .buttonStyle(.plain)
@@ -570,19 +547,6 @@ struct ConnectionsView: View {
                                      isArrival: via.isEmpty ? isArrival : false, onlyValidTicket: onlyValidTicket,
                                      products: perLeg ? legProducts[Self.startLegID] ?? all : products,
                                      maxTransfers: maxTransfers, withBike: model.settings.searchWithBike))]
-    }
-}
-
-/// Two stops joined by a line, the route card's line in small, for the recent searches.
-private struct MiniRoute: View {
-    var body: some View {
-        VStack(spacing: 2) {
-            Circle().strokeBorder(Color.secondary, lineWidth: 2).frame(width: 9, height: 9)
-            Capsule().fill(Color.secondary.opacity(0.4)).frame(width: 2, height: 12)
-            Circle().fill(Color.brand).frame(width: 9, height: 9)
-        }
-        .frame(width: 30)
-        .accessibilityHidden(true)
     }
 }
 
