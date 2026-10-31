@@ -378,7 +378,8 @@ struct ConnectionsView: View {
     private var timeSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
-                Picker("Zeit", selection: $isArrival) {
+                // Via routing only searches by departure, so with stopovers the switch shows that.
+                Picker("Zeit", selection: Binding(get: { isArrival && viaRows.isEmpty }, set: { isArrival = $0 })) {
                     Label("Abfahrt", systemImage: "arrow.up.right").tag(false)
                     Label("Ankunft", systemImage: "arrow.down.right").tag(true)
                 }
