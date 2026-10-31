@@ -48,7 +48,11 @@ public struct LiveTrainMotion: Sendable {
         // bahn.jetzt repeats a position until it has a new one: only a changed one tells the speed,
         // and one that stays put for a minute means the train stands.
         if let lastMove, abs(located.meters - lastMove.meters) < 1 {
-            if fix.time.timeIntervalSince(lastMove.time) > Self.standingAfter { estimatedSpeedKmh = 0 }
+            if fix.time.timeIntervalSince(lastMove.time) > Self.standingAfter {
+                estimatedSpeedKmh = 0
+                // Leaving again, the speed counts from here, not over the whole stop.
+                self.lastMove = (located.meters, fix.time)
+            }
             return
         }
         if let lastMove, case let elapsed = fix.time.timeIntervalSince(lastMove.time), elapsed >= Self.minEstimateInterval {

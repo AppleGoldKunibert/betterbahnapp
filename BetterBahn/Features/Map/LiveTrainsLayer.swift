@@ -126,7 +126,12 @@ final class LiveTrainsLayer {
     private func loadTrack(of leg: Leg) {
         guard let model, requestedLegTracks.insert(leg.id).inserted else { return }
         Task {
-            guard let track = await model.geometry(for: leg) else { return }
+            guard let track = await model.geometry(for: leg) else {
+                // Offline or refused: try again a minute later, at the next fix.
+                try? await Task.sleep(for: .seconds(60))
+                requestedLegTracks.remove(leg.id)
+                return
+            }
             legTracks[leg.id] = track
             applyOwnTrains(ownTrains)
         }

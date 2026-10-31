@@ -272,6 +272,10 @@ import Testing
         #expect(motion.speedKmh == 90)
         motion.update(with: TrainPosition(coordinate: b, time: Self.start.addingTimeInterval(120), speedKmh: nil, source: nil))
         #expect(motion.speedKmh == 0)
+        // Leaving after the stop, the speed counts from when it was seen standing, not over the whole stop.
+        let c = try #require(path.coordinate(at: 2_500))
+        motion.update(with: TrainPosition(coordinate: c, time: Self.start.addingTimeInterval(150), speedKmh: nil, source: nil))
+        #expect(abs((motion.speedKmh ?? 0) - 60) < 1)
     }
 
     @Test func tappedTrainOpensAtItsNextStop() throws {
