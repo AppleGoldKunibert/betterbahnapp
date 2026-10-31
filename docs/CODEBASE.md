@@ -119,7 +119,8 @@ in `project.pbxproj`: new files join their target automatically.
   them with their App Intents entities (`FavoriteStationEntity`, `SavedJourneyEntity`, `IndexedEntity`, queries via
   `AppDependencyManager`) and removes what's gone (IDs in UserDefaults `spotlightIDs`). Tapping opens the link via
   the entity's `OpenIntent` (`AppModel.linkToOpen`) or the `CSSearchableItemActionType` activity.
-- `Features/Connections/` – `ConnectionsView` (#504: route and time on one ticket with `\.ticketStationFields`
+- `Features/Connections/` – `ConnectionsView` (#504, two layouts by `\.appDesign`: Alternativ has the route card and
+  one card with the time and a foldable "Optionen" row naming what differs from the defaults; Fahrkarte has route and time on one ticket with `\.ticketStationFields`
   station fields, the options in their own card below; saved journeys as small tickets with live lines (Kit
   `JourneyLiveStatus`: departure, ridden train or transfer, from 10 min before arriving the change after it) and the
   series of the trains ahead (`AppModel.trainSeries(of:)`); "Zuletzt gesucht" folds (`recentSearchesExpanded`); in
@@ -250,14 +251,19 @@ in `project.pbxproj`: new files join their target automatically.
   the threshold (`CommuteAlerts`), delay reasons only then, cancellations/platforms/transfers left to the Worker when it watches.
 - `Features/Settings/` – settings (privacy link, "not affiliated with DB"), `DataSourcesView` (every source with its
   attribution/license; keep current when adding one), `BC100RulesView`, quick tags.
+  `DesignSettingsView` (#504): the design (Kit `AppDesign`) with a miniature of each drawn with the real components,
+  the accent color (Kit `AccentChoice`: ten `AccentPreset`s or a color of one's own) and `AppLogoView`. Each preset
+  has an alternate app icon (`AppIcon-<Name>` in the asset catalog, listed in `ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES`);
+  a custom color gets the nearest preset's; `Theme.applyAppIcon()` switches it when the page closes.
 - `Shared/DesignSystem.swift` – `Card`, `SectionHeader`, `LineBadge`, `TimeStack`, `DelayPill`, `PlatformBadge`,
   `InfoChip`, `OperatorLabel`, `Color.brand`, `.transition(.fold)` …; reuse these instead of new styling.
-  `.refinedDesign()` (#504) switches a page to the quieter look, so far on the connection search: the classic cards
-  with lighter shadows and a hairline edge, a fainter glow, sentence-case section titles, softly tinted `IconTile`s
-  and a grey `AddTicketButton`, so red stays for the main action. There the rarely changed search options sit behind
-  one foldable "Optionen" row that names what differs from the defaults, and "Zuletzt gesucht" starts folded.
-  `.pageButtonStyle(.regular/.circle/.prominent)` gives a page's own buttons Liquid Glass, or flat card-like buttons
-  (the main action filled with `Color.brand`) in the refined look.
+  `Shared/Theme.swift` holds the picked design and accent (per device); `Color.brand`, `.brandDeep` and `.ticket` read
+  the accent there, so views redraw when it changes, and `.appTheme()` at the root sets `\.appDesign` and the tint.
+  Never hard-code the red: use `Color.brand` or derive from it. `Card`, `AppBackground`, `SectionHeader`, `IconTile`
+  and `.pageButtonStyle(.regular/.circle/.prominent)` draw either design: Alternativ has the classic cards with light
+  shadows, a faint glow, sentence-case titles with a grey icon, softly tinted icon tiles and flat buttons (the main
+  action filled with `Color.brand`); Fahrkarte has flat outlined cards on `Color.canvas`, bold rounded titles, grey
+  symbols and Liquid Glass buttons. Branch on `@Environment(\.appDesign)` in a page only where the layout differs.
 - `Shared/ClosesMenusOnScroll.swift` – `.closesMenusOnScroll()` on scroll views with a `Menu` or menu `Picker` in their
   content (journey details, Settings, check-in): an open menu otherwise slides along while the content scrolls.
   `.resetsWhenMenusCloseOnScroll()` rebuilds a glass menu button (`JourneyShareButton`) that stayed where its menu was.
