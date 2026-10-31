@@ -485,7 +485,8 @@ struct JourneyDetailView: View {
                     if !model.tickets(for: journey).isEmpty {
                         TicketButton(tickets: model.tickets(for: journey), journey: journey)
                     }
-                    JourneyShareButton(journey: journey, title: shareTitle)
+                    JourneyShareButton(journey: journey, title: shareTitle,
+                                       onCheckin: readOnly || !model.settings.traewellingEnabled ? nil : { checkinLeg = $0 })
                     if !readOnly, let entry = model.savedEntry(for: journey) {
                         CalendarButton(entry: entry)
                         RegularTripButton(journey: journey)

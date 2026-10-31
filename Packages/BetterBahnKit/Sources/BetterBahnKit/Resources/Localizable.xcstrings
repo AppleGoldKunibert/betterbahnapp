@@ -1819,6 +1819,23 @@
         }
       }
     },
+    "Check dich jetzt in %@ nach %@ ein." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check dich jetzt in %@ nach %@ ein."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check in now on %@ to %@."
+          }
+        }
+      }
+    },
     "Das ist keine Verbindung aus dem DB Navigator oder von bahn.de." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4668,6 +4685,23 @@
         }
       }
     },
+    "Schon eingecheckt?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Schon eingecheckt?"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checked in yet?"
+          }
+        }
+      }
+    },
     "Schweden" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6269,6 +6303,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "bahn.de responded with an error (%lld)."
+          }
+        }
+      }
+    },
+    "deinen Zug" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "deinen Zug"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "your train"
           }
         }
       }

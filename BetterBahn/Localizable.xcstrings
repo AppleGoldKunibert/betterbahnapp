@@ -1871,6 +1871,46 @@
         }
       }
     },
+    "Einchecken" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check In"
+          }
+        }
+      }
+    },
+    "Welcher Zug?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Which train?"
+          }
+        }
+      }
+    },
+    "An Check-in erinnern" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remind Me to Check In"
+          }
+        }
+      }
+    },
+    "Wir erinnern dich 5 Minuten nach der Abfahrt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "We remind you 5 minutes after departure."
+          }
+        }
+      }
+    },
     "Ankunft teilen" : {
       "localizations" : {
         "en" : {

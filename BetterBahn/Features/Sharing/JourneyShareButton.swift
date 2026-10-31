@@ -10,15 +10,27 @@ import UIKit
 struct JourneyShareButton: View {
     let journey: Journey
     let title: String
+    /// Opens the check-in for a train of the journey (#519); nil hides "Einchecken" (no Träwelling, read-only).
+    var onCheckin: ((Leg) -> Void)?
     @State private var isPreparing = false
     /// The link made for the journey's current payload, so sharing again doesn't upload it again.
     @State private var lastLink: (payload: String, url: URL)?
     @State private var arrivalFailed = false
+    @State private var pickingTrain = false
 
     var body: some View {
         Menu {
             Button("Reise teilen", systemImage: "square.and.arrow.up") {
                 Task { await share() }
+            }
+            if onCheckin != nil, !journey.transitLegs.isEmpty {
+                Button("Einchecken", systemImage: "checkmark.seal.fill") {
+                    if let leg = journey.transitLegs.first, journey.transitLegs.count == 1 {
+                        onCheckin?(leg)
+                    } else {
+                        pickingTrain = true
+                    }
+                }
             }
             if ArrivalShare.canShare(journey) {
                 Button {
@@ -45,6 +57,11 @@ struct JourneyShareButton: View {
         .resetsWhenMenusCloseOnScroll()
         .disabled(isPreparing)
         .accessibilityLabel("Teilen")
+        .confirmationDialog("Welcher Zug?", isPresented: $pickingTrain) {
+            ForEach(journey.transitLegs) { leg in
+                Button("\(leg.line?.name ?? "") → \(leg.destination.displayName)") { onCheckin?(leg) }
+            }
+        }
         .alert("Ankunft konnte nicht geteilt werden", isPresented: $arrivalFailed) {
             Button("OK", role: .cancel) {}
         } message: {

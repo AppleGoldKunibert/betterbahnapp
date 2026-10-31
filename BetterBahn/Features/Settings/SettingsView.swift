@@ -122,6 +122,16 @@ struct SettingsView: View {
                         }
                         .onChange(of: settings.exitReminderLead) { model.scheduleExitReminderSync() }
                     }
+                    if settings.traewellingEnabled {
+                        Toggle(isOn: $settings.checkinReminders) {
+                            IconLabel(title: String(localized: "An Check-in erinnern"), systemImage: "checkmark.seal.fill", color: .teal)
+                        }
+                        .tint(.brand)
+                        .onChange(of: settings.checkinReminders) { _, enabled in
+                            if enabled { Task { await ConnectionNotifier.requestAuthorization() } }
+                            model.scheduleExitReminderSync()
+                        }
+                    }
                     if LiveActivityManager.isSupported {
                         Toggle(isOn: $settings.liveActivitiesEnabled) {
                             IconLabel(title: String(localized: "Live-Aktivitäten"), systemImage: "bolt.badge.clock.fill", color: .indigo)

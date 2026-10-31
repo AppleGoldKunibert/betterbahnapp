@@ -96,6 +96,7 @@ in `project.pbxproj`: new files join their target automatically.
   with a push token; `AppModel.handOverLiveActivity()` gives it and the journey to `Cloudflare/live-activity` when the
   app goes to the background and after the background refresh, `takeBackLiveActivity()` ends that when it is active (#315).
 - `App/ExitReminders.swift` – exit reminders (#313, Settings → Meine Reisen, per journey `exitRemindersOff`): Kit `Journey.exitReminders` → time-sensitive notifications `exit|<entry>|<leg>`, rescheduled after every refresh, one per stop (per-device log `exitReminderDates`); while the Live Activity runs, its alert instead. The text names the exit side ("Fulda, Ausstieg links", `ExitSides.side(leaving:)`, #394) when known.
+- Same file: check-in reminders (#519, Settings → Meine Reisen, only with a Träwelling login, per-device `checkinReminders`): Kit `Journey.checkinReminders` → notifications `checkin|<entry>|<leg>` 5 min after each train's live departure, dropped once `checkinStatusIDs` has the leg (its `didSet` runs the sync). "Einchecken" is also in `JourneyShareButton`'s menu (asks which train when there are several).
 - `App/CalendarEvents.swift` – calendar events of saved journeys (#382): `CalendarButton` (`Features/Trips/`, next to
   the share button in `JourneyDetailView`) adds one from Kit `JourneyCalendarEvent`, tapped again deletes it
   (`removeFromCalendar`, full access only); the first time it asks for
