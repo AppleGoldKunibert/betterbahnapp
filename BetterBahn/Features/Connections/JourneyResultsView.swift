@@ -664,13 +664,17 @@ struct JourneyCard: View {
     @State private var liftAlert: JourneyLiftAlert?
     /// DB's occupancy forecasts of the legs (#399), only those already loaded: a result never asks bahn.de.
     @State private var occupancies: [OccupancyForecast] = []
+    @Environment(\.calmDesign) private var calm
+
+    /// The calm design sets the times larger, the rest stays small and grey.
+    private var timeFont: Font { calm ? .title.weight(.bold) : .title2.weight(.bold) }
 
     var body: some View {
         Card {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .firstTextBaseline) {
                     if let departure = journey.departure {
-                        TimeStack(time: departure, cancelled: journey.isCancelled, font: .title2.weight(.bold))
+                        TimeStack(time: departure, cancelled: journey.isCancelled, font: timeFont)
                     }
                     Spacer()
                     VStack(spacing: 4) {
@@ -685,7 +689,7 @@ struct JourneyCard: View {
                     }
                     Spacer()
                     if let arrival = journey.arrival {
-                        TimeStack(time: arrival, cancelled: journey.isCancelled, alignment: .trailing, font: .title2.weight(.bold))
+                        TimeStack(time: arrival, cancelled: journey.isCancelled, alignment: .trailing, font: timeFont)
                     }
                 }
 

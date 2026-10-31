@@ -25,11 +25,17 @@ extension Color {
     static let heavyDelay = Color(red: 0.88, green: 0.15, blue: 0.20)
     /// Card surface: white in light mode, elevated gray in dark mode.
     static let card = Color(.secondarySystemGroupedBackground)
-    /// Page background of the calm design: a warm off-white, near-black in dark mode.
+    /// Page background of the calm design: a neutral light grey, near-black in dark mode.
     static let canvas = Color(UIColor { traits in
         traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.05, green: 0.05, blue: 0.06, alpha: 1)
-            : UIColor(red: 0.96, green: 0.955, blue: 0.945, alpha: 1)
+            ? UIColor(red: 0.04, green: 0.04, blue: 0.045, alpha: 1)
+            : UIColor(red: 0.955, green: 0.955, blue: 0.96, alpha: 1)
+    })
+    /// The red band at the top of the calm connection search: the brand red, a deeper red in dark mode.
+    static let band = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0.58, green: 0.05, blue: 0.12, alpha: 1)
+            : UIColor(red: 0.86, green: 0.09, blue: 0.19, alpha: 1)
     })
     /// Thin outline of flat cards.
     static let hairline = Color.primary.opacity(0.08)

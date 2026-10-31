@@ -15,6 +15,8 @@ struct StationInput<Focus: Hashable>: View {
     let placeholder: String
     let systemImage: String
     var iconColor: Color = .brand
+    /// The calm design marks the stop with a filled dot instead of a ring (the destination).
+    var fillsMarker = false
     @Binding var station: Station?
     let focus: FocusState<Focus?>.Binding
     let focusValue: Focus
@@ -60,6 +62,25 @@ struct StationInput<Focus: Hashable>: View {
         return Array(seen.prefix(5))
     }
 
+    /// The field's symbol; in the calm design a small ring (or dot) on the route card's line.
+    @ViewBuilder private var marker: some View {
+        if calm {
+            Group {
+                if fillsMarker {
+                    Circle().fill(Color.primary)
+                } else {
+                    // Filled with the card's color so it covers the line behind it.
+                    Circle().strokeBorder(Color.secondary, lineWidth: 2).background(Circle().fill(Color.card))
+                }
+            }
+            .frame(width: 12, height: 12)
+        } else {
+            Image(systemName: systemImage)
+                .font(.title3)
+                .foregroundStyle(iconColor)
+        }
+    }
+
     /// The suggestions whose RIL100 codes are shown; nil with the codes off.
     private var codeLookup: [String]? {
         model.settings.ril100Enabled ? suggestions.map(\.id) : nil
@@ -68,21 +89,21 @@ struct StationInput<Focus: Hashable>: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 14) {
-                Image(systemName: systemImage)
-                    .font(.title3)
-                    .foregroundStyle(iconColor)
-                    // Covers the line a calm route card draws between its stops.
-                    .background(Circle().fill(calm ? Color.card : .clear).padding(-2))
+                marker
                     .frame(width: 24)
                     .anchorPreference(key: RouteMarkerKey.self, value: .center) { [$0] }
                     .allowsHitTesting(false)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(label)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .allowsHitTesting(false)
+                    // The calm design names the field by its placeholder alone.
+                    if !calm {
+                        Text(label)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .allowsHitTesting(false)
+                    }
                     TextField(placeholder, text: $query)
                         .font(.headline)
+                        .accessibilityLabel(calm ? label : placeholder)
                         .focused(focus, equals: focusValue)
                         .submitLabel(.search)
                         .autocorrectionDisabled()

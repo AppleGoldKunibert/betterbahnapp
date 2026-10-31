@@ -250,7 +250,8 @@ in `project.pbxproj`: new files join their target automatically.
   `InfoChip`, `OperatorLabel`, `Color.brand`, `.transition(.fold)` …; reuse these instead of new styling.
   `.calmDesign()` (#504) switches a page to the calm look (flat cards, `Color.canvas`, plain section titles, grey
   symbols instead of `IconTile`s); rolled out page by page, so far on the connection search. There `RouteMarkerKey`
-  (from `StationInput`) lets the route card join its stops with one line.
+  (from `StationInput`) lets the route card join its stops with one line; a red `Color.band` sits behind the headline
+  and the top of the route card, and `StationInput` draws small rings instead of its symbol under `calmDesign`.
 - `Shared/ClosesMenusOnScroll.swift` – `.closesMenusOnScroll()` on scroll views with a `Menu` or menu `Picker` in their
   content (journey details, Settings, check-in): an open menu otherwise slides along while the content scrolls.
   `.resetsWhenMenusCloseOnScroll()` rebuilds a glass menu button (`JourneyShareButton`) that stayed where its menu was.

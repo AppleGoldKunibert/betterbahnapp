@@ -111,9 +111,13 @@ struct ConnectionsView: View {
     @State private var swapRotation = 0.0
     /// The year the review banner offers (#319); nil without any rides.
     @State private var reviewBannerYear: Int?
+    /// The red band behind the headline is still under the navigation bar, which then draws in white.
+    @State private var bandUnderBar = true
 
     private static let startLegID = UUID()
     private static let productsRowID = "productsRow"
+    /// How far the red band reaches below the headline, into the top of the route card.
+    private static let bandOverlap: CGFloat = 76
 
     /// Up to this many intermediate stops can be added to a single search.
     private static let maxViaPoints = 4
@@ -129,10 +133,19 @@ struct ConnectionsView: View {
                 VStack(spacing: 20) {
                     Text("Wohin geht’s?")
                         .font(.largeTitle.weight(.heavy))
+                        .foregroundStyle(.white)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 4)
                         .padding(.top, 4)
                         .accessibilityAddTraits(.isHeader)
+                        .background {
+                            // The page's one bold color: a band over the full width, from above the
+                            // screen's top (also when pulled down) into the route card, which draws over it.
+                            Color.band
+                                .padding(.horizontal, -500)
+                                .padding(.top, -1000)
+                                .padding(.bottom, -Self.bandOverlap)
+                        }
                     routeCard
                     optionsCard
                     if sizeClass != .regular {
@@ -171,6 +184,11 @@ struct ConnectionsView: View {
             }
             // The disabled button is see-through: hide the cards scrolling under it.
             .scrollEdgeEffectStyle(sizeClass == .regular ? .hard : nil, for: .bottom)
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentOffset.y + geometry.contentInsets.top < 60
+            } action: { _, underBar in
+                bandUnderBar = underBar
+            }
             .onChange(of: productsTapCount) {
                 // Bring the row into view first so the popover has room instead of being squeezed.
                 withAnimation(.snappy) { proxy.scrollTo(Self.productsRowID, anchor: .center) }
@@ -186,6 +204,8 @@ struct ConnectionsView: View {
             .navigationTitle("Verbindungen")
             // The page's own headline takes the title's place; the title stays for the back button.
             .toolbarTitleDisplayMode(.inline)
+            // White status bar and toolbar on the red band; the usual ones once it has scrolled away.
+            .toolbarColorScheme(bandUnderBar ? .dark : nil, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) { Color.clear.frame(width: 1, height: 1) }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -262,7 +282,7 @@ struct ConnectionsView: View {
                 }
 
                 StationInput(label: String(localized: "Ziel"), placeholder: String(localized: "Wohin?"), systemImage: "mappin.circle.fill",
-                             station: $to, focus: $focused, focusValue: .to)
+                             fillsMarker: true, station: $to, focus: $focused, focusValue: .to)
             }
             .backgroundPreferenceValue(RouteMarkerKey.self) { anchors in
                 // The stops sit on one line, like on a route map; hidden while suggestions push between them.
@@ -273,7 +293,7 @@ struct ConnectionsView: View {
                             path.move(to: top)
                             path.addLine(to: CGPoint(x: top.x, y: bottom.y))
                         }
-                        .stroke(Color.primary.opacity(0.15), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                        .stroke(Color.secondary.opacity(0.5), lineWidth: 1)
                     }
                 }
             }
@@ -317,12 +337,15 @@ struct ConnectionsView: View {
             }
         } label: {
             Image(systemName: "arrow.up.arrow.down")
-                .font(.headline)
+                .font(.subheadline.weight(.semibold))
                 .rotationEffect(.degrees(swapRotation))
+                .frame(width: 40, height: 40)
+                .background(Color.card, in: .circle)
+                .overlay { Circle().strokeBorder(Color.hairline, lineWidth: 1) }
                 .frame(width: 44, height: 44)
+                .contentShape(.circle)
         }
-        .buttonStyle(.glass)
-        .buttonBorderShape(.circle)
+        .buttonStyle(.plain)
         .padding(.trailing, 14)
         .disabled(from == nil && to == nil)
         .accessibilityLabel("Start und Ziel tauschen")
@@ -336,12 +359,15 @@ struct ConnectionsView: View {
             }
         } label: {
             Image(systemName: "plus")
-                .font(.subheadline.weight(.bold))
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.secondary)
+                .frame(width: 20, height: 20)
+                .background(Color.card, in: .circle)
+                .overlay { Circle().strokeBorder(Color.secondary.opacity(0.5), lineWidth: 1) }
                 .frame(width: 28, height: 28)
+                .contentShape(.circle)
         }
-        .buttonStyle(.glass)
-        .buttonBorderShape(.circle)
-        .tint(.brand)
+        .buttonStyle(.plain)
         .accessibilityLabel("Zwischenhalt hinzufügen")
     }
 
@@ -577,9 +603,9 @@ struct ConnectionsView: View {
 private struct MiniRoute: View {
     var body: some View {
         VStack(spacing: 2) {
-            Circle().strokeBorder(Color.secondary, lineWidth: 2).frame(width: 9, height: 9)
-            Capsule().fill(Color.secondary.opacity(0.4)).frame(width: 2, height: 12)
-            Circle().fill(Color.brand).frame(width: 9, height: 9)
+            Circle().strokeBorder(Color.secondary, lineWidth: 1.5).frame(width: 8, height: 8)
+            Rectangle().fill(Color.secondary.opacity(0.5)).frame(width: 1, height: 12)
+            Circle().fill(Color.primary).frame(width: 8, height: 8)
         }
         .frame(width: 30)
         .accessibilityHidden(true)
