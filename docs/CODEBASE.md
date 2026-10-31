@@ -194,6 +194,9 @@ in `project.pbxproj`: new files join their target automatically.
   `TicketsListView` (Settings → Gespeicherte Tickets; "Zeitkarten" like the Deutschland-Ticket from a screenshot via
   `PhotosPicker`, `TravelPassView`), `SeatReservationViews` (`ReservationRow` in `LegCard`;
   `AppModel.reservations(for:)`, only on the leg whose train matches; `SaveSeatButton`/`SaveSeatSheet`, #410).
+  `TicketFace` (#504) lays out `TicketView` and `TravelPassView` in both designs: Minimal barcode plus a details
+  `Card`; Fahrkarte one ticket (`ticketBackground()`) with the barcode between two `TicketPerforation`s and the
+  `TicketDetail`s as `TicketFieldLabel` capitals over their values.
 - `Features/Trips/TripsView.swift` – upcoming/past journeys, `SaveJourneyButton` (warns "Zug ist
   reservierungspflichtig", in bike mode also "Fahrradreservierung nötig" / "Keine Fahrradmitnahme", via
   `AppModel.saveWarnings`; ticket/reservation imports never warn).
@@ -239,7 +242,8 @@ in `project.pbxproj`: new files join their target automatically.
   `PassengerRightsCard` in details ("Anspruch auf 25/50 % Entschädigung", "Antrag vorbereiten" →
   `PassengerRightsRequestSheet` with DB's form fields, copy buttons, link). `AppModel.passengerRightsClaim(for:)` feeds
   Kit `PassengerRights` (journey, earlier plans, tickets, BahnCard 100 setting); `notifyPassengerRights` notifies once
-  per level after arrival and keeps the worst claim in `SavedJourney.recordedClaim`. Never shows amounts.
+  per level after arrival and keeps the worst claim in `SavedJourney.recordedClaim`. Never shows amounts. Fahrkarte
+  (#504) draws the card as a small ticket with the percentage large.
 - `Features/Sharing/` – shared-journey and DB-share previews; `JourneyShareButton` (menu: "Reise teilen" short link,
   falls back to the long one, `UIActivityViewController`; "Ankunft teilen" #317 adds an `ArrivalShare`, until 2 h after the arrival).
 - `Features/Commute/` – regular trips (#397): `RegularTripButton` (↻ next to "Gespeichert") → `RegularTripEditor` (weekdays,
@@ -250,7 +254,9 @@ in `project.pbxproj`: new files join their target automatically.
   asks in the app (`commuteQuestionAlert`), a Worker push opens its journey. `AppModel.refresh` keeps them quiet: delays only from
   the threshold (`CommuteAlerts`), delay reasons only then, cancellations/platforms/transfers left to the Worker when it watches.
 - `Features/Settings/` – settings (privacy link, "not affiliated with DB"), `DataSourcesView` (every source with its
-  attribution/license; keep current when adding one), `BC100RulesView`, quick tags.
+  attribution/license; keep current when adding one), `BC100RulesView`, quick tags. `SettingsDesign.swift` (#504):
+  `.designedForm()` (forms and lists on `AppBackground`), `FormHeader` (section titles, rounded in Fahrkarte),
+  `Color.settingsIcon` (grey symbol tiles; the accent only on Design and Mein Ticket), `TicketFieldLabel`.
   `DesignSettingsView` (#504): the design (Kit `AppDesign`) with a miniature of each drawn with the real components,
   the accent color (Kit `AccentChoice`: ten `AccentPreset`s or a color of one's own) and `AppLogoView`. Each preset
   has an alternate app icon (`AppIcon-<Name>` in the asset catalog, listed in `ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES`);

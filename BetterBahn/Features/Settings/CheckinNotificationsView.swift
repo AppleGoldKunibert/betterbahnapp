@@ -19,9 +19,9 @@ struct CheckinNotificationsView: View {
     var body: some View {
         Form {
             Section {
-                toggle(.followed, title: String(localized: "Check-ins von Gefolgten"), systemImage: "bell.badge.fill", color: .orange)
-                toggle(.likes, title: String(localized: "Likes auf deine Check-ins"), systemImage: "heart.fill", color: .pink)
-                toggle(.companions, title: String(localized: "Mitreisende"), systemImage: "person.2.fill", color: .teal,
+                toggle(.followed, title: String(localized: "Check-ins von Gefolgten"), systemImage: "bell.badge.fill", color: .settingsIcon)
+                toggle(.likes, title: String(localized: "Likes auf deine Check-ins"), systemImage: "heart.fill", color: .settingsIcon)
+                toggle(.companions, title: String(localized: "Mitreisende"), systemImage: "person.2.fill", color: .settingsIcon,
                        subtitle: String(localized: "Wenn jemand in deinen Zug eincheckt."))
                 if let error {
                     ErrorBanner(error: error)
@@ -34,6 +34,7 @@ struct CheckinNotificationsView: View {
                 }
             }
         }
+        .designedForm()
         .navigationTitle("Mitteilungen")
         .navigationBarTitleDisplayMode(.inline)
         .alert("Dieses Feature benötigt eine erneute Anmeldung mit Träwelling. Möchtest du fortfahren?",

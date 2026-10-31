@@ -11,40 +11,29 @@ struct TravelPassView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(pass.name).font(.title2.weight(.bold))
-                        if let travelClass = pass.classDescription {
-                            Text(travelClass).font(.headline).foregroundStyle(.secondary)
+                    TicketFace(title: pass.name, subtitle: pass.classDescription, details: details) {
+                        if pass.isExpired() {
+                            TicketNote(text: String(localized: "Abgelaufen. Füg die neue Karte mit einem aktuellen Screenshot hinzu."),
+                                       systemImage: "exclamationmark.triangle.fill", color: .slightDelay, emphasized: true)
+                        } else if !pass.isValid(), let from = pass.validFrom {
+                            TicketNote(text: String(localized: "Gilt erst ab \(from.formatted(date: .abbreviated, time: .shortened))."),
+                                       systemImage: "clock.fill", color: .slightDelay, emphasized: true)
+                        }
+                    } code: {
+                        // Drawn from the bytes, also for passes saved with the screenshot's cut-out.
+                        if let image = DBTicket.Barcode(payload: pass.barcode.payload, image: nil).uiImage {
+                            TicketBarcode(image: image)
                         }
                     }
 
-                    if pass.isExpired() {
-                        notice(String(localized: "Abgelaufen. Füg die neue Karte mit einem aktuellen Screenshot hinzu."),
-                               systemImage: "exclamationmark.triangle.fill", color: .slightDelay)
-                    } else if !pass.isValid(), let from = pass.validFrom {
-                        notice(String(localized: "Gilt erst ab \(from.formatted(date: .abbreviated, time: .shortened))."),
-                               systemImage: "clock.fill", color: .slightDelay)
+                    VStack(alignment: .leading, spacing: 12) {
+                        AddToWalletButton(payload: WalletPassPayload(pass: pass))
+
+                        Text("Bei der Kontrolle gilt die Karte in der App, in der du sie gekauft hast, z. B. im DB Navigator.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
-
-                    // Drawn from the bytes, also for passes saved with the screenshot's cut-out.
-                    if let image = DBTicket.Barcode(payload: pass.barcode.payload, image: nil).uiImage {
-                        Image(uiImage: image)
-                            .interpolation(.none)
-                            .resizable()
-                            .scaledToFit()
-                            .padding(20)
-                            .frame(maxWidth: .infinity)
-                            .background(.white, in: .rect(cornerRadius: 22, style: .continuous))
-                            .accessibilityLabel("Ticket-Barcode")
-                    }
-
-                    Card { details }
-
-                    AddToWalletButton(payload: WalletPassPayload(pass: pass))
-
-                    Text("Bei der Kontrolle gilt die Karte in der App, in der du sie gekauft hast, z. B. im DB Navigator.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    .padding(.top, 8)
                 }
                 .padding()
             }
@@ -60,33 +49,21 @@ struct TravelPassView: View {
         .fullBrightness()
     }
 
-    private var details: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let holder = pass.holder, !holder.name.isEmpty {
-                LabeledContent("Inhaber", value: holder.name)
-                if let birthDate = holder.birthDateDescription {
-                    LabeledContent("Geburtsdatum", value: birthDate)
-                }
-            }
-            if let from = pass.validFrom, let until = pass.validUntil {
-                LabeledContent("Gültig") {
-                    Text("\(from.formatted(date: .abbreviated, time: .shortened)) –\n\(until.formatted(date: .abbreviated, time: .shortened))")
-                        .multilineTextAlignment(.trailing)
-                }
-            }
-            if let issuer = pass.issuer {
-                LabeledContent("Ausgestellt von", value: issuer)
+    private var details: [TicketDetail] {
+        var details: [TicketDetail] = []
+        if let holder = pass.holder, !holder.name.isEmpty {
+            details.append(TicketDetail(label: String(localized: "Inhaber"), value: holder.name))
+            if let birthDate = holder.birthDateDescription {
+                details.append(TicketDetail(label: String(localized: "Geburtsdatum"), value: birthDate))
             }
         }
-        .font(.subheadline)
-    }
-
-    private func notice(_ text: String, systemImage: String, color: Color) -> some View {
-        Label(text, systemImage: systemImage)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(color)
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(color.opacity(0.12), in: .rect(cornerRadius: 14, style: .continuous))
+        if let from = pass.validFrom, let until = pass.validUntil {
+            details.append(TicketDetail(label: String(localized: "Gültig"),
+                                        value: String(localized: "\(from.formatted(date: .abbreviated, time: .shortened)) –\n\(until.formatted(date: .abbreviated, time: .shortened))")))
+        }
+        if let issuer = pass.issuer {
+            details.append(TicketDetail(label: String(localized: "Ausgestellt von"), value: issuer))
+        }
+        return details
     }
 }

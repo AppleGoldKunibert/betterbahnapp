@@ -53,6 +53,8 @@ struct DataSourcesView: View {
                url: URL(string: "https://commons.wikimedia.org/wiki/Category:Logos_of_railway_companies")!),
     ]
 
+    @Environment(\.appDesign) private var design
+
     var body: some View {
         List {
             Section {
@@ -60,15 +62,16 @@ struct DataSourcesView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Link(source.name, destination: source.url)
                             .font(.body.weight(.semibold))
+                            .fontDesign(design == .fahrkarte ? .rounded : nil)
                         Text(source.usage)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                         if let license = source.license {
                             Link(license.title, destination: license.url)
-                                .font(.footnote)
+                                .font(.footnote.weight(.medium))
                         }
                     }
-                    .padding(.vertical, 2)
+                    .padding(.vertical, 4)
                     // Two links in one row: without this, a tap anywhere opens both.
                     .buttonStyle(.borderless)
                 }
@@ -76,6 +79,7 @@ struct DataSourcesView: View {
                 Text("Karten: Apple Karten. BetterBahn ist ein privates Projekt und steht in keiner Verbindung zur Deutschen Bahn AG oder den anderen Diensten.")
             }
         }
+        .designedForm()
         .navigationTitle("Datenquellen")
         .navigationBarTitleDisplayMode(.inline)
     }
