@@ -21,6 +21,26 @@
         }
       }
     },
+    "Alle Verbindungen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All connections"
+          }
+        }
+      }
+    },
+    "Dabei" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Coming along"
+          }
+        }
+      }
+    },
     "Höchstens %lld" : {
       "localizations" : {
         "en" : {
@@ -37,6 +57,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "To"
+          }
+        }
+      }
+    },
+    "Nicht dabei" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not coming along"
           }
         }
       }

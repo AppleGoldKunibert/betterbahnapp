@@ -114,20 +114,22 @@ extension View {
 
 // MARK: - Fields
 
-/// One option of the ticket as a tile: its name over its value and a symbol showing it opens something.
-/// Values that differ from the default are red, so a changed option stands out at a glance.
+/// One field of the ticket's options: a small upper-case label over its value, with a symbol showing that a
+/// tap opens something. Values that differ from the default are red, so a changed option stands out at a glance.
 struct TicketFieldLabel: View {
     let title: String
     let value: String
     var changed = false
-    /// Menus show up-down chevrons, popovers a down chevron; nil leaves room for a button laid over the tile.
+    /// Menus show up-down chevrons, popovers a down chevron; nil leaves room for a button laid over the field.
     var indicator: String? = "chevron.up.chevron.down"
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .center, spacing: 6) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.footnote.weight(.semibold))
+                    .font(.caption.weight(.semibold))
+                    .tracking(0.5)
+                    .textCase(.uppercase)
                     // Fixed colors: a menu would tint its label otherwise.
                     .foregroundStyle(Color.secondary)
                 Text(value)
@@ -139,17 +141,15 @@ struct TicketFieldLabel: View {
             Spacer(minLength: 0)
             if let indicator {
                 Image(systemName: indicator)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Color.secondary)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(Color.secondary.opacity(0.7))
             } else {
                 Color.clear.frame(width: 28, height: 1)
             }
         }
-        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-        .background(Color.primary.opacity(0.05), in: .rect(cornerRadius: 14, style: .continuous))
-        .contentShape(.rect(cornerRadius: 14, style: .continuous))
+        .contentShape(.rect)
     }
 }
 
@@ -187,6 +187,7 @@ private struct TripTicket: View {
     @Environment(AppModel.self) private var model
     @State private var journeyToRemove: Journey?
 
+    private static let notchRadius: CGFloat = 7
     private static let cornerRadius: CGFloat = 18
 
     var body: some View {
@@ -194,44 +195,50 @@ private struct TripTicket: View {
         let blocking = entry.issues.first(where: \.isBlocking)
         let claim = model.passengerRightsClaim(for: entry)
         RouteLink(value: ConnectionsRoute.journey(entry.route())) {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    header
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        if let departure = journey.departure {
-                            TimeStack(time: departure, cancelled: journey.isCancelled, font: .title3.weight(.bold))
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                    .padding(.horizontal, 14)
+                    .padding(.top, 12)
+                    .padding(.bottom, 9)
+                TicketPerforation(notchRadius: Self.notchRadius)
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            if let departure = journey.departure {
+                                TimeStack(time: departure, cancelled: journey.isCancelled, font: .title3.weight(.bold))
+                            }
+                            Image(systemName: "arrow.right")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.tertiary)
+                            if let arrival = journey.arrival {
+                                TimeStack(time: arrival, cancelled: journey.isCancelled, font: .title3.weight(.bold))
+                            }
                         }
-                        Image(systemName: "arrow.right")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.tertiary)
-                        if let arrival = journey.arrival {
-                            TimeStack(time: arrival, cancelled: journey.isCancelled, font: .title3.weight(.bold))
+                        if let first = journey.legs.first, let last = journey.legs.last {
+                            Text("\(first.origin.displayName) → \(last.destination.displayName)")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        if let blocking {
+                            Label(blocking.title, systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Color.heavyDelay)
+                        }
+                        if let claim {
+                            PassengerRightsBadge(claim: claim)
+                                .padding(.horizontal, -6)
                         }
                     }
-                    if let first = journey.legs.first, let last = journey.legs.last {
-                        Text("\(first.origin.displayName) → \(last.destination.displayName)")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                    if let blocking {
-                        Label(blocking.title, systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(Color.heavyDelay)
-                    }
-                    if let claim {
-                        PassengerRightsBadge(claim: claim)
-                            .padding(.horizontal, -6)
-                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
                 }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+                .padding(14)
             }
-            .padding(14)
             .fontDesign(.rounded)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .ticketBackground(cornerRadius: Self.cornerRadius,
+            .ticketBackground(notchRadius: Self.notchRadius, cornerRadius: Self.cornerRadius,
                               outline: blocking != nil ? Color.heavyDelay : (highlightsAsNext ? Color.brand : Color.hairline),
                               outlineWidth: blocking != nil || highlightsAsNext ? 2 : 1)
             .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
@@ -249,6 +256,8 @@ private struct TripTicket: View {
     private var header: some View {
         HStack(spacing: 5) {
             Text(dayLabel)
+                .tracking(0.5)
+                .textCase(.uppercase)
             if isNext, model.liveActivities.isActive(entry.journey) {
                 Image(systemName: "bolt.badge.clock.fill").foregroundStyle(Color.brand)
             }
@@ -259,7 +268,7 @@ private struct TripTicket: View {
                     .accessibilityLabel(onlyReservations ? "Reservierung gespeichert" : "Ticket gespeichert")
             }
         }
-        .font(.footnote.weight(.semibold))
+        .font(.caption.weight(.semibold))
         .foregroundStyle(.secondary)
     }
 
@@ -273,7 +282,7 @@ private struct TripTicket: View {
         guard let date = entry.journey.departure?.planned else { return "" }
         if Calendar.current.isDateInToday(date) { return String(localized: "Heute") }
         if Calendar.current.isDateInTomorrow(date) { return String(localized: "Morgen") }
-        return date.formatted(.dateTime.weekday(.wide).day().month(.wide))
+        return date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
     }
 }
 

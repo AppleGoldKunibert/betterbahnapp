@@ -376,43 +376,50 @@ struct ConnectionsView: View {
 
     // MARK: Options
 
-    /// The options: the time, transfers and vehicles as tiles (one below the other with very large text) that
-    /// open their menu or popover, then the ticket and bike filters as switches.
+    /// The options as ticket fields, two side by side (one below the other with very large text). A tap on
+    /// a field opens its menu or popover.
     private var optionsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 4) {
             if dynamicTypeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 0) {
                     timeField
+                    Divider()
                     transfersField
+                    Divider()
                     productsField
+                    Divider()
+                    ticketField
+                    if model.settings.bikeOption.searchTitle != nil {
+                        Divider()
+                        bikeField
+                    }
                 }
             } else {
-                Grid(alignment: .topLeading, horizontalSpacing: 8, verticalSpacing: 8) {
+                Grid(alignment: .topLeading, horizontalSpacing: 16, verticalSpacing: 0) {
                     GridRow {
                         timeField
                         transfersField
                     }
+                    Divider()
                     GridRow {
                         productsField
-                            .gridCellColumns(2)
+                        ticketField
+                    }
+                    if model.settings.bikeOption.searchTitle != nil {
+                        Divider()
+                        GridRow {
+                            bikeField
+                                .gridCellColumns(2)
+                        }
                     }
                 }
             }
 
             if !viaRows.isEmpty {
                 viaTimeNote
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                Divider()
-                ticketToggle
-                if model.settings.bikeOption.searchTitle != nil {
-                    Divider()
-                    bikeToggle
-                }
+                    .padding(.bottom, 8)
             }
         }
-        .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -544,30 +551,44 @@ struct ConnectionsView: View {
         .popover(isPresented: $showProductsPopover) { productsPopover }
     }
 
-    private var ticketToggle: some View {
-        Toggle(isOn: $onlyValidTicket) {
-            let ticket = model.settings.ticketType
-            toggleLabel(ticket.filterTitle, subtitle: ticket.filterSubtitle)
+    private var ticketField: some View {
+        let ticket = model.settings.ticketType
+        let value = onlyValidTicket ? ticket.filterTitle : String(localized: "Alle Verbindungen")
+        return Menu {
+            Toggle(isOn: $onlyValidTicket) {
+                Text(ticket.filterTitle)
+                Text(ticket.filterSubtitle)
+            }
+        } label: {
+            TicketFieldLabel(title: String(localized: "Ticket"), value: value, changed: onlyValidTicket)
         }
-        .tint(.brand)
+        .menuStyle(.button)
+        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
+        .accessibilityLabel("Ticket")
+        .accessibilityValue(value)
     }
 
     @ViewBuilder
-    private var bikeToggle: some View {
+    private var bikeField: some View {
         let option = model.settings.bikeOption
         if let title = option.searchTitle {
-            Toggle(isOn: Bindable(model.settings).searchWithBike) {
-                toggleLabel(title, subtitle: option == .foldingBike
-                            ? String(localized: "Zeigt, wo dein Klapprad mitkommt") : String(localized: "Zeigt, ob dein Fahrrad mitkommt"))
+            let withBike = model.settings.searchWithBike
+            let value = withBike ? String(localized: "Dabei") : String(localized: "Nicht dabei")
+            Menu {
+                Toggle(isOn: Bindable(model.settings).searchWithBike) {
+                    Text(title)
+                    Text(option == .foldingBike
+                         ? String(localized: "Zeigt, wo dein Klapprad mitkommt") : String(localized: "Zeigt, ob dein Fahrrad mitkommt"))
+                }
+            } label: {
+                TicketFieldLabel(title: option.displayName, value: value, changed: withBike)
             }
-            .tint(.brand)
-        }
-    }
-
-    private func toggleLabel(_ title: String, subtitle: String) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(title).font(.subheadline.weight(.semibold))
-            Text(subtitle).font(.caption).foregroundStyle(.secondary)
+            .menuStyle(.button)
+            .menuIndicator(.hidden)
+            .buttonStyle(.plain)
+            .accessibilityLabel(option.displayName)
+            .accessibilityValue(value)
         }
     }
 
