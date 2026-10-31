@@ -43,7 +43,7 @@ struct AddTicketButton: View {
                 .font(.headline)
                 .padding(.vertical, 6)
         }
-        .buttonStyle(.glass)
+        .pageButtonStyle()
         .tint(.brand)
         .controlSize(.large)
         .sheet(isPresented: $showLookup, onDismiss: {

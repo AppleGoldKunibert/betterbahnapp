@@ -4894,6 +4894,16 @@
         }
       }
     },
+    "Keine Einschränkungen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No restrictions"
+          }
+        }
+      }
+    },
     "Keine Fahrten %@" : {
       "localizations" : {
         "en" : {
@@ -5343,6 +5353,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Add Manually"
+          }
+        }
+      }
+    },
+    "Max. %lld Umstiege" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Max. %lld Umstieg"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Max. %lld Umstiege"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Max. %lld change"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Max. %lld changes"
+                }
+              }
+            }
           }
         }
       }
@@ -5975,6 +6025,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "OpenRailwayMap Layer"
+          }
+        }
+      }
+    },
+    "Optionen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Options"
+          }
+        }
+      }
+    },
+    "Optionen ausblenden" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide options"
+          }
+        }
+      }
+    },
+    "Optionen einblenden" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show options"
           }
         }
       }
@@ -8244,16 +8324,6 @@
         }
       }
     },
-    "Wohin geht’s?" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Where to next?"
-          }
-        }
-      }
-    },
     "Wohin?" : {
       "localizations" : {
         "en" : {
@@ -8792,6 +8862,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Recent Searches"
+          }
+        }
+      }
+    },
+    "Zuletzt gesucht ausblenden" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide recent searches"
+          }
+        }
+      }
+    },
+    "Zuletzt gesucht einblenden" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show recent searches"
           }
         }
       }

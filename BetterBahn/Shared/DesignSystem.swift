@@ -25,33 +25,27 @@ extension Color {
     static let heavyDelay = Color(red: 0.88, green: 0.15, blue: 0.20)
     /// Card surface: white in light mode, elevated gray in dark mode.
     static let card = Color(.secondarySystemGroupedBackground)
-    /// Page background of the calm design: a warm off-white, near-black in dark mode.
-    static let canvas = Color(UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.05, green: 0.05, blue: 0.06, alpha: 1)
-            : UIColor(red: 0.96, green: 0.955, blue: 0.945, alpha: 1)
-    })
-    /// Thin outline of flat cards.
+    /// Thin card outline of the refined look.
     static let hairline = Color.primary.opacity(0.08)
 }
 
-nonisolated private struct CalmDesignKey: EnvironmentKey {
+extension View {
+    /// Draws this page in the refined classic look: the usual cards and glow, only quieter (#504).
+    func refinedDesign() -> some View {
+        environment(\.refinedDesign, true)
+    }
+}
+
+nonisolated private struct RefinedDesignKey: EnvironmentKey {
     static let defaultValue = false
 }
 
 extension EnvironmentValues {
-    /// The calm design (flat cards, no glow, plain section titles), switched on page by page while it is
-    /// rolled out. Set with `calmDesign()` at a page's root.
-    nonisolated var calmDesign: Bool {
-        get { self[CalmDesignKey.self] }
-        set { self[CalmDesignKey.self] = newValue }
-    }
-}
-
-extension View {
-    /// Draws this page and its cards, section headers and background in the calm design.
-    func calmDesign() -> some View {
-        environment(\.calmDesign, true)
+    /// The refined classic look (softer shadows, fainter glow, sentence-case section titles, tinted icon
+    /// tiles, red kept for the main action), switched on page by page. Set with `refinedDesign()` at a page's root.
+    nonisolated var refinedDesign: Bool {
+        get { self[RefinedDesignKey.self] }
+        set { self[RefinedDesignKey.self] = newValue }
     }
 }
 
@@ -114,62 +108,66 @@ func transferColor(_ minutes: Int) -> Color {
 struct Card<Content: View>: View {
     var padding: CGFloat = 16
     @ViewBuilder var content: Content
-    @Environment(\.calmDesign) private var calm
+    @Environment(\.refinedDesign) private var refined
 
     var body: some View {
         content
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.card, in: .rect(cornerRadius: 22, style: .continuous))
-            // The calm design separates cards from the page by their outline alone.
-            .shadow(color: .black.opacity(calm ? 0 : 0.06), radius: 12, y: 4)
+            // The refined look lifts cards with a lighter, tighter shadow.
+            .shadow(color: .black.opacity(refined ? 0.04 : 0.06), radius: refined ? 8 : 12, y: refined ? 2 : 4)
             .overlay {
                 // Subtle edge so cards stay visible on dark backgrounds.
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .strokeBorder(calm ? Color.hairline : Color.primary.opacity(0.06), lineWidth: calm ? 1 : 0.5)
+                    .strokeBorder(refined ? Color.hairline : Color.primary.opacity(0.06), lineWidth: 0.5)
             }
     }
 }
 
 /// Grouped background with a soft brand glow at the top.
-/// In the calm design a plain off-white page instead.
 struct AppBackground: View {
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.calmDesign) private var calm
+    @Environment(\.refinedDesign) private var refined
 
     var body: some View {
         ZStack(alignment: .top) {
-            if calm {
-                Color.canvas
-            } else {
-                Color(.systemGroupedBackground)
-                LinearGradient(colors: [Color.brand.opacity(colorScheme == .dark ? 0.28 : 0.16), .clear], startPoint: .top, endPoint: .bottom)
-                    .frame(height: 340)
-            }
+            Color(.systemGroupedBackground)
+            LinearGradient(colors: [Color.brand.opacity(glowOpacity), .clear], startPoint: .top, endPoint: .bottom)
+                .frame(height: 340)
         }
         .ignoresSafeArea()
     }
+
+    /// The refined look keeps the glow, only fainter.
+    private var glowOpacity: Double {
+        let dark = colorScheme == .dark
+        if refined { return dark ? 0.16 : 0.08 }
+        return dark ? 0.28 : 0.16
+    }
 }
 
-/// In the calm design a bold title in sentence case, without the icon.
+/// In the refined look a readable sentence-case title with a grey icon.
 struct SectionHeader: View {
     let title: String
     let systemImage: String
     var trailing: String?
-    @Environment(\.calmDesign) private var calm
+    @Environment(\.refinedDesign) private var refined
 
     var body: some View {
-        if calm {
-            HStack(alignment: .firstTextBaseline) {
+        if refined {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: systemImage)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
                 Text(title)
-                    .font(.title3.weight(.bold))
+                    .font(.subheadline.weight(.semibold))
                 Spacer()
                 if let trailing {
-                    Text(trailing).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary).monospacedDigit()
+                    Text(trailing).font(.footnote).foregroundStyle(.secondary).monospacedDigit()
                 }
             }
             .padding(.horizontal, 4)
-            .padding(.top, 8)
         } else {
             classic
         }
@@ -193,15 +191,80 @@ struct SectionHeader: View {
     }
 }
 
+// MARK: - Page buttons
+
+/// Kinds of the page's own buttons: wide or round, and the one prominent main action.
+nonisolated enum PageButtonKind {
+    case regular, circle, prominent
+}
+
+extension View {
+    /// Liquid Glass, or in the refined look a flat button on the card surface (#504).
+    func pageButtonStyle(_ kind: PageButtonKind = .regular) -> some View {
+        modifier(PageButtonStyleModifier(kind: kind))
+    }
+}
+
+private struct PageButtonStyleModifier: ViewModifier {
+    let kind: PageButtonKind
+    @Environment(\.refinedDesign) private var refined
+
+    func body(content: Content) -> some View {
+        if refined {
+            content.buttonStyle(FlatButtonStyle(kind: kind))
+        } else {
+            switch kind {
+            case .regular: content.buttonStyle(.glass)
+            case .circle: content.buttonStyle(.glass).buttonBorderShape(.circle)
+            case .prominent: content.buttonStyle(.glassProminent)
+            }
+        }
+    }
+}
+
+/// The refined look's button: card surface with a hairline edge, or filled with the accent color for the
+/// main action, without Liquid Glass shine.
+private struct FlatButtonStyle: ButtonStyle {
+    let kind: PageButtonKind
+
+    func makeBody(configuration: Configuration) -> some View {
+        FlatButtonBody(kind: kind, configuration: configuration)
+    }
+}
+
+private struct FlatButtonBody: View {
+    let kind: PageButtonKind
+    let configuration: ButtonStyleConfiguration
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        let shape = kind == .circle ? AnyShape(Circle()) : AnyShape(Capsule())
+        configuration.label
+            .foregroundStyle(kind == .prominent ? Color.white : Color.primary)
+            .padding(.vertical, kind == .circle ? 6 : 12)
+            .padding(.horizontal, kind == .circle ? 6 : 16)
+            .background {
+                if kind == .prominent {
+                    shape.fill(Color.brand)
+                } else {
+                    shape.fill(Color.card).overlay { shape.stroke(Color.hairline, lineWidth: 1) }
+                }
+            }
+            .contentShape(shape)
+            .opacity(isEnabled ? (configuration.isPressed ? 0.6 : 1) : 0.4)
+            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
+    }
+}
+
 /// iOS-Settings style colored icon square. With a `logo` (S-Bahn, U-Bahn, #350) the logo itself takes
-/// the tile's place, in its own colors and with the tile's rounded corners. The calm design draws only
-/// the symbol, in grey.
+/// the tile's place, in its own colors and with the tile's rounded corners. The refined look draws a softly
+/// tinted tile with the symbol in the tile's color.
 struct IconTile: View {
     let systemImage: String
     let color: Color
     var size: CGFloat = 30
     var logo: TransitLogo? = nil
-    @Environment(\.calmDesign) private var calm
+    @Environment(\.refinedDesign) private var refined
 
     var body: some View {
         if let logo, UIImage(named: logo.assetName) != nil {
@@ -212,11 +275,12 @@ struct IconTile: View {
                 .frame(width: size, height: size)
                 .clipShape(.rect(cornerRadius: size * 0.28, style: .continuous))
                 .accessibilityHidden(true)
-        } else if calm {
+        } else if refined {
             Image(systemName: systemImage)
-                .font(.system(size: size * 0.6, weight: .medium))
-                .foregroundStyle(.secondary)
+                .font(.system(size: size * 0.5, weight: .medium))
+                .foregroundStyle(color)
                 .frame(width: size, height: size)
+                .background(color.opacity(0.12), in: .rect(cornerRadius: size * 0.28, style: .continuous))
         } else {
             Image(systemName: systemImage)
                 .font(.system(size: size * 0.5, weight: .semibold))
