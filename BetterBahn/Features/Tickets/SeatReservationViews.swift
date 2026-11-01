@@ -8,17 +8,19 @@ struct ReservationRow: View {
     var request: BahnDeClient.FormationRequest?
 
     @Environment(AppModel.self) private var model
+    @Environment(\.appDesign) private var design
     @State private var hint: String?
 
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "carseat.right.fill")
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color.brand)
+                .foregroundStyle(Color.brandText)
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: 2) {
                 Text(reservation.description)
                     .font(.subheadline.weight(.semibold))
+                    .fontDesign(design == .fahrkarte ? .rounded : nil)
                 if let hint {
                     Text(hint)
                         .font(.caption)
@@ -29,7 +31,14 @@ struct ReservationRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(Color.brand.opacity(0.1), in: .rect(cornerRadius: 12, style: .continuous))
+        // Minimal tints the row softly; Fahrkarte keeps its surfaces plain and outlines it.
+        .background(design == .fahrkarte ? Color.clear : Color.brand.opacity(0.1),
+                    in: .rect(cornerRadius: 12, style: .continuous))
+        .overlay {
+            if design == .fahrkarte {
+                RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.hairline, lineWidth: 1)
+            }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Sitzplatzreservierung: \([reservation.description, hint].compactMap(\.self).joined(separator: ", "))")
         .task(id: request) {
@@ -65,7 +74,7 @@ struct SaveSeatButton: View {
                 Image(systemName: symbol)
             }
             .font(.caption.weight(.semibold))
-            .foregroundStyle(Color.brand)
+            .foregroundStyle(Color.brandText)
             .lineLimit(1)
             .contentShape(.rect)
         }
@@ -87,6 +96,7 @@ private struct SaveSeatSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var coach: String?
     @State private var seat = ""
+    @Environment(\.appDesign) private var design
 
     init(leg: Leg, coaches: [String], saved: SavedSeat?) {
         self.leg = leg
@@ -106,7 +116,8 @@ private struct SaveSeatSheet: View {
                             Button { coach = number } label: {
                                 Text(number)
                                     .font(.body.weight(.semibold).monospacedDigit())
-                                    .foregroundStyle(selected ? Color.white : Color.primary)
+                                    .fontDesign(design == .fahrkarte ? .rounded : nil)
+                                    .foregroundStyle(selected ? Color.onBrand : Color.primary)
                                     .frame(maxWidth: .infinity, minHeight: 44)
                                     .background(selected ? Color.brand : Color.secondary.opacity(0.12),
                                                 in: .rect(cornerRadius: 10, style: .continuous))
@@ -133,6 +144,7 @@ private struct SaveSeatSheet: View {
                 }
                 .padding()
             }
+            .background { AppBackground() }
             .navigationTitle("Wo sitzt du?")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

@@ -20,6 +20,7 @@ struct TicketLookupView: View {
     @State private var state: LoadState = .idle
     @State private var isFetching = false
     @FocusState private var focus: Field?
+    @Environment(\.appDesign) private var design
 
     enum Field { case orderNumber, lastName }
 
@@ -110,7 +111,9 @@ struct TicketLookupView: View {
                             ProgressView()
                             Text("Ticket wird geladen …").padding(.leading, 6)
                         } else {
-                            Text("Ticket abrufen").font(.headline)
+                            Text("Ticket abrufen")
+                                .font(.headline)
+                                .fontDesign(design == .fahrkarte ? .rounded : nil)
                         }
                         Spacer()
                     }
@@ -118,8 +121,7 @@ struct TicketLookupView: View {
                 .disabled(!canSearch)
             }
         }
-        .scrollContentBackground(.hidden)
-        .background { AppBackground() }
+        .designedForm()
         .onAppear { focus = .orderNumber }
     }
 

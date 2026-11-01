@@ -235,7 +235,8 @@ private struct PageButtonStyleModifier: ViewModifier {
             switch kind {
             case .regular: content.buttonStyle(.glass)
             case .circle: content.buttonStyle(.glass).buttonBorderShape(.circle)
-            case .prominent: content.buttonStyle(.glassProminent)
+            // The fill is the accent itself, with white text, or black where white wouldn't read (Gold).
+            case .prominent: content.buttonStyle(.glassProminent).tint(Color.brand).foregroundStyle(Color.onBrand)
             }
         }
     }

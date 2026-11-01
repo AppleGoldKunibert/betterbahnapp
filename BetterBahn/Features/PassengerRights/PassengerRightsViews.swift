@@ -78,46 +78,89 @@ extension PassengerRightsClaim {
 /// Small hint on a saved journey in the lists.
 struct PassengerRightsBadge: View {
     let claim: PassengerRightsClaim
+    @Environment(\.appDesign) private var design
 
     var body: some View {
         Label("Anspruch auf \(claim.compensation.percent) % Entschädigung", systemImage: "eurosign.circle.fill")
             .font(.caption.weight(.semibold))
+            .fontDesign(design == .fahrkarte ? .rounded : nil)
             .foregroundStyle(Color.punctual)
             .padding(.horizontal, 6)
     }
 }
 
-/// In the details of a journey: what the user is owed and a way to claim it.
+/// In the details of a journey: what the user is owed and a way to claim it. Minimal shows it as a card;
+/// Fahrkarte as a small ticket with the percentage large and the button below a perforation.
 struct PassengerRightsCard: View {
     let entry: SavedJourney
     let claim: PassengerRightsClaim
+    @Environment(\.appDesign) private var design
     @State private var showsRequest = false
 
     var body: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top, spacing: 12) {
-                    IconTile(systemImage: "eurosign.circle.fill", color: .punctual, size: 34)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(claim.title).font(.headline)
-                        Text(claim.explanation).font(.subheadline).foregroundStyle(.secondary)
-                        if claim.isFlatRate {
-                            Text("Mit der BahnCard 100 gelten andere Regeln. Mehr dazu auf bahn.de.")
-                                .font(.subheadline).foregroundStyle(.secondary)
+        Group {
+            if design == .fahrkarte {
+                ticket
+            } else {
+                Card {
+                    VStack(alignment: .leading, spacing: 16) {
+                        HStack(alignment: .top, spacing: 12) {
+                            IconTile(systemImage: "eurosign.circle.fill", color: .punctual, size: 32)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(claim.title).font(.headline)
+                                explanation
+                            }
                         }
+                        requestButton
                     }
                 }
-                Button { showsRequest = true } label: {
-                    Label("Antrag vorbereiten", systemImage: "doc.text")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.glassProminent)
-                .tint(.brand)
-                .controlSize(.large)
             }
         }
         .sheet(isPresented: $showsRequest) { PassengerRightsRequestSheet(entry: entry, claim: claim) }
+    }
+
+    private var ticket: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    TicketFieldLabel(title: String(localized: "Entschädigung"))
+                    Text(claim.compensation.percent, format: .percent)
+                        .font(.largeTitle.weight(.heavy))
+                        .fontDesign(.rounded)
+                        .foregroundStyle(Color.punctual)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(claim.title)
+                .accessibilityAddTraits(.isHeader)
+                explanation
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            TicketPerforation()
+            requestButton
+                .padding(16)
+        }
+        .ticketBackground()
+        .environment(\.cardSurface, Color.ticket)
+    }
+
+    @ViewBuilder private var explanation: some View {
+        Text(claim.explanation).font(.subheadline).foregroundStyle(.secondary)
+        if claim.isFlatRate {
+            Text("Mit der BahnCard 100 gelten andere Regeln. Mehr dazu auf bahn.de.")
+                .font(.subheadline).foregroundStyle(.secondary)
+        }
+    }
+
+    private var requestButton: some View {
+        Button { showsRequest = true } label: {
+            Label("Antrag vorbereiten", systemImage: "doc.text")
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+        }
+        .pageButtonStyle(.prominent)
+        .tint(.brand)
+        .controlSize(.large)
     }
 }
 
@@ -127,6 +170,7 @@ struct PassengerRightsRequestSheet: View {
     let claim: PassengerRightsClaim
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.appDesign) private var design
     @State private var copied: String?
 
     var body: some View {
@@ -137,10 +181,16 @@ struct PassengerRightsRequestSheet: View {
                 Section {
                     ForEach(fields) { field in
                         HStack(alignment: .top) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(field.label).font(.caption).foregroundStyle(.secondary)
-                                Text(field.value)
+                            VStack(alignment: .leading, spacing: 4) {
+                                if design == .fahrkarte {
+                                    TicketFieldLabel(title: field.label)
+                                    Text(field.value).fontDesign(.rounded)
+                                } else {
+                                    Text(field.label).font(.caption).foregroundStyle(.secondary)
+                                    Text(field.value)
+                                }
                             }
+                            .accessibilityElement(children: .combine)
                             Spacer(minLength: 8)
                             Button(copied == field.id ? "Kopiert" : "Kopieren", systemImage: copied == field.id ? "checkmark" : "doc.on.doc") {
                                 copy(field.value, id: field.id)
@@ -163,6 +213,7 @@ struct PassengerRightsRequestSheet: View {
                     }
                 }
             }
+            .designedForm()
             .sensoryFeedback(.success, trigger: copied)
             .navigationTitle("Antrag vorbereiten")
             .navigationBarTitleDisplayMode(.inline)
