@@ -104,7 +104,6 @@ struct MinimumStayPopover: View {
             } label: {
                 Text("Fertig")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color.onBrand)
             }
             .pageButtonStyle(.prominent)
         }

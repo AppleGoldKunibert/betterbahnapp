@@ -306,7 +306,6 @@ struct JourneyResultsView: View {
                 } label: {
                     Label("Jetzt", systemImage: "clock.fill")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
                 }
                 .pageButtonStyle()
                 Spacer()
@@ -316,7 +315,6 @@ struct JourneyResultsView: View {
                 } label: {
                     Text("Fertig")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Color.onBrand)
                 }
                 .pageButtonStyle(.prominent)
             }
@@ -336,7 +334,6 @@ struct JourneyResultsView: View {
             } label: {
                 Label(requirements.isEmpty ? "Bestimmten Zug wählen" : "Weiteren Zug vorgeben", systemImage: "number")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity)
             }
             .pageButtonStyle()
@@ -348,7 +345,6 @@ struct JourneyResultsView: View {
                 } label: {
                     Label("Zurücksetzen", systemImage: "arrow.counterclockwise")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
                         .labelStyle(.iconOnly)
                         // As tall as the wide button next to it in either design.
                         .frame(width: design == .fahrkarte ? 22 : 32, height: design == .fahrkarte ? 22 : 32)
@@ -480,7 +476,6 @@ struct JourneyResultsView: View {
         } label: {
             Label(title, systemImage: systemImage)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.primary)
                 .frame(maxWidth: .infinity)
         }
         .pageButtonStyle()

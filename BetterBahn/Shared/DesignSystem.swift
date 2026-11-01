@@ -259,7 +259,7 @@ private struct FlatButtonBody: View {
     var body: some View {
         let shape = kind == .circle ? AnyShape(Circle()) : AnyShape(Capsule())
         configuration.label
-            .foregroundStyle(kind == .prominent ? Color.white : Color.primary)
+            .foregroundStyle(kind == .prominent ? Color.onBrand : Color.primary)
             .padding(.vertical, kind == .circle ? 6 : 12)
             .padding(.horizontal, kind == .circle ? 6 : 16)
             .background {
@@ -300,9 +300,11 @@ struct IconTile: View {
                 .foregroundStyle(.secondary)
                 .frame(width: size, height: size)
         } else {
+            // The accent as a symbol has to read on its light tile whatever color was picked.
+            let symbolColor = color == Color.brand ? Color.brandText : color
             Image(systemName: systemImage)
                 .font(.system(size: size * 0.5, weight: .medium))
-                .foregroundStyle(color)
+                .foregroundStyle(symbolColor)
                 .frame(width: size, height: size)
                 .background(color.opacity(0.12), in: .rect(cornerRadius: size * 0.28, style: .continuous))
         }
@@ -1321,21 +1323,28 @@ extension AnyTransition {
     static var fold: AnyTransition { .opacity }
 }
 
-// MARK: - Readable accent
+// MARK: - Readable accent (#504)
 
 extension Color {
-    /// The accent color for text, thin outlines and small symbols on cards and pages: darkened (light mode) or
-    /// lightened (dark mode) just enough to stay readable, so Graphit, Gold or a very light color of one's own
-    /// don't vanish (#504). The fill of buttons and switches keeps `Color.brand`.
+    /// The accent color as text, a chip or a small symbol on a card: darker in light mode and lighter in dark
+    /// mode just as far as needed to read (Graphit on a dark card, Gold or a very light color on a white one).
     static var brandText: Color {
         let accent = Theme.shared.accent.color
-        // The lightest page in light mode and the lightest card in dark mode (sheets, elevated cards).
-        return Color(dynamicUIColor(light: accent.readable(on: RGBColor(red: 0.96, green: 0.955, blue: 0.945)),
-                                    dark: accent.readable(on: RGBColor(red: 0.17, green: 0.17, blue: 0.18))))
+        return Color(dynamicUIColor(light: accent.readable(on: Self.lightCardRGB), dark: accent.readable(on: Self.darkCardRGB)))
     }
 
-    /// Text and symbols on a surface filled with `Color.brand`: white, or near-black when the accent is light.
-    static var onBrand: Color {
-        Theme.shared.accent.color.prefersDarkForeground ? Color(white: 0.1) : .white
+    /// Text and symbols on a small surface filled with `brandText` (a picked weekday, your seat): such a fill shows
+    /// on the card even with a very light accent.
+    static var onBrandText: Color {
+        let accent = Theme.shared.accent.color
+        return Color(dynamicUIColor(light: accent.readable(on: Self.lightCardRGB).readableForeground,
+                                    dark: accent.readable(on: Self.darkCardRGB).readableForeground))
     }
+
+    private static let lightCardRGB = RGBColor(red: 1, green: 1, blue: 1)
+    /// `secondarySystemGroupedBackground` in dark mode.
+    private static let darkCardRGB = RGBColor(red: 0.11, green: 0.11, blue: 0.12)
+
+    /// Text and symbols on a surface filled with the accent color: white, or black where white wouldn't read.
+    static var onBrand: Color { Theme.shared.accent.color.readableForeground.swiftUIColor }
 }

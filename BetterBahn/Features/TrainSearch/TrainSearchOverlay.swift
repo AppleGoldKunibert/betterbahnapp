@@ -205,7 +205,6 @@ struct TrainSearchOverlay: View {
                     } label: {
                         Label("Erneut versuchen", systemImage: "arrow.clockwise")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.primary)
                     }
                     .pageButtonStyle()
                 }

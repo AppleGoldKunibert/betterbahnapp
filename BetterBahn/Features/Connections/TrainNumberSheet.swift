@@ -353,7 +353,6 @@ struct TrainNumberSheet: View {
                 Button(action: addTyped) {
                     Label("„\(trimmed)“ vorgeben", systemImage: "pin.fill")
                         .font(.headline)
-                        .foregroundStyle(Color.onBrand)
                         .frame(maxWidth: .infinity)
                 }
                 .pageButtonStyle(.prominent)
@@ -479,7 +478,6 @@ struct TrainNumberSheet: View {
         Button { add(candidate) } label: {
             Label("Zug vorgeben", systemImage: "pin.fill")
                 .font(.headline)
-                .foregroundStyle(Color.onBrand)
                 .frame(maxWidth: .infinity)
         }
         .pageButtonStyle(.prominent)
