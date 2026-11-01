@@ -566,7 +566,7 @@ struct TripContent: View {
             Text(name)
                 .font(.title3.weight(.bold))
                 .multilineTextAlignment(alignment == .leading ? .leading : .trailing)
-                .lineLimit(2)
+                // No line limit of its own: the pop-up sets it and compares with the full text to tell it is cut.
                 .fullTextPopup(name, lines: 2)
         }
         .frame(maxWidth: .infinity, alignment: alignment == .leading ? .leading : .trailing)
