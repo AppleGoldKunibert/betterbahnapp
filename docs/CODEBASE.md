@@ -261,7 +261,10 @@ in `project.pbxproj`: new files join their target automatically.
   `InfoChip`, `OperatorLabel`, `Color.brand`, `.transition(.fold)` …; reuse these instead of new styling.
   `Shared/Theme.swift` holds the picked design and accent (per device); `Color.brand`, `.brandDeep` and `.ticket` read
   the accent there, so views redraw when it changes, and `.appTheme()` at the root sets `\.appDesign` and the tint.
-  Never hard-code the red: use `Color.brand` or derive from it. `Card`, `AppBackground`, `SectionHeader`, `IconTile`
+  Never hard-code the red: use `Color.brand` or derive from it. Accent as text, chips or small symbols: `Color.brandText`
+  (moved just far enough towards black/white to read 4.5:1 on the card in light and dark mode, Kit `RGBColor.readable(on:)`);
+  on an accent fill `Color.onBrand` (white, black where white wouldn't read, `readableForeground`); a small fill that must
+  show even with a very light accent uses `brandText` with `onBrandText`. `Card`, `AppBackground`, `SectionHeader`, `IconTile`
   and `.pageButtonStyle(.regular/.circle/.prominent)` draw either design: Minimal has the classic cards with light
   shadows, a faint glow, sentence-case titles with a grey icon, softly tinted icon tiles and flat buttons (the main
   action filled with `Color.brand`); Fahrkarte has flat outlined cards on `Color.canvas`, bold rounded titles, grey

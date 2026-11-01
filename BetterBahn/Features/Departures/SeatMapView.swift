@@ -48,7 +48,7 @@ struct SeatMapSheet: View {
                         Label(reservation.description, systemImage: "person.crop.square.fill")
                             .font(.subheadline.weight(.semibold))
                             .fontDesign(rounded)
-                            .foregroundStyle(Color.brand)
+                            .foregroundStyle(Color.brandText)
                             .padding(.horizontal, 16)
                     }
                     ScrollViewReader { proxy in
@@ -111,7 +111,7 @@ struct SeatMapSheet: View {
             Text(title)
                 .font(.subheadline.weight(.semibold))
                 .fontDesign(rounded)
-                .foregroundStyle(item.id == selected.id ? Color.brand : .primary)
+                .foregroundStyle(item.id == selected.id ? Color.brandText : .primary)
             SeatMapCoach(map: item.map, turned: item.turned, reserved: reserved, height: Self.coachHeight, coachID: item.id)
         }
         .accessibilityElement(children: .ignore)
@@ -160,13 +160,14 @@ private struct SeatMapCoach: View {
                     let size = seat.height * height
                     Text(seat.number)
                         .font(.system(size: size * 0.8, weight: .bold))
-                        .foregroundStyle(.white)
+                        // On the accent-filled box of the reserved seat: black where white wouldn't read.
+                        .foregroundStyle(isReserved ? Color.onBrandText : Color.white)
                         .fixedSize()
                         .padding(isReserved ? size * 0.35 : 0)
                         .background {
                             if isReserved {
                                 RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
-                                    .fill(Color.brand)
+                                    .fill(Color.brandText)
                                     .stroke(.white, lineWidth: 1.5)
                                     .shadow(radius: 2)
                             }

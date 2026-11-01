@@ -404,7 +404,7 @@ struct TripContent: View {
             if interactive, exitOnly || showsStopTip || picksBoarding || boardingID != nil {
                 HStack(spacing: 8) {
                     if exitOnly || showsStopTip || picksBoarding {
-                        Image(systemName: "hand.tap.fill").foregroundStyle(Color.brand)
+                        Image(systemName: "hand.tap.fill").foregroundStyle(Color.brandText)
                         Text(exitOnly ? "Tippe auf einen Halt, um dort auszusteigen."
                              : picksBoarding ? "Tippe auf den Halt, an dem du einsteigst."
                              : "Tippe auf Halte, um Ein- und Ausstieg zu wählen.")
@@ -419,7 +419,7 @@ struct TripContent: View {
                         }
                         .labelStyle(.titleAndIcon)
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(Color.brand)
+                        .foregroundStyle(Color.brandText)
                         .accessibilityHint("Hebt Ein- und Ausstieg auf")
                     }
                 }
@@ -581,7 +581,7 @@ struct TripContent: View {
                 Text(title)
             }
             .font(.subheadline.weight(.semibold))
-            .foregroundStyle(Color.brand)
+            .foregroundStyle(Color.brandText)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 10)
             .contentShape(.rect)
@@ -646,13 +646,13 @@ struct TripContent: View {
                                 if isBoarding {
                                     InfoChip(text: String(localized: "Einstieg"), systemImage: "arrow.up.right.circle.fill", tint: .punctual)
                                 } else if isExit {
-                                    InfoChip(text: String(localized: "Ausstieg"), systemImage: "arrow.down.right.circle.fill", tint: .brand)
+                                    InfoChip(text: String(localized: "Ausstieg"), systemImage: "arrow.down.right.circle.fill", tint: .brandText)
                                 }
                                 if stop.isAdditional {
-                                    InfoChip(text: String(localized: "Zusatzhalt"), systemImage: "plus.circle.fill", tint: .brand)
+                                    InfoChip(text: String(localized: "Zusatzhalt"), systemImage: "plus.circle.fill", tint: .brandText)
                                 }
                                 if stop.isManual {
-                                    InfoChip(text: String(localized: "Selbst eingetragen"), systemImage: "hand.point.up.left.fill", tint: .brand)
+                                    InfoChip(text: String(localized: "Selbst eingetragen"), systemImage: "hand.point.up.left.fill", tint: .brandText)
                                 }
                                 if let operators = operatorStops[stop.id] {
                                     HStack(spacing: 6) {

@@ -279,7 +279,7 @@ struct StationBoardView: View {
                     HStack(spacing: 6) {
                         if onlyValidTicket {
                             let ticket = model.settings.ticketType
-                            InfoChip(text: ticket.displayName, systemImage: ticket.symbolName, tint: .brand)
+                            InfoChip(text: ticket.displayName, systemImage: ticket.symbolName, tint: .brandText)
                         }
                         if products.count != Product.allCases.count {
                             ForEach(Product.allCases.filter(products.contains), id: \.self) { product in

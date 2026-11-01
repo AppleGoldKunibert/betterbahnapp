@@ -673,7 +673,7 @@ private struct CoachSequenceDiagram: View {
             if let train = label.train {
                 Text(train)
                     .font(.caption2.weight(.bold))
-                    .foregroundStyle(Color.brand)
+                    .foregroundStyle(Color.brandText)
                     .lineLimit(2)
             }
             if let unit = label.unit {

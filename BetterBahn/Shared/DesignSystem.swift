@@ -1320,3 +1320,29 @@ extension AnyTransition {
     /// the screen moved up under it, so it was drawn over the text above it (#227, #267).
     static var fold: AnyTransition { .opacity }
 }
+
+// MARK: - Readable accent (#504)
+
+extension Color {
+    /// The accent color as text, a chip or a small symbol on a card: darker in light mode and lighter in dark
+    /// mode just as far as needed to read (Graphit on a dark card, Gold or a very light color on a white one).
+    static var brandText: Color {
+        let accent = Theme.shared.accent.color
+        return Color(dynamicUIColor(light: accent.readable(on: Self.lightCardRGB), dark: accent.readable(on: Self.darkCardRGB)))
+    }
+
+    /// Text and symbols on a small surface filled with `brandText` (a picked weekday, your seat): such a fill shows
+    /// on the card even with a very light accent.
+    static var onBrandText: Color {
+        let accent = Theme.shared.accent.color
+        return Color(dynamicUIColor(light: accent.readable(on: Self.lightCardRGB).readableForeground,
+                                    dark: accent.readable(on: Self.darkCardRGB).readableForeground))
+    }
+
+    private static let lightCardRGB = RGBColor(red: 1, green: 1, blue: 1)
+    /// `secondarySystemGroupedBackground` in dark mode.
+    private static let darkCardRGB = RGBColor(red: 0.11, green: 0.11, blue: 0.12)
+
+    /// Text and symbols on a surface filled with the accent color: white, or black where white wouldn't read.
+    static var onBrand: Color { Theme.shared.accent.color.readableForeground.swiftUIColor }
+}
