@@ -35,7 +35,7 @@ struct ManualStopSheet: View {
                     }
                     Card {
                         DatePicker(selection: $time, in: earliest..., displayedComponents: .hourAndMinute) {
-                            OptionLabel(title: String(localized: "Ankunft"), subtitle: String(localized: "Wann der Zug dort hält"), icon: "clock", color: .journeyAccent)
+                            OptionLabel(title: String(localized: "Ankunft"), subtitle: String(localized: "Wann der Zug dort hält"), icon: "clock")
                         }
                     }
                     Text("Für Halte, die nicht im Fahrplan stehen, z. B. bei einer Störung.")

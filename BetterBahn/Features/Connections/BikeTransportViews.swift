@@ -81,7 +81,7 @@ struct BikeTransportRow: View {
 
     private func color(of transport: BikeTransport) -> Color {
         switch transport.kind {
-        case .allowed, .luggage: transport.ticket == nil ? .punctual : .journeyAccent
+        case .allowed, .luggage: transport.ticket == nil ? .punctual : .brandText
         case .limited, .reservationRequired: .slightDelay
         case .notAllowed: .heavyDelay
         }
