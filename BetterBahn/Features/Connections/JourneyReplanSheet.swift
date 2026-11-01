@@ -32,6 +32,7 @@ struct JourneyReplanSheet: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.appDesign) private var design
 
     @State private var selectedLegID: String?
     @State private var trip: Trip?
@@ -336,7 +337,7 @@ struct JourneyReplanSheet: View {
                                     }
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 8)
-                                    .foregroundStyle(isOn ? Color.white : Color.primary)
+                                    .foregroundStyle(isOn ? Color.onBrand : Color.primary)
                                     .background(isOn ? Color.brand : Color.secondary.opacity(0.15),
                                                 in: .rect(cornerRadius: 12, style: .continuous))
                                 }
@@ -366,9 +367,8 @@ struct JourneyReplanSheet: View {
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.glass)
+            .pageButtonStyle()
             .controlSize(.large)
-            .tint(.brand)
 
             if !requirements.isEmpty {
                 Button {
@@ -377,10 +377,10 @@ struct JourneyReplanSheet: View {
                     Label("Zurücksetzen", systemImage: "arrow.counterclockwise")
                         .font(.subheadline.weight(.semibold))
                         .labelStyle(.iconOnly)
-                        .frame(width: 22, height: 22)
+                        // As tall as the button beside it: the flat circle adds less padding than the glass one.
+                        .frame(width: design == .minimal ? 32 : 22, height: design == .minimal ? 32 : 22)
                 }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
+                .pageButtonStyle(.circle)
                 .controlSize(.large)
                 .accessibilityLabel("Zugvorgaben zurücksetzen")
             }
@@ -395,6 +395,7 @@ struct JourneyReplanSheet: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(resolvedTrainNames[requirement.id] ?? requirement.trainName.uppercased())
                             .font(.subheadline.weight(.semibold))
+                            .journeyRoundedType()
                         Text(requirement.exit.map { String(localized: "ab \(requirement.boarding.displayName) → \($0.displayName)") }
                              ?? String(localized: "ab \(requirement.boarding.displayName) → schnellster Weg"))
                             .font(.caption)
@@ -410,8 +411,12 @@ struct JourneyReplanSheet: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("Zugvorgabe entfernen")
                 }
-                .padding(10)
-                .background(Color.card, in: .rect(cornerRadius: 14, style: .continuous))
+                .padding(12)
+                .background(Color.card, in: .rect(cornerRadius: 16, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(Color.hairline, lineWidth: design == .fahrkarte ? 1 : 0.5)
+                }
             }
         }
     }
@@ -459,7 +464,7 @@ struct JourneyReplanSheet: View {
                 HStack(spacing: 12) {
                     IconTile(systemImage: "tram.fill", color: .slightDelay, size: 38)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Mit dem geplanten Zug bist du früher da").font(.headline).lineLimit(2)
+                        Text("Mit dem geplanten Zug bist du früher da").font(.headline).lineLimit(2).journeyRoundedType()
                         Text(stayOnTrainSubtitle(lost: lost)).font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 0)
@@ -471,8 +476,7 @@ struct JourneyReplanSheet: View {
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.glass)
-                .tint(.brand)
+                .pageButtonStyle()
                 .controlSize(.large)
                 Text("Du kannst trotzdem umplanen.")
                     .font(.caption2)
@@ -500,6 +504,7 @@ struct JourneyReplanSheet: View {
                              : "Schneller: Ausstieg in \(option.exit.station.displayName)")
                             .font(.headline)
                             .lineLimit(2)
+                            .journeyRoundedType()
                         Text(fasterSubtitle(option))
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -520,8 +525,8 @@ struct JourneyReplanSheet: View {
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.glassProminent)
-                .tint(.punctual)
+                // Only a suggestion: it doesn't compete with the search, the page's main action.
+                .pageButtonStyle()
                 .controlSize(.large)
                 .disabled(applyingID != nil)
                 Text("Nur ein Vorschlag.")
@@ -545,9 +550,18 @@ struct JourneyReplanSheet: View {
                 HStack(spacing: 12) {
                     IconTile(systemImage: "arrow.down.right.circle.fill", color: .brand, size: 38)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Ausstieg: \(exitStation.displayName)")
-                            .font(.headline)
-                            .lineLimit(2)
+                        if design == .fahrkarte {
+                            // The ticket's small label over the big value.
+                            JourneyTicketCaption(text: String(localized: "Ausstieg"))
+                            Text(exitStation.displayName)
+                                .font(.title3.weight(.bold))
+                                .fontDesign(.rounded)
+                                .lineLimit(2)
+                        } else {
+                            Text("Ausstieg: \(exitStation.displayName)")
+                                .font(.headline)
+                                .lineLimit(2)
+                        }
                         Text(exitChanged
                              ? "statt \(leg.destination.displayName) · an \(exitArrival.timeString)"
                              : "wie geplant · an \(exitArrival.timeString)")
@@ -565,6 +579,7 @@ struct JourneyReplanSheet: View {
                     }
                     .buttonStyle(.plain)
                     .glassEffect(.regular, in: .circle)
+                    .journeyRoundActionSurface()
                     .accessibilityLabel(showStops ? "Halteliste ausblenden" : "Anderen Halt wählen")
                 }
             }
@@ -601,8 +616,10 @@ struct JourneyReplanSheet: View {
                     Label("Reise in \(exitStation.displayName) beenden", systemImage: "flag.checkered")
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity)
+                        // Liquid Glass would draw it white whatever the accent; the flat button does this itself.
+                        .foregroundStyle(Color.onBrand)
                 }
-                .buttonStyle(.glassProminent)
+                .pageButtonStyle(.prominent)
                 .tint(.brand)
                 .controlSize(.large)
                 .disabled(exitLeg == nil || legIndex == nil)
@@ -613,8 +630,7 @@ struct JourneyReplanSheet: View {
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.glass)
-                .tint(.brand)
+                .pageButtonStyle()
                 .controlSize(.large)
                 .disabled(products.isEmpty || destination == nil)
             }
@@ -624,7 +640,7 @@ struct JourneyReplanSheet: View {
 
     /// For a halt that isn't in the timetable, e.g. doors opened at a station during a disruption.
     private var manualStopButton: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 8) {
             Button {
                 showManualStopSheet = true
             } label: {
@@ -632,9 +648,8 @@ struct JourneyReplanSheet: View {
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.glass)
+            .pageButtonStyle()
             .controlSize(.large)
-            .tint(.brand)
             Text("Hält der Zug außerplanmäßig, z. B. bei einer Störung? Trag den Halt ein, um dort auszusteigen.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -651,8 +666,13 @@ struct JourneyReplanSheet: View {
                 HStack(spacing: 12) {
                     IconTile(systemImage: "smallcircle.filled.circle", color: .secondary, size: 32)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("Weiter ab").font(.caption).foregroundStyle(.secondary)
-                        Text(exitStation.displayName).font(.subheadline.weight(.semibold)).lineLimit(1)
+                        if design == .fahrkarte {
+                            JourneyTicketCaption(text: String(localized: "Weiter ab"))
+                            Text(exitStation.displayName).font(.title2.weight(.bold)).fontDesign(.rounded).lineLimit(1)
+                        } else {
+                            Text("Weiter ab").font(.caption).foregroundStyle(.secondary)
+                            Text(exitStation.displayName).font(.subheadline.weight(.semibold)).lineLimit(1)
+                        }
                     }
                     Spacer()
                 }
@@ -686,16 +706,17 @@ struct JourneyReplanSheet: View {
                             .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
-                    .tint(.brand)
                 }
             }
+            // On the ticket the goal and the stops read like "Von" and "Nach": a small label over a big name.
+            .environment(\.ticketStationFields, design == .fahrkarte)
             .clipShape(.rect(cornerRadius: 22, style: .continuous))
         }
     }
 
     private var optionsCard: some View {
         Card {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 16) {
                 Button {
                     showBufferPopover = true
                 } label: {
@@ -719,7 +740,6 @@ struct JourneyReplanSheet: View {
                     let ticket = model.settings.ticketType
                     OptionLabel(title: ticket.filterTitle, subtitle: ticket.filterSubtitle, icon: ticket.symbolName)
                 }
-                .tint(.brand)
 
                 Divider()
 
@@ -751,8 +771,12 @@ struct JourneyReplanSheet: View {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Verkehrsmittel").font(.subheadline.weight(.semibold))
                 ProductChips(products: $products)
-                Button("Fertig") { showProductsPopover = false }
-                    .buttonStyle(.glassProminent)
+                Button {
+                    showProductsPopover = false
+                } label: {
+                    Text("Fertig").foregroundStyle(Color.onBrand)
+                }
+                    .pageButtonStyle(.prominent)
                     .tint(.brand)
                     .frame(maxWidth: .infinity)
             }
@@ -778,9 +802,11 @@ struct JourneyReplanSheet: View {
                     }
                     .font(.headline)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
+                    .padding(.vertical, design == .minimal ? 0 : 6)
+                    // Liquid Glass would draw it white whatever the accent; the flat button does this itself.
+                    .foregroundStyle(Color.onBrand)
                 }
-                .buttonStyle(.glassProminent)
+                .pageButtonStyle(.prominent)
                 .tint(.brand)
                 .controlSize(.large)
                 .disabled(applyingID != nil || exitLeg == nil || legIndex == nil)
@@ -795,9 +821,11 @@ struct JourneyReplanSheet: View {
                 Label("Verbindungen suchen", systemImage: "magnifyingglass")
                     .font(.headline)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
+                    .padding(.vertical, design == .minimal ? 0 : 6)
+                    // Liquid Glass would draw it white whatever the accent; the flat button does this itself.
+                    .foregroundStyle(Color.onBrand)
             }
-            .buttonStyle(.glassProminent)
+            .pageButtonStyle(.prominent)
             .tint(.brand)
             .controlSize(.large)
             .disabled(isSearching || products.isEmpty || destination == nil
@@ -814,7 +842,7 @@ struct JourneyReplanSheet: View {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 48))
                     .foregroundStyle(Color.punctual.gradient)
-                Text("Reiseplan aktualisiert").font(.headline)
+                Text("Reiseplan aktualisiert").font(.headline).journeyRoundedType()
                 Text("Ausstieg in \(exit.destination.displayName) um \(exit.arrival.best.timeString).")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -840,7 +868,7 @@ struct JourneyReplanSheet: View {
                 HStack(spacing: 12) {
                     IconTile(systemImage: "checkmark.seal.fill", color: .punctual, size: 38)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Check-in angepasst").font(.headline)
+                        Text("Check-in angepasst").font(.headline).journeyRoundedType()
                         Text(checkinReplaced
                              ? "Neu angelegt als manuelle Fahrt bis \(exit.destination.displayName)."
                              : "Dein Check-in endet jetzt in \(exit.destination.displayName).")
@@ -859,11 +887,11 @@ struct JourneyReplanSheet: View {
         let asManualTrip = needsManualTrip(exit)
         let exitName = exit.destination.displayName
         return Card {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 12) {
                     IconTile(systemImage: "checkmark.seal.fill", color: .brand, size: 38)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Träwelling-Check-in anpassen?").font(.headline)
+                        Text("Träwelling-Check-in anpassen?").font(.headline).journeyRoundedType()
                         Text(asManualTrip
                              ? "Du bist bis \(checkedInDestinationName(status)) eingecheckt. \(exitName) ist auf Träwelling kein Halt dieser Fahrt, darum wird dein Check-in als manuelle Fahrt bis \(exitName) neu angelegt."
                              : "Du bist bis \(checkedInDestinationName(status)) eingecheckt, steigst jetzt aber in \(exitName) aus.")
@@ -890,8 +918,10 @@ struct JourneyReplanSheet: View {
                     }
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
+                    // Liquid Glass would draw it white whatever the accent; the flat button does this itself.
+                    .foregroundStyle(Color.onBrand)
                 }
-                .buttonStyle(.glassProminent)
+                .pageButtonStyle(.prominent)
                 .tint(.brand)
                 .controlSize(.large)
                 .disabled(isFixingCheckin)

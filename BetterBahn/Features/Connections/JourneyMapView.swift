@@ -218,7 +218,7 @@ struct JourneyMap: UIViewRepresentable {
             for (name, live) in current {
                 if let annotation = trainAnnotations[name] {
                     annotation.update(live)
-                    (map.view(for: annotation) as? MKMarkerAnnotationView)?.markerTintColor = annotation.isStale ? .systemGray : UIColor(Color.brand)
+                    (map.view(for: annotation) as? MKMarkerAnnotationView)?.markerTintColor = annotation.isStale ? .systemGray : UIColor(Color.brandText)
                 } else {
                     let annotation = TrainAnnotation(live)
                     trainAnnotations[name] = annotation
@@ -230,7 +230,7 @@ struct JourneyMap: UIViewRepresentable {
         func mapView(_ mapView: MKMapView, rendererFor overlay: any MKOverlay) -> MKOverlayRenderer {
             if let polyline = overlay as? MKPolyline {
                 let renderer = MKPolylineRenderer(polyline: polyline)
-                renderer.strokeColor = UIColor(Color.brand)
+                renderer.strokeColor = UIColor(Color.brandText)
                 renderer.lineWidth = 3
                 renderer.lineCap = .round
                 renderer.lineJoin = .round
@@ -246,7 +246,7 @@ struct JourneyMap: UIViewRepresentable {
                     ?? MKMarkerAnnotationView(annotation: train, reuseIdentifier: id)
                 view.annotation = train
                 view.glyphImage = UIImage(systemName: "tram.fill")
-                view.markerTintColor = train.isStale ? .systemGray : UIColor(Color.brand)
+                view.markerTintColor = train.isStale ? .systemGray : UIColor(Color.brandText)
                 view.displayPriority = .required
                 view.canShowCallout = true
                 return view
@@ -287,7 +287,7 @@ struct JourneyMap: UIViewRepresentable {
 
         private func annotationColor(for type: TransferPoint.PointType) -> UIColor {
             switch type {
-            case .start, .stopover, .transfer: return UIColor(Color.brand)
+            case .start, .stopover, .transfer: return UIColor(Color.brandText)
             case .end: return UIColor(Color.punctual)
             }
         }
@@ -339,7 +339,7 @@ struct TransferDetailsSheet: View {
                     HStack(spacing: 8) {
                         Image(systemName: transfer.type.symbol)
                             .font(.headline)
-                            .foregroundStyle(transfer.type == .end ? Color.punctual : Color.brand)
+                            .foregroundStyle(transfer.type == .end ? Color.punctual : Color.brandText)
                         Text(transfer.station.displayName)
                             .font(.headline)
                     }
@@ -405,6 +405,9 @@ struct TransferDetailsSheet: View {
                 }
                 .padding(.horizontal)
             }
+            .monospacedDigit()
+            // The ticket's rounded type for the station and the times.
+            .journeyRoundedType()
             .padding(.top, 28)
             .padding(.bottom)
             // Size the sheet to its content instead of a fixed half-screen detent.
