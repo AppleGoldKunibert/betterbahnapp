@@ -52,7 +52,7 @@ struct ViaRowView<Focus: Hashable>: View {
                     Label(row.minStayMinutes > 0 ? String(localized: "Mind. \(row.minStayMinutes) Min.") : String(localized: "Mindestaufenthalt"),
                           systemImage: "clock.badge.checkmark")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(row.minStayMinutes > 0 ? Color.brand : Color.secondary)
+                        .foregroundStyle(row.minStayMinutes > 0 ? Color.brandText : Color.secondary)
                         .padding(Self.hitPadding)
                         .contentShape(.rect)
                 }
@@ -102,7 +102,9 @@ struct MinimumStayPopover: View {
             Button {
                 isPresented = false
             } label: {
-                Text("Fertig").font(.subheadline.weight(.semibold))
+                Text("Fertig")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.onBrand)
             }
             .pageButtonStyle(.prominent)
         }
@@ -127,6 +129,7 @@ struct ProductChips: View {
             .font(.caption.weight(.semibold))
             .buttonStyle(.bordered)
             .buttonBorderShape(.capsule)
+            .tint(Color.brandText)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 8)], alignment: .leading, spacing: 8) {
                 ForEach(Product.allCases, id: \.self) { product in
                     let isOn = products.contains(product)
@@ -181,7 +184,7 @@ struct OptionLabel: View {
     let title: String
     let subtitle: String
     let icon: String
-    var color: Color = .brand
+    var color: Color = .brandText
 
     var body: some View {
         HStack(spacing: 12) {

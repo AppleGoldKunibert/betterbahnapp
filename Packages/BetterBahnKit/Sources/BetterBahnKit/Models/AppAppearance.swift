@@ -70,6 +70,44 @@ public struct RGBColor: Codable, Hashable, Sendable {
     }
 }
 
+/// Contrast, so the accent color stays readable whatever the user picks (#504): Graphit on a dark card, Gold or a
+/// very light color of one's own on white.
+extension RGBColor {
+    /// WCAG relative luminance, 0 (black) … 1 (white).
+    public var relativeLuminance: Double {
+        func channel(_ value: Double) -> Double {
+            value <= 0.03928 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * channel(red) + 0.7152 * channel(green) + 0.0722 * channel(blue)
+    }
+
+    /// WCAG contrast ratio with `other`, 1 … 21.
+    public func contrast(with other: RGBColor) -> Double {
+        let a = relativeLuminance, b = other.relativeLuminance
+        return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+    }
+
+    /// This color, darkened on a light `background` or lightened on a dark one just enough for text in it to
+    /// reach `minimumContrast` (4.5: normal text); unchanged when it already does.
+    public func readable(on background: RGBColor, minimumContrast: Double = 4.5) -> RGBColor {
+        let target = background.relativeLuminance > 0.18 ? RGBColor(red: 0, green: 0, blue: 0)
+                                                         : RGBColor(red: 1, green: 1, blue: 1)
+        var color = self
+        var share = 0.0
+        while color.contrast(with: background) < minimumContrast, share < 1 {
+            share = min(share + 0.04, 1)
+            color = mixed(with: target, by: share)
+        }
+        return color
+    }
+
+    /// Text and symbols on a surface filled with this color should be dark: white would not stand out enough
+    /// (contrast below 3, the minimum for bold or large text).
+    public var prefersDarkForeground: Bool {
+        contrast(with: RGBColor(red: 1, green: 1, blue: 1)) < 3
+    }
+}
+
 /// The ten accent colors on offer, each with an app icon of its own.
 public enum AccentPreset: String, Codable, CaseIterable, Sendable {
     case rot, orange, gold, gruen, tuerkis, blau, indigo, lila, pink, graphit

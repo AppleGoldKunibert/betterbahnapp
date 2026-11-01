@@ -1320,3 +1320,22 @@ extension AnyTransition {
     /// the screen moved up under it, so it was drawn over the text above it (#227, #267).
     static var fold: AnyTransition { .opacity }
 }
+
+// MARK: - Readable accent
+
+extension Color {
+    /// The accent color for text, thin outlines and small symbols on cards and pages: darkened (light mode) or
+    /// lightened (dark mode) just enough to stay readable, so Graphit, Gold or a very light color of one's own
+    /// don't vanish (#504). The fill of buttons and switches keeps `Color.brand`.
+    static var brandText: Color {
+        let accent = Theme.shared.accent.color
+        // The lightest page in light mode and the lightest card in dark mode (sheets, elevated cards).
+        return Color(dynamicUIColor(light: accent.readable(on: RGBColor(red: 0.96, green: 0.955, blue: 0.945)),
+                                    dark: accent.readable(on: RGBColor(red: 0.17, green: 0.17, blue: 0.18))))
+    }
+
+    /// Text and symbols on a surface filled with `Color.brand`: white, or near-black when the accent is light.
+    static var onBrand: Color {
+        Theme.shared.accent.color.prefersDarkForeground ? Color(white: 0.1) : .white
+    }
+}

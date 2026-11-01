@@ -134,7 +134,7 @@ struct TrainNumberSheet: View {
             Card {
                 VStack(alignment: .leading, spacing: 16) {
                     HStack(spacing: 12) {
-                        IconTile(systemImage: "number", color: .brand, size: 32)
+                        IconTile(systemImage: "number", color: .brandText, size: 32)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Zug").font(.headline)
                             Text("Ziel: \(search.to.displayName)")
@@ -353,6 +353,7 @@ struct TrainNumberSheet: View {
                 Button(action: addTyped) {
                     Label("„\(trimmed)“ vorgeben", systemImage: "pin.fill")
                         .font(.headline)
+                        .foregroundStyle(Color.onBrand)
                         .frame(maxWidth: .infinity)
                 }
                 .pageButtonStyle(.prominent)
@@ -363,7 +364,7 @@ struct TrainNumberSheet: View {
         } label: {
             Text("Ein- und Ausstieg selbst angeben").font(.subheadline.weight(.semibold))
         }
-        .tint(.brand)
+        .tint(Color.brandText)
         .padding(.horizontal, 4)
     }
 
@@ -450,7 +451,7 @@ struct TrainNumberSheet: View {
             Label("Anderen Zug wählen", systemImage: "chevron.left")
                 .font(.subheadline.weight(.semibold))
         }
-        .tint(.brand)
+        .tint(Color.brandText)
 
         Text(boardingID == nil
              ? "Tippe auf den Halt, an dem du einsteigst."
@@ -478,6 +479,7 @@ struct TrainNumberSheet: View {
         Button { add(candidate) } label: {
             Label("Zug vorgeben", systemImage: "pin.fill")
                 .font(.headline)
+                .foregroundStyle(Color.onBrand)
                 .frame(maxWidth: .infinity)
         }
         .pageButtonStyle(.prominent)

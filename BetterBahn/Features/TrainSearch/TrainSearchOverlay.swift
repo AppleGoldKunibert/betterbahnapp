@@ -152,7 +152,7 @@ struct TrainSearchOverlay: View {
                     }
                 }
                 .font(.title3)
-                .foregroundStyle(showsCalendar || !isToday ? Color.brand : .secondary)
+                .foregroundStyle(showsCalendar || !isToday ? Color.brandText : .secondary)
                 .padding(.vertical, 4)
                 .contentShape(.rect)
             }
@@ -172,11 +172,11 @@ struct TrainSearchOverlay: View {
             DatePicker("Tag", selection: $date, displayedComponents: .date)
                 .datePickerStyle(.graphical)
                 .labelsHidden()
-                .tint(.brand)
+                .tint(Color.brandText)
             if !isToday {
                 Button("Heute") { date = .now }
                     .font(.subheadline.weight(.semibold))
-                    .tint(.brand)
+                    .tint(Color.brandText)
                     .padding(.bottom, 4)
             }
         }
@@ -205,6 +205,7 @@ struct TrainSearchOverlay: View {
                     } label: {
                         Label("Erneut versuchen", systemImage: "arrow.clockwise")
                             .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
                     }
                     .pageButtonStyle()
                 }
@@ -437,7 +438,7 @@ struct TrainSearchResultView: View {
             TripView(entry: entry, selectsStation: false)
         } label: {
             OptionRow(title: "Zugdetails anzeigen", subtitle: "Alle Halte; Ein- und Ausstieg wählen, um die Fahrt zu speichern",
-                      systemImage: "list.bullet.rectangle.portrait", color: .brand)
+                      systemImage: "list.bullet.rectangle.portrait", color: .brandText)
         }
         .buttonStyle(.plain)
 
@@ -461,7 +462,7 @@ struct TrainSearchResultView: View {
                 showMap = true
             } label: {
                 OptionRow(title: "Auf Karte zeigen", subtitle: "Wo der Zug gerade ist",
-                          systemImage: "location.fill", color: .brand)
+                          systemImage: "location.fill", color: .brandText)
             }
             .buttonStyle(.plain)
         case nil:
@@ -568,7 +569,7 @@ private struct CoachSequenceByStop: View {
                 } label: {
                     OptionRow(title: nextSequence?.source == .bahnDe || nextSequence == nil ? "Wagenreihung" : "Plan-Wagenreihung",
                               subtitle: nextSequence == nil ? "Halt wählen; Wagen, Klassen und Ausstattung" : "Wagen, Klassen und Ausstattung",
-                              systemImage: "train.side.front.car", color: .brand,
+                              systemImage: "train.side.front.car", color: .brandText,
                               chevron: open ? "chevron.up" : "chevron.down")
                 }
                 .buttonStyle(.plain)
@@ -618,7 +619,7 @@ private struct CoachSequenceByStop: View {
                                     Text(title(of: stop)).font(.subheadline)
                                     Spacer(minLength: 0)
                                     if stop.id == selected.id {
-                                        Image(systemName: "checkmark").font(.caption.weight(.bold)).foregroundStyle(Color.brand)
+                                        Image(systemName: "checkmark").font(.caption.weight(.bold)).foregroundStyle(Color.brandText)
                                     }
                                 }
                                 .padding(.horizontal, 12)

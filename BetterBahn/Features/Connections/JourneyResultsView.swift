@@ -282,15 +282,15 @@ struct JourneyResultsView: View {
             }
             if search.onlyValidTicket {
                 let ticket = model.settings.ticketType
-                InfoChip(text: ticket.shortName, systemImage: ticket.symbolName, tint: .brand)
+                InfoChip(text: ticket.shortName, systemImage: ticket.symbolName, tint: .brandText)
             }
             if let maxTransfers = search.maxTransfers {
                 InfoChip(text: maxTransfers == 0 ? String(localized: "Direkt")
                             : maxTransfers == 1 ? String(localized: "≤ 1 Umstieg") : String(localized: "≤ \(maxTransfers) Umstiege"),
-                         systemImage: "arrow.triangle.swap", tint: .brand)
+                         systemImage: "arrow.triangle.swap", tint: .brandText)
             }
             if search.products != Set(Product.allCases) {
-                InfoChip(text: String(localized: "Verkehrsmittel gefiltert"), systemImage: "line.3.horizontal.decrease", tint: .brand)
+                InfoChip(text: String(localized: "Verkehrsmittel gefiltert"), systemImage: "line.3.horizontal.decrease", tint: .brandText)
             }
         }
     }
@@ -299,13 +299,14 @@ struct JourneyResultsView: View {
         VStack(spacing: 12) {
             DatePicker("Zeit", selection: $searchDate)
                 .datePickerStyle(.graphical)
-                .tint(.brand)
+                .tint(Color.brandText)
             HStack {
                 Button {
                     searchDate = .now
                 } label: {
                     Label("Jetzt", systemImage: "clock.fill")
                         .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
                 }
                 .pageButtonStyle()
                 Spacer()
@@ -313,7 +314,9 @@ struct JourneyResultsView: View {
                     showTimePicker = false
                     Task { await reload() }
                 } label: {
-                    Text("Fertig").font(.subheadline.weight(.semibold))
+                    Text("Fertig")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color.onBrand)
                 }
                 .pageButtonStyle(.prominent)
             }
@@ -333,6 +336,7 @@ struct JourneyResultsView: View {
             } label: {
                 Label(requirements.isEmpty ? "Bestimmten Zug wählen" : "Weiteren Zug vorgeben", systemImage: "number")
                     .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity)
             }
             .pageButtonStyle()
@@ -344,6 +348,7 @@ struct JourneyResultsView: View {
                 } label: {
                     Label("Zurücksetzen", systemImage: "arrow.counterclockwise")
                         .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
                         .labelStyle(.iconOnly)
                         // As tall as the wide button next to it in either design.
                         .frame(width: design == .fahrkarte ? 22 : 32, height: design == .fahrkarte ? 22 : 32)
@@ -364,7 +369,7 @@ struct JourneyResultsView: View {
                         Divider().padding(.leading, 64)
                     }
                     HStack(spacing: 16) {
-                        IconTile(systemImage: "tram.fill", color: .brand, size: 32)
+                        IconTile(systemImage: "tram.fill", color: .brandText, size: 32)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(plan?.resolvedNames[requirement.id] ?? requirement.trainName.uppercased())
                                 .font(.subheadline.weight(.semibold))
@@ -475,6 +480,7 @@ struct JourneyResultsView: View {
         } label: {
             Label(title, systemImage: systemImage)
                 .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
                 .frame(maxWidth: .infinity)
         }
         .pageButtonStyle()
@@ -776,7 +782,7 @@ struct JourneyCard: View {
         .overlay {
             if highlighted {
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .strokeBorder(Color.brand, lineWidth: 2)
+                    .strokeBorder(Color.brandText, lineWidth: 2)
             }
         }
     }
@@ -817,7 +823,7 @@ struct JourneyCard: View {
                 .padding(16)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .ticketBackground(outline: highlighted ? Color.brand : Color.hairline, outlineWidth: highlighted ? 2 : 1)
+        .ticketBackground(outline: highlighted ? Color.brandText : Color.hairline, outlineWidth: highlighted ? 2 : 1)
         .environment(\.cardSurface, Color.ticket)
         .contentShape(.rect)
     }
