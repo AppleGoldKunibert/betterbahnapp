@@ -19,7 +19,6 @@ struct RegularTripButton: View {
         }
         .buttonStyle(.plain)
         .modifier(RoundButtonSurface())
-        .tint(.brandText)
         .accessibilityLabel(existing == nil ? "Regelmäßig fahren" : "Regelmäßige Fahrt bearbeiten")
         .sheet(item: $editedTrip) { trip in
             RegularTripEditor(trip: trip, isNew: existing == nil)
@@ -113,7 +112,6 @@ struct RegularTripEditor: View {
                         get: { trip.pausedUntil != nil },
                         set: { trip.pausedUntil = $0 ? Calendar.current.date(byAdding: .day, value: 7, to: .now) : nil }
                     ))
-                    .tint(.brandText)
                     if let pausedUntil = trip.pausedUntil {
                         DatePicker("Bis einschließlich", selection: Binding(get: { pausedUntil }, set: { trip.pausedUntil = $0 }),
                                    in: Date.now..., displayedComponents: .date)
