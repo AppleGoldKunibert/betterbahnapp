@@ -257,6 +257,8 @@ in `project.pbxproj`: new files join their target automatically.
   attribution/license; keep current when adding one), `BC100RulesView`, quick tags. `SettingsDesign.swift` (#504):
   `.designedForm()` (forms and lists on `AppBackground`), `FormHeader` (section titles, rounded in Fahrkarte),
   `Color.settingsIcon` (grey symbol tiles; the accent only on Design and Mein Ticket), `TicketFieldLabel`.
+  `Color.brandText` (text, links; 4.5:1), `.brandControl` (switches; 3:1) and `.brandFill` (under white) keep the
+  accent legible with every color, from Kit `RGBColor.legible(on:ratio:)` (`Models/AccentContrast.swift`).
   `DesignSettingsView` (#504): the design (Kit `AppDesign`) with a miniature of each drawn with the real components,
   the accent color (Kit `AccentChoice`: ten `AccentPreset`s or a color of one's own) and `AppLogoView`. Each preset
   has an alternate app icon (`AppIcon-<Name>` in the asset catalog, listed in `ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES`);

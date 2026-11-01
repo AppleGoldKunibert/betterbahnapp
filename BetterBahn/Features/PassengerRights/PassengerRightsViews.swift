@@ -159,7 +159,7 @@ struct PassengerRightsCard: View {
                 .frame(maxWidth: .infinity)
         }
         .pageButtonStyle(.prominent)
-        .tint(.brand)
+        .tint(.brandFill)
         .controlSize(.large)
     }
 }

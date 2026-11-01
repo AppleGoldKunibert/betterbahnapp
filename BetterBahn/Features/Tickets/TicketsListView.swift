@@ -19,7 +19,7 @@ struct TicketButton: View {
         }
         .buttonStyle(.plain)
         .glassEffect(.regular, in: .circle)
-        .tint(.brand)
+        .tint(.brandControl)
         .accessibilityLabel("Ticket anzeigen")
         .sheet(isPresented: $showTickets) {
             TicketView(tickets: tickets, journey: journey)
@@ -44,7 +44,7 @@ struct AddTicketButton: View {
                 .padding(.vertical, 6)
         }
         .pageButtonStyle()
-        .tint(.brand)
+        .tint(.brandControl)
         .controlSize(.large)
         .sheet(isPresented: $showLookup, onDismiss: {
             notMatched = lookupFoundNoJourney
@@ -157,7 +157,7 @@ struct TicketsListView: View {
     private func row(_ pass: TravelPass) -> some View {
         HStack(spacing: 12) {
             IconTile(systemImage: "ticket.fill",
-                     color: pass.isExpired() ? .settingsIcon : .brand, size: 32)
+                     color: pass.isExpired() ? .settingsIcon : .brandText, size: 32)
             VStack(alignment: .leading, spacing: 2) {
                 Text(pass.name)
                     .font(.subheadline.weight(.semibold))

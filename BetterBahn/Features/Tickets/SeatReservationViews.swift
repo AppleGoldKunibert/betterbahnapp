@@ -15,7 +15,7 @@ struct ReservationRow: View {
         HStack(spacing: 10) {
             Image(systemName: "carseat.right.fill")
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color.brand)
+                .foregroundStyle(Color.brandText)
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: 2) {
                 Text(reservation.description)
@@ -74,7 +74,7 @@ struct SaveSeatButton: View {
                 Image(systemName: symbol)
             }
             .font(.caption.weight(.semibold))
-            .foregroundStyle(Color.brand)
+            .foregroundStyle(Color.brandText)
             .lineLimit(1)
             .contentShape(.rect)
         }
@@ -119,7 +119,7 @@ private struct SaveSeatSheet: View {
                                     .fontDesign(design == .fahrkarte ? .rounded : nil)
                                     .foregroundStyle(selected ? Color.white : Color.primary)
                                     .frame(maxWidth: .infinity, minHeight: 44)
-                                    .background(selected ? Color.brand : Color.secondary.opacity(0.12),
+                                    .background(selected ? Color.brandFill : Color.secondary.opacity(0.12),
                                                 in: .rect(cornerRadius: 10, style: .continuous))
                             }
                             .buttonStyle(.plain)

@@ -42,7 +42,7 @@ struct SettingsView: View {
                     NavigationLink {
                         DesignSettingsView()
                     } label: {
-                        IconLabel(title: String(localized: "Design"), systemImage: "paintpalette.fill", color: .brand,
+                        IconLabel(title: String(localized: "Design"), systemImage: "paintpalette.fill", color: .brandText,
                                   subtitle: "\(Theme.shared.design.displayName) · \(accentName)")
                     }
                 }
@@ -55,7 +55,7 @@ struct SettingsView: View {
                     Picker(selection: $settings.ticketType) {
                         ForEach(TicketType.allCases, id: \.self) { Text($0.displayName).tag($0) }
                     } label: {
-                        IconLabel(title: String(localized: "Mein Ticket"), systemImage: settings.ticketType.symbolName, color: .brand)
+                        IconLabel(title: String(localized: "Mein Ticket"), systemImage: settings.ticketType.symbolName, color: .brandText)
                     }
                     Picker(selection: $settings.travelClass) {
                         ForEach(TravelClass.allCases, id: \.self) { Text($0.displayName).tag($0) }
@@ -66,7 +66,7 @@ struct SettingsView: View {
                         IconLabel(title: String(localized: "Nur passende Züge zeigen"),
                                   systemImage: "line.3.horizontal.decrease.circle.fill", color: .settingsIcon)
                     }
-                    .tint(.brand)
+                    .tint(.brandControl)
                     if settings.ticketType == .bahnCard100 {
                         NavigationLink {
                             BC100RulesView()
@@ -103,7 +103,7 @@ struct SettingsView: View {
                     Toggle(isOn: $settings.stepFree) {
                         IconLabel(title: String(localized: "Stufenfrei reisen"), systemImage: "figure.roll", color: .settingsIcon)
                     }
-                    .tint(.brand)
+                    .tint(.brandControl)
                     .onChange(of: settings.stepFree) { _, enabled in
                         if enabled { Task { await ConnectionNotifier.requestAuthorization() } }
                         model.scheduleExitReminderSync()
@@ -116,7 +116,7 @@ struct SettingsView: View {
                     Toggle(isOn: $settings.connectionWarnings) {
                         IconLabel(title: String(localized: "Bei Problemen benachrichtigen"), systemImage: "exclamationmark.triangle.fill", color: .settingsIcon)
                     }
-                    .tint(.brand)
+                    .tint(.brandControl)
                     .onChange(of: settings.connectionWarnings) { _, enabled in
                         if enabled { Task { await ConnectionNotifier.requestAuthorization() } }
                         Task { await model.syncCommutePush() }
@@ -124,7 +124,7 @@ struct SettingsView: View {
                     Toggle(isOn: $settings.exitReminders) {
                         IconLabel(title: String(localized: "Ans Aussteigen erinnern"), systemImage: "bell.badge.fill", color: .settingsIcon)
                     }
-                    .tint(.brand)
+                    .tint(.brandControl)
                     .onChange(of: settings.exitReminders) { _, enabled in
                         if enabled { Task { await ConnectionNotifier.requestAuthorization() } }
                         model.scheduleExitReminderSync()
@@ -141,14 +141,14 @@ struct SettingsView: View {
                         Toggle(isOn: $settings.liveActivitiesEnabled) {
                             IconLabel(title: String(localized: "Live-Aktivitäten"), systemImage: "bolt.badge.clock.fill", color: .settingsIcon)
                         }
-                        .tint(.brand)
+                        .tint(.brandControl)
                         .onChange(of: settings.liveActivitiesEnabled) { model.syncLiveActivity() }
                         if settings.liveActivitiesEnabled {
                             Toggle(isOn: $settings.liveActivityServerUpdates) {
                                 IconLabel(title: String(localized: "Live-Aktivität über Server aktualisieren"), systemImage: "arrow.trianglehead.2.clockwise",
                                           color: .settingsIcon)
                             }
-                            .tint(.brand)
+                            .tint(.brandControl)
                             .onChange(of: settings.liveActivityServerUpdates) {
                                 // Whether an activity gets updates from our server is fixed when it starts.
                                 Task {
@@ -276,7 +276,7 @@ struct SettingsView: View {
                     Toggle(isOn: $settings.showTrainStatistics) {
                         IconLabel(title: String(localized: "Zugstatistik anzeigen"), systemImage: "chart.bar.fill", color: .settingsIcon)
                     }
-                    .tint(.brand)
+                    .tint(.brandControl)
                 } header: {
                     FormHeader("Statistik")
                 } footer: {
@@ -287,7 +287,7 @@ struct SettingsView: View {
                     Toggle(isOn: $settings.showWeather) {
                         IconLabel(title: String(localized: "Wetter am Ziel"), systemImage: "cloud.sun.fill", color: .settingsIcon)
                     }
-                    .tint(.brand)
+                    .tint(.brandControl)
                 } header: {
                     FormHeader("Wetter")
                 } footer: {
@@ -308,33 +308,33 @@ struct SettingsView: View {
                     Toggle(isOn: $settings.expertMode.animation()) {
                         IconLabel(title: String(localized: "Expertenmodus"), systemImage: "wand.and.stars", color: .settingsIcon)
                     }
-                    .tint(.brand)
+                    .tint(.brandControl)
                     if settings.expertMode {
                         Toggle(isOn: $settings.expertTraewelling) {
                             IconLabel(title: String(localized: "Träwelling"), systemImage: "checkmark.seal.fill", color: .settingsIcon,
                                       subtitle: String(localized: "Bei Träwelling in Züge einchecken."))
                         }
-                        .tint(.brand)
+                        .tint(.brandControl)
                         Toggle(isOn: $settings.expertEditJourney) {
                             IconLabel(title: String(localized: "Reise bearbeiten"), systemImage: "pencil", color: .settingsIcon,
                                       subtitle: String(localized: "Reisen ändern und ab einem Halt neu planen."))
                         }
-                        .tint(.brand)
+                        .tint(.brandControl)
                         Toggle(isOn: $settings.expertTrainChoice) {
                             IconLabel(title: String(localized: "Bestimmten Zug wählen"), systemImage: "number", color: .settingsIcon,
                                       subtitle: String(localized: "Einen bestimmten Zug in die Reise übernehmen."))
                         }
-                        .tint(.brand)
+                        .tint(.brandControl)
                         Toggle(isOn: $settings.expertIgnoreBoardingRules) {
                             IconLabel(title: String(localized: "„Nur Ein-/Ausstieg“ ignorieren"), systemImage: "arrow.up.arrow.down.circle.fill", color: .settingsIcon,
                                       subtitle: String(localized: "Auch Züge, die nur zum Ein- oder Aussteigen halten."))
                         }
-                        .tint(.brand)
+                        .tint(.brandControl)
                         Toggle(isOn: $settings.expertRil100) {
                             IconLabel(title: String(localized: "RIL100-Codes in der Suche"), systemImage: "character.textbox", color: .settingsIcon,
                                       subtitle: String(localized: "Kürzel wie „FF“ zeigen und danach suchen."))
                         }
-                        .tint(.brand)
+                        .tint(.brandControl)
                     }
                 } header: {
                     FormHeader("Für Profis")
@@ -414,7 +414,7 @@ struct SettingsView: View {
                     }
                     Spacer()
                     if let points = user?.points, user?.pointsEnabled == true {
-                        InfoChip(text: "\(points)", systemImage: "sparkles", tint: .brand)
+                        InfoChip(text: "\(points)", systemImage: "sparkles", tint: .brandText)
                     }
                 }
                 Button(role: .destructive) {
@@ -434,7 +434,7 @@ struct SettingsView: View {
             Toggle(isOn: $settings.syncTraewellingToMap) {
                 IconLabel(title: String(localized: "Fahrten auf der Karte zeigen"), systemImage: "map.fill", color: .settingsIcon)
             }
-            .tint(.brand)
+            .tint(.brandControl)
             if isLoggedIn, settings.syncTraewellingToMap {
                 Button {
                     Task { await model.syncTraewelling(force: true) }
@@ -697,7 +697,7 @@ private struct TrainSearchCountriesView: View {
             if selected {
                 Image(systemName: "checkmark")
                     .font(.body.weight(.semibold))
-                    .foregroundStyle(Color.brand)
+                    .foregroundStyle(Color.brandText)
             }
         }
         .contentShape(.rect)

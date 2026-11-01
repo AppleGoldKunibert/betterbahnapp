@@ -66,7 +66,7 @@ struct CheckinNotificationsView: View {
                 }
             }
         }
-        .tint(.brand)
+        .tint(.brandControl)
         .disabled(changing != nil)
     }
 
