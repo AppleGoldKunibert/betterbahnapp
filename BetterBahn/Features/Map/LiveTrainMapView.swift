@@ -92,9 +92,9 @@ struct LiveTrainIconTile: View {
                         .overlay(alignment: .bottomTrailing) {
                             Image(systemName: "location.fill")
                                 .font(.system(size: size * 0.24, weight: .bold))
-                                .foregroundStyle(Color.onBrandLegible)
+                                .foregroundStyle(Color.onBrandText)
                                 .frame(width: size * 0.46, height: size * 0.46)
-                                .background(Color.brandLegible, in: .circle)
+                                .background(Color.brandText, in: .circle)
                                 .overlay { Circle().stroke(Color.card, lineWidth: 2) }
                                 .offset(x: size * 0.16, y: size * 0.16)
                         }
@@ -145,9 +145,9 @@ struct LiveTrainMapView: View {
     @State private var track: [Coordinate]?
 
     /// The line's color, else the accent adjusted to stand out on the light and the dark map.
-    private var color: Color { route.line?.color ?? .brandLegible }
+    private var color: Color { route.line?.color ?? .brandText }
     /// The train symbol on `color`: white on line colors, dark on a pale accent.
-    private var glyphColor: Color { route.line?.color == nil ? .onBrandLegible : .white }
+    private var glyphColor: Color { route.line?.color == nil ? .onBrandText : .white }
 
     var body: some View {
         NavigationStack {
@@ -255,7 +255,7 @@ struct LiveTrainMapView: View {
         VStack(alignment: .leading, spacing: 12) {
             if let position {
                 HStack(spacing: 12) {
-                    IconTile(systemImage: "gauge.with.dots.needle.67percent", color: .brandLegible, size: 32)
+                    IconTile(systemImage: "gauge.with.dots.needle.67percent", color: .brand, size: 32)
                     VStack(alignment: .leading, spacing: 2) {
                         if let speedText {
                             Text(speedText).font(.headline).monospacedDigit()

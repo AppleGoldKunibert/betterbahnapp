@@ -90,7 +90,7 @@ private struct CollectionGroupCard: View {
         Card {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 12) {
-                    IconTile(systemImage: group.category.systemImage, color: .brandLegible, size: 40)
+                    IconTile(systemImage: group.category.systemImage, color: .brand, size: 40)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(group.category.title).font(.headline)
                         Text("\(group.collected) von \(group.total) gesammelt")
@@ -159,7 +159,7 @@ private struct CollectionProgressBar: View {
 
     var body: some View {
         ProgressView(value: Double(min(value, max(total, 1))), total: Double(max(total, 1)))
-            .tint(.brandLegible)
+            .tint(.brandText)
             .accessibilityHidden(true)
     }
 }
@@ -170,10 +170,10 @@ private struct NewBadge: View {
     var body: some View {
         Text(text)
             .font(.caption2.weight(.bold))
-            .foregroundStyle(Color.onBrandLegible)
+            .foregroundStyle(Color.onBrandText)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(Color.brandLegible, in: .capsule)
+            .background(Color.brandText, in: .capsule)
     }
 }
 
@@ -292,20 +292,20 @@ private struct CollectionTile: View {
     private var iconTile: some View {
         Image(systemName: item.category.systemImage)
             .font(.title3.weight(.semibold))
-            .foregroundStyle(item.isCollected ? Color.brandLegible : Color.secondary)
+            .foregroundStyle(item.isCollected ? Color.brandText : Color.secondary)
             .frame(width: 48, height: 48)
-            .background((item.isCollected ? Color.brandLegible : Color.secondary).opacity(0.12),
+            .background((item.isCollected ? Color.brandText : Color.secondary).opacity(0.12),
                         in: .rect(cornerRadius: 13, style: .continuous))
     }
 
     private var stamp: some View {
         Image(systemName: item.category.systemImage)
             .font(.title3.weight(.semibold))
-            .foregroundStyle(item.isCollected ? Color.brandLegible : Color.secondary)
+            .foregroundStyle(item.isCollected ? Color.brandText : Color.secondary)
             .frame(width: 48, height: 48)
             .overlay {
                 Circle()
-                    .strokeBorder(item.isCollected ? Color.brandLegible : Color.secondary.opacity(0.5),
+                    .strokeBorder(item.isCollected ? Color.brandText : Color.secondary.opacity(0.5),
                                   style: StrokeStyle(lineWidth: 1.5, dash: item.isCollected ? [] : [3, 4]))
             }
     }
@@ -323,7 +323,7 @@ private struct CollectionItemSheet: View {
                 Section {
                     HStack(spacing: 12) {
                         IconTile(systemImage: item.category.systemImage,
-                                 color: item.isCollected ? .brandLegible : .secondary, size: 40)
+                                 color: item.isCollected ? .brand : .secondary, size: 40)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(item.title)
                                 .font(.title3.weight(design == .fahrkarte ? .bold : .semibold))
