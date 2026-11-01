@@ -434,8 +434,10 @@ struct FollowedCheckinsSection: View {
                     .font(.caption.weight(.bold))
                     .rotationEffect(.degrees(showsList ? 180 : 0))
             }
+            // The accent made readable, never the raw one the glass button would tint it with (#504).
+            .foregroundStyle(Color.brandText)
         }
-        .buttonStyle(.glass)
+        .pageButtonStyle()
         .accessibilityHint(showsList ? "Blendet die Check-ins aus" : "Zeigt, wer gerade eingecheckt ist")
     }
 }
@@ -445,6 +447,7 @@ private struct FollowedPersonHeader: View {
     let person: FollowedPerson
     let isOpen: Bool
     let toggle: () -> Void
+    @Environment(\.appDesign) private var design
 
     var body: some View {
         Card {
@@ -455,6 +458,7 @@ private struct FollowedPersonHeader: View {
                         HStack(spacing: 4) {
                             Text(person.user.displayName)
                                 .font(.subheadline.weight(.semibold))
+                                .fontDesign(design == .fahrkarte ? .rounded : nil)
                             Text("@\(person.user.username)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -488,6 +492,7 @@ private struct FollowedCheckinCard: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
+    @Environment(\.appDesign) private var design
     /// The train in the timetable data (Transitous), once found.
     @State private var trainLeg: Leg?
     @State private var isSearchingTrain = false
@@ -579,6 +584,7 @@ private struct FollowedCheckinCard: View {
                         HStack(spacing: 4) {
                             Text(status.user?.displayName ?? String(localized: "Träwelling-Nutzer"))
                                 .font(.subheadline.weight(.semibold))
+                                .fontDesign(design == .fahrkarte ? .rounded : nil)
                             if let username = status.user?.username {
                                 Text("@\(username)")
                                     .font(.caption)
@@ -600,7 +606,7 @@ private struct FollowedCheckinCard: View {
                             Text("fährt \(start.timeString) ab")
                                 .font(.caption.weight(.semibold))
                                 .monospacedDigit()
-                                .foregroundStyle(Color.brand)
+                                .foregroundStyle(Color.brandText)
                         }
                     }
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -611,6 +617,7 @@ private struct FollowedCheckinCard: View {
                         if let start = checkin.start, let end = checkin.end {
                             Text("\(start.timeString)–\(end.timeString)")
                                 .font(.caption)
+                                .fontDesign(design == .fahrkarte ? .rounded : nil)
                                 .monospacedDigit()
                                 .foregroundStyle(.secondary)
                         }
@@ -627,7 +634,7 @@ private struct FollowedCheckinCard: View {
                     HStack(spacing: 8) {
                         ForEach(status.tags, id: \.key) { tag in
                             InfoChip(text: "\(model.statusTagLabel(tag.key)): \(tag.value)",
-                                     systemImage: model.statusTagIcon(tag.key), tint: .brand)
+                                     systemImage: model.statusTagIcon(tag.key), tint: .brandText)
                         }
                     }
                 }
@@ -687,7 +694,7 @@ private struct FollowedCheckinCard: View {
         }
         .lineLimit(1)
         .font(.subheadline.weight(.medium))
-        .buttonStyle(.glass)
+        .compactActionStyle()
         .controlSize(.small)
     }
 
@@ -713,8 +720,13 @@ private struct FollowedCheckinCard: View {
         return Button {
             Task { await toggleLike() }
         } label: {
-            Label("\(count)", systemImage: isLiked ? "heart.fill" : "heart")
-                .monospacedDigit()
+            Label {
+                Text("\(count)").monospacedDigit()
+            } icon: {
+                Image(systemName: isLiked ? "heart.fill" : "heart")
+                    // Pink once liked, else the button's own color.
+                    .foregroundStyle(isLiked ? AnyShapeStyle(Color.pink) : AnyShapeStyle(HierarchicalShapeStyle.primary))
+            }
         }
         .tint(isLiked ? .pink : nil)
         .disabled(isLiking)
@@ -876,4 +888,48 @@ struct TraewellingAvatar: View {
 
 private extension Coordinate {
     var clCoordinate: CLLocationCoordinate2D { CLLocationCoordinate2D(latitude: latitude, longitude: longitude) }
+}
+
+// MARK: - Small action buttons
+
+extension View {
+    /// The small buttons inside a card (Zug, Träwelling, like). Minimal: a flat, softly filled capsule.
+    /// Fahrkarte: Liquid Glass.
+    func compactActionStyle() -> some View {
+        modifier(CompactActionStyle())
+    }
+}
+
+private struct CompactActionStyle: ViewModifier {
+    @Environment(\.appDesign) private var design
+
+    func body(content: Content) -> some View {
+        if design == .fahrkarte {
+            content.buttonStyle(.glass)
+        } else {
+            content.buttonStyle(CompactFlatButtonStyle())
+        }
+    }
+}
+
+private struct CompactFlatButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        CompactFlatButtonBody(configuration: configuration)
+    }
+}
+
+private struct CompactFlatButtonBody: View {
+    let configuration: ButtonStyleConfiguration
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        configuration.label
+            .foregroundStyle(Color.primary)
+            .padding(.vertical, 8)
+            .padding(.horizontal, 12)
+            .background(Color.primary.opacity(0.07), in: .capsule)
+            .contentShape(.capsule)
+            .opacity(isEnabled ? (configuration.isPressed ? 0.6 : 1) : 0.4)
+            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
+    }
 }

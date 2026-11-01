@@ -30,6 +30,7 @@ struct ImportedJourneyView: View {
                             Text(errorMessage)
                         } actions: {
                             Button("Erneut versuchen") { Task { await load() } }
+                                .pageButtonStyle()
                         }
                     } else {
                         ProgressView("Verbindung wird gesucht …")

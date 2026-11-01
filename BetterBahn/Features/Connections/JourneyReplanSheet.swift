@@ -578,8 +578,7 @@ struct JourneyReplanSheet: View {
                             .frame(width: 34, height: 34)
                     }
                     .buttonStyle(.plain)
-                    .glassEffect(.regular, in: .circle)
-                    .journeyRoundActionSurface()
+                    .roundActionBackground()
                     .accessibilityLabel(showStops ? "Halteliste ausblenden" : "Anderen Halt wählen")
                 }
             }
