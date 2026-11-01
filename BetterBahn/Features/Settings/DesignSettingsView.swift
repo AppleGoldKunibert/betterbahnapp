@@ -28,7 +28,7 @@ struct DesignSettingsView: View {
             Section {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5), spacing: 14) {
                     ForEach(AccentPreset.allCases, id: \.self) { preset in
-                        AccentSwatch(color: preset.color.swiftUIColor, name: preset.displayName,
+                        AccentSwatch(color: preset.color, name: preset.displayName,
                                      isSelected: theme.accent == .preset(preset)) {
                             withAnimation(.snappy) { theme.accent = .preset(preset) }
                         }
@@ -40,7 +40,7 @@ struct DesignSettingsView: View {
                     HStack(spacing: 12) {
                         Text("Eigene Farbe")
                         if case .custom = theme.accent {
-                            Image(systemName: "checkmark").font(.footnote.weight(.bold)).foregroundStyle(Color.brand)
+                            Image(systemName: "checkmark").font(.footnote.weight(.bold)).foregroundStyle(Color.brandText)
                         }
                     }
                 }
@@ -127,13 +127,13 @@ private struct DesignPreviewButton: View {
                     .clipShape(.rect(cornerRadius: 18, style: .continuous))
                     .overlay {
                         RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .strokeBorder(isSelected ? Color.brand : Color.hairline, lineWidth: isSelected ? 2.5 : 1)
+                            .strokeBorder(isSelected ? Color.brandText : Color.hairline, lineWidth: isSelected ? 2.5 : 1)
                     }
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
                 HStack(spacing: 6) {
                     Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(isSelected ? Color.brand : Color.secondary)
+                        .foregroundStyle(isSelected ? Color.brandText : Color.secondary)
                     Text(design.displayName).font(.subheadline.weight(.semibold))
                 }
             }
@@ -180,7 +180,7 @@ private struct DesignPreview: View {
             }
             Text("Suchen")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(Color.onBrand)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 7)
                 .background(Color.brand, in: .capsule)
@@ -206,7 +206,7 @@ private struct DesignPreview: View {
 
 /// One accent color to pick: a filled circle, ringed while selected.
 private struct AccentSwatch: View {
-    let color: Color
+    let color: RGBColor
     let name: String
     let isSelected: Bool
     let action: () -> Void
@@ -214,15 +214,16 @@ private struct AccentSwatch: View {
     var body: some View {
         Button(action: action) {
             Circle()
-                .fill(color)
+                .fill(color.swiftUIColor)
                 .frame(width: 36, height: 36)
                 .overlay {
                     if isSelected {
-                        Image(systemName: "checkmark").font(.footnote.weight(.bold)).foregroundStyle(.white)
+                        Image(systemName: "checkmark").font(.footnote.weight(.bold))
+                            .foregroundStyle(color.readableForeground.swiftUIColor)
                     }
                 }
                 .padding(3)
-                .overlay { Circle().strokeBorder(isSelected ? color : .clear, lineWidth: 2) }
+                .overlay { Circle().strokeBorder(isSelected ? color.swiftUIColor : .clear, lineWidth: 2) }
                 .frame(maxWidth: .infinity)
                 .contentShape(.circle)
         }
