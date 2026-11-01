@@ -19,7 +19,7 @@ struct TicketButton: View {
         }
         .buttonStyle(.plain)
         .glassEffect(.regular, in: .circle)
-        .tint(.brand)
+        .tint(.brandText)
         .accessibilityLabel("Ticket anzeigen")
         .sheet(isPresented: $showTickets) {
             TicketView(tickets: tickets, journey: journey)
@@ -44,7 +44,7 @@ struct AddTicketButton: View {
                 .padding(.vertical, 6)
         }
         .pageButtonStyle()
-        .tint(.brand)
+        .tint(.brandText)
         .controlSize(.large)
         .sheet(isPresented: $showLookup, onDismiss: {
             notMatched = lookupFoundNoJourney
@@ -71,6 +71,7 @@ struct TicketsListView: View {
     @State private var pickedImage: PhotosPickerItem?
     @State private var isImporting = false
     @State private var importError: Error?
+    @Environment(\.appDesign) private var design
 
     var body: some View {
         List {
@@ -94,7 +95,7 @@ struct TicketsListView: View {
                 }
                 .disabled(isImporting)
             } header: {
-                Text("Zeitkarten")
+                FormHeader("Zeitkarten")
             } footer: {
                 Text("Wähl einen Screenshot des QR-Codes deines Deutschland-Tickets aus. Bitte beachte, dass nicht alle Anbieter unterstützt werden.")
             }
@@ -112,11 +113,12 @@ struct TicketsListView: View {
                     for index in offsets { model.removeTicket(sortedTickets[index]) }
                 }
             } header: {
-                Text("Tickets")
+                FormHeader("Tickets")
             } footer: {
                 Text("Tickets und Zeitkarten werden nur auf diesem Gerät gespeichert, nicht in iCloud.")
             }
         }
+        .designedForm()
         .navigationTitle("Tickets")
         .sheet(item: Binding(get: { shownTickets.map(TicketSelection.init) }, set: { shownTickets = $0?.tickets })) { selection in
             TicketView(tickets: selection.tickets, journey: journey(for: selection.tickets.first))
@@ -155,9 +157,12 @@ struct TicketsListView: View {
     private func row(_ pass: TravelPass) -> some View {
         HStack(spacing: 12) {
             IconTile(systemImage: "ticket.fill",
-                     color: pass.isExpired() ? .secondary : .brand, size: 34)
+                     color: pass.isExpired() ? .settingsIcon : .brandText, size: 32)
             VStack(alignment: .leading, spacing: 2) {
-                Text(pass.name).font(.subheadline.weight(.semibold)).lineLimit(1)
+                Text(pass.name)
+                    .font(.subheadline.weight(.semibold))
+                    .fontDesign(design == .fahrkarte ? .rounded : nil)
+                    .lineLimit(1)
                 if let validity = validity(of: pass) {
                     Text(validity)
                         .font(.caption)
@@ -187,9 +192,12 @@ struct TicketsListView: View {
     private func row(_ saved: SavedTicket) -> some View {
         HStack(spacing: 12) {
             IconTile(systemImage: saved.ticket.isReservationOnly ? "carseat.right.fill"
-                        : saved.ticket.isPartnerDocument ? "ticket" : "ticket.fill", color: .brand, size: 34)
+                        : saved.ticket.isPartnerDocument ? "ticket" : "ticket.fill", color: .settingsIcon, size: 32)
             VStack(alignment: .leading, spacing: 2) {
-                Text(saved.ticket.routeDescription).font(.subheadline.weight(.semibold)).lineLimit(1)
+                Text(saved.ticket.routeDescription)
+                    .font(.subheadline.weight(.semibold))
+                    .fontDesign(design == .fahrkarte ? .rounded : nil)
+                    .lineLimit(1)
                 Text([saved.ticket.offerName,
                       saved.ticket.legs.first?.departure.formatted(date: .abbreviated, time: .shortened)]
                     .compactMap(\.self).joined(separator: " · "))

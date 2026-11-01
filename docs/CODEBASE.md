@@ -128,7 +128,10 @@ in `project.pbxproj`: new files join their target automatically.
   transfers), `JourneyResultsView` + `JourneyCard`, `TrainNumberSheet` ("Bestimmten Zug wählen", #225: trains fitting
   the input via Kit `TrainCandidateFinder`; picking one shows its stops in `TripContent` with boarding/exit preselected
   and pins that run; "Ein- und Ausstieg selbst angeben"), `JourneyDetailView` (+ `LegCard`, `TransferRow`,
-  alternatives sheets; below the legs `CO2SavingButton` "−42 kg CO₂" → `CO2Sheet`, #386, from Kit `CO2Comparison`
+  alternatives sheets; #504: Minimal has the summary card, Fahrkarte draws it as a ticket with the day and
+  `JourneyTicketCaption` "Von"/"Nach" over the times and the actions below a `TicketPerforation`; `.journeyRoundedType()`
+  gives titles SF Rounded on the ticket, `.journeyRoundActionSurface()` lays the round glass actions on a flat disc in Minimal;
+  the map's lines and markers, chips and symbols use `Color.brandText`, the glass buttons' labels `Color.onBrand`; below the legs `CO2SavingButton` "−42 kg CO₂" → `CO2Sheet`, #386, from Kit `CO2Comparison`
   with the legs' cached track geometry; `WeatherLabel` "☀ 18° bei Ankunft" under the destination (summary card and the
   last leg) and "beim Umstieg" under a transfer station with more than 15 min to the next train
   (`JourneyWeather.arrival(of:in:)`), tap → `WeatherDetails` popover with rain, wind and
@@ -136,7 +139,9 @@ in `project.pbxproj`: new files join their target automatically.
   ahead of the picked train's exit, #430; "Halt hinzufügen" via
   `ManualStopSheet` adds an off-timetable exit, a check-in then becomes a manual trip via
   `AppModel.replaceCheckinWithManualTrip`; a new exit on the last train asks "Reise … beenden" / "Weiter nach …").
-- `Features/Departures/` – `StationBoardView`/`BoardRow`, `TripView` (and `LegTripSheet`, the read-only run of a journey's
+- `Features/Departures/` – two layouts by `\.appDesign` (#504): Minimal has the station and the time in one card; Fahrkarte
+  puts them on a ticket under its own headline, with "Zeit / Nach / Gleis" over the board (`BoardColumnLabels`), and draws
+  `TripContent`'s header as a ticket with "Von" and "Nach" below its perforation. `StationBoardView`/`BoardRow`, `TripView` (and `LegTripSheet`, the read-only run of a journey's
   leg): `plainTrip` with the board's line and lap, then `AppModel.liveRun` with the shown or remembered trip (and the
   saved leg) as baseline, painted as the sources answer, remembered via `rememberLive`. `DelayTimeText` shows a delay
   in planned-time mode only with a live time (no "0" for a plain timetable). `CoachSequenceView.swift`: the Wagenreihung
@@ -175,11 +180,15 @@ in `project.pbxproj`: new files join their target automatically.
 - `Features/Map/` – `TravelMapView` heatmap of past trips (`TravelMapHeatmap`; `RailwayTileOverlay`: OpenRailwayMap,
   512 px, disk cache 7 days, 10-min pause after 403/429). A ride both saved and checked in is drawn from the check-in
   (`RideMatch.uncovered`). `YearReviewView` (#319, "Jahresrückblick", only via `YearReviewBanner` on Verbindungen in
-  December and January): swipeable 9:16 cards from Kit `YearReview` (`AppModel.yearReview(for:)`, same
+  December and January; in debug builds all year with `-showYearReview YES`): swipeable 9:16 cards from Kit `YearReview` (`AppModel.yearReview(for:)`, same
   `TravelMapSelection` and cached heatmap, km from cached geometry, series from `rememberedFormation`), shared as an
   image (`ImageRenderer`, heatmap card via `Canvas`). `LiveTrainMapView`: one train live on its track
   (`AppModel.geometry(for:)`, never straight lines), opened from `LiveTrainIconTile`; `JourneyMapView` shows running
-  trains too.
+  trains too. Both designs (#504): `.mapPanel(in:)` draws what floats on a map (Minimal: card surface with shadow,
+  Fahrkarte: Liquid Glass); on Fahrkarte the travel map's range and numbers and the live map's status are tickets
+  with `MapTicketLabel` fields. The year review's cards are accent-colored stories on black (Minimal) or tickets on
+  `Color.canvas` (Fahrkarte), in the shared image too. Accent marks use `Color.brandText`/`.onBrandText`; the
+  review's white-text stories darken the accent with `RGBColor.readable(on:)`.
 - `Features/Collection/` – `CollectionView` (#384, "Sammlung", `CollectionButton` next to "Vergangene Fahrten" on
   Verbindungen): progress per category, `CollectionCategoryView` grid (not collected greyed out), sheet with the first and
   all rides. Kit `TravelCollection` from the travel map's rides (`AppModel.travelCollection()`); trains only from
@@ -187,6 +196,7 @@ in `project.pbxproj`: new files join their target automatically.
   saved leg of the same train it replaced), so other check-ins count only for stations. Series also count a planned
   series (`TrainSeriesTag` remembers it until a Tz is seen); liveries and trainsets need the Tz. "Neu" badges: IDs collected since the last
   visit (`newCollectionIDs`, UserDefaults `collectionSeenIDs`, the first computation is the starting point).
+  Fahrkarte (#504) shows the categories as small tickets and items as round stamps, dashed until collected.
 - `Features/Tickets/` – `TicketLookupView` (bahn.de's "Auftragssuche" in a hidden SwiftUI `WebView`:
   `DBOrderPage.fillScript` fills the form, `fetchScript` fetches order + PDFs inside the page; shown only when bahn.de
   asks for more, e.g. a captcha), `TicketView` (full-brightness barcode, PDF, `AddToWalletButton`, "Zugbindung
@@ -194,6 +204,9 @@ in `project.pbxproj`: new files join their target automatically.
   `TicketsListView` (Settings → Gespeicherte Tickets; "Zeitkarten" like the Deutschland-Ticket from a screenshot via
   `PhotosPicker`, `TravelPassView`), `SeatReservationViews` (`ReservationRow` in `LegCard`;
   `AppModel.reservations(for:)`, only on the leg whose train matches; `SaveSeatButton`/`SaveSeatSheet`, #410).
+  `TicketFace` (#504) lays out `TicketView` and `TravelPassView` in both designs: Minimal barcode plus a details
+  `Card`; Fahrkarte one ticket (`ticketBackground()`) with the barcode between two `TicketPerforation`s and the
+  `TicketDetail`s as `TicketFieldLabel` capitals over their values.
 - `Features/Trips/TripsView.swift` – upcoming/past journeys (`PastTripsView` under a header per month; #504
   Fahrkarte draws them as `PastTripTicket`, like the search page's `TripTicket`), `SaveJourneyButton` (warns "Zug ist
   reservierungspflichtig", in bike mode also "Fahrradreservierung nötig" / "Keine Fahrradmitnahme", via
@@ -241,7 +254,8 @@ in `project.pbxproj`: new files join their target automatically.
   `PassengerRightsCard` in details ("Anspruch auf 25/50 % Entschädigung", "Antrag vorbereiten" →
   `PassengerRightsRequestSheet` with DB's form fields, copy buttons, link). `AppModel.passengerRightsClaim(for:)` feeds
   Kit `PassengerRights` (journey, earlier plans, tickets, BahnCard 100 setting); `notifyPassengerRights` notifies once
-  per level after arrival and keeps the worst claim in `SavedJourney.recordedClaim`. Never shows amounts.
+  per level after arrival and keeps the worst claim in `SavedJourney.recordedClaim`. Never shows amounts. Fahrkarte
+  (#504) draws the card as a small ticket with the percentage large.
 - `Features/Sharing/` – shared-journey and DB-share previews; `JourneyShareButton` (menu: "Reise teilen" short link,
   falls back to the long one, `UIActivityViewController`; "Ankunft teilen" #317 adds an `ArrivalShare`, until 2 h after the arrival).
   `.roundActionBackground()` draws its and `CalendarButton`'s 40 pt circle in either design.
@@ -253,7 +267,9 @@ in `project.pbxproj`: new files join their target automatically.
   asks in the app (`commuteQuestionAlert`), a Worker push opens its journey. `AppModel.refresh` keeps them quiet: delays only from
   the threshold (`CommuteAlerts`), delay reasons only then, cancellations/platforms/transfers left to the Worker when it watches.
 - `Features/Settings/` – settings (privacy link, "not affiliated with DB"), `DataSourcesView` (every source with its
-  attribution/license; keep current when adding one), `BC100RulesView`, quick tags.
+  attribution/license; keep current when adding one), `BC100RulesView`, quick tags. `SettingsDesign.swift` (#504):
+  `.designedForm()` (forms and lists on `AppBackground`), `FormHeader` (section titles, rounded in Fahrkarte),
+  `Color.settingsIcon` (grey symbol tiles; the accent only on Design and Mein Ticket), `TicketFieldLabel`.
   `DesignSettingsView` (#504): the design (Kit `AppDesign`) with a miniature of each drawn with the real components,
   the accent color (Kit `AccentChoice`: ten `AccentPreset`s or a color of one's own) and `AppLogoView`. Each preset
   has an alternate app icon (`AppIcon-<Name>` in the asset catalog, listed in `ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES`);
@@ -262,7 +278,10 @@ in `project.pbxproj`: new files join their target automatically.
   `InfoChip`, `OperatorLabel`, `Color.brand`, `.transition(.fold)` …; reuse these instead of new styling.
   `Shared/Theme.swift` holds the picked design and accent (per device); `Color.brand`, `.brandDeep` and `.ticket` read
   the accent there, so views redraw when it changes, and `.appTheme()` at the root sets `\.appDesign` and the tint.
-  Never hard-code the red: use `Color.brand` or derive from it. `Card`, `AppBackground`, `SectionHeader`, `IconTile`
+  Never hard-code the red: use `Color.brand` or derive from it. Accent as text, chips or small symbols: `Color.brandText`
+  (moved just far enough towards black/white to read 4.5:1 on the card in light and dark mode, Kit `RGBColor.readable(on:)`);
+  on an accent fill `Color.onBrand` (white, black where white wouldn't read, `readableForeground`); a small fill that must
+  show even with a very light accent uses `brandText` with `onBrandText`. `Card`, `AppBackground`, `SectionHeader`, `IconTile`
   and `.pageButtonStyle(.regular/.circle/.prominent)` draw either design: Minimal has the classic cards with light
   shadows, a faint glow, sentence-case titles with a grey icon, softly tinted icon tiles and flat buttons (the main
   action filled with `Color.brand`); Fahrkarte has flat outlined cards on `Color.canvas`, bold rounded titles, grey

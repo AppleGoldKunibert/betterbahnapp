@@ -65,6 +65,7 @@ struct WeatherDetails: View {
                 .font(.caption2)
                 .tint(.secondary)
         }
+        .journeyRoundedType()
         .padding()
         // A fixed width, so the popover measures the text's height at the width it shows it at.
         .frame(width: 280, alignment: .leading)
