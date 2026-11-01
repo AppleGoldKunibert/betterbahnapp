@@ -3885,6 +3885,16 @@
         }
       }
     },
+    "Entschädigung" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Compensation"
+          }
+        }
+      }
+    },
     "Erfahrungswerte" : {
       "comment" : "Past punctuality/cancellation figures of a train",
       "localizations" : {
@@ -5877,12 +5887,12 @@
         }
       }
     },
-    "Mit vollem Zugriff bleiben die Termine deiner Reisen aktuell, auch bei Verspätungen und Gleiswechseln, und verschwinden mit der Reise. Mit „Nur hinzufügen“ wird jeder Termin einmal in deinen Standardkalender eingetragen. Automatisch kommt jede gespeicherte Reise einmal in den Kalender, beim Speichern oder erst bei der Abfahrt." : {
+    "Mit vollem Zugriff bleiben die Termine deiner Reisen aktuell und verschwinden mit der Reise. „Nur hinzufügen“ trägt jeden Termin einmal in deinen Standardkalender ein. „Automatisch“ trägt jede gespeicherte Reise ein, beim Speichern oder bei der Abfahrt." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "With full access, your journeys' events stay up to date, even with delays and platform changes, and disappear with the journey. With “Add Only”, each event is added to your default calendar once. Automatically, every saved journey is added to the calendar once, when you save it or not until departure."
+            "value" : "With full access, your journeys' events stay up to date and disappear with the journey. “Add Only” adds each event to your default calendar once. “Automatically” adds every saved journey, when you save it or when it departs."
           }
         }
       }
