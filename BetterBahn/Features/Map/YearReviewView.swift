@@ -72,7 +72,7 @@ struct YearReviewView: View {
             VStack(spacing: 12) {
                 if let progress, progress.total > 0 {
                     ProgressView(value: Double(progress.done), total: Double(progress.total))
-                        .tint(.brand)
+                        .tint(.brandLegible)
                         .frame(maxWidth: 220)
                     Text("Strecken \(progress.done)/\(progress.total)")
                         .font(.caption.monospacedDigit())
@@ -242,14 +242,19 @@ struct YearReviewCardView: View {
         }
     }
 
-    /// The story's gradients, all from the accent color; the CO₂ card in green for the saving.
+    /// The story's gradients, all from the accent color (the CO₂ card in green for the saving), darkened
+    /// where needed so the white text always reads, also on a pale accent.
     private var colors: [Color] {
+        let accent = Theme.shared.accent.color.legible(on: .white, minimum: 4.5).swiftUIColor
+        let deep = accent.mix(with: .black, by: 0.4)
         switch card {
-        case .intro, .summary: [.brand, .brandDeep]
-        case .distance, .map, .series, .routes: [.brandDeep, .black]
-        case .time, .stations: [Color.brand.mix(with: .black, by: 0.2), Color.brandDeep.mix(with: .black, by: 0.5)]
-        case .co2: [.punctual, Color.punctual.mix(with: .black, by: 0.55)]
-        case .punctuality, .longestRide, .abroad: [Color.brand.mix(with: .white, by: 0.12), .brandDeep]
+        case .intro, .summary: return [accent, deep]
+        case .distance, .map, .series, .routes: return [deep, .black]
+        case .time, .stations: return [accent.mix(with: .black, by: 0.2), deep.mix(with: .black, by: 0.5)]
+        case .co2:
+            let green = RGBColor(red: 0.13, green: 0.62, blue: 0.35).legible(on: .white, minimum: 4.5).swiftUIColor
+            return [green, green.mix(with: .black, by: 0.55)]
+        case .punctuality, .longestRide, .abroad: return [accent.mix(with: .black, by: 0.1), deep.mix(with: .black, by: 0.2)]
         }
     }
 
@@ -365,7 +370,7 @@ struct YearReviewCardView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.4)
                 // The ticket's one splash of color.
-                .foregroundStyle(isTicket ? Color.brand : Color.white)
+                .foregroundStyle(isTicket ? Color.brandLegible : Color.white)
             if let unit { Text(unit).font(.title2.weight(.semibold)) }
         }
         .padding(.top, 12)
@@ -385,7 +390,7 @@ struct YearReviewCardView: View {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Text("\(index + 1)")
                         .font(.title3.weight(.heavy).monospacedDigit())
-                        .foregroundStyle(isTicket ? AnyShapeStyle(Color.brand) : soft(0.6))
+                        .foregroundStyle(isTicket ? AnyShapeStyle(Color.brandLegible) : soft(0.6))
                         .frame(width: 22, alignment: .leading)
                     Text(entry.name)
                         .font(index == 0 ? .title3.weight(.bold) : .body.weight(.semibold))
@@ -479,7 +484,7 @@ struct YearReviewBanner: View {
             HStack(spacing: 12) {
                 Image(systemName: "sparkles")
                     .font(.title3.weight(.semibold))
-                    .foregroundStyle(Color.brand)
+                    .foregroundStyle(Color.brandLegible)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Dein Bahnjahr \(String(year))").font(.headline)
                     Text("Kilometer, Lieblingszüge und mehr im Jahresrückblick.")

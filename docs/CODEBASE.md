@@ -182,7 +182,10 @@ in `project.pbxproj`: new files join their target automatically.
   trains too. Both designs (#504): `.mapPanel(in:)` draws what floats on a map (Minimal: card surface with shadow,
   Fahrkarte: Liquid Glass); on Fahrkarte the travel map's range and numbers and the live map's status are tickets
   with `MapTicketLabel` fields. The year review's cards are accent-colored stories on black (Minimal) or tickets on
-  `Color.canvas` (Fahrkarte), in the shared image too.
+  `Color.canvas` (Fahrkarte), in the shared image too. These pages use `Color.brandLegible`/`.onBrandLegible`
+  (`TravelMapView.swift`, from Kit `RGBColor.legible(on:)`/`legibleForeground` in `AccentContrast.swift`): the accent
+  darkened on light and lightened on dark surfaces where it would be hard to see (Graphit, Gold, pale own colors), and
+  dark text on an accent fill where white wouldn't read; the review's white-text stories darken the accent to 4.5:1.
 - `Features/Collection/` – `CollectionView` (#384, "Sammlung", `CollectionButton` next to "Vergangene Fahrten" on
   Verbindungen): progress per category, `CollectionCategoryView` grid (not collected greyed out), sheet with the first and
   all rides. Kit `TravelCollection` from the travel map's rides (`AppModel.travelCollection()`); trains only from

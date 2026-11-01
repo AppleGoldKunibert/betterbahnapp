@@ -77,7 +77,7 @@ struct TravelMapView: View {
             if let progress, progress.done < progress.total {
                 HStack(spacing: 8) {
                     ProgressView(value: Double(progress.done), total: Double(progress.total))
-                        .tint(.brand)
+                        .tint(.brandLegible)
                     Text("Strecken \(progress.done)/\(progress.total)")
                         .font(.caption.monospacedDigit())
                 }
@@ -149,8 +149,8 @@ struct TravelMapView: View {
                     .minimumScaleFactor(0.8)
                     .frame(maxWidth: preset == .custom ? 44 : .infinity)
                     .padding(.vertical, 8)
-                    .foregroundStyle(range == preset ? .white : .primary)
-                    .background(range == preset ? Color.brand : Color.clear, in: .capsule)
+                    .foregroundStyle(range == preset ? Color.onBrandLegible : Color.primary)
+                    .background(range == preset ? Color.brandLegible : Color.clear, in: .capsule)
                     .contentShape(.capsule)
                 }
                 .buttonStyle(.plain)
@@ -169,7 +169,7 @@ struct TravelMapView: View {
                 Image(systemName: "chevron.down").font(.caption2.weight(.bold))
             }
             .font(.subheadline.weight(.semibold))
-            .foregroundStyle(Color.brand)
+            .foregroundStyle(Color.brandLegible)
             .padding(.horizontal, 12)
             .padding(.vertical, 4)
             .contentShape(.rect)
@@ -233,7 +233,7 @@ struct TravelMapView: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(active ? Color.brand : Color.primary)
+                .foregroundStyle(active ? Color.brandLegible : Color.primary)
                 .frame(width: 38, height: 38)
                 .contentShape(.circle)
         }
@@ -249,7 +249,7 @@ struct TravelMapView: View {
                 .font(.caption.weight(.semibold))
                 .padding(.horizontal, 12)
                 .frame(height: 38)
-                .foregroundStyle(isOn.wrappedValue ? Color.brand : .secondary)
+                .foregroundStyle(isOn.wrappedValue ? Color.brandLegible : Color.secondary)
                 .contentShape(.capsule)
         }
         .buttonStyle(.plain)
@@ -307,7 +307,7 @@ struct TravelMapView: View {
                 DatePicker("Von", selection: $customFrom, displayedComponents: .date)
                 DatePicker("Bis", selection: $customTo, displayedComponents: .date)
             }
-            .tint(.brand)
+            .tint(.brandLegible)
             .navigationTitle("Zeitraum")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -384,6 +384,38 @@ private struct MapPanelModifier<PanelShape: Shape>: ViewModifier {
                 .shadow(color: .black.opacity(0.1), radius: 8, y: 2)
         }
     }
+}
+
+// MARK: - Legible accent
+
+/// The accent color made legible for the map, year review and collection pages (#504): a dark accent
+/// (Graphit) is lightened in dark mode, a pale one darkened in light mode, and text on an accent fill turns
+/// dark where white wouldn't read (Kit `RGBColor.legible(on:)`).
+extension UIColor {
+    /// The light page and the dark card the accent has to stand out from.
+    private static let legibleLightSurface = RGBColor(red: 0.96, green: 0.955, blue: 0.945)
+    private static let legibleDarkSurface = RGBColor(red: 0.12, green: 0.12, blue: 0.13)
+
+    /// The accent for lines, markers, symbols, text and small fills.
+    static var brandLegible: UIColor {
+        let accent = Theme.shared.accent.color
+        return dynamicUIColor(light: accent.legible(on: legibleLightSurface),
+                              dark: accent.legible(on: legibleDarkSurface))
+    }
+
+    /// Text and symbols on a `brandLegible` fill.
+    static var onBrandLegible: UIColor {
+        let accent = Theme.shared.accent.color
+        return dynamicUIColor(light: accent.legible(on: legibleLightSurface).legibleForeground,
+                              dark: accent.legible(on: legibleDarkSurface).legibleForeground)
+    }
+}
+
+extension Color {
+    /// The accent, adjusted so it stays visible on light and dark surfaces.
+    static var brandLegible: Color { Color(uiColor: .brandLegible) }
+    /// Text and symbols on a `brandLegible` fill: white, or dark on a pale accent.
+    static var onBrandLegible: Color { Color(uiColor: .onBrandLegible) }
 }
 
 // MARK: - Colors
@@ -526,7 +558,9 @@ struct TravelMap: UIViewRepresentable {
                 ?? MKMarkerAnnotationView(annotation: train, reuseIdentifier: id)
             view.annotation = train
             view.glyphImage = UIImage(systemName: "tram.fill")
-            view.markerTintColor = train.isStale ? .systemGray : UIColor(Color.brand)
+            // Adjusted accent so the marker stands out on the light and the dark map, glyph in a color that reads on it.
+            view.markerTintColor = train.isStale ? .systemGray : .brandLegible
+            view.glyphTintColor = train.isStale ? .white : .onBrandLegible
             view.displayPriority = .required
             view.canShowCallout = true
             return view

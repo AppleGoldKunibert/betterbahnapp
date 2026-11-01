@@ -92,9 +92,9 @@ struct LiveTrainIconTile: View {
                         .overlay(alignment: .bottomTrailing) {
                             Image(systemName: "location.fill")
                                 .font(.system(size: size * 0.24, weight: .bold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(Color.onBrandLegible)
                                 .frame(width: size * 0.46, height: size * 0.46)
-                                .background(Color.brand, in: .circle)
+                                .background(Color.brandLegible, in: .circle)
                                 .overlay { Circle().stroke(Color.card, lineWidth: 2) }
                                 .offset(x: size * 0.16, y: size * 0.16)
                         }
@@ -144,7 +144,10 @@ struct LiveTrainMapView: View {
     /// than straight lines across country.
     @State private var track: [Coordinate]?
 
-    private var color: Color { route.line?.color ?? .brand }
+    /// The line's color, else the accent adjusted to stand out on the light and the dark map.
+    private var color: Color { route.line?.color ?? .brandLegible }
+    /// The train symbol on `color`: white on line colors, dark on a pale accent.
+    private var glyphColor: Color { route.line?.color == nil ? .onBrandLegible : .white }
 
     var body: some View {
         NavigationStack {
@@ -169,7 +172,7 @@ struct LiveTrainMapView: View {
                     Annotation(route.line?.name ?? String(localized: "Zug"), coordinate: position.coordinate.clCoordinate, anchor: .center) {
                         Image(systemName: route.line?.symbolName ?? "tram.fill")
                             .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(position.isStale() ? Color.white : glyphColor)
                             .frame(width: 32, height: 32)
                             .background(position.isStale() ? Color.gray : color, in: .circle)
                             .overlay { Circle().stroke(.white, lineWidth: 2) }
@@ -252,7 +255,7 @@ struct LiveTrainMapView: View {
         VStack(alignment: .leading, spacing: 12) {
             if let position {
                 HStack(spacing: 12) {
-                    IconTile(systemImage: "gauge.with.dots.needle.67percent", color: .brand, size: 32)
+                    IconTile(systemImage: "gauge.with.dots.needle.67percent", color: .brandLegible, size: 32)
                     VStack(alignment: .leading, spacing: 2) {
                         if let speedText {
                             Text(speedText).font(.headline).monospacedDigit()
