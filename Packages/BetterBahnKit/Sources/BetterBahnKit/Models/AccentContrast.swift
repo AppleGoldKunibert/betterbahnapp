@@ -1,39 +1,38 @@
 import Foundation
 
-/// Keeping the accent color readable (#504): any of the presets or a color of one's own, in light and dark mode.
-extension RGBColor {
-    public static let white = RGBColor(red: 1, green: 1, blue: 1)
-    public static let black = RGBColor(red: 0, green: 0, blue: 0)
-
+// Keeps the accent color readable whatever is picked (#504): Graphit on a dark card, Gold or a very light
+// color of one's own on a white one.
+public extension RGBColor {
     /// WCAG relative luminance, 0 (black) … 1 (white).
-    public var relativeLuminance: Double {
-        func channel(_ c: Double) -> Double { c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4) }
+    var relativeLuminance: Double {
+        func channel(_ value: Double) -> Double {
+            value <= 0.03928 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+        }
         return 0.2126 * channel(red) + 0.7152 * channel(green) + 0.0722 * channel(blue)
     }
 
     /// WCAG contrast ratio to `other`, 1 … 21.
-    public func contrastRatio(to other: RGBColor) -> Double {
+    func contrastRatio(to other: RGBColor) -> Double {
         let a = relativeLuminance, b = other.relativeLuminance
         return (max(a, b) + 0.05) / (min(a, b) + 0.05)
     }
 
-    /// This color, darkened on a light background or lightened on a dark one just as far as it takes to reach
-    /// `minimum` contrast to `background`: for accent-colored text and symbols.
-    public func readable(on background: RGBColor, minimum: Double = 4.5) -> RGBColor {
-        guard contrastRatio(to: background) < minimum else { return self }
-        let target: RGBColor = background.relativeLuminance > 0.18 ? .black : .white
-        var share = 0.0
-        var color = self
-        while share < 1, color.contrastRatio(to: background) < minimum {
-            share = min(share + 0.05, 1)
-            color = mixed(with: target, by: share)
+    /// This color as text or a thin mark on `background`: unchanged when it reads already, else moved towards
+    /// black (on a light background) or white (on a dark one) just far enough to reach `minimumContrast`.
+    func readable(on background: RGBColor, minimumContrast: Double = 4.5) -> RGBColor {
+        let target = background.relativeLuminance > 0.18 ? RGBColor(red: 0, green: 0, blue: 0)
+                                                          : RGBColor(red: 1, green: 1, blue: 1)
+        for step in 0...20 {
+            let candidate = mixed(with: target, by: Double(step) / 20)
+            if candidate.contrastRatio(to: background) >= minimumContrast { return candidate }
         }
-        return color
+        return target
     }
 
-    /// The text color on a surface filled with this color: white while that stays readable (bold labels need
-    /// 3:1), else near-black.
-    public var textColorOnFill: RGBColor {
-        contrastRatio(to: .white) >= 3 ? .white : RGBColor(red: 0.1, green: 0.1, blue: 0.1)
+    /// White, or black where white would be hard to read: for text and symbols on a surface of this color.
+    /// Bold labels on a filled surface need less contrast than body text, so white wins down to 3:1.
+    var readableForeground: RGBColor {
+        let white = RGBColor(red: 1, green: 1, blue: 1)
+        return contrastRatio(to: white) >= 3 ? white : RGBColor(red: 0, green: 0, blue: 0)
     }
 }

@@ -112,7 +112,7 @@ struct CheckinDetailSheet: View {
                             InfoChip(text: business.label, systemImage: "briefcase.fill", tint: .orange)
                         }
                         ForEach(tags, id: \.key) { tag in
-                            InfoChip(text: "\(tagLabel(tag.key)): \(tag.value)", systemImage: tagIcon(tag.key), tint: .brandReadable)
+                            InfoChip(text: "\(tagLabel(tag.key)): \(tag.value)", systemImage: tagIcon(tag.key), tint: .brandText)
                         }
                     }
                 }
@@ -123,7 +123,7 @@ struct CheckinDetailSheet: View {
                     Label("Auf Träwelling öffnen", systemImage: "safari")
                         .font(.subheadline.weight(.medium))
                 }
-                .tint(.brandReadable)
+                .tint(.brandText)
             }
         }
     }
@@ -208,7 +208,7 @@ struct CheckinDetailSheet: View {
     private var tagsEditor: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
-                IconTile(systemImage: "tag.fill", color: .brandReadable, size: 32)
+                IconTile(systemImage: "tag.fill", color: .brandText, size: 32)
                 Text("Tags").font(.subheadline.weight(.medium))
                 Spacer()
             }
@@ -216,7 +216,7 @@ struct CheckinDetailSheet: View {
                 HStack(spacing: 8) {
                     Label(tagLabel(tag.key), systemImage: tagIcon(tag.key))
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(Color.brandReadable)
+                        .foregroundStyle(Color.brandText)
                         .lineLimit(1)
                         .frame(width: 110, alignment: .leading)
                     TextField(tagLabel(tag.key), text: $tag.value)
@@ -246,7 +246,7 @@ struct CheckinDetailSheet: View {
                                     .font(.caption.weight(.medium))
                                     .padding(.horizontal, 10)
                                     .padding(.vertical, 6)
-                                    .foregroundStyle(Color.brandReadable)
+                                    .foregroundStyle(Color.brandText)
                                     .background(Color.brand.opacity(0.12), in: .capsule)
                             }
                             .buttonStyle(.plain)
@@ -316,7 +316,6 @@ struct CheckinDetailSheet: View {
                 }
             }
             .font(.headline)
-            .foregroundStyle(Color.brandFillText)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 6)
         }

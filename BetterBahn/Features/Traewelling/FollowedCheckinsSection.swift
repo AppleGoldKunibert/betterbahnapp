@@ -434,8 +434,8 @@ struct FollowedCheckinsSection: View {
                     .font(.caption.weight(.bold))
                     .rotationEffect(.degrees(showsList ? 180 : 0))
             }
-            // The text's own color, never the accent the glass button would tint it with (#504).
-            .foregroundStyle(.primary)
+            // The accent made readable, never the raw one the glass button would tint it with (#504).
+            .foregroundStyle(Color.brandText)
         }
         .pageButtonStyle()
         .accessibilityHint(showsList ? "Blendet die Check-ins aus" : "Zeigt, wer gerade eingecheckt ist")
@@ -606,7 +606,7 @@ private struct FollowedCheckinCard: View {
                             Text("fährt \(start.timeString) ab")
                                 .font(.caption.weight(.semibold))
                                 .monospacedDigit()
-                                .foregroundStyle(Color.brandReadable)
+                                .foregroundStyle(Color.brandText)
                         }
                     }
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -634,7 +634,7 @@ private struct FollowedCheckinCard: View {
                     HStack(spacing: 8) {
                         ForEach(status.tags, id: \.key) { tag in
                             InfoChip(text: "\(model.statusTagLabel(tag.key)): \(tag.value)",
-                                     systemImage: model.statusTagIcon(tag.key), tint: .brandReadable)
+                                     systemImage: model.statusTagIcon(tag.key), tint: .brandText)
                         }
                     }
                 }

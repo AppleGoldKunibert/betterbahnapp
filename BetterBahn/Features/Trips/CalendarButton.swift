@@ -33,7 +33,7 @@ struct CalendarButton: View {
         }
         .buttonStyle(.plain)
         .roundActionBackground()
-        .tint(.brandReadable)
+        .tint(.brandText)
         .disabled(isAdding)
         .accessibilityLabel(isInCalendar ? "Aus dem Kalender löschen" : "Zum Kalender hinzufügen")
         .confirmationDialog("Zum Kalender hinzufügen", isPresented: $asksForAccess, titleVisibility: .visible) {

@@ -103,7 +103,7 @@ struct CheckinSheet: View {
     private var loginCard: some View {
         Card {
             VStack(spacing: 12) {
-                IconTile(systemImage: "person.badge.key.fill", color: .brandReadable, size: 48)
+                IconTile(systemImage: "person.badge.key.fill", color: .brandText, size: 48)
                 Text("Bei Träwelling anmelden")
                     .font(.headline)
                     .fontDesign(design == .fahrkarte ? .rounded : nil)
@@ -140,7 +140,7 @@ struct CheckinSheet: View {
                     .fontDesign(design == .fahrkarte ? .rounded : nil)
                 HStack(spacing: 8) {
                     if showsPoints {
-                        InfoChip(text: String(localized: "+\(result.points) Punkte"), systemImage: "sparkles", tint: .brandReadable)
+                        InfoChip(text: String(localized: "+\(result.points) Punkte"), systemImage: "sparkles", tint: .brandText)
                     }
                     if result.alsoOnThisConnection > 0 {
                         InfoChip(text: String(localized: "\(result.alsoOnThisConnection) Mitreisende"), systemImage: "person.2.fill", tint: .punctual)
@@ -177,7 +177,7 @@ struct CheckinSheet: View {
                             }
                             Spacer()
                             Image(systemName: isChosen ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(isChosen ? Color.brandReadable : .secondary)
+                                .foregroundStyle(isChosen ? Color.brandText : .secondary)
                         }
                         .padding(.vertical, 6)
                         .contentShape(.rect)
@@ -223,7 +223,7 @@ struct CheckinSheet: View {
     private var tagsRow: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
-                IconTile(systemImage: "tag.fill", color: .brandReadable, size: 32)
+                IconTile(systemImage: "tag.fill", color: .brandText, size: 32)
                 Text("Tags").font(.subheadline.weight(.medium))
                 Spacer()
             }
@@ -254,10 +254,8 @@ struct CheckinSheet: View {
                 .font(.caption.weight(.medium))
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .foregroundStyle(isOn ? Color.brandFillText : Color.primary)
-                .background(isOn ? Color.brand : Color.primary.opacity(0.07), in: .capsule)
-                // Keeps a picked tag apart from the card even with a very light accent.
-                .overlay { Capsule().strokeBorder(Color.hairline, lineWidth: 1) }
+                .foregroundStyle(isOn ? Color.onBrandText : Color.primary)
+                .background(isOn ? Color.brandText : Color.primary.opacity(0.07), in: .capsule)
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isOn ? .isSelected : [])
@@ -282,7 +280,6 @@ struct CheckinSheet: View {
                 }
             }
             .font(.headline)
-            .foregroundStyle(Color.brandFillText)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 6)
         }
