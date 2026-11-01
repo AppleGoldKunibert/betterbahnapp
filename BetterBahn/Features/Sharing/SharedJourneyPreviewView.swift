@@ -41,6 +41,8 @@ struct SharedJourneyPreviewView: View {
                     Label(saved ? "Reise gespeichert" : "Reise speichern",
                           systemImage: saved ? "bookmark.fill" : "bookmark")
                         .font(.headline)
+                        // Fahrkarte turns the button green once saved; Minimal keeps the accent.
+                        .foregroundStyle(saved && design == .fahrkarte ? Color.white : Color.brandFillText)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 6)
                         .contentTransition(.symbolEffect(.replace))

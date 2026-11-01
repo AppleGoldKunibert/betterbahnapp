@@ -21,6 +21,7 @@ struct TraewellingLoginButton: View {
                     }
                 }
                 .font(.headline)
+                .foregroundStyle(Color.brandFillText)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 6)
             }

@@ -606,7 +606,7 @@ private struct FollowedCheckinCard: View {
                             Text("fährt \(start.timeString) ab")
                                 .font(.caption.weight(.semibold))
                                 .monospacedDigit()
-                                .foregroundStyle(Color.brand)
+                                .foregroundStyle(Color.brandReadable)
                         }
                     }
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -634,7 +634,7 @@ private struct FollowedCheckinCard: View {
                     HStack(spacing: 8) {
                         ForEach(status.tags, id: \.key) { tag in
                             InfoChip(text: "\(model.statusTagLabel(tag.key)): \(tag.value)",
-                                     systemImage: model.statusTagIcon(tag.key), tint: .brand)
+                                     systemImage: model.statusTagIcon(tag.key), tint: .brandReadable)
                         }
                     }
                 }

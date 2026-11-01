@@ -220,6 +220,8 @@ in `project.pbxproj`: new files join their target automatically.
   "Mitreisende"), `CheckoutPrompt` (removing a journey with check-ins: check out at the last stop reached via
   `TraewellingClient.earlyExit`, delete them, or keep them). `CheckinTicket` (#504): Minimal a `Card`, Fahrkarte a
   `ticketBackground()` ticket with the line above a perforation; small buttons in cards use `.compactActionStyle()`.
+  Accent as text or symbol: `Color.brandReadable`; text on an accent fill: `Color.brandFillText`
+  (`AccentReadability.swift`, from Kit `RGBColor.readable(on:)`/`textColorOnFill`, so graphite, gold and light colors stay readable).
   `FollowedCheckinsSection` (#196): who the user follows is checked in now, above "Deine Reisen"
   (`AppModel.followedCheckins`, every 2 min while Verbindungen shows, `keepFollowedCheckinsFresh`; one entry per person
   via `TraewellingClient.grouped`). Detail: train (`LegTripSheet`, hidden for manual trips), map with live position

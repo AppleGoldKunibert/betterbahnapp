@@ -52,12 +52,12 @@ struct SavedJourneyRow: View {
                     Image(systemName: "calendar")
                     Text(dayLabel)
                     if isNext, model.liveActivities.isActive(entry.journey) {
-                        Image(systemName: "bolt.badge.clock.fill").foregroundStyle(Color.brand)
+                        Image(systemName: "bolt.badge.clock.fill").foregroundStyle(Color.brandReadable)
                     }
                     let tickets = model.tickets(for: entry)
                     if !tickets.isEmpty {
                         let onlyReservations = tickets.allSatisfy(\.ticket.isReservationOnly)
-                        Image(systemName: onlyReservations ? "carseat.right.fill" : "ticket.fill").foregroundStyle(Color.brand)
+                        Image(systemName: onlyReservations ? "carseat.right.fill" : "ticket.fill").foregroundStyle(Color.brandReadable)
                             .accessibilityLabel(onlyReservations ? "Reservierung gespeichert" : "Ticket gespeichert")
                     }
                     Spacer()

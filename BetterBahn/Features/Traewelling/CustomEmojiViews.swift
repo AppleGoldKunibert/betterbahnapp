@@ -150,7 +150,7 @@ struct EmojiSuggestionBar: View {
                         }
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
-                        .foregroundStyle(Color.brand)
+                        .foregroundStyle(Color.brandReadable)
                         .background(Color.brand.opacity(0.12), in: .capsule)
                     }
                     .buttonStyle(.plain)
