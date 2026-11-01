@@ -130,7 +130,9 @@ in `project.pbxproj`: new files join their target automatically.
   and pins that run; "Ein- und Ausstieg selbst angeben"), `JourneyDetailView` (+ `LegCard`, `TransferRow`,
   alternatives sheets; #504: Minimal has the summary card, Fahrkarte draws it as a ticket with the day and
   `JourneyTicketCaption` "Von"/"Nach" over the times and the actions below a `TicketPerforation`; `.journeyRoundedType()`
-  gives titles SF Rounded on the ticket, `.journeyRoundActionSurface()` lays the round glass actions on a flat disc in Minimal; below the legs `CO2SavingButton` "−42 kg CO₂" → `CO2Sheet`, #386, from Kit `CO2Comparison`
+  gives titles SF Rounded on the ticket, `.journeyRoundActionSurface()` lays the round glass actions on a flat disc in Minimal;
+  accent there as `Color.journeyAccent` (text, symbols, map lines; Kit `RGBColor.readable(on:)` keeps contrast ≥ 3 on cards
+  in both modes) and `Color.journeyOnAccent` on accent fills (Kit `readableForeground`: white, or black on Gold/pale colors); below the legs `CO2SavingButton` "−42 kg CO₂" → `CO2Sheet`, #386, from Kit `CO2Comparison`
   with the legs' cached track geometry; `WeatherLabel` "☀ 18° bei Ankunft" under the destination (summary card and the
   last leg) and "beim Umstieg" under a transfer station with more than 15 min to the next train
   (`JourneyWeather.arrival(of:in:)`), tap → `WeatherDetails` popover with rain, wind and

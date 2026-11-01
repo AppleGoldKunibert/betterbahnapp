@@ -320,7 +320,7 @@ struct JourneyReplanSheet: View {
     private var legPicker: some View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
-                OptionLabel(title: String(localized: "Ab welchem Zug?"), subtitle: String(localized: "Alles davor bleibt gleich"), icon: "tram.fill")
+                OptionLabel(title: String(localized: "Ab welchem Zug?"), subtitle: String(localized: "Alles davor bleibt gleich"), icon: "tram.fill", color: .journeyAccent)
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
@@ -337,7 +337,7 @@ struct JourneyReplanSheet: View {
                                     }
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 8)
-                                    .foregroundStyle(isOn ? Color.white : Color.primary)
+                                    .foregroundStyle(isOn ? Color.journeyOnAccent : Color.primary)
                                     .background(isOn ? Color.brand : Color.secondary.opacity(0.15),
                                                 in: .rect(cornerRadius: 12, style: .continuous))
                                 }
@@ -369,7 +369,7 @@ struct JourneyReplanSheet: View {
             }
             .pageButtonStyle()
             .controlSize(.large)
-            .tint(.brand)
+            .tint(.journeyAccent)
 
             if !requirements.isEmpty {
                 Button {
@@ -392,7 +392,7 @@ struct JourneyReplanSheet: View {
         VStack(spacing: 8) {
             ForEach(requirements) { requirement in
                 HStack(spacing: 10) {
-                    IconTile(systemImage: "pin.fill", color: .brand, size: 32)
+                    IconTile(systemImage: "pin.fill", color: .journeyAccent, size: 32)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(resolvedTrainNames[requirement.id] ?? requirement.trainName.uppercased())
                             .font(.subheadline.weight(.semibold))
@@ -478,7 +478,7 @@ struct JourneyReplanSheet: View {
                         .frame(maxWidth: .infinity)
                 }
                 .pageButtonStyle()
-                .tint(.brand)
+                .tint(.journeyAccent)
                 .controlSize(.large)
                 Text("Du kannst trotzdem umplanen.")
                     .font(.caption2)
@@ -529,7 +529,7 @@ struct JourneyReplanSheet: View {
                 }
                 // Only a suggestion: it doesn't compete with the search, the page's main action.
                 .pageButtonStyle()
-                .tint(.brand)
+                .tint(.journeyAccent)
                 .controlSize(.large)
                 .disabled(applyingID != nil)
                 Text("Nur ein Vorschlag.")
@@ -551,7 +551,7 @@ struct JourneyReplanSheet: View {
         VStack(spacing: 12) {
             Card {
                 HStack(spacing: 12) {
-                    IconTile(systemImage: "arrow.down.right.circle.fill", color: .brand, size: 38)
+                    IconTile(systemImage: "arrow.down.right.circle.fill", color: .journeyAccent, size: 38)
                     VStack(alignment: .leading, spacing: 2) {
                         if design == .fahrkarte {
                             // The ticket's small label over the big value.
@@ -612,13 +612,15 @@ struct JourneyReplanSheet: View {
         Card {
             VStack(alignment: .leading, spacing: 12) {
                 OptionLabel(title: String(localized: "Und dann?"), subtitle: String(localized: "Ausstieg in \(exitStation.displayName) um \(exitArrival.timeString)"),
-                            icon: "arrow.triangle.branch")
+                            icon: "arrow.triangle.branch", color: .journeyAccent)
                 Button {
                     endJourneyAtExit()
                 } label: {
                     Label("Reise in \(exitStation.displayName) beenden", systemImage: "flag.checkered")
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity)
+                        // White only on an accent dark enough for it.
+                        .foregroundStyle(Color.journeyOnAccent)
                 }
                 .pageButtonStyle(.prominent)
                 .tint(.brand)
@@ -632,7 +634,7 @@ struct JourneyReplanSheet: View {
                         .frame(maxWidth: .infinity)
                 }
                 .pageButtonStyle()
-                .tint(.brand)
+                .tint(.journeyAccent)
                 .controlSize(.large)
                 .disabled(products.isEmpty || destination == nil)
             }
@@ -652,7 +654,7 @@ struct JourneyReplanSheet: View {
             }
             .pageButtonStyle()
             .controlSize(.large)
-            .tint(.brand)
+            .tint(.journeyAccent)
             Text("Hält der Zug außerplanmäßig, z. B. bei einer Störung? Trag den Halt ein, um dort auszusteigen.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -709,7 +711,7 @@ struct JourneyReplanSheet: View {
                             .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
-                    .tint(.brand)
+                    .tint(.journeyAccent)
                 }
             }
             // On the ticket the goal and the stops read like "Von" and "Nach": a small label over a big name.
@@ -726,7 +728,7 @@ struct JourneyReplanSheet: View {
                 } label: {
                     HStack {
                         OptionLabel(title: String(localized: "Zeit zum Umsteigen"), subtitle: String(localized: "\(minTransferMinutes) Min."),
-                                    icon: "clock.badge.checkmark")
+                                    icon: "clock.badge.checkmark", color: .journeyAccent)
                         Spacer()
                         Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
                     }
@@ -742,15 +744,15 @@ struct JourneyReplanSheet: View {
 
                 Toggle(isOn: $onlyValidTicket) {
                     let ticket = model.settings.ticketType
-                    OptionLabel(title: ticket.filterTitle, subtitle: ticket.filterSubtitle, icon: ticket.symbolName)
+                    OptionLabel(title: ticket.filterTitle, subtitle: ticket.filterSubtitle, icon: ticket.symbolName, color: .journeyAccent)
                 }
-                .tint(.brand)
+                .tint(.journeyAccent)
 
                 Divider()
 
                 VStack(alignment: .leading, spacing: 8) {
                     OptionLabel(title: String(localized: "Max. Umstiege"), subtitle: String(localized: "Weniger Umsteigen, evtl. länger unterwegs"),
-                                icon: "arrow.triangle.swap")
+                                icon: "arrow.triangle.swap", color: .journeyAccent)
                     MaxTransfersPicker(maxTransfers: $maxTransfers)
                 }
 
@@ -765,7 +767,7 @@ struct JourneyReplanSheet: View {
         } label: {
             HStack {
                 OptionLabel(title: String(localized: "Verkehrsmittel"), subtitle: productSummary(products),
-                            icon: "train.side.front.car")
+                            icon: "train.side.front.car", color: .journeyAccent)
                 Spacer()
                 Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
             }
@@ -776,7 +778,11 @@ struct JourneyReplanSheet: View {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Verkehrsmittel").font(.subheadline.weight(.semibold))
                 ProductChips(products: $products)
-                Button("Fertig") { showProductsPopover = false }
+                Button {
+                    showProductsPopover = false
+                } label: {
+                    Text("Fertig").foregroundStyle(Color.journeyOnAccent)
+                }
                     .pageButtonStyle(.prominent)
                     .tint(.brand)
                     .frame(maxWidth: .infinity)
@@ -804,6 +810,8 @@ struct JourneyReplanSheet: View {
                     .font(.headline)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, design == .minimal ? 0 : 6)
+                    // White only on an accent dark enough for it.
+                    .foregroundStyle(Color.journeyOnAccent)
                 }
                 .pageButtonStyle(.prominent)
                 .tint(.brand)
@@ -821,6 +829,8 @@ struct JourneyReplanSheet: View {
                     .font(.headline)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, design == .minimal ? 0 : 6)
+                    // White only on an accent dark enough for it.
+                    .foregroundStyle(Color.journeyOnAccent)
             }
             .pageButtonStyle(.prominent)
             .tint(.brand)
@@ -886,7 +896,7 @@ struct JourneyReplanSheet: View {
         return Card {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 12) {
-                    IconTile(systemImage: "checkmark.seal.fill", color: .brand, size: 38)
+                    IconTile(systemImage: "checkmark.seal.fill", color: .journeyAccent, size: 38)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Träwelling-Check-in anpassen?").font(.headline).journeyRoundedType()
                         Text(asManualTrip
@@ -915,6 +925,8 @@ struct JourneyReplanSheet: View {
                     }
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
+                    // White only on an accent dark enough for it.
+                    .foregroundStyle(Color.journeyOnAccent)
                 }
                 .pageButtonStyle(.prominent)
                 .tint(.brand)

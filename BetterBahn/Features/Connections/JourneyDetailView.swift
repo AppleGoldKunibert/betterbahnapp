@@ -381,6 +381,8 @@ struct JourneyDetailView: View {
                             Label("Alternative suchen", systemImage: "arrow.triangle.branch")
                                 .font(.headline)
                                 .frame(maxWidth: .infinity)
+                                // White only on an accent dark enough for it.
+                                .foregroundStyle(Color.journeyOnAccent)
                         }
                         .pageButtonStyle(.prominent)
                         .tint(.brand)
@@ -570,7 +572,7 @@ struct JourneyDetailView: View {
                         .buttonStyle(.plain)
                         .glassEffect(.regular, in: .circle)
                         .journeyRoundActionSurface()
-                        .tint(.brand)
+                        .tint(.journeyAccent)
                         .accessibilityLabel("Reise bearbeiten")
                     }
                 }
@@ -595,7 +597,7 @@ struct JourneyDetailView: View {
                         SummaryToggleLabel(title: LiveActivityManager.isSupported ? String(localized: "Als Widget und Live-Aktivität zeigen") : String(localized: "Als Widget zeigen"),
                                            systemImage: "arrow.left.arrow.right.circle.fill")
                     }
-                    .tint(.brand)
+                    .tint(.journeyAccent)
                 }
             }
             if model.settings.exitReminders, let entry = model.savedEntry(for: journey), !entry.isFinished {
@@ -606,7 +608,7 @@ struct JourneyDetailView: View {
                     SummaryToggleLabel(title: String(localized: "Ans Aussteigen erinnern (\(model.settings.exitReminderLead.displayName))"),
                                        systemImage: "bell.badge.fill")
                 }
-                .tint(.brand)
+                .tint(.journeyAccent)
             }
         }
     }
@@ -625,6 +627,19 @@ private struct SummaryToggleLabel: View {
         }
         .font(.subheadline)
     }
+}
+
+extension Color {
+    /// The accent as text, a symbol or a line on the journey's pages: as picked while it reads on a card, else
+    /// darker in light mode or lighter in dark mode (Graphit on a dark card, a very light color of one's own).
+    static var journeyAccent: Color {
+        let accent = Theme.shared.accent.color
+        return Color(dynamicUIColor(light: accent.readable(on: RGBColor(red: 1, green: 1, blue: 1)),
+                                    dark: accent.readable(on: RGBColor(red: 0.11, green: 0.11, blue: 0.12))))
+    }
+
+    /// Text and symbols on an accent fill: white while that reads, black on a light accent (Gold, pale colors).
+    static var journeyOnAccent: Color { Theme.shared.accent.color.readableForeground.swiftUIColor }
 }
 
 /// A small label in capitals over a big value on the ticket ("VON", "NACH", the day).
@@ -957,7 +972,7 @@ struct LegCard: View {
                                     HStack {
                                         Text(stop.station.displayName).font(.caption).expandsOnTap()
                                         if stop.isAdditional {
-                                            InfoChip(text: String(localized: "Zusatzhalt"), systemImage: "plus.circle.fill", tint: .brand)
+                                            InfoChip(text: String(localized: "Zusatzhalt"), systemImage: "plus.circle.fill", tint: .journeyAccent)
                                         }
                                         Spacer()
                                         if let time = stop.departure ?? stop.arrival {
@@ -1206,7 +1221,7 @@ struct AlternativeTrainsSheet: View {
                     Card {
                         VStack(alignment: .leading, spacing: 12) {
                             HStack(spacing: 12) {
-                                IconTile(systemImage: "arrow.left.arrow.right", color: .brand, size: 34)
+                                IconTile(systemImage: "arrow.left.arrow.right", color: .journeyAccent, size: 34)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text("\(leg.origin.displayName) → \(leg.destination.displayName)")
                                         .font(.subheadline.weight(.semibold))
@@ -1230,7 +1245,7 @@ struct AlternativeTrainsSheet: View {
                                 }
                                 .font(.subheadline.weight(.medium))
                             }
-                            .tint(.brand)
+                            .tint(.journeyAccent)
                         }
                         .fontDesign(design == .fahrkarte ? .rounded : nil)
                     }
@@ -1323,7 +1338,7 @@ struct AlternativeTrainsSheet: View {
             }
             .pageButtonStyle()
             .controlSize(.large)
-            .tint(.brand)
+            .tint(.journeyAccent)
 
             if pinnedName != nil {
                 Button {
@@ -1646,7 +1661,7 @@ struct AlternativeJourneySheet: View {
                     if let restart, let destination = entry.journey.legs.last?.destination {
                         Card {
                             HStack(spacing: 12) {
-                                IconTile(systemImage: "arrow.triangle.branch", color: .brand, size: 38)
+                                IconTile(systemImage: "arrow.triangle.branch", color: .journeyAccent, size: 38)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text("Ab \(restart.from.displayName)").font(.headline)
                                         .fontDesign(design == .fahrkarte ? .rounded : nil)
