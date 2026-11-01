@@ -19,7 +19,7 @@ struct TicketButton: View {
         }
         .buttonStyle(.plain)
         .glassEffect(.regular, in: .circle)
-        .tint(.brandControl)
+        .tint(.brandText)
         .accessibilityLabel("Ticket anzeigen")
         .sheet(isPresented: $showTickets) {
             TicketView(tickets: tickets, journey: journey)
@@ -44,7 +44,7 @@ struct AddTicketButton: View {
                 .padding(.vertical, 6)
         }
         .pageButtonStyle()
-        .tint(.brandControl)
+        .tint(.brandText)
         .controlSize(.large)
         .sheet(isPresented: $showLookup, onDismiss: {
             notMatched = lookupFoundNoJourney

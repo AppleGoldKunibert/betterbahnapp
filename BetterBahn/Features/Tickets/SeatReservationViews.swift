@@ -117,9 +117,9 @@ private struct SaveSeatSheet: View {
                                 Text(number)
                                     .font(.body.weight(.semibold).monospacedDigit())
                                     .fontDesign(design == .fahrkarte ? .rounded : nil)
-                                    .foregroundStyle(selected ? Color.white : Color.primary)
+                                    .foregroundStyle(selected ? Color.onBrand : Color.primary)
                                     .frame(maxWidth: .infinity, minHeight: 44)
-                                    .background(selected ? Color.brandFill : Color.secondary.opacity(0.12),
+                                    .background(selected ? Color.brand : Color.secondary.opacity(0.12),
                                                 in: .rect(cornerRadius: 10, style: .continuous))
                             }
                             .buttonStyle(.plain)
