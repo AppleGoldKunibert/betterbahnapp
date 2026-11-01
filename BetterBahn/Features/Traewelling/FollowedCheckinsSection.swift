@@ -434,6 +434,8 @@ struct FollowedCheckinsSection: View {
                     .font(.caption.weight(.bold))
                     .rotationEffect(.degrees(showsList ? 180 : 0))
             }
+            // The text's own color, never the accent the glass button would tint it with (#504).
+            .foregroundStyle(.primary)
         }
         .pageButtonStyle()
         .accessibilityHint(showsList ? "Blendet die Check-ins aus" : "Zeigt, wer gerade eingecheckt ist")
