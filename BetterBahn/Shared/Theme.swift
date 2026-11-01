@@ -52,6 +52,7 @@ private struct AppThemeModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .environment(\.appDesign, Theme.shared.design)
-            .tint(Color.brand)
+            // Links, toggles and system buttons: the accent, adjusted where it wouldn't read.
+            .tint(Color.brandText)
     }
 }

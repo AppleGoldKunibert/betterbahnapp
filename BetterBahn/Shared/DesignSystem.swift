@@ -259,7 +259,7 @@ private struct FlatButtonBody: View {
     var body: some View {
         let shape = kind == .circle ? AnyShape(Circle()) : AnyShape(Capsule())
         configuration.label
-            .foregroundStyle(kind == .prominent ? Color.white : Color.primary)
+            .foregroundStyle(kind == .prominent ? Color.onBrand : Color.primary)
             .padding(.vertical, kind == .circle ? 6 : 12)
             .padding(.horizontal, kind == .circle ? 6 : 16)
             .background {
@@ -300,9 +300,11 @@ struct IconTile: View {
                 .foregroundStyle(.secondary)
                 .frame(width: size, height: size)
         } else {
+            // The accent as a symbol has to read on its light tile whatever color was picked.
+            let symbolColor = color == Color.brand ? Color.brandText : color
             Image(systemName: systemImage)
                 .font(.system(size: size * 0.5, weight: .medium))
-                .foregroundStyle(color)
+                .foregroundStyle(symbolColor)
                 .frame(width: size, height: size)
                 .background(color.opacity(0.12), in: .rect(cornerRadius: size * 0.28, style: .continuous))
         }
