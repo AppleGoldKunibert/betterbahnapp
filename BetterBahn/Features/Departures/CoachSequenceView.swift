@@ -744,6 +744,9 @@ private struct CoachTile: View {
     @Environment(\.appDesign) private var design
 
     static let height: CGFloat = 46
+    /// The restaurant and the marked coaches (your seat or reservation, the recommended one) stay DB red
+    /// whatever accent color is picked (#504): they read like the signs on the platform.
+    static let markRed = AccentPreset.rot.color.swiftUIColor
     private static let amenitiesPerRow = 3
 
     var body: some View {
@@ -824,7 +827,7 @@ private struct CoachTile: View {
     private var shape: some View {
         let fill: Color = switch coach.kind {
         case .locomotive, .powerCar: .gray
-        case .diningCar, .halfDiningCar: .brand
+        case .diningCar, .halfDiningCar: Self.markRed
         default: coach.firstClass ? .yellow : .secondary
         }
         let corner: CGFloat = coach.isPassengerCoach ? 6 : 10
@@ -838,9 +841,9 @@ private struct CoachTile: View {
             .fill(fill.opacity(coach.isPassengerCoach ? 0.22 : 0.45))
             .overlay {
                 if suggested && !highlighted && !bikeHighlighted {
-                    outline.strokeBorder(Color.brand, style: StrokeStyle(lineWidth: 2.5, dash: [6, 4]))
+                    outline.strokeBorder(Self.markRed, style: StrokeStyle(lineWidth: 2.5, dash: [6, 4]))
                 } else {
-                    outline.strokeBorder(highlighted ? Color.brand : bikeHighlighted ? Color.punctual : fill.opacity(0.6),
+                    outline.strokeBorder(highlighted ? Self.markRed : bikeHighlighted ? Color.punctual : fill.opacity(0.6),
                                          lineWidth: highlighted || bikeHighlighted ? 3 : 1)
                 }
             }
