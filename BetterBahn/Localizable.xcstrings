@@ -4338,6 +4338,16 @@
         }
       }
     },
+    "Geschwindigkeit" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speed"
+          }
+        }
+      }
+    },
     "Gespeichert" : {
       "localizations" : {
         "en" : {
@@ -4460,6 +4470,7 @@
       }
     },
     "Gleise" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -5969,7 +5980,18 @@
         }
       }
     },
+    "Nächster Halt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Next stop"
+          }
+        }
+      }
+    },
     "Nächster Halt:" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -7172,6 +7194,16 @@
         }
       }
     },
+    "Stand" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Updated"
+          }
+        }
+      }
+    },
     "Stand %@" : {
       "localizations" : {
         "en" : {
@@ -8216,6 +8248,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "From"
+          }
+        }
+      }
+    },
+    "von %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "of %lld"
+          }
+        }
+      }
+    },
+    "von %lld gesammelt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "of %lld collected"
           }
         }
       }

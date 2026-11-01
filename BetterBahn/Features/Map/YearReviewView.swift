@@ -7,6 +7,8 @@ import SwiftUI
 struct YearReviewView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.appDesign) private var design
+    @Environment(\.colorScheme) private var colorScheme
     @State var year: Int
     @State private var years: [Int] = []
     @State private var review: YearReview?
@@ -19,10 +21,10 @@ struct YearReviewView: View {
         NavigationStack {
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.black.ignoresSafeArea())
+                .background((isTicket ? Color.canvas : Color.black).ignoresSafeArea())
                 .navigationTitle("Jahresrückblick")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbarColorScheme(.dark, for: .navigationBar)
+                .toolbarColorScheme(isTicket ? nil : .dark, for: .navigationBar)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Schließen", systemImage: "xmark") { dismiss() }
@@ -38,11 +40,15 @@ struct YearReviewView: View {
                     }
                 }
         }
-        .preferredColorScheme(.dark)
+        // The stories glow on black; the tickets lie on the page like the rest of the app.
+        .preferredColorScheme(isTicket ? nil : .dark)
         .task { await loadYears() }
         .task(id: year) { await load() }
-        .task(id: "\(page)|\(review?.year ?? 0)") { renderShareImage() }
+        .task(id: "\(page)|\(review?.year ?? 0)|\(design)|\(colorScheme)") { renderShareImage() }
     }
+
+    /// Fahrkarte draws each card as a ticket on the page; Minimal as a colored story on black.
+    private var isTicket: Bool { design == .fahrkarte }
 
     @ViewBuilder private var content: some View {
         if let review, review.year == year {
@@ -59,12 +65,14 @@ struct YearReviewView: View {
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .always))
+                // The white dots need a backing on the light page.
+                .indexViewStyle(.page(backgroundDisplayMode: isTicket ? .always : .automatic))
             }
         } else {
             VStack(spacing: 12) {
                 if let progress, progress.total > 0 {
                     ProgressView(value: Double(progress.done), total: Double(progress.total))
-                        .tint(.brand)
+                        .tint(.brandText)
                         .frame(maxWidth: 220)
                     Text("Strecken \(progress.done)/\(progress.total)")
                         .font(.caption.monospacedDigit())
@@ -86,7 +94,7 @@ struct YearReviewView: View {
                 Text(String(year)).font(.headline.monospacedDigit())
                 if years.count > 1 { Image(systemName: "chevron.down").font(.caption.weight(.bold)) }
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(isTicket ? Color.primary : Color.white)
         }
         .disabled(years.count < 2)
     }
@@ -116,7 +124,8 @@ struct YearReviewView: View {
         guard let review, !review.isEmpty else { shareImage = nil; return }
         let renderer = ImageRenderer(content: YearReviewCardView(card: page, review: review, runs: runs)
             .frame(width: YearReviewCardView.size.width, height: YearReviewCardView.size.height)
-            .environment(\.colorScheme, .dark))
+            .environment(\.appDesign, design)
+            .environment(\.colorScheme, isTicket ? colorScheme : .dark))
         renderer.scale = 3
         shareImage = renderer.uiImage.map { Image(uiImage: $0) }
     }
@@ -168,10 +177,19 @@ struct YearReviewCardView: View {
     let review: YearReview
     let runs: [SegmentHeatmap.Run]
 
+    @Environment(\.appDesign) private var design
+
     static let size = CGSize(width: 360, height: 640)
     private static let earthKilometers = 40_075.0
 
+    private var isTicket: Bool { design == .fahrkarte }
+
     var body: some View {
+        if isTicket { ticket } else { story }
+    }
+
+    /// Minimal: a story card in shades of the accent color, white text.
+    private var story: some View {
         ZStack {
             LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
             VStack(alignment: .leading, spacing: 0) {
@@ -181,7 +199,7 @@ struct YearReviewCardView: View {
                     Text(String(review.year)).monospacedDigit()
                 }
                 .font(.footnote.weight(.semibold))
-                .opacity(0.8)
+                .foregroundStyle(soft(0.8))
                 Spacer(minLength: 16)
                 content(for: card)
                 Spacer(minLength: 16)
@@ -191,16 +209,58 @@ struct YearReviewCardView: View {
         .foregroundStyle(.white)
     }
 
-    private var colors: [Color] {
-        switch card {
-        case .intro, .summary: [.brand, .brandDeep]
-        case .distance, .map: [Color(HeatColor.color(for: 10)), .black]
-        case .time, .stations: [Color(HeatColor.color(for: 5)), .brandDeep]
-        case .co2: [.punctual, .brandDeep]
-        case .punctuality: [Color(HeatColor.color(for: 2)), .brand]
-        case .series, .routes: [.brandDeep, .black]
-        case .longestRide, .abroad: [Color(HeatColor.color(for: 1)), Color(HeatColor.color(for: 3))]
+    /// Fahrkarte: a ticket on the page, the app and year in its stub above the perforation.
+    private var ticket: some View {
+        ZStack {
+            Color.canvas
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Label("BetterBahn", systemImage: "tram.fill")
+                    Spacer()
+                    Text(String(review.year)).monospacedDigit()
+                }
+                .font(.caption.weight(.semibold))
+                .tracking(0.6)
+                .textCase(.uppercase)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 16)
+                TicketPerforation()
+                VStack(alignment: .leading, spacing: 0) {
+                    Spacer(minLength: 8)
+                    content(for: card)
+                    Spacer(minLength: 8)
+                }
+                .padding(20)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            }
+            .fontDesign(.rounded)
+            .foregroundStyle(.primary)
+            .ticketBackground()
+            .environment(\.cardSurface, Color.ticket)
+            .padding(16)
         }
+    }
+
+    /// The story's gradients, all from the accent color (the CO₂ card in green for the saving), darkened
+    /// where needed so the white text always reads, also on a pale accent.
+    private var colors: [Color] {
+        let accent = Theme.shared.accent.color.readable(on: RGBColor(red: 1, green: 1, blue: 1)).swiftUIColor
+        let deep = accent.mix(with: .black, by: 0.4)
+        switch card {
+        case .intro, .summary: return [accent, deep]
+        case .distance, .map, .series, .routes: return [deep, .black]
+        case .time, .stations: return [accent.mix(with: .black, by: 0.2), deep.mix(with: .black, by: 0.5)]
+        case .co2:
+            let green = RGBColor(red: 0.13, green: 0.62, blue: 0.35).readable(on: RGBColor(red: 1, green: 1, blue: 1)).swiftUIColor
+            return [green, green.mix(with: .black, by: 0.55)]
+        case .punctuality, .longestRide, .abroad: return [accent.mix(with: .black, by: 0.1), deep.mix(with: .black, by: 0.2)]
+        }
+    }
+
+    /// Secondary text: grey on the ticket, translucent white on the story.
+    private func soft(_ opacity: Double) -> AnyShapeStyle {
+        isTicket ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.white.opacity(opacity))
     }
 
     @ViewBuilder private func content(for card: YearReviewCard) -> some View {
@@ -309,6 +369,8 @@ struct YearReviewCardView: View {
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.4)
+                // The ticket's one splash of color.
+                .foregroundStyle(isTicket ? Color.brandText : Color.white)
             if let unit { Text(unit).font(.title2.weight(.semibold)) }
         }
         .padding(.top, 12)
@@ -317,7 +379,7 @@ struct YearReviewCardView: View {
     private func caption(_ text: String) -> some View {
         Text(text)
             .font(.body.weight(.medium))
-            .opacity(0.85)
+            .foregroundStyle(soft(0.85))
             .fixedSize(horizontal: false, vertical: true)
             .padding(.top, 10)
     }
@@ -328,7 +390,7 @@ struct YearReviewCardView: View {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Text("\(index + 1)")
                         .font(.title3.weight(.heavy).monospacedDigit())
-                        .opacity(0.6)
+                        .foregroundStyle(isTicket ? AnyShapeStyle(Color.brandText) : soft(0.6))
                         .frame(width: 22, alignment: .leading)
                     Text(entry.name)
                         .font(index == 0 ? .title3.weight(.bold) : .body.weight(.semibold))
@@ -337,7 +399,7 @@ struct YearReviewCardView: View {
                     Spacer(minLength: 8)
                     Text("\(entry.count)×")
                         .font(.body.weight(.semibold).monospacedDigit())
-                        .opacity(0.8)
+                        .foregroundStyle(soft(0.8))
                 }
             }
         }
@@ -347,7 +409,7 @@ struct YearReviewCardView: View {
     private func summaryRow(_ value: String, _ label: LocalizedStringKey) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(value).font(.title2.weight(.heavy)).lineLimit(1).minimumScaleFactor(0.6)
-            Text(label).font(.subheadline.weight(.medium)).opacity(0.8)
+            Text(label).font(.subheadline.weight(.medium)).foregroundStyle(soft(0.8))
         }
     }
 
@@ -422,7 +484,7 @@ struct YearReviewBanner: View {
             HStack(spacing: 12) {
                 Image(systemName: "sparkles")
                     .font(.title3.weight(.semibold))
-                    .foregroundStyle(Color.brand)
+                    .foregroundStyle(Color.brandText)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Dein Bahnjahr \(String(year))").font(.headline)
                     Text("Kilometer, Lieblingszüge und mehr im Jahresrückblick.")
@@ -469,6 +531,13 @@ extension AppModel {
 
     /// The year the banner offers right now, if it has rides; cheap enough for every visit of the tab.
     func featuredYearReview() async -> Int? {
+        #if DEBUG
+        // `-showYearReview YES` (launch argument): the banner all year round, for testing. The review itself
+        // falls back to the latest year with rides.
+        if UserDefaults.standard.bool(forKey: "showYearReview") {
+            return Calendar.current.component(.year, from: .now)
+        }
+        #endif
         guard let year = YearReview.featuredYear(on: .now) else { return nil }
         await loadTraewellingTrips()
         let calendar = Calendar.current
