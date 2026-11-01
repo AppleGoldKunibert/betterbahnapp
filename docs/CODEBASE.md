@@ -139,7 +139,9 @@ in `project.pbxproj`: new files join their target automatically.
   ahead of the picked train's exit, #430; "Halt hinzufügen" via
   `ManualStopSheet` adds an off-timetable exit, a check-in then becomes a manual trip via
   `AppModel.replaceCheckinWithManualTrip`; a new exit on the last train asks "Reise … beenden" / "Weiter nach …").
-- `Features/Departures/` – `StationBoardView`/`BoardRow`, `TripView` (and `LegTripSheet`, the read-only run of a journey's
+- `Features/Departures/` – two layouts by `\.appDesign` (#504): Minimal has the station and the time in one card; Fahrkarte
+  puts them on a ticket under its own headline, with "Zeit / Nach / Gleis" over the board (`BoardColumnLabels`), and draws
+  `TripContent`'s header as a ticket with "Von" and "Nach" below its perforation. `StationBoardView`/`BoardRow`, `TripView` (and `LegTripSheet`, the read-only run of a journey's
   leg): `plainTrip` with the board's line and lap, then `AppModel.liveRun` with the shown or remembered trip (and the
   saved leg) as baseline, painted as the sources answer, remembered via `rememberLive`. `DelayTimeText` shows a delay
   in planned-time mode only with a live time (no "0" for a plain timetable). `CoachSequenceView.swift`: the Wagenreihung
@@ -273,7 +275,10 @@ in `project.pbxproj`: new files join their target automatically.
   `InfoChip`, `OperatorLabel`, `Color.brand`, `.transition(.fold)` …; reuse these instead of new styling.
   `Shared/Theme.swift` holds the picked design and accent (per device); `Color.brand`, `.brandDeep` and `.ticket` read
   the accent there, so views redraw when it changes, and `.appTheme()` at the root sets `\.appDesign` and the tint.
-  Never hard-code the red: use `Color.brand` or derive from it. `Card`, `AppBackground`, `SectionHeader`, `IconTile`
+  Never hard-code the red: use `Color.brand` or derive from it. Accent as text, chips or small symbols: `Color.brandText`
+  (moved just far enough towards black/white to read 4.5:1 on the card in light and dark mode, Kit `RGBColor.readable(on:)`);
+  on an accent fill `Color.onBrand` (white, black where white wouldn't read, `readableForeground`); a small fill that must
+  show even with a very light accent uses `brandText` with `onBrandText`. `Card`, `AppBackground`, `SectionHeader`, `IconTile`
   and `.pageButtonStyle(.regular/.circle/.prominent)` draw either design: Minimal has the classic cards with light
   shadows, a faint glow, sentence-case titles with a grey icon, softly tinted icon tiles and flat buttons (the main
   action filled with `Color.brand`); Fahrkarte has flat outlined cards on `Color.canvas`, bold rounded titles, grey
