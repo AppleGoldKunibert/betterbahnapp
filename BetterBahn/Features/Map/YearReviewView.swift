@@ -531,6 +531,13 @@ extension AppModel {
 
     /// The year the banner offers right now, if it has rides; cheap enough for every visit of the tab.
     func featuredYearReview() async -> Int? {
+        #if DEBUG
+        // `-showYearReview YES` (launch argument): the banner all year round, for testing. The review itself
+        // falls back to the latest year with rides.
+        if UserDefaults.standard.bool(forKey: "showYearReview") {
+            return Calendar.current.component(.year, from: .now)
+        }
+        #endif
         guard let year = YearReview.featuredYear(on: .now) else { return nil }
         await loadTraewellingTrips()
         let calendar = Calendar.current

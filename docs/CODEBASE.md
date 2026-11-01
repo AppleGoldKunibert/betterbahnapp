@@ -178,7 +178,7 @@ in `project.pbxproj`: new files join their target automatically.
 - `Features/Map/` – `TravelMapView` heatmap of past trips (`TravelMapHeatmap`; `RailwayTileOverlay`: OpenRailwayMap,
   512 px, disk cache 7 days, 10-min pause after 403/429). A ride both saved and checked in is drawn from the check-in
   (`RideMatch.uncovered`). `YearReviewView` (#319, "Jahresrückblick", only via `YearReviewBanner` on Verbindungen in
-  December and January): swipeable 9:16 cards from Kit `YearReview` (`AppModel.yearReview(for:)`, same
+  December and January; in debug builds all year with `-showYearReview YES`): swipeable 9:16 cards from Kit `YearReview` (`AppModel.yearReview(for:)`, same
   `TravelMapSelection` and cached heatmap, km from cached geometry, series from `rememberedFormation`), shared as an
   image (`ImageRenderer`, heatmap card via `Canvas`). `LiveTrainMapView`: one train live on its track
   (`AppModel.geometry(for:)`, never straight lines), opened from `LiveTrainIconTile`; `JourneyMapView` shows running
