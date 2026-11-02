@@ -1101,7 +1101,7 @@ struct AlternativeTrainsSheet: View {
                     }
 
                     if !options.isEmpty {
-                        SectionHeader(title: "Andere Züge", systemImage: "tram.fill",
+                        SectionHeader(title: String(localized: "Andere Züge"), systemImage: "tram.fill",
                                       trailing: notBefore == nil ? String(localized: "30 Min. vorher bis 3 Std. nachher") : String(localized: "3 Std. ab Ankunft"))
                             .padding(.top, 6)
                     }
