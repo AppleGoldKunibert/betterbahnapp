@@ -1,32 +1,40 @@
-# Bumps the app version on indevelopment when a PR is merged into it: +0.1 (patch reset to 0) for every
+# Bumps the app version on indevelopment after a PR is merged into it: +0.1 (patch reset to 0) for every
 # feature, +0.0.1 for every bug fix, and the build number +1 once per bumped PR. A feature or bug is an issue
 # the PR fixes ("Fixed #15", "Closes #15", … in the PR body) labeled "enhancement" or "bug" (an issue with
 # both counts as a feature), so a PR fixing two bugs bumps the patch twice. Changes without an issue are
 # listed in the PR body as lines starting with "Feature without Issue" or "Bug without Issue" (a "- " bullet
-# in front is fine), each counting once; the phrase in the middle of a sentence doesn't count. The
-# PR's own "enhancement" or "bug" label counts once more, but only when nothing above counted that kind.
-# Minors are applied before patches: 1.0.3 + one feature and one bug → 1.1.1. No label, no bump.
+# in front is fine), each counting once; the phrase in the middle of a sentence doesn't count. The PR's own
+# "enhancement" or "bug" label counts once more, but only when nothing above counted that kind. Minors are
+# applied before patches: 1.0.3 + one feature and one bug → 1.1.1. No label, no bump.
+#
+# PR branches are never touched, so the bump can't cause conflicts on them. indevelopment only takes
+# changes through reviewed PRs, so the bump commit is pushed with the review bot App's token: the App
+# needs "Contents: Read and write" and must be on the bypass list of indevelopment's ruleset.
+#
+# No concurrency group: GitHub keeps only one waiting run per group and would drop bumps when several PRs
+# are merged at once. Instead every run bumps the newest indevelopment and, when another bump or merge got
+# in first (push rejected), fetches again and bumps that, so every merged PR is counted exactly once.
+#
+# pull_request_target so the App token is also available for PRs from forks; the job never checks out or
+# runs code from the PR, only indevelopment. GitHub runs pull_request_target from the default branch, so
+# the copy of this file on prod is the one that runs.
 name: Bump version
 
 on:
-  pull_request:
+  pull_request_target:
     types: [closed]
     branches: [indevelopment]
 
 permissions:
-  contents: write
+  contents: read
   issues: read
   pull-requests: read
-
-concurrency:
-  group: bump-version
-  cancel-in-progress: false
 
 jobs:
   bump:
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - name: Count features and bug fixes
         id: count
@@ -82,10 +90,20 @@ jobs:
             core.setOutput("features", features);
             core.setOutput("bugs", bugs);
 
+      - name: Get the App token
+        id: app
+        if: steps.count.outputs.features != '0' || steps.count.outputs.bugs != '0'
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.REVIEW_BOT_APP_ID }}
+          private-key: ${{ secrets.REVIEW_BOT_PRIVATE_KEY }}
+          permission-contents: write
+
       - uses: actions/checkout@v4
         if: steps.count.outputs.features != '0' || steps.count.outputs.bugs != '0'
         with:
           ref: indevelopment
+          token: ${{ steps.app.outputs.token }}
 
       - name: Bump MARKETING_VERSION and build number
         if: steps.count.outputs.features != '0' || steps.count.outputs.bugs != '0'
@@ -93,40 +111,71 @@ jobs:
           FEATURES: ${{ steps.count.outputs.features }}
           BUGS: ${{ steps.count.outputs.bugs }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
           MERGER_LOGIN: ${{ github.event.pull_request.merged_by.login }}
           MERGER_ID: ${{ github.event.pull_request.merged_by.id }}
         run: |
           set -euo pipefail
           project=BetterBahn.xcodeproj/project.pbxproj
 
-          versions=$(grep -oE 'MARKETING_VERSION = [0-9.]+;' "$project" | sort -u)
-          builds=$(grep -oE 'CURRENT_PROJECT_VERSION = [0-9]+;' "$project" | sort -u)
-          if [ "$(wc -l <<< "$versions")" -ne 1 ] || [ "$(wc -l <<< "$builds")" -ne 1 ]; then
-            echo "::error::Targets don't share one version: $versions / $builds"
-            exit 1
-          fi
-
-          old=$(sed -E 's/.*= ([0-9.]+);/\1/' <<< "$versions")
-          build=$(sed -E 's/.*= ([0-9]+);/\1/' <<< "$builds")
-          IFS=. read -r major minor patch <<< "$old"
-          minor=${minor:-0}
-          patch=${patch:-0}
-          if [ "$FEATURES" -gt 0 ]; then
-            minor=$((minor + FEATURES))
-            patch=0
-          fi
-          patch=$((patch + BUGS))
-          new="$major.$minor.$patch"
-          new_build=$((build + 1))
-
-          sed -i -E "s/MARKETING_VERSION = [0-9.]+;/MARKETING_VERSION = $new;/; s/CURRENT_PROJECT_VERSION = [0-9]+;/CURRENT_PROJECT_VERSION = $new_build;/" "$project"
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # The person who merged the PR authors the bump, so it counts as theirs and not as a bot contributor.
           author=()
           [ -n "$MERGER_LOGIN" ] && author=(--author="$MERGER_LOGIN <$MERGER_ID+$MERGER_LOGIN@users.noreply.github.com>")
-          git commit -qam "Version $new ($new_build) for #$PR_NUMBER" "${author[@]}"
-          git push origin HEAD:indevelopment
 
-          echo "Version $old ($build) → $new ($new_build): $FEATURES feature(s), $BUGS bug fix(es) in #$PR_NUMBER" >> "$GITHUB_STEP_SUMMARY"
+          # "1.6.2 21" for a commit, "mixed" when its targets don't share one version.
+          version_of() {
+            local versions builds
+            versions=$(git show "$1:$project" | grep -oE 'MARKETING_VERSION = [0-9.]+;' | sort -u)
+            builds=$(git show "$1:$project" | grep -oE 'CURRENT_PROJECT_VERSION = [0-9]+;' | sort -u)
+            if [ "$(wc -l <<< "$versions")" -ne 1 ] || [ "$(wc -l <<< "$builds")" -ne 1 ]; then
+              echo mixed
+            else
+              echo "$(sed -E 's/.*= ([0-9.]+);/\1/' <<< "$versions") $(sed -E 's/.*= ([0-9]+);/\1/' <<< "$builds")"
+            fi
+          }
+
+          # A PR that already changed the version itself (bumped by hand, or by the old workflow that bumped
+          # PR branches before the merge) keeps it.
+          git fetch -q --depth=2 origin "$MERGE_SHA"
+          if [ "$(version_of "$MERGE_SHA")" != "$(version_of "$MERGE_SHA^1")" ]; then
+            echo "#$PR_NUMBER brought its own version ($(version_of "$MERGE_SHA")), nothing to bump" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          for attempt in 1 2 3 4 5 6; do
+            git fetch -q origin indevelopment
+            git checkout -q --detach origin/indevelopment
+
+            read -r old build <<< "$(version_of HEAD)"
+            if [ "$old" = mixed ]; then
+              echo "::error::Targets on indevelopment don't share one version"
+              exit 1
+            fi
+            IFS=. read -r major minor patch <<< "$old"
+            minor=${minor:-0}
+            patch=${patch:-0}
+            if [ "$FEATURES" -gt 0 ]; then
+              minor=$((minor + FEATURES))
+              patch=0
+            fi
+            patch=$((patch + BUGS))
+            new="$major.$minor.$patch"
+            new_build=$((build + 1))
+
+            sed -i -E "s/MARKETING_VERSION = [0-9.]+;/MARKETING_VERSION = $new;/; s/CURRENT_PROJECT_VERSION = [0-9]+;/CURRENT_PROJECT_VERSION = $new_build;/" "$project"
+            git commit -qam "Version $new ($new_build) for #$PR_NUMBER" "${author[@]}"
+
+            # Not forced: when another merge or bump got in first, the push is rejected and the loop bumps
+            # the newer indevelopment instead.
+            if git push -q origin HEAD:refs/heads/indevelopment; then
+              echo "Version $old ($build) → $new ($new_build): $FEATURES feature(s), $BUGS bug fix(es) in #$PR_NUMBER" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "indevelopment moved, trying again ($attempt)"
+            sleep $((attempt * 5))
+          done
+
+          echo "::error::Could not push the bump for #$PR_NUMBER. If the push was refused by the ruleset, add the review bot App to indevelopment's bypass list."
+          exit 1
