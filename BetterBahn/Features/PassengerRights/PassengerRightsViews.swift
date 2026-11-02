@@ -51,7 +51,7 @@ extension AppModel {
 extension ConnectionNotifier {
     static func notify(_ claim: PassengerRightsClaim, journey: Journey) async {
         let content = UNMutableNotificationContent()
-        content.title = String(localized: "Anspruch auf \(claim.compensation.percent) % Entschädigung")
+        content.title = String(localized: "Anspruch auf \(claim.compensation.percent.formatted(.percent)) Entschädigung")
         let destination = journey.legs.last?.destination.displayName ?? String(localized: "deinem Ziel")
         content.body = String(localized: "Du bist \(claim.delayMinutes) Min. später in \(destination) angekommen. Unter „Vergangene Fahrten“ kannst du den Antrag vorbereiten.")
         content.sound = .default
@@ -64,7 +64,7 @@ extension ConnectionNotifier {
 // MARK: - Views
 
 extension PassengerRightsClaim {
-    var title: String { String(localized: "Du hast Anspruch auf \(compensation.percent) % Entschädigung") }
+    var title: String { String(localized: "Du hast Anspruch auf \(compensation.percent.formatted(.percent)) Entschädigung") }
 
     var explanation: String {
         switch cause {
@@ -81,7 +81,7 @@ struct PassengerRightsBadge: View {
     @Environment(\.appDesign) private var design
 
     var body: some View {
-        Label("Anspruch auf \(claim.compensation.percent) % Entschädigung", systemImage: "eurosign.circle.fill")
+        Label("Anspruch auf \(claim.compensation.percent.formatted(.percent)) Entschädigung", systemImage: "eurosign.circle.fill")
             .font(.caption.weight(.semibold))
             .fontDesign(design == .fahrkarte ? .rounded : nil)
             .foregroundStyle(Color.punctual)

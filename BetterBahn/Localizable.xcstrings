@@ -1014,6 +1014,16 @@
         }
       }
     },
+    "1 Fahrt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 trip"
+          }
+        }
+      }
+    },
     "1 Jahr" : {
       "localizations" : {
         "en" : {
@@ -1778,12 +1788,21 @@
       }
     },
     "Andere Züge" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Other Trains"
+          }
+        }
+      }
+    },
+    "Andere Züge zeigen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show other trains"
           }
         }
       }
@@ -1996,12 +2015,12 @@
         }
       }
     },
-    "Anspruch auf %lld %% Entschädigung" : {
+    "Anspruch auf %@ Entschädigung" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Entitled to %lld%% compensation"
+            "value" : "Entitled to %@ compensation"
           }
         }
       }
@@ -2377,17 +2396,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "bahn.de wants to confirm the search. Please complete it on the page, then BetterBahn will load your ticket."
-          }
-        }
-      }
-    },
-    "bahn.de: %@" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "bahn.de: %@"
           }
         }
       }
@@ -3526,12 +3534,12 @@
         }
       }
     },
-    "Du hast Anspruch auf %lld %% Entschädigung" : {
+    "Du hast Anspruch auf %@ Entschädigung" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "You're entitled to %lld%% compensation"
+            "value" : "You're entitled to %@ compensation"
           }
         }
       }
@@ -6225,6 +6233,36 @@
         }
       }
     },
+    "Strecken über Mobilfunk laden" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Load tracks on mobile data"
+          }
+        }
+      }
+    },
+    "Zeigt auf den Karten auch die anderen fahrenden Züge. Über Mobilfunk kann das einige MB pro Karte kosten." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shows the other running trains on the maps too. On mobile data this can cost a few MB per map."
+          }
+        }
+      }
+    },
+    "Zeigt die ganze Fahrt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shows the whole trip"
+          }
+        }
+      }
+    },
     "Öffne eine gespeicherte Reise und tippe auf „Regelmäßig fahren“." : {
       "localizations" : {
         "en" : {
@@ -7154,6 +7192,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Special livery: %@"
+          }
+        }
+      }
+    },
+    "Sortieren" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sort"
           }
         }
       }

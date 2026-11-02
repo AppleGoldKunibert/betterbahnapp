@@ -670,6 +670,40 @@
         }
       }
     },
+    "12-teilig" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "12-teilig"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "12 cars"
+          }
+        }
+      }
+    },
+    "13-teilig" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "13-teilig"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "13 cars"
+          }
+        }
+      }
+    },
     "15 Sek." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -734,6 +768,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "30 sec"
+          }
+        }
+      }
+    },
+    "7-teilig" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "7-teilig"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "7 cars"
           }
         }
       }
@@ -2929,6 +2980,23 @@
         }
       }
     },
+    "Gesammelte zuerst" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gesammelte zuerst"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Collected first"
+          }
+        }
+      }
+    },
     "Geschäftlich" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3811,6 +3879,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Several coaches missing"
+          }
+        }
+      }
+    },
+    "Meiste Fahrten" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Meiste Fahrten"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Most trips"
           }
         }
       }
@@ -5265,6 +5350,23 @@
         }
       }
     },
+    "Tz-Nummer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tz-Nummer"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tz number"
+          }
+        }
+      }
+    },
     "Türstörung" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6000,6 +6102,23 @@
         }
       }
     },
+    "Weitere" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Weitere"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Others"
+          }
+        }
+      }
+    },
     "Wetter" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6167,6 +6286,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Invalid train number."
+          }
+        }
+      }
+    },
+    "Zuletzt gefahren" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zuletzt gefahren"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last ridden"
           }
         }
       }

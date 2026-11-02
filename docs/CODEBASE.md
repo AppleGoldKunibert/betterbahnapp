@@ -188,10 +188,23 @@ in `project.pbxproj`: new files join their target automatically.
   Fahrkarte: Liquid Glass); on Fahrkarte the travel map's range and numbers and the live map's status are tickets
   with `MapTicketLabel` fields. The year review's cards are accent-colored stories on black (Minimal) or tickets on
   `Color.canvas` (Fahrkarte), in the shared image too. Accent marks use `Color.brandText`/`.onBrandText`; the
-  review's white-text stories darken the accent with `RGBColor.readable(on:)`.
+  review's white-text stories darken the accent with `RGBColor.readable(on:)`. trains too. `LiveTrainsLayer.swift` (#505, all three maps): moves the own trains once a second along their track
+  (Kit `LiveTrainMotion`, `OwnTrain` from the leg) and, with `AppSettings.showOtherTrains`, shows every other train
+  around (Kit `LiveTrainField`, at most 150, nearest the middle; `OtherTrainsAnnotator` for the MKMapView maps,
+  `OtherTrainMarkerView` for the SwiftUI one). bahn.jetzt's list comes at the position interval; Transitous' tracks
+  only for the visible area up to 2.5° × 4° (`LiveTrainCoverage`, 20 min ahead, reloaded on leaving the area), never
+  in Low Data Mode, on mobile data only with `otherTrainsOnMobileData`. Jumps on new data are blended over 3 s
+  (`LiveTrainSmoother`); markers animate linearly between the seconds. Own trains show their speed (`ownSpeeds`; in
+  the MKMapView maps in the marker's title), legs saved without a track get it via `AppModel.geometry(for:)`. A
+  tapped other train (callout button; on the live map a tap shows name and next stop, a second tap opens it) opens
+  `LiveTrainTripSheet`: `TripView` at the stop it runs to next (Kit `BoardEntry.liveTrain`).
 - `Features/Collection/` – `CollectionView` (#384, "Sammlung", `CollectionButton` next to "Vergangene Fahrten" on
   Verbindungen): progress per category, `CollectionCategoryView` grid (not collected greyed out), sheet with the first and
-  all rides. Kit `TravelCollection` from the travel map's rides (`AppModel.travelCollection()`); trains only from
+  all rides. Triebzüge (#521): `CollectionTrainsetsView` list to expand by series, then length (ICE 4 7-/12-/13-teilig),
+  then Tz to its rides, sorted per series (`TrainsetOrder`: Tz, most rides, last ridden, collected first); a ride
+  opens its journey (`AppModel.collectionRoute(for:)`: the saved journey, also one a check-in replaced, else the
+  check-in). Category pages are pushed by value (`ConnectionsRoute.collectionCategory`, data from
+  `AppModel.collectionSnapshot`): a view-based link mixed with the path put the page back on top of the journey. Kit `TravelCollection` from the travel map's rides (`AppModel.travelCollection()`); trains only from
   `rememberedFormations` (Kit `RideMatch.rememberedFormation`: a Träwelling check-in gets the Tz remembered for the
   saved leg of the same train it replaced), so other check-ins count only for stations. Series also count a planned
   series (`TrainSeriesTag` remembers it until a Tz is seen); liveries and trainsets need the Tz. "Neu" badges: IDs collected since the last
@@ -288,6 +301,8 @@ in `project.pbxproj`: new files join their target automatically.
   symbols and Liquid Glass buttons. Branch on `@Environment(\.appDesign)` in a page only where the layout differs.
 - `Shared/ClosesMenusOnScroll.swift` – `.closesMenusOnScroll()` on scroll views with a `Menu` or menu `Picker` in their
   content (journey details, Settings, check-in): an open menu otherwise slides along while the content scrolls.
+  Only for a scroll that starts at rest (a menu can only be open then), not when the page is grabbed again while it
+  glides, which stuttered; only the shown views of the scenes on screen are searched.
   `.resetsWhenMenusCloseOnScroll()` rebuilds a glass menu button (`JourneyShareButton`) that stayed where its menu was.
 - `Shared/StationPicker.swift` (`StationInput`, `TimeSelector`), `LocationService`, `PreviewData`, `VagonwebBrowser`.
   `Shared/DebugScreens.swift` (DEBUG): `-debugScreen <name>`, `-seedDemoTrips YES`, `-seedStressTrips <count>`, `-seedSeatMapTrips YES` (two made-up ICEs leaving in 20 min with a reservation and a made-up Wagenreihung, `CoachSequence.seatMapDemo`: ICE 1 turned round, Wagen 12 Platz 43; ICE 3neo Wagen 24 Platz 78), `-seedCoachAdviceTrips YES` (coach advice, #383: ICE 9911 → Hannover Hbf Gleis 12 with ICE 9912 6 min later on Gleis 11, again as ICE 9921/9922 with a seat in the front coach; ICE 9913 ending at Frankfurt(Main)Hbf Gleis 13, leaving a minute after seeding and 20 min long; ICE 9931/9932 like 9911/9912 but left 10 min ago, for saving a seat, #410).
@@ -302,7 +317,10 @@ in `project.pbxproj`: new files join their target automatically.
   `CO2Comparison` (#386: km × Umweltbundesamt g/Pkm per product, reference year 2024; car and domestic flight over the
   same km; walks, ferries and unknown products left out).
 - `TravelCollection` (#384) – collected special liveries (`TrainsetLiveries`, per Tz), series (`TravelCollection.series`,
-  unit model via `seriesName(of:)`: "ICE 3neo Redesign" → "ICE 3neo"), named trainsets (`TrainsetNames`) and
+  unit model via `seriesName(of:)`: "ICE 3neo Redesign" → "ICE 3neo"), trainsets (#521: every Tz of `TrainsetFleet`, DB
+  Fernverkehr's active fleet per series and ICE 4 length from Wikipedia, plus ridden ones outside it that are long-distance
+  or named in `TrainsetNames`; `trainsetSeries` groups them; unnamed ones collected before the update aren't "Neu"; a
+  number longer than 4 digits is an IC 1 coach set remembered by older versions and counts for nothing) and
   `BigStations` (DB price class 1 and 2, shown as "Großer"/"Mittlerer Bahnhof", by DHID via `StationNames.dhid(for:)`; boarding, alighting, changing; arriving
   and leaving within 3 h is one visit). Only arrived, not cancelled legs; IC 1 coach sets don't count.
 - `StationNames` (#205) – `Station.displayName`: DB's name for German stations, the national railway's with accents
@@ -483,7 +501,17 @@ in `project.pbxproj`: new files join their target automatically.
   the 2 latest of the previous 30 min at the origin (`TrainRoutePlanner.plan(pickedEarlier:)`). Picked run pinned in
   `TrainRequirement.tripId`.
 - `Transit/BahnJetzt/` – live positions from `/api/journeys` (`AppModel.followTrainPositions()` while a map shows);
-  long-distance by number, regional/S-Bahn by `Line.tripNumber`.
+  long-distance by number, regional/S-Bahn by `Line.tripNumber`. `runningTrains()`: the whole list (other trains, #505).
+- `Transit/LiveTrains/` (#505) – `TrackPath` (meters along a polyline, `locate`), `LiveTrainSegment` + `MapArea` and
+  `TransitousProvider.liveTrainSegments(in:zoom:from:to:)` (`v1/map/trips`: each train's stretch between two stops with
+  track (polyline precision 5) and real-time times; trains only, S-Bahns filed as `METRO` too, night buses named
+  "20N" dropped, "RB58 (4761)" split into line and run number). `LiveTrainField`: per trip the bahn.jetzt fix
+  (long-distance by name, regional by run number, else line name nearest the timetable), runs on at its speed for
+  90 s at most and never past the next stop, else by timetable; S-Bahns (`isSuburban`, too frequent to tell apart)
+  never by timetable, only with a fix within 4 km of their timetable spot; own trains left out by name within 3 km;
+  unmatched bahn.jetzt trains stay put. `LiveTrainMotion` (own train on its leg's track, waits at its stops; without bahn.jetzt speed it works one out
+  from the last two different fixes, standing after a minute unmoved), `LiveTrainSmoother`,
+  `LiveTrainCoverage` (when to load which area).
 - `Transit/Lifts/` – lifts out of order (#486). `FacilityClient.brokenLifts()`: DB FaSta's whole list through `betterbahn2`
   (never a station; cached 5 min). FaSta numbers stations its own way, so `LiftCheck.alerts(at:)` goes by position: within
   60 m of a platform edge in `StationPlatforms`, else 300 m (150 m with platforms) of the station. Tracks from the

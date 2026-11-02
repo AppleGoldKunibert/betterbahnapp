@@ -94,8 +94,10 @@ public enum UICBarcode {
 }
 
 private extension Int {
+    /// Digits only: `Int(String)` would also take a sign, and a negative length traps when slicing.
     init?(ascii bytes: ArraySlice<UInt8>) {
-        guard let value = Int(String(decoding: bytes, as: UTF8.self)) else { return nil }
+        guard !bytes.isEmpty, bytes.allSatisfy({ (0x30...0x39).contains($0) }),
+              let value = Int(String(decoding: bytes, as: UTF8.self)) else { return nil }
         self = value
     }
 }
