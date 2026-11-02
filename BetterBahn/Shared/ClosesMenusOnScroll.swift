@@ -29,12 +29,19 @@ extension EnvironmentValues {
 
 private struct ClosesMenusOnScroll: ViewModifier {
     @State private var closings = 0
+    /// Whether the touch that's scrolling came while the page was at rest; only read in the scroll callback.
+    @State private var startedAtRest = true
 
     func body(content: Content) -> some View {
         content
             .environment(\.menuClosingScrolls, closings)
-            .onScrollPhaseChange { _, phase in
-                guard phase == .interacting else { return }
+            .onScrollPhaseChange { old, phase in
+                // A finger first touches (tracking), then drags (interacting).
+                if phase == .tracking { startedAtRest = old == .idle }
+                // Only when a scroll starts from rest: a menu can only be opened then. Grabbing the page again
+                // while it still glides (a quick second swipe, changing direction) used to walk all views and
+                // rebuild the share button each time, which made the page stutter.
+                guard phase == .interacting, old == .idle || (old == .tracking && startedAtRest) else { return }
                 closeOpenMenus()
                 closings += 1
             }
@@ -50,13 +57,17 @@ private struct ResetsWhenMenusClose: ViewModifier {
 }
 
 /// SwiftUI has no way to close a menu, but each one is shown by a `UIContextMenuInteraction`.
+/// Only the visible windows of the scenes on screen, and only views that are shown: the ones behind the other
+/// tabs and hidden ones can't have an open menu.
 private func closeOpenMenus() {
-    for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
-        for window in scene.windows { closeMenus(in: window) }
+    for case let scene as UIWindowScene in UIApplication.shared.connectedScenes
+    where scene.activationState == .foregroundActive {
+        for window in scene.windows where !window.isHidden { closeMenus(in: window) }
     }
 }
 
 private func closeMenus(in view: UIView) {
+    guard !view.isHidden, view.alpha > 0 else { return }
     for case let interaction as UIContextMenuInteraction in view.interactions { interaction.dismissMenu() }
     for subview in view.subviews { closeMenus(in: subview) }
 }

@@ -267,6 +267,8 @@ in `project.pbxproj`: new files join their target automatically.
   `InfoChip`, `OperatorLabel`, `Color.brand`, `.transition(.fold)` …; reuse these instead of new styling.
 - `Shared/ClosesMenusOnScroll.swift` – `.closesMenusOnScroll()` on scroll views with a `Menu` or menu `Picker` in their
   content (journey details, Settings, check-in): an open menu otherwise slides along while the content scrolls.
+  Only for a scroll that starts at rest (a menu can only be open then), not when the page is grabbed again while it
+  glides, which stuttered; only the shown views of the scenes on screen are searched.
   `.resetsWhenMenusCloseOnScroll()` rebuilds a glass menu button (`JourneyShareButton`) that stayed where its menu was.
 - `Shared/StationPicker.swift` (`StationInput`, `TimeSelector`), `LocationService`, `PreviewData`, `VagonwebBrowser`.
   `Shared/DebugScreens.swift` (DEBUG): `-debugScreen <name>`, `-seedDemoTrips YES`, `-seedStressTrips <count>`, `-seedSeatMapTrips YES` (two made-up ICEs leaving in 20 min with a reservation and a made-up Wagenreihung, `CoachSequence.seatMapDemo`: ICE 1 turned round, Wagen 12 Platz 43; ICE 3neo Wagen 24 Platz 78), `-seedCoachAdviceTrips YES` (coach advice, #383: ICE 9911 → Hannover Hbf Gleis 12 with ICE 9912 6 min later on Gleis 11, again as ICE 9921/9922 with a seat in the front coach; ICE 9913 ending at Frankfurt(Main)Hbf Gleis 13, leaving a minute after seeding and 20 min long; ICE 9931/9932 like 9911/9912 but left 10 min ago, for saving a seat, #410).
