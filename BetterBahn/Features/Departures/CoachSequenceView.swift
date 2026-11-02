@@ -339,7 +339,7 @@ struct CoachSequencePanel: View {
             }
             #if DEBUG
             if let bahnDeNote {
-                Text("bahn.de: \(bahnDeNote)")
+                Text(verbatim: "bahn.de: \(bahnDeNote)")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .textSelection(.enabled)

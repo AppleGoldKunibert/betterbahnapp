@@ -542,17 +542,6 @@
         }
       }
     },
-    "%lld %%" : {
-      "comment" : "Percentage, e.g. 33 %",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld%%"
-          }
-        }
-      }
-    },
     "%lld Check-ins" : {
       "localizations" : {
         "en" : {
@@ -1734,7 +1723,6 @@
       }
     },
     "Andere Züge" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1962,12 +1950,12 @@
         }
       }
     },
-    "Anspruch auf %lld %% Entschädigung" : {
+    "Anspruch auf %@ Entschädigung" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Entitled to %lld%% compensation"
+            "value" : "Entitled to %@ compensation"
           }
         }
       }
@@ -2313,17 +2301,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "bahn.de wants to confirm the search. Please complete it on the page, then BetterBahn will load your ticket."
-          }
-        }
-      }
-    },
-    "bahn.de: %@" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "bahn.de: %@"
           }
         }
       }
@@ -3412,12 +3389,12 @@
         }
       }
     },
-    "Du hast Anspruch auf %lld %% Entschädigung" : {
+    "Du hast Anspruch auf %@ Entschädigung" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "You're entitled to %lld%% compensation"
+            "value" : "You're entitled to %@ compensation"
           }
         }
       }
