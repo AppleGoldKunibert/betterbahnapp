@@ -81,4 +81,23 @@ import Testing
         #expect(cancelled.exitReminders(lead: lead, now: now).map(\.station) == ["Fulda"])
         #expect(journey().exitReminders(lead: lead, now: now.addingTimeInterval(60 * 60)).map(\.station) == ["Berlin Hbf"])
     }
+
+    /// A cancelled connecting train isn't announced as a transfer with time and platform (#482).
+    @Test func cancelledConnectionIsSaidInsteadOfTheTransfer() throws {
+        var cancelled = journey()
+        cancelled.legs[1].cancelled = true
+        let reminder = try #require(cancelled.exitReminders(lead: lead, now: now, dispositions: [cancelled.legs[1].id: .waiting]).first)
+        #expect(reminder.body == "In 5 Min. (+23) Ankunft in Fulda – ICE 578 fällt aus")
+    }
+
+    /// Also when only its departure at the transfer stop is cancelled.
+    @Test func cancelledDepartureAtTheTransferStopIsSaid() throws {
+        var cancelled = journey()
+        var start = Stopover(station: fulda, arrival: nil, departure: time(56, delay: 23),
+                             arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+        start.departureCancelled = true
+        cancelled.legs[1].stopovers = [start]
+        let reminder = try #require(cancelled.exitReminders(lead: lead, now: now).first)
+        #expect(reminder.body == "In 5 Min. (+23) Ankunft in Fulda – ICE 578 fällt aus")
+    }
 }
