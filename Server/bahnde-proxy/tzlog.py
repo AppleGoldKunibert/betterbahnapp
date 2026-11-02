@@ -34,8 +34,9 @@ GROUP_NAME = re.compile(r"^(ICE|ICD)(\d{1,5})$")
 MAX_TYPES = 12
 BOARD_PAGE = 7
 
-# Stations whose ICE/IC departure boards cover (nearly) every long-distance train of Germany, Switzerland,
-# the Netherlands and Austria: bahn.de's EVA number and name.
+# Stations whose ICE/IC departure boards together list every ICE and IC that runs in Germany (checked on
+# 2026-10-30 against the train statistics' data: all 635 ICE runs, and with the last four entries all IC runs), plus
+# the long-distance trains of Switzerland, the Netherlands and Austria: bahn.de's EVA number and name.
 HUBS = [
     ("8011160", "Berlin Hbf"), ("8002549", "Hamburg Hbf"), ("8000261", "München Hbf"),
     ("8000105", "Frankfurt(Main)Hbf"), ("8000207", "Köln Hbf"), ("8000152", "Hannover Hbf"),
@@ -57,6 +58,9 @@ HUBS = [
     ("8000294", "Osnabrück Hbf"), ("8000049", "Braunschweig Hbf"), ("8000128", "Göttingen"),
     ("8000036", "Bielefeld Hbf"), ("8000323", "Saarbrücken Hbf"), ("8000134", "Trier Hbf"),
     ("8000156", "Heidelberg Hbf"), ("8010338", "Stralsund Hbf"),
+    # IC lines that touch none of the above (measured on 2026-10-30 against the train statistics' data).
+    ("8000073", "Singen(Hohentwiel)"), ("8000249", "Memmingen"), ("8000103", "Flensburg"),
+    ("8011201", "Flughafen BER"),
 ]
 
 
