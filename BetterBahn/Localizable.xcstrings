@@ -94,6 +94,7 @@
       }
     },
     "%@\n%@" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -312,6 +313,9 @@
           }
         }
       }
+    },
+    "%@ km" : {
+
     },
     "%@ kommt um %@ in %@ an, %@ fährt dort schon um %@. Andere Züge dafür anzeigen oder den Plan so lassen?" : {
       "localizations" : {
