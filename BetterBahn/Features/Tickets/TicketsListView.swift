@@ -18,7 +18,7 @@ struct TicketButton: View {
                 .frame(width: 40, height: 40)
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular, in: .circle)
+        .roundActionBackground()
         .tint(.brandText)
         .accessibilityLabel("Ticket anzeigen")
         .sheet(isPresented: $showTickets) {

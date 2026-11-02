@@ -130,7 +130,7 @@ in `project.pbxproj`: new files join their target automatically.
   and pins that run; "Ein- und Ausstieg selbst angeben"), `JourneyDetailView` (+ `LegCard`, `TransferRow`,
   alternatives sheets; #504: Minimal has the summary card, Fahrkarte draws it as a ticket with the day and
   `JourneyTicketCaption` "Von"/"Nach" over the times and the actions below a `TicketPerforation`; `.journeyRoundedType()`
-  gives titles SF Rounded on the ticket, `.journeyRoundActionSurface()` lays the round glass actions on a flat disc in Minimal;
+  gives titles SF Rounded on the ticket, the round actions use `.roundActionBackground()` (flat disc in Minimal, glass in Fahrkarte);
   the map's lines and markers, chips and symbols use `Color.brandText`, the glass buttons' labels `Color.onBrand`; below the legs `CO2SavingButton` "−42 kg CO₂" → `CO2Sheet`, #386, from Kit `CO2Comparison`
   with the legs' cached track geometry; `WeatherLabel` "☀ 18° bei Ankunft" under the destination (summary card and the
   last leg) and "beim Umstieg" under a transfer station with more than 15 min to the next train
@@ -207,7 +207,8 @@ in `project.pbxproj`: new files join their target automatically.
   `TicketFace` (#504) lays out `TicketView` and `TravelPassView` in both designs: Minimal barcode plus a details
   `Card`; Fahrkarte one ticket (`ticketBackground()`) with the barcode between two `TicketPerforation`s and the
   `TicketDetail`s as `TicketFieldLabel` capitals over their values.
-- `Features/Trips/TripsView.swift` – upcoming/past journeys, `SaveJourneyButton` (warns "Zug ist
+- `Features/Trips/TripsView.swift` – upcoming/past journeys (`PastTripsView` under a header per month; #504
+  Fahrkarte draws them as `PastTripTicket`, like the search page's `TripTicket`), `SaveJourneyButton` (warns "Zug ist
   reservierungspflichtig", in bike mode also "Fahrradreservierung nötig" / "Keine Fahrradmitnahme", via
   `AppModel.saveWarnings`; ticket/reservation imports never warn).
 - Bike mode (#398): Settings → Fahrrad (`AppSettings.bikeOption`: Ausblenden (default), Klapprad, Fahrrad; synced). Unless
@@ -230,7 +231,8 @@ in `project.pbxproj`: new files join their target automatically.
   `TraewellingLoginButton`, `CustomEmojiViews` (`EmojiMessageField`, `EmojiText`), `CheckinDetailSheet` ("Check-in
   ansehen" for check-ins made in the app, `AppModel.checkinStatusIDs`: edit text/visibility/trip type/tags, delete,
   "Mitreisende"), `CheckoutPrompt` (removing a journey with check-ins: check out at the last stop reached via
-  `TraewellingClient.earlyExit`, delete them, or keep them).
+  `TraewellingClient.earlyExit`, delete them, or keep them). `CheckinTicket` (#504): Minimal a `Card`, Fahrkarte a
+  `ticketBackground()` ticket with the line above a perforation; small buttons in cards use `.compactActionStyle()`.
   `FollowedCheckinsSection` (#196): who the user follows is checked in now, above "Deine Reisen"
   (`AppModel.followedCheckins`, every 2 min while Verbindungen shows, `keepFollowedCheckinsFresh`; one entry per person
   via `TraewellingClient.grouped`). Detail: train (`LegTripSheet`, hidden for manual trips), map with live position
@@ -256,6 +258,7 @@ in `project.pbxproj`: new files join their target automatically.
   (#504) draws the card as a small ticket with the percentage large.
 - `Features/Sharing/` – shared-journey and DB-share previews; `JourneyShareButton` (menu: "Reise teilen" short link,
   falls back to the long one, `UIActivityViewController`; "Ankunft teilen" #317 adds an `ArrivalShare`, until 2 h after the arrival).
+  `.roundActionBackground()` draws its and `CalendarButton`'s 40 pt circle in either design.
 - `Features/Commute/` – regular trips (#397): `RegularTripButton` (↻ next to "Gespeichert") → `RegularTripEditor` (weekdays,
   question 15–60 min before, delay threshold, "Pausieren bis"); Settings → Meine Reisen → `RegularTripsView`. `CommuteModel.swift`:
   `AppModel.regularTrips` (synced, `CloudList` key `regularTrips`), `scheduleCommuteQuestions()` (one-shot "Fährst du heute?" for

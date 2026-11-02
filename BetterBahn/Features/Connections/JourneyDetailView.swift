@@ -519,8 +519,7 @@ struct JourneyDetailView: View {
                         .frame(width: 34, height: 34)
                 }
                 .buttonStyle(.plain)
-                .glassEffect(.regular, in: .circle)
-                .journeyRoundActionSurface()
+                .roundActionBackground()
                 .accessibilityLabel("Reise auf Karte anzeigen")
             }
         }
@@ -551,15 +550,11 @@ struct JourneyDetailView: View {
                 HStack(spacing: 8) {
                     if !model.tickets(for: journey).isEmpty {
                         TicketButton(tickets: model.tickets(for: journey), journey: journey)
-                            .journeyRoundActionSurface()
                     }
                     JourneyShareButton(journey: journey, title: shareTitle)
-                        .journeyRoundActionSurface()
                     if !readOnly, let entry = model.savedEntry(for: journey) {
                         CalendarButton(entry: entry)
-                            .journeyRoundActionSurface()
                         RegularTripButton(journey: journey)
-                            .journeyRoundActionSurface()
                     }
                     if model.settings.editJourneyEnabled {
                         Button {
@@ -570,8 +565,7 @@ struct JourneyDetailView: View {
                                 .frame(width: 40, height: 40)
                         }
                         .buttonStyle(.plain)
-                        .glassEffect(.regular, in: .circle)
-                        .journeyRoundActionSurface()
+                        .roundActionBackground()
                         .accessibilityLabel("Reise bearbeiten")
                     }
                 }
@@ -645,12 +639,6 @@ extension View {
     func journeyRoundedType() -> some View {
         modifier(JourneyRoundedType())
     }
-
-    /// Under a round glass action of the journey's summary: in Minimal a card-colored disc with a hairline
-    /// edge, so the button reads flat like the page's other buttons; Fahrkarte keeps the glass alone.
-    func journeyRoundActionSurface() -> some View {
-        modifier(JourneyRoundActionSurface())
-    }
 }
 
 private struct JourneyRoundedType: ViewModifier {
@@ -658,20 +646,6 @@ private struct JourneyRoundedType: ViewModifier {
 
     func body(content: Content) -> some View {
         content.fontDesign(design == .fahrkarte ? .rounded : nil)
-    }
-}
-
-private struct JourneyRoundActionSurface: ViewModifier {
-    @Environment(\.appDesign) private var design
-
-    func body(content: Content) -> some View {
-        if design == .minimal {
-            content
-                .background(Circle().fill(Color.card))
-                .overlay(Circle().strokeBorder(Color.hairline, lineWidth: 1).allowsHitTesting(false))
-        } else {
-            content
-        }
     }
 }
 
