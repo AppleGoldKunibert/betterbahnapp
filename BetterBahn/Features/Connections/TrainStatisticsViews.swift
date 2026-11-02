@@ -110,7 +110,7 @@ struct TrainStatisticsRows {
     static func minutes(_ value: Int) -> String { value >= 0 ? "+\(value) min" : "\(value) min" }
 
     /// "33 %".
-    static func percentText(_ share: Double) -> String { String(localized: "\(Int((share * 100).rounded())) %") }
+    static func percentText(_ share: Double) -> String { share.formatted(.percent.precision(.fractionLength(0))) }
 
     /// "33 %"; nil when it rounds to nothing.
     static func percent(_ share: Double) -> String? {
