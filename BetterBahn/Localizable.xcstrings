@@ -3951,12 +3951,32 @@
         }
       }
     },
+    "Fahrten anzeigen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show rides"
+          }
+        }
+      }
+    },
     "Fahrten auf der Karte zeigen" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Show Trips on the Map"
+          }
+        }
+      }
+    },
+    "Fahrten ausblenden" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide rides"
           }
         }
       }

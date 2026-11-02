@@ -484,19 +484,38 @@ private struct TrainsetGroupLabel: View {
 }
 
 /// One row per Tz: a collected one expands to its rides, one not collected yet is greyed out.
+/// The rides are plain rows under the Tz: a third level of `DisclosureGroup` made the whole list jump down
+/// when one opened (#539).
 private struct TrainsetRows: View {
     let items: [TravelCollection.Item]
     let newIDs: Set<String>
+    @State private var expanded: Set<String> = []
 
     var body: some View {
         ForEach(items) { item in
             if item.isCollected {
-                DisclosureGroup {
-                    ForEach(Array(item.sightings.enumerated()), id: \.offset) { _, sighting in
-                        CollectionRideLink(sighting: sighting)
+                let isExpanded = expanded.contains(item.id)
+                Button {
+                    withAnimation(.snappy) {
+                        if isExpanded { expanded.remove(item.id) } else { expanded.insert(item.id) }
                     }
                 } label: {
-                    TrainsetLabel(item: item, isNew: newIDs.contains(item.id))
+                    HStack(spacing: 8) {
+                        TrainsetLabel(item: item, isNew: newIDs.contains(item.id))
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    }
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint(isExpanded ? Text("Fahrten ausblenden") : Text("Fahrten anzeigen"))
+                if isExpanded {
+                    ForEach(Array(item.sightings.enumerated()), id: \.offset) { _, sighting in
+                        CollectionRideLink(sighting: sighting)
+                            .padding(.leading, 28)
+                    }
                 }
             } else {
                 TrainsetLabel(item: item, isNew: false)
