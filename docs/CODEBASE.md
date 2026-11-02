@@ -125,7 +125,7 @@ in `project.pbxproj`: new files join their target automatically.
   `JourneyLiveStatus`: departure, ridden train or transfer, from 10 min before arriving the change after it) and the
   series of the trains ahead (`AppModel.trainSeries(of:)`); "Zuletzt gesucht" folds (`recentSearchesExpanded`); in
   `ConnectionsTicketViews.swift`, `.ticketBackground()` notches the ticket at each `TicketPerforation`), `ConnectionSearch`, `RouteOptionsEditor` (vias, products, max
-  transfers), `JourneyResultsView` + `JourneyCard`, `TrainNumberSheet` ("Bestimmten Zug wählen", #225: trains fitting
+  transfers), `JourneyResultsView` + `JourneyCard` (#504: Minimal a card, Fahrkarte a small ticket with "Abfahrt"/"Ankunft" above the perforation; the results' header is a "Von"/"Nach" ticket there; `TicketCaption`/`TicketValueField` for a ticket's small upper-case labels), `TrainNumberSheet` ("Bestimmten Zug wählen", #225: trains fitting
   the input via Kit `TrainCandidateFinder`; picking one shows its stops in `TripContent` with boarding/exit preselected
   and pins that run; "Ein- und Ausstieg selbst angeben"), `JourneyDetailView` (+ `LegCard`, `TransferRow`,
   alternatives sheets; #504: Minimal has the summary card, Fahrkarte draws it as a ticket with the day and
