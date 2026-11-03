@@ -20,37 +20,63 @@ struct CO2SavingButton: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .journeyRoundedType()
         .frame(maxWidth: .infinity)
         .accessibilityLabel("\(CO2Comparison.kilogramsText(comparison.savedComparedToCar)) CO₂ weniger als mit dem Auto")
         .sheet(isPresented: $showsDetails) { CO2Sheet(comparison: comparison) }
     }
 }
 
-/// Distance and CO₂ by train, car and plane for one journey.
+/// Distance and CO₂ by train, car and plane for one journey. Minimal and Fahrkarte share the layout; the
+/// ticket puts a small "STRECKE" over the distance and uses its rounded type.
 struct CO2Sheet: View {
     let comparison: CO2Comparison
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.appDesign) private var design
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    LabeledContent("Strecke", value: "\(comparison.kilometers.formatted(.number.precision(.fractionLength(0)))) km")
-                }
-                Section {
-                    row(String(localized: "Bahn"), systemImage: "tram.fill", kilograms: comparison.train, color: .punctual)
-                    row(String(localized: "Auto"), systemImage: "car.fill", kilograms: comparison.car, color: .slightDelay)
-                    row(String(localized: "Flugzeug"), systemImage: "airplane", kilograms: comparison.plane, color: .heavyDelay)
-                } header: {
-                    Text("CO₂ für diese Reise")
-                } footer: {
-                    Text("Mit der Bahn sparst du \(CO2Comparison.kilogramsText(comparison.savedComparedToCar)) gegenüber dem Auto und \(CO2Comparison.kilogramsText(comparison.savedComparedToPlane)) gegenüber dem Flugzeug.")
-                }
-                Section {
-                } footer: {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Card {
+                        VStack(alignment: .leading, spacing: 4) {
+                            if design == .fahrkarte {
+                                JourneyTicketCaption(text: String(localized: "Strecke"))
+                            } else {
+                                Text("Strecke").font(.subheadline).foregroundStyle(.secondary)
+                            }
+                            Text("\(comparison.kilometers.formatted(.number.precision(.fractionLength(0)))) km")
+                                .font(.largeTitle.weight(.bold))
+                                .monospacedDigit()
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        SectionHeader(title: String(localized: "CO₂ für diese Reise"), systemImage: "leaf.fill")
+                        Card {
+                            VStack(alignment: .leading, spacing: 16) {
+                                row(String(localized: "Bahn"), systemImage: "tram.fill", kilograms: comparison.train, color: .punctual)
+                                row(String(localized: "Auto"), systemImage: "car.fill", kilograms: comparison.car, color: .slightDelay)
+                                row(String(localized: "Flugzeug"), systemImage: "airplane", kilograms: comparison.plane, color: .heavyDelay)
+                            }
+                        }
+                        Text("Mit der Bahn sparst du \(CO2Comparison.kilogramsText(comparison.savedComparedToCar)) gegenüber dem Auto und \(CO2Comparison.kilogramsText(comparison.savedComparedToPlane)) gegenüber dem Flugzeug.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 4)
+                    }
+
                     Text("Durchschnittswerte des Umweltbundesamts von 2024 pro Person und Kilometer für Fernverkehr, Nahverkehr, Auto und Inlandsflug.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 4)
                 }
+                .fontDesign(design == .fahrkarte ? .rounded : nil)
+                .padding(.horizontal)
+                .padding(.bottom, 32)
             }
+            .background { AppBackground() }
             .navigationTitle("CO₂-Vergleich")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -63,20 +89,28 @@ struct CO2Sheet: View {
     }
 
     private func row(_ title: String, systemImage: String, kilograms: Double, color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            LabeledContent {
-                Text(CO2Comparison.kilogramsText(kilograms)).monospacedDigit()
-            } label: {
-                Label(title, systemImage: systemImage)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label {
+                    Text(title)
+                } icon: {
+                    Image(systemName: systemImage).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(CO2Comparison.kilogramsText(kilograms))
+                    .fontWeight(.semibold)
+                    .monospacedDigit()
             }
+            .font(.subheadline)
             GeometryReader { proxy in
                 Capsule()
                     .fill(color.gradient)
                     .frame(width: max(4, proxy.size.width * kilograms / max(comparison.plane, comparison.car, comparison.train, 0.001)))
             }
             .frame(height: 6)
+            .accessibilityHidden(true)
         }
-        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
     }
 }
 

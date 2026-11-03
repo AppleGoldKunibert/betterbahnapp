@@ -18,11 +18,41 @@ struct RegularTripButton: View {
                 .frame(width: 40, height: 40)
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular, in: .circle)
-        .tint(.brand)
+        .modifier(RoundButtonSurface())
         .accessibilityLabel(existing == nil ? "Regelmäßig fahren" : "Regelmäßige Fahrt bearbeiten")
         .sheet(item: $editedTrip) { trip in
             RegularTripEditor(trip: trip, isNew: existing == nil)
+        }
+    }
+}
+
+/// Minimal: a flat circle on the card surface, like the page's other round buttons. Fahrkarte: Liquid Glass (#504).
+private struct RoundButtonSurface: ViewModifier {
+    @Environment(\.appDesign) private var design
+
+    func body(content: Content) -> some View {
+        if design == .fahrkarte {
+            content.glassEffect(.regular, in: .circle)
+        } else {
+            content
+                .background(Color.card, in: .circle)
+                .overlay { Circle().strokeBorder(Color.hairline, lineWidth: 1) }
+                .contentShape(.circle)
+        }
+    }
+}
+
+/// Fahrkarte: the form on the design's warm page instead of the grouped background (#504).
+private struct FormBackground: ViewModifier {
+    @Environment(\.appDesign) private var design
+
+    func body(content: Content) -> some View {
+        if design == .fahrkarte {
+            content
+                .scrollContentBackground(.hidden)
+                .background { AppBackground() }
+        } else {
+            content
         }
     }
 }
@@ -34,6 +64,9 @@ struct RegularTripEditor: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var confirmsDelete = false
+    @Environment(\.appDesign) private var design
+
+    private var rounded: Font.Design? { design == .fahrkarte ? .rounded : nil }
 
     private static let leads = [15, 30, 45, 60]
     private static let thresholds = [3, 5, 10, 15]
@@ -49,6 +82,7 @@ struct RegularTripEditor: View {
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
+                    .fontDesign(rounded)
                 }
 
                 Section {
@@ -78,7 +112,6 @@ struct RegularTripEditor: View {
                         get: { trip.pausedUntil != nil },
                         set: { trip.pausedUntil = $0 ? Calendar.current.date(byAdding: .day, value: 7, to: .now) : nil }
                     ))
-                    .tint(.brand)
                     if let pausedUntil = trip.pausedUntil {
                         DatePicker("Bis einschließlich", selection: Binding(get: { pausedUntil }, set: { trip.pausedUntil = $0 }),
                                    in: Date.now..., displayedComponents: .date)
@@ -93,6 +126,7 @@ struct RegularTripEditor: View {
                     }
                 }
             }
+            .modifier(FormBackground())
             .navigationTitle("Regelmäßig fahren")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -125,9 +159,10 @@ struct RegularTripEditor: View {
         } label: {
             Text(RegularTrip.weekdayNames[day - 1])
                 .font(.subheadline.weight(.semibold))
+                .fontDesign(rounded)
                 .frame(width: 38, height: 38)
-                .foregroundStyle(selected ? Color.white : Color.primary)
-                .background(selected ? Color.brand : Color.secondary.opacity(0.15), in: .circle)
+                .foregroundStyle(selected ? Color.onBrandText : Color.primary)
+                .background(selected ? Color.brandText : Color.secondary.opacity(0.15), in: .circle)
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -138,6 +173,7 @@ struct RegularTripEditor: View {
 struct RegularTripsView: View {
     @Environment(AppModel.self) private var model
     @State private var editedTrip: RegularTrip?
+    @Environment(\.appDesign) private var design
 
     var body: some View {
         List {
@@ -155,6 +191,7 @@ struct RegularTripsView: View {
                                        description: Text("Öffne eine gespeicherte Reise und tippe auf „Regelmäßig fahren“."))
             }
         }
+        .modifier(FormBackground())
         .navigationTitle("Regelmäßige Fahrten")
         .sheet(item: $editedTrip) { RegularTripEditor(trip: $0, isNew: false) }
     }
@@ -163,6 +200,7 @@ struct RegularTripsView: View {
         VStack(alignment: .leading, spacing: 3) {
             Text(trip.summary)
                 .font(.subheadline.weight(.semibold))
+                .fontDesign(design == .fahrkarte ? .rounded : nil)
             Text(details(trip))
                 .font(.caption)
                 .foregroundStyle(.secondary)

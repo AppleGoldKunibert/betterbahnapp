@@ -406,6 +406,7 @@ struct CoachSequencePanel: View {
 /// share a box ("2× ICE 4"). Drawings: DB Fahrzeuglexikon, © Deutsche Bahn AG.
 private struct TrainCard: View {
     let formation: TrainFormation
+    @Environment(\.appDesign) private var design
 
     private static let drawingHeight: CGFloat = 54
 
@@ -417,6 +418,7 @@ private struct TrainCard: View {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(model)
                             .font(.headline)
+                            .fontDesign(design == .fahrkarte ? .rounded : nil)
                         if let series = drawing?.series {
                             Text(series)
                                 .font(.subheadline)
@@ -671,7 +673,7 @@ private struct CoachSequenceDiagram: View {
             if let train = label.train {
                 Text(train)
                     .font(.caption2.weight(.bold))
-                    .foregroundStyle(Color.brand)
+                    .foregroundStyle(Color.brandText)
                     .lineLimit(2)
             }
             if let unit = label.unit {
@@ -739,8 +741,12 @@ private struct CoachTile: View {
     var bikeHighlighted = false
     var leadingNose = false
     var trailingNose = false
+    @Environment(\.appDesign) private var design
 
     static let height: CGFloat = 46
+    /// The restaurant and the marked coaches (your seat or reservation, the recommended one) stay DB red
+    /// whatever accent color is picked (#504): they read like the signs on the platform.
+    static let markRed = AccentPreset.rot.color.swiftUIColor
     private static let amenitiesPerRow = 3
 
     var body: some View {
@@ -821,7 +827,7 @@ private struct CoachTile: View {
     private var shape: some View {
         let fill: Color = switch coach.kind {
         case .locomotive, .powerCar: .gray
-        case .diningCar, .halfDiningCar: .brand
+        case .diningCar, .halfDiningCar: Self.markRed
         default: coach.firstClass ? .yellow : .secondary
         }
         let corner: CGFloat = coach.isPassengerCoach ? 6 : 10
@@ -835,9 +841,9 @@ private struct CoachTile: View {
             .fill(fill.opacity(coach.isPassengerCoach ? 0.22 : 0.45))
             .overlay {
                 if suggested && !highlighted && !bikeHighlighted {
-                    outline.strokeBorder(Color.brand, style: StrokeStyle(lineWidth: 2.5, dash: [6, 4]))
+                    outline.strokeBorder(Self.markRed, style: StrokeStyle(lineWidth: 2.5, dash: [6, 4]))
                 } else {
-                    outline.strokeBorder(highlighted ? Color.brand : bikeHighlighted ? Color.punctual : fill.opacity(0.6),
+                    outline.strokeBorder(highlighted ? Self.markRed : bikeHighlighted ? Color.punctual : fill.opacity(0.6),
                                          lineWidth: highlighted || bikeHighlighted ? 3 : 1)
                 }
             }
@@ -845,6 +851,7 @@ private struct CoachTile: View {
                 if let number = coach.number {
                     Text(number)
                         .font(.title3.weight(.bold))
+                        .fontDesign(design == .fahrkarte ? .rounded : nil)
                         .monospacedDigit()
                         .foregroundStyle(coach.closed ? .secondary : .primary)
                         .minimumScaleFactor(0.6)
@@ -919,9 +926,26 @@ private extension String {
 }
 
 private extension View {
-    /// The Wagenreihung's boxes inside a card: a faint fill instead of a card of their own.
+    /// The Wagenreihung's boxes inside a card: a faint fill instead of a card of their own (Minimal), or a fine
+    /// outline like the cards themselves (Fahrkarte).
     func insetPanel() -> some View {
-        background(Color.primary.opacity(0.05), in: .rect(cornerRadius: 16, style: .continuous))
-            .clipShape(.rect(cornerRadius: 16, style: .continuous))
+        modifier(InsetPanel())
+    }
+}
+
+private struct InsetPanel: ViewModifier {
+    @Environment(\.appDesign) private var design
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        if design == .fahrkarte {
+            content
+                .clipShape(shape)
+                .overlay { shape.strokeBorder(Color.hairline, lineWidth: 1) }
+        } else {
+            content
+                .background(Color.primary.opacity(0.05), in: shape)
+                .clipShape(shape)
+        }
     }
 }

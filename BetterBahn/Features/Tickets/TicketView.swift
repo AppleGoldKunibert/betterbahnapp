@@ -46,47 +46,36 @@ private struct TicketPage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(ticket.offerName).font(.title2.weight(.bold))
-                Text(ticket.routeDescription).font(.headline).foregroundStyle(.secondary)
+            TicketFace(title: ticket.offerName, subtitle: ticket.routeDescription, details: details) {
+                if ticket.isTrainBound, let journey, Self.trainBindingLifted(journey) {
+                    TicketNote(text: String(localized: "Zugbindung aufgehoben: Bei mindestens 20 Minuten erwarteter Verspätung am Ziel darfst du auch andere Züge nehmen."),
+                               systemImage: "checkmark.seal.fill", color: .punctual, emphasized: true)
+                }
+            } code: {
+                if ticket.isPartnerDocument {
+                    partnerNotice
+                } else if ticket.isReservationOnly {
+                    TicketNote(text: String(localized: "Nur Reservierung. Zeig bei der Kontrolle zusätzlich deine Fahrkarte."),
+                               systemImage: "carseat.right.fill")
+                } else {
+                    barcode
+                }
             }
-
-            if ticket.isPartnerDocument {
-                partnerNotice
-            } else if ticket.isReservationOnly {
-                Label("Nur Reservierung. Zeig bei der Kontrolle zusätzlich deine Fahrkarte.",
-                      systemImage: "carseat.right.fill")
-                    .font(.callout)
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.secondary.opacity(0.12), in: .rect(cornerRadius: 14, style: .continuous))
-            } else {
-                barcode
-            }
-
-            if ticket.isTrainBound, let journey, Self.trainBindingLifted(journey) {
-                Label("Zugbindung aufgehoben: Bei mindestens 20 Minuten erwarteter Verspätung am Ziel darfst du auch andere Züge nehmen.",
-                      systemImage: "checkmark.seal.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color.punctual)
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.punctual.opacity(0.12), in: .rect(cornerRadius: 14, style: .continuous))
-            }
-
-            Card { details }
 
             if !ticket.isPartnerDocument {
-                if TicketStore.pdf(for: ticket.id) != nil {
-                    Button { showPDF = true } label: {
-                        Label("PDF anzeigen", systemImage: "doc.richtext")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
+                VStack(spacing: 12) {
+                    if TicketStore.pdf(for: ticket.id) != nil {
+                        Button { showPDF = true } label: {
+                            Label("PDF anzeigen", systemImage: "doc.richtext")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                        }
+                        .pageButtonStyle()
+                        .controlSize(.large)
                     }
-                    .buttonStyle(.glass)
-                    .controlSize(.large)
+                    AddToWalletButton(payload: WalletPassPayload(ticket: ticket))
                 }
-                AddToWalletButton(payload: WalletPassPayload(ticket: ticket))
+                .padding(.top, 8)
             }
         }
         .sheet(isPresented: $showPDF) {
@@ -113,64 +102,41 @@ private struct TicketPage: View {
 
     @ViewBuilder private var barcode: some View {
         if let image = ticket.barcode?.uiImage {
-            Image(uiImage: image)
-                .interpolation(.none)
-                .resizable()
-                .scaledToFit()
-                .padding(20)
-                .frame(maxWidth: .infinity)
-                .background(.white, in: .rect(cornerRadius: 22, style: .continuous))
-                .accessibilityLabel("Ticket-Barcode")
+            TicketBarcode(image: image)
         } else {
-            Label("Auf dem Ticket-PDF wurde kein Barcode gefunden. Zeig bei der Kontrolle das PDF vor.",
-                  systemImage: "barcode.viewfinder")
-                .font(.callout)
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.slightDelay.opacity(0.12), in: .rect(cornerRadius: 14, style: .continuous))
+            TicketNote(text: String(localized: "Auf dem Ticket-PDF wurde kein Barcode gefunden. Zeig bei der Kontrolle das PDF vor."),
+                       systemImage: "barcode.viewfinder", color: .slightDelay)
         }
     }
 
     private var partnerNotice: some View {
-        Label("Dieses Ticket stellt \(ticket.issuer?.capitalized ?? String(localized: "ein Partner der Bahn")) selbst aus. Du findest es in der Buchungsbestätigung oder auf bahn.de.",
-              systemImage: "info.circle.fill")
-            .font(.callout)
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.secondary.opacity(0.12), in: .rect(cornerRadius: 14, style: .continuous))
+        TicketNote(text: String(localized: "Dieses Ticket stellt \(ticket.issuer?.capitalized ?? String(localized: "ein Partner der Bahn")) selbst aus. Du findest es in der Buchungsbestätigung oder auf bahn.de."),
+                   systemImage: "info.circle.fill")
     }
 
-    @ViewBuilder private var details: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let travelClass = ticket.classDescription {
-                LabeledContent("Klasse", value: travelClass)
-            }
-            if !ticket.travellers.isEmpty {
-                LabeledContent("Reisende") {
-                    Text(ticket.travellers.map(\.displayName).joined(separator: "\n")).multilineTextAlignment(.trailing)
-                }
-            }
-            if let from = ticket.validFrom, let until = ticket.validUntil {
-                LabeledContent("Gültig") {
-                    Text("\(from.formatted(date: .abbreviated, time: .shortened)) –\n\(until.formatted(date: .abbreviated, time: .shortened))")
-                        .multilineTextAlignment(.trailing)
-                }
-            }
-            if !ticket.legs.isEmpty {
-                LabeledContent(ticket.isTrainBound ? "Zugbindung" : "Züge") {
-                    Text(ticket.legs.map { "\($0.displayName) · \($0.departure.formatted(date: .omitted, time: .shortened))" }
-                        .joined(separator: "\n"))
-                        .multilineTextAlignment(.trailing)
-                }
-            }
-            ForEach(ticket.seats.map(SeatReservation.init)) { reservation in
-                LabeledContent("Sitzplatz") {
-                    Text("\(reservation.trainName)\n\(reservation.description)").multilineTextAlignment(.trailing)
-                }
-            }
-            LabeledContent("Auftragsnummer", value: ticket.orderNumber)
+    private var details: [TicketDetail] {
+        var details: [TicketDetail] = []
+        if let travelClass = ticket.classDescription {
+            details.append(TicketDetail(label: String(localized: "Klasse"), value: travelClass))
         }
-        .font(.subheadline)
+        if !ticket.travellers.isEmpty {
+            details.append(TicketDetail(label: String(localized: "Reisende"),
+                                        value: ticket.travellers.map(\.displayName).joined(separator: "\n")))
+        }
+        if let from = ticket.validFrom, let until = ticket.validUntil {
+            details.append(TicketDetail(label: String(localized: "Gültig"),
+                                        value: String(localized: "\(from.formatted(date: .abbreviated, time: .shortened)) –\n\(until.formatted(date: .abbreviated, time: .shortened))")))
+        }
+        if !ticket.legs.isEmpty {
+            details.append(TicketDetail(label: ticket.isTrainBound ? String(localized: "Zugbindung") : String(localized: "Züge"),
+                                        value: ticket.legs.map { "\($0.displayName) · \($0.departure.formatted(date: .omitted, time: .shortened))" }
+                                            .joined(separator: "\n")))
+        }
+        for reservation in ticket.seats.map(SeatReservation.init) {
+            details.append(TicketDetail(label: String(localized: "Sitzplatz"), value: "\(reservation.trainName)\n\(reservation.description)"))
+        }
+        details.append(TicketDetail(label: String(localized: "Auftragsnummer"), value: ticket.orderNumber))
+        return details
     }
 
 }
