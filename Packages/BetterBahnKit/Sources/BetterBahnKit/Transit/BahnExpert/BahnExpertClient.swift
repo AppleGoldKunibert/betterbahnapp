@@ -235,10 +235,10 @@ public struct BahnExpertClient: Sendable {
         return calendar.dateComponents([.year, .month, .day], from: date) == DateComponents(year: parts[0], month: parts[1], day: parts[2])
     }
 
-    /// bahn.expert answers requests without a `Referer` from its own site with an empty `206`
-    /// (it did not until 2026-09-20), so every call identifies where the API is meant to be used from.
     /// RIS::Journeys' answer for `journey/find` or `journey/detailsByJourneyId` in bahn.expert's shape; nil for
-    /// other procedures, while RIS is paused after a failure, or when it fails (then it pauses).
+    /// other procedures, while RIS is paused after a failure, or when it fails. It only pauses when RIS itself
+    /// fails (our server down, the key refused, a rate limit): not for one run it doesn't know (404) or an ID
+    /// that wasn't sent.
     static func risAnswer(_ procedure: String, input: [String: Any], from ris: RISJourneysClient) async -> Data? {
         let json = input["json"]
         let ask: (@Sendable () async throws -> Data)?
@@ -264,11 +264,20 @@ public struct BahnExpertClient: Sendable {
         } catch is CancellationError {
             return nil
         } catch {
-            await ris.health.markFailed()
+            if pausesRIS(error) { await ris.health.markFailed() }
             return nil
         }
     }
 
+    static func pausesRIS(_ error: Error) -> Bool {
+        switch error {
+        case TransitError.invalidInput, TransitError.notFound, TransitError.http(status: 404, _): false
+        default: true
+        }
+    }
+
+    /// bahn.expert answers requests without a `Referer` from its own site with an empty `206`
+    /// (it did not until 2026-09-20), so every call identifies where the API is meant to be used from.
     static func request(procedure: String, input: [String: Any]) throws -> URLRequest {
         var request = URLRequest(url: baseURL.appending(path: "api/orpc/\(procedure)"), timeoutInterval: 12)
         request.httpMethod = "POST"

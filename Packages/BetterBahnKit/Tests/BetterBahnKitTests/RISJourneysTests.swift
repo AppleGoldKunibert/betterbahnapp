@@ -90,6 +90,16 @@ import Testing
         #expect(requests.filter { $0.contains("bahn.expert") }.count == 2)
     }
 
+    /// A run RIS doesn't know (404) goes to bahn.expert, but doesn't pause RIS for the next one.
+    @Test func anUnknownRunDoesntPauseRIS() async throws {
+        let (client, session) = clients(risStatus: 404)
+        defer { session.invalidateAndCancel() }
+        _ = try await client.stops(ofJourney: "20261103-c5ed6631-9860-3f62-aa16-50637daedbaf")
+        _ = try await client.stops(ofJourney: "20261103-c5ed6631-9860-3f62-aa16-50637daedbaf")
+        let requests = RISJourneysProtocol.requests.withLock { $0 }
+        #expect(requests.filter { $0.contains("proxy.test") }.count == 2)
+    }
+
     @Test func journeyIdsWithOtherCharactersArentSent() async throws {
         let (client, session) = clients()
         defer { session.invalidateAndCancel() }
