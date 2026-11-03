@@ -22,7 +22,7 @@ bahn.de tolerates this as long as the traffic stays small, so the server keeps i
 Environment: TOKEN_SECRET (required, same as in the Workers), PORT (8080), IMPERSONATE (safari),
 FIRST_PAUSE (60), BLOCK_PAUSE (600), MAX_PARALLEL (4), MIN_INTERVAL (0.25), RATE_LIMIT (120),
 ALLOW_UNATTESTED ("true" lets requests without a token through, for testing only). The Tz log (`tzlog.py`,
-#502) has TZ_DB, TZ_SCAN, TZ_SCAN_INTERVAL and TZ_SCAN_EVERY.
+#502) has TZ_DB, TZ_SCAN, TZ_SCAN_INTERVAL, TZ_SCAN_EVERY, TZ_RIS, TZ_RIS_INTERVAL and TZ_VEHICLE_EVERY.
 """
 
 import asyncio
@@ -435,11 +435,16 @@ def make_app(proxy, scan=None):
     app.router.add_route("*", "/{tail:.*}", proxy.handle)
     if scan is not None and proxy.tz_store is not None:
         async def start_scan(app):
-            scanner = tzlog.Scanner(proxy.tz_store, proxy.ask_json, pause_left=proxy.pause_left, **scan)
+            options = dict(scan)
+            ris = tzlog.RisClient() if options.pop("ris", True) else None
+            app["tz_ris"] = ris
+            scanner = tzlog.Scanner(proxy.tz_store, proxy.ask_json, pause_left=proxy.pause_left, ris=ris, **options)
             app["tz_scan"] = asyncio.ensure_future(scanner.run())
 
         async def stop_scan(app):
             app["tz_scan"].cancel()
+            if app.get("tz_ris") is not None:
+                await app["tz_ris"].close()
 
         app.on_startup.append(start_scan)
         app.on_cleanup.append(stop_scan)
@@ -468,7 +473,10 @@ def main():
     scan = None
     if os.environ.get("TZ_SCAN", "true") != "false":
         scan = {"interval": float(os.environ.get("TZ_SCAN_INTERVAL", "3")),
-                "every": int(os.environ.get("TZ_SCAN_EVERY", "10800"))}
+                "every": int(os.environ.get("TZ_SCAN_EVERY", "21600")),
+                "ris": os.environ.get("TZ_RIS", "true") != "false",
+                "ris_interval": float(os.environ.get("TZ_RIS_INTERVAL", "1")),
+                "vehicle_every": int(os.environ.get("TZ_VEHICLE_EVERY", "43200"))}
     web.run_app(make_app(proxy, scan), port=int(os.environ.get("PORT", "8080")), access_log=None)
 
 

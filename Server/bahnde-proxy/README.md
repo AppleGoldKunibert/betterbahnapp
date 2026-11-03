@@ -34,13 +34,20 @@ The `betterbahn` Worker also asks it for the live times of shared arrivals when 
 
 **Tz log (#502):** `tzlog.py` keeps which trainset (Tz) ran which ICE/IC on which day, for a year, in a SQLite file
 (`TZ_DB`), and serves it to the app: `GET /tz/list` (every Tz with its latest day's trains) and `GET /tz/history?tz=8043`
-(same token and rate limit as `/web/api/`). bahn.de names the Tz in the Wagenreihung hours before departure but cannot
-list where a Tz runs, so the server asks the other way round, slowly: every `TZ_SCAN_EVERY` seconds it reads the ICE/EC/IC
-departure boards of ~60 big stations in Germany, Switzerland, the Netherlands and Austria (`HUBS`) for that long ahead and
-asks each train's Wagenreihung once (about 2000 requests a day, `TZ_SCAN_INTERVAL` apart, through the proxy's own
-cache, turn-taking and pause: while bahn.de has the proxy paused the scan waits). Only ICE and ICD (IC 2) groups with a
-Tz are kept, no loco-hauled IC 1. It records nothing about who asks. On a panel server the file lives next to the code
-and survives restarts; with Docker it is the `tzlog` volume. `TZ_SCAN=false` stops the scan (the log is still served).
+(same token and rate limit as `/web/api/`). It asks two sources, both slowly:
+- **Learning the Tz (bahn.de, through the proxy's own cache, turn-taking and pause):** every `TZ_SCAN_EVERY` seconds
+  it reads the ICE/EC/IC departure boards of 15 stations that together list every ICE and IC run (`HUBS`, picked from one
+  day of the train statistics) and asks the Wagenreihung of each train no earlier answer explains. That names the Tz
+  ("ICE8043") and gives the UIC number of one coach, which the log keeps. About 400 requests a day, `TZ_SCAN_INTERVAL` apart.
+- **Where each Tz runs (the RIS::Transports API behind DB Regio's WiFi landing page, `RisClient`):** every
+  `TZ_VEHICLE_EVERY` seconds one request per known Tz asks the journeys of its coach (`/api/transports/vehicles/<UIC>/journeys?date=`),
+  the first time also the last 6 days. No login: like the page itself it loads the landing page and sends its CSRF cookie and
+  token back. Not a documented API, so DB can change or close it; the log then stops growing from there, the boards still work.
+  About 800 requests a day, `TZ_RIS_INTERVAL` apart, plus ~2800 once for the first week.
+
+Only ICE and ICD (IC 2) groups with a Tz are kept, no loco-hauled IC 1. It records nothing about who asks. On a panel
+server the file lives next to the code and survives restarts; with Docker it is the `tzlog` volume. `TZ_SCAN=false`
+stops the scan (the log is still served), `TZ_RIS=false` the WiFi host.
 
 | Variable | Default | |
 | --- | --- | --- |
@@ -55,7 +62,10 @@ and survives restarts; with Docker it is the `tzlog` volume. `TZ_SCAN=false` sto
 | `TZ_DB` | `tz.db` next to `proxy.py` (`/data/tz.db` in Docker) | The Tz log's SQLite file. |
 | `TZ_SCAN` | `true` | `false` turns the scan off. |
 | `TZ_SCAN_INTERVAL` | `3` | Seconds between two requests of the scan. |
-| `TZ_SCAN_EVERY` | `10800` | Seconds between two scans, also how far ahead each one reads the boards. |
+| `TZ_SCAN_EVERY` | `21600` | Seconds between two board scans, also how far ahead each one reads the boards. |
+| `TZ_RIS` | `true` | `false` turns the WiFi host (vehicle lookups) off. |
+| `TZ_RIS_INTERVAL` | `1` | Seconds between two requests to the WiFi host. |
+| `TZ_VEHICLE_EVERY` | `43200` | Seconds between two vehicle rounds. |
 | `ALLOW_UNATTESTED` | — | `true` lets requests without a token through. Only for a quick test, never in production. |
 
 ## Run it
