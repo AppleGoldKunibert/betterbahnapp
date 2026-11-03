@@ -1,0 +1,510 @@
+{
+ "trips": [
+  {
+   "extTripID": "¶HKI¶T$A=1@O=Berlin Hbf@X=13369549@Y=52525589@L=8098160@a=128@$A=1@O=München Hbf@X=11558339@Y=48140229@L=8000261@a=128@$202611040836$202611041320$ICE 1005$$1$$$$$$¶KC¶#VE#2#CF#100#CA#0#CM#0#SICT#0#AM#5242977#AM2#0#RT#7#¶KRCC¶#VE#1#",
+   "startDate": "2026-11-04T08:36:00+01:00",
+   "duration": "PT4H44M",
+   "legs": [
+    {
+     "type": "JOURNEY",
+     "extJourneyID": "2|#VN#1#ST#1793209233#PI#0#ZI#209881#TA#0#DA#41126#1S#8011102#1T#826#LS#8000261#LT#1320#PU#80#RT#1#CA#ICE#ZE#1005#ZB#ICE 1005#PC#0#FR#8011102#FT#826#TO#8000261#TT#1320#",
+     "departure": {
+      "stopPlace": {
+       "evaNumber": "8098160",
+       "name": "Berlin Hbf"
+      },
+      "timeSchedule": "2026-11-04T08:36:00+01:00",
+      "timeType": "SCHEDULE",
+      "time": "2026-11-04T08:36:00+01:00",
+      "messages": [],
+      "transport": {
+       "type": "HIGH_SPEED_TRAIN",
+       "journeyDescription": "ICE 1005",
+       "category": "ICE",
+       "number": 1005,
+       "direction": {
+        "stopPlaces": [],
+        "text": "München Hbf"
+       },
+       "line": "29"
+      },
+      "administration": {
+       "administrationID": "80",
+       "operatorCode": "D",
+       "operatorName": "DB Fernverkehr AG"
+      },
+      "extOriginID": "A=1@O=Berlin Hbf@X=13369549@Y=52525589@U=80@L=8098160@i=U×008031922@",
+      "platform": "4",
+      "platformSchedule": "4"
+     },
+     "via": [
+      {
+       "evaNumber": "8011113",
+       "name": "Berlin Südkreuz",
+       "arrival": {
+        "timeSchedule": "2026-11-04T08:40:00+01:00",
+        "timeType": "SCHEDULE",
+        "time": "2026-11-04T08:40:00+01:00",
+        "messages": [
+         {
+          "type": "CUSTOMER_TEXT",
+          "text": "Hält nur zum Einsteigen"
+         },
+         {
+          "type": "CUSTOMER_TEXT",
+          "text": "Komfort Check-in verfügbar - wenn möglich bitte einchecken"
+         },
+         {
+          "type": "CUSTOMER_TEXT",
+          "text": "Bordrestaurant"
+         }
+        ],
+        "platform": "5",
+        "platformSchedule": "5"
+       },
+       "departure": {
+        "timeSchedule": "2026-11-04T08:42:00+01:00",
+        "timeType": "SCHEDULE",
+        "time": "2026-11-04T08:42:00+01:00",
+        "messages": [
+         {
+          "type": "CUSTOMER_TEXT",
+          "text": "Hält nur zum Einsteigen"
+         }
+        ],
+        "platform": "5",
+        "platformSchedule": "5"
+       }
+      },
+      {
+       "evaNumber": "8010159",
+       "name": "Halle(Saale)Hbf",
+       "arrival": {
+        "timeSchedule": "2026-11-04T09:43:00+01:00",
+        "timeType": "SCHEDULE",
+        "time": "2026-11-04T09:43:00+01:00",
+        "messages": [
+         {
+          "type": "CUSTOMER_TEXT",
+          "text": "Komfort Check-in verfügbar - wenn möglich bitte einchecken"
+         },
+         {
+          "type": "CUSTOMER_TEXT",
+          "text": "Bordrestaurant"
+         }
+        ],
+        "platform": "6",
+        "platformSchedule": "6"
+       },
+       "departure": {
+        "timeSchedule": "2026-11-04T09:45:00+01:00",
+        "timeType": "SCHEDULE",
+        "time": "2026-11-04T09:45:00+01:00",
+        "messages": [],
+        "platform": "6",
+        "platformSchedule": "6"
+       }
+      },
+      {
+       "evaNumber": "8010101",
+       "name": "Erfurt Hbf",
+       "arrival": {
+        "timeSchedule": "2026-11-04T10:12:00+01:00",
+        "timeType": "SCHEDULE",
+        "time": "2026-11-04T10:12:00+01:00",
+        "messages": [
+         {
+          "type": "CUSTOMER_TEXT",
+          "text": "Komfort Check-in verfügbar - wenn möglich bitte einchecken"
+         },
+         {
+          "type": "CUSTOMER_TEXT",
+          "text": "Bordrestaurant"
+         }
+        ],
+        "platform": "1",
+        "platformSchedule": "1"
+       },
+       "departure": {
+        "timeSchedule": "2026-11-04T10:14:00+01:00",
+        "timeType": "SCHEDULE",
+        "time": "2026-11-04T10:14:00+01:00",
+        "messages": [],
+        "platform": "1",
+        "platformSchedule": "1"
+       }
+      }
+     ],
+     "arrival": {
+      "stopPlace": {
+       "evaNumber": "8000261",
+       "name": "München Hbf"
+      },
+      "timeSchedule": "2026-11-04T13:20:00+01:00",
+      "timeType": "SCHEDULE",
+      "time": "2026-11-04T13:20:00+01:00",
+      "messages": [],
+      "transport": {
+       "type": "HIGH_SPEED_TRAIN",
+       "journeyDescription": "ICE 1005",
+       "category": "ICE",
+       "number": 1005,
+       "direction": {
+        "stopPlaces": [],
+        "text": "München Hbf"
+       },
+       "line": "29"
+      },
+      "administration": {
+       "administrationID": "80",
+       "operatorCode": "D",
+       "operatorName": "DB Fernverkehr AG"
+      },
+      "extDestinationID": "A=1@O=München Hbf@X=11558339@Y=48140229@U=80@L=8000261@i=U×008020347@",
+      "platform": "23",
+      "platformSchedule": "23"
+     },
+     "duration": "PT4H44M",
+     "dayOfOperation": "2026-11-04"
+    }
+   ]
+  },
+  {
+   "extTripID": "¶HKI¶T$A=1@O=Frankfurt(Main)Hbf@X=8662833@Y=50106682@L=8000105@a=128@$A=1@O=Frankfurt(M) Flughafen Regionalbf@X=8571250@Y=50051219@L=8070004@a=128@$202611031624$202611031635$   29542$$1$$$$$$§W$A=1@O=Frankfurt(M) Flughafen Regionalbf@X=8571250@Y=50051219@L=8070004@a=128@$A=1@O=Frankfurt(M) Flughafen Fernbf@X=8570181@Y=50053169@L=8070003@a=128@$202611031635$202611031650$$$1$$$$$$§T$A=1@O=Frankfurt(M) Flughafen Fernbf@X=8570181@Y=50053169@L=8070003@a=128@$A=1@O=Mannheim Hbf@X=8468917@Y=49479352@L=8000244@a=128@$202611031651$202611031725$ICE  611$$1$$$$$$¶KC¶#VE#2#CF#100#CA#0#CM#0#SICT#0#AM#5242977#AM2#0#RT#7#¶KRCC¶#VE#1#",
+   "startDate": "2026-11-03T16:24:00+01:00",
+   "duration": "PT1H1M",
+   "legs": [
+    {
+     "type": "JOURNEY",
+     "extJourneyID": "2|#VN#1#ST#1793209233#PI#0#ZI#352521#TA#0#DA#31126#1S#8000105#1T#1624#LS#8000206#LT#1809#PU#80#RT#1#CA#DRB#ZE#29542#ZB#   29542#PC#3#FR#8000105#FT#1624#TO#8000206#TT#1809#",
+     "departure": {
+      "stopPlace": {
+       "evaNumber": "8000105",
+       "name": "Frankfurt(Main)Hbf"
+      },
+      "timeSchedule": "2026-11-03T16:24:00+01:00",
+      "timeType": "PREVIEW",
+      "time": "2026-11-03T16:24:00+01:00",
+      "messages": [
+       {
+        "type": "CUSTOMER_TEXT",
+        "text": "2"
+       }
+      ],
+      "transport": {
+       "type": "REGIONAL_TRAIN",
+       "journeyDescription": "29542",
+       "category": "vlx",
+       "number": 29542,
+       "direction": {
+        "stopPlaces": [],
+        "text": "Koblenz Hbf"
+       },
+       "label": "RE2",
+       "line": "RE2"
+      },
+      "administration": {
+       "administrationID": "V6RE",
+       "operatorCode": "DRB",
+       "operatorName": "vlexx"
+      },
+      "extOriginID": "A=1@O=Frankfurt(Main)Hbf@X=8662833@Y=50106682@U=80@L=8000105@i=U×008011068@",
+      "platform": "4",
+      "platformSchedule": "4"
+     },
+     "via": [],
+     "arrival": {
+      "stopPlace": {
+       "evaNumber": "8070004",
+       "name": "Frankfurt(M) Flughafen Regionalbf"
+      },
+      "timeSchedule": "2026-11-03T16:35:00+01:00",
+      "timeType": "PREVIEW",
+      "time": "2026-11-03T16:35:00+01:00",
+      "messages": [
+       {
+        "type": "CUSTOMER_TEXT",
+        "text": "2"
+       }
+      ],
+      "transport": {
+       "type": "REGIONAL_TRAIN",
+       "journeyDescription": "29542",
+       "category": "vlx",
+       "number": 29542,
+       "direction": {
+        "stopPlaces": [],
+        "text": "Koblenz Hbf"
+       },
+       "label": "RE2",
+       "line": "RE2"
+      },
+      "administration": {
+       "administrationID": "V6RE",
+       "operatorCode": "DRB",
+       "operatorName": "vlexx"
+      },
+      "extDestinationID": "A=1@O=Frankfurt(M) Flughafen Regionalbf@X=8571250@Y=50051219@U=80@L=8070004@i=U×008011090@",
+      "platform": "Regio 3",
+      "platformSchedule": "Regio 3"
+     },
+     "duration": "PT11M",
+     "dayOfOperation": "2026-11-03"
+    },
+    {
+     "type": "WALK",
+     "origin": {
+      "type": "STOP_PLACE",
+      "stopPlaceID": "8070004",
+      "name": "Frankfurt(M) Flughafen Regionalbf"
+     },
+     "destination": {
+      "type": "STOP_PLACE",
+      "stopPlaceID": "8070003",
+      "name": "Frankfurt(M) Flughafen Fernbf"
+     },
+     "duration": "PT15M",
+     "arrivalTime": "2026-11-03T16:50:00+01:00",
+     "departureTime": "2026-11-03T16:35:00+01:00"
+    },
+    {
+     "type": "JOURNEY",
+     "extJourneyID": "2|#VN#1#ST#1793209233#PI#0#ZI#222667#TA#0#DA#31126#1S#8002553#1T#1126#LS#8000261#LT#2032#PU#80#RT#1#CA#ICE#ZE#611#ZB#ICE  611#PC#0#FR#8002553#FT#1126#TO#8000261#TT#2032#",
+     "departure": {
+      "stopPlace": {
+       "evaNumber": "8070003",
+       "name": "Frankfurt(M) Flughafen Fernbf"
+      },
+      "timeSchedule": "2026-11-03T16:51:00+01:00",
+      "timeType": "PREVIEW",
+      "time": "2026-11-03T17:24:00+01:00",
+      "messages": [
+       {
+        "type": "CUSTOMER_TEXT",
+        "text": "Streckensperrung"
+       }
+      ],
+      "transport": {
+       "type": "HIGH_SPEED_TRAIN",
+       "journeyDescription": "ICE 611",
+       "category": "ICE",
+       "number": 611,
+       "direction": {
+        "stopPlaces": [],
+        "text": "München Hbf"
+       },
+       "line": "42"
+      },
+      "administration": {
+       "administrationID": "80",
+       "operatorCode": "D",
+       "operatorName": "DB Fernverkehr AG"
+      },
+      "extOriginID": "A=1@O=Frankfurt(M) Flughafen Fernbf@X=8570181@Y=50053169@U=80@L=8070003@i=U×008061676@",
+      "platform": "Fern 5",
+      "platformSchedule": "Fern 5"
+     },
+     "via": [],
+     "arrival": {
+      "stopPlace": {
+       "evaNumber": "8000244",
+       "name": "Mannheim Hbf"
+      },
+      "timeSchedule": "2026-11-03T17:25:00+01:00",
+      "timeType": "PREVIEW",
+      "time": "2026-11-03T17:54:00+01:00",
+      "messages": [
+       {
+        "type": "CUSTOMER_TEXT",
+        "text": "Streckensperrung"
+       }
+      ],
+      "transport": {
+       "type": "HIGH_SPEED_TRAIN",
+       "journeyDescription": "ICE 611",
+       "category": "ICE",
+       "number": 611,
+       "direction": {
+        "stopPlaces": [],
+        "text": "München Hbf"
+       },
+       "line": "42"
+      },
+      "administration": {
+       "administrationID": "80",
+       "operatorCode": "D",
+       "operatorName": "DB Fernverkehr AG"
+      },
+      "extDestinationID": "A=1@O=Mannheim Hbf@X=8468917@Y=49479352@U=80@L=8000244@i=U×008014008@",
+      "platform": "5",
+      "platformSchedule": "5"
+     },
+     "duration": "PT30M",
+     "dayOfOperation": "2026-11-03"
+    }
+   ]
+  },
+  {
+   "extTripID": "¶HKI¶T$A=1@O=Berlin Hbf (S-Bahn)@X=13369549@Y=52525589@L=8089021@a=128@$A=1@O=Berlin Ostbahnhof (S)@X=13435125@Y=52510721@L=8089185@a=128@$202611031621$202611031631$      S5$$1$$$$$$¶KC¶#VE#2#CF#100#CA#0#CM#0#SICT#0#AM#5242977#AM2#0#RT#7#¶KRCC¶#VE#1#",
+   "startDate": "2026-11-03T16:21:00+01:00",
+   "duration": "PT10M",
+   "legs": [
+    {
+     "type": "JOURNEY",
+     "extJourneyID": "2|#VN#1#ST#1793209233#PI#0#ZI#330316#TA#0#DA#31126#1S#8089047#1T#1607#LS#8013064#LT#1725#PU#80#RT#1#CA#DBS#ZE#S5#ZB#      S5#PC#4#FR#8089047#FT#1607#TO#8013064#TT#1725#",
+     "departure": {
+      "stopPlace": {
+       "evaNumber": "8089021",
+       "name": "Berlin Hbf (S-Bahn)"
+      },
+      "timeSchedule": "2026-11-03T16:21:00+01:00",
+      "timeType": "PREVIEW",
+      "time": "2026-11-03T16:21:00+01:00",
+      "messages": [],
+      "transport": {
+       "type": "CITY_TRAIN",
+       "journeyDescription": "S5",
+       "category": "S",
+       "number": 5101,
+       "direction": {
+        "stopPlaces": [],
+        "text": "Strausberg Nord"
+       },
+       "line": "S5"
+      },
+      "administration": {
+       "administrationID": "08",
+       "operatorCode": "s",
+       "operatorName": "S-Bahn Berlin"
+      },
+      "extOriginID": "A=1@O=Berlin Hbf (S-Bahn)@X=13369549@Y=52525589@U=80@L=8089021@i=U×008033452@",
+      "platform": "15",
+      "platformSchedule": "15"
+     },
+     "via": [
+      {
+       "evaNumber": "8089066",
+       "name": "Berlin Friedrichstraße (S)",
+       "arrival": {
+        "timeSchedule": "2026-11-03T16:23:00+01:00",
+        "timeType": "PREVIEW",
+        "time": "2026-11-03T16:23:00+01:00",
+        "messages": [
+         {
+          "type": "CUSTOMER_TEXT",
+          "text": "Fahrradmitnahme begrenzt möglich"
+         },
+         {
+          "type": "CUSTOMER_TEXT",
+          "text": "nur 2. Klasse"
+         }
+        ],
+        "platform": "5",
+        "platformSchedule": "5"
+       },
+       "departure": {
+        "timeSchedule": "2026-11-03T16:23:00+01:00",
+        "timeType": "PREVIEW",
+        "time": "2026-11-03T16:23:00+01:00",
+        "messages": [],
+        "platform": "5",
+        "platformSchedule": "5"
+       }
+      },
+      {
+       "evaNumber": "8089017",
+       "name": "Berlin Hackescher Markt",
+       "arrival": {
+        "timeSchedule": "2026-11-03T16:25:00+01:00",
+        "timeType": "PREVIEW",
+        "time": "2026-11-03T16:25:00+01:00",
+        "messages": [
+         {
+          "type": "CUSTOMER_TEXT",
+          "text": "Fahrradmitnahme begrenzt möglich"
+         },
+         {
+          "type": "CUSTOMER_TEXT",
+          "text": "nur 2. Klasse"
+         }
+        ],
+        "platform": "3",
+        "platformSchedule": "3"
+       },
+       "departure": {
+        "timeSchedule": "2026-11-03T16:25:00+01:00",
+        "timeType": "PREVIEW",
+        "time": "2026-11-03T16:25:00+01:00",
+        "messages": [],
+        "platform": "3",
+        "platformSchedule": "3"
+       }
+      },
+      {
+       "evaNumber": "8089001",
+       "name": "Berlin Alexanderplatz (S)",
+       "arrival": {
+        "timeSchedule": "2026-11-03T16:27:00+01:00",
+        "timeType": "PREVIEW",
+        "time": "2026-11-03T16:27:00+01:00",
+        "messages": [
+         {
+          "type": "CUSTOMER_TEXT",
+          "text": "Fahrradmitnahme begrenzt möglich"
+         },
+         {
+          "type": "CUSTOMER_TEXT",
+          "text": "nur 2. Klasse"
+         }
+        ],
+        "platform": "3",
+        "platformSchedule": "3"
+       },
+       "departure": {
+        "timeSchedule": "2026-11-03T16:27:00+01:00",
+        "timeType": "PREVIEW",
+        "time": "2026-11-03T16:27:00+01:00",
+        "messages": [],
+        "platform": "3",
+        "platformSchedule": "3"
+       }
+      }
+     ],
+     "arrival": {
+      "stopPlace": {
+       "evaNumber": "8089185",
+       "name": "Berlin Ostbahnhof (S)"
+      },
+      "timeSchedule": "2026-11-03T16:31:00+01:00",
+      "timeType": "PREVIEW",
+      "time": "2026-11-03T16:31:00+01:00",
+      "messages": [],
+      "transport": {
+       "type": "CITY_TRAIN",
+       "journeyDescription": "S5",
+       "category": "S",
+       "number": 5101,
+       "direction": {
+        "stopPlaces": [],
+        "text": "Strausberg Nord"
+       },
+       "line": "S5"
+      },
+      "administration": {
+       "administrationID": "08",
+       "operatorCode": "s",
+       "operatorName": "S-Bahn Berlin"
+      },
+      "extDestinationID": "A=1@O=Berlin Ostbahnhof (S)@X=13435125@Y=52510721@U=80@L=8089185@i=U×008085768@",
+      "platform": "8",
+      "platformSchedule": "8"
+     },
+     "duration": "PT10M",
+     "dayOfOperation": "2026-11-03"
+    }
+   ]
+  }
+ ],
+ "navigationContextEarlier": "3|OB|earlier",
+ "navigationContextLater": "3|OF|later"
+}

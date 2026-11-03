@@ -355,8 +355,12 @@ in `project.pbxproj`: new files join their target automatically.
 ### Transit
 
 - `Transit/TransitProvider.swift` – `TransitProvider` (`searchStations`, `journeys`, `board`, `trip`), `JourneyQuery`.
-- `Transit/CombinedProvider.swift` – what the app uses: `TransitousProvider` (no fallback configured), cooldown
+- `Transit/CombinedProvider.swift` – what the app uses: `TransitousProvider`, with `RISRoutingProvider` as the fallback (journeys only), cooldown
   health check, `BahnDeClient`, `VagonwebClient`, `BahnExpertClient`, `BahnJetztClient`.
+- `Transit/RISRouting/RISRoutingProvider.swift` – fallback for journeys while Transitous fails: DB's own routing
+  (RIS::Routing, `verkehrslage.bahnhof.de/api/routing/multimodal`, no key, undocumented). Stops by EVA number
+  (`BahnDeClient.evaNumber(for:)`), source `.bahnDe`: its journey IDs are bahn.de's, so `trip(id:)` reads bahn.de's
+  journey details through our server. Lines named like Transitous ("RE2 (29542)", "S5"). No board.
 - `Transit/StationSearch.swift` (#90) – shortcuts "b" (bus), "t" (tram), "l" (nearest first) as a separate word.
   Without "b", bus-only stops are left out of the picker unless nothing else matches;
   `TransitousProvider.searchStations(_:near:)` passes modes to the geocoder and filters after

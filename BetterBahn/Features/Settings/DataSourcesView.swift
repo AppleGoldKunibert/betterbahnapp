@@ -33,6 +33,8 @@ struct DataSourcesView: View {
         Source(name: "Deutsche Bahn – OpenStation der DB InfraGO", usage: String(localized: "Namen der Bahnhöfe, Gleise am selben Bahnsteig und Aufzüge"),
                url: URL(string: "https://mobilithek.info/offers/879076212433727488")!,
                license: (String(localized: "Lizenz: CC0 1.0"), URL(string: "https://creativecommons.org/publicdomain/zero/1.0/deed.de")!)),
+        Source(name: "Deutsche Bahn – bahnhof.de", usage: String(localized: "Verbindungen, wenn Transitous nicht antwortet"),
+               url: URL(string: "https://www.bahnhof.de")!),
         Source(name: "bahn.de", usage: String(localized: "Wagenreihung, Zusatzhalte, Gleise und Zugnamen; Zeichnungen der ICE-Baureihen aus dem Fahrzeuglexikon, © Deutsche Bahn AG"),
                url: URL(string: "https://www.bahn.de")!),
         Source(name: "vagonweb.cz", usage: String(localized: "Geplante Wagenreihungen und Zugtypen, mit Erlaubnis von vagonweb"),

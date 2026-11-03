@@ -2,7 +2,7 @@
 
 Research checked 2026-09-17.
 
-Transitous now supplies station search, journeys, departure/arrival boards and trip details. The existing direct bahn.de client remains a station-search fallback and optional coach-formation helper. There is currently **no full journey/board fallback configured**. The retired DB REST implementation, DTOs, fixtures and URL setting have been removed. The `dbRest` source value remains solely to decode saved data: stations are resolved through Transitous; provider-specific old trip IDs and pagination tokens require a new search.
+Transitous now supplies station search, journeys, departure/arrival boards and trip details. The existing direct bahn.de client remains a station-search fallback and optional coach-formation helper. Journeys fall back to DB's own routing (RIS::Routing, `RISRoutingProvider`, unofficial and keyless, via bahnhof.de) when Transitous fails; there is **no board fallback**. The retired DB REST implementation, DTOs, fixtures and URL setting have been removed. The `dbRest` source value remains solely to decode saved data: stations are resolved through Transitous; provider-specific old trip IDs and pagination tokens require a new search.
 
 ## Replacement options
 
