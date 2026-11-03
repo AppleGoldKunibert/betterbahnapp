@@ -4974,6 +4974,11 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         #expect(BahnExpertClient.product(transportType: "INTERCITY_TRAIN", category: "IC") == .longDistance)
         #expect(BahnExpertClient.product(transportType: "REGIONAL_TRAIN", category: "RE") == .regionalExpress)
         #expect(BahnExpertClient.product(transportType: "REGIONAL_TRAIN", category: "RB") == .regional)
+        // Other operators' own category: ODEG's RE8 62025 is "OE", the line says it's an RE.
+        #expect(BahnExpertClient.product(transportType: "REGIONAL_TRAIN", category: "OE", line: "RE8") == .regionalExpress)
+        #expect(BahnExpertClient.product(transportType: "REGIONAL_TRAIN", category: "vlx", line: "RE2") == .regionalExpress)
+        #expect(BahnExpertClient.product(transportType: "REGIONAL_TRAIN", category: "OE", line: "RB10") == .regional)
+        #expect(BahnExpertClient.product(transportType: "REGIONAL_TRAIN", category: "Bus", line: "RE3") == .bus)
         #expect(BahnExpertClient.product(transportType: "REGIONAL_TRAIN", category: "Bus") == .bus)
         #expect(BahnExpertClient.product(transportType: "CITY_TRAIN", category: "S") == .suburban)
         #expect(BahnExpertClient.product(transportType: "FERRY", category: "Fähre") == .ferry)

@@ -413,7 +413,7 @@ extension BahnExpertClient {
         let category = train.category ?? ""
         return TrainSearchResult(
             journeyId: run.journeyId, category: category, number: number, line: train.line,
-            product: product(transportType: train.transportType, category: category),
+            product: product(transportType: train.transportType, category: category, line: train.line),
             origin: StationNames.displayName(forName: run.firstStop?.stopPlace.name ?? "", evaNumber: run.firstStop?.stopPlace.evaNumber),
             destination: StationNames.displayName(forName: run.lastStop?.stopPlace.name ?? "", evaNumber: run.lastStop?.stopPlace.evaNumber),
             originEVA: run.firstStop?.stopPlace.evaNumber, destinationEVA: run.lastStop?.stopPlace.evaNumber,
@@ -422,13 +422,17 @@ extension BahnExpertClient {
     }
 
     /// bahn.expert's transport type; replacement buses come as regional trains of category "Bus".
-    static func product(transportType: String?, category: String) -> Product {
+    /// A regional train is an RE by its category ("RE") or, for other operators whose category is their own
+    /// ("OE" for ODEG's RE8 62025), by its line ("RE8").
+    static func product(transportType: String?, category: String, line: String? = nil) -> Product {
         let category = category.uppercased()
         if category.hasPrefix("BUS") { return .bus }
         switch transportType {
         case "HIGH_SPEED_TRAIN": return .highSpeed
         case "INTERCITY_TRAIN", "INTER_REGIONAL_TRAIN": return .longDistance
-        case "REGIONAL_TRAIN": return ["RE", "IRE", "REX"].contains(category) ? .regionalExpress : .regional
+        case "REGIONAL_TRAIN":
+            let lineCategory = String((line ?? "").prefix { $0.isLetter }).uppercased()
+            return expressCategories.contains(category) || expressCategories.contains(lineCategory) ? .regionalExpress : .regional
         case "CITY_TRAIN": return .suburban
         case "SUBWAY": return .subway
         case "TRAM": return .tram
@@ -437,4 +441,6 @@ extension BahnExpertClient {
         default: return .other
         }
     }
+
+    static let expressCategories: Set<String> = ["RE", "IRE", "REX"]
 }
