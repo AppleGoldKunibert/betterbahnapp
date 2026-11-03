@@ -1,22 +1,12 @@
 {
   "sourceLanguage" : "de",
   "strings" : {
-    "Alle Triebzüge" : {
+    "Alle Einsätze" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "All Trainsets"
-          }
-        }
-      }
-    },
-    "Baureihe" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Series"
+            "value" : "All trips"
           }
         }
       }
@@ -27,16 +17,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "The history isn't available right now."
-          }
-        }
-      }
-    },
-    "Die Liste ist gerade nicht verfügbar." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The list isn't available right now."
           }
         }
       }
@@ -81,26 +61,6 @@
         }
       }
     },
-    "Nur ICE und IC. Der Verlauf reicht ein Jahr zurück." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ICE and IC only. The history goes back one year."
-          }
-        }
-      }
-    },
-    "Schon gefahren" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Already ridden"
-          }
-        }
-      }
-    },
     " (seit %@)" : {
       "localizations" : {
         "en" : {
@@ -127,26 +87,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "· %@"
-          }
-        }
-      }
-    },
-    "Tz, Name oder Zug" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Trainset, name or train"
-          }
-        }
-      }
-    },
-    "Unser Server sammelt die Züge erst seit Kurzem. Die Liste füllt sich nach und nach." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Our server has only just started collecting trains. The list fills up over time."
           }
         }
       }
@@ -214,6 +154,7 @@
       }
     },
     "%@\n%@" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -309,6 +250,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ cancelled"
+          }
+        }
+      }
+    },
+    "%@ bis %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ to %2$@"
           }
         }
       }
@@ -423,6 +374,7 @@
         }
       }
     },
+    "%@ km" : {},
     "%@ kommt um %@ in %@ an, %@ fährt dort schon um %@. Andere Züge dafür anzeigen oder den Plan so lassen?" : {
       "localizations" : {
         "en" : {
@@ -477,6 +429,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ minutes of delay in total"
+          }
+        }
+      }
+    },
+    "%@ nach %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ to %2$@"
           }
         }
       }
@@ -664,11 +626,22 @@
     },
     "%lld %%" : {
       "comment" : "Percentage, e.g. 33 %",
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld%%"
+          }
+        }
+      }
+    },
+    "%lld Aufzüge defekt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld lifts out of order"
           }
         }
       }
@@ -1096,6 +1069,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "● "
+          }
+        }
+      }
+    },
+    "1 Fahrt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 trip"
           }
         }
       }
@@ -1549,6 +1532,16 @@
         }
       }
     },
+    "Akzentfarbe" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Accent color"
+          }
+        }
+      }
+    },
     "Alle" : {
       "localizations" : {
         "en" : {
@@ -1752,6 +1745,16 @@
         }
       }
     },
+    "an %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "arr. %@"
+          }
+        }
+      }
+    },
     "an %@ in %@" : {
       "localizations" : {
         "en" : {
@@ -1844,12 +1847,21 @@
       }
     },
     "Andere Züge" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Other Trains"
+          }
+        }
+      }
+    },
+    "Andere Züge zeigen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show other trains"
           }
         }
       }
@@ -2062,12 +2074,12 @@
         }
       }
     },
-    "Anspruch auf %lld %% Entschädigung" : {
+    "Anspruch auf %@ Entschädigung" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Entitled to %lld%% compensation"
+            "value" : "Entitled to %@ compensation"
           }
         }
       }
@@ -2098,6 +2110,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Show"
+          }
+        }
+      }
+    },
+    "App-Symbol" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App icon"
           }
         }
       }
@@ -2198,6 +2220,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Order Number"
+          }
+        }
+      }
+    },
+    "Aufzug defekt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lift out of order"
+          }
+        }
+      }
+    },
+    "Aufzüge außer Betrieb" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lifts out of order"
           }
         }
       }
@@ -2413,17 +2455,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "bahn.de wants to confirm the search. Please complete it on the page, then BetterBahn will load your ticket."
-          }
-        }
-      }
-    },
-    "bahn.de: %@" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "bahn.de: %@"
           }
         }
       }
@@ -2691,6 +2722,16 @@
         }
       }
     },
+    "Blau" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Blue"
+          }
+        }
+      }
+    },
     "Bleibst du im Zug, bist du um %@ in %@ – %lld Min. früher." : {
       "localizations" : {
         "en" : {
@@ -2907,6 +2948,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "CO₂ Comparison"
+          }
+        }
+      }
+    },
+    "Dann Umstieg in %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Then change at %@"
           }
         }
       }
@@ -3201,6 +3252,16 @@
         }
       }
     },
+    "Design" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Design"
+          }
+        }
+      }
+    },
     "deutsche-bahn-data von Piet Brömmel" : {
       "localizations" : {
         "en" : {
@@ -3265,6 +3326,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "The journey couldn't be loaded. Check your internet connection and open the link again."
+          }
+        }
+      }
+    },
+    "Die Suche als Fahrkarte, mit runder Schrift und ruhigem Hintergrund." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The search as a ticket, with rounded type and a calm background."
+          }
+        }
+      }
+    },
+    "Die Suche zeigt, wo ein Aufzug auf deinem Weg außer Betrieb ist. Für gespeicherte Reisen bekommst du dann eine Mitteilung." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The search shows where a lift on your way is out of order. For saved journeys, you'll get a notification."
           }
         }
       }
@@ -3512,12 +3593,12 @@
         }
       }
     },
-    "Du hast Anspruch auf %lld %% Entschädigung" : {
+    "Du hast Anspruch auf %@ Entschädigung" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "You're entitled to %lld%% compensation"
+            "value" : "You're entitled to %@ compensation"
           }
         }
       }
@@ -3580,6 +3661,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Custom"
+          }
+        }
+      }
+    },
+    "Eigene Farbe" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Custom color"
           }
         }
       }
@@ -3715,6 +3806,16 @@
         }
       }
     },
+    "Entschädigung" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Compensation"
+          }
+        }
+      }
+    },
     "Erfahrungswerte" : {
       "comment" : "Past punctuality/cancellation figures of a train",
       "localizations" : {
@@ -3772,6 +3873,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Expert Mode"
+          }
+        }
+      }
+    },
+    "Fahrkarte" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ticket"
           }
         }
       }
@@ -3898,12 +4009,32 @@
         }
       }
     },
+    "Fahrten anzeigen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show rides"
+          }
+        }
+      }
+    },
     "Fahrten auf der Karte zeigen" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Show Trips on the Map"
+          }
+        }
+      }
+    },
+    "Fahrten ausblenden" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide rides"
           }
         }
       }
@@ -4298,6 +4429,16 @@
         }
       }
     },
+    "Geschwindigkeit" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speed"
+          }
+        }
+      }
+    },
     "Gespeichert" : {
       "localizations" : {
         "en" : {
@@ -4420,6 +4561,7 @@
       }
     },
     "Gleise" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4455,6 +4597,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Platform change in %1$@ of cases (usually %2$@)"
+          }
+        }
+      }
+    },
+    "Gold" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gold"
+          }
+        }
+      }
+    },
+    "Graphit" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Graphite"
+          }
+        }
+      }
+    },
+    "Grün" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Green"
           }
         }
       }
@@ -4670,6 +4842,16 @@
         }
       }
     },
+    "in %lld Min." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "in %lld min"
+          }
+        }
+      }
+    },
     "In den nächsten 90 Minuten fährt hier nichts." : {
       "localizations" : {
         "en" : {
@@ -4696,6 +4878,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Which part of the train are you in?"
+          }
+        }
+      }
+    },
+    "Indigo" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Indigo"
           }
         }
       }
@@ -5014,6 +5206,16 @@
         }
       }
     },
+    "Keine Einschränkungen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No restrictions"
+          }
+        }
+      }
+    },
     "Keine Fahrten %@" : {
       "localizations" : {
         "en" : {
@@ -5326,6 +5528,16 @@
         }
       }
     },
+    "Lila" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Purple"
+          }
+        }
+      }
+    },
     "Live" : {
       "comment" : "Map chip: live position without speed",
       "localizations" : {
@@ -5467,6 +5679,46 @@
         }
       }
     },
+    "Max. %lld Umstiege" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Max. %lld Umstieg"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Max. %lld Umstiege"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Max. %lld change"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Max. %lld changes"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "Max. Umstiege" : {
       "localizations" : {
         "en" : {
@@ -5543,6 +5795,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Minimum stay at %@"
+          }
+        }
+      }
+    },
+    "Minimal" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Minimal"
           }
         }
       }
@@ -5657,12 +5919,12 @@
         }
       }
     },
-    "Mit vollem Zugriff bleiben die Termine deiner Reisen aktuell, auch bei Verspätungen und Gleiswechseln, und verschwinden mit der Reise. Mit „Nur hinzufügen“ wird jeder Termin einmal in deinen Standardkalender eingetragen. Automatisch kommt jede gespeicherte Reise einmal in den Kalender, beim Speichern oder erst bei der Abfahrt." : {
+    "Mit vollem Zugriff bleiben die Termine deiner Reisen aktuell und verschwinden mit der Reise. „Nur hinzufügen“ trägt jeden Termin einmal in deinen Standardkalender ein. „Automatisch“ trägt jede gespeicherte Reise ein, beim Speichern oder bei der Abfahrt." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "With full access, your journeys' events stay up to date, even with delays and platform changes, and disappear with the journey. With “Add Only”, each event is added to your default calendar once. Automatically, every saved journey is added to the calendar once, when you save it or not until departure."
+            "value" : "With full access, your journeys' events stay up to date and disappear with the journey. “Add Only” adds each event to your default calendar once. “Automatically” adds every saved journey, when you save it or when it departs."
           }
         }
       }
@@ -5738,6 +6000,16 @@
         }
       }
     },
+    "Nach" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "To"
+          }
+        }
+      }
+    },
     "nach %@" : {
       "localizations" : {
         "en" : {
@@ -5799,7 +6071,18 @@
         }
       }
     },
+    "Nächster Halt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Next stop"
+          }
+        }
+      }
+    },
     "Nächster Halt:" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -6099,6 +6382,56 @@
         }
       }
     },
+    "Optionen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Options"
+          }
+        }
+      }
+    },
+    "Optionen ausblenden" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide options"
+          }
+        }
+      }
+    },
+    "Optionen einblenden" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show options"
+          }
+        }
+      }
+    },
+    "Orange" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Orange"
+          }
+        }
+      }
+    },
+    "Passt sich deiner Farbe an, sobald du diese Seite verlässt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Changes to match your color when you leave this page."
+          }
+        }
+      }
+    },
     "Pausieren" : {
       "localizations" : {
         "en" : {
@@ -6115,6 +6448,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Show PDF"
+          }
+        }
+      }
+    },
+    "Pink" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pink"
           }
         }
       }
@@ -6650,6 +6993,16 @@
         }
       }
     },
+    "Rot" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Red"
+          }
+        }
+      }
+    },
     "Route geändert" : {
       "localizations" : {
         "en" : {
@@ -6892,6 +7245,16 @@
         }
       }
     },
+    "Sortieren" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sort"
+          }
+        }
+      }
+    },
     "Spätere Abfahrten" : {
       "localizations" : {
         "en" : {
@@ -6928,6 +7291,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Save"
+          }
+        }
+      }
+    },
+    "Stand" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Updated"
           }
         }
       }
@@ -7053,6 +7426,26 @@
         }
       }
     },
+    "Strecken über Mobilfunk laden" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Load tracks on mobile data"
+          }
+        }
+      }
+    },
+    "Stufenfrei reisen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Step-Free Travel"
+          }
+        }
+      }
+    },
     "Stunden" : {
       "localizations" : {
         "en" : {
@@ -7169,6 +7562,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Finding the train…"
+          }
+        }
+      }
+    },
+    "Suchen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search"
           }
         }
       }
@@ -7573,6 +7976,16 @@
         }
       }
     },
+    "Türkis" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turquoise"
+          }
+        }
+      }
+    },
     "Tz %@" : {
       "comment" : "Triebzug (trainset) number, kept as DB's abbreviation like in Kit's unit descriptions",
       "localizations" : {
@@ -7640,6 +8053,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Change · %lld min"
+          }
+        }
+      }
+    },
+    "Umstieg in %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Change at %@"
           }
         }
       }
@@ -7900,6 +8323,16 @@
         }
       }
     },
+    "Vertraut und aufgeräumt: Karten wie gewohnt, seltene Optionen eingeklappt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Familiar and tidy: the usual cards, rarely used options folded away."
+          }
+        }
+      }
+    },
     "Via Ticket hinzufügen" : {
       "localizations" : {
         "en" : {
@@ -7926,6 +8359,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "From"
+          }
+        }
+      }
+    },
+    "von %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "of %lld"
+          }
+        }
+      }
+    },
+    "von %lld gesammelt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "of %lld collected"
           }
         }
       }
@@ -8184,16 +8637,6 @@
         }
       }
     },
-    "Welcher Tz fährt heute auf welchem Zug?" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Which trainset runs on which train today?"
-          }
-        }
-      }
-    },
     "Welche Zugarten und Länder die Suche zeigt, stellst du in den Einstellungen unter „Zugschnellsuche“ ein." : {
       "localizations" : {
         "en" : {
@@ -8374,6 +8817,16 @@
         }
       }
     },
+    "Wohin geht’s?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Where to next?"
+          }
+        }
+      }
+    },
     "Wohin?" : {
       "localizations" : {
         "en" : {
@@ -8424,12 +8877,32 @@
         }
       }
     },
+    "Zeigt auf den Karten auch die anderen fahrenden Züge. Über Mobilfunk kann das einige MB pro Karte kosten." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shows the other running trains on the maps too. On mobile data this can cost a few MB per map."
+          }
+        }
+      }
+    },
     "Zeigt den Sitzplan" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Shows the seat map"
+          }
+        }
+      }
+    },
+    "Zeigt die ganze Fahrt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shows the whole trip"
           }
         }
       }
@@ -8776,6 +9249,16 @@
         }
       }
     },
+    "Züge: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trains: %@"
+          }
+        }
+      }
+    },
     "Zugnamen, die beginnen mit (mit Komma trennen)" : {
       "localizations" : {
         "en" : {
@@ -8906,16 +9389,6 @@
         }
       }
     },
-    "zuletzt %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "last %@"
-          }
-        }
-      }
-    },
     "Zuletzt am %@" : {
       "localizations" : {
         "en" : {
@@ -8932,6 +9405,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Recent Searches"
+          }
+        }
+      }
+    },
+    "Zuletzt gesucht ausblenden" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide recent searches"
+          }
+        }
+      }
+    },
+    "Zuletzt gesucht einblenden" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show recent searches"
           }
         }
       }
@@ -9043,56 +9538,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Add Via Stop"
-          }
-        }
-      }
-    },
-    "Aufzug defekt" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Lift out of order"
-          }
-        }
-      }
-    },
-    "%lld Aufzüge defekt" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld lifts out of order"
-          }
-        }
-      }
-    },
-    "Stufenfrei reisen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Step-Free Travel"
-          }
-        }
-      }
-    },
-    "Die Suche zeigt, wo ein Aufzug auf deinem Weg außer Betrieb ist. Für gespeicherte Reisen bekommst du dann eine Mitteilung." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The search shows where a lift on your way is out of order. For saved journeys, you'll get a notification."
-          }
-        }
-      }
-    },
-    "Aufzüge außer Betrieb" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Lifts out of order"
           }
         }
       }

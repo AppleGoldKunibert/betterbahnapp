@@ -77,6 +77,43 @@ public struct BahnJetztClient: Sendable {
     /// Whether bahn.jetzt could know this train at all.
     public static func supports(_ line: Line?) -> Bool { reference(for: line) != nil }
 
+    /// A train in bahn.jetzt's list of every running train.
+    public struct RunningTrain: Sendable, Hashable {
+        public var id: String
+        /// e.g. "ICE 79", "RE 8".
+        public var name: String
+        /// e.g. "ICE", "RE".
+        public var category: String?
+        public var number: Int?
+        /// bahn.jetzt's line name, e.g. "RE8"; regional trains carry their line here, not their number.
+        public var lineName: String?
+        public var destination: String?
+        public var position: TrainPosition
+    }
+
+    /// Every train bahn.jetzt has a position for (one list, shared with `position(of:…)`).
+    /// - Throws: `TransitError.rateLimited` while bahn.jetzt is refusing requests.
+    public func runningTrains() async throws -> [RunningTrain] {
+        let snapshot = try await snapshot()
+        return Self.runningTrains(in: snapshot)
+    }
+
+    static func runningTrains(in snapshot: Snapshot) -> [RunningTrain] {
+        snapshot.journeys.compactMap { journey in
+            guard let position = journey.position, position.count == 2 else { return nil }
+            let transport = journey.details?.transportAtStart
+            let category = transport?.category?.trimmingCharacters(in: .whitespaces)
+            let longDistance = category.map { BahnDeClient.longDistanceCategories.contains($0.uppercased()) } ?? false
+            let name = longDistance
+                ? [category, transport?.journeyNumber.map(String.init)].compactMap { $0 }.joined(separator: " ")
+                : transport?.journeyName ?? journey.name ?? category ?? ""
+            return RunningTrain(id: journey.journeyId, name: name, category: category, number: transport?.journeyNumber,
+                                lineName: transport?.journeyName ?? journey.name, destination: journey.details?.destination?.name,
+                                position: TrainPosition(coordinate: Coordinate(latitude: position[1], longitude: position[0]),
+                                                        time: snapshot.fetchedAt, speedKmh: journey.speed, source: "bahn.jetzt"))
+        }
+    }
+
     /// What a regional match is checked against, since run numbers are only unique within one country.
     public struct RouteHint: Sendable, Hashable {
         /// The train's final destination (headsign).

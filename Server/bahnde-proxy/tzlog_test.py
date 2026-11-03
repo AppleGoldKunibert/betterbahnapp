@@ -147,6 +147,17 @@ class StoreTests(unittest.TestCase):
         store.prune(dt.date(2026, 10, 31))
         self.assertEqual([t["day"] for t in store.history("8043")], ["2026-10-31", "2026-10-30"])
 
+    def test_prune_keeps_a_freshly_seeded_tz_that_has_no_trains_yet(self):
+        import json
+        import tempfile
+        store = tzlog.TzStore()
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "seed.json"
+            path.write_text(json.dumps([{"tz": "8043", "unit": "ICE8043", "types": [], "vehicle": "938000000043"}]))
+            store.load_seed(path)  # seen: now
+        store.prune(dt.datetime.now(tzlog.BERLIN).date())
+        self.assertEqual(store.vehicles(), [("8043", "938000000043", False)])
+
     def test_prune_forgets_a_tz_without_trains(self):
         store = tzlog.TzStore()
         self.record(store, "2025-01-01", "169", 1)
@@ -339,6 +350,20 @@ class VehicleRoundTests(unittest.IsolatedAsyncioTestCase):
         await scanner.scan_vehicles()
         self.assertEqual(len(self.asked), tzlog.RIS_MAX_FAILURES)
         self.assertFalse(any(done for _, _, done in self.store.vehicles()), "not backfilled, tried again later")
+
+    async def test_a_board_scan_after_a_failed_round_keeps_the_seeded_tz(self):
+        scanner = self.scanner()
+
+        async def failing(uic, day):
+            return 500, None
+
+        scanner.ris = failing
+        self.store.record_unit({"tz": "7777", "unit": "ICE7777", "types": [], "vehicle": "938000000077"}, NOW)
+        await scanner.scan_vehicles()
+        scanner.hubs = []
+        await scanner.scan()  # prunes
+        # The two from setUp were seen at time 1 (long ago) and have no trains: forgotten. The fresh one stays.
+        self.assertEqual([tz for tz, _, _ in self.store.vehicles()], ["7777"])
 
     async def test_no_wifi_host_no_round(self):
         scanner = tzlog.Scanner(self.store, None, hubs=[], now=lambda: NOW, sleep=noop_sleep(), ris=None)

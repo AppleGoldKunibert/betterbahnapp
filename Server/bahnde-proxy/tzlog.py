@@ -256,10 +256,12 @@ class TzStore:
         return [self._train(row) for row in rows]
 
     def prune(self, today):
-        """Forgets what is older than `RETENTION_DAYS` before `today` (a `date`), and Tz not seen since."""
-        limit = (today - dt.timedelta(days=RETENTION_DAYS)).isoformat()
-        self.db.execute("DELETE FROM sightings WHERE day < ?", (limit,))
-        self.db.execute("DELETE FROM units WHERE tz NOT IN (SELECT DISTINCT tz FROM sightings)")
+        """Forgets what is older than `RETENTION_DAYS` before `today` (a `date`), and Tz without trains that nothing
+        has seen since. A Tz just taken from the seed has no trains yet and stays until its first lookup works."""
+        limit = (today - dt.timedelta(days=RETENTION_DAYS))
+        self.db.execute("DELETE FROM sightings WHERE day < ?", (limit.isoformat(),))
+        self.db.execute("DELETE FROM units WHERE tz NOT IN (SELECT DISTINCT tz FROM sightings) AND seen < ?",
+                        (dt.datetime.combine(limit, dt.time(), tzinfo=BERLIN).timestamp(),))
         self.db.commit()
 
 
@@ -392,7 +394,9 @@ class Scanner:
         """One board scan: trains of the hubs' boards no earlier answer explains get their Wagenreihung asked."""
         started = self.now()
         now = dt.datetime.fromtimestamp(started, BERLIN).replace(tzinfo=None, second=0, microsecond=0)
-        # Not past midnight: the vehicle lookups know the trains of the day, and what they know isn't asked again.
+        # Not past midnight: the vehicle lookups know the trains of the day, and what they know isn't asked again. The
+        # trains between midnight and the next scan are left to them too; only a Tz missing from the seed that first
+        # runs in those hours is learned a day later.
         end = min(now + dt.timedelta(seconds=self.every), dt.datetime.combine(now.date() + dt.timedelta(days=1), dt.time()))
         # Continue where the last scan stopped; after a long break (or the first scan) start now.
         start = now

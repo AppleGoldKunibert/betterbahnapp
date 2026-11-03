@@ -24,6 +24,7 @@ struct TrainNumberSheet: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.appDesign) private var design
     @State private var train = ""
     @State private var finder: TrainCandidateFinder?
     @State private var candidates: [TrainCandidate] = []
@@ -110,32 +111,56 @@ struct TrainNumberSheet: View {
 
     // MARK: Searching
 
+    /// Minimal: a card with the field. Fahrkarte: a ticket, "Zug" above the perforation and the destination below.
+    @ViewBuilder
     private var searchField: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 12) {
-                    IconTile(systemImage: "number", color: .brand, size: 38)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Zug").font(.headline)
-                        Text("Ziel: \(search.to.displayName)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
+        if design == .fahrkarte {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 4) {
+                    TicketCaption(text: String(localized: "Zug"))
+                    trainField
+                        .font(.title3.weight(.bold))
                 }
-                TextField("z. B. ICE 423, RE 3 oder 3300", text: $train)
-                    .font(.title3.weight(.semibold))
-                    .textInputAutocapitalization(.characters)
-                    .autocorrectionDisabled()
-                    .submitLabel(.search)
-                    .focused($focused, equals: .train)
-                    .onSubmit {
-                        if let first = shownNumbered.first { pick(first) } else if let first = shownCandidates.first { pick(first) }
+                .padding(16)
+                TicketPerforation()
+                TicketValueField(label: String(localized: "Ziel"), value: search.to.displayName, font: .headline)
+                    .padding(16)
+            }
+            .fontDesign(.rounded)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .ticketBackground()
+            .environment(\.cardSurface, Color.ticket)
+        } else {
+            Card {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(spacing: 12) {
+                        IconTile(systemImage: "number", color: .brandText, size: 32)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Zug").font(.headline)
+                            Text("Ziel: \(search.to.displayName)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
                     }
-                    .padding(12)
-                    .background(Color.secondary.opacity(0.1), in: .rect(cornerRadius: 12, style: .continuous))
+                    trainField
+                        .font(.title3.weight(.semibold))
+                        .padding(12)
+                        .background(Color.secondary.opacity(0.1), in: .rect(cornerRadius: 12, style: .continuous))
+                }
             }
         }
+    }
+
+    private var trainField: some View {
+        TextField("z. B. ICE 423, RE 3 oder 3300", text: $train)
+            .textInputAutocapitalization(.characters)
+            .autocorrectionDisabled()
+            .submitLabel(.search)
+            .focused($focused, equals: .train)
+            .onSubmit {
+                if let first = shownNumbered.first { pick(first) } else if let first = shownCandidates.first { pick(first) }
+            }
     }
 
     @ViewBuilder
@@ -158,10 +183,14 @@ struct TrainNumberSheet: View {
                 .padding(.horizontal, 4)
             }
             if let pickError { ErrorBanner(error: pickError) }
-            ForEach(shownNumbered) { train in
-                Button { pick(train) } label: { numberedRow(train) }
-                    .buttonStyle(.plain)
-                    .disabled(loadingTrainID != nil)
+            if !shownNumbered.isEmpty {
+                VStack(spacing: 8) {
+                    ForEach(shownNumbered) { train in
+                        Button { pick(train) } label: { numberedRow(train) }
+                            .buttonStyle(.plain)
+                            .disabled(loadingTrainID != nil)
+                    }
+                }
             }
             if isCheckingRoute {
                 hint("Prüfe, wo die Züge halten …")
@@ -170,9 +199,13 @@ struct TrainNumberSheet: View {
                 SectionHeader(title: String(localized: "Weitere Züge auf deiner Strecke"), systemImage: "tram.fill")
                     .padding(.top, 4)
             }
-            ForEach(shownCandidates) { candidate in
-                Button { pick(candidate) } label: { candidateRow(candidate) }
-                    .buttonStyle(.plain)
+            if !shownCandidates.isEmpty {
+                VStack(spacing: 8) {
+                    ForEach(shownCandidates) { candidate in
+                        Button { pick(candidate) } label: { candidateRow(candidate) }
+                            .buttonStyle(.plain)
+                    }
+                }
             }
             if isSearching, !shownNumbered.isEmpty || !shownCandidates.isEmpty {
                 hint("Suche auf den Bahnhöfen deiner Strecke …")
@@ -262,10 +295,7 @@ struct TrainNumberSheet: View {
                     .padding(.top, 4)
             }
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.card, in: .rect(cornerRadius: 16, style: .continuous))
-        .contentShape(.rect)
+        .modifier(TrainRowSurface())
     }
 
     private func candidateRow(_ candidate: TrainCandidate) -> some View {
@@ -302,10 +332,7 @@ struct TrainNumberSheet: View {
                 .foregroundStyle(.tertiary)
                 .padding(.top, 4)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.card, in: .rect(cornerRadius: 16, style: .continuous))
-        .contentShape(.rect)
+        .modifier(TrainRowSurface())
     }
 
     /// The old way: name plus stations typed by hand, for a train neither the boards nor the train search know.
@@ -328,8 +355,7 @@ struct TrainNumberSheet: View {
                         .font(.headline)
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.glassProminent)
-                .tint(.brand)
+                .pageButtonStyle(.prominent)
                 .controlSize(.large)
                 .disabled(trimmed.isEmpty || boardingStation == nil)
             }
@@ -337,7 +363,7 @@ struct TrainNumberSheet: View {
         } label: {
             Text("Ein- und Ausstieg selbst angeben").font(.subheadline.weight(.semibold))
         }
-        .tint(.brand)
+        .tint(Color.brandText)
         .padding(.horizontal, 4)
     }
 
@@ -424,7 +450,7 @@ struct TrainNumberSheet: View {
             Label("Anderen Zug wählen", systemImage: "chevron.left")
                 .font(.subheadline.weight(.semibold))
         }
-        .tint(.brand)
+        .tint(Color.brandText)
 
         Text(boardingID == nil
              ? "Tippe auf den Halt, an dem du einsteigst."
@@ -454,8 +480,7 @@ struct TrainNumberSheet: View {
                 .font(.headline)
                 .frame(maxWidth: .infinity)
         }
-        .buttonStyle(.glassProminent)
-        .tint(.brand)
+        .pageButtonStyle(.prominent)
         .controlSize(.large)
         .disabled(boardingID == nil)
     }
@@ -499,5 +524,26 @@ struct TrainNumberSheet: View {
         guard !trimmed.isEmpty, let boarding = boardingStation else { return }
         onAdd(TrainRequirement(trainName: trimmed, boarding: boarding, exit: exitStation))
         dismiss()
+    }
+}
+
+/// A train in the sheet's lists: Minimal a card-like row with a light shadow, Fahrkarte flat with a fine
+/// outline and the rounded type.
+private struct TrainRowSurface: ViewModifier {
+    @Environment(\.appDesign) private var design
+
+    func body(content: Content) -> some View {
+        let fahrkarte = design == .fahrkarte
+        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        content
+            .fontDesign(fahrkarte ? .rounded : nil)
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                shape.fill(Color.card)
+                    .shadow(color: .black.opacity(fahrkarte ? 0 : 0.04), radius: 8, y: 2)
+            }
+            .overlay { shape.strokeBorder(Color.hairline, lineWidth: fahrkarte ? 1 : 0.5) }
+            .contentShape(.rect)
     }
 }
