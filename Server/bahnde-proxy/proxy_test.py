@@ -269,7 +269,8 @@ class RISTests(unittest.IsolatedAsyncioTestCase):
         self.clock = Clock()
         self.proxy = proxy.Proxy(fetch=self.bahn_de, secret=SECRET, clock=self.clock)
         self.ris_proxy = proxy.ris_proxy(self.ris, SECRET, clock=self.clock) if with_ris else None
-        self.client = TestClient(TestServer(proxy.make_app(self.proxy, self.ris_proxy)))
+        self.boards_proxy = proxy.ris_boards_proxy(self.ris, SECRET, clock=self.clock) if with_ris else None
+        self.client = TestClient(TestServer(proxy.make_app(self.proxy, self.ris_proxy, self.boards_proxy)))
         await self.client.start_server()
         self.addAsyncCleanup(self.client.close)
 
@@ -291,7 +292,7 @@ class RISTests(unittest.IsolatedAsyncioTestCase):
     async def test_only_its_paths_and_only_the_app(self):
         await self.start()
         self.assertEqual((await self.get("/db/apis/ris-journeys/v2/anything")).status, 404)
-        self.assertEqual((await self.get("/db/apis/ris-boards/v1/public/departures/8000105")).status, 404)
+        self.assertEqual((await self.get("/db/apis/ris-boards/v1/public/stop-places/8000105")).status, 404)
         self.assertEqual((await self.get(f"/db/apis/ris-journeys/v2/{RUN}", token=None)).status, 401)
         self.assertEqual(self.ris.urls, [])
 
@@ -305,6 +306,14 @@ class RISTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.get(f"/db/apis/ris-journeys/v2/{RUN}")).status, 401)
         self.assertEqual((await self.get(f"/db/apis/ris-journeys/v2/{RUN}")).status, 401)
         self.assertEqual(len(self.ris.urls), 2)
+
+    async def test_passes_a_stations_board_on(self):
+        await self.start()
+        response = await self.get("/db/apis/ris-boards/v1/public/departures/8000105?filterTransports=BUS&timeEnd=x")
+        self.assertEqual(response.status, 200)
+        self.assertEqual(self.ris.urls, ["https://apis.deutschebahn.com/db/apis/ris-boards/v1/public/departures/8000105?filterTransports=BUS&timeEnd=x"])
+        self.assertEqual((await self.get("/db/apis/ris-boards/v1/public/departures/abc")).status, 404)
+        self.assertEqual((await self.get("/db/apis/ris-boards/v1/public/stations")).status, 404)
 
     async def test_a_rate_limit_pauses_ris_but_not_bahn_de(self):
         await self.start(ris_status=429)
