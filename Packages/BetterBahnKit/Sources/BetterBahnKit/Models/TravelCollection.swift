@@ -76,6 +76,12 @@ public struct TravelCollection: Sendable, Hashable {
         /// Newest first.
         public var sightings: [Sighting]
 
+        /// The Tz of a trainset or livery item ("trainset:9018" → 9018); nil for any other.
+        public var unitNumber: Int? {
+            guard category == .trainsets || category == .liveries else { return nil }
+            return id.split(separator: ":").last.flatMap { Int($0) }
+        }
+
         public var isCollected: Bool { !sightings.isEmpty }
         public var firstSighting: Sighting? { sightings.last }
     }

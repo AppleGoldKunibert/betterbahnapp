@@ -32,6 +32,30 @@ verfügbar". The server keeps no logs of who asked.
 The `betterbahn` Worker also asks it for the live times of shared arrivals when IRIS doesn't have the train
 ("Ankunft teilen", `Cloudflare/arrival.mjs`: `fahrt` only, cached 30 s per train), with a token of its own (key `arrival-pages`, one rate limit for all of them).
 
+**Tz log (#502):** `tzlog.py` keeps which trainset (Tz) ran which ICE/IC on which day, for a year, in a SQLite file
+(`TZ_DB`), and serves it to the app: `GET /tz/list` (every Tz with its latest day's trains) and `GET /tz/history?tz=8043`
+(same token and rate limit as `/web/api/`), and `GET /tz/turnaround?category=ICE&number=592&day=2026-11-03`: the trains the
+trainset of that train ran as just before and runs as just after it ("Wendet aus / zu"). The turnaround answers from the log and first
+refreshes that trainset's journeys at the WiFi host (3 requests: the day and the days around it) when nobody looked at them for 30 minutes,
+so the host is only asked while someone looks at a trip, once per trainset and half hour however many look. It runs on one source, the RIS::Transports API behind DB Regio's WiFi landing
+page (`RisClient`): every `TZ_VEHICLE_EVERY` seconds one request per known Tz asks the journeys of one of its coaches
+(`/api/transports/vehicles/<UIC>/journeys?date=`), the first time also the last 6 days. No login: like the page itself it loads
+the landing page and sends its CSRF cookie and token back. It is not a documented API, so DB can change or close it; the log
+then stops growing from there. About 400 requests a day, `TZ_RIS_INTERVAL` apart, plus ~2400 once for the first week.
+
+- **The Tz list is a file:** `tz_seed.json` has every known Tz with the UIC number of one coach and is loaded at start.
+  `make_tz_seed.py` makes and extends it: it reads the boards of 15 stations once (about 700 requests to bahn.de through
+  this server), and keeps only Tz whose coach the WiFi host confirms. Run it on a few days until the list stops growing,
+  e.g. `python3 Server/bahnde-proxy/make_tz_seed.py` from a cloud session (the network secret adds the token).
+- **New Tz:** after each vehicle round the server reads the ICE/IC boards of 6 big stations (`HUBS`) for the rest of the day
+  and asks the Wagenreihung only of trains the vehicle round did not explain (those have a Tz the list lacks). With
+  nothing new that is about 100 board requests a day to bahn.de, `TZ_SCAN_INTERVAL` apart, through the proxy's cache, turn-taking
+  and pause. `TZ_BOARDS=false` never asks bahn.de.
+
+Only ICE and ICD (IC 2) groups with a Tz are kept, no loco-hauled IC 1. It records nothing about who asks. On a panel
+server the file lives next to the code and survives restarts; with Docker it is the `tzlog` volume. `TZ_SCAN=false`
+stops the scan (the log is still served), `TZ_RIS=false` the WiFi host.
+
 | Variable | Default | |
 | --- | --- | --- |
 | `TOKEN_SECRET` | — | Required. The same value as in `betterbahn2`, `betterbahn`, `betterbahn-pass`. |
@@ -42,6 +66,15 @@ The `betterbahn` Worker also asks it for the live times of shared arrivals when 
 | `MAX_PARALLEL` | `4` | Requests going to bahn.de at the same time. |
 | `MIN_INTERVAL` | `0.25` | Seconds between the starts of two requests to bahn.de. |
 | `RATE_LIMIT` | `120` | Requests per minute per app install. |
+| `TZ_DB` | `tz.db` next to `proxy.py` (`/data/tz.db` in Docker) | The Tz log's SQLite file. |
+| `TZ_SCAN` | `true` | `false` turns the scan off. |
+| `TZ_SCAN_INTERVAL` | `3` | Seconds between two requests of the scan. |
+| `TZ_SEED` | `tz_seed.json` next to `proxy.py` | The known Tz (see above). |
+| `TZ_BOARDS` | `true` | `false` never reads bahn.de's boards. |
+| `TZ_SCAN_EVERY` | `43200` | Seconds between two board scans (each reads up to midnight at most). |
+| `TZ_RIS` | `true` | `false` turns the WiFi host (vehicle lookups) off. |
+| `TZ_RIS_INTERVAL` | `1` | Seconds between two requests to the WiFi host. |
+| `TZ_VEHICLE_EVERY` | `43200` | Seconds between two vehicle rounds. |
 | `ALLOW_UNATTESTED` | — | `true` lets requests without a token through. Only for a quick test, never in production. |
 
 ## Run it
@@ -106,4 +139,4 @@ curl "http://localhost:8080/web/api/reiseloesung/orte?suchbegriff=Berlin&typ=ALL
 
 ## Tests
 
-`python3 -m unittest Server/bahnde-proxy/proxy_test.py` (needs `aiohttp`; no network).
+`python3 -m unittest Server/bahnde-proxy/proxy_test.py Server/bahnde-proxy/tzlog_test.py` (needs `aiohttp`; no network).

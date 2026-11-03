@@ -1,6 +1,66 @@
 {
   "sourceLanguage" : "de",
   "strings" : {
+    "Alle Einsätze" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All trips"
+          }
+        }
+      }
+    },
+    "Der Verlauf ist gerade nicht verfügbar." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The history isn't available right now."
+          }
+        }
+      }
+    },
+    "Dieser Triebzug ist unserem Server noch nicht aufgefallen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Our server hasn't seen this trainset yet."
+          }
+        }
+      }
+    },
+    "Du bist mit diesem Triebzug noch nicht gefahren." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You haven't ridden this trainset yet."
+          }
+        }
+      }
+    },
+    "Kurzfristig getauscht" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Swapped at short notice"
+          }
+        }
+      }
+    },
+    "Meine" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mine"
+          }
+        }
+      }
+    },
     " (seit %@)" : {
       "localizations" : {
         "en" : {
@@ -314,9 +374,7 @@
         }
       }
     },
-    "%@ km" : {
-
-    },
+    "%@ km" : {},
     "%@ kommt um %@ in %@ an, %@ fährt dort schon um %@. Andere Züge dafür anzeigen oder den Plan so lassen?" : {
       "localizations" : {
         "en" : {
@@ -9347,6 +9405,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Reset chosen trains"
+          }
+        }
+      }
+    },
+    "Zuletzt am %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last on %@"
           }
         }
       }

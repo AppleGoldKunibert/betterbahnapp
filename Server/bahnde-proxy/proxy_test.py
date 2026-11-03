@@ -9,6 +9,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 sys.path.insert(0, str(Path(__file__).parent))
 import proxy  # noqa: E402
+import tzlog  # noqa: E402
 
 SECRET = "test-secret"
 # Signed by Cloudflare/shared/appattest.mjs: signToken({t: "a", kid: "key-1", exp: 4102444800}, "test-secret").
@@ -69,6 +70,53 @@ class ProxyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.bahn_de.urls, ["https://www.bahn.de/web/api/reiseloesung/fahrt?journeyId=2%7C%23VN%231%23&poly=false"])
         self.assertEqual(response.headers["X-Proxy-Cache"], "MISS")
         self.assertEqual(response.headers["Cache-Control"], "public, max-age=30")
+
+    async def test_tz_log_is_served_to_the_app_only(self):
+        await self.start()
+        self.proxy.tz_store = tzlog.TzStore()
+        self.proxy.tz_store.record("2026-10-31", {"tz": "8043", "unit": "ICE8043", "types": ["I4080"], "category": "ICE",
+                                                  "number": 592, "destination": "Köln Hbf", "status": None}, "Berlin Hbf", 1)
+        self.assertEqual((await self.get("/tz/list", token=None)).status, 401)
+        listed = await (await self.get("/tz/list")).json()
+        self.assertEqual(listed["units"][0]["tz"], "8043")
+        history = await (await self.get("/tz/history?tz=08043")).json()
+        self.assertEqual([t["number"] for t in history["trains"]], [592])
+        self.assertEqual((await self.get("/tz/history?tz=x")).status, 400)
+        self.assertEqual((await self.get("/tz/other")).status, 404)
+        self.assertEqual(self.bahn_de.urls, [])
+
+    async def test_tz_turnaround_names_the_trains_before_and_after_and_checks_its_input(self):
+        await self.start()
+        self.proxy.tz_store = tzlog.TzStore()
+        store = self.proxy.tz_store
+        store.record_unit({"tz": "8043", "unit": "ICE8043", "types": [], "vehicle": "938000000043"}, 1)
+        for number, start in ((567, "2026-11-03T06:00:00Z"), (592, "2026-11-03T09:30:00Z"), (1501, "2026-11-03T14:00:00Z")):
+            store.record("2026-11-03", {"tz": "8043", "category": "ICE", "number": number, "start": start}, "Berlin Hbf", 1)
+        self.proxy.tz_ris = None  # no WiFi host: the log's own answer
+        url = "/tz/turnaround?category=ice&number=592&day=2026-11-03"
+        self.assertEqual((await self.get(url, token=None)).status, 401)
+        answer = await (await self.get(url)).json()
+        self.assertEqual((answer["tz"], [t["number"] for t in answer["previous"]], [t["number"] for t in answer["next"]]),
+                         ("8043", [567], [1501]))
+        self.assertEqual((await self.get("/tz/turnaround?category=ICE&number=592&day=nope")).status, 400)
+        self.assertEqual((await self.get("/tz/turnaround?category=ICE&number=x&day=2026-11-03")).status, 400)
+        unknown = await (await self.get("/tz/turnaround?category=ICE&number=9&day=2026-11-03")).json()
+        self.assertEqual(unknown, {"tz": None, "previous": [], "next": []})
+        self.assertEqual(self.bahn_de.urls, [])
+
+    async def test_no_tz_log_without_a_store(self):
+        await self.start()
+        self.assertEqual((await self.get("/tz/list")).status, 404)
+
+    async def test_scan_requests_use_the_cache_and_the_pause(self):
+        await self.start()
+        status, body = await self.proxy.ask_json("reiseloesung/abfahrten?x=1")
+        self.assertEqual((status, body["url"]), (200, proxy.UPSTREAM + "reiseloesung/abfahrten?x=1"))
+        self.assertEqual((await self.proxy.ask_json("angebote/fahrplan"))[0], 404)
+        self.proxy.paused_until = self.clock.now + 30
+        self.assertEqual((await self.proxy.ask_json("reiseloesung/abfahrten?x=2"))[0], 503)
+        self.assertEqual((await self.proxy.ask_json("reiseloesung/abfahrten?x=1"))[0], 200)
+        self.assertEqual(self.proxy.pause_left(), 30)
 
     async def test_only_the_workers_paths_and_only_get(self):
         await self.start()
