@@ -154,6 +154,91 @@ import Testing
         #expect(later.source == .bahnDe)
         #expect(RISFallbackProtocol.requests.withLock { $0.allSatisfy { $0.contains("verkehrslage.bahnhof.de") } })
     }
+
+    func dbFirst(risEmpty: Bool = false, bahnDeHits: String = "[]") -> (CombinedProvider, URLSession) {
+        DBFirstProtocol.requests.withLock { $0 = [] }
+        DBFirstProtocol.risEmpty.withLock { $0 = risEmpty }
+        DBFirstProtocol.bahnDeHits.withLock { $0 = bahnDeHits }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [DBFirstProtocol.self]
+        let session = URLSession(configuration: config)
+        let http = HTTPClient(session: session)
+        let ris = RISRoutingProvider(http: http, bahnDe: BahnDeClient(http: http, gate: BahnDeGate()))
+        return (CombinedProvider(primary: TransitousProvider(http: http), fallback: ris, bahnDe: nil, bahnExpert: nil,
+                                 vagonweb: nil, bahnJetzt: nil, dbJourneys: ris), session)
+    }
+
+    /// DB is asked first; Transitous isn't asked when DB has journeys.
+    @Test func journeysComeFromDBFirst() async throws {
+        let (combined, session) = dbFirst()
+        defer { session.invalidateAndCancel() }
+        let page = try await combined.journeys(JourneyQuery(from: berlin, to: munich, date: try date("2026-11-04T07:00:00Z")))
+        #expect(page.source == .bahnDe)
+        #expect(page.journeys.first?.legs.first?.line?.name == "ICE 1005")
+        #expect(DBFirstProtocol.requests.withLock { $0 }.allSatisfy { !$0.contains("transitous") })
+    }
+
+    /// When DB finds nothing (often abroad), Transitous is asked.
+    @Test func transitousAnswersWhenDBFindsNothing() async throws {
+        let (combined, session) = dbFirst(risEmpty: true)
+        defer { session.invalidateAndCancel() }
+        _ = try? await combined.journeys(JourneyQuery(from: berlin, to: munich, date: try date("2026-11-04T07:00:00Z")))
+        let requests = DBFirstProtocol.requests.withLock { $0 }
+        #expect(requests.contains { $0.contains("verkehrslage.bahnhof.de") })
+        #expect(requests.contains { $0.contains("api.transitous.org") })
+    }
+
+    /// A stop without an EVA number goes to Transitous: bahn.de's nearest hit could be a railway station
+    /// next to a bus stop, only a hit with the very same name counts.
+    @Test func aStopWithoutEVAGoesToTransitous() async throws {
+        let (combined, session) = dbFirst(bahnDeHits: #"[{"extId": "8000001", "name": "Somewhere Bahnhof", "type": "ST"}]"#)
+        defer { session.invalidateAndCancel() }
+        let busStop = Station(id: "de-DELFI_de:00000:99", name: "Somewhere Marktplatz", coordinate: nil, evaNumber: nil, source: .transitous)
+        _ = try? await combined.journeys(JourneyQuery(from: busStop, to: munich, date: try date("2026-11-04T07:00:00Z")))
+        let requests = DBFirstProtocol.requests.withLock { $0 }
+        #expect(!requests.contains { $0.contains("verkehrslage.bahnhof.de") })
+        #expect(requests.contains { $0.contains("api.transitous.org") })
+    }
+
+    @Test func aBahnDeHitWithTheSameNameIsTheStop() async throws {
+        let (_, session) = dbFirst(bahnDeHits: #"[{"extId": "8000002", "name": "Somewhere Bahnhof", "type": "ST"}, {"extId": "123456", "name": "Somewhere Marktplatz", "type": "ST"}]"#)
+        defer { session.invalidateAndCancel() }
+        let http = HTTPClient(session: session)
+        let ris = RISRoutingProvider(http: http, bahnDe: BahnDeClient(http: http, gate: BahnDeGate()))
+        let busStop = Station(id: "de-DELFI_de:00000:99", name: "Somewhere Marktplatz", coordinate: nil, evaNumber: nil, source: .transitous)
+        #expect(try await ris.eva(for: busStop) == "123456")
+    }
+}
+
+/// Transitous answers 503 to everything; RIS::Routing the fixture (or no trips); bahn.de's search `bahnDeHits`.
+private final class DBFirstProtocol: URLProtocol, @unchecked Sendable {
+    static let requests = Mutex<[String]>([])
+    static let risEmpty = Mutex(false)
+    static let bahnDeHits = Mutex("[]")
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let url = request.url!
+        Self.requests.withLock { $0.append(url.absoluteString) }
+        var status = 503
+        var body = Data()
+        if url.host() == "verkehrslage.bahnhof.de" {
+            status = 200
+            if Self.risEmpty.withLock({ $0 }) {
+                body = Data(#"{"trips": []}"#.utf8)
+            } else if let fixture = Bundle.module.url(forResource: "ris-routing-multimodal", withExtension: "json", subdirectory: "Fixtures") {
+                body = (try? Data(contentsOf: fixture)) ?? Data()
+            }
+        } else if url.path().hasSuffix("reiseloesung/orte") {
+            status = 200
+            body = Data(Self.bahnDeHits.withLock { $0 }.utf8)
+        }
+        let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }
 
 /// Transitous is down (503); RIS::Routing answers with the fixture.

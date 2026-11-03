@@ -12,7 +12,11 @@ public final class CombinedProvider: TransitProvider {
     public let bahnExpert: BahnExpertClient?
     public let vagonweb: VagonwebClient?
     public let bahnJetzt: BahnJetztClient?
+    /// Asked first for journeys: DB's own routing, as in the DB Navigator. Transitous answers when it finds
+    /// none (often abroad), fails, or a stop has no EVA number for it (`RISRoutingProvider.eva(for:)`).
+    public let dbJourneys: RISRoutingProvider?
     private let health: Health
+    private let dbHealth: Health
     private let renumbered = RenumberedTrips()
 
     public init(primary: any TransitProvider = TransitousProvider(),
@@ -21,7 +25,10 @@ public final class CombinedProvider: TransitProvider {
                 bahnExpert: BahnExpertClient? = BahnExpertClient(),
                 vagonweb: VagonwebClient? = VagonwebClient(),
                 bahnJetzt: BahnJetztClient? = BahnJetztClient(),
+                dbJourneys: RISRoutingProvider? = nil,
                 cooldown: TimeInterval = 120) {
+        self.dbJourneys = dbJourneys
+        self.dbHealth = Health(cooldown: cooldown)
         self.bahnDe = bahnDe
         self.bahnExpert = bahnExpert
         self.vagonweb = vagonweb
@@ -136,6 +143,8 @@ public final class CombinedProvider: TransitProvider {
             var nextQuery = query
             nextQuery.cursor = Self.stripCursor(cursor, source: provider.source)
             page = try await provider.journeys(nextQuery)
+        } else if let found = await dbJourneysFirst(query) {
+            page = found
         } else {
             // Providers resolve foreign and previously saved station IDs themselves.
             page = try await withFallback(deadline: .seconds(10),
@@ -161,6 +170,23 @@ public final class CombinedProvider: TransitProvider {
         // The same train from two feeds now reads alike: show it once.
         page.journeys = page.journeys.removingSameTrainDuplicates()
         return page
+    }
+
+    /// DB's journeys for `query`, nil when Transitous should answer: DB found none the query allows, failed (then
+    /// it is left alone for `cooldown`), or a stop has no EVA number for it. Cancelling (the user searched again)
+    /// isn't a failure.
+    func dbJourneysFirst(_ query: JourneyQuery) async -> JourneyPage? {
+        guard let dbJourneys, await dbHealth.primaryAvailable else { return nil }
+        do {
+            let page = try await Self.withDeadline(.seconds(8)) { try await dbJourneys.journeys(query) }
+            await dbHealth.markOK()
+            return page.journeys.contains(where: query.allows) ? page : nil
+        } catch TransitError.notFound {
+            return nil
+        } catch {
+            if !Task.isCancelled { await dbHealth.markFailed() }
+            return nil
+        }
     }
 
     /// `journeys` (as `journeys(_:)` returned them) with the train names bahn.de gives, waiting up to `deadline`:
@@ -397,6 +423,7 @@ public final class CombinedProvider: TransitProvider {
     private func provider(for source: DataSource?) throws -> any TransitProvider {
         if source == primary.source { return primary }
         if let fallback, source == fallback.source { return fallback }
+        if let dbJourneys, source == dbJourneys.source { return dbJourneys }
         throw TransitError.invalidInput(String(kit: "Diese Datenquelle ist nicht mehr verfügbar. Bitte die Verbindung neu suchen."))
     }
 

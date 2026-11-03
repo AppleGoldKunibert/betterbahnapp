@@ -8185,16 +8185,6 @@
         }
       }
     },
-    "Verbindungen, wenn Transitous nicht antwortet" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Connections when Transitous doesn't answer"
-          }
-        }
-      }
-    },
     "Vergangene Fahrten" : {
       "localizations" : {
         "en" : {

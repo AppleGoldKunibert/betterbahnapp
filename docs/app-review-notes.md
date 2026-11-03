@@ -63,7 +63,7 @@ features or data flows change (and update the privacy policy in `Cloudflare/work
 
 ## Open points from the review of 2026-10-01
 
-- bahn.de, bahn.expert, bahn.jetzt and DB's routing behind bahnhof.de (journeys only while Transitous fails) are used
+- bahn.de, bahn.expert, bahn.jetzt and DB's routing behind bahnhof.de (journeys, Transitous when it has none) are used
   without a written agreement (guideline 5.2.2); the
   proxy also sends browser user agents. Ask DB / the operators for permission if App Review asks.
 - vagonweb.cz (planned Wagenreihung, train types) is used with the permission of vagonweb (issue #95);

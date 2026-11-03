@@ -166,9 +166,12 @@ final class AppModel {
     init() {
         // The list of station names every stop is shown under, read before the first screen needs it.
         Task { await StationNames.preload() }
-        // DB's own routing steps in for journeys while Transitous fails (`RISRoutingProvider`).
-        provider = CombinedProvider(fallback: RISRoutingProvider(),
-                                    vagonweb: VagonwebClient(browserLoader: { url in try await VagonwebBrowser.shared.html(at: url) }))
+        // Journeys come from DB's own routing first, Transitous when DB has none or fails; DB's routing is also
+        // the fallback while Transitous fails (`RISRoutingProvider`).
+        let dbRouting = RISRoutingProvider()
+        provider = CombinedProvider(fallback: dbRouting,
+                                    vagonweb: VagonwebClient(browserLoader: { url in try await VagonwebBrowser.shared.html(at: url) }),
+                                    dbJourneys: dbRouting)
         traewelling = TraewellingClient(config: TraewellingConfig(), keepAlive: { await BackgroundTime.begin(named: "Träwelling-Anmeldung") })
         // Older versions stored everything in UserDefaults; move the raw bytes into files once
         // (re-encoding everything on every launch is what used to slow the start down).

@@ -1,8 +1,9 @@
 import Foundation
 
-/// Journeys from DB's own routing (RIS::Routing, DB's HAFAS behind it), as the "Verkehrslage" page on
-/// bahnhof.de asks it: no key, undocumented, so only the fallback for when Transitous fails
-/// (`CombinedProvider.fallback`). Compared on the same routes (Nov 2026), long-distance trains in Germany
+/// Journeys from DB's own routing (RIS::Routing, DB's HAFAS behind it, as in the DB Navigator), as the
+/// "Verkehrslage" page on bahnhof.de asks it: no key, undocumented. `CombinedProvider` asks it first for
+/// journeys (`dbJourneys`) and Transitous when it finds none, fails or a stop has no EVA number for it,
+/// and it is the fallback for everything else while Transitous fails (`CombinedProvider.fallback`). Compared on the same routes (Nov 2026), long-distance trains in Germany
 /// matched Transitous exactly; RIS named trains abroad as DB does ("RJ 385", where Transitous says
 /// "ICE 385") and gave a few more connections per page, but knows only stops with an EVA number (no
 /// addresses, no FlixBus) and gives no positions for the stops in between.
@@ -45,13 +46,20 @@ public struct RISRoutingProvider: TransitProvider {
         return Self.page(from: response)
     }
 
-    /// The station's EVA number (HAFAS ID; bus and tram stops have one too): its own, the offline list's,
-    /// else bahn.de's search.
+    /// The station's EVA number (HAFAS ID; bus and tram stops have one too): its own, the offline list's
+    /// (the main one of a station with several levels, Berlin Hbf's 8011160: DB's routing takes them all),
+    /// else the hit of bahn.de's search with the very same name. Not the nearest hit: for a bus stop that is
+    /// a railway station nearby, and the journey would start at the wrong place. Throws `notFound` without one,
+    /// so the journeys come from Transitous.
     func eva(for station: Station) async throws -> String {
         if station.source == .bahnDe, station.id.allSatisfy(\.isNumber) { return station.id }
-        guard let eva = try await bahnDe.evaNumber(for: station) else {
-            throw TransitError.notFound(station.displayName)
+        if let eva = station.evaNumber ?? StationNames.evaNumber(for: station) ?? StationNames.mainEvaNumber(for: station) {
+            return eva
         }
+        let wanted = Station.normalize(station.displayName)
+        let hits = try await bahnDe.candidates(station.name).map(\.station)
+            .filter { Station.normalize($0.displayName) == wanted || Station.normalize($0.name) == wanted }
+        guard hits.count == 1, let eva = hits[0].evaNumber else { throw TransitError.notFound(station.displayName) }
         return eva
     }
 
