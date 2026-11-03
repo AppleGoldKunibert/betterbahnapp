@@ -10,6 +10,9 @@ struct TimetablesEvent {
     var cancelled: Bool
     /// The stop's `<m>` messages from `fchg` (filled in by `liveEvent`; `plan` never has any).
     var messages: [TimetablesMessage] = []
+    /// The stations before (arrival) or after (departure) this stop, `ppth` (planned) or `cpth` (changed):
+    /// an arrival's first is where the train comes from, a departure's last where it goes.
+    var path: [String] = []
 }
 
 /// One `<m>` element from `fchg`: a numeric delay-reason or quality code, reported at `timestamp`.
@@ -282,6 +285,70 @@ public struct TimetablesClient: Sendable {
         "8010205": ["8098205"], // Leipzig Hbf (tief)
         "8011160": ["8098160", "8089021"], // Berlin Hbf (tief), Berlin Hbf (S-Bahn)
     ]
+
+    // MARK: Boards
+
+    /// One train at a station for a DB board (`DBBoardProvider`): its stop and the side asked for, with `fchg`'s
+    /// changes laid over the plan.
+    struct BoardStop {
+        var stop: TimetablesStop
+        var event: TimetablesEvent
+        /// The level it was found at, "8098549" for Hamburg Hbf's S-Bahn.
+        var eva: String
+    }
+
+    /// `station`'s EVA number as the boards need it (its own, the offline list's main one, else bahn.de's).
+    func boardEVA(for station: Station) async -> String? { await eva(for: station) }
+
+    /// Every train of `kind` at `station` planned from `start` up to `end`, at the station and its other levels
+    /// (`lowerLevels`, `otherLevels(of:)`): the S-Bahn of Hamburg Hbf is a station of its own here. nil when
+    /// the station has no EVA number; throws when the station's own plan can't be read. A train only in
+    /// `fchg` (added at short notice) counts too. Without `fchg` the plan alone is shown, without live times.
+    func boardStops(at station: Station, kind: BoardKind, from start: Date, to end: Date) async throws -> [BoardStop]? {
+        guard let eva = await eva(for: station) else { return nil }
+        var levels = [eva] + (Self.lowerLevels[eva] ?? [])
+        for level in await otherLevels(of: eva) where !levels.contains(level) { levels.append(level) }
+        var hours: [Date] = []
+        var hour = Calendar.current.dateInterval(of: .hour, for: start)?.start ?? start
+        while hour < end, hours.count < 6 {
+            hours.append(hour)
+            hour = hour.addingTimeInterval(3600)
+        }
+        let side: KeyPath<TimetablesStop, TimetablesEvent?> = kind == .departures ? \.departure : \.arrival
+        var result: [BoardStop] = []
+        for (index, level) in levels.enumerated() {
+            var planned: [TimetablesStop] = []
+            for hour in hours {
+                do {
+                    planned += try await plan(eva: level, around: hour)
+                } catch {
+                    if index == 0 { throw error }
+                }
+            }
+            let changes = (try? await changes(eva: level)) ?? [:]
+            var seen = Set<String>()
+            for stop in planned where seen.insert(stop.id).inserted {
+                guard var event = stop[keyPath: side], let time = event.planned, time >= start, time < end else { continue }
+                var merged = stop
+                if let changed = changes[stop.id] {
+                    if let change = changed[keyPath: side] {
+                        if let actual = change.actual { event.actual = actual }
+                        if let platform = change.actualPlatform { event.actualPlatform = platform }
+                        if !change.path.isEmpty { event.path = change.path }
+                        event.cancelled = change.cancelled
+                    }
+                    merged.messages = changed.messages
+                }
+                result.append(BoardStop(stop: merged, event: event, eva: level))
+            }
+            // Trains added at short notice are only in `fchg`, with their own `<tl>` and planned time.
+            for (id, changed) in changes where !seen.contains(id) && changed.category != nil {
+                guard let event = changed[keyPath: side], let time = event.planned, time >= start, time < end else { continue }
+                result.append(BoardStop(stop: changed, event: event, eva: level))
+            }
+        }
+        return result.sorted { ($0.event.planned ?? .distantPast) < ($1.event.planned ?? .distantPast) }
+    }
 
     /// Whether DB's own dispatching feed reports the departure of `category`+`number` at `station`
     /// (planned `time`) as cancelled. `nil` when it can't tell (train not found, or
@@ -751,8 +818,9 @@ enum TimetablesXMLParser {
             // `fchg` reports a cancellation as just `cs="c" clt="…"` (no `pt`/`ct`), so the status
             // alone must still make an event — otherwise every DB cancellation got dropped here.
             guard planned != nil || actual != nil || cancelled else { return nil }
+            let path = (attributes["cpth"] ?? attributes["ppth"]).map { $0.split(separator: "|").map(String.init) } ?? []
             return TimetablesEvent(planned: planned, actual: actual, plannedPlatform: attributes["pp"],
-                                    actualPlatform: attributes["cp"], cancelled: cancelled)
+                                    actualPlatform: attributes["cp"], cancelled: cancelled, path: path)
         }
 
         /// "YYMMDDHHmm" in German local time.

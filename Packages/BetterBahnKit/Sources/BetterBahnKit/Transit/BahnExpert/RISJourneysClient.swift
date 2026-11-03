@@ -121,6 +121,81 @@ public struct RISJourneysClient: Sendable {
         return try Self.expertDetails(details, journeyId: journeyId)
     }
 
+    // MARK: Trips
+
+    /// The run of `category`+`number` that calls at `eva` with its `kind` side planned at `planned` (±2 min), as a
+    /// `Trip` with DB's stops, times and platforms. nil when RIS has no such run.
+    public func trip(category: String, number: String, eva: String, planned: Date, kind: BoardKind) async throws -> Trip? {
+        guard let journeyNumber = Int(number) else { return nil }
+        let day = BahnDeClient.berlinDay(planned)
+        let url = baseURL.appending(path: "find").appending(queryItems: [
+            .init(name: "journeyNumber", value: String(journeyNumber)), .init(name: "date", value: day),
+            .init(name: "limit", value: String(Self.findLimit)),
+        ])
+        let prefix = day.replacingOccurrences(of: "-", with: "") + "-"
+        let wanted = category.uppercased()
+        let runs = try await get(url, as: FindResponse.self).journeys
+            .filter { $0.journeyID.hasPrefix(prefix) && $0.info.transportAtStart?.journeyNumber == journeyNumber }
+            .sorted { ($0.info.transportAtStart?.category?.uppercased() == wanted ? 0 : 1) < ($1.info.transportAtStart?.category?.uppercased() == wanted ? 0 : 1) }
+        let side = kind == .departures ? "DEPARTURE" : "ARRIVAL"
+        for run in runs.prefix(3) {
+            let details = try await get(baseURL.appending(path: run.journeyID), as: Details.self)
+            let calls = details.events.contains { event in
+                event.type == side && event.stopPlace.evaNumber == eva
+                    && JSONDecoding.parseISODate(event.timeSchedule).map { abs($0.timeIntervalSince(planned)) <= 120 } == true
+            }
+            if calls { return Self.trip(id: run.journeyID, from: details) }
+        }
+        return nil
+    }
+
+    /// The run `journeyId` (a RIS journey ID, "20261104-…") as a `Trip`.
+    public func trip(journeyId: String) async throws -> Trip {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-"))
+        guard !journeyId.isEmpty, journeyId.unicodeScalars.allSatisfy(allowed.contains) else { throw TransitError.invalidInput(journeyId) }
+        return Self.trip(id: journeyId, from: try await get(baseURL.appending(path: journeyId), as: Details.self))
+    }
+
+    /// A RIS journey ID: its day and a UUID.
+    public static func isJourneyId(_ id: String) -> Bool {
+        id.wholeMatch(of: /\d{8}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/) != nil
+    }
+
+    static func trip(id: String, from details: Details) -> Trip {
+        var stopovers: [Stopover] = []
+        for event in details.events {
+            guard let planned = JSONDecoding.parseISODate(event.timeSchedule) else { continue }
+            let live = event.timeType == "REAL" || event.timeType == "PREVIEW"
+            let time = TimeInfo(planned: planned, actual: live ? event.time.flatMap(JSONDecoding.parseISODate) : nil)
+            let platform = PlatformInfo(planned: event.platformSchedule, actual: event.platform)
+            let eva = event.stopPlace.evaNumber ?? ""
+            if event.type == "DEPARTURE", let last = stopovers.indices.last, stopovers[last].station.id == eva, stopovers[last].departure == nil {
+                stopovers[last].departure = time
+                stopovers[last].departurePlatform = platform
+                stopovers[last].departureCancelled = event.cancelled == true
+                continue
+            }
+            let station = Station(id: eva, name: event.stopPlace.name ?? eva, coordinate: nil, evaNumber: eva, source: .bahnDe)
+            var stopover = Stopover(station: station, arrival: event.type == "ARRIVAL" ? time : nil,
+                                    departure: event.type == "DEPARTURE" ? time : nil,
+                                    arrivalPlatform: event.type == "ARRIVAL" ? platform : nil,
+                                    departurePlatform: event.type == "DEPARTURE" ? platform : nil,
+                                    cancelled: false, isAdditional: event.additional == true)
+            stopover.arrivalCancelled = event.type == "ARRIVAL" && event.cancelled == true
+            stopover.departureCancelled = event.type == "DEPARTURE" && event.cancelled == true
+            stopovers.append(stopover)
+        }
+        let transport = details.events.first?.transport
+        let line = transport.map {
+            RISRoutingProvider.line(RISRoutingProvider.Transport(type: $0.type, journeyDescription: $0.journeyDescription,
+                                                                 category: $0.category, number: $0.journeyNumber, line: $0.line,
+                                                                 label: nil, direction: nil),
+                                    operatorName: $0.administration?.operatorName)
+        }
+        return Trip(id: id, line: line, direction: stopovers.last?.station.name, stopovers: stopovers,
+                    cancelled: !stopovers.isEmpty && stopovers.allSatisfy(\.cancelled), remarks: [], source: .bahnDe)
+    }
+
     private func get<T: Decodable>(_ url: URL, as type: T.Type) async throws -> T {
         try await http.get(url, as: type, headers: ["Accept": "application/vnd.de.db.ris+json"], auth: auth)
     }

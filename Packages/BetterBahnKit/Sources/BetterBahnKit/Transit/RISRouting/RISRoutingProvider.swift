@@ -19,10 +19,14 @@ public struct RISRoutingProvider: TransitProvider {
     public var source: DataSource { .bahnDe }
     let http: HTTPClient
     let bahnDe: BahnDeClient
+    /// DB's RIS::Journeys through our server, for the trips of DB board entries (`DBBoardProvider`).
+    let journeyDetails: RISJourneysClient?
 
-    public init(http: HTTPClient = HTTPClient(timeout: 10), bahnDe: BahnDeClient = BahnDeClient()) {
+    public init(http: HTTPClient = HTTPClient(timeout: 10), bahnDe: BahnDeClient = BahnDeClient(),
+                journeyDetails: RISJourneysClient? = nil) {
         self.http = http
         self.bahnDe = bahnDe
+        self.journeyDetails = journeyDetails ?? (http.session === URLSession.shared ? .shared : nil)
     }
 
     // MARK: Stations
@@ -112,8 +116,26 @@ public struct RISRoutingProvider: TransitProvider {
 
     // MARK: Trips
 
-    /// The train's run from bahn.de's journey details (through our server): `id` is bahn.de's journey ID.
+    /// A DB trip by its ID: a RIS journey ID (RIS::Boards) or a train on a DB Timetables board (`IRISTripReference`)
+    /// from RIS::Journeys, a bahn.de journey ID (DB's routing) from bahn.de's journey details (through our server).
+    /// A board train RIS::Journeys doesn't answer for is found on bahn.de's board instead.
     public func trip(id: String) async throws -> Trip {
+        if RISJourneysClient.isJourneyId(id) {
+            guard let journeyDetails else { throw TransitError.notFound(id) }
+            return try await journeyDetails.trip(journeyId: id)
+        }
+        if let reference = IRISTripReference(id: id) {
+            if let journeyDetails, let trip = try? await journeyDetails.trip(category: reference.category, number: reference.number,
+                                                                             eva: reference.eva, planned: reference.planned,
+                                                                             kind: reference.kind) {
+                return trip
+            }
+            let line = Line(name: "\(reference.category) \(reference.number)", number: reference.number, product: .other, operatorName: nil)
+            let station = Self.station(eva: reference.eva, name: reference.eva, coordinate: nil)
+            let journeyId = try await bahnDe.findJourneyId(line: line, station: station, plannedDeparture: reference.planned)
+            let details = try await bahnDe.get(BahnDeClient.journeyURL(journeyId), as: BahnDeClient.JourneyDetails.self)
+            return Self.trip(id: id, from: details)
+        }
         let details = try await bahnDe.get(BahnDeClient.journeyURL(id), as: BahnDeClient.JourneyDetails.self)
         return Self.trip(id: id, from: details)
     }

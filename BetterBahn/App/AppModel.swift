@@ -171,7 +171,7 @@ final class AppModel {
         let dbRouting = RISRoutingProvider()
         provider = CombinedProvider(fallback: dbRouting,
                                     vagonweb: VagonwebClient(browserLoader: { url in try await VagonwebBrowser.shared.html(at: url) }),
-                                    dbJourneys: dbRouting)
+                                    dbJourneys: dbRouting, dbBoards: DBBoardProvider())
         traewelling = TraewellingClient(config: TraewellingConfig(), keepAlive: { await BackgroundTime.begin(named: "Träwelling-Anmeldung") })
         // Older versions stored everything in UserDefaults; move the raw bytes into files once
         // (re-encoding everything on every launch is what used to slow the start down).

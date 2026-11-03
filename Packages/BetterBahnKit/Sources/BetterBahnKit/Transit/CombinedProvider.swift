@@ -15,6 +15,9 @@ public final class CombinedProvider: TransitProvider {
     /// Asked first for journeys: DB's own routing, as in the DB Navigator. Transitous answers when it finds
     /// none (often abroad), fails, or a stop has no EVA number for it (`RISRoutingProvider.eva(for:)`).
     public let dbJourneys: RISRoutingProvider?
+    /// Asked first for departure and arrival boards (`DBBoardProvider`): Transitous answers when DB has nothing
+    /// for the station or fails.
+    public let dbBoards: DBBoardProvider?
     private let health: Health
     private let dbHealth: Health
     private let renumbered = RenumberedTrips()
@@ -26,8 +29,10 @@ public final class CombinedProvider: TransitProvider {
                 vagonweb: VagonwebClient? = VagonwebClient(),
                 bahnJetzt: BahnJetztClient? = BahnJetztClient(),
                 dbJourneys: RISRoutingProvider? = nil,
+                dbBoards: DBBoardProvider? = nil,
                 cooldown: TimeInterval = 120) {
         self.dbJourneys = dbJourneys
+        self.dbBoards = dbBoards
         self.dbHealth = Health(cooldown: cooldown)
         self.bahnDe = bahnDe
         self.bahnExpert = bahnExpert
@@ -291,6 +296,12 @@ public final class CombinedProvider: TransitProvider {
     }
 
     public func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int, products: Set<Product>) async throws -> [BoardEntry] {
+        // DB's board first; it already carries DB's names and live times.
+        if let dbBoards, let entries = try? await Self.withDeadline(.seconds(8), {
+            try await dbBoards.board(kind, at: station, date: date, duration: duration, products: products)
+        }) {
+            return entries
+        }
         let entries = try await withFallback(deadline: .seconds(8),
                                { try await $0.board(kind, at: station, date: date, duration: duration, products: products) },
                                { try await $0.board(kind, at: station, date: date, duration: duration, products: products) })
