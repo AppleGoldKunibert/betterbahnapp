@@ -120,6 +120,24 @@ class StoreTests(unittest.TestCase):
         self.record(store, "2026-11-01", "8043", 592, vehicle="938000000009")
         self.assertEqual(store.vehicles(), [("8043", "938000000009", True)])
 
+    def test_seed_adds_only_unknown_trainsets_with_valid_numbers(self):
+        import json
+        import tempfile
+        store = tzlog.TzStore()
+        self.record(store, "2026-10-31", "8043", 592, vehicle="938000000043")
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "seed.json"
+            path.write_text(json.dumps([
+                {"tz": "8043", "unit": "ICE8043", "types": [], "vehicle": "938000000999"},  # known: the log's wins
+                {"tz": "9490", "unit": "ICE9490", "types": ["I2412"], "vehicle": "938024120900"},
+                {"tz": "x", "unit": "ICE", "types": [], "vehicle": "938"},
+                {"tz": "100", "unit": "ICE100", "types": [], "vehicle": "not-a-number"},
+            ]))
+            self.assertEqual(store.load_seed(path), 1)
+            self.assertEqual(store.load_seed(path), 0, "nothing new the second time")
+            self.assertEqual(store.load_seed(Path(folder) / "missing.json"), 0)
+        self.assertEqual(store.vehicles(), [("8043", "938000000043", False), ("9490", "938024120900", False)])
+
     def test_history_newest_first_and_prune_after_a_year(self):
         store = tzlog.TzStore()
         self.record(store, "2025-10-01", "8043", 1)
@@ -222,6 +240,20 @@ class BoardScanTests(unittest.IsolatedAsyncioTestCase):
         await scanner.scan()
         # The first reads 10:00 up to 11:00, the second 11:00 (not 11:20) on, up to 12:20.
         self.assertEqual(boards, ["10:00:00", "11:00:00", "12:00:00"])
+
+    async def test_a_scan_ends_at_midnight(self):
+        boards = []
+
+        async def get(path):
+            boards.append(path.split("zeit=")[1].split("&")[0])
+            return 200, {"entries": []}
+
+        scanner = tzlog.Scanner(tzlog.TzStore(), get, hubs=[("1", "Berlin Hbf")], interval=0, every=36 * 3600,
+                                now=lambda: NOW, sleep=noop_sleep())
+        await scanner.scan()
+        self.assertEqual(boards[0], "10:00:00")
+        self.assertEqual(boards[-1], "23:00:00")
+        self.assertEqual(len(boards), 14)
 
     async def test_sequence_asked_with_utc_time_and_berlin_day(self):
         path = tzlog.sequence_path("ICE", 1516, "8000105", dt.datetime(2026, 11, 1, 0, 41))
@@ -339,9 +371,10 @@ class RunTests(unittest.IsolatedAsyncioTestCase):
         scanner.scan, scanner.scan_vehicles = boards, vehicles
         with self.assertRaises(asyncio.CancelledError):
             await scanner.run()
-        # Boards every 100 s from their start, vehicles every 250 s from theirs (1030 + 250).
-        self.assertEqual(calls[:5], [("boards", 1000.0), ("vehicles", 1030.0), ("boards", 1100.0), ("boards", 1200.0),
-                                     ("vehicles", 1280.0)])
+        # A round's vehicle lookups come first. Boards every 100 s from their start (a scan takes 30 s), vehicles
+        # every 250 s from theirs.
+        self.assertEqual(calls[:5], [("vehicles", 1000.0), ("boards", 1000.0), ("boards", 1100.0), ("boards", 1200.0),
+                                     ("vehicles", 1250.0)])
 
     async def test_without_a_wifi_host_only_the_boards_run(self):
         clock = [0.0]

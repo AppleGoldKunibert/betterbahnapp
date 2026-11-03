@@ -22,7 +22,8 @@ bahn.de tolerates this as long as the traffic stays small, so the server keeps i
 Environment: TOKEN_SECRET (required, same as in the Workers), PORT (8080), IMPERSONATE (safari),
 FIRST_PAUSE (60), BLOCK_PAUSE (600), MAX_PARALLEL (4), MIN_INTERVAL (0.25), RATE_LIMIT (120),
 ALLOW_UNATTESTED ("true" lets requests without a token through, for testing only). The Tz log (`tzlog.py`,
-#502) has TZ_DB, TZ_SCAN, TZ_SCAN_INTERVAL, TZ_SCAN_EVERY, TZ_RIS, TZ_RIS_INTERVAL and TZ_VEHICLE_EVERY.
+#502) has TZ_DB, TZ_SEED, TZ_SCAN, TZ_BOARDS, TZ_SCAN_INTERVAL, TZ_SCAN_EVERY, TZ_RIS, TZ_RIS_INTERVAL and
+TZ_VEHICLE_EVERY.
 """
 
 import asyncio
@@ -459,6 +460,11 @@ def main():
     allow_unattested = os.environ.get("ALLOW_UNATTESTED") == "true"
     if not secret and not allow_unattested:
         raise SystemExit("TOKEN_SECRET is missing (the same value as in the Cloudflare Workers).")
+    here = os.path.dirname(os.path.abspath(__file__))
+    tz_store = tzlog.TzStore(os.environ.get("TZ_DB") or os.path.join(here, "tz.db"))
+    added = tz_store.load_seed(os.environ.get("TZ_SEED") or os.path.join(here, "tz_seed.json"))
+    if added:
+        logging.getLogger("bahnde-proxy").info("Tz seed: %d new trainsets", added)
     proxy = Proxy(
         fetch=BrowserFetch(os.environ.get("IMPERSONATE", "safari")),
         secret=secret,
@@ -468,12 +474,13 @@ def main():
         max_parallel=int(os.environ.get("MAX_PARALLEL", "4")),
         min_interval=float(os.environ.get("MIN_INTERVAL", "0.25")),
         rate_limit=int(os.environ.get("RATE_LIMIT", "120")),
-        tz_store=tzlog.TzStore(os.environ.get("TZ_DB") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "tz.db")),
+        tz_store=tz_store,
     )
     scan = None
     if os.environ.get("TZ_SCAN", "true") != "false":
         scan = {"interval": float(os.environ.get("TZ_SCAN_INTERVAL", "3")),
-                "every": int(os.environ.get("TZ_SCAN_EVERY", "21600")),
+                "every": int(os.environ.get("TZ_SCAN_EVERY", "43200")),
+                "hubs": tzlog.HUBS if os.environ.get("TZ_BOARDS", "true") != "false" else [],
                 "ris": os.environ.get("TZ_RIS", "true") != "false",
                 "ris_interval": float(os.environ.get("TZ_RIS_INTERVAL", "1")),
                 "vehicle_every": int(os.environ.get("TZ_VEHICLE_EVERY", "43200"))}

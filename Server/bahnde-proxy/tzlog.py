@@ -1,25 +1,26 @@
 """The Tz log (#502): which trainset (Tz) ran which ICE/IC, today and for a year back.
 
-Two sources, both asked slowly:
+The log runs on the **RIS::Transports API behind the on-board WiFi landing page** (`RisClient`): one request per
+known Tz and day asks which journeys its coach is in (the first time also the last `BACKFILL_DAYS` days), without
+logging in. The known Tz come from `tz_seed.json` (a list of Tz with the UIC number of one coach, made by
+`make_tz_seed.py` and checked into the repo), so the server needs nothing else for them.
 
-1. **Learning the Tz** (bahn.de, through the proxy): every `TZ_SCAN_EVERY` seconds the server reads the ICE/IC
-   departure boards of 15 big stations (`HUBS`, together they list every ICE and IC run) and asks the Wagenreihung
-   of each train that no earlier answer explains. That names a Tz ("ICE8043") and gives the UIC number of one of
-   its coaches (`vehicleID`), which the log keeps.
-2. **Where each Tz runs** (the RIS::Transports API behind the on-board WiFi landing page, `RisClient`): every
-   `TZ_VEHICLE_EVERY` seconds one request per known Tz asks which journeys its coach is in today (the first
-   time also the last `BACKFILL_DAYS` days), without logging in. So the boards only have to teach us a Tz once.
+bahn.de is only asked to learn Tz the list doesn't have yet (a new delivery, a renumbered set), and only a little:
+after each vehicle round the server reads the ICE/IC departure boards of a few big stations (`HUBS`) for the rest
+of the day and asks the Wagenreihung of the trains the vehicle round did not explain, which names the Tz and gives
+a coach. When every train is explained, that is a few dozen board requests a day and no more.
 
 "Tz X ran as train Y on day Z" stays in a small SQLite file for `RETENTION_DAYS`. The app reads it with
 `GET /tz/list` (every Tz with the trains of its latest day) and `GET /tz/history?tz=8043`.
 
-The scan stays small: `TZ_SCAN_INTERVAL` seconds between its bahn.de requests, nothing while bahn.de has the proxy
-paused, `TZ_RIS_INTERVAL` between those to the WiFi host, and the app's own requests take their turn between its.
-It records no one who asks.
+The scan stays small: `TZ_RIS_INTERVAL` seconds between requests to the WiFi host, `TZ_SCAN_INTERVAL` between
+those to bahn.de (through the proxy: its cache, turn-taking and pause, and the app's own requests go first), and it
+records no one who asks.
 
-Environment: TZ_DB (file, default `tz.db` next to this file), TZ_SCAN ("false" turns the scan off, the log is
-still served), TZ_SCAN_INTERVAL (3), TZ_SCAN_EVERY (21600: seconds between two board scans, also how far ahead
-each one looks), TZ_RIS ("false" turns the WiFi host off), TZ_RIS_INTERVAL (1), TZ_VEHICLE_EVERY (43200).
+Environment: TZ_DB (file, default `tz.db` next to this file), TZ_SEED (default `tz_seed.json` next to this file),
+TZ_SCAN ("false" turns the scan off, the log is still served), TZ_VEHICLE_EVERY (43200: seconds between two rounds),
+TZ_RIS ("false" turns the WiFi host off), TZ_RIS_INTERVAL (1), TZ_BOARDS ("false" never asks bahn.de),
+TZ_SCAN_INTERVAL (3).
 """
 
 import asyncio
@@ -29,6 +30,7 @@ import logging
 import re
 import sqlite3
 import time
+from pathlib import Path
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
@@ -51,15 +53,18 @@ RIS_SESSION_MAX_AGE = 3600
 # This many failed requests in a row end a round at the WiFi host.
 RIS_MAX_FAILURES = 5
 
-# Stations whose ICE/IC departure boards together list every ICE, IC and ECE run that touches Germany (greedy cover
-# of one day's runs from the train statistics, 2026-10-30: 806 runs). A Tz only has to show up on one of them once;
-# where it runs afterwards the vehicle lookup tells. bahn.de's EVA number and name.
+# Stations whose boards the server reads to find Tz the seed list lacks: the busiest long-distance stations, which a
+# new trainset passes within days. bahn.de's EVA number and name.
 HUBS = [
     ("8000261", "München Hbf"), ("8000152", "Hannover Hbf"), ("8000207", "Köln Hbf"), ("8011160", "Berlin Hbf"),
-    ("8000191", "Karlsruhe Hbf"), ("8000177", "Horb"), ("8010205", "Leipzig Hbf"), ("8002549", "Hamburg Hbf"),
-    ("8003693", "Lindau-Reutin"), ("8000244", "Mannheim Hbf"), ("8011201", "Flughafen BER"),
-    ("8003200", "Kassel-Wilhelmshöhe"), ("8000284", "Nürnberg Hbf"), ("8000085", "Düsseldorf Hbf"),
-    ("8000225", "Leer(Ostfriesl)"),
+    ("8000191", "Karlsruhe Hbf"), ("8002549", "Hamburg Hbf"),
+]
+# What `make_tz_seed.py` reads: stations that together list every ICE, IC and ECE run that touches Germany (greedy
+# cover of one day's runs from the train statistics, 2026-10-30: 806 runs).
+SEED_HUBS = HUBS + [
+    ("8000177", "Horb"), ("8010205", "Leipzig Hbf"), ("8003693", "Lindau-Reutin"), ("8000244", "Mannheim Hbf"),
+    ("8011201", "Flughafen BER"), ("8003200", "Kassel-Wilhelmshöhe"), ("8000284", "Nürnberg Hbf"),
+    ("8000085", "Düsseldorf Hbf"), ("8000225", "Leer(Ostfriesl)"),
 ]
 
 
@@ -175,6 +180,24 @@ class TzStore:
                vehicle = COALESCE(excluded.vehicle, vehicle), seen = excluded.seen""",
             (sighting["tz"], sighting["unit"], json.dumps(sighting["types"]), sighting.get("vehicle"), now))
         self.db.commit()
+
+    def load_seed(self, path, now=None):
+        """Adds the Tz of a seed file (`[{"tz", "unit", "types", "vehicle"}]`) that the log doesn't have yet; what it
+        learned itself stays. Returns how many were new."""
+        try:
+            seed = json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return 0
+        known = {tz for (tz,) in self.db.execute("SELECT tz FROM units")}
+        added = 0
+        for item in seed if isinstance(seed, list) else []:
+            tz, vehicle = str(item.get("tz", "")), str(item.get("vehicle") or "")
+            if not tz.isdigit() or not vehicle.isdigit() or tz in known:
+                continue
+            self.record_unit({"tz": tz, "unit": item.get("unit") or "ICE" + tz, "types": item.get("types") or [],
+                              "vehicle": vehicle}, time.time() if now is None else now)
+            added += 1
+        return added
 
     def record(self, day, sighting, station, now):
         """Tz X ran as train Y on `day`; what a later sighting doesn't know (destination, station) is kept."""
@@ -311,7 +334,7 @@ class Scanner:
     """Fills a `TzStore`. `get(path) -> (status, body)` asks bahn.de through the proxy, `ris(uic, day) ->
     (status, body)` the WiFi host (`RisClient`, none: no vehicle lookups); replaced in tests."""
 
-    def __init__(self, store, get, hubs=HUBS, interval=3.0, every=21600, now=time.time, sleep=asyncio.sleep,
+    def __init__(self, store, get, hubs=HUBS, interval=3.0, every=43200, now=time.time, sleep=asyncio.sleep,
                  pause_left=lambda: 0, ris=None, ris_interval=1.0, vehicle_every=43200):
         self.store = store
         self.get = get
@@ -331,10 +354,11 @@ class Scanner:
         self.vehicle_day = None
 
     async def run(self):
-        """Board scans `every` apart and vehicle rounds `vehicle_every` apart, whatever one took."""
+        """Vehicle rounds `vehicle_every` apart and board scans `every` apart, whatever one took; a round's vehicle
+        lookups come first, so the boards only ask for trains they didn't explain."""
         next_boards = next_vehicles = self.now()
         while True:
-            for name in ("boards", "vehicles"):
+            for name in ("vehicles", "boards"):
                 due = next_boards if name == "boards" else next_vehicles
                 if name == "vehicles" and self.ris is None or self.now() < due:
                     continue
@@ -368,7 +392,8 @@ class Scanner:
         """One board scan: trains of the hubs' boards no earlier answer explains get their Wagenreihung asked."""
         started = self.now()
         now = dt.datetime.fromtimestamp(started, BERLIN).replace(tzinfo=None, second=0, microsecond=0)
-        end = now + dt.timedelta(seconds=self.every)
+        # Not past midnight: the vehicle lookups know the trains of the day, and what they know isn't asked again.
+        end = min(now + dt.timedelta(seconds=self.every), dt.datetime.combine(now.date() + dt.timedelta(days=1), dt.time()))
         # Continue where the last scan stopped; after a long break (or the first scan) start now.
         start = now
         if self.covered_until is not None and dt.timedelta(0) <= now - self.covered_until < dt.timedelta(hours=6):

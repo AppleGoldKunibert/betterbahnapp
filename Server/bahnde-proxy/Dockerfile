@@ -2,7 +2,7 @@ FROM python:3.12-slim
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY proxy.py tzlog.py ./
+COPY proxy.py tzlog.py tz_seed.json ./
 RUN mkdir /data && chown nobody /data
 USER nobody
 ENV TZ_DB=/data/tz.db
