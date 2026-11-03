@@ -3587,12 +3587,22 @@
         }
       }
     },
-    "Echtzeitdaten und Meldungen" : {
+    "Busse und Bahnen auf den Abfahrtstafeln" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Real-time data and notices"
+            "value" : "Buses, trams and subways on departure boards"
+          }
+        }
+      }
+    },
+    "Abfahrtstafeln, Echtzeitdaten und Meldungen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Departure boards, live data and messages"
           }
         }
       }
@@ -8175,12 +8185,12 @@
         }
       }
     },
-    "Verbindungen, Abfahrten, Fahrten und Bahnhofssuche" : {
+    "Verbindungen, Abfahrten und Bahnhofssuche, wo die Bahn keine Daten hat" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Connections, departures, trips and station search"
+            "value" : "Connections, departures and station search where DB has no data"
           }
         }
       }
@@ -8437,12 +8447,12 @@
         }
       }
     },
-    "Wagenreihung, Zusatzhalte, Gleise und Zugnamen; Zeichnungen der ICE-Baureihen aus dem Fahrzeuglexikon, © Deutsche Bahn AG" : {
+    "Bahnhofssuche, Wagenreihung, Zusatzhalte, Gleise und Zugnamen; Zeichnungen der ICE-Baureihen aus dem Fahrzeuglexikon, © Deutsche Bahn AG" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Coach sequence, extra stops, platforms and train names; drawings of the ICE series from the Fahrzeuglexikon, © Deutsche Bahn AG"
+            "value" : "Station search, coach sequence, extra stops, platforms and train names; drawings of the ICE series from the Fahrzeuglexikon, © Deutsche Bahn AG"
           }
         }
       }
@@ -9271,12 +9281,12 @@
         }
       }
     },
-    "Zugsuche nach Nummer, Echtzeiten und Gleise der Züge" : {
+    "Zugsuche nach Nummer, Zugverläufe, Echtzeiten und Gleise" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Train search by number, live times and platforms of trains"
+            "value" : "Train search by number, train courses, live times and platforms"
           }
         }
       }

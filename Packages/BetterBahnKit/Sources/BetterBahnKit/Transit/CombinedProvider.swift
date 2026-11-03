@@ -18,6 +18,9 @@ public final class CombinedProvider: TransitProvider {
     /// Asked first for departure and arrival boards (`DBBoardProvider`): Transitous answers when DB has nothing
     /// for the station or fails.
     public let dbBoards: DBBoardProvider?
+    /// Whether stations are searched at bahn.de first (as in the DB Navigator, `dbStations(_:near:)`), Transitous
+    /// only for what bahn.de doesn't find and for the searches with a logic of their own there.
+    public let stationsFromDB: Bool
     private let health: Health
     private let dbHealth: Health
     private let renumbered = RenumberedTrips()
@@ -30,7 +33,9 @@ public final class CombinedProvider: TransitProvider {
                 bahnJetzt: BahnJetztClient? = BahnJetztClient(),
                 dbJourneys: RISRoutingProvider? = nil,
                 dbBoards: DBBoardProvider? = nil,
+                stationsFromDB: Bool = false,
                 cooldown: TimeInterval = 120) {
+        self.stationsFromDB = stationsFromDB
         self.dbJourneys = dbJourneys
         self.dbBoards = dbBoards
         self.dbHealth = Health(cooldown: cooldown)
@@ -101,6 +106,7 @@ public final class CombinedProvider: TransitProvider {
     }
 
     public func searchStations(_ query: String, near location: Coordinate?) async throws -> [Station] {
+        if let stations = await dbStations(StationSearch(text: query), near: location) { return stations }
         do {
             let stations = try await withFallback(deadline: .milliseconds(2500),
                 { try await $0.searchStations(query, near: location) }, { try await $0.searchStations(query, near: location) })
@@ -119,6 +125,7 @@ public final class CombinedProvider: TransitProvider {
     /// Like `searchStations(_:near:)`; bahn.de's stations don't say which modes stop there, so it's
     /// only asked when no mode filter is set.
     public func searchStations(_ search: StationSearch, near location: Coordinate?) async throws -> [Station] {
+        if let stations = await dbStations(search, near: location) { return stations }
         let askBahnDe = search.modes.isEmpty && !Self.isShortQuery(search.text)
         do {
             let stations = try await withFallback(deadline: .milliseconds(2500),
@@ -134,6 +141,42 @@ public final class CombinedProvider: TransitProvider {
         guard let bahnDe else { return [] }
         let stations = try await Self.withDeadline(.milliseconds(2500)) { try await bahnDe.searchStations(search.text) }
         return search.ordered(search.filtered(stations), near: location)
+    }
+
+    /// bahn.de's stations for `search`, in its order (as the DB Navigator lists them), nil when Transitous should
+    /// answer: bahn.de found nothing or failed, or the search is one Transitous has its own logic for (one or two
+    /// letters, a RIL100 code, just "Hbf" or "Bahnhof" for the station nearby, found on the device). "b"/"t" keep
+    /// stops where buses/trams call, "l" sorts nearest first on the device, a flag keeps that country's. Without a
+    /// mode, bus-only stops only count when nothing else matches, as in Transitous' search. Only the typed text
+    /// is sent, never the location.
+    func dbStations(_ search: StationSearch, near location: Coordinate?) async -> [Station]? {
+        guard stationsFromDB, let bahnDe, Self.asksDBFirst(search) else { return nil }
+        let text = search.text
+        guard let candidates = try? await Self.withDeadline(.milliseconds(2500), { try await bahnDe.candidates(text) }) else { return nil }
+        var hits = candidates.filter { candidate in
+            search.modes.allSatisfy { mode in
+                switch mode {
+                case .bus: candidate.products.contains("BUS")
+                case .tram: candidate.products.contains("TRAM")
+                }
+            }
+        }
+        if search.modes.isEmpty {
+            let busOnly: Set<String> = ["BUS", "ANRUFPFLICHTIG"]
+            let others = hits.filter { $0.products.isEmpty || !Set($0.products).isSubset(of: busOnly) }
+            if !others.isEmpty { hits = others }
+        }
+        let stations = search.ordered(search.filtered(hits.map(\.station)), near: location)
+        return stations.isEmpty ? nil : stations
+    }
+
+    /// Searches bahn.de takes as well as Transitous: not one or two letters, not a RIL100 code ("FF"), not just
+    /// words for "station", which Transitous answers with the station nearby.
+    static func asksDBFirst(_ search: StationSearch) -> Bool {
+        guard !isShortQuery(search.text), Ril100.entry(forCode: search.text) == nil else { return false }
+        let stationWords: Set<String> = ["hbf", "hauptbahnhof", "hauptbf", "bahnhof", "bhf", "bf"]
+        let words = search.text.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+        return !words.isEmpty && !words.allSatisfy(stationWords.contains)
     }
 
     static func isShortQuery(_ query: String) -> Bool {
