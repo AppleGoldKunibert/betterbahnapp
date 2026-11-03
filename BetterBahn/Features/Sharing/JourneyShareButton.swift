@@ -41,7 +41,7 @@ struct JourneyShareButton: View {
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
-        .glassEffect(.regular, in: .circle)
+        .roundActionBackground()
         .resetsWhenMenusCloseOnScroll()
         .disabled(isPreparing)
         .accessibilityLabel("Teilen")
@@ -86,6 +86,29 @@ struct JourneyShareButton: View {
             ShareSheet.present(JourneyLinkItem(url: url, title: String(localized: "Ankunft in \(leg.destination.displayName)"), icon: .appIcon))
         } catch {
             arrivalFailed = true
+        }
+    }
+}
+
+extension View {
+    /// The background of the round 40 pt actions next to "Speichern" (share, calendar). Minimal: a flat circle on
+    /// the card surface with a hairline edge. Fahrkarte: Liquid Glass.
+    func roundActionBackground() -> some View {
+        modifier(RoundActionBackground())
+    }
+}
+
+private struct RoundActionBackground: ViewModifier {
+    @Environment(\.appDesign) private var design
+
+    func body(content: Content) -> some View {
+        if design == .fahrkarte {
+            content.glassEffect(.regular, in: .circle)
+        } else {
+            content
+                .background(Color.card, in: .circle)
+                .overlay { Circle().strokeBorder(Color.hairline, lineWidth: 1).allowsHitTesting(false) }
+                .contentShape(.circle)
         }
     }
 }
