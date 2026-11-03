@@ -100,6 +100,17 @@ import Testing
         #expect(requests.filter { $0.contains("proxy.test") }.count == 2)
     }
 
+    /// Our server without a key answers 404 itself: that pauses RIS, so bahn.expert answers without a detour.
+    @Test func aServerWithoutKeyPausesRIS() async throws {
+        let (client, session) = clients(risStatus: 404)
+        RISJourneysProtocol.serverOwn404.withLock { $0 = true }
+        defer { RISJourneysProtocol.serverOwn404.withLock { $0 = false }; session.invalidateAndCancel() }
+        _ = try await client.stops(ofJourney: "20261103-c5ed6631-9860-3f62-aa16-50637daedbaf")
+        _ = try await client.stops(ofJourney: "20261103-c5ed6631-9860-3f62-aa16-50637daedbaf")
+        let requests = RISJourneysProtocol.requests.withLock { $0 }
+        #expect(requests.filter { $0.contains("proxy.test") }.count == 1)
+    }
+
     @Test func journeyIdsWithOtherCharactersArentSent() async throws {
         let (client, session) = clients()
         defer { session.invalidateAndCancel() }
@@ -112,6 +123,8 @@ import Testing
 private final class RISJourneysProtocol: URLProtocol, @unchecked Sendable {
     static let requests = Mutex<[String]>([])
     static let risStatus = Mutex(200)
+    /// A 404 as our server answers it without a key, instead of DB's.
+    static let serverOwn404 = Mutex(false)
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
@@ -122,6 +135,7 @@ private final class RISJourneysProtocol: URLProtocol, @unchecked Sendable {
         if url.host() == "proxy.test" {
             status = Self.risStatus.withLock { $0 }
             let name = url.path().hasSuffix("/find") ? "ris-journeys-find-flx1243" : "ris-journeys-details-ice7"
+            if status == 404 { body = Data(Self.serverOwn404.withLock { $0 } ? #"{"error": "not_found"}"#.utf8 : #"{"status": 404}"#.utf8) }
             if status == 200, let file = Bundle.module.url(forResource: name, withExtension: "json", subdirectory: "Fixtures") {
                 body = (try? Data(contentsOf: file)) ?? Data()
             }

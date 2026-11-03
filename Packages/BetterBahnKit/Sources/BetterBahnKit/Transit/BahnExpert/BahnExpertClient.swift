@@ -269,9 +269,12 @@ public struct BahnExpertClient: Sendable {
         }
     }
 
+    /// Our server's own 404 (`{"error": "not_found"}`: no key there yet) pauses like a failure; DB's 404 for a run
+    /// it doesn't know doesn't.
     static func pausesRIS(_ error: Error) -> Bool {
         switch error {
-        case TransitError.invalidInput, TransitError.notFound, TransitError.http(status: 404, _): false
+        case TransitError.http(status: 404, let body): body?.contains("\"not_found\"") == true
+        case TransitError.invalidInput, TransitError.notFound: false
         default: true
         }
     }
