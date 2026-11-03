@@ -145,8 +145,11 @@ class Proxy:
     next_start: float = 0
     requests: dict = field(default_factory=dict)
     slots: asyncio.Semaphore = None
-    # The Tz log (`tzlog.TzStore`, #502) served under /tz/…, None without one.
+    # The Tz log (`tzlog.TzStore`, #502) served under /tz/…, None without one; `tz_ris` is the WiFi host's client
+    # (`tzlog.RisClient`, None: off) and `tz_turnaround` the lookup of a train's neighbours built on both.
     tz_store: object = None
+    tz_ris: object = None
+    tz_turnaround: object = None
 
     def __post_init__(self):
         self.slots = asyncio.Semaphore(self.max_parallel)
@@ -271,6 +274,20 @@ class Proxy:
             return json_response(429, {"error": "rate_limited"})
         if request.path == "/tz/list":
             return json_response(200, {"units": self.tz_store.units()}, {"Cache-Control": "public, max-age=300"})
+        if request.path == "/tz/turnaround":
+            category, day = request.query.get("category", ""), request.query.get("day", "")
+            number = request.query.get("number", "")
+            try:
+                valid = category.isalpha() and len(category) <= 4 and number.isdigit() and len(number) <= 5
+                dt_day = tzlog.dt.date.fromisoformat(day)
+            except ValueError:
+                valid = False
+            if not valid:
+                return json_response(400, {"error": "bad_request"})
+            lookup = self.tz_turnaround or tzlog.Turnaround(self.tz_store, self.tz_ris)
+            self.tz_turnaround = lookup
+            answer = await lookup.lookup(category.upper(), int(number), dt_day.isoformat())
+            return json_response(200, answer, {"Cache-Control": "no-store"})
         if request.path == "/tz/history":
             tz = request.query.get("tz", "")
             if not tz.isdigit() or len(tz) > 5:
@@ -437,18 +454,21 @@ def make_app(proxy, scan=None):
     if scan is not None and proxy.tz_store is not None:
         async def start_scan(app):
             options = dict(scan)
-            ris = tzlog.RisClient() if options.pop("ris", True) else None
-            app["tz_ris"] = ris
-            scanner = tzlog.Scanner(proxy.tz_store, proxy.ask_json, pause_left=proxy.pause_left, ris=ris, **options)
+            options.pop("ris", None)
+            scanner = tzlog.Scanner(proxy.tz_store, proxy.ask_json, pause_left=proxy.pause_left, ris=proxy.tz_ris, **options)
             app["tz_scan"] = asyncio.ensure_future(scanner.run())
 
         async def stop_scan(app):
             app["tz_scan"].cancel()
-            if app.get("tz_ris") is not None:
-                await app["tz_ris"].close()
 
         app.on_startup.append(start_scan)
         app.on_cleanup.append(stop_scan)
+
+    async def close_ris(app):
+        if proxy.tz_ris is not None:
+            await proxy.tz_ris.close()
+
+    app.on_cleanup.append(close_ris)
     return app
 
 
@@ -475,6 +495,7 @@ def main():
         min_interval=float(os.environ.get("MIN_INTERVAL", "0.25")),
         rate_limit=int(os.environ.get("RATE_LIMIT", "120")),
         tz_store=tz_store,
+        tz_ris=tzlog.RisClient() if os.environ.get("TZ_RIS", "true") != "false" else None,
     )
     scan = None
     if os.environ.get("TZ_SCAN", "true") != "false":

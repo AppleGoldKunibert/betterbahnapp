@@ -473,7 +473,7 @@ in `project.pbxproj`: new files join their target automatically.
   and drops those 6 h past their arrival. `AppModel.savedSeats` (`savedSeats.json`, this device only).
 - `Transit/TzLog/TzLogClient.swift` (#502) – reads our server's Tz log (`BahnDeProxy.baseURL` + `/tz/list`, `/tz/history?tz=`,
   App Attest token like the bahn.de requests): `TzUnit` (Tz, group name "ICE8043"/"ICD4886", vehicle construction types
-  → `series` via `BahnDeClient.model`, Taufname, livery, trains of the latest day) and `TzRun` (day in Germany,
+  → `series` via `BahnDeClient.model`, Taufname, livery, trains of the latest day) and `TzTurnaround` (`turnaround(category:number:day:)`, the trains just before and after a train's trainset, refreshed by the server when a trip is looked at, at most every 30 min per trainset) and `TzRun` (day in Germany,
   train, destination, `changedFromPlan` when bahn.de's `sequenceStatus` is `DIFFERS_FROM_SCHEDULE`).
 - `Transit/Vagonweb/` – vagonweb.cz (with permission, #95): planned compositions for the timetable year from the train's
   HTML (`VagonwebComposition.scheduled`, fixtures `vagonweb-ice*.html`), used when bahn.de has none: `AppModel.trainType`

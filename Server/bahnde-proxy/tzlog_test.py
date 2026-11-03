@@ -68,7 +68,8 @@ class ParseTests(unittest.TestCase):
                                                               "startJourneyNumber": 610}},
             {"journeyID": "x", "journeyRelation": {"startTime": "2026-11-03T08:28:00Z"}},
         ]}
-        self.assertEqual(tzlog.parse_vehicle_journeys(body), ("9490", [("2026-10-28", "ICE", 271), ("2026-11-03", "ICE", 610)]))
+        self.assertEqual(tzlog.parse_vehicle_journeys(body), ("9490", [
+            ("2026-10-28", "ICE", 271, "2026-10-28T04:56:00Z", None), ("2026-11-03", "ICE", 610, "2026-11-03T23:30:00Z", None)]))
         self.assertEqual(tzlog.parse_vehicle_journeys({"vehicle": {}}), (None, []))
         self.assertEqual(tzlog.parse_vehicle_journeys(None), (None, []))
 
@@ -303,10 +304,12 @@ class VehicleRoundTests(unittest.IsolatedAsyncioTestCase):
 
     @staticmethod
     def answer(group, *journeys):
+        """Journeys are (day, category, number) or (day, category, number, "HH:MM" UTC start, default 08:00)."""
         return 200, {"vehicle": {"vehicleGroupName": group}, "journeys": [
-            {"journeyID": day.replace("-", "") + "-x",
-             "journeyRelation": {"startTime": day + "T08:00:00Z", "startCategory": category, "startJourneyNumber": number}}
-            for day, category, number in journeys]}
+            {"journeyID": journey[0].replace("-", "") + "-x",
+             "journeyRelation": {"startTime": f"{journey[0]}T{journey[3] if len(journey) > 3 else '08:00'}:00Z",
+                                 "startCategory": journey[1], "startJourneyNumber": journey[2], "startEvaNumber": "8002549"}}
+            for journey in journeys]}
 
     async def test_a_new_tz_gets_the_last_week_then_only_today(self):
         scanner = self.scanner()
@@ -369,6 +372,76 @@ class VehicleRoundTests(unittest.IsolatedAsyncioTestCase):
         scanner = tzlog.Scanner(self.store, None, hubs=[], now=lambda: NOW, sleep=noop_sleep(), ris=None)
         await scanner.scan_vehicles()
         self.assertEqual(self.asked, [])
+
+
+class TurnaroundTests(unittest.IsolatedAsyncioTestCase):
+    """Trainset 8043 (coach 938000000043) ran ICE 567 at 06:00, ICE 592 at 09:30 and ICE 1501 at 14:00 on the 3rd."""
+
+    def setUp(self):
+        self.store = tzlog.TzStore()
+        self.store.record_unit({"tz": "8043", "unit": "ICE8043", "types": [], "vehicle": "938000000043"}, 1)
+        self.asked = []
+        self.clock = [NOW]
+        self.answers = {"2026-11-03": VehicleRoundTests.answer(
+            "ICE8043", ("2026-11-03", "ICE", 567, "06:00"), ("2026-11-03", "ICE", 592, "09:30"),
+            ("2026-11-03", "ICE", 1501, "14:00"))}
+
+    async def ris(self, uic, day):
+        self.asked.append(day)
+        return self.answers.get(day, (404, None))
+
+    def service(self, **options):
+        return tzlog.Turnaround(self.store, self.ris, now=lambda: self.clock[0], **options)
+
+    def known(self, number, day="2026-11-03", start=None):
+        self.store.record(day, {"tz": "8043", "category": "ICE", "number": number, "start": start}, "Hamburg Hbf", 1)
+
+    async def test_names_the_trains_before_and_after_from_a_fresh_lookup(self):
+        self.known(592)  # the boards saw it, without a start time
+        answer = await self.service().lookup("ICE", 592, "2026-11-03")
+        self.assertEqual(answer["tz"], "8043")
+        self.assertEqual([t["number"] for t in answer["previous"]], [567])
+        self.assertEqual([t["number"] for t in answer["next"]], [1501])
+        self.assertEqual(self.asked, ["2026-11-03", "2026-11-02", "2026-11-04"], "the neighbouring days too")
+
+    async def test_the_host_is_asked_once_per_trainset_and_half_hour_however_many_look(self):
+        self.known(592)
+        service = self.service()
+        await asyncio.gather(*(service.lookup("ICE", 592, "2026-11-03") for _ in range(5)))
+        self.assertEqual(self.asked.count("2026-11-03"), 1)
+        await service.lookup("ICE", 592, "2026-11-03")
+        self.assertEqual(self.asked.count("2026-11-03"), 1, "still fresh")
+        self.clock[0] += 1801
+        await service.lookup("ICE", 592, "2026-11-03")
+        self.assertEqual(self.asked.count("2026-11-03"), 2, "half an hour later, the next look refreshes")
+
+    async def test_nothing_is_asked_without_a_look(self):
+        self.service()
+        self.assertEqual(self.asked, [])
+
+    async def test_first_train_of_the_day_follows_the_one_of_the_day_before(self):
+        self.answers["2026-11-02"] = VehicleRoundTests.answer("ICE8043", ("2026-11-02", "ICE", 1700, "20:00"))
+        self.known(567)
+        answer = await self.service().lookup("ICE", 567, "2026-11-03")
+        self.assertEqual([t["number"] for t in answer["previous"]], [1700])
+        self.assertEqual([t["number"] for t in answer["next"]], [592])
+
+    async def test_an_unknown_train_or_a_failing_host_gives_what_the_log_has(self):
+        service = self.service()
+        self.assertEqual(await service.lookup("ICE", 9, "2026-11-03"), {"tz": None, "previous": [], "next": []})
+        self.known(592, start="2026-11-03T09:30:00Z")
+        self.known(567, start="2026-11-03T06:00:00Z")
+        self.answers = {}
+        self.ris = lambda uic, day: (_ for _ in ()).throw(ConnectionError())
+        answer = await self.service().lookup("ICE", 592, "2026-11-03")
+        self.assertEqual([t["number"] for t in answer["previous"]], [567])
+        self.assertEqual(answer["next"], [])
+
+    async def test_without_the_wifi_host_it_still_answers_from_the_log(self):
+        self.known(592, start="2026-11-03T09:30:00Z")
+        self.known(1501, start="2026-11-03T14:00:00Z")
+        answer = await tzlog.Turnaround(self.store, None).lookup("ICE", 592, "2026-11-03")
+        self.assertEqual([t["number"] for t in answer["next"]], [1501])
 
 
 class RunTests(unittest.IsolatedAsyncioTestCase):

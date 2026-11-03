@@ -34,7 +34,10 @@ The `betterbahn` Worker also asks it for the live times of shared arrivals when 
 
 **Tz log (#502):** `tzlog.py` keeps which trainset (Tz) ran which ICE/IC on which day, for a year, in a SQLite file
 (`TZ_DB`), and serves it to the app: `GET /tz/list` (every Tz with its latest day's trains) and `GET /tz/history?tz=8043`
-(same token and rate limit as `/web/api/`). It runs on one source, the RIS::Transports API behind DB Regio's WiFi landing
+(same token and rate limit as `/web/api/`), and `GET /tz/turnaround?category=ICE&number=592&day=2026-11-03`: the trains the
+trainset of that train ran as just before and runs as just after it ("Wendet aus / zu"). The turnaround answers from the log and first
+refreshes that trainset's journeys at the WiFi host (3 requests: the day and the days around it) when nobody looked at them for 30 minutes,
+so the host is only asked while someone looks at a trip, once per trainset and half hour however many look. It runs on one source, the RIS::Transports API behind DB Regio's WiFi landing
 page (`RisClient`): every `TZ_VEHICLE_EVERY` seconds one request per known Tz asks the journeys of one of its coaches
 (`/api/transports/vehicles/<UIC>/journeys?date=`), the first time also the last 6 days. No login: like the page itself it loads
 the landing page and sends its CSRF cookie and token back. It is not a documented API, so DB can change or close it; the log

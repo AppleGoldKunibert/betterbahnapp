@@ -73,6 +73,31 @@ public struct TzUnit: Codable, Sendable, Hashable, Identifiable {
     public var livery: String? { number.flatMap { TrainsetLiveries.byUnit[$0] } }
 }
 
+/// The trains a train's trainset runs as before and after it ("Wendet aus ICE 567", "Wendet zu ICE 1501"), from the
+/// Tz log (#502). Several when two trains start together (a coupled pair).
+public struct TzTurnaround: Codable, Sendable, Hashable {
+    public struct Train: Codable, Sendable, Hashable, Identifiable {
+        public var day: String
+        public var category: String
+        public var number: Int
+        /// First departure of the train (UTC), nil when the log has none.
+        public var start: Date?
+        public var startEva: String?
+
+        public var id: String { "\(day)|\(category)|\(number)" }
+        /// "ICE 567".
+        public var name: String { "\(category) \(number)" }
+    }
+
+    /// The Tz that ran the train, nil when the log doesn't know it (yet).
+    public var tz: String?
+    public var previous: [Train]
+    public var next: [Train]
+
+    public static let none = TzTurnaround(tz: nil, previous: [], next: [])
+    public var isEmpty: Bool { previous.isEmpty && next.isEmpty }
+}
+
 /// Our server's Tz log: every ICE/IC trainset in Germany, Switzerland, the Netherlands and Austria with
 /// the trains it ran today and on each day of the last year (#502). The server collects it from bahn.de's
 /// Wagenreihung; the app only reads it.
@@ -101,6 +126,16 @@ public struct TzLogClient: Sendable {
         let answer: HistoryResponse = try await http.get(try url("tz/history", query: [.init(name: "tz", value: tz)]),
                                                          as: HistoryResponse.self, auth: auth)
         return answer.trains
+    }
+
+    /// The trains the trainset of `category number` ran as just before and runs as just after it on `day`
+    /// (`yyyy-MM-dd`, the operating day). The server asks its WiFi host for fresh data when nobody looked at the
+    /// trainset for half an hour, so this is the call to make when a trip is opened or refreshed.
+    public func turnaround(category: String, number: Int, day: String) async throws -> TzTurnaround {
+        try await http.get(try url("tz/turnaround", query: [
+            .init(name: "category", value: category), .init(name: "number", value: String(number)),
+            .init(name: "day", value: day),
+        ]), as: TzTurnaround.self, auth: auth)
     }
 
     func url(_ path: String, query: [URLQueryItem] = []) throws -> URL {

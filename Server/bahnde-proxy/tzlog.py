@@ -138,7 +138,8 @@ def board_day(board_journey_id, fallback):
 
 
 def parse_vehicle_journeys(body):
-    """(Tz of the vehicle's trainset or None, [(day, category, number)]) from a vehicle-journeys answer."""
+    """(Tz of the vehicle's trainset or None, [(day, category, number, start, start_eva)]) from a vehicle-journeys
+    answer; `start` is the journey's first departure in UTC ("2026-11-03T08:28:00Z")."""
     if not isinstance(body, dict):
         return None, []
     unit = unit_number(((body.get("vehicle") or {}).get("vehicleGroupName")))
@@ -152,8 +153,23 @@ def parse_vehicle_journeys(body):
             fallback = dt.datetime.fromisoformat(start.replace("Z", "+00:00")).astimezone(BERLIN).date().isoformat()
         except ValueError:
             continue
-        trains.append((operating_day(journey.get("journeyID"), fallback), category, number))
+        eva = relation.get("startEvaNumber")
+        trains.append((operating_day(journey.get("journeyID"), fallback), category, number,
+                       start.replace("+00:00", "Z"), str(eva) if eva else None))
     return (unit[1] if unit else None), trains
+
+
+def apply_vehicle_answer(store, tz, body, now):
+    """Records the journeys of a vehicle-journeys answer for `tz`. False, and the coach forgotten, when the
+    answer names another trainset (or none): the coach doesn't belong to `tz`."""
+    group, trains = parse_vehicle_journeys(body)
+    if group != tz:
+        store.drop_vehicle(tz)
+        return False
+    for day, category, number, start, start_eva in trains:
+        store.record(day, {"tz": tz, "category": category, "number": number, "start": start, "start_eva": start_eva},
+                     None, now)
+    return True
 
 
 class TzStore:
@@ -163,11 +179,16 @@ class TzStore:
         self.db = sqlite3.connect(path)
         self.db.execute("""CREATE TABLE IF NOT EXISTS units (
             tz TEXT PRIMARY KEY, unit TEXT NOT NULL, types TEXT NOT NULL, vehicle TEXT, seen REAL NOT NULL,
-            backfilled INTEGER NOT NULL DEFAULT 0)""")
+            backfilled INTEGER NOT NULL DEFAULT 0, refreshed REAL NOT NULL DEFAULT 0)""")
         self.db.execute("""CREATE TABLE IF NOT EXISTS sightings (
             tz TEXT NOT NULL, day TEXT NOT NULL, category TEXT NOT NULL, number INTEGER NOT NULL,
-            station TEXT, destination TEXT, status TEXT, seen REAL NOT NULL,
+            station TEXT, destination TEXT, status TEXT, seen REAL NOT NULL, start TEXT, start_eva TEXT,
             PRIMARY KEY (tz, day, category, number))""")
+        # Files made before these columns existed.
+        for table, column, kind in (("units", "refreshed", "REAL NOT NULL DEFAULT 0"), ("sightings", "start", "TEXT"),
+                                    ("sightings", "start_eva", "TEXT")):
+            if column not in {row[1] for row in self.db.execute(f"PRAGMA table_info({table})")}:
+                self.db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
         self.db.execute("CREATE INDEX IF NOT EXISTS by_day ON sightings (day)")
         self.db.commit()
 
@@ -200,16 +221,39 @@ class TzStore:
         return added
 
     def record(self, day, sighting, station, now):
-        """Tz X ran as train Y on `day`; what a later sighting doesn't know (destination, station) is kept."""
+        """Tz X ran as train Y on `day`; what a later sighting doesn't know (destination, station, start) is kept."""
         self.db.execute(
-            """INSERT INTO sightings (tz, day, category, number, station, destination, status, seen)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """INSERT INTO sightings (tz, day, category, number, station, destination, status, seen, start, start_eva)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT (tz, day, category, number) DO UPDATE SET
                station = COALESCE(excluded.station, station), destination = COALESCE(excluded.destination, destination),
-               status = COALESCE(excluded.status, status), seen = excluded.seen""",
+               status = COALESCE(excluded.status, status), seen = excluded.seen,
+               start = COALESCE(excluded.start, start), start_eva = COALESCE(excluded.start_eva, start_eva)""",
             (sighting["tz"], day, sighting["category"], sighting["number"], station, sighting.get("destination"),
-             sighting.get("status"), now))
+             sighting.get("status"), now, sighting.get("start"), sighting.get("start_eva")))
         self.db.commit()
+
+    def tz_of(self, day, category, number):
+        """The Tz that ran train `category number` on `day`, or None (the first, when coupled sets ran it)."""
+        row = self.db.execute("SELECT tz FROM sightings WHERE day = ? AND category = ? AND number = ? ORDER BY tz LIMIT 1",
+                              (day, category, number)).fetchone()
+        return row[0] if row else None
+
+    def vehicle_of(self, tz):
+        row = self.db.execute("SELECT vehicle, refreshed FROM units WHERE tz = ?", (tz,)).fetchone()
+        return (row[0], row[1]) if row else (None, 0)
+
+    def mark_refreshed(self, tz, now):
+        self.db.execute("UPDATE units SET refreshed = ? WHERE tz = ?", (now, tz))
+        self.db.commit()
+
+    def journeys(self, tz, first_day, last_day):
+        """(day, category, number, start, start_eva) of the Tz's trains between two days (`yyyy-MM-dd`) that have a
+        start time, earliest first."""
+        return self.db.execute(
+            """SELECT day, category, number, start, start_eva FROM sightings
+               WHERE tz = ? AND day BETWEEN ? AND ? AND start IS NOT NULL ORDER BY start, number""",
+            (tz, first_day, last_day)).fetchall()
 
     def has_train(self, day, category, number):
         return self.db.execute("SELECT 1 FROM sightings WHERE day = ? AND category = ? AND number = ? LIMIT 1",
@@ -330,6 +374,70 @@ class RisClient:
                     body = None
                 return response.status, body
         return 403, None
+
+
+class Turnaround:
+    """The trains a train's trainset runs as before and after it ("Wendet aus ICE 567", "Wendet zu ICE 1501").
+
+    It answers from the log and refreshes the trainset's journeys at the WiFi host first when nobody has looked at
+    them for `ttl` seconds, so the host is only asked while someone looks at a trip, and once per trainset and
+    `ttl` however many look. `ris(uic, day) -> (status, body)` is `RisClient`."""
+
+    def __init__(self, store, ris, ttl=1800, now=time.time):
+        self.store = store
+        self.ris = ris
+        self.ttl = ttl
+        self.now = now
+        self.running = {}
+
+    async def refresh(self, tz, day):
+        """Asks the WiFi host for the Tz's coach on `day` and the days around it (a trip's neighbours can start the
+        day before or after) unless that happened within `ttl`; concurrent callers share one refresh."""
+        uic, refreshed = self.store.vehicle_of(tz)
+        if self.ris is None or not uic or self.now() - refreshed < self.ttl:
+            return
+        if tz not in self.running:
+            self.running[tz] = asyncio.ensure_future(self._refresh(tz, uic, day))
+        try:
+            await asyncio.shield(self.running[tz])
+        finally:
+            if self.running.get(tz) is not None and self.running[tz].done():
+                self.running.pop(tz, None)
+
+    async def _refresh(self, tz, uic, day):
+        center = dt.date.fromisoformat(day)
+        # Marked first: a failing host is not asked again for every viewer.
+        self.store.mark_refreshed(tz, self.now())
+        for offset in (0, -1, 1):
+            try:
+                status, body = await self.ris(uic, (center + dt.timedelta(days=offset)).isoformat())
+            except Exception:  # noqa: BLE001 - the answer is built from what the log has
+                return
+            if status == 200 and not apply_vehicle_answer(self.store, tz, body, self.now()):
+                return
+
+    async def lookup(self, category, number, day):
+        """{"tz", "previous", "next"} for a train on `day` (`yyyy-MM-dd`); the neighbours are the Tz's trains that
+        start just before and just after it (several when two start together)."""
+        tz = self.store.tz_of(day, category, number)
+        if tz is None:
+            return {"tz": None, "previous": [], "next": []}
+        await self.refresh(tz, day)
+        center = dt.date.fromisoformat(day)
+        rows = self.store.journeys(tz, (center - dt.timedelta(days=1)).isoformat(), (center + dt.timedelta(days=1)).isoformat())
+        starts = [r[3] for r in rows if (r[0], r[1], r[2]) == (day, category, number)]
+        if not starts:
+            return {"tz": tz, "previous": [], "next": []}
+        mine = starts[0]
+        before = [r for r in rows if r[3] < mine]
+        after = [r for r in rows if r[3] > mine]
+
+        def trains(group):
+            return [{"day": r[0], "category": r[1], "number": r[2], "start": r[3], "startEva": r[4]} for r in group]
+
+        return {"tz": tz,
+                "previous": trains([r for r in before if r[3] == before[-1][3]]) if before else [],
+                "next": trains([r for r in after if r[3] == after[0][3]]) if after else []}
 
 
 class Scanner:
@@ -480,15 +588,10 @@ class Scanner:
                     complete = False
                     break
                 failures = 0
-                group, trains = parse_vehicle_journeys(body)
-                if group != tz:
+                if not apply_vehicle_answer(self.store, tz, body, self.now()):
                     # The coach runs in another trainset now (or the API names none): learn it again from the boards.
-                    self.store.drop_vehicle(tz)
                     complete = False
                     break
-                unit = {"tz": tz, "unit": "", "types": [], "vehicle": None}
-                for train_day, category, number in trains:
-                    self.store.record(train_day, {**unit, "category": category, "number": number}, None, self.now())
             if complete and not backfilled:
                 self.store.mark_backfilled(tz)
             if failures >= RIS_MAX_FAILURES:

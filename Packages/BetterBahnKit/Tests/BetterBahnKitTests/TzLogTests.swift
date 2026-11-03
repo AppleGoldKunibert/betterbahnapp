@@ -26,6 +26,16 @@ import Testing
         #expect(runs[0].id == "2026-10-31|ICE|592")
     }
 
+    @Test func readsTheTrainsBeforeAndAfter() async throws {
+        let turnaround = try await client.turnaround(category: "ICE", number: 592, day: "2026-11-03")
+        #expect(TzLogProtocol.lastQuery == "category=ICE&number=592&day=2026-11-03")
+        #expect(turnaround.tz == "8043")
+        #expect(turnaround.previous.map(\.name) == ["ICE 567"])
+        #expect(turnaround.next.map(\.name) == ["ICE 1501", "ICE 1503"])
+        #expect(turnaround.next[0].start != nil && turnaround.previous[0].startEva == "8002549")
+        #expect(!turnaround.isEmpty && TzTurnaround.none.isEmpty)
+    }
+
     /// The log's days are Germany's: just after midnight there it is already the next day, though not in UTC.
     @Test func daysAreGermanyDays() throws {
         let lateEvening = try #require(ISO8601DateFormatter().date(from: "2026-10-31T23:30:00Z"))
@@ -67,6 +77,14 @@ final class TzLogProtocol: URLProtocol, @unchecked Sendable {
              {"tz":"4886","unit":"ICD4886","types":["E1475","R6684"],"lastDay":"2026-10-31","trains":[]},
              {"tz":"8043","unit":"ICE8043","types":["I4080","I4081"],"lastDay":"2026-10-31","trains":[
               {"day":"2026-10-31","category":"ICE","number":592,"station":"Berlin Hbf","destination":"Köln Hbf","status":"DIFFERS_FROM_SCHEDULE"}]}]}
+            """
+        case "/tz/turnaround":
+            Self.lock.withLock { Self._query = url.query }
+            body = """
+            {"tz":"8043",
+             "previous":[{"day":"2026-11-03","category":"ICE","number":567,"start":"2026-11-03T06:00:00Z","startEva":"8002549"}],
+             "next":[{"day":"2026-11-03","category":"ICE","number":1501,"start":"2026-11-03T14:00:00Z","startEva":null},
+                     {"day":"2026-11-03","category":"ICE","number":1503,"start":"2026-11-03T14:00:00Z","startEva":null}]}
             """
         default:
             Self.lock.withLock { Self._query = url.query }
