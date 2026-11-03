@@ -5,7 +5,7 @@
 
 It reads the ICE/IC departure boards of `tzlog.SEED_HUBS` (together they list every run) from now until midnight,
 asks the Wagenreihung of each train through our server, and checks every coach it found against the WiFi host
-(`RisClient`: the coach's trainset there must be the same Tz). What it finds is added to the seed file; Tz already
+(`RisClient`: the coach's trainset there, today or on one of the last days, must be the same Tz). What it finds is added to the seed file; Tz already
 in it stay. One run sees the trains of the rest of the day, so run it on a few days until the list stops growing.
 The server itself only needs the file: it never reads all boards again (see `tzlog.py`).
 
@@ -46,6 +46,18 @@ async def get(path):
     return await asyncio.to_thread(fetch, path)
 
 
+async def check(ris, vehicle, days=4):
+    """The WiFi host's answer for a coach: today's, or the latest of the last `days` days where it was in use (a
+    trainset that is out of service today answers 404 "not in use today", but is still a valid Tz)."""
+    today = tzlog.dt.datetime.now(tzlog.BERLIN).date()
+    for back in range(days):
+        status, body = await asyncio.wait_for(ris(vehicle, (today - tzlog.dt.timedelta(days=back)).isoformat()), timeout=60)
+        if status != 404:
+            return status, body
+        await asyncio.sleep(1)
+    return 404, None
+
+
 async def main(seed_path, interval):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     store = tzlog.TzStore()
@@ -57,14 +69,13 @@ async def main(seed_path, interval):
     print(f"boards done: {len(found)} trainsets, checking their coaches at the WiFi host", flush=True)
     seed = {item["tz"]: item for item in json.loads(seed_path.read_text(encoding="utf-8"))} if seed_path.exists() else {}
     ris = tzlog.RisClient()
-    today = tzlog.dt.datetime.now(tzlog.BERLIN).date().isoformat()
     added = rejected = 0
     try:
         for tz, (unit, types, vehicle) in sorted(found.items(), key=lambda item: int(item[0])):
             if tz in seed:
                 continue
             await asyncio.sleep(1)
-            status, body = await asyncio.wait_for(ris(vehicle, today), timeout=60)
+            status, body = await check(ris, vehicle)
             group, _ = tzlog.parse_vehicle_journeys(body)
             if status == 200 and group == tz:
                 seed[tz] = {"tz": tz, "unit": unit, "types": json.loads(types), "vehicle": vehicle}
