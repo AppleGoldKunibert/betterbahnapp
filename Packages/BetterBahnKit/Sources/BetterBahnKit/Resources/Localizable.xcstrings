@@ -18,6 +18,40 @@
         }
       }
     },
+    "Gebuchte Züge" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gebuchte Züge"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Booked trains"
+          }
+        }
+      }
+    },
+    "Gefahrene Züge" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gefahrene Züge"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trains taken"
+          }
+        }
+      }
+    },
     " statt Gl. %@" : {
       "extractionState" : "manual",
       "localizations" : {
