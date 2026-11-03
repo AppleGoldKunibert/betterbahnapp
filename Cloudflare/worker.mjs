@@ -96,7 +96,7 @@ dafür geht der gezeigte Kartenausschnitt an den Dienst, nie dein Standort)</li>
 <li><a href="https://www.openrailwaymap.org">OpenRailwayMap</a> (Kartenkacheln mit Daten von <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>) und Apple Karten</li>
 <li><a href="https://open-meteo.com">Open-Meteo</a> (Wetter bei Ankunft und beim Umstieg; abschaltbar in den Einstellungen) –
 dafür geht nur die ungefähre Lage des Bahnhofs an den Dienst, nie dein Standort</li>
-<li>bahn.de und die Timetables- und FaSta-Schnittstellen der Deutschen Bahn (Aufzüge außer Betrieb) – diese Anfragen laufen über den Server von
+<li>bahn.de und die Timetables-, RIS::Journeys- und FaSta-Schnittstellen der Deutschen Bahn (Zugsuche nach Nummer, Echtzeiten, Aufzüge außer Betrieb) – diese Anfragen laufen über den Server von
 BetterBahn (siehe unten), daher sieht die Deutsche Bahn nicht deine IP-Adresse, sondern die des Servers. Es gelten die
 <a href="https://www.bahn.de/datenschutz">Datenschutzhinweise der Deutschen Bahn</a>.</li>
 </ul>

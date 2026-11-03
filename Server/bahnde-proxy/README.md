@@ -41,8 +41,9 @@ The `betterbahn` Worker also asks it for the live times of shared arrivals when 
 | `BLOCK_PAUSE` | `600` | The longest pause, reached when refusals keep coming. |
 | `MAX_PARALLEL` | `4` | Requests going to bahn.de at the same time. |
 | `MIN_INTERVAL` | `0.25` | Seconds between the starts of two requests to bahn.de. |
-| `RATE_LIMIT` | `120` | Requests per minute per app install. |
+| `RATE_LIMIT` | `120` | Requests per minute per app install, counted separately for bahn.de and RIS::Journeys. |
 | `ALLOW_UNATTESTED` | — | `true` lets requests without a token through. Only for a quick test, never in production. |
+| `DB_CLIENT_ID`, `DB_API_KEY` | — | DB API Marketplace key with RIS::Journeys. The server passes `/db/apis/ris-journeys/v2/find` and `/{journeyID}` on with it (the app asks these before bahn.expert); without it those paths answer 404. Put both into `.env`, never into the repo. |
 
 ## Run it
 

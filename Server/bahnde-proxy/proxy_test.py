@@ -256,5 +256,63 @@ class BrowserFetchTests(unittest.IsolatedAsyncioTestCase):
             await self.fetch(proxy.UPSTREAM + "a")
 
 
+
+RUN = "20261103-c5ed6631-9860-3f62-aa16-50637daedbaf"
+
+
+class RISTests(unittest.IsolatedAsyncioTestCase):
+    """RIS::Journeys through the same server: its own paths, cache and pauses."""
+
+    async def start(self, ris_status=200, with_ris=True):
+        self.bahn_de = FakeBahnDe()
+        self.ris = FakeBahnDe(status=ris_status)
+        self.clock = Clock()
+        self.proxy = proxy.Proxy(fetch=self.bahn_de, secret=SECRET, clock=self.clock)
+        self.ris_proxy = proxy.ris_proxy(self.ris, SECRET, clock=self.clock) if with_ris else None
+        self.client = TestClient(TestServer(proxy.make_app(self.proxy, self.ris_proxy)))
+        await self.client.start_server()
+        self.addAsyncCleanup(self.client.close)
+
+    async def get(self, path, token=WORKER_TOKEN):
+        return await self.client.get(path, headers={proxy.TOKEN_HEADER: token} if token else {})
+
+    async def test_passes_find_and_a_run_on_to_dbs_api(self):
+        await self.start()
+        find = await self.get("/db/apis/ris-journeys/v2/find?journeyNumber=7&date=2026-11-03")
+        self.assertEqual(find.status, 200)
+        self.assertEqual(find.headers["Cache-Control"], "public, max-age=300")
+        self.assertEqual((await self.get(f"/db/apis/ris-journeys/v2/{RUN}")).status, 200)
+        self.assertEqual(self.ris.urls, [
+            "https://apis.deutschebahn.com/db/apis/ris-journeys/v2/find?journeyNumber=7&date=2026-11-03",
+            f"https://apis.deutschebahn.com/db/apis/ris-journeys/v2/{RUN}",
+        ])
+        self.assertEqual(self.bahn_de.urls, [])
+
+    async def test_only_its_paths_and_only_the_app(self):
+        await self.start()
+        self.assertEqual((await self.get("/db/apis/ris-journeys/v2/anything")).status, 404)
+        self.assertEqual((await self.get("/db/apis/ris-boards/v1/public/departures/8000105")).status, 404)
+        self.assertEqual((await self.get(f"/db/apis/ris-journeys/v2/{RUN}", token=None)).status, 401)
+        self.assertEqual(self.ris.urls, [])
+
+    async def test_without_a_key_ris_answers_404(self):
+        await self.start(with_ris=False)
+        self.assertEqual((await self.get(f"/db/apis/ris-journeys/v2/{RUN}")).status, 404)
+        self.assertEqual((await self.get(ORTE)).status, 200)
+
+    async def test_a_refused_key_doesnt_pause(self):
+        await self.start(ris_status=401)
+        self.assertEqual((await self.get(f"/db/apis/ris-journeys/v2/{RUN}")).status, 401)
+        self.assertEqual((await self.get(f"/db/apis/ris-journeys/v2/{RUN}")).status, 401)
+        self.assertEqual(len(self.ris.urls), 2)
+
+    async def test_a_rate_limit_pauses_ris_but_not_bahn_de(self):
+        await self.start(ris_status=429)
+        self.assertEqual((await self.get(f"/db/apis/ris-journeys/v2/{RUN}")).status, 429)
+        self.assertEqual((await self.get("/db/apis/ris-journeys/v2/find?journeyNumber=7&date=2026-11-03")).status, 503)
+        self.assertEqual(len(self.ris.urls), 1)
+        self.assertEqual((await self.get(ORTE)).status, 200)
+
+
 if __name__ == "__main__":
     unittest.main()

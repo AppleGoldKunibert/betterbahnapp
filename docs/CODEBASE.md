@@ -496,6 +496,12 @@ in `project.pbxproj`: new files join their target automatically.
   (nicht)" in `TransferRow`) via `disposition(from:to:)`/`dispositions(in:now:)` (`dispositionStatus`, 15 min ago to
   3 h ahead, notifies once per `notificationID`). `ExpertTimes` (`liveTimes(category:number:day:)`, `ExpertTimesCache`
   2 min) referees bahn.de vs. DB Timetables in `applyingLiveTimes(…referee:)` (closer value wins, tie → Timetables).
+- `Transit/BahnExpert/RISJourneysClient.swift` – DB's RIS::Journeys through our server (`/db/apis/ris-journeys/v2/`,
+  the server adds the Marketplace key): `BahnExpertClient.call` asks it first for `journey/find` and
+  `journey/detailsByJourneyId` (same journey and stop IDs as bahn.expert) and hands the answer over in bahn.expert's
+  shape; bahn.expert only answers when it fails (then RIS pauses 2 min). `find` is asked without category (RIS takes it
+  strictly) and with `limit=1000` (20 by default), keeps the asked day's runs and puts the category, then trains first.
+  `coachSequence/departureSequence` and `connections/connections` stay on bahn.expert.
 - `Transit/TrainNumberSearch.swift` (#183) – bahn.expert's `journey/find` lists a number's runs (`TrainNumberQuery`,
   `ranked` by `TrainSearchFilter`/`TrainSearchCountry`), `detailsByJourneyId` their stops; `run(of:)` finds the run on
   a stop's board so the trip comes from Transitous.

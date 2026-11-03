@@ -679,7 +679,7 @@ private struct TrainSearchCountriesView: View {
                     row(title: String(localized: "Überall"), flag: "🌍", selected: settings.trainSearchCountries.isEmpty)
                 }
             } footer: {
-                Text("Zeigt Züge aus allen Ländern, die bahn.expert kennt.")
+                Text("Zeigt Züge aus allen Ländern, die die Deutsche Bahn kennt.")
             }
             Section {
                 ForEach(TrainSearchCountry.all) { country in
