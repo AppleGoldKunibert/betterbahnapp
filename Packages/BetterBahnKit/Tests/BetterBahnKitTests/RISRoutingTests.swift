@@ -188,6 +188,17 @@ import Testing
         #expect(requests.contains { $0.contains("api.transitous.org") })
     }
 
+    /// When DB found nothing and Transitous fails too, DB (also the fallback) isn't asked a second time.
+    @Test func dbIsNotAskedTwiceWhenTransitousFailsToo() async throws {
+        let (combined, session) = dbFirst(risEmpty: true)
+        defer { session.invalidateAndCancel() }
+        await #expect(throws: TransitError.self) {
+            try await combined.journeys(JourneyQuery(from: berlin, to: munich, date: try date("2026-11-04T07:00:00Z")))
+        }
+        let requests = DBFirstProtocol.requests.withLock { $0 }
+        #expect(requests.filter { $0.contains("verkehrslage.bahnhof.de") }.count == 1)
+    }
+
     /// A stop without an EVA number goes to Transitous: bahn.de's nearest hit could be a railway station
     /// next to a bus stop, only a hit with the very same name counts.
     @Test func aStopWithoutEVAGoesToTransitous() async throws {

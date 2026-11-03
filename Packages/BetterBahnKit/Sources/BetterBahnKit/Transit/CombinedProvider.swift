@@ -143,12 +143,24 @@ public final class CombinedProvider: TransitProvider {
             var nextQuery = query
             nextQuery.cursor = Self.stripCursor(cursor, source: provider.source)
             page = try await provider.journeys(nextQuery)
-        } else if let found = await dbJourneysFirst(query) {
-            page = found
         } else {
-            // Providers resolve foreign and previously saved station IDs themselves.
-            page = try await withFallback(deadline: .seconds(10),
-                { try await $0.journeys(query) }, { try await $0.journeys(query) })
+            let db = await dbJourneysFirst(query)
+            if let found = db.page {
+                page = found
+            } else {
+                // Providers resolve foreign and previously saved station IDs themselves. DB, the fallback,
+                // isn't asked a second time when it just answered.
+                let askedDB = db.asked
+                let dbSource = dbJourneys?.source
+                page = try await withFallback(deadline: .seconds(10),
+                    { try await $0.journeys(query) },
+                    { fallback in
+                        guard !askedDB || fallback.source != dbSource else {
+                            throw TransitError.notFound(String(kit: "Verbindung"))
+                        }
+                        return try await fallback.journeys(query)
+                    })
+            }
         }
         page.earlierCursor = page.earlierCursor.map { "\(page.source.rawValue):\($0)" }
         page.laterCursor = page.laterCursor.map { "\(page.source.rawValue):\($0)" }
@@ -172,20 +184,20 @@ public final class CombinedProvider: TransitProvider {
         return page
     }
 
-    /// DB's journeys for `query`, nil when Transitous should answer: DB found none the query allows, failed (then
-    /// it is left alone for `cooldown`), or a stop has no EVA number for it. Cancelling (the user searched again)
-    /// isn't a failure.
-    func dbJourneysFirst(_ query: JourneyQuery) async -> JourneyPage? {
-        guard let dbJourneys, await dbHealth.primaryAvailable else { return nil }
+    /// DB's journeys for `query`, no page when Transitous should answer: DB found none the query allows, failed
+    /// (then it is left alone for `cooldown`), or a stop has no EVA number for it (`asked` false then). Cancelling
+    /// (the user searched again) isn't a failure.
+    func dbJourneysFirst(_ query: JourneyQuery) async -> (page: JourneyPage?, asked: Bool) {
+        guard let dbJourneys, await dbHealth.primaryAvailable else { return (nil, false) }
         do {
-            let page = try await Self.withDeadline(.seconds(8)) { try await dbJourneys.journeys(query) }
+            let page = try await Self.withDeadline(.seconds(6)) { try await dbJourneys.journeys(query) }
             await dbHealth.markOK()
-            return page.journeys.contains(where: query.allows) ? page : nil
+            return (page.journeys.contains(where: query.allows) ? page : nil, true)
         } catch TransitError.notFound {
-            return nil
+            return (nil, false)
         } catch {
             if !Task.isCancelled { await dbHealth.markFailed() }
-            return nil
+            return (nil, true)
         }
     }
 

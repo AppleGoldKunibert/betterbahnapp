@@ -96,6 +96,8 @@ public struct RISRoutingProvider: TransitProvider {
     static func transportTypes(for product: Product) -> [String] {
         switch product {
         case .highSpeed: ["HIGH_SPEED_TRAIN"]
+        // DB has no type of its own for night trains: night trains alone also bring IC/EC, which
+        // `JourneyQuery.allows` (`CombinedProvider.journeys`) then leaves out.
         case .longDistance, .nightTrain: ["INTERCITY_TRAIN"]
         case .interregio: ["INTER_REGIONAL_TRAIN"]
         case .regionalExpress, .regional: ["REGIONAL_TRAIN"]
