@@ -149,10 +149,40 @@ import Testing
         #expect(trainsOnly.missing.isEmpty)
     }
 
+    /// IRIS answers, RIS::Boards doesn't: the trains stay DB's and the bus comes from Transitous.
+    @Test func combinedProviderFillsBusesFromTransitousWhenRISBoardsFails() async throws {
+        let (db, session) = provider(risAnswers: false)
+        defer { session.invalidateAndCancel() }
+        let combined = CombinedProvider(primary: BusOnlyProvider(station: koeln, at: noon.addingTimeInterval(600)), bahnDe: nil,
+                                        bahnExpert: nil, vagonweb: nil, bahnJetzt: nil, dbBoards: db)
+        let entries = try await combined.board(.departures, at: koeln, date: noon, duration: 60, products: Set(Product.allCases))
+        #expect(entries.contains { $0.line.name == "ICE 22" && $0.source == .bahnDe })
+        #expect(entries.contains { $0.line.name == "Bus 133" && $0.source == .transitous })
+        #expect(!entries.contains { $0.line.name == "ICE 999" })
+        #expect(entries.map(\.time.planned) == entries.map(\.time.planned).sorted())
+    }
+
     @Test func tripReferenceRoundTrips() throws {
         let reference = IRISTripReference(category: "ICE", number: "22", eva: "8000207", planned: noon, kind: .arrivals)
         #expect(IRISTripReference(id: reference.id) == reference)
         #expect(IRISTripReference(id: "2|#VN#1#ST#") == nil)
+    }
+}
+
+/// Transitous as a stand-in: one bus and one train at `station` (the train must not be taken over).
+private struct BusOnlyProvider: TransitProvider {
+    let station: Station
+    let at: Date
+    var source: DataSource { .transitous }
+    func searchStations(_ query: String) async throws -> [Station] { [] }
+    func journeys(_ query: JourneyQuery) async throws -> JourneyPage { throw TransitError.notFound("") }
+    func trip(id: String) async throws -> Trip { throw TransitError.notFound(id) }
+    func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int, products: Set<Product>) async throws -> [BoardEntry] {
+        [("Bus 133", Product.bus), ("ICE 999", Product.highSpeed)].map { name, product in
+            BoardEntry(kind: kind, tripId: name, station: station, line: Line(name: name, number: nil, product: product, operatorName: nil),
+                       otherEnd: "Somewhere", time: TimeInfo(planned: at, actual: nil), platform: PlatformInfo(planned: nil, actual: nil),
+                       cancelled: false, terminatesOrOriginatesHere: nil, remarks: [], source: .transitous)
+        }
     }
 }
 
