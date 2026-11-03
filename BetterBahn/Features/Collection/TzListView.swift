@@ -21,7 +21,7 @@ extension TzRunsLink where Content == Label<Text, Image> {
     /// The link under an opened Tz: "Alle Einsätze".
     init(item: TravelCollection.Item, startsWithAll: Bool) {
         self.init(item: item, startsWithAll: startsWithAll) {
-            Label("Alle Einsätze", systemImage: "list.bullet").font(.subheadline)
+            Label("Alle Einsätze", systemImage: "list.bullet")
         }
     }
 }
