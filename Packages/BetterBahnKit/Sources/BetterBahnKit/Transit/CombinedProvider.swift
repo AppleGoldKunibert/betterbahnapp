@@ -339,11 +339,16 @@ public final class CombinedProvider: TransitProvider {
     }
 
     public func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int, products: Set<Product>) async throws -> [BoardEntry] {
-        // DB's board first; it already carries DB's names and live times.
-        if let dbBoards, let entries = try? await Self.withDeadline(.seconds(8), {
-            try await dbBoards.board(kind, at: station, date: date, duration: duration, products: products)
+        // DB's board first; it already carries DB's names and live times. Buses and trams DB couldn't answer for
+        // (RIS::Boards failed) come from Transitous.
+        if let dbBoards, let result = try? await Self.withDeadline(.seconds(8), {
+            try await dbBoards.boardResult(kind, at: station, date: date, duration: duration, products: products)
         }) {
-            return entries
+            guard !result.missing.isEmpty, let local = try? await Self.withDeadline(.seconds(6), {
+                try await self.primary.board(kind, at: station, date: date, duration: duration, products: result.missing)
+            }) else { return result.entries }
+            return (result.entries + local.filter { result.missing.contains($0.line.filterProduct) })
+                .sorted { $0.time.planned < $1.time.planned }
         }
         let entries = try await withFallback(deadline: .seconds(8),
                                { try await $0.board(kind, at: station, date: date, duration: duration, products: products) },

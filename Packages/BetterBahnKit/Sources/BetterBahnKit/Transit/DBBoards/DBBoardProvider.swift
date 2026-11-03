@@ -20,11 +20,23 @@ public struct DBBoardProvider: Sendable {
     static let localProducts: Set<Product> = [.bus, .tram, .subway, .ferry, .other]
 
     public func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int, products: Set<Product>) async throws -> [BoardEntry] {
+        try await boardResult(kind, at: station, date: date, duration: duration, products: products).entries
+    }
+
+    /// DB's board and which of the asked `products` DB couldn't answer for (buses, trams and subways when
+    /// RIS::Boards failed), for Transitous to fill in (`CombinedProvider.board`).
+    struct Result {
+        var entries: [BoardEntry]
+        var missing: Set<Product>
+    }
+
+    func boardResult(_ kind: BoardKind, at station: Station, date: Date, duration: Int, products: Set<Product>) async throws -> Result {
         let end = date.addingTimeInterval(TimeInterval(duration * 60))
         let trains = products.contains { !Self.localProducts.contains($0) }
         let local = !products.isDisjoint(with: Self.localProducts)
         var entries: [BoardEntry] = []
         var irisAnswered = false
+        var risAnswered = false
         if trains, let stops = try? await timetables.boardStops(at: station, kind: kind, from: date, to: end), !stops.isEmpty {
             irisAnswered = true
             entries += stops.map { Self.entry($0, kind: kind, station: station) }
@@ -35,12 +47,14 @@ public struct DBBoardProvider: Sendable {
         if let boards, local || !irisAnswered, let eva {
             let types = irisAnswered ? RISBoardsClient.localTypes : RISBoardsClient.localTypes + RISBoardsClient.trainTypes
             if let answer = try? await boards.board(kind, eva: eva, from: date, to: end, types: types) {
+                risAnswered = true
                 entries += answer.map { Self.entry($0, kind: kind, station: station) }
             }
         }
         entries = entries.filter { products.contains($0.line.filterProduct) }
         guard !entries.isEmpty else { throw TransitError.notFound(station.displayName) }
-        return entries.sorted { $0.time.planned < $1.time.planned }
+        let missing = local && !risAnswered ? products.intersection(Self.localProducts) : []
+        return Result(entries: entries.sorted { $0.time.planned < $1.time.planned }, missing: missing)
     }
 
     // MARK: IRIS

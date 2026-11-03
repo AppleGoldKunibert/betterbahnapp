@@ -137,6 +137,18 @@ import Testing
         #expect(trip.stopovers.last?.station.name == "Basel SBB")
     }
 
+    /// Without RIS::Boards (no key on our server), the trains still come from IRIS and the asked buses and trams
+    /// are left to Transitous.
+    @Test func withoutRISBoardsBusesAreLeftToTransitous() async throws {
+        let (db, session) = provider(risAnswers: false)
+        defer { session.invalidateAndCancel() }
+        let result = try await db.boardResult(.departures, at: koeln, date: noon, duration: 60, products: Set(Product.allCases))
+        #expect(result.entries.allSatisfy { $0.line.product.isTrain })
+        #expect(result.missing.contains(.bus) && result.missing.contains(.tram))
+        let trainsOnly = try await db.boardResult(.departures, at: koeln, date: noon, duration: 60, products: [.highSpeed])
+        #expect(trainsOnly.missing.isEmpty)
+    }
+
     @Test func tripReferenceRoundTrips() throws {
         let reference = IRISTripReference(category: "ICE", number: "22", eva: "8000207", planned: noon, kind: .arrivals)
         #expect(IRISTripReference(id: reference.id) == reference)
