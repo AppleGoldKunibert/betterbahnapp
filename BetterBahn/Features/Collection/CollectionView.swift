@@ -525,6 +525,7 @@ private struct TrainsetRows: View {
                             .padding(.leading, 28)
                     }
                     TzRunsLink(item: item, startsWithAll: true)
+                        .font(.subheadline)
                         .padding(.leading, 28)
                 }
             } else if item.unitNumber != nil {
