@@ -48,7 +48,9 @@ struct LiveTrainEntry: TimelineEntry {
 }
 
 /// Fetches the ridden train's position from bahn.jetzt itself (the app can't refresh it in the
-/// background), so the live widgets update on their own and on the refresh button.
+/// background), so the live widgets update on their own and on the refresh button. Not from our
+/// RIS::Maps Worker (`TrainPositionClient`): it needs an App Attest token, which app extensions can't get;
+/// the app's stored position (often from RIS::Maps) stands in when bahn.jetzt has none.
 struct LiveTrainProvider: TimelineProvider {
     let withMap: Bool
 

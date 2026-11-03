@@ -1,0 +1,11 @@
+name = "betterbahn-positions"
+main = "worker.mjs"
+compatibility_date = "2026-09-01"
+workers_dev = true
+
+[vars]
+# RIS administrations asked for, comma-separated; empty uses DEFAULT_ADMIN_IDS in worker.mjs.
+ADMIN_IDS = ""
+# Secrets (`npx wrangler secret put …`):
+#   TOKEN_SECRET – same value as in betterbahn2 (which hands out the App Attest tokens), betterbahn-pass, …
+#   DB_CLIENT_ID, DB_API_KEY – the DB API Marketplace application subscribed to RIS::Maps

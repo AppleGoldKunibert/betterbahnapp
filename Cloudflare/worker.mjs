@@ -90,11 +90,11 @@ aber nicht mit Daten über dich:</p>
 <ul>
 <li><a href="https://transitous.org">Transitous</a> (Verbindungen, Abfahrten, Bahnhofssuche und die anderen Züge auf der Karte –
 dafür geht der gezeigte Kartenausschnitt an den Dienst, nie dein Standort)</li>
-<li><a href="https://www.vagonweb.cz">vagonweb.cz</a> (geplante Wagenreihungen und Zugtypen), <a href="https://bahn.expert">bahn.expert</a> (Zugtypen) und <a href="https://bahn.jetzt">bahn.jetzt</a> (Zugpositionen auf der Karte)</li>
+<li><a href="https://www.vagonweb.cz">vagonweb.cz</a> (geplante Wagenreihungen und Zugtypen), <a href="https://bahn.expert">bahn.expert</a> (Zugtypen) und <a href="https://bahn.jetzt">bahn.jetzt</a> (Zugpositionen, wenn unser Server keine hat)</li>
 <li><a href="https://www.openrailwaymap.org">OpenRailwayMap</a> (Kartenkacheln mit Daten von <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>) und Apple Karten</li>
 <li><a href="https://open-meteo.com">Open-Meteo</a> (Wetter bei Ankunft und beim Umstieg; abschaltbar in den Einstellungen) –
 dafür geht nur die ungefähre Lage des Bahnhofs an den Dienst, nie dein Standort</li>
-<li>bahn.de und die Timetables- und FaSta-Schnittstellen der Deutschen Bahn (Aufzüge außer Betrieb) – diese Anfragen laufen über den Server von
+<li>bahn.de und die Timetables-, FaSta- (Aufzüge außer Betrieb) und RIS::Maps-Schnittstellen (Zugpositionen) der Deutschen Bahn – diese Anfragen laufen über den Server von
 BetterBahn (siehe unten), daher sieht die Deutsche Bahn nicht deine IP-Adresse, sondern die des Servers. Es gelten die
 <a href="https://www.bahn.de/datenschutz">Datenschutzhinweise der Deutschen Bahn</a>.</li>
 </ul>
@@ -106,6 +106,8 @@ BetterBahn (siehe unten), daher sieht die Deutsche Bahn nicht deine IP-Adresse, 
 kurz zwischen (Sekunden bis höchstens einen Tag), damit nicht jede Anfrage erneut gestellt wird,</li>
 <li>laden die Liste aller Aufzüge, die an Bahnhöfen außer Betrieb sind, und speichern sie 5 Minuten zwischen. Die App
 lädt immer die ganze Liste, der Server erfährt also nicht, welchen Bahnhof du ansiehst,</li>
+<li>laden die Positionen aller fahrenden Züge der Deutschen Bahn und speichern sie 15 Sekunden zwischen. Die App lädt
+immer die ganze Liste, der Server erfährt also nicht, welchen Zug du ansiehst,</li>
 <li>signieren Apple-Wallet-Pässe: Wenn du „Zu Apple Wallet hinzufügen“ tippst, werden die Daten des Passes
 (Barcode des Tickets, Namen der Reisenden, Verbindung, Sitzplätze, Auftragsnummer; bei Zeitkarten auch das
 Geburtsdatum aus dem Barcode) an den Server geschickt, dort signiert und sofort zurückgegeben,</li>
@@ -167,7 +169,7 @@ löscht er sie und beendet sie bei Träwelling. Hat 180 Tage lang keines deiner 
 ebenfalls.</p>
 <p>Die App zeigt dir, wer von den Leuten, denen du auf Träwelling folgst, gerade eingecheckt ist. Um deren Zug
 anzuzeigen, fragt sie Transitous nach den Abfahrten am Einstiegsbahnhof des Check-ins, mit Bahnhof und Uhrzeit,
-aber ohne Namen; die Live-Position kommt wie bei deinen eigenen Zügen von bahn.jetzt.</p>
+aber ohne Namen; die Live-Position kommt wie bei deinen eigenen Zügen von unserem Server oder bahn.jetzt.</p>
 <p>Für die Emojis im Check-in-Text lädt die App die Emoji-Liste und -Bilder der Mastodon-Instanz, die mit
 deinem Träwelling-Konto verbunden ist, sonst von <a href="https://zug.network">zug.network</a>. Dabei wird
 nichts über dich gesendet außer deiner IP-Adresse, die jeder Abruf im Internet mitschickt.</p>

@@ -9231,6 +9231,16 @@
         }
       }
     },
+    "Zugpositionen, wenn unser Server keine hat" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Train positions when our server has none"
+          }
+        }
+      }
+    },
     "Zugriff" : {
       "localizations" : {
         "en" : {

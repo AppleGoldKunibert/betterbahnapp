@@ -22,7 +22,7 @@ import Testing
         config.protocolClasses = [RenumberedTripProtocol.self]
         let session = URLSession(configuration: config)
         let transitous = TransitousProvider(http: HTTPClient(session: session))
-        return (CombinedProvider(primary: transitous, bahnDe: nil, bahnExpert: nil, vagonweb: nil, bahnJetzt: nil), session)
+        return (CombinedProvider(primary: transitous, bahnDe: nil, bahnExpert: nil, vagonweb: nil, trainPositions: nil), session)
     }
 
     @Test func goneTripIsFoundAgainOnTheOriginsBoard() async throws {

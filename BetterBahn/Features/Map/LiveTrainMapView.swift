@@ -56,7 +56,7 @@ struct LiveTrainRoute: Hashable {
         end = (trip.stopovers.last?.arrival?.best ?? .distantFuture).addingTimeInterval(10 * 60)
     }
 
-    var isSupported: Bool { BahnJetztClient.supports(line) }
+    var isSupported: Bool { TrainPositionClient.supports(line) }
 
     var hint: BahnJetztClient.RouteHint { .init(destination: destination, path: path) }
 
