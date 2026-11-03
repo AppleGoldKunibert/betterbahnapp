@@ -91,9 +91,13 @@ public struct BahnExpertClient: Sendable {
     public static let baseURL = URL(string: "https://bahn.expert")!
 
     let http: HTTPClient
+    /// DB's RIS::Journeys through our server: asked first for a run by number and a run's stops, which
+    /// bahn.expert takes from there too; bahn.expert only answers when it fails. None in tests unless given.
+    let ris: RISJourneysClient?
 
-    public init(http: HTTPClient = HTTPClient(timeout: 12)) {
+    public init(http: HTTPClient = HTTPClient(timeout: 12), ris: RISJourneysClient? = nil) {
         self.http = http
+        self.ris = ris ?? (http.session === URLSession.shared ? .shared : nil)
     }
 
     // MARK: Wire types
@@ -233,6 +237,38 @@ public struct BahnExpertClient: Sendable {
 
     /// bahn.expert answers requests without a `Referer` from its own site with an empty `206`
     /// (it did not until 2026-09-20), so every call identifies where the API is meant to be used from.
+    /// RIS::Journeys' answer for `journey/find` or `journey/detailsByJourneyId` in bahn.expert's shape; nil for
+    /// other procedures, while RIS is paused after a failure, or when it fails (then it pauses).
+    static func risAnswer(_ procedure: String, input: [String: Any], from ris: RISJourneysClient) async -> Data? {
+        let json = input["json"]
+        let ask: (@Sendable () async throws -> Data)?
+        switch procedure {
+        case "journey/find":
+            guard let query = json as? [String: Any], let number = query["journeyNumber"] as? Int,
+                  let date = query["initialDepartureDate"] as? String, date.count >= 10 else { return nil }
+            let day = String(date.prefix(10))
+            let limit = query["limit"] as? Int
+            let category = query["category"] as? String
+            ask = { try await ris.expertFind(number: number, category: category, day: day, limit: limit) }
+        case "journey/detailsByJourneyId":
+            guard let journeyId = json as? String else { return nil }
+            ask = { try await ris.expertDetails(journeyId: journeyId) }
+        default:
+            ask = nil
+        }
+        guard let ask, await ris.health.available() else { return nil }
+        do {
+            let data = try await ask()
+            await ris.health.markOK()
+            return data
+        } catch is CancellationError {
+            return nil
+        } catch {
+            await ris.health.markFailed()
+            return nil
+        }
+    }
+
     static func request(procedure: String, input: [String: Any]) throws -> URLRequest {
         var request = URLRequest(url: baseURL.appending(path: "api/orpc/\(procedure)"), timeoutInterval: 12)
         request.httpMethod = "POST"
@@ -244,6 +280,13 @@ public struct BahnExpertClient: Sendable {
     }
 
     func call<T: Decodable>(_ procedure: String, input: [String: Any]) async throws -> T {
+        if let ris, let data = await Self.risAnswer(procedure, input: input, from: ris) {
+            do {
+                return try JSONDecoding.decoder.decode(Envelope<T>.self, from: data).json
+            } catch {
+                // An answer that doesn't read like bahn.expert's: bahn.expert itself decides.
+            }
+        }
         let request = try Self.request(procedure: procedure, input: input)
         do {
             return try await http.send(request, as: Envelope<T>.self).json

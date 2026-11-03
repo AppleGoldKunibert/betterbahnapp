@@ -22,6 +22,8 @@ struct DataSourcesView: View {
         Source(name: "Deutsche Bahn – FaSta", usage: String(localized: "Aufzüge außer Betrieb"),
                url: URL(string: "https://developers.deutschebahn.com/db-api-marketplace/apis/product/fasta")!,
                license: (String(localized: "Lizenz: CC BY 4.0"), URL(string: "https://creativecommons.org/licenses/by/4.0/deed.de")!)),
+        Source(name: "Deutsche Bahn – RIS::Journeys", usage: String(localized: "Zugsuche nach Nummer, Echtzeiten und Gleise der Züge"),
+               url: URL(string: "https://developers.deutschebahn.com/db-api-marketplace/apis/product/ris-journeys-netz")!),
         Source(name: String(localized: "deutsche-bahn-data von Piet Brömmel"), usage: String(localized: "Zugstatistik: Verspätungen, Ausfälle und Gleiswechsel der letzten 30 Tage, aus DB Timetables"),
                url: URL(string: "https://github.com/piebro/deutsche-bahn-data")!,
                license: (String(localized: "Lizenz: CC BY 4.0, Deutsche Bahn"), URL(string: "https://creativecommons.org/licenses/by/4.0/deed.de")!)),

@@ -9271,6 +9271,16 @@
         }
       }
     },
+    "Zugsuche nach Nummer, Echtzeiten und Gleise der Züge" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Train search by number, live times and platforms of trains"
+          }
+        }
+      }
+    },
     "Zugteil" : {
       "localizations" : {
         "en" : {
