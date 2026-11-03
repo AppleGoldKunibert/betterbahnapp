@@ -6,13 +6,14 @@ import SwiftUI
 /// device from Kit `TravelCollection`.
 struct CollectionView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.appDesign) private var design
     @State private var collection: TravelCollection?
     /// Collected since the last visit; kept for this visit, so the "Neu" badges stay while looking.
     @State private var newIDs: Set<String> = []
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 14) {
+            VStack(spacing: design == .fahrkarte ? 16 : 12) {
                 if let collection {
                     ForEach(collection.groups) { group in
                         // Pushed by value like the journeys opened from there: a view-based link mixed with
@@ -27,11 +28,13 @@ struct CollectionView: View {
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 4)
+                        .padding(.top, 8)
                 } else {
                     ProgressView().padding(.top, 60)
                 }
             }
             .padding(.horizontal)
+            .padding(.top, 8)
             .padding(.bottom, 24)
             .readableWidth()
         }
@@ -96,19 +99,26 @@ extension TravelCollection.Category {
     }
 }
 
+/// Minimal: a card with a tinted icon tile, the count and a progress bar. Fahrkarte: a small ticket with the
+/// category in its stub and the count large below the perforation.
 private struct CollectionGroupCard: View {
     let group: TravelCollection.Group
     let newCount: Int
+    @Environment(\.appDesign) private var design
 
     var body: some View {
+        Group {
+            if design == .fahrkarte { ticket } else { card }
+        }
+        .contentShape(.rect)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var card: some View {
         Card {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 12) {
-                    Image(systemName: group.category.systemImage)
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 42, height: 42)
-                        .background(Color.brand.gradient, in: .rect(cornerRadius: 12, style: .continuous))
+                    IconTile(systemImage: group.category.systemImage, color: .brand, size: 40)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(group.category.title).font(.headline)
                         Text("\(group.collected) von \(group.total) gesammelt")
@@ -117,15 +127,68 @@ private struct CollectionGroupCard: View {
                     }
                     Spacer(minLength: 0)
                     if newCount > 0 { NewBadge(text: "\(newCount) neu") }
-                    Image(systemName: "chevron.right")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.tertiary)
+                    chevron
                 }
-                ProgressView(value: Double(group.collected), total: Double(max(group.total, 1)))
-                    .tint(.brand)
+                CollectionProgressBar(value: group.collected, total: group.total)
             }
         }
-        .contentShape(.rect)
+    }
+
+    private var ticket: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: group.category.systemImage)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(group.category.title)
+                    .font(.caption.weight(.semibold))
+                    .tracking(0.6)
+                    .textCase(.uppercase)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                if newCount > 0 { NewBadge(text: "\(newCount) neu") }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 10)
+            TicketPerforation(notchRadius: 7)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(group.collected.formatted())
+                        .font(.largeTitle.weight(.bold))
+                        .monospacedDigit()
+                    Text("von \(group.total)")
+                        .font(.headline)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    chevron
+                }
+                CollectionProgressBar(value: group.collected, total: group.total)
+            }
+            .padding(16)
+        }
+        .fontDesign(.rounded)
+        .ticketBackground(notchRadius: 7, cornerRadius: 18)
+        .environment(\.cardSurface, Color.ticket)
+    }
+
+    private var chevron: some View {
+        Image(systemName: "chevron.right")
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.tertiary)
+    }
+}
+
+/// A slim progress bar in the accent color on a faint track.
+private struct CollectionProgressBar: View {
+    let value: Int
+    let total: Int
+
+    var body: some View {
+        ProgressView(value: Double(min(value, max(total, 1))), total: Double(max(total, 1)))
+            .tint(.brandText)
+            .accessibilityHidden(true)
     }
 }
 
@@ -135,10 +198,10 @@ private struct NewBadge: View {
     var body: some View {
         Text(text)
             .font(.caption2.weight(.bold))
-            .foregroundStyle(.white)
+            .foregroundStyle(Color.onBrandText)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(Color.brand, in: .capsule)
+            .background(Color.brandText, in: .capsule)
     }
 }
 
@@ -147,18 +210,15 @@ struct CollectionCategoryView: View {
     let group: TravelCollection.Group
     let newIDs: Set<String>
     @State private var selected: TravelCollection.Item?
+    @Environment(\.appDesign) private var design
 
-    private let columns = [GridItem(.adaptive(minimum: 100), spacing: 10)]
+    private let columns = [GridItem(.adaptive(minimum: 104), spacing: 8)]
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("\(group.collected) von \(group.total) gesammelt")
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                ProgressView(value: Double(group.collected), total: Double(max(group.total, 1)))
-                    .tint(.brand)
-                LazyVGrid(columns: columns, spacing: 10) {
+            VStack(alignment: .leading, spacing: 16) {
+                progressHeader
+                LazyVGrid(columns: columns, spacing: 8) {
                     ForEach(sortedItems) { item in
                         Button { selected = item } label: {
                             CollectionTile(item: item, isNew: newIDs.contains(item.id))
@@ -168,7 +228,9 @@ struct CollectionCategoryView: View {
                 }
             }
             .padding(.horizontal)
+            .padding(.top, 8)
             .padding(.bottom, 24)
+            .readableWidth()
         }
         .tabBarSafePadding()
         .background { AppBackground() }
@@ -180,45 +242,100 @@ struct CollectionCategoryView: View {
         }
     }
 
+    /// How much of the category is collected: Minimal in a card, Fahrkarte as a large count on the page.
+    @ViewBuilder private var progressHeader: some View {
+        if design == .fahrkarte {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(group.collected.formatted())
+                        .font(.largeTitle.weight(.heavy))
+                    Text("von \(group.total) gesammelt")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                }
+                .monospacedDigit()
+                .fontDesign(.rounded)
+                .accessibilityElement(children: .combine)
+                CollectionProgressBar(value: group.collected, total: group.total)
+            }
+            .padding(.horizontal, 4)
+        } else {
+            Card {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("\(group.collected) von \(group.total) gesammelt")
+                        .font(.subheadline.weight(.semibold).monospacedDigit())
+                    CollectionProgressBar(value: group.collected, total: group.total)
+                }
+            }
+        }
+    }
+
     private var sortedItems: [TravelCollection.Item] {
         group.items.filter(\.isCollected) + group.items.filter { !$0.isCollected }
     }
 }
 
+/// Minimal: a card tile with a tinted icon tile. Fahrkarte: a flat tile with the symbol in a round stamp,
+/// dashed while not collected.
 private struct CollectionTile: View {
     let item: TravelCollection.Item
     let isNew: Bool
+    @Environment(\.appDesign) private var design
 
     var body: some View {
-        VStack(spacing: 6) {
-            Image(systemName: item.category.systemImage)
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(item.isCollected ? Color.white : Color.secondary)
-                .frame(maxWidth: .infinity)
-                .frame(height: 48)
-                .background(item.isCollected ? AnyShapeStyle(Color.brand.gradient) : AnyShapeStyle(Color.secondary.opacity(0.15)),
-                            in: .rect(cornerRadius: 12, style: .continuous))
-            Text(item.title)
-                .font(.caption.weight(.semibold))
-                .lineLimit(2)
-                .multilineTextAlignment(.center)
-            if let subtitle = item.subtitle {
-                Text(subtitle)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+        let isTicket = design == .fahrkarte
+        VStack(spacing: 8) {
+            if isTicket { stamp } else { iconTile }
+            VStack(spacing: 2) {
+                Text(item.title)
+                    .font(.caption.weight(.semibold))
                     .lineLimit(2)
-                    .multilineTextAlignment(.center)
+                if let subtitle = item.subtitle {
+                    Text(subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
             }
+            .multilineTextAlignment(.center)
         }
+        .fontDesign(isTicket ? .rounded : nil)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .padding(8)
-        .background(Color.card, in: .rect(cornerRadius: 16, style: .continuous))
-        .opacity(item.isCollected ? 1 : 0.55)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 12)
+        .background(isTicket ? Color.ticket : Color.card, in: .rect(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.hairline, lineWidth: isTicket ? 1 : 0.5)
+        }
+        .shadow(color: .black.opacity(isTicket ? 0 : 0.04), radius: 6, y: 2)
+        .opacity(item.isCollected ? 1 : 0.6)
         .overlay(alignment: .topTrailing) {
             if isNew { NewBadge().offset(x: 4, y: -4) }
         }
         .accessibilityElement(children: .combine)
         .accessibilityValue(item.isCollected ? "Gesammelt" : "Noch nicht gesammelt")
+    }
+
+    private var iconTile: some View {
+        Image(systemName: item.category.systemImage)
+            .font(.title3.weight(.semibold))
+            .foregroundStyle(item.isCollected ? Color.brandText : Color.secondary)
+            .frame(width: 48, height: 48)
+            .background((item.isCollected ? Color.brandText : Color.secondary).opacity(0.12),
+                        in: .rect(cornerRadius: 13, style: .continuous))
+    }
+
+    private var stamp: some View {
+        Image(systemName: item.category.systemImage)
+            .font(.title3.weight(.semibold))
+            .foregroundStyle(item.isCollected ? Color.brandText : Color.secondary)
+            .frame(width: 48, height: 48)
+            .overlay {
+                Circle()
+                    .strokeBorder(item.isCollected ? Color.brandText : Color.secondary.opacity(0.5),
+                                  style: StrokeStyle(lineWidth: 1.5, dash: item.isCollected ? [] : [3, 4]))
+            }
     }
 }
 
@@ -226,17 +343,25 @@ private struct CollectionTile: View {
 private struct CollectionItemSheet: View {
     let item: TravelCollection.Item
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.appDesign) private var design
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(item.title).font(.title3.weight(.semibold))
-                        if let subtitle = item.subtitle {
-                            Text(subtitle).foregroundStyle(.secondary)
+                    HStack(spacing: 12) {
+                        IconTile(systemImage: item.category.systemImage,
+                                 color: item.isCollected ? .brand : .secondary, size: 40)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.title)
+                                .font(.title3.weight(design == .fahrkarte ? .bold : .semibold))
+                                .fontDesign(design == .fahrkarte ? .rounded : nil)
+                            if let subtitle = item.subtitle {
+                                Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
+                            }
                         }
                     }
+                    .accessibilityElement(children: .combine)
                 }
                 if let first = item.firstSighting {
                     Section("Zuerst gesammelt") { SightingRow(sighting: first) }
@@ -252,6 +377,8 @@ private struct CollectionItemSheet: View {
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background { AppBackground() }
             .navigationTitle(item.category.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -357,19 +484,38 @@ private struct TrainsetGroupLabel: View {
 }
 
 /// One row per Tz: a collected one expands to its rides, one not collected yet is greyed out.
+/// The rides are plain rows under the Tz: a third level of `DisclosureGroup` made the whole list jump down
+/// when one opened (#539).
 private struct TrainsetRows: View {
     let items: [TravelCollection.Item]
     let newIDs: Set<String>
+    @State private var expanded: Set<String> = []
 
     var body: some View {
         ForEach(items) { item in
             if item.isCollected {
-                DisclosureGroup {
-                    ForEach(Array(item.sightings.enumerated()), id: \.offset) { _, sighting in
-                        CollectionRideLink(sighting: sighting)
+                let isExpanded = expanded.contains(item.id)
+                Button {
+                    withAnimation(.snappy) {
+                        if isExpanded { expanded.remove(item.id) } else { expanded.insert(item.id) }
                     }
                 } label: {
-                    TrainsetLabel(item: item, isNew: newIDs.contains(item.id))
+                    HStack(spacing: 8) {
+                        TrainsetLabel(item: item, isNew: newIDs.contains(item.id))
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    }
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint(isExpanded ? Text("Fahrten ausblenden") : Text("Fahrten anzeigen"))
+                if isExpanded {
+                    ForEach(Array(item.sightings.enumerated()), id: \.offset) { _, sighting in
+                        CollectionRideLink(sighting: sighting)
+                            .padding(.leading, 28)
+                    }
                 }
             } else {
                 TrainsetLabel(item: item, isNew: false)
@@ -449,7 +595,7 @@ struct CollectionButton: View {
                     if newCount > 0 { NewBadge(text: "\(newCount)").offset(x: 6, y: -10) }
                 }
         }
-        .buttonStyle(.glass)
+        .pageButtonStyle()
         .controlSize(.large)
         .accessibilityValue(newCount > 0 ? String(localized: "\(newCount) neu gesammelt") : "")
         .task(id: "\(model.savedJourneys.count)|\(model.traewellingTrips.count)") {
