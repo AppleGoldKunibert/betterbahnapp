@@ -818,7 +818,7 @@ final class AppModel {
     /// (plus 10 minutes either side, since departures and arrivals shift). All legs share one
     /// position list (our Worker's, else bahn.jetzt's), and nothing is requested while no train is running.
     func refreshTrainPositions() async {
-        guard let trainPositions = provider.trainPositions else { return }
+        guard let positionSource = provider.trainPositions else { return }
         let now = Date.now
         let legs = upcomingJourneys.flatMap(\.journey.transitLegs).filter { leg in
             TrainPositionClient.supports(leg.line) && !leg.cancelled
@@ -832,7 +832,7 @@ final class AppModel {
         await withTaskGroup(of: LiveTrainPosition?.self) { group in
             for leg in legs {
                 group.addTask {
-                    guard let name = leg.line?.name, let position = try? await trainPositions.position(for: leg) else { return nil }
+                    guard let name = leg.line?.name, let position = try? await positionSource.position(for: leg) else { return nil }
                     return LiveTrainPosition(trainName: name, position: position)
                 }
             }
@@ -876,8 +876,8 @@ final class AppModel {
 
     /// Where one train is right now (our Worker with RIS::Maps, else bahn.jetzt); nil while it isn't running.
     func livePosition(of route: LiveTrainRoute) async throws -> TrainPosition? {
-        guard let trainPositions = provider.trainPositions else { return nil }
-        return try await trainPositions.position(of: route.line, plannedDeparture: route.plannedDeparture, route: route.hint)
+        guard let positionSource = provider.trainPositions else { return nil }
+        return try await positionSource.position(of: route.line, plannedDeparture: route.plannedDeparture, route: route.hint)
     }
 
     /// Keeps reporting the positions of a journey's running trains for as long as the calling task
@@ -916,8 +916,8 @@ final class AppModel {
     /// Every train with a live position (the list `livePosition(of:)` uses too); nil when it
     /// can't be reached or is pausing.
     func runningTrains() async -> [BahnJetztClient.RunningTrain]? {
-        guard let trainPositions = provider.trainPositions else { return nil }
-        return try? await trainPositions.runningTrains()
+        guard let positionSource = provider.trainPositions else { return nil }
+        return try? await positionSource.runningTrains()
     }
 
     /// Transitous' trains in `area` for the next `LiveTrainCoverage.window`, with their tracks; nil on failure.
