@@ -39,7 +39,7 @@ struct DataSourcesView: View {
                url: URL(string: "https://www.bahn.de")!),
         Source(name: "vagonweb.cz", usage: String(localized: "Geplante Wagenreihungen und Zugtypen, mit Erlaubnis von vagonweb"),
                url: URL(string: "https://www.vagonweb.cz")!),
-        Source(name: "bahn.expert", usage: String(localized: "Zugtypen, Zugsuche nach Nummer, Namen der Bahnhöfe; Sitzpläne der ICE aus den Wagenreihungsplänen, © Deutsche Bahn AG"), url: URL(string: "https://bahn.expert")!),
+        Source(name: "bahn.expert", usage: String(localized: "Zugtypen, Namen der Bahnhöfe; Sitzpläne der ICE aus den Wagenreihungsplänen, © Deutsche Bahn AG"), url: URL(string: "https://bahn.expert")!),
         Source(name: "bahn.jetzt", usage: String(localized: "Zugpositionen auf der Karte"), url: URL(string: "https://bahn.jetzt")!),
         Source(name: "Träwelling", usage: String(localized: "Check-ins"), url: URL(string: "https://traewelling.de")!),
         Source(name: "Open-Meteo", usage: String(localized: "Wetter bei Ankunft und beim Umstieg"),
