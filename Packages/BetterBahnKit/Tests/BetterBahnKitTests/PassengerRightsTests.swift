@@ -88,6 +88,34 @@ struct PassengerRightsTests {
         #expect(text.contains("Auftragsnummer: ABC123"))
     }
 
+    @Test func requestOfAReplannedJourneyNamesTheBookedConnection() throws {
+        let booked = journey(delay: 0)
+        // ICE 1 was cancelled; ICE 2 leaves 42 minutes later and arrives 75 minutes after the booked plan.
+        var replacement = Journey(legs: [leg("ICE 2", product: .highSpeed, delay: 0, arrivesIn: -4 * 3600 + 75 * 60)], source: .transitous)
+        replacement.legs[0].departure = TimeInfo(planned: booked.legs[0].departure.planned.addingTimeInterval(42 * 60), actual: nil)
+        replacement.legs[0].arrival.actual = replacement.legs[0].arrival.planned
+        let claim = try #require(PassengerRights.claim(for: replacement, earlierPlans: [booked], hasTicket: true,
+                                                       hasBahnCard100: false, now: now))
+        let fields = PassengerRights.requestFields(for: replacement, earlierPlans: [booked], claim: claim, orderNumbers: [])
+        func value(_ label: String) -> String? { fields.first { $0.label == label }?.value }
+
+        let berlin = try #require(TimeZone(identifier: "Europe/Berlin"))
+        let german = Locale(identifier: "de_DE")
+        let bookedDeparture = booked.legs[0].departure.planned
+        #expect(value("Geplante Abfahrt") == bookedDeparture.formatted(Date.FormatStyle(date: .omitted, time: .shortened, locale: german, timeZone: berlin)))
+        #expect(value("Reisedatum") == bookedDeparture.formatted(Date.FormatStyle(date: .numeric, time: .omitted, locale: german, timeZone: berlin)))
+        #expect(value("Geplante Ankunft") == booked.legs[0].arrival.planned.formatted(Date.FormatStyle(date: .omitted, time: .shortened, locale: german, timeZone: berlin)))
+        #expect(value("Züge") == nil)
+        #expect(value("Gebuchte Züge")?.hasPrefix("ICE 1: ") == true)
+        #expect(value("Gefahrene Züge")?.hasPrefix("ICE 2: ") == true)
+        #expect(value("Verspätung am Ziel") == "75 Minuten")
+
+        // Without the earlier plans only the journey itself is known: one list of trains.
+        let plain = PassengerRights.requestFields(for: booked, claim: claim, orderNumbers: [])
+        #expect(plain.contains { $0.label == "Züge" })
+        #expect(!plain.contains { $0.label == "Gefahrene Züge" })
+    }
+
     @Test func missedConnectionIsMarked() {
         // ICE 1 arrives 70 minutes late in Köln, after ICE 2 left.
         let booked = Journey(legs: [
