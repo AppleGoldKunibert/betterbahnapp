@@ -16,6 +16,7 @@ From a cloud session the environment's network secret adds the app token (as for
 import argparse
 import asyncio
 import json
+import logging
 import os
 import sys
 import urllib.error
@@ -46,12 +47,14 @@ async def get(path):
 
 
 async def main(seed_path, interval):
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     store = tzlog.TzStore()
     scanner = tzlog.Scanner(store, get, hubs=tzlog.SEED_HUBS, interval=interval, every=24 * 3600, ris=None)
     await scanner.scan()
     found = {tz: (unit, types, vehicle) for tz, unit, types, vehicle in store.db.execute(
         "SELECT tz, unit, types, vehicle FROM units WHERE vehicle IS NOT NULL")}
 
+    print(f"boards done: {len(found)} trainsets, checking their coaches at the WiFi host", flush=True)
     seed = {item["tz"]: item for item in json.loads(seed_path.read_text(encoding="utf-8"))} if seed_path.exists() else {}
     ris = tzlog.RisClient()
     today = tzlog.dt.datetime.now(tzlog.BERLIN).date().isoformat()
@@ -61,11 +64,13 @@ async def main(seed_path, interval):
             if tz in seed:
                 continue
             await asyncio.sleep(1)
-            status, body = await ris(vehicle, today)
+            status, body = await asyncio.wait_for(ris(vehicle, today), timeout=60)
             group, _ = tzlog.parse_vehicle_journeys(body)
             if status == 200 and group == tz:
                 seed[tz] = {"tz": tz, "unit": unit, "types": json.loads(types), "vehicle": vehicle}
                 added += 1
+                if added % 20 == 0:
+                    print(f"  {added} confirmed", flush=True)
             else:
                 rejected += 1
                 print(f"Tz {tz}: coach {vehicle} is in {group or 'no trainset'} at the WiFi host ({status}), skipped")

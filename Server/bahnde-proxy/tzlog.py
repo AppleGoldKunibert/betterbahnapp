@@ -401,7 +401,9 @@ class Scanner:
         done = set()
         asked = found = 0
         for eva, name in self.hubs:
-            for entry in await self.entries(eva, start, end):
+            entries = await self.entries(eva, start, end)
+            log.info("Tz scan: %s lists %d trains", name, len(entries))
+            for entry in entries:
                 train = entry.get("verkehrmittel") or {}
                 parts = (train.get("name") or "").split()
                 try:
