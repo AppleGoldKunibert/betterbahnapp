@@ -6054,6 +6054,16 @@
         }
       }
     },
+    "Namen der Bahnhöfe, wie die Bahn sie anzeigt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Station names as DB shows them"
+          }
+        }
+      }
+    },
     "Neu" : {
       "localizations" : {
         "en" : {
@@ -9301,12 +9311,12 @@
         }
       }
     },
-    "Zugtypen, Zugsuche nach Nummer, Namen der Bahnhöfe; Sitzpläne der ICE aus den Wagenreihungsplänen, © Deutsche Bahn AG" : {
+    "Zugtypen und Zugsuche nach Nummer; Sitzpläne der ICE aus den Wagenreihungsplänen, © Deutsche Bahn AG" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Train types, train search by number, station names; ICE seat maps from the coach sequence plans, © Deutsche Bahn AG"
+            "value" : "Train types and train search by number; ICE seat maps from the coach sequence plans, © Deutsche Bahn AG"
           }
         }
       }
