@@ -36,6 +36,19 @@ import Testing
         #expect(!turnaround.isEmpty && TzTurnaround.none.isEmpty)
     }
 
+    /// #501: a leg's line is asked for by its train and the day it departs in Germany; other lines aren't asked at all.
+    @Test func turnaroundOfALineAsksForItsTrainAndGermanDay() async throws {
+        let ice = Line(name: "ICE 592", number: "592", product: .highSpeed, operatorName: nil)
+        let lateEvening = try #require(ISO8601DateFormatter().date(from: "2026-11-02T23:30:00Z"))  // 00:30 on the 3rd in Germany
+        let turnaround = try await client.turnaround(for: ice, on: lateEvening)
+        #expect(TzLogProtocol.lastQuery == "category=ICE&number=592&day=2026-11-03")
+        #expect(turnaround.previous.map(\.name) == ["ICE 567"])
+
+        let regional = Line(name: "RE 5", number: "5", product: .regional, operatorName: nil)
+        #expect(try await client.turnaround(for: regional, on: lateEvening).isEmpty)
+        #expect(try await client.turnaround(for: nil, on: lateEvening).isEmpty)
+    }
+
     /// The log's days are Germany's: just after midnight there it is already the next day, though not in UTC.
     @Test func daysAreGermanyDays() throws {
         let lateEvening = try #require(ISO8601DateFormatter().date(from: "2026-10-31T23:30:00Z"))

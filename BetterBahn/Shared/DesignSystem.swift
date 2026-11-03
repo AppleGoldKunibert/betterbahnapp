@@ -548,13 +548,14 @@ struct TrainFormationLabel: View {
 }
 
 /// "Wendet aus ICE 567 · Wendet zu ICE 1501": the trains the train's trainset ran as before and runs as after it.
-/// Only shown when bahn.expert knows them, which it does around the day of the ride.
+/// Only shown when our server's Tz log knows them, which it does around the day of the ride; it asks again every
+/// 30 minutes while the trip is open.
 struct TrainTurnaroundLabel: View {
     let line: Line?
     let date: Date
 
     @Environment(AppModel.self) private var model
-    @State private var turnaround: TrainTurnaround?
+    @State private var turnaround: TzTurnaround?
 
     private var text: String? {
         guard let turnaround else { return nil }
@@ -579,7 +580,11 @@ struct TrainTurnaroundLabel: View {
             }
         }
         .task(id: "\(line?.name ?? "")|\(Int(date.timeIntervalSince1970 / 60))") {
-            turnaround = await model.turnaround(for: line, on: date)
+            // Only while the trip is on screen (the task ends with the view); the model answers from its cache in between.
+            while !Task.isCancelled {
+                turnaround = await model.turnaround(for: line, on: date)
+                try? await Task.sleep(for: .seconds(30 * 60))
+            }
         }
     }
 }

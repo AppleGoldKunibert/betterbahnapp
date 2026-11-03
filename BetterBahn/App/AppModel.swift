@@ -1013,17 +1013,21 @@ final class AppModel {
         if changed { savedJourneys = updated }
     }
 
-    @ObservationIgnored private var turnaroundCache: [String: TrainTurnaround] = [:]
+    /// What the server's Tz log said about a train's neighbours and when it was asked; per train and day.
+    @ObservationIgnored private var turnaroundCache: [String: (asked: Date, value: TzTurnaround?)] = [:]
 
-    /// The trains a train's trainset ran as before and runs as after it, from bahn.expert, which only knows
-    /// it around the day of the ride. Cached per train and day; failed or empty answers are asked again.
-    func turnaround(for line: Line?, on date: Date) async -> TrainTurnaround? {
+    /// The trains a train's trainset ran as before and runs as after it, from our server's Tz log (#501, #502). Asked
+    /// at most every 30 minutes per train and day, which is also how often the server looks at its source, and only
+    /// within a day and a half of the ride (the log knows no more); an empty answer counts as answered too.
+    func turnaround(for line: Line?, on date: Date) async -> TzTurnaround? {
         guard abs(date.timeIntervalSinceNow) < 36 * 3600, let ref = BahnDeClient.trainReference(for: line) else { return nil }
         let key = "\(ref.category) \(ref.number)|\(BahnDeClient.berlinDay(date))"
-        if let cached = turnaroundCache[key] { return cached }
-        guard let found = try? await provider.bahnExpert?.turnaround(for: line, on: date), !found.isEmpty else { return nil }
-        turnaroundCache[key] = found
-        return found
+        if let cached = turnaroundCache[key], cached.asked.timeIntervalSinceNow > -30 * 60 { return cached.value }
+        let found = try? await TzLogClient().turnaround(for: line, on: date)
+        let value = found.flatMap { $0.isEmpty ? nil : $0 }
+        // A failed request is asked again next time; an answer, even an empty one, waits out the half hour.
+        if found != nil { turnaroundCache[key] = (.now, value) }
+        return value ?? turnaroundCache[key]?.value
     }
 
     @ObservationIgnored private var trainTypeCache: [String: TrainTypeLookup?] = [:]
