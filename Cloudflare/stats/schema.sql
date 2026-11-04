@@ -20,3 +20,19 @@ CREATE TABLE IF NOT EXISTS train_import (
     day TEXT PRIMARY KEY,
     rows INTEGER NOT NULL
 );
+
+-- The long-distance trains' runs (ICE, IC, EC …) of the last ~400 days, so an old journey can get its real delays
+-- (`day` in the app's request). Same format as `train_days.runs`, only runs of `LONG_DISTANCE` categories, about 900 runs
+-- (<1 MB) a day. Filled by importer.py next to `train_days` and backfilled a few days per run.
+CREATE TABLE IF NOT EXISTS long_distance_days (
+    number TEXT NOT NULL,
+    day TEXT NOT NULL,
+    runs TEXT NOT NULL,
+    PRIMARY KEY (number, day)
+) WITHOUT ROWID;
+
+-- Days of `long_distance_days` done and their rows, so importer.py knows what's missing (0 rows: the dataset has none).
+CREATE TABLE IF NOT EXISTS archive_import (
+    day TEXT PRIMARY KEY,
+    rows INTEGER NOT NULL
+);
