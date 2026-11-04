@@ -1356,16 +1356,17 @@ final class AppModel {
         savedJourneys.firstIndex { $0.id == entry.id && $0.journey.id == entry.journey.id }
     }
 
-    /// Past journeys; once their live data is gone (`SavedJourney.liveDataLifetime`) shown as planned,
-    /// without any delay.
+    /// Past journeys; once their live data is gone (`SavedJourney.liveDataLifetime`) a leg shows the delays the
+    /// train statistics know of its day. Until they do (the import runs once a day), it keeps the last live
+    /// times it was saved with.
     var pastJourneys: [SavedJourney] {
         savedJourneys.filter(\.isFinished).sorted { SavedJourney.departsEarlier($1, $0) }.map { entry in
             guard let arrival = entry.journey.arrival?.planned,
                   arrival.addingTimeInterval(SavedJourney.liveDataLifetime) < .now else { return entry }
             var entry = entry
-            // Planned, but with the delays the statistics know of that day, where they were asked.
+            // Only a leg the statistics have a run for is replaced by it; the others keep what was last seen.
             let runs = (entry.statisticsRuns ?? [:]).compactMapValues(\.run)
-            entry.journey = entry.journey.droppingActualTimes().applying(runs)
+            entry.journey = entry.journey.droppingActualTimes(ofLegs: Set(runs.keys)).applying(runs)
             return entry
         }
     }

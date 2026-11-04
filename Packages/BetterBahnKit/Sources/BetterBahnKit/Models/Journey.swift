@@ -604,10 +604,14 @@ public struct Journey: Codable, Sendable, Hashable, Identifiable {
 
     /// This journey as planned, with every actual time removed, so no delay shows at all: what a
     /// long-finished journey had saved is no longer live data (and older saves carry a made-up "+0").
-    public func droppingActualTimes() -> Journey {
+    public func droppingActualTimes() -> Journey { droppingActualTimes(ofLegs: nil) }
+
+    /// Like `droppingActualTimes()`, but only for the legs with these IDs (`nil`: all legs), so the other
+    /// legs keep the last live times they were saved with.
+    public func droppingActualTimes(ofLegs ids: Set<String>?) -> Journey {
         func dropped(_ time: TimeInfo) -> TimeInfo { TimeInfo(planned: time.planned, actual: nil) }
         var journey = self
-        for index in journey.legs.indices {
+        for index in journey.legs.indices where ids?.contains(journey.legs[index].id) ?? true {
             var leg = journey.legs[index]
             leg.departure = dropped(leg.departure)
             leg.arrival = dropped(leg.arrival)
