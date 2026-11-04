@@ -331,6 +331,17 @@ class VehicleRoundTests(unittest.IsolatedAsyncioTestCase):
         await scanner.scan_vehicles()
         self.assertEqual([d for _, d in self.asked], ["2026-10-31", "2026-11-01"] * 2)
 
+    async def test_from_noon_on_tomorrow_is_asked_too(self):
+        scanner = self.scanner()
+        scanner.now = lambda: NOW + 5 * 3600  # 15:00 in Berlin
+        self.store.mark_backfilled("8043")
+        self.store.mark_backfilled("9490")
+        await scanner.scan_vehicles()
+        self.assertEqual([d for _, d in self.asked], ["2026-10-30", "2026-10-31", "2026-11-01"] * 2)
+        self.asked.clear()
+        await scanner.scan_vehicles()
+        self.assertEqual([d for _, d in self.asked], ["2026-10-31", "2026-11-01"] * 2)
+
     async def test_a_coach_in_another_trainset_is_dropped_not_recorded(self):
         scanner = self.scanner()
         self.answers = {"938000000043": self.answer("ICE8099", ("2026-10-31", "ICE", 610)),

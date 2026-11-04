@@ -212,7 +212,7 @@ in `project.pbxproj`: new files join their target automatically.
   Fahrkarte (#504) shows the categories as small tickets and items as round stamps, dashed until collected.
   Trips of a Tz (#502, `TzRunsView` in `TzListView.swift`): a Tz row (opened or not ridden yet) and a Tz/livery item's sheet
   ("Fahrten" on top) open "Meine" (own rides, which open their journey) and "Alle" (`TzLogClient.history(of:)`: today,
-  then each day of the last year, from the server's Tz log).
+  then each day of the last year, from the server's Tz log); a run opens its Zuglauf (`TzTrainRunView`: found by number on that day like in the train search, shown as `TrainSearchResultView`; days DB no longer has say so).
 - `Features/Tickets/` – `TicketLookupView` (bahn.de's "Auftragssuche" in a hidden SwiftUI `WebView`:
   `DBOrderPage.fillScript` fills the form, `fetchScript` fetches order + PDFs inside the page; shown only when bahn.de
   asks for more, e.g. a captcha), `TicketView` (full-brightness barcode, PDF, `AddToWalletButton`, "Zugbindung

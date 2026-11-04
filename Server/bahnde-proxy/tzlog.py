@@ -570,6 +570,9 @@ class Scanner:
             return
         today = dt.datetime.fromtimestamp(self.now(), BERLIN).date()
         recent = [today] if self.vehicle_day == today else [today - dt.timedelta(days=1), today]
+        # From noon on the host also knows the early trains of tomorrow (it looks about 22 hours ahead).
+        if dt.datetime.fromtimestamp(self.now(), BERLIN).hour >= 12:
+            recent.append(today + dt.timedelta(days=1))
         failures = asked = 0
         for tz, uic, backfilled in self.store.vehicles():
             days = recent if backfilled else [today - dt.timedelta(days=n) for n in range(BACKFILL_DAYS, -1, -1)]

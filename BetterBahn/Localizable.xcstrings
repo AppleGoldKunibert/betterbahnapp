@@ -11,12 +11,42 @@
         }
       }
     },
+    "DB hält die Fahrten nur für kurze Zeit vor." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DB only keeps trips for a short time."
+          }
+        }
+      }
+    },
+    "Den Zuglauf von %@ gibt es für diesen Tag nicht mehr." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The route of %@ is no longer available for this day."
+          }
+        }
+      }
+    },
     "Der Verlauf ist gerade nicht verfügbar." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "The history isn't available right now."
+          }
+        }
+      }
+    },
+    "Der Zuglauf ist gerade nicht abrufbar." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The route isn't available right now."
           }
         }
       }
