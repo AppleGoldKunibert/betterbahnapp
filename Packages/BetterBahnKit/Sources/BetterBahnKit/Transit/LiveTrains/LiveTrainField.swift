@@ -1,6 +1,5 @@
 import Foundation
 
-/// A train drawn on a map at one moment.
 /// How a train tapped on the map opens its route.
 public enum LiveTrainOpening: Sendable, Hashable, Identifiable {
     /// Transitous' trip.
@@ -17,6 +16,7 @@ public enum LiveTrainOpening: Sendable, Hashable, Identifiable {
     }
 }
 
+/// A train drawn on a map at one moment.
 public struct LiveTrainMarker: Sendable, Hashable, Identifiable {
     public var id: String
     /// Transitous' trip, to open the train's route; nil for trains only the position list knows.
