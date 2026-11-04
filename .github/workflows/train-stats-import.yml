@@ -1,6 +1,7 @@
 # Imports the train statistics (#336) once a day: yesterday's DB Timetables data from piebro/deutsche-bahn-data
 # (Hugging Face) into the D1 database of `betterbahn-stats`, plus older missing days of the last 30 while the
-# day's write budget lasts (see Cloudflare/stats/README.md). Needs the repository secrets CLOUDFLARE_API_TOKEN
+# day's write budget lasts, and a few missing days of the long-distance archive of the last ~400 (see
+# Cloudflare/stats/README.md). Needs the repository secrets CLOUDFLARE_API_TOKEN
 # (D1 edit) and CLOUDFLARE_ACCOUNT_ID.
 name: Train statistics import
 
@@ -64,6 +65,7 @@ jobs:
         run: |
           npx --yes "$WRANGLER" d1 execute betterbahn-stats --remote --file=schema.sql
           npx --yes "$WRANGLER" d1 execute betterbahn-stats --remote --json --command "SELECT day, rows FROM train_import" > imported.json
+          npx --yes "$WRANGLER" d1 execute betterbahn-stats --remote --json --command "SELECT day, rows FROM archive_import" > archived.json
 
       - name: Build SQL
         env:
@@ -71,9 +73,9 @@ jobs:
         run: |
           pip install --quiet pyarrow==25.0.1
           if [ -n "$DAY" ]; then
-            python3 importer.py --imported imported.json --sql import.sql --raw "$RUNNER_TEMP/raw" --day "$DAY"
+            python3 importer.py --imported imported.json --archived archived.json --sql import.sql --raw "$RUNNER_TEMP/raw" --day "$DAY"
           else
-            python3 importer.py --imported imported.json --sql import.sql --raw "$RUNNER_TEMP/raw"
+            python3 importer.py --imported imported.json --archived archived.json --sql import.sql --raw "$RUNNER_TEMP/raw"
           fi
           ls -la import.sql
 
