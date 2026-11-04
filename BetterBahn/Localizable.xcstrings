@@ -1576,6 +1576,16 @@
         }
       }
     },
+    "Alles Weitere findest du in den Einstellungen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You'll find everything else in Settings."
+          }
+        }
+      }
+    },
     "Als manuelle Fahrt bis %@ einchecken" : {
       "localizations" : {
         "en" : {
@@ -3034,6 +3044,16 @@
         }
       }
     },
+    "Dein Ticket" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your Ticket"
+          }
+        }
+      }
+    },
     "Dein Wagen" : {
       "localizations" : {
         "en" : {
@@ -3288,6 +3308,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "The search shows where a lift on your way is out of order. For saved journeys, you'll get a notification."
+          }
+        }
+      }
+    },
+    "Die wichtigsten Einstellungen in %lld Schritten." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The most important settings in %lld steps."
           }
         }
       }
@@ -4102,6 +4132,7 @@
       }
     },
     "Favoriten und gespeicherte Reisen bleiben erhalten." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4277,6 +4308,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "For Pros"
+          }
+        }
+      }
+    },
+    "Für Strecken, die du oft fährst: Wir fragen kurz vor der Abfahrt, ob du heute fährst." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "For routes you travel often: we ask shortly before departure whether you're travelling today."
           }
         }
       }
@@ -5611,6 +5652,16 @@
         }
       }
     },
+    "Los geht’s" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Let’s Go"
+          }
+        }
+      }
+    },
     "Löschen" : {
       "localizations" : {
         "en" : {
@@ -5891,6 +5942,16 @@
         }
       }
     },
+    "Mit welchem Ticket fährst du? Die Suche kann dann nur Züge zeigen, in denen es gilt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Which ticket do you travel with? The search can then show only trains it's valid on."
+          }
+        }
+      }
+    },
     "Mit Zwischenhalten suchen wir ab der gewählten Abfahrtszeit." : {
       "localizations" : {
         "en" : {
@@ -6110,6 +6171,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Not possible"
+          }
+        }
+      }
+    },
+    "Nimmst du ein Fahrrad mit oder brauchst du einen Aufzug?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Do you take a bike along or need a lift?"
           }
         }
       }
@@ -6885,6 +6956,16 @@
         }
       }
     },
+    "Richte die App in %lld kurzen Schritten ein. Alles kannst du später in den Einstellungen ändern." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Set up the app in %lld short steps. You can change everything later in Settings."
+          }
+        }
+      }
+    },
     "Richtung" : {
       "localizations" : {
         "en" : {
@@ -7056,6 +7137,16 @@
         }
       }
     },
+    "Schnelleinrichtung" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quick Setup"
+          }
+        }
+      }
+    },
     "Schneller: Ausstieg in %@" : {
       "localizations" : {
         "en" : {
@@ -7082,6 +7173,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Trips already saved are kept."
+          }
+        }
+      }
+    },
+    "Schritt %lld von %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Step %1$lld of %2$lld"
           }
         }
       }
@@ -7213,6 +7314,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sort"
+          }
+        }
+      }
+    },
+    "Später" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Later"
           }
         }
       }
@@ -7428,6 +7539,16 @@
         }
       }
     },
+    "Such dir aus, wie die App aussieht." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose how the app looks."
+          }
+        }
+      }
+    },
     "Such eine Verbindung oder wähl eine deiner Reisen." : {
       "localizations" : {
         "en" : {
@@ -7444,6 +7565,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Search for a station to see its departures and arrivals. Tap the star to save it."
+          }
+        }
+      }
+    },
+    "Suche & Karten" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search & Maps"
           }
         }
       }
@@ -7678,6 +7809,16 @@
         }
       }
     },
+    "Ticket & Reise" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ticket & Travel"
+          }
+        }
+      }
+    },
     "Ticket abrufen" : {
       "localizations" : {
         "en" : {
@@ -7824,6 +7965,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Type a train name, line or train number. Trains on your route that go to your destination are listed first."
+          }
+        }
+      }
+    },
+    "Trag deine Reisen in den Kalender ein, auf Wunsch automatisch." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add your journeys to your calendar, automatically if you like."
           }
         }
       }
@@ -8121,6 +8272,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Our server checks Träwelling every 2 minutes. Nothing is stored."
+          }
+        }
+      }
+    },
+    "Unterwegs" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On the Way"
           }
         }
       }
@@ -8549,6 +8710,16 @@
         }
       }
     },
+    "Weiter" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Next"
+          }
+        }
+      }
+    },
     "Weiter ab" : {
       "localizations" : {
         "en" : {
@@ -8709,6 +8880,16 @@
         }
       }
     },
+    "Willkommen bei BetterBahn" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Welcome to BetterBahn"
+          }
+        }
+      }
+    },
     "Wind %lld km/h" : {
       "localizations" : {
         "en" : {
@@ -8735,6 +8916,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "We'll let you know about cancellations, platform changes and missed connections – and shortly before you need to get off. Through our server, the Live Activity shows current times and platforms even when the app is closed. For this, it receives your journey until arrival."
+          }
+        }
+      }
+    },
+    "Wir sagen dir Bescheid, wenn auf deiner Reise etwas nicht klappt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "We let you know when something goes wrong on your journey."
           }
         }
       }
@@ -9459,6 +9650,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Extra stop"
+          }
+        }
+      }
+    },
+    "Zusatzinfos" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Extra Info"
           }
         }
       }
