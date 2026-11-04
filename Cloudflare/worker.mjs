@@ -142,8 +142,11 @@ dabei.</p>
 
 <h2>Zugstatistik</h2>
 <p>Solange „Zugstatistik anzeigen“ in den Einstellungen eingeschaltet ist (Standard), zeigt dir die App
-Erfahrungswerte zu einem Zug (Verspätungen, Ausfälle, Gleiswechsel der letzten 30 Tage). Dafür fragt sie den
-Server von BetterBahn nach Zugnummer und Halten dieses Zuges; dabei wird nichts gespeichert. Die Zugdaten
+Erfahrungswerte zu einem Zug (Verspätungen, Ausfälle, Gleiswechsel der letzten 30 Tage). Für vergangene Fahrten,
+zu denen die App keine aktuellen Zeiten mehr hat, fragt sie zusätzlich den Tag der Fahrt ab und zeigt damit, wie
+pünktlich der Zug an diesem Tag wirklich war (bei ICE, IC und EC bis zu einem Jahr zurück, sonst 30 Tage). Dafür
+fragt sie den Server von BetterBahn nach Zugnummer, Halten und bei vergangenen Fahrten dem Tag dieses Zuges; dabei
+wird nichts gespeichert. Die Zugdaten
 selbst stammen aus den offenen Fahrplandaten der Deutschen Bahn (über das Projekt
 <a href="https://github.com/piebro/deutsche-bahn-data">deutsche-bahn-data</a>); die App schickt dafür nichts.</p>
 
