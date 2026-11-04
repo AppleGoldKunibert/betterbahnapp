@@ -17,10 +17,16 @@ bahn.de for it any more, and the app reports nothing.
    Days of the last 30 that are still missing are filled in too, as long as the rows written stay within the
    free plan (90,000 of D1's 100,000 a day): after the first run the 30 days take about ten days to fill.
    Days older than 30 are deleted on the way.
+   Long-distance runs (ICE, IC, EC …, `LONG_DISTANCE`) also go into `long_distance_days` (about 900 rows and <1 MB a day), which keeps
+   ~400 days: every run also fills the archive for its day, and `--archive-backfill` (2 by default) older missing days are
+   fetched besides, archive only, so a year fills in about half a year of daily runs (the dataset starts in 2024). `archive_import`
+   notes the days done (0 rows: the dataset has none).
 2. The app asks `POST /train-stats { trains: [{ category, number, evas: [...] }] }` (App Attest token, at
    most 8 trains with 12 stops each, 60 requests per minute per install): per train its runs of the last 30
    days (`STATS_DAYS`), cancelled runs, and per stop the arrival and departure delays, cancellations and
-   platform moves (planned → actual). The app shows them only from 5 runs on.
+   platform moves (planned → actual). The app shows them only from 5 runs on. With a `day` ("2026-10-30") on a train
+   the answer also has `run`: that day's run with every stop's real delays, cancellations and platform (from `train_days`,
+   else the archive, else `null`), so an old journey can get its real delays.
 
 Train numbers: DB Timetables knows a run by its number and category ("ICE 1095", but also "HLB 24010" or
 "ag 84123" where the app says "RB"), so long-distance trains match by category and number, regional ones by

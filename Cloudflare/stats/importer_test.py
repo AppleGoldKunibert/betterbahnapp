@@ -93,6 +93,24 @@ class BuildRowsTests(unittest.TestCase):
         self.assertTrue(all(len(statement) < 100_000 for statement in sql))
         self.assertEqual(sum(statement.count("'2026-10-14','") for statement in sql), 2000)
 
+    def test_the_archive_keeps_only_long_distance_runs(self):
+        rows = {"1095": [{"c": "ICE", "x": 0, "s": []}, {"c": "HLB", "x": 0, "s": []}], "3185": [{"c": "RE", "x": 0, "s": []}],
+                "2": [{"c": "ic", "x": 1, "s": []}]}
+        self.assertEqual(importer.archive_rows(rows), {"1095": [{"c": "ICE", "x": 0, "s": []}], "2": [{"c": "ic", "x": 1, "s": []}]})
+        statements = importer.sql_for_archive("2026-06-01", rows)
+        self.assertEqual(statements[0], "DELETE FROM long_distance_days WHERE day = '2026-06-01';")
+        self.assertTrue(statements[1].startswith("INSERT INTO long_distance_days (number, day, runs) VALUES "))
+        self.assertNotIn("HLB", statements[1])
+        self.assertIn("INSERT INTO archive_import (day, rows) VALUES ('2026-06-01', 2)", statements[-1])
+        self.assertEqual(importer.sql_for_day("2026-06-01", {})[-1].split(" (")[0], "INSERT INTO train_import")
+
+    def test_the_archive_backfills_the_newest_missing_days_a_few_at_a_time(self):
+        today = date(2026, 10, 15)
+        archived = {"2026-10-14": 900, "2026-10-12": 0}
+        self.assertEqual(importer.archive_days_to_import(archived, today), ["2026-10-13", "2026-10-11"])
+        self.assertEqual(importer.archive_days_to_import(archived, today, skip={"2026-10-13"}, limit=1), ["2026-10-11"])
+        self.assertEqual(len(importer.archive_days_to_import({}, today, limit=1000)), importer.ARCHIVE_DAYS)
+
     def test_yesterday_first_then_missing_days_and_old_ones_expire(self):
         today = date(2026, 10, 15)
         imported = {"2026-10-13": 100, "2026-09-10": 50}

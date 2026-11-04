@@ -17,6 +17,7 @@ import argparse
 import json
 import re
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -27,6 +28,12 @@ from zoneinfo import ZoneInfo
 DATASET = "https://huggingface.co/api/datasets/piebro/deutsche-bahn-data"
 RESOLVE = "https://huggingface.co/datasets/piebro/deutsche-bahn-data/resolve/main/"
 STATS_DAYS = 30
+# How long the long-distance archive reaches back, and how many missing days of it one run fetches (a day is a
+# download of ~400 MB).
+ARCHIVE_DAYS = 400
+ARCHIVE_BACKFILL = 2
+# Long-distance categories, as in worker.mjs (`LONG_DISTANCE`): their runs are kept in the archive.
+LONG_DISTANCE = {"ICE", "IC", "EC", "ECE", "EN", "NJ", "RJ", "RJX", "TGV", "FLX", "IR", "D", "EUR", "ES", "EST", "THA", "ICD", "UEX", "WB"}
 # D1 takes at most 100 KB per SQL statement; one INSERT carries this much.
 MAX_STATEMENT = 90_000
 # Not kept: S-Bahn and buses (as in the app, which asks only for regional and long-distance trains).
@@ -196,29 +203,40 @@ def parse_time(text):
 # MARK: - SQL
 
 
-def sql_for_day(day, rows):
+def sql_for_day(day, rows, table="train_days", noted="train_import"):
     """Replaces `day` in D1: deletes what an earlier import left, inserts `rows`, notes the import."""
-    statements = [f"DELETE FROM train_days WHERE day = {quote(day)};"]
+    statements = [f"DELETE FROM {table} WHERE day = {quote(day)};"]
     values = []
     size = 0
     for number in sorted(rows):
         value = f"({quote(number)},{quote(day)},{quote(json.dumps(rows[number], separators=(',', ':'), ensure_ascii=False))})"
         if values and size + len(value) > MAX_STATEMENT:
-            statements.append(insert(values))
+            statements.append(insert(values, table))
             values, size = [], 0
         values.append(value)
         size += len(value) + 1
     if values:
-        statements.append(insert(values))
+        statements.append(insert(values, table))
     statements.append(
-        f"INSERT INTO train_import (day, rows) VALUES ({quote(day)}, {len(rows)}) "
+        f"INSERT INTO {noted} (day, rows) VALUES ({quote(day)}, {len(rows)}) "
         "ON CONFLICT (day) DO UPDATE SET rows = excluded.rows;"
     )
     return statements
 
 
-def insert(values):
-    return "INSERT INTO train_days (number, day, runs) VALUES " + ",".join(values) + ";"
+def archive_rows(rows):
+    """The runs of `rows` (number → runs) that are long-distance trains', for the archive."""
+    kept = {number: [run for run in runs if run["c"].upper() in LONG_DISTANCE] for number, runs in rows.items()}
+    return {number: runs for number, runs in kept.items() if runs}
+
+
+def sql_for_archive(day, rows):
+    """`archive_rows(rows)` of `day` into `long_distance_days`, noted in `archive_import`."""
+    return sql_for_day(day, archive_rows(rows), "long_distance_days", "archive_import")
+
+
+def insert(values, table="train_days"):
+    return f"INSERT INTO {table} (number, day, runs) VALUES " + ",".join(values) + ";"
 
 
 def quote(text):
@@ -232,6 +250,12 @@ def days_to_import(imported, today, days=STATS_DAYS):
     """Yesterday first, then the missing days of the last `days`, newest first. `imported`: day → rows."""
     wanted = [(today - timedelta(days=offset)).isoformat() for offset in range(1, days + 1)]
     return [day for day in wanted if day not in imported]
+
+
+def archive_days_to_import(archived, today, skip=(), days=ARCHIVE_DAYS, limit=ARCHIVE_BACKFILL):
+    """The newest days of the last `days` the archive lacks and `skip` (days imported anyway) doesn't cover, at most `limit`."""
+    wanted = [(today - timedelta(days=offset)).isoformat() for offset in range(1, days + 1)]
+    return [day for day in wanted if day not in archived and day not in skip][:limit]
 
 
 def expired(imported, today, days=STATS_DAYS):
@@ -258,8 +282,13 @@ def imported_days(answer):
 def raw_files(day):
     """The raw files of one dataset folder (`raw_data/year=…/month=…/day=…`)."""
     folder = f"raw_data/year={day.year}/month={day.month}/day={day.day}"
-    with urllib.request.urlopen(f"{DATASET}/tree/main/{urllib.parse.quote(folder)}") as response:
-        return sorted(entry["path"] for entry in json.load(response) if entry.get("type") == "file" and entry["path"].endswith(".parquet"))
+    try:
+        with urllib.request.urlopen(f"{DATASET}/tree/main/{urllib.parse.quote(folder)}") as response:
+            return sorted(entry["path"] for entry in json.load(response) if entry.get("type") == "file" and entry["path"].endswith(".parquet"))
+    except urllib.error.HTTPError as error:
+        if error.code == 404:  # no folder: before the dataset started, or not uploaded yet
+            return []
+        raise
 
 
 def download(path, directory):
@@ -290,9 +319,13 @@ def main():
     parser.add_argument("--raw", type=Path, default=Path("raw"), help="where downloads are kept")
     parser.add_argument("--budget", type=int, default=90_000, help="rows written at most (deleted ones count too)")
     parser.add_argument("--day", action="append", help="import just this day (repeatable), e.g. 2026-10-14")
+    parser.add_argument("--archived", type=Path, help="wrangler d1 execute --json output of SELECT day, rows FROM archive_import")
+    parser.add_argument("--archive-backfill", type=int, default=ARCHIVE_BACKFILL,
+                        help="how many missing days of the long-distance archive to fetch besides the normal import")
     args = parser.parse_args()
 
     imported = imported_days(args.imported.read_text()) if args.imported and args.imported.exists() else {}
+    archived = imported_days(args.archived.read_text()) if args.archived and args.archived.exists() else {}
 
     today = datetime.now(ZoneInfo("Europe/Berlin")).date()
     statements = []
@@ -302,6 +335,11 @@ def main():
         statements.append(f"DELETE FROM train_days WHERE day < {quote((today - timedelta(days=STATS_DAYS)).isoformat())};")
         statements.append(f"DELETE FROM train_import WHERE day < {quote((today - timedelta(days=STATS_DAYS)).isoformat())};")
         budget -= sum(old.values()) + len(old)
+    archive_limit = (today - timedelta(days=ARCHIVE_DAYS)).isoformat()
+    if any(day < archive_limit for day in archived):
+        statements.append(f"DELETE FROM long_distance_days WHERE day < {quote(archive_limit)};")
+        statements.append(f"DELETE FROM archive_import WHERE day < {quote(archive_limit)};")
+    done = set()
 
     for day in args.day or days_to_import(imported, today):
         data = load_day(date.fromisoformat(day), args.raw)
@@ -309,12 +347,13 @@ def main():
             print(f"{day}: the next morning's changes aren't in the dataset yet; next time", file=sys.stderr)
             continue
         rows = build_rows(data, day)
-        cost = len(rows) + imported.get(day, 0) + 1
+        cost = len(rows) + len(archive_rows(rows)) + imported.get(day, 0) + archived.get(day, 0) + 2
         if not args.day and cost > budget:
             print(f"{day}: {len(rows)} trains, over the budget; next time", file=sys.stderr)
             break
         print(f"{day}: {len(rows)} trains, {sum(len(r) for r in rows.values())} runs", file=sys.stderr)
-        statements += sql_for_day(day, rows)
+        statements += sql_for_day(day, rows) + sql_for_archive(day, rows)
+        done.add(day)
         budget -= cost
         # Only the next day's folder is reused: older downloads go to keep the disk small.
         for folder in args.raw.glob("raw_data/year=*/month=*/day=*"):
@@ -322,6 +361,23 @@ def main():
             if date(int(parts["year"]), int(parts["month"]), int(parts["day"])) > date.fromisoformat(day):
                 for file in folder.glob("*.parquet"):
                     file.unlink()
+
+    # The long-distance archive: a few missing older days, which only write the archive (the normal tables keep 30 days).
+    for day in archive_days_to_import(archived, today, skip=done | set(args.day or []), limit=args.archive_backfill):
+        data = load_day(date.fromisoformat(day), args.raw)
+        if not data.plan and not data.change_stops:
+            # Nothing in the dataset for that day (before it started): noted, so it isn't asked again.
+            print(f"{day}: not in the dataset", file=sys.stderr)
+            statements += sql_for_archive(day, {})
+        elif complete(data, day):
+            rows = build_rows(data, day)
+            print(f"{day}: archive, {len(archive_rows(rows))} long-distance trains", file=sys.stderr)
+            statements += sql_for_archive(day, rows)
+        else:
+            print(f"{day}: archive, the next morning's changes aren't in the dataset yet; next time", file=sys.stderr)
+            continue
+        for file in args.raw.glob("raw_data/**/*.parquet"):
+            file.unlink()
 
     args.sql.write_text("\n".join(statements) + "\n")
     print(f"{len(statements)} statements in {args.sql}", file=sys.stderr)
