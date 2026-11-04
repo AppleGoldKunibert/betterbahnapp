@@ -155,7 +155,7 @@ final class LiveTrainsLayer {
         }
         self.motions = motions
         let now = Date.now
-        firstSeen = Dictionary(uniqueKeysWithValues: trains.map { ($0.name, firstSeen[$0.name] ?? now) })
+        firstSeen = Dictionary(trains.map { ($0.name, firstSeen[$0.name] ?? now) }, uniquingKeysWith: { first, _ in first })
         ownTrains = trains
         dataChanged = true
         Task { await rebuildField() }
