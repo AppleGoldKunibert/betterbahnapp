@@ -265,14 +265,13 @@ struct RootView: View {
             // A shared journey or widget link opened the app: that comes first, the setup next time.
             guard incomingSharedJourney == nil, incomingDBShare == nil, linkedTrainMap == nil else { return }
             #if DEBUG
-            // Launch argument `-showQuickSetup YES`: the first start's setup on a device that has used the app.
-            if UserDefaults.standard.bool(forKey: "showQuickSetup") {
-                showQuickSetup = true
-                return
-            }
+            // Launch argument `-forceFirstStart YES`: every start acts like the first one after installing.
+            let firstStart = UserDefaults.standard.bool(forKey: "forceFirstStart")
+            #else
+            let firstStart = false
             #endif
             let hasUsedApp = !model.savedJourneys.isEmpty || !model.favoriteStations.isEmpty || !model.recentSearches.isEmpty
-            if QuickSetup.opensOnLaunch(seen: model.settings.quickSetupSeen, hasUsedApp: hasUsedApp) {
+            if QuickSetup.opensOnLaunch(seen: model.settings.quickSetupSeen, hasUsedApp: hasUsedApp, forceFirstStart: firstStart) {
                 showQuickSetup = true
             } else {
                 // An update from a version without it: it stays in Settings from now on.

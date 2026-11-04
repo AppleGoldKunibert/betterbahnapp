@@ -286,7 +286,7 @@ in `project.pbxproj`: new files join their target automatically.
   reminders), so add a setting there when the quick setup should offer it. `QuickSetupView` (Kit `QuickSetupStep`:
   ticket, travel, notifications, calendar, design; one page each, choices apply at once) opens from Settings and once on
   the first start (`RootView`, Kit `QuickSetup.opensOnLaunch`: not after an update from a version without it,
-  `AppSettings.quickSetupSeen` per device; DEBUG launch argument `-showQuickSetup YES` forces it).
+  `AppSettings.quickSetupSeen` per device; DEBUG launch argument `-forceFirstStart YES`: every start acts like the first one).
   `DataSourcesView` (every source with its attribution/license; keep current when adding one), `BC100RulesView`, quick tags. `SettingsDesign.swift` (#504):
   `.designedForm()` (forms and lists on `AppBackground`), `FormHeader` (section titles, rounded in Fahrkarte),
   `Color.settingsIcon` (grey symbol tiles; the accent only on Design and Mein Ticket), `TicketFieldLabel`.

@@ -21,5 +21,7 @@ import Testing
         #expect(!QuickSetup.opensOnLaunch(seen: true, hasUsedApp: false))
         // Updating from a version without it: the app is set up already.
         #expect(!QuickSetup.opensOnLaunch(seen: false, hasUsedApp: true))
+        // The debug launch argument: like the first start after installing, every time.
+        #expect(QuickSetup.opensOnLaunch(seen: true, hasUsedApp: true, forceFirstStart: true))
     }
 }

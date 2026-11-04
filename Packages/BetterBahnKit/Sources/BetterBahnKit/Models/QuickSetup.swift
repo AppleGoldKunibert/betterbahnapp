@@ -30,8 +30,9 @@ public enum QuickSetupStep: String, CaseIterable, Hashable, Sendable {
 public enum QuickSetup {
     /// Whether the quick setup opens by itself when the app starts: once, on a fresh install. Someone who used
     /// the app before this version (saved journeys, favourites or recent searches on the device) has set it up
-    /// already and only finds it in Settings.
-    public static func opensOnLaunch(seen: Bool, hasUsedApp: Bool) -> Bool {
-        !seen && !hasUsedApp
+    /// already and only finds it in Settings. `forceFirstStart` (the DEBUG launch argument `-forceFirstStart`)
+    /// treats every start as the first one after installing.
+    public static func opensOnLaunch(seen: Bool, hasUsedApp: Bool, forceFirstStart: Bool = false) -> Bool {
+        forceFirstStart || (!seen && !hasUsedApp)
     }
 }
