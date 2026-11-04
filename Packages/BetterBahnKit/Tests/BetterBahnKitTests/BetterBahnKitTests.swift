@@ -7416,6 +7416,26 @@ private final class HamburgSBahnLevelProtocol: URLProtocol, @unchecked Sendable 
         #expect(cleaned.stopovers[1].arrival?.planned == start.addingTimeInterval(60))
     }
 
+    /// Only the legs asked for lose their live times; the others keep the last ones they were saved with.
+    @Test func droppingActualTimesOfSomeLegsKeepsTheOthers() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        func leg(_ id: String, from: String, to: String) -> Leg {
+            Leg(origin: station(from, from), destination: station(to, to),
+                departure: TimeInfo(planned: start, actual: start.addingTimeInterval(60)),
+                arrival: TimeInfo(planned: start.addingTimeInterval(120), actual: start.addingTimeInterval(300)),
+                departurePlatform: nil, arrivalPlatform: nil, tripId: id, line: nil, direction: nil,
+                isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+        }
+        let first = leg("one", from: "a", to: "b"), second = leg("two", from: "b", to: "c")
+        let journey = Journey(legs: [first, second], source: .transitous)
+
+        let cleaned = journey.droppingActualTimes(ofLegs: [first.id])
+
+        #expect(cleaned.legs[0].arrival.actual == nil)
+        #expect(cleaned.legs[1].arrival.actual == start.addingTimeInterval(300))
+        #expect(journey.droppingActualTimes(ofLegs: nil) == journey.droppingActualTimes())
+    }
+
     /// MOTIS repeats the schedule as a stop's time when it has no realtime; that's not a live "+0".
     @Test func transitousStopsWithoutRealtimeHaveNoActualTime() throws {
         let json = """
