@@ -208,6 +208,11 @@ struct TravelMapView: View {
             }
             .accessibilityLabel("OpenRailwayMap-Ebene")
             .accessibilityValue(showRailwayLayer ? String(localized: "An") : String(localized: "Aus"))
+            circleButton(model.settings.showOtherTrains ? "tram.fill" : "tram", active: model.settings.showOtherTrains) {
+                withAnimation { model.settings.showOtherTrains.toggle() }
+            }
+            .accessibilityLabel("Andere Züge")
+            .accessibilityValue(model.settings.showOtherTrains ? String(localized: "An") : String(localized: "Aus"))
             circleButton("magnifyingglass") {
                 model.showsTrainSearch = true
             }
@@ -460,6 +465,7 @@ private struct LiveTravelMap: View {
             .sheet(item: $tappedTrain) { LiveTrainTripSheet(opening: $0.opening) }
             .task { await model.followTrainPositions() }
             .task { await layer.run(model: model) }
+            .followsOtherTrainsSetting(layer, model: model)
             .onChange(of: model.trainPositions, initial: true) { updateOwnTrains() }
     }
 

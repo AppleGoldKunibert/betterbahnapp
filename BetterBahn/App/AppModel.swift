@@ -1911,7 +1911,8 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(trainPositionRefresh.rawValue, forKey: "trainPositionRefresh") }
     }
 
-    /// Whether maps show the other running trains around too (#505). Stays on this device.
+    /// Whether maps show the other running trains around too (#505); off until switched on with a map's
+    /// "Andere Züge" button (or in the settings), then every map starts that way. Stays on this device.
     var showOtherTrains: Bool {
         didSet { UserDefaults.standard.set(showOtherTrains, forKey: "showOtherTrains") }
     }
@@ -2026,7 +2027,7 @@ final class AppSettings {
         liveActivitiesEnabled = defaults.object(forKey: "liveActivitiesEnabled") as? Bool ?? true
         liveActivityServerUpdates = defaults.object(forKey: "liveActivityServerUpdates") as? Bool ?? true
         trainPositionRefresh = defaults.string(forKey: "trainPositionRefresh").flatMap(TrainPositionRefresh.init) ?? .automatic
-        showOtherTrains = defaults.object(forKey: "showOtherTrains") as? Bool ?? true
+        showOtherTrains = defaults.object(forKey: "showOtherTrains") as? Bool ?? false
         otherTrainsOnMobileData = defaults.bool(forKey: "otherTrainsOnMobileData")
         stationFlagMode = defaults.string(forKey: "stationFlagMode").flatMap(StationFlagMode.init) ?? .foreignOnly
         // A new key: switching off sharing (#169) said nothing about wanting to see the statistics.

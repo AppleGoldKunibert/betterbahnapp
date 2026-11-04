@@ -92,6 +92,22 @@ final class LiveTrainsLayer {
         }
     }
 
+    /// The "Andere Züge" button (or the setting) was switched: shows or clears the others right away instead of
+    /// at the next position refresh.
+    func otherTrainsSettingChanged(model: AppModel) {
+        guard model.settings.showOtherTrains else {
+            clearOthers()
+            return
+        }
+        Task {
+            if let running = await model.runningTrains() {
+                self.running = running
+                await rebuildField()
+            }
+            loadSegmentsIfNeeded(model: model)
+        }
+    }
+
     /// What the map shows right now; loads the tracks there when needed.
     func setVisible(_ area: MapArea, model: AppModel) {
         visible = area
@@ -357,6 +373,27 @@ final class OtherTrainsAnnotator {
                                        width: symbol.size.width, height: symbol.size.height))
             }
         }
+    }
+}
+
+// MARK: - The maps' "Andere Züge" button
+
+/// Switches the other trains on every map on or off (`showOtherTrains`); the next map starts the same way.
+struct OtherTrainsButton: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var settings = model.settings
+        Toggle("Andere Züge", systemImage: settings.showOtherTrains ? "tram.fill" : "tram", isOn: $settings.showOtherTrains)
+            .toggleStyle(.button)
+            .accessibilityHint("Zeigt die anderen fahrenden Züge auf der Karte")
+    }
+}
+
+extension View {
+    /// Keeps `layer` in step with the "Andere Züge" button.
+    func followsOtherTrainsSetting(_ layer: LiveTrainsLayer, model: AppModel) -> some View {
+        onChange(of: model.settings.showOtherTrains) { layer.otherTrainsSettingChanged(model: model) }
     }
 }
 

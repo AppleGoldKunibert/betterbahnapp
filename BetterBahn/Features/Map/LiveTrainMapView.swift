@@ -232,10 +232,12 @@ struct LiveTrainMapView: View {
                     }
                     .disabled(position == nil)
                 }
+                ToolbarItem(placement: .topBarTrailing) { OtherTrainsButton() }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Fertig", systemImage: "xmark", role: .cancel) { dismiss() }
                 }
             }
+            .followsOtherTrainsSetting(layer, model: model)
         }
         .task(id: route) {
             if RouteGeometryService.followsTracks(route.path) {

@@ -27,10 +27,12 @@ struct JourneyMapView: View {
                 .navigationTitle("\(journey.legs.first?.origin.displayName ?? String(localized: "Reise")) → \(finalDestination.displayName)")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
+                    ToolbarItem(placement: .topBarLeading) { OtherTrainsButton() }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Fertig", systemImage: "xmark", role: .cancel) { dismiss() }
                     }
                 }
+                .followsOtherTrainsSetting(layer, model: model)
         }
         .task(id: journey) {
             await model.followPositions(of: journey.legs) { found in
