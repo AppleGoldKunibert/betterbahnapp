@@ -1880,6 +1880,11 @@ final class AppSettings {
         }
     }
 
+    /// Whether the quick setup (#547) was opened on this device; it opens by itself only before that.
+    var quickSetupSeen: Bool {
+        didSet { UserDefaults.standard.set(quickSetupSeen, forKey: "quickSetupSeen") }
+    }
+
     /// Unlocks the features below; each one still has to be switched on by itself.
     var expertMode: Bool {
         didSet {
@@ -1950,6 +1955,7 @@ final class AppSettings {
         defaults.removeObject(forKey: "shareTrainStatistics")
         Task { await TrainStatisticsStore.shared.setEnabled(showTrainStatistics) }
         showWeather = defaults.object(forKey: "showWeather") as? Bool ?? true
+        quickSetupSeen = defaults.bool(forKey: "quickSetupSeen")
         expertMode = defaults.bool(forKey: "expertMode")
         expertTraewelling = defaults.bool(forKey: "expertTraewelling")
         expertEditJourney = defaults.bool(forKey: "expertEditJourney")
