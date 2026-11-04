@@ -19,6 +19,9 @@ struct TrainSearchOverlay: View {
     @State private var selected: TrainSearchResult?
     /// The trainset picked from the matches of a Tz number or name (#502).
     @State private var selectedTz: TzDescription?
+    /// Trainsets the text could mean: a Tz number ("Tz 8043", "8043") or part of a Taufname or livery ("Hamburg").
+    /// Kept per text change, as finding them scans the whole offline list.
+    @State private var tzMatches: [TzDescription] = []
     @FocusState private var focused: Bool
 
     private struct Submitted: Equatable {
@@ -38,9 +41,6 @@ struct TrainSearchOverlay: View {
 
     /// Only the bar, nothing below it: it sits in the middle, like Spotlight.
     private var isBarOnly: Bool { submitted == nil && tzMatches.isEmpty && !showsCalendar }
-
-    /// Trainsets the text could mean: a Tz number ("Tz 8043", "8043") or part of a Taufname or livery ("Hamburg").
-    private var tzMatches: [TzDescription] { TzSearch.matches(text) }
 
     var body: some View {
         GeometryReader { geometry in
@@ -92,6 +92,7 @@ struct TrainSearchOverlay: View {
         .animation(.snappy, value: showsCalendar)
         .animation(.snappy, value: results)
         .onAppear { focused = true }
+        .onChange(of: text) { tzMatches = TzSearch.matches(text) }
         .onChange(of: date) {
             showsCalendar = false
             submit(again: false)
