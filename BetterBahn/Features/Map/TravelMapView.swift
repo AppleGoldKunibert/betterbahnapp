@@ -456,8 +456,8 @@ private struct LiveTravelMap: View {
         TravelMap(runs: runs, version: version, showRailwayLayer: showRailwayLayer,
                   trains: Array(model.trainPositions.values), shownTrains: layer.ownCoordinates, trainSpeeds: layer.ownSpeeds,
                   otherTrains: layer.markers, onRegionChange: { layer.setVisible($0, model: model) },
-                  onTrainTap: { tappedTrain = LiveTrainTripRequest(tripId: $0) })
-            .sheet(item: $tappedTrain) { LiveTrainTripSheet(tripId: $0.tripId) }
+                  onTrainTap: { tappedTrain = LiveTrainTripRequest(opening: $0) })
+            .sheet(item: $tappedTrain) { LiveTrainTripSheet(opening: $0.opening) }
             .task { await model.followTrainPositions() }
             .task { await layer.run(model: model) }
             .onChange(of: model.trainPositions, initial: true) { updateOwnTrains() }
@@ -489,7 +489,7 @@ struct TravelMap: UIViewRepresentable {
     var otherTrains: [LiveTrainMarker] = []
     var onRegionChange: (MKCoordinateRegion) -> Void = { _ in }
     /// A tapped other train's route, by Transitous trip ID.
-    var onTrainTap: (String) -> Void = { _ in }
+    var onTrainTap: (LiveTrainOpening) -> Void = { _ in }
 
     func makeUIView(context: Context) -> MKMapView {
         let map = MKMapView()
@@ -544,7 +544,7 @@ struct TravelMap: UIViewRepresentable {
         var renderedVersion = -1
         var didFit = false
         var onRegionChange: (MKCoordinateRegion) -> Void = { _ in }
-        var onTrainTap: (String) -> Void = { _ in }
+        var onTrainTap: (LiveTrainOpening) -> Void = { _ in }
         let otherTrains = OtherTrainsAnnotator()
         private var trainAnnotations: [String: TrainAnnotation] = [:]
 
@@ -569,7 +569,7 @@ struct TravelMap: UIViewRepresentable {
         }
 
         func mapView(_ mapView: MKMapView, annotationView view: MKAnnotationView, calloutAccessoryControlTapped control: UIControl) {
-            if let other = view.annotation as? OtherTrainAnnotation, let tripId = other.tripId { onTrainTap(tripId) }
+            if let other = view.annotation as? OtherTrainAnnotation, let opening = other.opening { onTrainTap(opening) }
         }
 
         func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {

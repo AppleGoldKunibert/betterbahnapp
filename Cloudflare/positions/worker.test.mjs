@@ -113,7 +113,8 @@ test("asks RIS::Maps with our key and the administrations, and answers the compa
     assert.equal(body.trains.length, 2);
     assert.deepEqual(body.trains[0], {
         id: "20261102-517e7679-d3a4-3e6c-8e95-6556a3dbf9cd", category: "ICE", number: 921, name: "ICE 921",
-        destination: "Köln Hbf", lat: 50.941489999999995, lon: 6.968878333299999, speed: 26.74,
+        type: "HIGH_SPEED_TRAIN", origin: "Hamburg-Altona", originEva: "8002553",
+        destination: "Köln Hbf", destinationEva: "8000207", lat: 50.941489999999995, lon: 6.968878333299999, speed: 26.74,
         time: "2026-11-03T03:23:48Z", source: "SENSOR",
     });
     assert.equal(body.trains[1].line, "RE51");

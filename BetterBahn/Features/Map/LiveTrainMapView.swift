@@ -183,7 +183,7 @@ struct LiveTrainMapView: View {
                     Annotation(marker.name, coordinate: marker.coordinate.clCoordinate, anchor: .center) {
                         OtherTrainMarkerView(marker: marker, showsName: showsTrainNames, isSelected: selectedTrain == marker.id,
                                              onTap: { selectedTrain = selectedTrain == marker.id ? nil : marker.id },
-                                             onOpen: { tappedTrain = marker.tripId.map(LiveTrainTripRequest.init(tripId:)) })
+                                             onOpen: { tappedTrain = marker.opening.map(LiveTrainTripRequest.init(opening:)) })
                     }
                     .annotationTitles(.hidden)
                 }
@@ -252,7 +252,7 @@ struct LiveTrainMapView: View {
             }
         }
         .task { await layer.run(model: model) }
-        .sheet(item: $tappedTrain) { LiveTrainTripSheet(tripId: $0.tripId) }
+        .sheet(item: $tappedTrain) { LiveTrainTripSheet(opening: $0.opening) }
         .onChange(of: track) { updateOwnTrain() }
     }
 

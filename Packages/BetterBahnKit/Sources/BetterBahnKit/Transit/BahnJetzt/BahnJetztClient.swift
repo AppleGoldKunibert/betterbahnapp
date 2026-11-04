@@ -55,10 +55,15 @@ public struct BahnJetztClient: Sendable {
 
     struct Journey: Decodable, Sendable {
         struct Details: Decodable, Sendable {
-            struct Transport: Decodable, Sendable { var category: String?; var journeyNumber: Int?; var journeyName: String? }
+            struct Transport: Decodable, Sendable {
+                var category: String?; var journeyNumber: Int?; var journeyName: String?
+                /// RIS' transport type, e.g. "HIGH_SPEED_TRAIN", "REGIONAL_TRAIN", "CITY_TRAIN".
+                var type: String? = nil
+            }
             struct Stop: Decodable, Sendable { var evaNumber: String?; var name: String? }
             var transportAtStart: Transport?
             var destination: Stop?
+            var origin: Stop? = nil
         }
         /// e.g. "20260929-65771c12-fbc7-3dc8-8f7e-9dbe745ba3a4"; starts with the day the run began.
         var journeyId: String
@@ -103,6 +108,9 @@ public struct BahnJetztClient: Sendable {
         public var lineName: String?
         public var destination: String?
         public var position: TrainPosition
+        /// The run as the train search knows it (RIS' journey ID, the same as bahn.expert's), to open its
+        /// route when no Transitous trip matched it; nil without a category and number.
+        public var journey: TrainSearchResult? = nil
     }
 
     /// Every train bahn.jetzt has a position for (one list, shared with `position(of:…)`).
@@ -125,8 +133,24 @@ public struct BahnJetztClient: Sendable {
                                 lineName: transport?.journeyName ?? journey.name, destination: journey.details?.destination?.name,
                                 position: TrainPosition(coordinate: Coordinate(latitude: position[1], longitude: position[0]),
                                                         time: snapshot.fetchedAt, speedKmh: journey.speed, source: snapshot.source,
-                                                        fixTime: journey.fixTime))
+                                                        fixTime: journey.fixTime),
+                                journey: searchResult(for: journey))
         }
+    }
+
+    /// `journey` as a train search result, so `TrainNumberSearch.run(of:)` can open its route.
+    static func searchResult(for journey: Journey) -> TrainSearchResult? {
+        let transport = journey.details?.transportAtStart
+        guard let category = transport?.category?.trimmingCharacters(in: .whitespaces), !category.isEmpty,
+              let number = transport?.journeyNumber else { return nil }
+        let line = transport?.journeyName ?? journey.name
+        let longDistance = BahnDeClient.longDistanceCategories.contains(category.uppercased())
+        return TrainSearchResult(
+            journeyId: journey.journeyId, category: category, number: number, line: longDistance ? nil : line,
+            product: BahnExpertClient.product(transportType: transport?.type ?? (longDistance ? "INTERCITY_TRAIN" : "REGIONAL_TRAIN"),
+                                               category: category, line: line),
+            origin: journey.details?.origin?.name ?? "", destination: journey.details?.destination?.name ?? "",
+            originEVA: journey.details?.origin?.evaNumber, destinationEVA: journey.details?.destination?.evaNumber)
     }
 
     /// What a regional match is checked against, since run numbers are only unique within one country.

@@ -18,11 +18,13 @@ The answer is a compact list (about 180 trains, ~40 KB before compression):
 ```json
 { "fetchedAt": "2026-11-03T03:24:00.000Z",
   "trains": [ { "id": "20261102-517e…", "category": "ICE", "number": 921, "name": "ICE 921",
-                "destination": "Köln Hbf", "lat": 50.94, "lon": 6.97, "speed": 26.7,
+                "type": "HIGH_SPEED_TRAIN", "origin": "Hamburg-Altona", "originEva": "8002553",
+                "destination": "Köln Hbf", "destinationEva": "8000207", "lat": 50.94, "lon": 6.97, "speed": 26.7,
                 "time": "2026-11-03T03:23:48Z", "source": "SENSOR" } ] }
 ```
 
-`id` is RIS' journey ID (the same as bahn.expert's and bahn.jetzt's), `number` the train number (for regional trains
+`id` is RIS' journey ID (the same as bahn.expert's and bahn.jetzt's; the app opens a train's route with it when
+Transitous has no matching trip), `type` RIS' transport type, `number` the train number (for regional trains
 the run number, `line` the line name, e.g. "RE51"), `time` when the fix was taken, `source` `SENSOR` (GPS on the
 train) or `SIGNALLING` (from the interlocking, can be a minute or two old). `speed` (km/h) is missing when unknown.
 

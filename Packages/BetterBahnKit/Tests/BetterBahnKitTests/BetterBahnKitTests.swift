@@ -6013,7 +6013,8 @@ private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
     /// The Worker's compact list (Cloudflare/positions), from a real RIS::Maps answer.
     static let workerList = #"""
     {"fetchedAt": "2026-11-03T03:24:00.000Z", "trains": [
-      {"id": "20261102-517e7679", "category": "ICE", "number": 693, "name": "ICE 693", "destination": "München Hbf",
+      {"id": "20261102-517e7679", "category": "ICE", "number": 693, "name": "ICE 693", "type": "HIGH_SPEED_TRAIN",
+       "origin": "Frankfurt (Main) Hbf", "originEva": "8000105", "destination": "München Hbf", "destinationEva": "8000261",
        "lat": 50.11, "lon": 8.66, "speed": 26.74, "time": "2026-11-03T03:23:48Z", "source": "SENSOR"},
       {"id": "20260929-7ce51213", "category": "RE", "number": 17677, "name": "RE14a", "line": "RE14a", "destination": "Rottweil",
        "lat": 48.7455, "lon": 9.1162, "time": "2026-11-03T03:21:37Z", "source": "SIGNALLING"}
@@ -6072,6 +6073,30 @@ private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
         #expect(running.map(\.name) == ["ICE 693", "RE14a"])
         #expect(running.allSatisfy { $0.position.source == "RIS::Maps" })
         #expect(running.last?.destination == "Rottweil")
+    }
+
+    @Test func trainsWithoutTransitousTripOpenTheirRunAndShowWhereTheyGo() throws {
+        let answer = try JSONDecoder().decode(RISMapsClient.Answer.self, from: Data(Self.workerList.utf8))
+        let snapshot = BahnJetztClient.Snapshot(journeys: RISMapsClient.journeys(in: answer), fetchedAt: .now, source: RISMapsClient.source)
+        let running = BahnJetztClient.runningTrains(in: snapshot)
+        let ice = try #require(running.first?.journey)
+        #expect(ice.journeyId == "20261102-517e7679")
+        #expect(ice.name == "ICE 693")
+        #expect(ice.product == .highSpeed)
+        #expect(ice.line == nil)
+        #expect(ice.origin == "Frankfurt (Main) Hbf")
+        #expect(ice.destinationEVA == "8000261")
+        let re = try #require(running.last?.journey)
+        #expect(re.product == .regionalExpress)
+        #expect(re.number == 17677)
+        #expect(re.line == "RE14a")
+
+        // No Transitous trip matches (e.g. it runs later than Transitous thinks): the marker still opens the run.
+        let markers = LiveTrainField(segments: [], running: running).markers(at: .now)
+        let marker = try #require(markers.first { $0.name == "ICE 693" })
+        #expect(marker.tripId == nil)
+        #expect(marker.opening == .journey(ice))
+        #expect(marker.nextStop == Station.displayName(for: "München Hbf"))
     }
 
     @Test func workerFirstThenNoBahnJetzt() async throws {

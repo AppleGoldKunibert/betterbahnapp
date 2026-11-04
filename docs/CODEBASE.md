@@ -198,7 +198,10 @@ in `project.pbxproj`: new files join their target automatically.
   (`LiveTrainSmoother`); markers animate linearly between the seconds. Own trains show their speed (`ownSpeeds`; in
   the MKMapView maps in the marker's title), legs saved without a track get it via `AppModel.geometry(for:)`. A
   tapped other train (callout button; on the live map a tap shows name and next stop, a second tap opens it) opens
-  `LiveTrainTripSheet`: `TripView` at the stop it runs to next (Kit `BoardEntry.liveTrain`).
+  `LiveTrainTripSheet`: `TripView` at the stop it runs to next (Kit `BoardEntry.liveTrain`). Every train opens
+  (`LiveTrainMarker.opening`): Transitous' trip, else (no trip matched, e.g. running later than Transitous thinks,
+  so its last stretch is no longer loaded) the position list's run (`RunningTrain.journey`, RIS' journey ID =
+  bahn.expert's) through `TrainNumberSearch.run(of:)`; such trains show their destination as the next stop.
 - `Features/Collection/` – `CollectionView` (#384, "Sammlung", `CollectionButton` next to "Vergangene Fahrten" on
   Verbindungen): progress per category, `CollectionCategoryView` grid (not collected greyed out), sheet with the first and
   all rides. Triebzüge (#521): `CollectionTrainsetsView` list to expand by series, then length (ICE 4 7-/12-/13-teilig),

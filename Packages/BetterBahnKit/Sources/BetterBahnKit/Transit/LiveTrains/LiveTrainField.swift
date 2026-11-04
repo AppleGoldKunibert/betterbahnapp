@@ -1,9 +1,25 @@
 import Foundation
 
 /// A train drawn on a map at one moment.
+/// How a train tapped on the map opens its route.
+public enum LiveTrainOpening: Sendable, Hashable, Identifiable {
+    /// Transitous' trip.
+    case trip(String)
+    /// A train only the position list knows: its run, looked up like the train search does
+    /// (`TrainNumberSearch.run(of:)`).
+    case journey(TrainSearchResult)
+
+    public var id: String {
+        switch self {
+        case .trip(let id): "trip:\(id)"
+        case .journey(let result): "journey:\(result.journeyId)"
+        }
+    }
+}
+
 public struct LiveTrainMarker: Sendable, Hashable, Identifiable {
     public var id: String
-    /// Transitous' trip, to open the train's route; nil for trains only bahn.jetzt knows.
+    /// Transitous' trip, to open the train's route; nil for trains only the position list knows.
     public var tripId: String?
     public var name: String
     public var coordinate: Coordinate
@@ -13,6 +29,14 @@ public struct LiveTrainMarker: Sendable, Hashable, Identifiable {
     public var isLongDistance: Bool
     /// Whether the marker moves along the track between refreshes; bahn.jetzt-only trains stay put.
     public var followsTrack: Bool
+    /// The run of a train no Transitous trip matched (e.g. running later than Transitous thinks).
+    public var journey: TrainSearchResult? = nil
+
+    /// How tapping opens the train's route; nil when it can't be looked up at all.
+    public var opening: LiveTrainOpening? {
+        if let tripId { return .trip(tripId) }
+        return journey.map(LiveTrainOpening.journey)
+    }
 }
 
 /// Every train on the map: Transitous' stretches between stops give the track and the timetable,
@@ -146,9 +170,9 @@ public struct LiveTrainField: Sendable {
         }
         for train in unmatched {
             markers.append(LiveTrainMarker(id: "bahn.jetzt:\(train.id)", tripId: nil, name: train.name, coordinate: train.position.coordinate,
-                                           nextStop: nil, speedKmh: train.position.speedKmh,
+                                           nextStop: train.destination.map { Station.displayName(for: $0) }, speedKmh: train.position.speedKmh,
                                            isLongDistance: train.category.map { BahnDeClient.longDistanceCategories.contains($0.uppercased()) } ?? false,
-                                           followsTrack: false))
+                                           followsTrack: false, journey: train.journey))
         }
         markers.removeAll { marker in
             (area.map { !$0.contains(marker.coordinate) } ?? false) || ownTrains.contains {

@@ -236,7 +236,7 @@ extension LiveTrainsLayer.OwnTrain {
 /// Another train on a UIKit map; its coordinate moves every second.
 final class OtherTrainAnnotation: NSObject, MKAnnotation {
     let id: String
-    let tripId: String?
+    private(set) var opening: LiveTrainOpening?
     @objc dynamic var coordinate: CLLocationCoordinate2D
     @objc dynamic var title: String?
     @objc dynamic var subtitle: String?
@@ -244,7 +244,7 @@ final class OtherTrainAnnotation: NSObject, MKAnnotation {
 
     init(_ marker: LiveTrainMarker) {
         id = marker.id
-        tripId = marker.tripId
+        opening = marker.opening
         coordinate = CLLocationCoordinate2D(latitude: marker.coordinate.latitude, longitude: marker.coordinate.longitude)
         isLongDistance = marker.isLongDistance
         super.init()
@@ -255,6 +255,7 @@ final class OtherTrainAnnotation: NSObject, MKAnnotation {
         title = marker.name
         subtitle = marker.subtitle
         isLongDistance = marker.isLongDistance
+        opening = marker.opening
     }
 }
 
@@ -300,7 +301,7 @@ final class OtherTrainsAnnotator {
         view.image = Self.image(longDistance: annotation.isLongDistance)
         view.canShowCallout = true
         // Opens the train's route (`mapView(_:annotationView:calloutAccessoryControlTapped:)`).
-        view.rightCalloutAccessoryView = annotation.tripId == nil ? nil : UIButton(type: .detailDisclosure)
+        view.rightCalloutAccessoryView = annotation.opening == nil ? nil : UIButton(type: .detailDisclosure)
         // Crowded stations: MapKit hides the trains that would overlap, the own train always stays.
         view.displayPriority = annotation.isLongDistance ? .defaultHigh : .defaultLow
         view.collisionMode = .circle
@@ -363,7 +364,7 @@ struct OtherTrainMarkerView: View {
                                 Text(subtitle).font(.caption2).foregroundStyle(.secondary)
                             }
                         }
-                        if marker.tripId != nil {
+                        if marker.opening != nil {
                             Image(systemName: "chevron.right").font(.caption2.weight(.bold)).foregroundStyle(.tertiary)
                         }
                     }
@@ -372,8 +373,8 @@ struct OtherTrainMarkerView: View {
                     .background(.regularMaterial, in: .rect(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
-                .disabled(marker.tripId == nil)
-                .accessibilityHint(marker.tripId == nil ? Text(verbatim: "") : Text("Zeigt die ganze Fahrt"))
+                .disabled(marker.opening == nil)
+                .accessibilityHint(marker.opening == nil ? Text(verbatim: "") : Text("Zeigt die ganze Fahrt"))
             } else if showsName {
                 Text(marker.name)
                     .font(.caption2.weight(.semibold))
@@ -389,15 +390,16 @@ struct OtherTrainMarkerView: View {
 
 // MARK: - A tapped train's route
 
-/// Which train's route to show (`tripId` from `LiveTrainMarker`).
+/// Which train's route to show (`LiveTrainMarker.opening`).
 struct LiveTrainTripRequest: Identifiable, Hashable {
-    let tripId: String
-    var id: String { tripId }
+    let opening: LiveTrainOpening
+    var id: String { opening.id }
 }
 
-/// A train tapped on the map: its whole route, opened at the stop it runs to next.
+/// A train tapped on the map: its whole route, opened at the stop it runs to next. A train no Transitous
+/// trip matched (e.g. running later than Transitous thinks) is looked up like in the train search.
 struct LiveTrainTripSheet: View {
-    let tripId: String
+    let opening: LiveTrainOpening
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -421,13 +423,23 @@ struct LiveTrainTripSheet: View {
                 }
             }
         }
-        .task(id: tripId) {
-            guard let trip = try? await model.provider.plainTrip(id: tripId, source: .transitous),
-                  let entry = BoardEntry.liveTrain(trip) else {
-                failed = true
-                return
+        .task(id: opening) {
+            switch opening {
+            case .trip(let tripId):
+                guard let trip = try? await model.provider.plainTrip(id: tripId, source: .transitous),
+                      let entry = BoardEntry.liveTrain(trip) else {
+                    failed = true
+                    return
+                }
+                self.entry = entry
+            case .journey(let result):
+                guard let finder = TrainNumberSearch(provider: model.provider),
+                      let run = try? await finder.run(of: result) else {
+                    failed = true
+                    return
+                }
+                self.entry = BoardEntry.liveTrain(run.trip) ?? run.entry
             }
-            self.entry = entry
         }
     }
 }

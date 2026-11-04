@@ -43,7 +43,12 @@ public struct RISMapsClient: Sendable {
         /// e.g. "ICE 921", or the line ("RE51") for regional trains.
         var name: String?
         var line: String?
+        /// RIS' transport type, e.g. "HIGH_SPEED_TRAIN".
+        var type: String?
+        var origin: String?
+        var originEva: String?
         var destination: String?
+        var destinationEva: String?
         var lat: Double
         var lon: Double
         var speed: Double?
@@ -59,8 +64,9 @@ public struct RISMapsClient: Sendable {
             BahnJetztClient.Journey(
                 journeyId: train.id, position: [train.lon, train.lat], speed: train.speed, name: train.name ?? train.line,
                 details: .init(transportAtStart: .init(category: train.category, journeyNumber: train.number,
-                                                       journeyName: train.name ?? train.line),
-                               destination: train.destination.map { .init(evaNumber: nil, name: $0) }),
+                                                       journeyName: train.name ?? train.line, type: train.type),
+                               destination: train.destination.map { .init(evaNumber: train.destinationEva, name: $0) },
+                               origin: train.origin.map { .init(evaNumber: train.originEva, name: $0) }),
                 fixTime: train.time.flatMap(JSONDecoding.parseISODate))
         }
     }
