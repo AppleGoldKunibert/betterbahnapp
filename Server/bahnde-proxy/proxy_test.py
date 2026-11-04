@@ -79,6 +79,25 @@ class ProxyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.get(vbid)).status, 200)
         self.assertEqual(len(self.bahn_de.urls), 1)
 
+    async def test_the_seat_picker_paths(self):
+        await self.start()
+        seats = await self.get("/web/api/gsd/gsd_v3?data=%7B%22lang%22%7D")
+        self.assertEqual(seats.status, 200)
+        self.assertEqual(seats.headers["Cache-Control"], "public, max-age=30")
+        plan = await self.get("/web/api/gsd/api/wagentypen/I5812-412.(12-TLG.)-1")
+        self.assertEqual(plan.status, 200)
+        self.assertEqual(plan.headers["Cache-Control"], "public, max-age=86400")
+        self.assertEqual(self.bahn_de.urls, [
+            "https://www.bahn.de/web/api/gsd/gsd_v3?data=%7B%22lang%22%7D",
+            "https://www.bahn.de/web/api/gsd/api/wagentypen/I5812-412.(12-TLG.)-1",
+        ])
+
+    async def test_nothing_else_below_the_seat_picker(self):
+        await self.start()
+        for path in ["gsd/assets/D9vPiMVD.mjs", "gsd/api/wagentypen/", "gsd/api/wagentypen/a%2Fb", "gsd/api/other"]:
+            self.assertEqual((await self.get("/web/api/" + path)).status, 404, path)
+        self.assertEqual(self.bahn_de.urls, [])
+
     async def test_only_the_app_with_a_token_from_the_workers(self):
         await self.start()
         self.assertEqual((await self.get(ORTE, token=None)).status, 401)
