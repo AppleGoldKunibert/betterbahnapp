@@ -86,6 +86,10 @@ final class AppModel {
     /// so after a restart too they show at once while a background refresh runs instead of a spinner.
     @ObservationIgnored private(set) var liveJourneys = LiveDataCache<Journey>()
     @ObservationIgnored private(set) var liveTrips = LiveDataCache<Trip>()
+    /// A `fillDelaysFromStatistics` pass is running.
+    @ObservationIgnored private var isFillingStatistics = false
+    /// The journey opened while a pass ran; asked for after it (`fillDelaysFromStatistics`).
+    @ObservationIgnored private var statisticsFollowUp: UUID?
     /// Laps of looping trains (Ringbahn) loaded by "Vorherige / Nächste Runde laden", kept on disk; unsaved
     /// trips forget them after 15 minutes without a look (see `LoadedLaps`).
     @ObservationIgnored private var loadedLaps = LoadedLaps()
@@ -1352,15 +1356,75 @@ final class AppModel {
         savedJourneys.firstIndex { $0.id == entry.id && $0.journey.id == entry.journey.id }
     }
 
-    /// Past journeys; once their live data is gone (`SavedJourney.liveDataLifetime`) shown as planned,
-    /// without any delay.
+    /// Past journeys; once their live data is gone (`SavedJourney.liveDataLifetime`) a leg shows the delays the
+    /// train statistics know of its day. Until they do (the import runs once a day), it keeps the last live
+    /// times it was saved with.
     var pastJourneys: [SavedJourney] {
         savedJourneys.filter(\.isFinished).sorted { SavedJourney.departsEarlier($1, $0) }.map { entry in
             guard let arrival = entry.journey.arrival?.planned,
                   arrival.addingTimeInterval(SavedJourney.liveDataLifetime) < .now else { return entry }
             var entry = entry
-            entry.journey = entry.journey.droppingActualTimes()
+            // Only a leg the statistics have a run for is replaced by it; the others keep what was last seen.
+            let runs = (entry.statisticsRuns ?? [:]).compactMapValues(\.run)
+            entry.journey = entry.journey.droppingActualTimes(ofLegs: Set(runs.keys)).applying(runs)
             return entry
+        }
+    }
+
+    /// Asks the train statistics for the real delays of the legs of past journeys whose live data is gone
+    /// (`SavedJourney.liveDataLifetime`) and keeps the answers in the journeys, so `pastJourneys` shows them. A few
+    /// legs per call and slowly (they are asked in batches of the Worker's limit); a failing request ends the call
+    /// and is tried again the next time, an answer without a run is kept, except for the last days, when the
+    /// server may not have taken the day in yet. Off with "Zugstatistik anzeigen".
+    func fillDelaysFromStatistics(only id: UUID? = nil) async {
+        guard settings.showTrainStatistics else { return }
+        if isFillingStatistics {
+            // A pass for the list is running: the journey that was just opened follows once it is done.
+            if let id { statisticsFollowUp = id }
+            return
+        }
+        await fillDelaysPass(only: id)
+        if let next = statisticsFollowUp {
+            statisticsFollowUp = nil
+            await fillDelaysPass(only: next)
+        }
+    }
+
+    private func fillDelaysPass(only id: UUID?) async {
+        isFillingStatistics = true
+        defer { isFillingStatistics = false }
+        let now = Date.now
+        let maximum = 24
+        var pending: [(entry: UUID, leg: String, query: TrainStatisticsClient.RunQuery)] = []
+        for entry in savedJourneys.sorted(by: { SavedJourney.departsEarlier($1, $0) }) where id == nil || entry.id == id {
+            guard let arrival = entry.journey.arrival?.planned,
+                  arrival.addingTimeInterval(SavedJourney.liveDataLifetime) < now else { continue }
+            // What the past journey shows: planned times; the live ones kept in the file are not shown any more.
+            for leg in entry.journey.droppingActualTimes().legs where SavedJourney.LegStatistics.needsAsking(entry.statisticsRuns?[leg.id]) {
+                if let query = leg.statisticsRunQuery(now: now) { pending.append((entry.id, leg.id, query)) }
+            }
+            if pending.count >= maximum { break }
+        }
+        pending = Array(pending.prefix(maximum))
+        let client = TrainStatisticsClient()
+        for start in stride(from: 0, to: pending.count, by: 8) {
+            if start > 0 { try? await Task.sleep(for: .seconds(1)) }
+            guard !Task.isCancelled else { return }
+            let batch = Array(pending[start..<min(start + 8, pending.count)])
+            guard let answers = try? await client.runs(for: batch.map(\.query)) else { return }
+            var updated = savedJourneys
+            var changed = false
+            for item in batch {
+                guard let index = updated.firstIndex(where: { $0.id == item.entry }) else { continue }
+                let run = answers[item.query]
+                // No run for a day that's over only a few days: the server may not have it yet, ask again later.
+                if run == nil, now.timeIntervalSince(item.query.dayStart) < 3 * 86400 { continue }
+                var runs = updated[index].statisticsRuns ?? [:]
+                runs[item.leg] = SavedJourney.LegStatistics(run: run, askedAt: now, confirmed: true)
+                updated[index].statisticsRuns = runs
+                changed = true
+            }
+            if changed { savedJourneys = updated }
         }
     }
 
@@ -1577,6 +1641,24 @@ nonisolated struct SavedJourney: Codable, Hashable, Identifiable {
     var exitRemindersOff: Bool?
     /// Set when the journey is a regular trip's day (#397): it then only reports problems.
     var commute: CommuteDay?
+    /// What the train statistics said about each leg's day, by `Leg.id`, once its live data was gone: the delays
+    /// it really had, shown on the past journey. Asked once per leg (optional so older saved data still decodes).
+    var statisticsRuns: [String: LegStatistics]?
+
+    /// The answer of the statistics server for one leg's day; `run` is nil when it had none.
+    nonisolated struct LegStatistics: Codable, Hashable {
+        var run: TrainStatistics.Run?
+        var askedAt: Date
+        /// Set when a server that knows days said there is no run (`run: null`). An entry without a run and without
+        /// this was saved before that was checked and is asked for again.
+        var confirmed: Bool?
+
+        /// Whether the leg still has to be asked: nothing known yet, or a "no run" nobody confirmed.
+        static func needsAsking(_ saved: LegStatistics?) -> Bool {
+            guard let saved else { return true }
+            return saved.run == nil && saved.confirmed != true
+        }
+    }
 
     var issues: [ConnectionIssue] { journey.currentIssues() }
 

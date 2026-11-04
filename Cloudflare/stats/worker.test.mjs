@@ -137,3 +137,58 @@ test("skips malformed runs instead of failing", () => {
     assert.equal(answer.runs, 2);
     assert.deepEqual(answer.stops[FULDA].arrival, [2]);
 });
+
+function addArchiveRun(db, day, run, number = "1095") {
+    db.db.prepare("INSERT OR REPLACE INTO long_distance_days (number, day, runs) VALUES (?, ?, ?)").run(number, day, JSON.stringify([run]));
+}
+
+test("answers one day's run with its stops' real delays, from the last 30 days or the long-distance archive", async () => {
+    const env = { DB: new FakeD1(), TOKEN_SECRET: secret };
+    addRun(env.DB, "2026-10-02", [12, 14, "7", "8", 0]);
+    addRun(env.DB, "2026-10-03", [3, 3, "7", null, 0]);
+    // Older than 30 days: only the archive has it (a partly cancelled run with an additional stop).
+    addArchiveRun(env.DB, "2026-06-01", { c: "ICE", x: 0, s: [["8000261", null, 2, "19", null, 0], [FULDA, null, null, "7", null, 1], ["8000105", 9, null, "8", null, 2]] });
+
+    const [recent] = (await (await askStats(env, [{ category: "ICE", number: "1095", evas: [FULDA], day: "2026-10-02" }])).json()).trains;
+    assert.equal(recent.runs, 4 - 2, "the aggregated fields are the same as without a day");
+    assert.deepEqual(recent.run, {
+        day: "2026-10-02", category: "ICE", cancelled: false,
+        stops: [
+            { eva: "8000261", arrivalDelay: null, departureDelay: 1, platform: "19", changedPlatform: null, cancelled: false, additional: false },
+            { eva: FULDA, arrivalDelay: 12, departureDelay: 14, platform: "7", changedPlatform: "8", cancelled: false, additional: false },
+            { eva: "8000105", arrivalDelay: 4, departureDelay: null, platform: "8", changedPlatform: null, cancelled: false, additional: false },
+        ],
+    });
+
+    const [old] = (await (await askStats(env, [{ category: "ICE", number: "1095", evas: [FULDA], day: "2026-06-01" }])).json()).trains;
+    assert.equal(old.run.stops[1].cancelled, true);
+    assert.equal(old.run.stops[1].arrivalDelay, null);
+    assert.equal(old.run.stops[2].additional, true);
+    assert.equal(old.run.cancelled, false);
+
+    const none = (await (await askStats(env, [
+        { category: "ICE", number: "1095", evas: [FULDA], day: "2026-09-01" }, // not imported
+        { category: "ICE", number: "1095", evas: [FULDA], day: "2026-10-07" }, // tomorrow
+        { category: "ICE", number: "1095", evas: [FULDA], day: "2025-01-01" }, // beyond the archive
+        { category: "IC", number: "1095", evas: [FULDA], day: "2026-10-02" }, // another train with the number
+        { category: "ICE", number: "1095", evas: [FULDA] },
+    ])).json()).trains;
+    assert.deepEqual(none.map(train => train.run), [null, null, null, null, undefined]);
+});
+
+test("a cancelled run is reported as cancelled, and bad days are refused", async () => {
+    const env = { DB: new FakeD1(), TOKEN_SECRET: secret };
+    addRun(env.DB, "2026-10-03", [null, null, "7", null, 1], { cancelled: 1 });
+    const [train] = (await (await askStats(env, [{ category: "ICE", number: "1095", evas: [FULDA], day: "2026-10-03" }])).json()).trains;
+    assert.equal(train.run.cancelled, true);
+    for (const day of ["yesterday", "2026-13-45", 20261003, "2026-10-03T00:00"]) {
+        assert.equal((await askStats(env, [{ category: "ICE", number: "1095", evas: [FULDA], day }])).status, 400);
+    }
+});
+
+test("works with a database that has no archive table yet", async () => {
+    const env = { DB: new FakeD1(), TOKEN_SECRET: secret };
+    env.DB.db.exec("DROP TABLE long_distance_days");
+    const [train] = (await (await askStats(env, [{ category: "ICE", number: "1095", evas: [FULDA], day: "2026-06-01" }])).json()).trains;
+    assert.equal(train.run, null);
+});
