@@ -168,7 +168,7 @@ extension Leg {
         let longDistance = line.product != .regional && line.product != .regionalExpress
         let limit = TimeInterval(longDistance ? TrainStatistics.longDistanceRunDays : TrainStatistics.regionalRunDays) * 86400
         guard now.timeIntervalSince(departure.planned) < limit else { return nil }
-        let evas = [origin, destination].compactMap(\.statisticsEVA)
+        let evas = [origin, destination].compactMap(\.runEVA)
         guard let train = TrainStatisticsQuery(line: line, evas: evas) else { return nil }
         return .init(train: train, day: BahnDeClient.berlinDay(departure.planned))
     }
@@ -187,7 +187,7 @@ extension Leg {
         var stops: [String: TrainStatistics.Run.Stop] = [:]
         for stop in run.stops where stops[stop.eva] == nil { stops[stop.eva] = stop }
         func stop(at station: Station) -> TrainStatistics.Run.Stop? {
-            station.statisticsEVA.flatMap { stops[TrainStatistics.mainStationEVA($0)] }
+            station.runEVA.flatMap { stops[TrainStatistics.mainStationEVA($0)] }
         }
         func shifted(_ time: TimeInfo, by delay: Int?) -> TimeInfo {
             guard let delay else { return time }
@@ -233,5 +233,14 @@ extension TrainStatistics {
     static func mainStationEVA(_ eva: String) -> String {
         for (main, lowers) in TimetablesClient.lowerLevels where lowers.contains(eva) { return main }
         return eva
+    }
+}
+
+extension Station {
+    /// The EVA number to ask the statistics with: the one the feed gave, else the offline list's by the station's
+    /// name (as the live statistics do before asking bahn.de), so a journey from a feed without EVA numbers
+    /// (Transitous) is asked for too.
+    var runEVA: String? {
+        statisticsEVA ?? StationNames.mainEvaNumber(for: self)
     }
 }

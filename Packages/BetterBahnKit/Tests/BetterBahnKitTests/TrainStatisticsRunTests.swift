@@ -141,6 +141,21 @@ import Testing
         #expect(live.statisticsRunQuery(now: now) == nil)
     }
 
+    /// Journeys from a feed without EVA numbers (Transitous) have stations with an ID like "de-DELFI_de:11000:900003201:1:51":
+    /// the offline list finds the EVA by the DHID in it, so their legs are asked for and get their delays too.
+    @Test func findsTheEVAOfAStationTheFeedGaveNoneFor() throws {
+        var transitous = leg()
+        transitous.origin = Station(id: "de-DELFI_de:11000:900003201:1:51", name: "Berlin Hbf", coordinate: nil,
+                                    evaNumber: nil, source: .transitous)
+        #expect(transitous.origin.evaNumber == nil)
+        let query = try #require(transitous.statisticsRunQuery(now: now))
+        #expect(query.train.evas.first == "8011160")
+
+        transitous.stopovers[0].station = transitous.origin
+        let applied = transitous.applying(run([.init(eva: "8011160", departureDelay: 7)]), now: now)
+        #expect(applied.departure.delayMinutes == 7)
+    }
+
     @Test func asksWithTheDayAndMatchesTheAnswersInOrder() async throws {
         let client = TrainStatisticsClient(http: HTTPClient(session: StatsRunProtocol.session()),
                                            baseURL: URL(string: "https://stats.test")!)
