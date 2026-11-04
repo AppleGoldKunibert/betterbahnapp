@@ -147,6 +147,8 @@ struct PastTripsView: View {
         .background { AppBackground() }
         .navigationTitle("Vergangene Fahrten")
         .navigationBarTitleDisplayMode(.inline)
+        // Journeys whose live data is gone get the delays their day really had from the train statistics.
+        .task { await model.fillDelaysFromStatistics() }
     }
 
     /// The journeys by the month they departed in, keeping their order.
