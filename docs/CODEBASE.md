@@ -177,6 +177,7 @@ in `project.pbxproj`: new files join their target automatically.
   and `trainSearchCountries` (Germany), both synced. `TrainSearchResultView`: "Zugdetails anzeigen" (`TripView`),
   Wagenreihung (next stop; `CoachSequenceByStop` unfolds a list of the other stops, `BahnDeClient.formationStops(of:)`;
   a train not running starts at its first stop), "Auf Karte zeigen" (only while bahn.jetzt has a position).
+  Trainsets (#502): a Tz number ("Tz 8043", "8043") or part of a Taufname or livery ("Hamburg" finds "Freie und Hansestadt Hamburg", Kit `TzSearch`: every typed word must start a word of the name, from four letters inside one; accents and case don't matter) show as rows above the trains, which open `TzRunsView` ("Alle") in a sheet.
 - `Features/Map/` – `TravelMapView` heatmap of past trips (`TravelMapHeatmap`; `RailwayTileOverlay`: OpenRailwayMap,
   512 px, disk cache 7 days, 10-min pause after 403/429). A ride both saved and checked in is drawn from the check-in
   (`RideMatch.uncovered`). `YearReviewView` (#319, "Jahresrückblick", only via `YearReviewBanner` on Verbindungen in

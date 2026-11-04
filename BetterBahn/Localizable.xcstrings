@@ -9199,6 +9199,16 @@
         }
       }
     },
+    "Zugnummer, Tz oder Name" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Train number, Tz or name"
+          }
+        }
+      }
+    },
     "Zug suchen" : {
       "localizations" : {
         "en" : {
@@ -9305,16 +9315,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Train names starting with (separate with commas)"
-          }
-        }
-      }
-    },
-    "Zugnummer, z. B. ICE 123" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Train number, e.g. ICE 123"
           }
         }
       }

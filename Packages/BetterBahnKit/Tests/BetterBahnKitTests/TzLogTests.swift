@@ -100,3 +100,60 @@ final class TzLogProtocol: URLProtocol, @unchecked Sendable {
         client?.urlProtocolDidFinishLoading(self)
     }
 }
+
+/// The train search finds trainsets by number or name (#502).
+@Suite struct TzSearchTests {
+    private let entries = [
+        TzDescription(number: 301, series: "ICE 3", name: "Freiburg im Breisgau"),
+        TzDescription(number: 304, series: "ICE 3", livery: "Regenbogen"),
+        TzDescription(number: 1112, series: "ICE T", name: "Freie und Hansestadt Hamburg"),
+        TzDescription(number: 1113, series: "ICE T", name: "Hamburg"),
+        TzDescription(number: 1120, series: "ICE T", name: "Hansestadt Lübeck"),
+        TzDescription(number: 8043, series: "ICE 3neo"),
+    ]
+
+    private func found(_ text: String) -> [Int] { TzSearch.matches(text, in: entries, limit: 8).map(\.number) }
+
+    @Test func aPartOfTheNameIsEnough() {
+        #expect(found("Hamburg") == [1113, 1112], "the exact name first")
+        #expect(found("hansestadt hamburg") == [1112])
+        #expect(found("Freib") == [301])
+        #expect(found("breisgau") == [301])
+        #expect(found("regenbogen") == [304])
+    }
+
+    @Test func accentsAndCaseDontMatter() {
+        #expect(found("lubeck") == [1120])
+        #expect(found("LÜBECK") == [1120])
+    }
+
+    @Test func insideAWordOnlyFromFourLetters() {
+        #expect(found("burg") == [1113, 301, 1112], "inside \"Hamburg\", \"Freiburg\", \"Hamburg\"; fewer words first")
+        #expect(found("urg").isEmpty, "three letters have to start a word")
+        #expect(found("ham") == [1113, 1112])
+    }
+
+    @Test func tooShortOrUnknownFindsNothing() {
+        #expect(found("ha").isEmpty)
+        #expect(found("").isEmpty)
+        #expect(found("zzzz").isEmpty)
+    }
+
+    @Test func aNumberFindsThatTrainset() {
+        #expect(found("Tz 8043") == [8043])
+        #expect(found("TZ8043") == [8043])
+        #expect(found("triebzug 304") == [304])
+        #expect(found("8043") == [8043])
+        #expect(found("9999").isEmpty)
+        #expect(found("12345").isEmpty, "more than four digits is a train number")
+    }
+
+    @Test func theRealListsKnowNamesAndNumbers() {
+        #expect(TzSearch.matches("Hamburg").contains { $0.number == 1112 })
+        #expect(TzSearch.matches("Freiburg").first?.name == "Freiburg im Breisgau")
+        #expect(TzSearch.description(of: 8043)?.series == "ICE 3neo")
+        #expect(TzSearch.description(of: 1)?.number == nil)
+        #expect(TzSearch.matches("Tz 8043").first?.detail?.hasPrefix("ICE 3neo") == true)
+        #expect(TzDescription(number: 8043).title == "Tz 8043")
+    }
+}

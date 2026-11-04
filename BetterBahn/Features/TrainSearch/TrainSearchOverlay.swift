@@ -17,6 +17,8 @@ struct TrainSearchOverlay: View {
     @State private var searching = false
     @State private var error: Error?
     @State private var selected: TrainSearchResult?
+    /// The trainset picked from the matches of a Tz number or name (#502).
+    @State private var selectedTz: TzDescription?
     @FocusState private var focused: Bool
 
     private struct Submitted: Equatable {
@@ -35,7 +37,10 @@ struct TrainSearchOverlay: View {
     private var isToday: Bool { Calendar.current.isDateInToday(date) }
 
     /// Only the bar, nothing below it: it sits in the middle, like Spotlight.
-    private var isBarOnly: Bool { submitted == nil && !showsCalendar }
+    private var isBarOnly: Bool { submitted == nil && tzMatches.isEmpty && !showsCalendar }
+
+    /// Trainsets the text could mean: a Tz number ("Tz 8043", "8043") or part of a Taufname or livery ("Hamburg").
+    private var tzMatches: [TzDescription] { TzSearch.matches(text) }
 
     var body: some View {
         GeometryReader { geometry in
@@ -45,6 +50,10 @@ struct TrainSearchOverlay: View {
                     if showsCalendar {
                         calendar
                             .transition(.fold)
+                    }
+                    if !tzMatches.isEmpty {
+                        tzPanel
+                            .transition(.opacity)
                     }
                     if submitted != nil {
                         resultsPanel
@@ -101,6 +110,16 @@ struct TrainSearchOverlay: View {
             submit(again: false)
         }
         .task(id: submitted) { await search() }
+        .sheet(item: $selectedTz) { tz in
+            NavigationStack {
+                TzRunsView(number: tz.number, title: tz.title, subtitle: tz.detail, rides: nil, startsWithAll: true)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Schließen", systemImage: "xmark", role: .cancel) { selectedTz = nil }
+                        }
+                    }
+            }
+        }
         .sheet(item: $selected) { result in
             NavigationStack {
                 TrainSearchResultView(result: result)
@@ -120,7 +139,7 @@ struct TrainSearchOverlay: View {
             Image(systemName: "magnifyingglass")
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(.secondary)
-            TextField("Zugnummer, z. B. ICE 123", text: $text)
+            TextField("Zugnummer, Tz oder Name", text: $text)
                 .font(.title3.weight(design == .fahrkarte ? .semibold : .medium))
                 .fontDesign(design == .fahrkarte ? .rounded : nil)
                 .textInputAutocapitalization(.characters)
@@ -183,6 +202,29 @@ struct TrainSearchOverlay: View {
         .padding(12)
         .modifier(OverlaySurface(shape: RoundedRectangle(cornerRadius: 26, style: .continuous)))
         // No tap gesture here, not even an empty one: it would block the DatePicker's day taps.
+    }
+
+    // MARK: Trainsets
+
+    /// The trainsets that match the text by number or name, above the trains found by number.
+    private var tzPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(tzMatches.enumerated()), id: \.element.id) { index, tz in
+                if index > 0 {
+                    Divider().padding(.leading, 64)
+                }
+                Button {
+                    focused = false
+                    selectedTz = tz
+                } label: {
+                    TzSearchRow(tz: tz)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .modifier(OverlaySurface(shape: RoundedRectangle(cornerRadius: 26, style: .continuous)))
+        .onTapGesture {}
     }
 
     // MARK: Results
@@ -273,6 +315,36 @@ struct TrainSearchOverlay: View {
     private func close() {
         focused = false
         model.showsTrainSearch = false
+    }
+}
+
+/// One trainset found by its number or name; opens its trips.
+private struct TzSearchRow: View {
+    let tz: TzDescription
+    @Environment(\.appDesign) private var design
+
+    var body: some View {
+        HStack(spacing: 16) {
+            IconTile(systemImage: "train.side.front.car", color: .brand, size: 34)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(tz.title)
+                    .font(.headline)
+                    .fontDesign(design == .fahrkarte ? .rounded : nil)
+                if let detail = tz.detail {
+                    Text(detail)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .contentShape(.rect)
     }
 }
 

@@ -32,17 +32,18 @@ struct TzRunsView: View {
     let number: Int
     let title: String
     let subtitle: String?
-    let rides: [TravelCollection.Sighting]
+    /// Your own rides with it; nil where they aren't known (the train search): then only "Alle" is shown.
+    let rides: [TravelCollection.Sighting]?
     @State private var showsAll: Bool
     @State private var runs: [TzRun]?
     @State private var failed = false
 
-    init(number: Int, title: String, subtitle: String?, rides: [TravelCollection.Sighting], startsWithAll: Bool) {
+    init(number: Int, title: String, subtitle: String?, rides: [TravelCollection.Sighting]?, startsWithAll: Bool) {
         self.number = number
         self.title = title
         self.subtitle = subtitle
         self.rides = rides
-        _showsAll = State(initialValue: startsWithAll)
+        _showsAll = State(initialValue: startsWithAll || rides == nil)
     }
 
     var body: some View {
@@ -52,19 +53,21 @@ struct TzRunsView: View {
                     Text(title).font(.title3.weight(.semibold))
                     if let subtitle { Text(subtitle).foregroundStyle(.secondary) }
                 }
-                Picker("Fahrten", selection: $showsAll) {
-                    Text("Meine").tag(false)
-                    Text("Alle").tag(true)
+                if rides != nil {
+                    Picker("Fahrten", selection: $showsAll) {
+                        Text("Meine").tag(false)
+                        Text("Alle").tag(true)
+                    }
+                    .pickerStyle(.segmented)
                 }
-                .pickerStyle(.segmented)
             }
             if showsAll {
                 allRuns
-            } else if rides.isEmpty {
+            } else if let rides, rides.isEmpty {
                 Section {
                     Text("Du bist mit diesem Triebzug noch nicht gefahren.").foregroundStyle(.secondary)
                 }
-            } else {
+            } else if let rides {
                 Section("\(rides.count) Fahrten") {
                     ForEach(Array(rides.enumerated()), id: \.offset) { CollectionRideLink(sighting: $0.element) }
                 }
