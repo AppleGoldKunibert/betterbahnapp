@@ -34,6 +34,10 @@ final class LiveTrainsLayer {
     /// Whole trips of trains running later than the loaded stretches reach, by trip ID (`completeTrips`).
     @ObservationIgnored private var completedTrips: [String: [LiveTrainSegment]] = [:]
     @ObservationIgnored private var requestedTrips: Set<String> = []
+    /// Bumped whenever the other trains are cleared, so answers to requests from before don't bring them back.
+    @ObservationIgnored private var othersGeneration = 0
+    /// Bumped by every `rebuildField`, so only the latest one's field is kept.
+    @ObservationIgnored private var rebuildID = 0
     /// At most this many trips are loaded one by one after each rebuild.
     static let maxTripsToComplete = 6
     @ObservationIgnored private var running: [BahnJetztClient.RunningTrain] = []
@@ -84,7 +88,8 @@ final class LiveTrainsLayer {
                 return
             }
             // A failed fetch keeps the last list; its fixes soon count as too old to move on.
-            if let running = await model.runningTrains() {
+            let generation = self.othersGeneration
+            if let running = await model.runningTrains(), self.othersStillWanted(generation) {
                 self.running = running
                 await self.rebuildField()
             }
@@ -99,13 +104,18 @@ final class LiveTrainsLayer {
             clearOthers()
             return
         }
+        let generation = othersGeneration
         Task {
-            if let running = await model.runningTrains() {
-                self.running = running
-                await rebuildField()
-            }
+            guard let running = await model.runningTrains(), othersStillWanted(generation) else { return }
+            self.running = running
+            await rebuildField()
             loadSegmentsIfNeeded(model: model)
         }
+    }
+
+    /// Whether the other trains are still wanted as they were when a request started.
+    private func othersStillWanted(_ generation: Int) -> Bool {
+        generation == othersGeneration && model?.settings.showOtherTrains == true
     }
 
     /// What the map shows right now; loads the tracks there when needed.
@@ -159,6 +169,8 @@ final class LiveTrainsLayer {
     }
 
     private func clearOthers() {
+        othersGeneration += 1
+        rebuildID += 1
         running = []
         segments = []
         completedTrips = [:]
@@ -209,9 +221,14 @@ final class LiveTrainsLayer {
         let segments = segments.filter { completedTrips[$0.tripId] == nil } + completedTrips.values.flatMap { $0 }
         let running = running
         let own = ownTrains.map { (name: $0.name, coordinate: $0.position.coordinate) }
-        field = await Task.detached(priority: .userInitiated) {
+        rebuildID += 1
+        let id = rebuildID
+        let built = await Task.detached(priority: .userInitiated) {
             LiveTrainField(segments: segments, running: running, ownTrains: own)
         }.value
+        // A newer rebuild (or clearing the others) started meanwhile: its field counts.
+        guard id == rebuildID else { return }
+        field = built
         dataChanged = true
         tick()
         completeTrips()
@@ -225,8 +242,16 @@ final class LiveTrainsLayer {
         for tripId in wanted {
             guard let segment = segments.first(where: { $0.tripId == tripId }) else { continue }
             requestedTrips.insert(tripId)
+            let generation = othersGeneration
             Task {
-                guard let whole = await model.liveTrainSegments(completing: segment), !whole.isEmpty else { return }
+                let whole = await model.liveTrainSegments(completing: segment)
+                guard othersStillWanted(generation) else { return }
+                guard let whole, !whole.isEmpty else {
+                    // Offline or refused: asked again after a while, not on every refresh.
+                    try? await Task.sleep(for: .seconds(Self.retryDelay))
+                    if generation == othersGeneration { requestedTrips.remove(tripId) }
+                    return
+                }
                 completedTrips[tripId] = whole
                 await rebuildField()
             }
