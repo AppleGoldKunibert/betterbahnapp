@@ -9,44 +9,8 @@ struct DesignSettingsView: View {
 
     var body: some View {
         Form {
-            Section {
-                HStack(spacing: 12) {
-                    ForEach(AppDesign.allCases, id: \.self) { design in
-                        DesignPreviewButton(design: design, isSelected: theme.design == design) {
-                            withAnimation(.snappy) { theme.design = design }
-                        }
-                    }
-                }
-                .listRowInsets(EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
-                .listRowBackground(Color.clear)
-            } header: {
-                Text("Design")
-            } footer: {
-                Text(theme.design.summary)
-            }
-
-            Section {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5), spacing: 14) {
-                    ForEach(AccentPreset.allCases, id: \.self) { preset in
-                        AccentSwatch(color: preset.color, name: preset.displayName,
-                                     isSelected: theme.accent == .preset(preset)) {
-                            withAnimation(.snappy) { theme.accent = .preset(preset) }
-                        }
-                    }
-                }
-                .padding(.vertical, 6)
-
-                ColorPicker(selection: customColor, supportsOpacity: false) {
-                    HStack(spacing: 12) {
-                        Text("Eigene Farbe")
-                        if case .custom = theme.accent {
-                            Image(systemName: "checkmark").font(.footnote.weight(.bold)).foregroundStyle(Color.brandText)
-                        }
-                    }
-                }
-            } header: {
-                Text("Akzentfarbe")
-            }
+            DesignChoiceSection()
+            AccentChoiceSection()
 
             Section {
                 HStack(spacing: 14) {
@@ -65,6 +29,60 @@ struct DesignSettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         // iOS asks before every icon change: change it once, when the user is done picking.
         .onDisappear { theme.applyAppIcon() }
+    }
+}
+
+/// The design with a preview of each; in Settings › Design and the quick setup.
+struct DesignChoiceSection: View {
+    private var theme: Theme { Theme.shared }
+
+    var body: some View {
+        Section {
+            HStack(spacing: 12) {
+                ForEach(AppDesign.allCases, id: \.self) { design in
+                    DesignPreviewButton(design: design, isSelected: theme.design == design) {
+                        withAnimation(.snappy) { theme.design = design }
+                    }
+                }
+            }
+            .listRowInsets(EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
+            .listRowBackground(Color.clear)
+        } header: {
+            Text("Design")
+        } footer: {
+            Text(theme.design.summary)
+        }
+    }
+}
+
+/// The accent colors and a color of one's own; the app icon follows once the page closes
+/// (`Theme.applyAppIcon()`).
+struct AccentChoiceSection: View {
+    private var theme: Theme { Theme.shared }
+
+    var body: some View {
+        Section {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5), spacing: 14) {
+                ForEach(AccentPreset.allCases, id: \.self) { preset in
+                    AccentSwatch(color: preset.color, name: preset.displayName,
+                                 isSelected: theme.accent == .preset(preset)) {
+                        withAnimation(.snappy) { theme.accent = .preset(preset) }
+                    }
+                }
+            }
+            .padding(.vertical, 6)
+
+            ColorPicker(selection: customColor, supportsOpacity: false) {
+                HStack(spacing: 12) {
+                    Text("Eigene Farbe")
+                    if case .custom = theme.accent {
+                        Image(systemName: "checkmark").font(.footnote.weight(.bold)).foregroundStyle(Color.brandText)
+                    }
+                }
+            }
+        } header: {
+            Text("Akzentfarbe")
+        }
     }
 
     /// The color picker sets a color of the user's own.
