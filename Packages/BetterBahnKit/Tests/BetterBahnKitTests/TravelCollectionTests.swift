@@ -24,7 +24,8 @@ import Testing
     }
 
     private func ride(_ line: String, _ from: Station, _ to: Station, departure: String, minutes: Double = 100,
-                      cancelled: Bool = false, units: [TrainFormation.Unit] = []) -> TravelCollection.Ride {
+                      cancelled: Bool = false, units: [TrainFormation.Unit] = [],
+                      journey: Journey? = nil) -> TravelCollection.Ride {
         let start = date(departure)
         let leg = Leg(origin: from, destination: to,
                       departure: TimeInfo(planned: start, actual: nil),
@@ -32,14 +33,23 @@ import Testing
                       departurePlatform: nil, arrivalPlatform: nil, tripId: nil,
                       line: Line(name: line, number: nil, product: .highSpeed, operatorName: nil), direction: nil,
                       isWalking: false, cancelled: cancelled, stopovers: [], remarks: [], source: .transitous)
-        return TravelCollection.Ride(leg: leg, formation: units.isEmpty ? nil : TrainFormation(units: units))
+        return TravelCollection.Ride(leg: leg, formation: units.isEmpty ? nil : TrainFormation(units: units), journey: journey)
     }
 
     private func collection(_ rides: [TravelCollection.Ride], now: String = "2026-10-18T12:00:00Z") -> TravelCollection {
         TravelCollection(rides: rides, now: date(now), stations: stations,
                          liveries: [304: "Regenbogen", 8029: "Blauer Streifen (Europa)"],
-                         trainsetNames: [304: "Wetzlar", 9018: "Freiburg im Breisgau"], dhid: dhid)
+                         trainsetNames: [304: "Wetzlar", 9018: "Freiburg im Breisgau", 1807: "Ilmenau"],
+                         fleet: fleet, dhid: dhid)
     }
+
+    private let fleet = [
+        TrainsetFleet.Series(name: "ICE 1", variants: [.init(numbers: [101])]),
+        TrainsetFleet.Series(name: "ICE 4", variants: [
+            .init(name: "7-teilig", numbers: [9201]),
+            .init(name: "12-teilig", numbers: [9019, 9018]),
+        ]),
+    ]
 
     @Test func collectsLiveriesSeriesAndTrainsetsFromRememberedFormations() {
         let result = collection([
@@ -63,9 +73,72 @@ import Testing
         #expect(ice4.firstSighting?.from == "Berlin Hbf")
 
         let trainsets = result.group(.trainsets)!
-        #expect(trainsets.items.map(\.title) == ["Tz 304", "Tz 9018"])
-        #expect(trainsets.items[1].subtitle == "Freiburg im Breisgau" && trainsets.items[1].sightings.count == 2)
+        // The fleet, plus Tz 8029 ridden outside it; Tz 304 has a name but was never ridden.
+        #expect(trainsets.items.map(\.title) == ["Tz 101", "Tz 8029", "Tz 9201", "Tz 9018", "Tz 9019"])
+        let freiburg = trainsets.items.first { $0.title == "Tz 9018" }!
+        #expect(freiburg.subtitle == "Freiburg im Breisgau" && freiburg.sightings.count == 2)
         #expect(!trainsets.items[0].isCollected)
+    }
+
+    /// Trainsets without a name count too, sorted by series and then by length.
+    @Test func groupsTrainsetsBySeriesAndLength() {
+        let journey = Journey(legs: [], source: .bahnDe)
+        let result = collection([
+            ride("ICE 597", berlin, hamburg, departure: "2026-05-01T08:00:00Z",
+                 units: [.init(model: "ICE 4 Kurz (BR412)", number: "9201")], journey: journey),
+            ride("ICE 800", berlin, hamburg, departure: "2026-05-02T08:00:00Z",
+                 units: [.init(model: "ICE 3", number: "4601")]), // a retired BR 406
+            ride("RE 1", hamburg, buechen, departure: "2026-05-03T08:00:00Z",
+                 units: [.init(model: "FLIRT", number: "1234")]), // regional, no name: not a trainset to collect
+            ride("ICE 1", berlin, hamburg, departure: "2026-05-04T08:00:00Z",
+                 units: [.init(model: nil, number: "1807")]), // named, model unknown
+        ])
+        let series = result.trainsetSeries
+        #expect(series.map(\.name) == ["ICE 1", "ICE 3", "ICE 4", "Weitere"])
+        let ice4 = series[2]
+        #expect(ice4.variants.map(\.name) == ["7-teilig", "12-teilig"])
+        #expect(ice4.variants[0].collected == 1 && ice4.variants[1].items.map(\.title) == ["Tz 9018", "Tz 9019"])
+        #expect(ice4.collected == 1 && ice4.total == 3)
+        let tz9201 = ice4.variants[0].items[0]
+        #expect(tz9201.subtitle == nil && tz9201.sightings.first?.journey == journey)
+        #expect(series[1].items.map(\.title) == ["Tz 4601"] && series[1].variants[0].name == nil)
+        #expect(series[3].items.map(\.title) == ["Tz 1807"])
+        #expect(!result.collectedIDs.contains("trainset:1234"))
+        #expect(result.collectedUnnamedTrainsetIDs == ["trainset:9201", "trainset:4601"])
+    }
+
+    /// IC 1189 (an IC 1) was remembered by an older version as "ICE L" with its coach set "450007" as the Tz.
+    @Test func coachSetNumberIsNoTrainsetOrSeries() {
+        let result = collection([
+            ride("IC 1189", berlin, hamburg, departure: "2026-10-08T08:00:00Z", units: [.init(model: "ICE L", number: "450007")]),
+        ])
+        #expect(!result.collectedIDs.contains { $0.hasPrefix("trainset:") || $0.hasPrefix("series:") })
+    }
+
+    @Test func sortsTrainsetsOfASeries() {
+        let result = collection([
+            ride("ICE 1", berlin, hamburg, departure: "2026-05-01T08:00:00Z", units: [.init(model: "ICE 4", number: "9019")]),
+            ride("ICE 2", berlin, hamburg, departure: "2026-05-02T08:00:00Z", units: [.init(model: "ICE 4", number: "9019")]),
+            ride("ICE 3", berlin, hamburg, departure: "2026-06-01T08:00:00Z", units: [.init(model: "ICE 4", number: "9201")]),
+        ])
+        let ice4 = result.trainsetSeries.first { $0.name == "ICE 4" }!
+        let twelve = ice4.variants[1].items // Tz 9018 (not ridden), 9019
+        func titles(_ order: TravelCollection.TrainsetOrder, _ items: [TravelCollection.Item]) -> [String] {
+            order.sorted(items).map(\.title)
+        }
+        #expect(titles(.number, twelve) == ["Tz 9018", "Tz 9019"])
+        #expect(titles(.mostRides, twelve) == ["Tz 9019", "Tz 9018"])
+        #expect(titles(.collectedFirst, twelve) == ["Tz 9019", "Tz 9018"])
+        #expect(titles(.lastRidden, ice4.items) == ["Tz 9201", "Tz 9019", "Tz 9018"])
+        #expect(titles(.mostRides, ice4.items) == ["Tz 9019", "Tz 9201", "Tz 9018"])
+    }
+
+    @Test func fleetHasEveryTzOnce() {
+        let numbers = TrainsetFleet.all.flatMap { $0.variants.flatMap(\.numbers) }
+        #expect(Set(numbers).count == numbers.count)
+        #expect(TrainsetFleet.all.allSatisfy { TravelCollection.series.contains($0.name) })
+        let ice4 = TrainsetFleet.all.first { $0.name == "ICE 4" }!
+        #expect(ice4.variants.map(\.numbers.count) == [37, 50, 50])
     }
 
     /// A ride whose Tz was never seen still counts for its planned series, not for a trainset or livery.

@@ -65,6 +65,7 @@ struct WeatherDetails: View {
                 .font(.caption2)
                 .tint(.secondary)
         }
+        .journeyRoundedType()
         .padding()
         // A fixed width, so the popover measures the text's height at the width it shows it at.
         .frame(width: 280, alignment: .leading)
@@ -74,7 +75,7 @@ struct WeatherDetails: View {
     /// "Regen 60 % · 2,7 mm", without the parts the forecast lacks.
     private var rainText: String? {
         var parts: [String] = []
-        if let chance = forecast.precipitationProbability { parts.append(String(localized: "\(chance) %")) }
+        if let chance = forecast.precipitationProbability { parts.append(chance.formatted(.percent)) }
         if let amount = forecast.precipitation, amount > 0 {
             parts.append("\(amount.formatted(.number.precision(.fractionLength(1)))) mm")
         }

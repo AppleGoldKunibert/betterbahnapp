@@ -13,6 +13,10 @@ struct SeatMapSheet: View {
     var reservation: SeatReservation?
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.appDesign) private var design
+
+    /// Fahrkarte: the seat and the coaches' names in the rounded type (#504).
+    private var rounded: Font.Design? { design == .fahrkarte ? .rounded : nil }
 
     private static let coachHeight: CGFloat = 180
 
@@ -43,7 +47,8 @@ struct SeatMapSheet: View {
                     if let reservation, !reservation.description.isEmpty {
                         Label(reservation.description, systemImage: "person.crop.square.fill")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Color.brand)
+                            .fontDesign(rounded)
+                            .foregroundStyle(Color.brandText)
                             .padding(.horizontal, 16)
                     }
                     ScrollViewReader { proxy in
@@ -105,7 +110,8 @@ struct SeatMapSheet: View {
         return VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(item.id == selected.id ? Color.brand : .primary)
+                .fontDesign(rounded)
+                .foregroundStyle(item.id == selected.id ? Color.brandText : .primary)
             SeatMapCoach(map: item.map, turned: item.turned, reserved: reserved, height: Self.coachHeight, coachID: item.id)
         }
         .accessibilityElement(children: .ignore)
@@ -154,13 +160,14 @@ private struct SeatMapCoach: View {
                     let size = seat.height * height
                     Text(seat.number)
                         .font(.system(size: size * 0.8, weight: .bold))
-                        .foregroundStyle(.white)
+                        // On the accent-filled box of the reserved seat: black where white wouldn't read.
+                        .foregroundStyle(isReserved ? Color.onBrandText : Color.white)
                         .fixedSize()
                         .padding(isReserved ? size * 0.35 : 0)
                         .background {
                             if isReserved {
                                 RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
-                                    .fill(Color.brand)
+                                    .fill(Color.brandText)
                                     .stroke(.white, lineWidth: 1.5)
                                     .shadow(radius: 2)
                             }

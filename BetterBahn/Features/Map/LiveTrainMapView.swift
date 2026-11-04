@@ -92,9 +92,9 @@ struct LiveTrainIconTile: View {
                         .overlay(alignment: .bottomTrailing) {
                             Image(systemName: "location.fill")
                                 .font(.system(size: size * 0.24, weight: .bold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(Color.onBrandText)
                                 .frame(width: size * 0.46, height: size * 0.46)
-                                .background(Color.brand, in: .circle)
+                                .background(Color.brandText, in: .circle)
                                 .overlay { Circle().stroke(Color.card, lineWidth: 2) }
                                 .offset(x: size * 0.16, y: size * 0.16)
                         }
@@ -135,6 +135,7 @@ struct LiveTrainMapView: View {
     let route: LiveTrainRoute
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.appDesign) private var design
     @Environment(AppModel.self) private var model
     @State private var position: TrainPosition?
     @State private var camera: MapCameraPosition = .automatic
@@ -142,8 +143,22 @@ struct LiveTrainMapView: View {
     /// The route along the tracks; nil until known, and then the map shows only the stops rather
     /// than straight lines across country.
     @State private var track: [Coordinate]?
+    /// Moves the train between fixes and shows the other trains around (#505).
+    @State private var layer = LiveTrainsLayer()
+    /// Zoomed in this far (degrees north–south), the other trains show their names.
+    @State private var showsTrainNames = false
+    /// The other train tapped on, showing its name and where it runs to.
+    @State private var selectedTrain: String?
+    @State private var tappedTrain: LiveTrainTripRequest?
 
-    private var color: Color { route.line?.color ?? .brand }
+    private var trainName: String { route.line?.name ?? String(localized: "Zug") }
+    /// bahn.jetzt's speed, else the one worked out from the last fixes.
+    private var speed: Double? { layer.ownSpeeds[trainName] ?? position?.speedKmh }
+
+    /// The line's color, else the accent adjusted to stand out on the light and the dark map.
+    private var color: Color { route.line?.color ?? .brandText }
+    /// The train symbol on `color`: white on line colors, dark on a pale accent.
+    private var glyphColor: Color { route.line?.color == nil ? .onBrandText : .white }
 
     var body: some View {
         NavigationStack {
@@ -164,15 +179,35 @@ struct LiveTrainMapView: View {
                         .annotationTitles(.hidden)
                     }
                 }
+                ForEach(layer.markers) { marker in
+                    Annotation(marker.name, coordinate: marker.coordinate.clCoordinate, anchor: .center) {
+                        OtherTrainMarkerView(marker: marker, showsName: showsTrainNames, isSelected: selectedTrain == marker.id,
+                                             onTap: { selectedTrain = selectedTrain == marker.id ? nil : marker.id },
+                                             onOpen: { tappedTrain = marker.tripId.map(LiveTrainTripRequest.init(tripId:)) })
+                    }
+                    .annotationTitles(.hidden)
+                }
                 if let position {
-                    Annotation(route.line?.name ?? String(localized: "Zug"), coordinate: position.coordinate.clCoordinate, anchor: .center) {
+                    Annotation(trainName, coordinate: (layer.ownCoordinates[trainName] ?? position.coordinate).clCoordinate, anchor: .center) {
                         Image(systemName: route.line?.symbolName ?? "tram.fill")
                             .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(position.isStale() ? Color.white : glyphColor)
                             .frame(width: 32, height: 32)
                             .background(position.isStale() ? Color.gray : color, in: .circle)
                             .overlay { Circle().stroke(.white, lineWidth: 2) }
                             .shadow(radius: 3)
+                            .overlay(alignment: .top) {
+                                if let speed {
+                                    Text("\(Int(speed.rounded())) km/h")
+                                        .font(.caption.weight(.semibold))
+                                        .monospacedDigit()
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(.regularMaterial, in: .capsule)
+                                        .fixedSize()
+                                        .offset(y: -24)
+                                }
+                            }
                     }
                 }
             }
@@ -180,9 +215,11 @@ struct LiveTrainMapView: View {
             .onMapCameraChange { context in
                 // Panning away stops following the train until the button brings it back.
                 if let position, following,
-                   context.region.center.distance(to: position.coordinate.clCoordinate) > 2_000 {
+                   context.region.center.distance(to: (layer.ownCoordinates[trainName] ?? position.coordinate).clCoordinate) > 2_000 {
                     following = false
                 }
+                showsTrainNames = context.region.span.latitudeDelta < 0.3
+                layer.setVisible(context.region, model: model)
             }
             .safeAreaInset(edge: .bottom) { statusCard }
             .navigationTitle(route.line.map { String(localized: "\($0.name) live") } ?? String(localized: "Live-Karte"))
@@ -210,9 +247,19 @@ struct LiveTrainMapView: View {
         .task(id: route) {
             await model.followPosition(of: route) { new in
                 position = new
+                updateOwnTrain()
                 if following { center() }
             }
         }
+        .task { await layer.run(model: model) }
+        .sheet(item: $tappedTrain) { LiveTrainTripSheet(tripId: $0.tripId) }
+        .onChange(of: track) { updateOwnTrain() }
+    }
+
+    private func updateOwnTrain() {
+        guard let position else { return layer.setOwnTrains([]) }
+        layer.setOwnTrains([LiveTrainsLayer.OwnTrain(name: trainName, position: position, track: track,
+                                                     stops: route.stops.filter { !$0.cancelled }.compactMap(\.station.coordinate))])
     }
 
     private func center() {
@@ -223,48 +270,132 @@ struct LiveTrainMapView: View {
         }
     }
 
+    // MARK: Status
+
+    /// Minimal: a card with the speed and the next stop. Fahrkarte: a ticket with the same as labelled fields.
     private var statusCard: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 6) {
-                if let position {
-                    HStack(spacing: 12) {
-                        if let speed = position.speedKmh {
-                            Label("\(Int(speed.rounded())) km/h", systemImage: "gauge.with.dots.needle.67percent")
-                                .font(.subheadline.weight(.semibold))
-                                .monospacedDigit()
-                        }
-                        Spacer()
-                        Text("Stand \(position.time.formatted(date: .omitted, time: .standard))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    if position.isStale() {
-                        Label("Position nicht mehr aktuell", systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption)
-                            .foregroundStyle(Color.slightDelay)
-                    }
-                } else {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                        Text("Suche Zugposition …").font(.subheadline).foregroundStyle(.secondary)
-                    }
-                }
-                if let next = route.nextStop(), let time = next.arrival ?? next.departure {
-                    HStack(spacing: 4) {
-                        Text("Nächster Halt:").foregroundStyle(.secondary)
-                        Text(next.station.displayName).lineLimit(1)
-                        Spacer()
-                        Text(time.best.timeString)
-                            .monospacedDigit()
-                            .foregroundStyle(delayColor(time.delayMinutes))
-                    }
-                    .font(.caption)
-                }
+        Group {
+            if design == .fahrkarte {
+                ticketStatus
+            } else {
+                Card { minimalStatus }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: 560)
         .padding(.horizontal)
         .padding(.bottom, 8)
+    }
+
+    private var speedText: String? {
+        speed.map { "\(Int($0.rounded())) km/h" }
+    }
+
+    private func fixTime(_ position: TrainPosition) -> String {
+        position.time.formatted(date: .omitted, time: .standard)
+    }
+
+    private var minimalStatus: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let position {
+                HStack(spacing: 12) {
+                    IconTile(systemImage: "gauge.with.dots.needle.67percent", color: .brand, size: 32)
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let speedText {
+                            Text(speedText).font(.headline).monospacedDigit()
+                        }
+                        Text("Stand \(fixTime(position))")
+                            .font(speedText == nil ? .headline : .caption)
+                            .foregroundStyle(speedText == nil ? Color.primary : Color.secondary)
+                            .monospacedDigit()
+                    }
+                    Spacer(minLength: 0)
+                }
+                if position.isStale() { staleWarning }
+            } else {
+                searching
+            }
+            if let next = route.nextStop(), let time = next.arrival ?? next.departure {
+                Divider()
+                HStack(spacing: 12) {
+                    IconTile(systemImage: "mappin.and.ellipse", color: .secondary, size: 32)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Nächster Halt").font(.caption).foregroundStyle(.secondary)
+                        Text(next.station.displayName).font(.subheadline.weight(.semibold)).lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                    Text(time.best.timeString)
+                        .font(.subheadline.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(delayColor(time.delayMinutes))
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var ticketStatus: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                if let position {
+                    HStack(alignment: .top, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            MapTicketLabel("Geschwindigkeit")
+                            Text(speedText ?? "–").font(.title2.weight(.bold)).monospacedDigit()
+                        }
+                        .accessibilityElement(children: .combine)
+                        Spacer(minLength: 0)
+                        VStack(alignment: .trailing, spacing: 2) {
+                            MapTicketLabel("Stand")
+                            Text(fixTime(position)).font(.title2.weight(.bold)).monospacedDigit()
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    if position.isStale() { staleWarning }
+                } else {
+                    searching
+                }
+            }
+            .padding(16)
+            if let next = route.nextStop(), let time = next.arrival ?? next.departure {
+                TicketPerforation()
+                HStack(alignment: .lastTextBaseline, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        MapTicketLabel("Nächster Halt")
+                        Text(next.station.displayName)
+                            .font(.title3.weight(.bold))
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.8)
+                    }
+                    Spacer(minLength: 8)
+                    Text(time.best.timeString)
+                        .font(.title3.weight(.bold))
+                        .monospacedDigit()
+                        .foregroundStyle(delayColor(time.delayMinutes))
+                }
+                .padding(16)
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .fontDesign(.rounded)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .ticketBackground(outline: Color.primary.opacity(0.12))
+        .environment(\.cardSurface, Color.ticket)
+    }
+
+    private var staleWarning: some View {
+        Label("Position nicht mehr aktuell", systemImage: "exclamationmark.triangle.fill")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(Color.slightDelay)
+    }
+
+    private var searching: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+            Text("Suche Zugposition …").font(.subheadline).foregroundStyle(.secondary)
+        }
     }
 }
 
