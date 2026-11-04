@@ -1177,6 +1177,40 @@ private final class LoginServerProtocol: URLProtocol, @unchecked Sendable {
         // Nor is a missing trip short name.
         #expect(TraewellingClient.bestMatch([departure("none", "RE2", "", minutes: 0)], for: leg, tolerance: 120) == nil)
     }
+
+    /// An RE 6 is line 6, not train 6: the S 6, RB 6, U6 or bus 6 leaving the same minute are other trains (#485).
+    @Test func doesNotTakeAnotherProductWithTheSameLineNumber() throws {
+        let planned = try Date("2026-10-30T08:12:00Z", strategy: .iso8601)
+        func leg(_ line: Line) -> Leg {
+            Leg(origin: station("koeln", "Köln Hbf", 50.9430, 6.9589, source: .transitous),
+                destination: station("duesseldorf", "Düsseldorf Hbf", 51.2200, 6.7942, source: .transitous),
+                departure: TimeInfo(planned: planned, actual: nil),
+                arrival: TimeInfo(planned: planned.addingTimeInterval(30 * 60), actual: nil),
+                departurePlatform: nil, arrivalPlatform: nil, tripId: "t", line: line,
+                direction: "Minden (Westf)", isWalking: false, cancelled: false,
+                stopovers: [], remarks: [], source: .transitous)
+        }
+        func departure(_ trip: String, _ name: String, _ fahrtNr: String?, minutes: Double = 0) -> TraewellingDeparture {
+            TraewellingDeparture(tripId: trip, plannedWhen: planned.addingTimeInterval(minutes * 60), when: nil,
+                                 line: .init(name: name, fahrtNr: fahrtNr), direction: nil, station: nil)
+        }
+        let others = [departure("s6", "S 6", "30642"), departure("rb6", "RB 6", "6"), departure("u6", "U6", nil),
+                      departure("bus6", "Bus 6", nil), departure("str6", "STR 6", nil)]
+        // With and without the run number.
+        for line in [Line(name: "RE 6", number: "6", product: .regionalExpress, operatorName: "DB Regio NRW", tripNumber: "10620"),
+                     Line(name: "RE 6", number: "6", product: .regionalExpress, operatorName: "DB Regio NRW")] {
+            #expect(TraewellingClient.matches(others, for: leg(line), tolerance: 120).isEmpty, "\(line)")
+            // The real RE 6 wins even when the board lists the S 6 first.
+            let board = others + [departure("re6", "RE 6", "10620")]
+            #expect(TraewellingClient.matches(board, for: leg(line), tolerance: 120).map(\.tripId) == ["re6"], "\(line)")
+        }
+        // A long-distance train under another brand is still the same train (ÖBB's RJ 177 is DB's ICE 177).
+        let rj = leg(Line(name: "RJ 177", number: "177", product: .highSpeed, operatorName: "ÖBB"))
+        #expect(TraewellingClient.bestMatch([departure("ice177", "ICE 177", nil)], for: rj, tolerance: 120)?.tripId == "ice177")
+        #expect(TraewellingClient.bestMatch([departure("ice178", "ICE 178", nil)], for: rj, tolerance: 120) == nil)
+        // A regional name with its run number still matches by run number.
+        #expect(TraewellingClient.runNumber(of: Line(name: "RE6 (10620)", number: "10620", product: .regionalExpress, operatorName: nil)) == "10620")
+    }
 }
 
 private final class LateTrainCheckinProtocol: URLProtocol, @unchecked Sendable {
