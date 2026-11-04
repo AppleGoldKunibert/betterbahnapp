@@ -924,11 +924,17 @@ final class AppModel {
         return try? await positionSource.runningTrains()
     }
 
-    /// Transitous' trains in `area` for the next `LiveTrainCoverage.window`, with their tracks; nil on failure.
+    /// Transitous' trains in `area` from `LiveTrainCoverage.lookback` ago for the next `LiveTrainCoverage.window`,
+    /// with their tracks; nil on failure.
     func liveTrainSegments(in area: MapArea, zoom: Int) async -> [LiveTrainSegment]? {
         let now = Date.now
-        return try? await liveTrainSource.liveTrainSegments(in: area, zoom: zoom, from: now,
+        return try? await liveTrainSource.liveTrainSegments(in: area, zoom: zoom, from: now.addingTimeInterval(-LiveTrainCoverage.lookback),
                                                             to: now.addingTimeInterval(LiveTrainCoverage.window))
+    }
+
+    /// Every stretch of `segment`'s trip, for a train running later than the loaded stretches reach; nil on failure.
+    func liveTrainSegments(completing segment: LiveTrainSegment) async -> [LiveTrainSegment]? {
+        try? await liveTrainSource.liveTrainSegments(completing: segment)
     }
 
     /// Series, Triebzug numbers and names of a train from bahn.de's coach sequence. bahn.de caches

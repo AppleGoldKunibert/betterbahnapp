@@ -193,7 +193,7 @@ in `project.pbxproj`: new files join their target automatically.
   (Kit `LiveTrainMotion`, `OwnTrain` from the leg) and, with `AppSettings.showOtherTrains`, shows every other train
   around (Kit `LiveTrainField`, at most 150, nearest the middle; `OtherTrainsAnnotator` for the MKMapView maps,
   `OtherTrainMarkerView` for the SwiftUI one). The position list (`TrainPositionClient.runningTrains`) comes at the position interval; Transitous' tracks
-  only for the visible area up to 2.5° × 4° (`LiveTrainCoverage`, 20 min ahead, reloaded on leaving the area), never
+  only for the visible area up to 2.5° × 4° (`LiveTrainCoverage`, 10 min back and 15 min ahead, so trains running late are still on their stretch; reloaded on leaving the area; a train still behind its loaded stretches gets its whole trip from `v5/trip`, `LiveTrainField.tripsToComplete`, at most 6 per rebuild, once each), never
   in Low Data Mode, on mobile data only with `otherTrainsOnMobileData`. Jumps on new data are blended over 3 s
   (`LiveTrainSmoother`); markers animate linearly between the seconds. Own trains show their speed (`ownSpeeds`; in
   the MKMapView maps in the marker's title), legs saved without a track get it via `AppModel.geometry(for:)`. A

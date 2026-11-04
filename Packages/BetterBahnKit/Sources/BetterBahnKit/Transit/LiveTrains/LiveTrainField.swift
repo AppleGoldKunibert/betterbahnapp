@@ -76,6 +76,10 @@ public struct LiveTrainField: Sendable {
     let anchors: [String: Anchor]
     /// bahn.jetzt trains no trip matched; shown where bahn.jetzt last saw them.
     let unmatched: [BahnJetztClient.RunningTrain]
+    /// Loaded trips an unmatched train goes by (name or run number) but whose loaded stretches don't
+    /// reach it: it runs later than Transitous thinks. Loading the whole trip
+    /// (`TransitousProvider.liveTrainSegments(completing:)`) lets it run on its track.
+    public let tripsToComplete: [String]
     let ownTrains: [(name: String, coordinate: Coordinate)]
 
     /// - Parameter ownTrains: the user's own trains, which the map draws itself and which are left out here.
@@ -96,10 +100,12 @@ public struct LiveTrainField: Sendable {
 
         // Best fix per trip; a bahn.jetzt train serves one trip only, the closest match first.
         var candidates: [(trip: String, train: String, anchor: Anchor, score: Double)] = []
+        var tripsByTrain: [String: [String]] = [:]
         for trip in trips {
             // A regional run number names the train; feeds disagree on RE vs. RB and the line's spelling.
             let trains = trip.runNumber.flatMap { regionalByNumber[$0] } ?? byName[Self.normalized(trip.name)] ?? []
             for train in Set(trains) {
+                tripsByTrain[train.id, default: []].append(trip.id)
                 if let (anchor, score) = Self.anchor(of: train, on: trip) {
                     candidates.append((trip.id, train.id, anchor, score))
                 }
@@ -115,6 +121,13 @@ public struct LiveTrainField: Sendable {
         self.trips = trips
         self.anchors = anchors
         self.unmatched = running.filter { !usedTrains.contains($0.id) }
+        var toComplete: [String] = []
+        for train in unmatched {
+            for trip in tripsByTrain[train.id] ?? [] where anchors[trip] == nil && !toComplete.contains(trip) {
+                toComplete.append(trip)
+            }
+        }
+        self.tripsToComplete = toComplete
         self.ownTrains = ownTrains
     }
 
@@ -222,7 +235,11 @@ public struct LiveTrainCoverage: Sendable, Hashable {
     }
 
     /// How far ahead one load reaches.
-    public static let window: TimeInterval = 20 * 60
+    public static let window: TimeInterval = 15 * 60
+    /// How far back one load reaches: a train running later than Transitous thinks is still on a stretch
+    /// Transitous has already finished. Back and ahead together stay below what Transitous answers
+    /// ("too many trips" from about 35 minutes in a city at street zoom).
+    public static let lookback: TimeInterval = 10 * 60
     /// Loaded again this long before the window runs out.
     public static let refreshMargin: TimeInterval = 2 * 60
     /// Zoomed out further than this (degrees on screen), nothing is loaded: the answer would be megabytes.

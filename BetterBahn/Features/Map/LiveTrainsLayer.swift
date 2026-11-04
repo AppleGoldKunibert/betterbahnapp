@@ -31,6 +31,11 @@ final class LiveTrainsLayer {
 
     @ObservationIgnored private var field = LiveTrainField(segments: [], running: [])
     @ObservationIgnored private var segments: [LiveTrainSegment] = []
+    /// Whole trips of trains running later than the loaded stretches reach, by trip ID (`completeTrips`).
+    @ObservationIgnored private var completedTrips: [String: [LiveTrainSegment]] = [:]
+    @ObservationIgnored private var requestedTrips: Set<String> = []
+    /// At most this many trips are loaded one by one after each rebuild.
+    static let maxTripsToComplete = 6
     @ObservationIgnored private var running: [BahnJetztClient.RunningTrain] = []
     @ObservationIgnored private var coverage: LiveTrainCoverage?
     @ObservationIgnored private var visible: MapArea?
@@ -140,6 +145,8 @@ final class LiveTrainsLayer {
     private func clearOthers() {
         running = []
         segments = []
+        completedTrips = [:]
+        requestedTrips = []
         coverage = nil
         loading?.cancel()
         loading = nil
@@ -178,15 +185,36 @@ final class LiveTrainsLayer {
         }
     }
 
-    /// Matches bahn.jetzt's fixes to Transitous' trips off the main thread: the tracks have thousands of points.
+    /// Matches the position list's fixes to Transitous' trips off the main thread: the tracks have thousands of points.
     private func rebuildField() async {
-        let segments = segments, running = running
+        // A completed trip replaces its loaded stretches; once it has ended it's dropped.
+        let now = Date.now
+        completedTrips = completedTrips.filter { $0.value.last.map { $0.arrival.addingTimeInterval(30 * 60) > now } ?? false }
+        let segments = segments.filter { completedTrips[$0.tripId] == nil } + completedTrips.values.flatMap { $0 }
+        let running = running
         let own = ownTrains.map { (name: $0.name, coordinate: $0.position.coordinate) }
         field = await Task.detached(priority: .userInitiated) {
             LiveTrainField(segments: segments, running: running, ownTrains: own)
         }.value
         dataChanged = true
         tick()
+        completeTrips()
+    }
+
+    /// Loads the whole trip of trains running later than Transitous thinks, once each, so they run on their
+    /// track instead of standing where they were last seen.
+    private func completeTrips() {
+        guard let model else { return }
+        let wanted = field.tripsToComplete.filter { !requestedTrips.contains($0) }.prefix(Self.maxTripsToComplete)
+        for tripId in wanted {
+            guard let segment = segments.first(where: { $0.tripId == tripId }) else { continue }
+            requestedTrips.insert(tripId)
+            Task {
+                guard let whole = await model.liveTrainSegments(completing: segment), !whole.isEmpty else { return }
+                completedTrips[tripId] = whole
+                await rebuildField()
+            }
+        }
     }
 
     private func tick() {

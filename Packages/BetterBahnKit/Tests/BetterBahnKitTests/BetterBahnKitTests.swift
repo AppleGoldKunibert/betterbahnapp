@@ -6168,6 +6168,93 @@ private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
     }
 }
 
+/// Trains running later than Transitous thinks: their stretch is no longer in the map's window.
+@Suite struct LateLiveTrainTests {
+    // Köln → Siegburg → Frankfurt Flughafen, roughly along the line.
+    static let koeln = Coordinate(latitude: 50.943, longitude: 6.959)
+    static let siegburg = Coordinate(latitude: 50.794, longitude: 7.203)
+    static let flughafen = Coordinate(latitude: 50.053, longitude: 8.570)
+    static let mannheim = Coordinate(latitude: 49.479, longitude: 8.469)
+    static let start = Date(timeIntervalSince1970: 1_800_000_000)
+
+    static func segment(from: Coordinate, to: Coordinate, departure: Date, minutes: Double) -> LiveTrainSegment {
+        LiveTrainSegment(tripId: "t105", name: "ICE 105", from: "A", to: "B", departure: departure,
+                         arrival: departure.addingTimeInterval(minutes * 60), track: TrackPath([from, to]), isLongDistance: true)
+    }
+
+    static func ice105(at coordinate: Coordinate, time: Date) -> BahnJetztClient.RunningTrain {
+        .init(id: "ris-105", name: "ICE 105", category: "ICE", number: 105, lineName: "ICE 105", destination: "Chur",
+              position: TrainPosition(coordinate: coordinate, time: time, speedKmh: 250, source: "RIS::Maps"))
+    }
+
+    @Test func aTrainBehindItsLoadedStretchesAsksForItsWholeTrip() throws {
+        // Only the stretch after Flughafen is loaded; the train is still between Siegburg and Flughafen.
+        let next = Self.segment(from: Self.flughafen, to: Self.mannheim, departure: Self.start, minutes: 30)
+        let between = Coordinate(latitude: 50.40, longitude: 7.90)
+        let late = Self.ice105(at: between, time: Self.start.addingTimeInterval(60))
+        let field = LiveTrainField(segments: [next], running: [late])
+        #expect(field.tripsToComplete == ["t105"])
+        let standing = try #require(field.markers(at: Self.start.addingTimeInterval(60)).first { $0.tripId == nil })
+        #expect(!standing.followsTrack)
+
+        // With the whole trip it runs on its track towards Flughafen.
+        let earlier = Self.segment(from: Self.siegburg, to: Self.flughafen, departure: Self.start.addingTimeInterval(-40 * 60), minutes: 38)
+        let completed = LiveTrainField(segments: [earlier, next], running: [late])
+        #expect(completed.tripsToComplete.isEmpty)
+        let markers = completed.markers(at: Self.start.addingTimeInterval(60))
+        // One marker for the train, on its track; none left standing.
+        #expect(markers.count == 1)
+        let first = try #require(markers.first)
+        let later = try #require(completed.markers(at: Self.start.addingTimeInterval(80)).first)
+        #expect(first.followsTrack)
+        #expect(first.tripId == "t105")
+        #expect(first.coordinate.distance(to: later.coordinate) > 1_000)
+        #expect(later.coordinate.distance(to: Self.flughafen) < first.coordinate.distance(to: Self.flughafen))
+    }
+
+    @Test func trainsWithoutAnyLoadedTripAskForNothing() {
+        let field = LiveTrainField(segments: [], running: [Self.ice105(at: Self.siegburg, time: Self.start)])
+        #expect(field.tripsToComplete.isEmpty)
+    }
+
+    @Test func wholeTripIsSplitAtItsStops() throws {
+        let shape = Polyline.encode([Self.koeln, Self.siegburg, Self.flughafen, Self.mannheim])
+        func place(_ name: String, _ c: Coordinate, arrival: String?, departure: String?) -> String {
+            let times = [arrival.map { "\"arrival\": \"\($0)\"" }, departure.map { "\"departure\": \"\($0)\"" }].compactMap { $0 }
+            return #"{"name": "\#(name)", "lat": \#(c.latitude), "lon": \#(c.longitude)\#(times.isEmpty ? "" : ", " + times.joined(separator: ", "))}"#
+        }
+        let json = #"""
+        {"legs": [{"mode": "HIGHSPEED_RAIL", "startTime": "2027-01-15T08:00:00Z", "endTime": "2027-01-15T09:40:00Z",
+          "routeShortName": "105", "tripId": "t105",
+          "from": \#(place("Köln Hbf", Self.koeln, arrival: nil, departure: "2027-01-15T08:00:00Z")),
+          "intermediateStops": [\#(place("Siegburg/Bonn", Self.siegburg, arrival: "2027-01-15T08:15:00Z", departure: "2027-01-15T08:17:00Z")),
+                                \#(place("Frankfurt(M) Flughafen Fernbf", Self.flughafen, arrival: "2027-01-15T08:55:00Z", departure: "2027-01-15T08:58:00Z"))],
+          "to": \#(place("Mannheim Hbf", Self.mannheim, arrival: "2027-01-15T09:40:00Z", departure: nil)),
+          "legGeometry": {"points": "\#(shape)", "precision": 6}}]}
+        """#
+        let itinerary = try JSONDecoding.decoder.decode(MItinerary.self, from: Data(json.utf8))
+        let loaded = Self.segment(from: Self.flughafen, to: Self.mannheim, departure: Self.start, minutes: 42)
+        let whole = TransitousProvider.liveTrainSegments(completing: loaded, from: itinerary)
+        #expect(whole.map(\.to) == ["Siegburg/Bonn", "Frankfurt(M) Flughafen Fernbf", "Mannheim Hbf"])
+        // Named like the loaded stretch, so they join its trip.
+        #expect(whole.allSatisfy { $0.tripId == "t105" && $0.name == "ICE 105" && $0.isLongDistance })
+        #expect(whole[1].departure == JSONDecoding.parseISODate("2027-01-15T08:17:00Z"))
+        #expect(whole[1].arrival == JSONDecoding.parseISODate("2027-01-15T08:55:00Z"))
+        let middle = whole[1].track
+        #expect(try #require(middle.points.first).distance(to: Self.siegburg) < 50)
+        #expect(try #require(middle.points.last).distance(to: Self.flughafen) < 50)
+    }
+
+    @Test func trackPartBetweenTwoPoints() {
+        let track = TrackPath([Self.koeln, Self.siegburg, Self.flughafen])
+        let first = Self.koeln.distance(to: Self.siegburg)
+        let part = track.points(from: first / 2, to: first + 1_000)
+        #expect(part.count == 3)
+        #expect(part[1] == Self.siegburg)
+        #expect(track.points(from: 500, to: 100).isEmpty)
+    }
+}
+
 /// Answers the Worker's `/journeys` per host as configured, and bahn.jetzt's list on `jetzt-*` hosts.
 final class PositionsProtocol: URLProtocol, @unchecked Sendable {
     enum Answer: Sendable { case ok(String), status(Int) }
