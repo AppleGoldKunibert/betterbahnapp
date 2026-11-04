@@ -923,8 +923,10 @@ final class AppModel {
     /// Transitous' trains in `area` for the next `LiveTrainCoverage.window`, with their tracks; nil on failure.
     func liveTrainSegments(in area: MapArea, zoom: Int) async -> [LiveTrainSegment]? {
         let now = Date.now
-        return try? await liveTrainSource.liveTrainSegments(in: area, zoom: zoom, from: now,
-                                                            to: now.addingTimeInterval(LiveTrainCoverage.window))
+        let segments = try? await liveTrainSource.liveTrainSegments(in: area, zoom: zoom, from: now,
+                                                                    to: now.addingTimeInterval(LiveTrainCoverage.window))
+        guard let segments, let bahnDe = provider.bahnDe else { return segments }
+        return bahnDe.applyingRememberedTrainNames(to: segments)
     }
 
     /// Series, Triebzug numbers and names of a train from bahn.de's coach sequence. bahn.de caches

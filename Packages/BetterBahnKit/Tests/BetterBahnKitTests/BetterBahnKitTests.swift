@@ -4949,6 +4949,13 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         let re = TrainSearchResult(journeyId: "r", category: "RE", number: 171, line: "RE1", product: .regionalExpress,
                                    origin: "", destination: "", originEVA: nil, destinationEVA: nil)
         #expect(TrainNumberSearch.named(after: re, entry: entry, trip: trip).trip == trip)
+        // RJ 178 Dresden → Hamburg-Altona (2026-11-04): the board already has bahn.de's "RJ 171", the trip
+        // opened from it is still Transitous' "ICE 171" (#552).
+        var boardNamed = entry
+        boardNamed.line = BahnDeClient.renamed(ice, to: "RJ 171")
+        let both = TrainNumberSearch.named(after: rj, entry: boardNamed, trip: trip)
+        #expect(both.entry == boardNamed)
+        #expect(both.trip.line?.name == "RJ 171")
     }
 
     static let found63 = """
@@ -5820,6 +5827,27 @@ private final class TrainSearchProtocol: URLProtocol, @unchecked Sendable {
         #expect(corrected[0].legs[0].line?.name == "RJ 171")
         #expect(corrected[0].legs[0].line?.alternateName == "ICE 171")
         #expect(corrected[1] == journeys[1])
+    }
+
+    /// The live map has the ČD Railjet Dresden–Hamburg as Transitous' "ICE 178"; once bahn.de named it "RJ 178"
+    /// (a board or a journey), the map does too (#552). Regional trains keep their names.
+    @Test func liveMapUsesRememberedTrainNames() throws {
+        let suite = "TrainNameMemoryTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let learned = try #require(JSONDecoding.parseISODate("2026-11-04T09:53:00Z"))
+        let memory = TrainNameMemory(defaultsSuite: suite)
+        memory.remember("RJ 178", for: "ICE 178", now: learned)
+        memory.remember("RE 8", for: "RE8", now: learned)
+        let track = TrackPath([Coordinate(latitude: 51.04, longitude: 13.73), Coordinate(latitude: 51.1, longitude: 13.6)])
+        func segment(_ name: String, longDistance: Bool) -> LiveTrainSegment {
+            LiveTrainSegment(tripId: name, name: name, from: "Dresden Hbf", to: "Dresden-Neustadt", departure: learned,
+                             arrival: learned.addingTimeInterval(300), track: track, isLongDistance: longDistance)
+        }
+        let named = BahnDeClient.applyingRememberedTrainNames(
+            to: [segment("ICE 178", longDistance: true), segment("ICE 1000", longDistance: true), segment("RE8", longDistance: false)],
+            from: memory, now: learned)
+        #expect(named.map(\.name) == ["RJ 178", "ICE 1000", "RE8"])
     }
 
     /// DB's feed calls the ČD Railjet Berlin–Hamburg "ICE 176", bahn.de "RJ 176". When bahn.de answered too late,

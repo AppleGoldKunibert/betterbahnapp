@@ -410,7 +410,7 @@ in `project.pbxproj`: new files join their target automatically.
   `TrainsetNames`, `CoachSequence` (coaches, classes, amenities, sectors, direction; RE/RB via `sequenceReference`),
   Zusatzhalte (`inserting`, `nextRegularStop`), `fillingMissingPlatforms` (e.g. Hamburg Hbf), `correctingTrainNames`
   ("RJ 171" Transitous calls "ICE 171"; names bahn.de gave are kept 6 weeks on the device, `TrainNameMemory`, and
-  used before asking; a late answer renames the results, `JourneyResultsView.correctLateTrainNames`). Live times (`ezZeit`; `correctingFromBoard`, `applyingLiveTimes`,
+  used before asking, also for the live map's trains and the trains tapped there, #552; a late answer renames the results, `JourneyResultsView.correctLateTrainNames`). Live times (`ezZeit`; `correctingFromBoard`, `applyingLiveTimes`,
   `applyingLiveTimes(from:to:)`) beat DELFI's forecasts, but not a delay/early time DB Timetables set (`keepingDelays`),
   and never turn 2+ min early into on time (`turnsEarlyIntoOnTime`). The journey details (`journeyCourse`) are asked
   only by `LiveRun`, for legs and trip views alike: for a run underway or leaving within 12 h (`isRunningSoon`,

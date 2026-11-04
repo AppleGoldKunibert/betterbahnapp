@@ -667,6 +667,34 @@ extension BahnDeClient {
         }
     }
 
+    /// The live map's long-distance trains named as bahn.de named them before (`TrainNameMemory`): its
+    /// segments come straight from Transitous, which has the ČD Railjet "RJ 178" as "ICE 178" (#552).
+    public func applyingRememberedTrainNames(to segments: [LiveTrainSegment]) -> [LiveTrainSegment] {
+        guard let trainNameMemory else { return segments }
+        return Self.applyingRememberedTrainNames(to: segments, from: trainNameMemory)
+    }
+
+    static func applyingRememberedTrainNames(to segments: [LiveTrainSegment], from memory: TrainNameMemory,
+                                             now: Date = .now) -> [LiveTrainSegment] {
+        segments.map { segment in
+            guard segment.isLongDistance, let name = memory.name(for: segment.name, now: now),
+                  normalizedTrainName(name) != normalizedTrainName(segment.name) else { return segment }
+            var segment = segment
+            segment.name = name
+            return segment
+        }
+    }
+
+    /// A train tapped on the live map under bahn.de's name for it, as its marker shows it.
+    public func applyingRememberedTrainName(to trip: Trip) -> Trip {
+        guard let trainNameMemory, let line = trip.line, Self.trainReference(for: line) != nil,
+              let name = trainNameMemory.name(for: line.name),
+              Self.normalizedTrainName(name) != Self.normalizedTrainName(line.name) else { return trip }
+        var trip = trip
+        trip.line = Self.renamed(line, to: name)
+        return trip
+    }
+
     /// `current` with the train names of the same legs in `corrected` (a `correctingTrainNames(in:)` that
     /// finished after `current` was shown), leaving everything else as it is now.
     public static func takingTrainNames(from corrected: [Journey], into current: [Journey]) -> [Journey] {

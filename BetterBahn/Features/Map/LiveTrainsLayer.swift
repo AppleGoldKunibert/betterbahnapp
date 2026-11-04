@@ -422,8 +422,12 @@ struct LiveTrainTripSheet: View {
             }
         }
         .task(id: tripId) {
-            guard let trip = try? await model.provider.plainTrip(id: tripId, source: .transitous),
-                  let entry = BoardEntry.liveTrain(trip) else {
+            guard var trip = try? await model.provider.plainTrip(id: tripId, source: .transitous) else {
+                failed = true
+                return
+            }
+            trip = model.provider.bahnDe?.applyingRememberedTrainName(to: trip) ?? trip
+            guard let entry = BoardEntry.liveTrain(trip) else {
                 failed = true
                 return
             }
