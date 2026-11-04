@@ -3,7 +3,7 @@ import Testing
 @testable import BetterBahnKit
 
 /// Old journeys get the real delays of their day from the statistics server.
-@Suite struct TrainStatisticsRunTests {
+@Suite(.serialized) struct TrainStatisticsRunTests {
     private let now = ISO8601DateFormatter().date(from: "2026-11-04T12:00:00Z")!
 
     private func date(_ value: String) -> Date { ISO8601DateFormatter().date(from: value)! }
@@ -156,6 +156,17 @@ import Testing
         #expect(sent.contains("\"number\":\"2049\""))
     }
 
+    /// An older Worker ignores `day` and answers without `run`: that is no answer for the day, so the app must not
+    /// remember "no run" (it would never ask again) but ask again later.
+    @Test func aWorkerThatDoesntKnowDaysIsNotTakenForNoRun() async throws {
+        let client = TrainStatisticsClient(http: HTTPClient(session: StatsRunProtocol.session()),
+                                           baseURL: URL(string: "https://stats.test")!)
+        StatsRunProtocol.oldWorker = true
+        defer { StatsRunProtocol.oldWorker = false }
+        let ice = TrainStatisticsClient.RunQuery(train: .init(category: "ICE", number: "592", evas: ["8000105"]), day: "2026-10-30")
+        await #expect(throws: TrainStatisticsClient.RunError.self) { try await client.runs(for: [ice]) }
+    }
+
     @Test func aQueryKnowsWhenItsDayBegan() throws {
         let query = try #require(leg().statisticsRunQuery(now: now))
         // 2026-10-30 00:00 in Germany is 23:00 UTC the evening before (winter time since 25 October).
@@ -179,6 +190,12 @@ final class StatsRunProtocol: URLProtocol, @unchecked Sendable {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var _body: String?
     static var lastBody: String? { lock.withLock { _body } }
+    /// Answers like the Worker before it knew days: no `run` key at all.
+    nonisolated(unsafe) private static var _oldWorker = false
+    static var oldWorker: Bool {
+        get { lock.withLock { _oldWorker } }
+        set { lock.withLock { _oldWorker = newValue } }
+    }
 
     static func session() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
@@ -203,7 +220,9 @@ final class StatsRunProtocol: URLProtocol, @unchecked Sendable {
             stream.close()
         }
         Self.lock.withLock { Self._body = String(data: data, encoding: .utf8) }
-        let body = """
+        let body = Self.oldWorker ? """
+        {"trains":[{"category":"ICE","number":"592","days":30,"runs":20,"cancelled":0,"stops":{}}]}
+        """ : """
         {"trains":[
          {"category":"ICE","number":"592","days":30,"runs":20,"cancelled":0,"stops":{},
           "run":{"day":"2026-10-30","category":"ICE","cancelled":false,"stops":[{"eva":"8000105","arrivalDelay":null,"departureDelay":5}]}},

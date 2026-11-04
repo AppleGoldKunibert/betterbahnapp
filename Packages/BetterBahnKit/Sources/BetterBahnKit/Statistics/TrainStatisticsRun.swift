@@ -102,12 +102,32 @@ extension TrainStatisticsClient {
     }
 
     private struct RunResponse: Decodable {
-        struct Entry: Decodable { var run: TrainStatistics.Run? }
+        struct Entry: Decodable {
+            var run: TrainStatistics.Run?
+            /// Whether the answer has the key `run` at all (null: no such run). A server that doesn't know the
+            /// `day` yet (an older Worker) leaves it out and says nothing about the day.
+            var answered: Bool
+
+            private enum CodingKeys: String, CodingKey { case run }
+
+            init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                answered = c.contains(.run)
+                run = try c.decodeIfPresent(TrainStatistics.Run.self, forKey: .run)
+            }
+        }
         var trains: [Entry]
     }
 
+    public enum RunError: Error {
+        /// The server answered without `run`: it doesn't know how to answer for a day (yet). Nothing is learned from
+        /// that, so the caller must not remember "no run" but ask again later.
+        case dayNotSupported
+    }
+
     /// The runs of these trains on their days, one request per `maxTrains`; a train the server has no run
-    /// for (too old, never seen) is left out. Throws when a request fails, so the caller asks again later.
+    /// for (too old, never seen) is left out. Throws when a request fails or the server doesn't answer for days
+    /// (`RunError.dayNotSupported`), so the caller asks again later.
     public func runs(for queries: [RunQuery]) async throws -> [RunQuery: TrainStatistics.Run] {
         var answers: [RunQuery: TrainStatistics.Run] = [:]
         for start in stride(from: 0, to: queries.count, by: Self.maxTrains) {
@@ -125,6 +145,7 @@ extension TrainStatisticsClient {
             } catch {
                 throw TransitError.decoding(String(describing: error))
             }
+            guard entries.count == batch.count, entries.allSatisfy(\.answered) else { throw RunError.dayNotSupported }
             // The server answers in the order asked.
             for (query, entry) in zip(batch, entries) {
                 if let run = entry.run { answers[query] = run }

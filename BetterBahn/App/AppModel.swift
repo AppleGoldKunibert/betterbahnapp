@@ -1399,7 +1399,7 @@ final class AppModel {
             guard let arrival = entry.journey.arrival?.planned,
                   arrival.addingTimeInterval(SavedJourney.liveDataLifetime) < now else { continue }
             // What the past journey shows: planned times; the live ones kept in the file are not shown any more.
-            for leg in entry.journey.droppingActualTimes().legs where entry.statisticsRuns?[leg.id] == nil {
+            for leg in entry.journey.droppingActualTimes().legs where SavedJourney.LegStatistics.needsAsking(entry.statisticsRuns?[leg.id]) {
                 if let query = leg.statisticsRunQuery(now: now) { pending.append((entry.id, leg.id, query)) }
             }
             if pending.count >= maximum { break }
@@ -1419,7 +1419,7 @@ final class AppModel {
                 // No run for a day that's over only a few days: the server may not have it yet, ask again later.
                 if run == nil, now.timeIntervalSince(item.query.dayStart) < 3 * 86400 { continue }
                 var runs = updated[index].statisticsRuns ?? [:]
-                runs[item.leg] = SavedJourney.LegStatistics(run: run, askedAt: now)
+                runs[item.leg] = SavedJourney.LegStatistics(run: run, askedAt: now, confirmed: true)
                 updated[index].statisticsRuns = runs
                 changed = true
             }
@@ -1648,6 +1648,15 @@ nonisolated struct SavedJourney: Codable, Hashable, Identifiable {
     nonisolated struct LegStatistics: Codable, Hashable {
         var run: TrainStatistics.Run?
         var askedAt: Date
+        /// Set when a server that knows days said there is no run (`run: null`). An entry without a run and without
+        /// this was saved before that was checked and is asked for again.
+        var confirmed: Bool?
+
+        /// Whether the leg still has to be asked: nothing known yet, or a "no run" nobody confirmed.
+        static func needsAsking(_ saved: LegStatistics?) -> Bool {
+            guard let saved else { return true }
+            return saved.run == nil && saved.confirmed != true
+        }
     }
 
     var issues: [ConnectionIssue] { journey.currentIssues() }

@@ -630,7 +630,7 @@ in `project.pbxproj`: new files join their target automatically.
   lower levels of big stations folded into the main station, cancelled stops/runs marked; a leg with any real time
   is never touched). `AppModel.fillDelaysFromStatistics(only:)` (from `PastTripsView` and an opened past
   `JourneyDetailView`, off with "Zugstatistik anzeigen") asks up to 24 legs in batches 1 s apart, keeps the answer in
-  `SavedJourney.statisticsRuns` by `Leg.id` (a leg without a run isn't asked again, except for the last 3 days, when
+  `SavedJourney.statisticsRuns` by `Leg.id` (a leg without a run isn't asked again once a server that knows days said so (`run: null`, `LegStatistics.confirmed`; an answer without the `run` key is an older Worker, `RunError.dayNotSupported`, nothing is remembered), except for the last 3 days, when
   the server may not have the day yet; a failed request is tried again next time), and `pastJourneys` applies them.
 - `Support/HTTPClient.swift` – shared HTTP, `TransitError`, `JSONDecoding`; every request sends `identifyingUserAgent`
   (only `BahnDeClient` sends browser agents). `ProductStyle`: `Line.color` = product color, or `Line.lineColorHex`
