@@ -67,6 +67,8 @@ class Day:
         self.change_stops = {}
         # The latest snapshot of changes read (Berlin local time, as the dataset keeps it).
         self.latest_changes = None
+        # eva → the station's name, as DB's responses spell it (`<timetable station="Fulda">`).
+        self.names = {}
 
     def read(self, api, url, xml, snapshot):
         if not xml or "<s " not in xml:
@@ -74,11 +76,15 @@ class Day:
         root = ET.fromstring(xml)
         if api == "timetables/v1/plan":
             # .../plan/<eva>/<yymmdd>/<hh>
-            eva = main_station(url.rstrip("/").split("/")[-3])
+            raw = url.rstrip("/").split("/")[-3]
+            eva = main_station(raw)
+            self.note_name(raw, eva, root)
             for stop in root.findall("s"):
                 self.plan[stop.get("id")] = (eva, attributes(stop.find("tl")), attributes(stop.find("ar")), attributes(stop.find("dp")))
         elif api == "timetables/v1/fchg":
-            eva = main_station(url.rstrip("/").split("/")[-1])
+            raw = url.rstrip("/").split("/")[-1]
+            eva = main_station(raw)
+            self.note_name(raw, eva, root)
             if self.latest_changes is None or self.latest_changes < snapshot:
                 self.latest_changes = snapshot
             for stop in root.findall("s"):
@@ -95,6 +101,12 @@ class Day:
                     previous = self.changes.get((sid, kind))
                     if previous is None or previous[0] <= snapshot:
                         self.changes[(sid, kind)] = (snapshot, event)
+
+    def note_name(self, raw, eva, root):
+        """The station's name; a lower level ("Frankfurt(Main)Hbf (tief)") only names the main station until that has its own."""
+        name = root.get("station")
+        if name and (eva not in self.names or raw.lstrip("0") == eva):
+            self.names[eva] = name
 
     def read_parquet(self, path):
         import pyarrow.parquet as pq
@@ -119,10 +131,10 @@ def attributes(element):
 # MARK: - Runs
 
 
-def build_rows(data, day):
-    """Train number → the runs of that number that started on `day` ("2026-10-14"), as stored in
-    `train_days.runs`: [{"c": category, "x": 1 when cancelled altogether, "s": stops}], each stop
-    [eva, arrival delay, departure delay, platform, changed platform, flags] (see schema.sql)."""
+def collect_runs(data, day):
+    """The runs that started on `day` ("2026-10-14"), keyed by (train ID, start): {"label": the train's attributes,
+    "stops": [(position, eva, arrival event, departure event)]} with each event's plan and latest change merged
+    (`merge`). Stops without any event are left out."""
     stamp = day[2:4] + day[5:7] + day[8:10]
     runs = {}
     for sid in set(data.plan) | set(data.change_stops):
@@ -139,6 +151,14 @@ def build_rows(data, day):
         if label and (planned or not run["label"]):
             run["label"] = label
         run["stops"].append((int(match.group(3)), eva, arrival, departure))
+    return runs
+
+
+def build_rows(data, day):
+    """Train number → the runs of that number that started on `day` ("2026-10-14"), as stored in
+    `train_days.runs`: [{"c": category, "x": 1 when cancelled altogether, "s": stops}], each stop
+    [eva, arrival delay, departure delay, platform, changed platform, flags] (see schema.sql)."""
+    runs = collect_runs(data, day)
 
     rows = {}
     for run in runs.values():
