@@ -553,6 +553,16 @@
         }
       }
     },
+    "%lld Aufzüge defekt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld lifts out of order"
+          }
+        }
+      }
+    },
     "%lld Check-ins" : {
       "localizations" : {
         "en" : {
@@ -1662,6 +1672,16 @@
         }
       }
     },
+    "An Check-in erinnern" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remind Me to Check In"
+          }
+        }
+      }
+    },
     "An diesen Tagen fragen wir kurz vor der Abfahrt, ob du fährst. Sagst du Ja, wird die Fahrt gespeichert und meldet sich nur bei Problemen." : {
       "localizations" : {
         "en" : {
@@ -1867,46 +1887,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Couldn't Share Arrival"
-          }
-        }
-      }
-    },
-    "Einchecken" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Check In"
-          }
-        }
-      }
-    },
-    "Welcher Zug?" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Which train?"
-          }
-        }
-      }
-    },
-    "An Check-in erinnern" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Remind Me to Check In"
-          }
-        }
-      }
-    },
-    "Wir erinnern dich 5 Minuten nach der Abfahrt." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "We remind you 5 minutes after departure."
           }
         }
       }
@@ -2118,6 +2098,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Order Number"
+          }
+        }
+      }
+    },
+    "Aufzug defekt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lift out of order"
+          }
+        }
+      }
+    },
+    "Aufzüge außer Betrieb" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lifts out of order"
           }
         }
       }
@@ -3189,6 +3189,16 @@
         }
       }
     },
+    "Die Suche zeigt, wo ein Aufzug auf deinem Weg außer Betrieb ist. Für gespeicherte Reisen bekommst du dann eine Mitteilung." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The search shows where a lift on your way is out of order. For saved journeys, you'll get a notification."
+          }
+        }
+      }
+    },
     "Die Züge fahren gekoppelt und trennen sich später." : {
       "localizations" : {
         "en" : {
@@ -3530,6 +3540,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Enter Boarding and Exit Yourself"
+          }
+        }
+      }
+    },
+    "Einchecken" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check In"
           }
         }
       }
@@ -6973,6 +6993,16 @@
         }
       }
     },
+    "Stufenfrei reisen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Step-Free Travel"
+          }
+        }
+      }
+    },
     "Stunden" : {
       "localizations" : {
         "en" : {
@@ -8114,6 +8144,16 @@
         }
       }
     },
+    "Welcher Zug?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Which train?"
+          }
+        }
+      }
+    },
     "Weniger" : {
       "localizations" : {
         "en" : {
@@ -8220,6 +8260,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Wind %lld km/h"
+          }
+        }
+      }
+    },
+    "Wir erinnern dich 5 Minuten nach der Abfahrt." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "We remind you 5 minutes after departure."
           }
         }
       }
@@ -8933,56 +8984,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Add Via Stop"
-          }
-        }
-      }
-    },
-    "Aufzug defekt" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Lift out of order"
-          }
-        }
-      }
-    },
-    "%lld Aufzüge defekt" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld lifts out of order"
-          }
-        }
-      }
-    },
-    "Stufenfrei reisen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Step-Free Travel"
-          }
-        }
-      }
-    },
-    "Die Suche zeigt, wo ein Aufzug auf deinem Weg außer Betrieb ist. Für gespeicherte Reisen bekommst du dann eine Mitteilung." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The search shows where a lift on your way is out of order. For saved journeys, you'll get a notification."
-          }
-        }
-      }
-    },
-    "Aufzüge außer Betrieb" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Lifts out of order"
           }
         }
       }
