@@ -6,8 +6,9 @@ https://mobilithek.info/offers/879076212433727488: every DB station with its DHI
 codes and name ("Dresden-Neustadt" for DELFI's "Dresden Bahnhof Neustadt"). It has no positions, so each
 station gets those of its RIL100 codes from Ril100.json (scripts/make-ril100.py). About one name in ten
 isn't the one DB shows passengers ("Barmbek" for "Hamburg-Barmbek", "Celle Pbf" for "Celle"), so the
-name comes from DB's RIS as bahn.expert's station search has it, found by EVA number. bahn.expert is
-unofficial, and asking it for every station takes about an hour: names already in StationNames.json are
+name comes from DB's RIS::Stations, looked up by EVA number. Without a key for the DB API Marketplace it
+is asked at the copy DB Streckenagent's website uses (unofficial, so not bahn.expert, which we keep the
+load off). Asking it for every station takes about half an hour: names already in StationNames.json are
 kept (by EVA numbers), so a rerun only asks for new stations; --refresh asks for all again.
 
 Other railways' feeds in Transitous name German stations their own way, without a stop area (DHID) in the
@@ -40,10 +41,9 @@ RESOURCES = Path(__file__).resolve().parent.parent / "Packages/BetterBahnKit/Sou
 OUT = RESOURCES / "StationNames.json"
 NETEX = "{http://www.netex.org.uk/netex}"
 API = "https://api.transitous.org/api/v1/map/stops"
-EXPERT = "https://bahn.expert/api/orpc/stopPlace/byTerm"
-# bahn.expert only answers requests that say they come from its own site (see BahnExpertClient).
-EXPERT_HEADERS = {"Content-Type": "application/json", "Accept": "application/json",
-                  "Referer": "https://bahn.expert/", "User-Agent": "BetterBahn station names"}
+# DB's RIS::Stations (https://developers.deutschebahn.com/db-api-marketplace/apis/product/ris-stations)
+# as DB Streckenagent's website asks it: same paths and answers, no key.
+RIS = "https://dbstreckenagent.de/api/stations/stop-places/"
 TRAIN = {"HIGHSPEED_RAIL", "LONG_DISTANCE", "NIGHT_RAIL", "REGIONAL_RAIL", "REGIONAL_FAST_RAIL", "SUBURBAN", "RAIL"}
 BORDER_POINT = re.compile(r"(\(Gr\)|\[Grenze\])\s*$|,[^,]*\bGrenze\b|^Grenze\b|Grænse|Tarifpunkt")
 
@@ -98,28 +98,32 @@ def german_stations(netex_path):
     return stations
 
 
-def expert_search(term):
-    """bahn.expert's station search: DB's stops for `term`, each with its EVA number and RIS name."""
-    request = urllib.request.Request(EXPERT, data=json.dumps({"json": {"searchTerm": term}}).encode(),
-                                     headers=EXPERT_HEADERS, method="POST")
+def ris_stop_place(eva):
+    """RIS::Stations' stop place with the EVA number `eva`, None if RIS has none."""
+    request = urllib.request.Request(RIS + urllib.parse.quote(eva),
+                                     headers={"Accept": "application/json", "User-Agent": "BetterBahn station names"})
     for attempt in range(4):
         try:
             time.sleep(0.3)
             with urllib.request.urlopen(request, timeout=30) as response:
-                return json.load(response)["json"]
+                return next(iter(json.load(response).get("stopPlaces") or []), None)
+        except urllib.error.HTTPError as error:
+            if error.code == 404:
+                return None
+            time.sleep(2 ** attempt)
         except (urllib.error.URLError, TimeoutError):
             time.sleep(2 ** attempt)
-    raise SystemExit(f"bahn.expert failed for {term!r}")
+    raise SystemExit(f"RIS::Stations failed for {eva}")
 
 
-def ris_name(name, evas):
-    """DB's own name for a station (RIS, as bahn.de shows it): asked for OpenStation's name, without its
-    part in brackets, then its town, until a hit has one of the station's EVA numbers; None if none has."""
-    terms = [name, re.sub(r"\s*\([^)]*\)", "", name), re.split(r"[ (/-]", name)[0]]
-    for term in dict.fromkeys(term for term in terms if term):
-        for hit in expert_search(term):
-            if hit.get("evaNumber") in evas:
-                return hit["name"]
+def ris_name(evas):
+    """DB's own name for a station (RIS, as bahn.de shows it), from the first of its EVA numbers RIS knows;
+    None if it knows none."""
+    for eva in evas:
+        place = ris_stop_place(eva)
+        name = ((place or {}).get("names") or {}).get("DE", {}).get("nameLong")
+        if name:
+            return name
     return None
 
 
@@ -271,7 +275,7 @@ def main(netex_path, refresh=False):
         if tuple(evas) in known:
             name = known[tuple(evas)]
         elif evas:
-            name = shown_name(name, ris_name(name, evas))
+            name = shown_name(name, ris_name(evas))
             print(f"{number}: {name}", flush=True)
         points = []
         for code in codes:
