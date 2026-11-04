@@ -26,6 +26,7 @@ extension AppModel {
             try? await Task.sleep(for: delay)
             guard generation == exitReminderGeneration else { return }
             await syncExitReminders()
+            await syncCheckinReminders()
         }
         exitReminderSync = task
         return task
@@ -105,5 +106,36 @@ private enum ExitReminderLog {
 
     static func save(_ dates: [String: Date]) {
         UserDefaults.standard.set(dates, forKey: key)
+    }
+}
+
+/// Check-in reminders (#519): a notification 5 minutes after each train of a saved journey has left, unless
+/// the user is checked in on it. Scheduled by the same sync as the exit reminders, so they never overlap.
+extension AppModel {
+    /// Identifiers of check-in reminder notifications start with this (see `AppDelegate`'s `willPresent`).
+    nonisolated static let checkinReminderPrefix = "checkin|"
+
+    private func syncCheckinReminders(now: Date = .now) async {
+        let center = UNUserNotificationCenter.current()
+        var wanted: [String: CheckinReminder] = [:]
+        if settings.checkinReminders, settings.traewellingEnabled, await traewelling.isLoggedIn {
+            let checkedIn = Set(checkinStatusIDs.keys)
+            for entry in upcomingJourneys where (entry.journey.departure?.best ?? .distantFuture) < now.addingTimeInterval(24 * 3600) {
+                for reminder in entry.journey.checkinReminders(now: now, checkedIn: checkedIn) {
+                    wanted[Self.checkinReminderPrefix + entry.id.uuidString + "|" + reminder.legID] = reminder
+                }
+            }
+        }
+        let pending = await center.pendingNotificationRequests().map(\.identifier).filter { $0.hasPrefix(Self.checkinReminderPrefix) }
+        center.removePendingNotificationRequests(withIdentifiers: pending.filter { wanted[$0] == nil })
+        for (identifier, reminder) in wanted {
+            let content = UNMutableNotificationContent()
+            content.title = reminder.title
+            content.body = reminder.body
+            content.sound = .default
+            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(1, reminder.fireDate.timeIntervalSince(now)), repeats: false)
+            // The same identifier replaces the pending one, so a moved reminder never comes twice.
+            try? await center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: trigger))
+        }
     }
 }
