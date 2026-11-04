@@ -51,6 +51,9 @@ const EVA_PATTERN = /^\d{1,9}$/;
 const TRAIN_PATTERN = /^[A-Za-z0-9]{1,8}$/;
 // The last days that count.
 const DEFAULT_DAYS = 30;
+// How far back the long-distance archive (`long_distance_days`) reaches.
+const ARCHIVE_DAYS = 400;
+const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 // Long-distance categories, which DB and the app name alike. Everything else is regional: DB stores many
 // regional trains under their operator's category ("HLB", "ag", "erx"), the app knows them as "RE 5" or
 // "RB 27", so those match by run number and stop instead.
@@ -75,7 +78,11 @@ async function handleTrainStats(request, env, now) {
             || evas.length > MAX_STOPS_PER_TRAIN || !evas.every(eva => EVA_PATTERN.test(String(eva)))) {
             return json(400, { error: "invalid_trains" });
         }
-        queries.push({ category: train.category.toUpperCase(), number: String(train.number), evas: evas.map(String) });
+        // Optional: the run of that day too (`run` in the answer), for an old journey's real delays.
+        if (train.day !== undefined && !(typeof train.day === "string" && DAY_PATTERN.test(train.day) && !Number.isNaN(Date.parse(train.day)))) {
+            return json(400, { error: "invalid_trains" });
+        }
+        queries.push({ category: train.category.toUpperCase(), number: String(train.number), evas: evas.map(String), day: train.day });
     }
 
     const days = Number(env.STATS_DAYS) > 0 ? Number(env.STATS_DAYS) : DEFAULT_DAYS;
@@ -84,9 +91,55 @@ async function handleTrainStats(request, env, now) {
     const answers = await Promise.all(queries.map(async query => {
         const { results } = await select.bind(query.number, since).all();
         const runs = (results ?? []).flatMap(row => parseJSON(row.runs) ?? []);
-        return trainStatistics(runs, query, days);
+        const answer = trainStatistics(runs, query, days);
+        if (query.day) answer.run = await findRun(env, query, now);
+        return answer;
     }));
     return json(200, { trains: answers });
+}
+
+/// The run of the train asked for on `query.day` with its stops' real delays, from the last 30 days (`train_days`) or the
+/// long-distance archive (`long_distance_days`); null when DB's data has none (too old, in the future, not imported yet).
+async function findRun(env, query, now) {
+    const today = new Date(now).toISOString().slice(0, 10);
+    const oldest = new Date(now - ARCHIVE_DAYS * 86400_000).toISOString().slice(0, 10);
+    if (query.day > today || query.day < oldest) return null;
+    for (const table of ["train_days", "long_distance_days"]) {
+        let rows;
+        try {
+            ({ results: rows } = await env.DB.prepare(`SELECT runs FROM ${table} WHERE number = ? AND day = ?`).bind(query.number, query.day).all());
+        } catch {
+            continue; // a database without the archive table yet
+        }
+        const run = pickRun((rows ?? []).flatMap(row => parseJSON(row.runs) ?? []), query);
+        if (run) return run;
+    }
+    return null;
+}
+
+/// The run of `runs` (one number's runs of a day) that is the train asked for; of several, the one calling at most of the
+/// stops asked for. Stops as `{eva, arrivalDelay, departureDelay, platform, changedPlatform, cancelled, additional}`.
+export function pickRun(runs, query) {
+    const candidates = runs
+        .map(run => ({ category: String(run?.c ?? "").toUpperCase(), cancelled: run?.x === 1, stops: Array.isArray(run?.s) ? run.s : [] }))
+        .filter(run => isTrain(run, query));
+    if (candidates.length === 0) return null;
+    const overlap = run => run.stops.filter(row => query.evas.some(eva => (LOWER_LEVELS[eva] ?? eva) === row[0])).length;
+    const best = candidates.sort((a, b) => overlap(b) - overlap(a))[0];
+    return {
+        day: query.day,
+        category: best.category,
+        cancelled: best.cancelled,
+        stops: best.stops.map(row => ({
+            eva: row[0],
+            arrivalDelay: Number.isInteger(row[1]) ? row[1] : null,
+            departureDelay: Number.isInteger(row[2]) ? row[2] : null,
+            platform: row[3] ?? null,
+            changedPlatform: row[4] ?? null,
+            cancelled: ((row[5] ?? 0) & 1) === 1,
+            additional: ((row[5] ?? 0) & 2) === 2,
+        })),
+    };
 }
 
 /// What the `runs` of one train number say about the train asked for, and about its stops `query.evas`:

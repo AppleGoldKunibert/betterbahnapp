@@ -23,7 +23,9 @@ features or data flows change (and update the privacy policy in `Cloudflare/work
   declare it (e.g. "Other User Content", not linked, not tracking). The train statistics
   (`Cloudflare/stats`, Settings → "Zugstatistik anzeigen", on by default) only ask that server for a
   train's figures by train number and stops, nothing is kept; the figures come from DB's open data
-  (#336), the app reports nothing. Second exception: the user's Träwelling login (#452) is kept encrypted on
+  (#336), the app reports nothing. For a saved journey whose live data is gone the app also asks for the
+  delays its day really had, so that request carries the train number and the day of that ride; the answer is
+  kept in the journey on the device and nothing is kept on the server. Second exception: the user's Träwelling login (#452) is kept encrypted on
   `Cloudflare/checkin-push` while logged in (deleted on logout or after 180 days unused), and the check-in
   notifications (Settings → Träwelling → "Mitteilungen", off by default) keep the Träwelling user ID, the APNs
   device token and seen status and notification IDs until turned off – likely "Identifiers → User ID" and
