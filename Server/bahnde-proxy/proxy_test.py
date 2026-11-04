@@ -17,19 +17,6 @@ WORKER_TOKEN = "eyJ0IjoiYSIsImtpZCI6ImtleS0xIiwiZXhwIjo0MTAyNDQ0ODAwfQ.J3Otk9jGZ
 ORTE = "/web/api/reiseloesung/orte?suchbegriff=Berlin&typ=ALL&limit=1"
 
 
-class SiblingTests(unittest.TestCase):
-    def test_fetches_only_the_files_a_folder_lacks(self):
-        import tempfile
-        asked = []
-        with tempfile.TemporaryDirectory() as folder:
-            (Path(folder) / "tz_seed.json").write_text("[]")
-            got = proxy.fetch_missing_siblings(folder, "https://x/", lambda url: asked.append(url) or b"code")
-            self.assertEqual((got, asked), (["tzlog.py"], ["https://x/tzlog.py"]))
-            self.assertEqual((Path(folder) / "tzlog.py").read_bytes(), b"code")
-            self.assertEqual((Path(folder) / "tz_seed.json").read_text(), "[]")
-            self.assertEqual(proxy.fetch_missing_siblings(folder, "https://x/", lambda url: b"x"), [])
-
-
 class FakeBahnDe:
     """bahn.de stand-in: answers `status` with a body naming the URL, counts and records requests."""
 

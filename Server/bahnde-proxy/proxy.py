@@ -41,34 +41,7 @@ from dataclasses import dataclass, field
 
 from aiohttp import web
 
-# Files next to this one that `panel_boot.py` of an older version doesn't download (it only knew proxy.py, panel_start.py and
-# requirements.txt): a panel that still has that one fetches them from here, so a restart is enough.
-SIBLING_FILES = ("tzlog.py", "tz_seed.json")
-
-
-def fetch_missing_siblings(folder, base_url, opener=None):
-    """Downloads the `SIBLING_FILES` that `folder` lacks from `base_url`; returns the names it got."""
-    import urllib.request
-    opener = opener or (lambda url: urllib.request.urlopen(url, timeout=20).read())
-    got = []
-    for name in SIBLING_FILES:
-        target = os.path.join(folder, name)
-        if not os.path.exists(target):
-            with open(target, "wb") as file:
-                file.write(opener(base_url + name))
-            got.append(name)
-    return got
-
-
-try:
-    import tzlog
-except ModuleNotFoundError:
-    # REPO and BRANCH are the ones `panel_boot.py` read from the panel's .env.
-    fetch_missing_siblings(
-        os.path.dirname(os.path.abspath(__file__)),
-        f"https://raw.githubusercontent.com/{os.environ.get('REPO', 'AppleGoldKunibert/betterbahnapp')}/"
-        f"{os.environ.get('BRANCH', 'indevelopment')}/Server/bahnde-proxy/")
-    import tzlog  # noqa: E402
+import tzlog
 
 UPSTREAM = "https://www.bahn.de/web/api/"
 TOKEN_HEADER = "X-BetterBahn-Token"
