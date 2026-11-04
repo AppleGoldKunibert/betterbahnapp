@@ -88,6 +88,8 @@ final class AppModel {
     @ObservationIgnored private(set) var liveTrips = LiveDataCache<Trip>()
     /// A `fillDelaysFromStatistics` pass is running.
     @ObservationIgnored private var isFillingStatistics = false
+    /// The journey opened while a pass ran; asked for after it (`fillDelaysFromStatistics`).
+    @ObservationIgnored private var statisticsFollowUp: UUID?
     /// Laps of looping trains (Ringbahn) loaded by "Vorherige / Nächste Runde laden", kept on disk; unsaved
     /// trips forget them after 15 minutes without a look (see `LoadedLaps`).
     @ObservationIgnored private var loadedLaps = LoadedLaps()
@@ -1374,7 +1376,20 @@ final class AppModel {
     /// and is tried again the next time, an answer without a run is kept, except for the last days, when the
     /// server may not have taken the day in yet. Off with "Zugstatistik anzeigen".
     func fillDelaysFromStatistics(only id: UUID? = nil) async {
-        guard settings.showTrainStatistics, !isFillingStatistics else { return }
+        guard settings.showTrainStatistics else { return }
+        if isFillingStatistics {
+            // A pass for the list is running: the journey that was just opened follows once it is done.
+            if let id { statisticsFollowUp = id }
+            return
+        }
+        await fillDelaysPass(only: id)
+        if let next = statisticsFollowUp {
+            statisticsFollowUp = nil
+            await fillDelaysPass(only: next)
+        }
+    }
+
+    private func fillDelaysPass(only id: UUID?) async {
         isFillingStatistics = true
         defer { isFillingStatistics = false }
         let now = Date.now
