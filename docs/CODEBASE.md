@@ -529,7 +529,7 @@ in `project.pbxproj`: new files join their target automatically.
   (long-distance by name, regional by run number, else line name nearest the timetable), runs on at its speed for
   90 s at most and never past the next stop, else by timetable; S-Bahns (`isSuburban`, too frequent to tell apart)
   never by timetable, only with a fix within 4 km of their timetable spot; own trains left out by name within 3 km;
-  unmatched bahn.jetzt trains stay put. `LiveTrainMotion` (own train on its leg's track, waits at its stops; without bahn.jetzt speed it works one out
+  unmatched bahn.jetzt trains stay put. `LiveTrainMotion` (own train on its leg's track, waits at its stops; while that track still loads the app's `LiveTrainsLayer` holds the own train back up to 3 s (`trackWait`) so it doesn't appear at its last fix and slide onto the track; without bahn.jetzt speed it works one out
   from the last two different fixes, standing after a minute unmoved), `LiveTrainSmoother`,
   `LiveTrainCoverage` (when to load which area).
 - `Transit/Lifts/` – lifts out of order (#486). `FacilityClient.brokenLifts()`: DB FaSta's whole list through `betterbahn2`

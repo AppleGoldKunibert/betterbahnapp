@@ -17,6 +17,8 @@ final class LiveTrainsLayer {
         var stops: [Coordinate] = []
         /// The leg it rides, to look up its track when it came without.
         var leg: Leg?
+        /// Whether the map is still looking up `track` itself.
+        var trackPending = false
     }
 
     /// At most this many other trains are drawn, the ones nearest the middle of the map.
@@ -48,6 +50,11 @@ final class LiveTrainsLayer {
     /// Tracks of own trains' legs that came without, by leg ID.
     @ObservationIgnored private var legTracks: [String: [Coordinate]] = [:]
     @ObservationIgnored private var requestedLegTracks: Set<String> = []
+    /// When each own train was first handed over, to wait a moment for its track (`trackWait`).
+    @ObservationIgnored private var firstSeen: [String: Date] = [:]
+    /// An own train whose track is still loading isn't drawn for this long: drawn at its last fix first, it would
+    /// slide onto the track and to where it is by now once the track arrives.
+    static let trackWait: TimeInterval = 3
     @ObservationIgnored private weak var model: AppModel?
     @ObservationIgnored private var smoother = LiveTrainSmoother()
     @ObservationIgnored private var dataChanged = false
@@ -147,6 +154,8 @@ final class LiveTrainsLayer {
             motions[train.name] = motion
         }
         self.motions = motions
+        let now = Date.now
+        firstSeen = Dictionary(uniqueKeysWithValues: trains.map { ($0.name, firstSeen[$0.name] ?? now) })
         ownTrains = trains
         dataChanged = true
         Task { await rebuildField() }
@@ -166,6 +175,13 @@ final class LiveTrainsLayer {
             legTracks[leg.id] = track
             applyOwnTrains(ownTrains)
         }
+    }
+
+    /// Whether `train` is held back while its leg's track loads (see `trackWait`).
+    private func waitsForTrack(_ train: OwnTrain, at now: Date) -> Bool {
+        guard motions[train.name] == nil, train.track == nil, let first = firstSeen[train.name] else { return false }
+        let loadingLegTrack = train.leg.map { legTracks[$0.id] == nil && requestedLegTracks.contains($0.id) } ?? false
+        return (train.trackPending || loadingLegTrack) && now.timeIntervalSince(first) < Self.trackWait
     }
 
     private func clearOthers() {
@@ -266,7 +282,7 @@ final class LiveTrainsLayer {
             others = field.markers(at: now, in: visible.expanded(by: 0.1), limit: Self.limit)
             for marker in others { raw[marker.id] = marker.coordinate }
         }
-        for train in ownTrains {
+        for train in ownTrains where !waitsForTrack(train, at: now) {
             raw["own:" + train.name] = motions[train.name]?.coordinate(at: now) ?? train.position.coordinate
         }
         let shown = smoother.positions(raw, dataChanged: dataChanged, at: now)
@@ -277,7 +293,7 @@ final class LiveTrainsLayer {
         var own: [String: Coordinate] = [:]
         var speeds: [String: Double] = [:]
         for train in ownTrains {
-            own[train.name] = shown["own:" + train.name]
+            if let coordinate = shown["own:" + train.name] { own[train.name] = coordinate }
             speeds[train.name] = motions[train.name]?.speedKmh ?? train.position.speedKmh
         }
         if speeds != ownSpeeds { ownSpeeds = speeds }

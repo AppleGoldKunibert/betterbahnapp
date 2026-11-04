@@ -143,6 +143,8 @@ struct LiveTrainMapView: View {
     /// The route along the tracks; nil until known, and then the map shows only the stops rather
     /// than straight lines across country.
     @State private var track: [Coordinate]?
+    /// Whether looking up `track` has finished (found or not), so the train isn't held back for it any longer.
+    @State private var trackLookedUp = false
     /// Moves the train between fixes and shows the other trains around (#505).
     @State private var layer = LiveTrainsLayer()
     /// Zoomed in this far (degrees north–south), the other trains show their names.
@@ -187,8 +189,9 @@ struct LiveTrainMapView: View {
                     }
                     .annotationTitles(.hidden)
                 }
-                if let position {
-                    Annotation(trainName, coordinate: (layer.ownCoordinates[trainName] ?? position.coordinate).clCoordinate, anchor: .center) {
+                // Drawn once the live layer places it (on its track, where it is by now), not at the last fix first.
+                if let position, let shownAt = layer.ownCoordinates[trainName] {
+                    Annotation(trainName, coordinate: shownAt.clCoordinate, anchor: .center) {
                         Image(systemName: route.line?.symbolName ?? "tram.fill")
                             .font(.system(size: 15, weight: .bold))
                             .foregroundStyle(position.isStale() ? Color.white : glyphColor)
@@ -240,11 +243,13 @@ struct LiveTrainMapView: View {
             .followsOtherTrainsSetting(layer, model: model)
         }
         .task(id: route) {
+            trackLookedUp = false
             if RouteGeometryService.followsTracks(route.path) {
                 track = route.path
             } else if let leg = route.geometryLeg {
                 track = await model.geometry(for: leg)
             }
+            trackLookedUp = true
         }
         .task(id: route) {
             await model.followPosition(of: route) { new in
@@ -256,12 +261,14 @@ struct LiveTrainMapView: View {
         .task { await layer.run(model: model) }
         .sheet(item: $tappedTrain) { LiveTrainTripSheet(opening: $0.opening) }
         .onChange(of: track) { updateOwnTrain() }
+        .onChange(of: trackLookedUp) { updateOwnTrain() }
     }
 
     private func updateOwnTrain() {
         guard let position else { return layer.setOwnTrains([]) }
         layer.setOwnTrains([LiveTrainsLayer.OwnTrain(name: trainName, position: position, track: track,
-                                                     stops: route.stops.filter { !$0.cancelled }.compactMap(\.station.coordinate))])
+                                                     stops: route.stops.filter { !$0.cancelled }.compactMap(\.station.coordinate),
+                                                     trackPending: track == nil && !trackLookedUp)])
     }
 
     private func center() {

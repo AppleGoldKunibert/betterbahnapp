@@ -252,8 +252,10 @@ struct JourneyMap: UIViewRepresentable {
                         annotation.update(live, shown: shown[name], speed: speeds[name])
                     }
                     (map.view(for: annotation) as? MKMarkerAnnotationView)?.markerTintColor = annotation.isStale ? .systemGray : UIColor(Color.brandText)
-                } else {
+                } else if let coordinate = shown[name] {
+                    // Added once the live layer places it (on its track, where it is by now), not at the last fix.
                     let annotation = TrainAnnotation(live)
+                    annotation.update(live, shown: coordinate, speed: speeds[name])
                     trainAnnotations[name] = annotation
                     map.addAnnotation(annotation)
                 }
