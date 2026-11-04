@@ -204,16 +204,22 @@ class TzStore:
 
     def load_seed(self, path, now=None):
         """Adds the Tz of a seed file (`[{"tz", "unit", "types", "vehicle"}]`) that the log doesn't have yet; what it
-        learned itself stays. Returns how many were new."""
+        learned itself stays, but a Tz the log knows without a coach (the boards saw it first, or its coach was dropped)
+        gets the seed's. Returns how many were new."""
         try:
             seed = json.loads(Path(path).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return 0
-        known = {tz for (tz,) in self.db.execute("SELECT tz FROM units")}
+        known = {tz: vehicle for tz, vehicle in self.db.execute("SELECT tz, vehicle FROM units")}
         added = 0
         for item in seed if isinstance(seed, list) else []:
             tz, vehicle = str(item.get("tz", "")), str(item.get("vehicle") or "")
-            if not tz.isdigit() or not vehicle.isdigit() or tz in known:
+            if not tz.isdigit() or not vehicle.isdigit():
+                continue
+            if tz in known:
+                if not known[tz]:
+                    self.db.execute("UPDATE units SET vehicle = ? WHERE tz = ?", (vehicle, tz))
+                    self.db.commit()
                 continue
             self.record_unit({"tz": tz, "unit": item.get("unit") or "ICE" + tz, "types": item.get("types") or [],
                               "vehicle": vehicle}, time.time() if now is None else now)
@@ -260,9 +266,10 @@ class TzStore:
                                (day, category, number)).fetchone() is not None
 
     def vehicles(self):
-        """(tz, UIC number, already backfilled) of every Tz with a known coach."""
+        """(tz, UIC number, already backfilled) of every Tz with a known coach, those still to backfill first, so a
+        restart doesn't keep the last ones from ever being reached."""
         return [(tz, vehicle, bool(done)) for tz, vehicle, done in self.db.execute(
-            "SELECT tz, vehicle, backfilled FROM units WHERE vehicle IS NOT NULL ORDER BY CAST(tz AS INTEGER)")]
+            "SELECT tz, vehicle, backfilled FROM units WHERE vehicle IS NOT NULL ORDER BY backfilled, CAST(tz AS INTEGER)")]
 
     def mark_backfilled(self, tz):
         self.db.execute("UPDATE units SET backfilled = 1 WHERE tz = ?", (tz,))

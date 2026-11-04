@@ -139,6 +139,28 @@ class StoreTests(unittest.TestCase):
             self.assertEqual(store.load_seed(Path(folder) / "missing.json"), 0)
         self.assertEqual(store.vehicles(), [("8043", "938000000043", False), ("9490", "938024120900", False)])
 
+    def test_seed_gives_a_known_tz_without_a_coach_the_seeded_one(self):
+        import json
+        import tempfile
+        store = tzlog.TzStore()
+        store.record_unit({"tz": "303", "unit": "ICE303", "types": [], "vehicle": None}, 1)  # a board showed no coach
+        self.record(store, "2026-10-31", "8043", 2, vehicle="938000000043")
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "seed.json"
+            path.write_text(json.dumps([
+                {"tz": "303", "unit": "ICE303", "types": [], "vehicle": "938054036034"},
+                {"tz": "8043", "unit": "ICE8043", "types": [], "vehicle": "938000000999"},
+            ]))
+            self.assertEqual(store.load_seed(path), 0)
+        self.assertEqual(sorted(store.vehicles()), [("303", "938054036034", False), ("8043", "938000000043", False)])
+
+    def test_vehicles_lists_the_ones_still_to_backfill_first(self):
+        store = tzlog.TzStore()
+        self.record(store, "2026-10-31", "169", 1, vehicle="938000000169")
+        self.record(store, "2026-10-31", "303", 2, vehicle="938000000303")
+        store.mark_backfilled("169")
+        self.assertEqual([tz for tz, _, _ in store.vehicles()], ["303", "169"])
+
     def test_history_newest_first_and_prune_after_a_year(self):
         store = tzlog.TzStore()
         self.record(store, "2025-10-01", "8043", 1)
