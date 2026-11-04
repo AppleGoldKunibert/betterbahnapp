@@ -13,8 +13,9 @@
 # to "indevelopment's version + its bump". When indevelopment's version moved since the PR branched off
 # (another PR was merged), indevelopment is merged into the PR branch in the same commit, so the PR merges
 # without conflict and doesn't keep the number the other PR already took. PRs whose merge with
-# indevelopment conflicts are skipped and listed in the run summary (the run then fails so GitHub notifies
-# you), as is a PR that got merged before its bump caught up. Bump commits are pushed with the review
+# indevelopment conflicts get the bump alone, on their own head and without the merge, and are listed in
+# the run summary (the run then fails so GitHub notifies you about the conflict), as is a PR that got
+# merged before its bump caught up. Bump commits are pushed with the review
 # bot App's token (it needs Contents and Workflows write), so "Build & test" runs on them; the bump run
 # such a push starts finds the version up to date and pushes nothing, so nothing loops. Without those
 # permissions the GITHUB_TOKEN pushes, which starts no other workflow. Pull before pushing to a bumped PR
@@ -270,8 +271,22 @@ jobs:
               git diff --quiet || git commit -qam "Take indevelopment's version"
               if ! git merge -q --no-ff --no-commit "$base"; then
                 git merge --abort
-                echo "- #$number \`$head\`: ❌ conflicts with indevelopment, merge it in by hand" >> "$GITHUB_STEP_SUMMARY"
+                # Still bump on the PR's own head, without merging: the version shows right away and the
+                # conflict is left for the author (their merge takes indevelopment's version, the next run
+                # bumps it again). The run fails afterwards so GitHub notifies you about the conflict.
+                git reset -q --hard "$head_sha"
                 failed+=("#$number")
+                if [ "$(version_of "$head_sha")" = "$new $new_build" ]; then
+                  echo "- #$number \`$head\`: $new ($new_build) bumped, ❌ still conflicts with indevelopment, merge it in by hand" >> "$GITHUB_STEP_SUMMARY"
+                  continue
+                fi
+                set_version "$new" "$new_build"
+                git commit -qam "$message" --author="$author_name <$author_email>"
+                if git push -q origin "HEAD:refs/heads/$head"; then
+                  echo "- #$number \`$head\`: → $new ($new_build), ❌ conflicts with indevelopment (not merged in), merge it in by hand" >> "$GITHUB_STEP_SUMMARY"
+                else
+                  echo "- #$number \`$head\`: ❌ conflicts with indevelopment, moved during the run" >> "$GITHUB_STEP_SUMMARY"
+                fi
                 continue
               fi
               set_version "$new" "$new_build"
