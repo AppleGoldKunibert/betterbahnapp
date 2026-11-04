@@ -17,12 +17,12 @@ only the files you change. Keep it current when structure changes. Build, test a
 | `Cloudflare/bahnde-proxy/` | Worker `betterbahn2`: DB Timetables (`/timetables/v1/…`, API key as secret), DB FaSta's lifts out of order (`/fasta/v2/facilities`, always the whole list, 5 min, #486) and App Attest tokens (`/auth/…`). No bahn.de paths: bahn.de refuses Workers since October 2026. `TimetablesClient.baseURL`, `WorkerAuth.baseURL`; `BahnDeClient.baseURL` is only the template `BahnDeProxy` rewrites to the server. |
 | `Server/bahnde-proxy/` | Docker server (Python, curl_cffi) asking bahn.de with a browser's TLS fingerprint, which Akamai demands and Workers can't make (#342): bahn.de's `/web/api/…` paths with the Worker's App Attest tokens, cache, rate limit, requests to bahn.de spaced `MIN_INTERVAL` apart, pause after a block (a new session; requests running on the old one finish there, #411). The app's only way to bahn.de (`BahnDeProxy.baseURL`; game-server host behind Tailscale Funnel, `panel_boot.py`; bahn.de refuses Oracle Cloud). `python3 -m unittest Server/bahnde-proxy/proxy_test.py`. |
 | `Cloudflare/pass-signer/` | Worker `betterbahn-pass`: signs Wallet passes for DB tickets (Pass Type ID certificate as secrets). Needs App Attest, only UIC `#UT` barcodes whose issuer signature verifies (`uicsignature.mjs`). `npm install && npm test`. |
-| `Cloudflare/stats/` | Worker `betterbahn-stats` (D1) answering `POST /train-stats` (#316): per train number and stop the delays, cancellations and platform moves of 30 days, one row per train and day (`schema.sql`, `train_days`). Filled daily by `importer.py` from piebro/deutsche-bahn-data (CC BY 4.0; Action `train-stats-import.yml`), so nothing asks bahn.de and the app reports nothing (#336). `node --test Cloudflare/stats/worker.test.mjs`, `python3 -m unittest Cloudflare/stats/importer_test.py`. |
+| `Cloudflare/stats/` | Worker `betterbahn-stats` (D1) answering `POST /train-stats` (#316): per train number and stop the delays, cancellations and platform moves of 30 days, one row per train and day (`schema.sql`, `train_days`). `long_distance_days` keeps the ICE/IC/EC … runs for ~400 days, so a request with a `day` gets that day's run with its stops' real delays (`run`). Filled daily by `importer.py` from piebro/deutsche-bahn-data (CC BY 4.0; Action `train-stats-import.yml`), so nothing asks bahn.de and the app reports nothing (#336). `node --test Cloudflare/stats/worker.test.mjs`, `python3 -m unittest Cloudflare/stats/importer_test.py`. |
 | `Cloudflare/checkin-push/` | Worker `betterbahn-push` (D1, cron every minute): keeps the app's Träwelling login (#452, `logins.mjs`, table `logins`, AES-GCM): `POST /logins` (code + PKCE verifier, or an old refresh token handed over), `POST /logins/<id>/token` (renews below 15 min left, one request at a time via `renewing`), `PUT` signs in again in place, `DELETE` logs out; the cron renews logins idle for 20 days and ends those unused for 180; old D1 needs `migrations/0002_…`. Notifications read with that login (`login_id`; sign-ups from before have their own), per `kinds` (#447) checks the dashboard (`followed`) and Träwelling's notifications (`likes`: `StatusLiked`, `companions`: `UserJoinedConnection`) every 2 min, sends APNs pushes (`followedStatusID`, `ownStatusID`, `companionStatusID`); likes/fellow travellers also right away via Träwelling's webhook (`/traewelling/webhook`, made with the app's login when `/login-options` offers it while `TRAEWELLING_WEBHOOKS` is "true"; pushes to every sign-up on the login); old D1 needs `migrations/0001_…` before deploying, and `migrations/0003_…` for the app's notification language (#479). Also regular trips (#397, `commute.mjs`, table `commutes`): `PUT /commutes/<id>` with the day's trains (category + number, EVA + planned times), found in IRIS' `plan`, then `fchg` every 2 min from 2 h before departure → cancellation, delay from the threshold (again +5), platform change, tight transfer (`commuteJourneyID`); never bahn.de. APNs in `apns.mjs`. `node --test Cloudflare/checkin-push/*.test.mjs`. |
 | `Cloudflare/live-activity/` | Worker `betterbahn-live` (D1, cron every minute): keeps the Live Activity current while the app is closed (#315). The app hands over the activity's push token and the journey (Kit `LiveActivityPushJourney`) when it goes to the background (`PUT /activities/<id>`) and takes it back when opened (`DELETE`). On `LiveActivityRefreshSchedule`'s times it asks DB's keyless IRIS about the current train (`../shared/iris.mjs`: `plan` once per stop, then `fchg`), works out the state like `ContentState.from` (`state.mjs`, checked against the Kit fixture `live-activity-push.json`) and pushes it when it changed; ends the activity after the arrival. `node --test Cloudflare/live-activity/worker.test.mjs`. |
 | `Cloudflare/shared/` | `appattest.mjs`: App Attest verification and the `X-BetterBahn-Token` the Workers check. `node --test Cloudflare/shared/appattest.test.mjs`. `apns.mjs`: APNs with the provider token (`betterbahn-push`, `betterbahn-live`). |
 | `.github/workflows/` | `pr-build.yml` (macOS: Kit tests + unsigned app build on code PRs), `pr-secrets.yml` (gitleaks + guard against `DefaultCredentials.swift`), `bump-version.yml` (before a PR merges into indevelopment, which takes changes only through reviewed PRs: on every PR event and push to indevelopment each open, ready PR's branch gets indevelopment's version +0.1 per fixed `enhancement` issue, +0.0.1 per `bug` issue, one bump per "Feature without Issue"/"Bug without Issue" line in the PR body (only lines starting with the phrase count), the PR's own label only when none of those counted that kind; build number +1; indevelopment merged in when its version moved; committed with the PR's author, pushed with the review bot App's token so "Build & test" runs (needs Contents and Workflows write, else the GITHUB_TOKEN); a PR merged before its bump fails the `check` job), `train-stats-import.yml` (daily, into D1), `monthly-data-update.yml` (1st of the month: rebuilds the three station lists and `Platforms.json`, PR into prod on `monthlyupdate-<MM>/<YY>`; `scripts/check-data-update.py` stops it when a list is empty or 10 % smaller; the PR gets no CI by itself, push an empty commit), `review-bot.yml` (a PR comment `@<app> approve [note]` or `@<app> request changes <reason>` from someone with write access, e.g. the review Routine as goldkunibert, makes the GitHub App submit that review on the head commit; App ID in the variable `REVIEW_BOT_APP_ID`, key in the secret `REVIEW_BOT_PRIVATE_KEY`, App permission "Pull requests: Read and write"; runs only from prod). |
-| `scripts/` | `make-station-hints.py` (offline search hints; picks DB's name per station, drops railway-internal points, keeps last run's stations missing now and each country's busyness level (country from DHID or UIC number in the stop ID)), `keep-previous-data.py` (after a rebuild: puts back German stations, names abroad, tracks, lifts and shared platforms the new `StationNames.json`/`Platforms.json` lost), `make-ril100.py` (`Ril100.swift`, also DB's XLSX for codes abroad, needs `openpyxl`), `make-station-names.py` (`StationNames.swift` from OpenStation NeTEx, DB RIS names via bahn.expert and Transitous; run after `make-ril100.py`; `--refresh` re-asks bahn.expert, ~1 h), `make-big-stations.py` (`Models/BigStations.swift`: price class 1 and 2 from OpenStation NeTEx, run after `make-station-names.py`), `check-data-update.py`, `make-exit-sides.py` (#394: `ExitSides.json`, which side of the track each platform is on, from OpenStreetMap: `--pbf germany-latest.osm.pbf` reads Geofabrik's extract with pyosmium in four passes, else Overpass tile by tile with a cache, which often answers 502; run on a Mac, both are blocked from cloud sessions. A platform edge takes the track it touches on its level, a platform the track numbered like it or the only one next to it; S-Bahn tracks are `light_rail`; tests `python3 scripts/make-exit-sides-test.py`), `make-platforms.py` (`Platforms.json` for the coach advice, #383: tracks sharing a platform and lifts from OpenStation, platform edges/areas (also multipolygons), stairs, lifts, sector signs, buffer stops and tracks above ground (termini: no track runs on past the buffer stops) from OSM's Germany extract via pyosmium, `pip install osmium`, ~7 min; ODbL), `make-seat-maps.py` (ICE seat maps from DB's Wagenreihungspläne via bahn.expert `/WRSheets/<sheet>.pdf`: images in `Assets.xcassets/SeatMaps/`, seat positions in `SeatMaps.json`; needs poppler, Pillow, numpy). `searchsim/`: Linux package (`./sync.sh`, `swift test`; `swift run SearchSim scenarios.txt` runs ~1150 live station-search scenarios, rerun after changing search ranking). |
+| `scripts/` | `make-station-hints.py` (offline search hints; picks DB's name per station, drops railway-internal points, keeps last run's stations missing now and each country's busyness level (country from DHID or UIC number in the stop ID)), `keep-previous-data.py` (after a rebuild: puts back German stations, names abroad, tracks, lifts and shared platforms the new `StationNames.json`/`Platforms.json` lost), `make-ril100.py` (`Ril100.swift`, also DB's XLSX for codes abroad, needs `openpyxl`), `make-station-names.py` (`StationNames.swift` from OpenStation NeTEx, DB RIS names via bahn.expert and Transitous; run after `make-ril100.py`; `--refresh` re-asks bahn.expert, ~1 h), `make-big-stations.py` (`Models/BigStations.swift`: price class 1 and 2 from OpenStation NeTEx, run after `make-station-names.py`), `check-data-update.py`, `make-exit-sides.py` (#394: `ExitSides.json`, which side of the track each platform is on, from OpenStreetMap: `--pbf germany-latest.osm.pbf` reads Geofabrik's extract with pyosmium in four passes, else Overpass tile by tile with a cache, which often answers 502; run on a Mac, both are blocked from cloud sessions. A platform edge takes the track it touches on its level, a platform the track numbered like it or the only one next to it; S-Bahn tracks are `light_rail`; tests `python3 scripts/make-exit-sides-test.py`), `make-platforms.py` (`Platforms.json` for the coach advice, #383: tracks sharing a platform and lifts from OpenStation, platform edges/areas (also multipolygons), stairs, lifts, sector signs, buffer stops and tracks above ground (termini: no track runs on past the buffer stops) from OSM's Germany extract via pyosmium, `pip install osmium`, ~7 min; ODbL), `make-seat-maps.py` (ICE seat maps from DB's Wagenreihungspläne via bahn.expert `/WRSheets/<sheet>.pdf`: images in `Assets.xcassets/SeatMaps/`, seat positions in `SeatMaps.json`; needs poppler, Pillow, numpy). `ausfallskript.py` (`scripts/ausfallskript 21.10 3 [-fullonly]`: cancelled long-distance trains of a day from the same dataset as the statistics, each with its whole run in `ICE7842110.txt`: plan times for a total cancellation, plan and real times for a partial one; German stops only, a day is a ~400 MB download; tests `python3 -m unittest scripts/ausfallskript_test.py`, needs pyarrow). `searchsim/`: Linux package (`./sync.sh`, `swift test`; `swift run SearchSim scenarios.txt` runs ~1150 live station-search scenarios, rerun after changing search ranking). |
 | `docs/` | `transit-providers.md` (data sources), `app-review-notes.md` (App Store checklist and review notes). |
 
 Targets: `BetterBahn`, `BetterBahnWidgetsExtension`, `BetterBahnShareExtension`, `BetterBahnKit`. Bundle IDs
@@ -91,11 +91,11 @@ in `project.pbxproj`: new files join their target automatically.
   `Application Support/BetterBahn/Tickets/` (list + PDFs, file protection, **not** synced). `importTickets` matches
   a saved journey or imports the booking via `DBShareImporter.journey(from:)`.
 - `App/LiveActivityManager.swift` – ActivityKit wrapper; attributes in Kit `TripActivityAttributes`; `alert` lights up the running activity (only the
-  `ActivityAttributes` conformance is iOS-only, so Kit tests cover `ContentState.from`). With Settings → Meine Reisen
+  `ActivityAttributes` conformance is iOS-only, so Kit tests cover `ContentState.from`). With Settings → Mitteilungen
   "Live-Aktivität über Server aktualisieren" (`AppSettings.liveActivityServerUpdates`, on by default) activities start
   with a push token; `AppModel.handOverLiveActivity()` gives it and the journey to `Cloudflare/live-activity` when the
   app goes to the background and after the background refresh, `takeBackLiveActivity()` ends that when it is active (#315).
-- `App/ExitReminders.swift` – exit reminders (#313, Settings → Meine Reisen, per journey `exitRemindersOff`): Kit `Journey.exitReminders` → time-sensitive notifications `exit|<entry>|<leg>`, rescheduled after every refresh, one per stop (per-device log `exitReminderDates`); while the Live Activity runs, its alert instead. The text names the exit side ("Fulda, Ausstieg links", `ExitSides.side(leaving:)`, #394) when known.
+- `App/ExitReminders.swift` – exit reminders (#313, Settings → Mitteilungen, per journey `exitRemindersOff`): Kit `Journey.exitReminders` → time-sensitive notifications `exit|<entry>|<leg>`, rescheduled after every refresh, one per stop (per-device log `exitReminderDates`); while the Live Activity runs, its alert instead. The text names the exit side ("Fulda, Ausstieg links", `ExitSides.side(leaving:)`, #394) when known.
 - `App/CalendarEvents.swift` – calendar events of saved journeys (#382): `CalendarButton` (`Features/Trips/`, next to
   the share button in `JourneyDetailView`) adds one from Kit `JourneyCalendarEvent`, tapped again deletes it
   (`removeFromCalendar`, full access only); the first time it asks for
@@ -119,15 +119,19 @@ in `project.pbxproj`: new files join their target automatically.
   them with their App Intents entities (`FavoriteStationEntity`, `SavedJourneyEntity`, `IndexedEntity`, queries via
   `AppDependencyManager`) and removes what's gone (IDs in UserDefaults `spotlightIDs`). Tapping opens the link via
   the entity's `OpenIntent` (`AppModel.linkToOpen`) or the `CSSearchableItemActionType` activity.
-- `Features/Connections/` – `ConnectionsView`, `ConnectionSearch`, `RouteOptionsEditor` (vias, products, max
-  transfers), `JourneyResultsView` + `JourneyCard` (alternative destination, #516: "Alternatives Ziel" below Ziel sets
-  `ConnectionSearch.alternativeTo`, not remembered; the results view loads and pages both destinations side by side
-  and shows them as one list via Kit `AlternativeDestination.merging` (by departure; a connection is dropped when one
-  to the other station rides the same trains and arrives no later), cards to the alternative say "Nach …" and open
-  with `towardsAlternative`; train requirements only plan to the destination), `TrainNumberSheet` ("Bestimmten Zug wählen", #225: trains fitting
+- `Features/Connections/` – `ConnectionsView` (#504, two layouts by `\.appDesign`: Minimal has the route card and
+  one card with the time and a foldable "Optionen" row naming what differs from the defaults; Fahrkarte has route and time on one ticket with `\.ticketStationFields`
+  station fields, the options in their own card below; saved journeys as small tickets with live lines (Kit
+  `JourneyLiveStatus`: departure, ridden train or transfer, from 10 min before arriving the change after it) and the
+  series of the trains ahead (`AppModel.trainSeries(of:)`); "Zuletzt gesucht" folds (`recentSearchesExpanded`); in
+  `ConnectionsTicketViews.swift`, `.ticketBackground()` notches the ticket at each `TicketPerforation`), `ConnectionSearch`, `RouteOptionsEditor` (vias, products, max
+  transfers), `JourneyResultsView` + `JourneyCard` (#504: Minimal a card, Fahrkarte a small ticket with "Abfahrt"/"Ankunft" above the perforation; the results' header is a "Von"/"Nach" ticket there; `TicketCaption`/`TicketValueField` for a ticket's small upper-case labels), `TrainNumberSheet` ("Bestimmten Zug wählen", #225: trains fitting
   the input via Kit `TrainCandidateFinder`; picking one shows its stops in `TripContent` with boarding/exit preselected
   and pins that run; "Ein- und Ausstieg selbst angeben"), `JourneyDetailView` (+ `LegCard`, `TransferRow`,
-  alternatives sheets; below the legs `CO2SavingButton` "−42 kg CO₂" → `CO2Sheet`, #386, from Kit `CO2Comparison`
+  alternatives sheets; #504: Minimal has the summary card, Fahrkarte draws it as a ticket with the day and
+  `JourneyTicketCaption` "Von"/"Nach" over the times and the actions below a `TicketPerforation`; `.journeyRoundedType()`
+  gives titles SF Rounded on the ticket, the round actions use `.roundActionBackground()` (flat disc in Minimal, glass in Fahrkarte);
+  the map's lines and markers, chips and symbols use `Color.brandText`, the glass buttons' labels `Color.onBrand`; below the legs `CO2SavingButton` "−42 kg CO₂" → `CO2Sheet`, #386, from Kit `CO2Comparison`
   with the legs' cached track geometry; `WeatherLabel` "☀ 18° bei Ankunft" under the destination (summary card and the
   last leg) and "beim Umstieg" under a transfer station with more than 15 min to the next train
   (`JourneyWeather.arrival(of:in:)`), tap → `WeatherDetails` popover with rain, wind and
@@ -135,7 +139,14 @@ in `project.pbxproj`: new files join their target automatically.
   ahead of the picked train's exit, #430; "Halt hinzufügen" via
   `ManualStopSheet` adds an off-timetable exit, a check-in then becomes a manual trip via
   `AppModel.replaceCheckinWithManualTrip`; a new exit on the last train asks "Reise … beenden" / "Weiter nach …").
-- `Features/Departures/` – `StationBoardView`/`BoardRow`, `TripView` (and `LegTripSheet`, the read-only run of a journey's
+- Alternative destination (#516), in `Features/Connections/`: "Alternatives Ziel" below Ziel sets `ConnectionSearch.alternativeTo` (not remembered); the
+  results view loads and pages both destinations side by side and shows them as one list via Kit
+  `AlternativeDestination.merging` (by departure; a connection is dropped when one to the other station rides the same
+  trains and arrives no later); cards to the alternative say "Nach …" and open with `towardsAlternative`; train
+  requirements only plan to the destination.
+- `Features/Departures/` – two layouts by `\.appDesign` (#504): Minimal has the station and the time in one card; Fahrkarte
+  puts them on a ticket under its own headline, with "Zeit / Nach / Gleis" over the board (`BoardColumnLabels`), and draws
+  `TripContent`'s header as a ticket with "Von" and "Nach" below its perforation. `StationBoardView`/`BoardRow`, `TripView` (and `LegTripSheet`, the read-only run of a journey's
   leg): `plainTrip` with the board's line and lap, then `AppModel.liveRun` with the shown or remembered trip (and the
   saved leg) as baseline, painted as the sources answer, remembered via `rememberLive`. `DelayTimeText` shows a delay
   in planned-time mode only with a live time (no "0" for a plain timetable). `CoachSequenceView.swift`: the Wagenreihung
@@ -174,11 +185,15 @@ in `project.pbxproj`: new files join their target automatically.
 - `Features/Map/` – `TravelMapView` heatmap of past trips (`TravelMapHeatmap`; `RailwayTileOverlay`: OpenRailwayMap,
   512 px, disk cache 7 days, 10-min pause after 403/429). A ride both saved and checked in is drawn from the check-in
   (`RideMatch.uncovered`). `YearReviewView` (#319, "Jahresrückblick", only via `YearReviewBanner` on Verbindungen in
-  December and January): swipeable 9:16 cards from Kit `YearReview` (`AppModel.yearReview(for:)`, same
+  December and January; in debug builds all year with `-showYearReview YES`): swipeable 9:16 cards from Kit `YearReview` (`AppModel.yearReview(for:)`, same
   `TravelMapSelection` and cached heatmap, km from cached geometry, series from `rememberedFormation`), shared as an
   image (`ImageRenderer`, heatmap card via `Canvas`). `LiveTrainMapView`: one train live on its track
   (`AppModel.geometry(for:)`, never straight lines), opened from `LiveTrainIconTile`; `JourneyMapView` shows running
-  trains too. `LiveTrainsLayer.swift` (#505, all three maps): moves the own trains once a second along their track
+  trains too. Both designs (#504): `.mapPanel(in:)` draws what floats on a map (Minimal: card surface with shadow,
+  Fahrkarte: Liquid Glass); on Fahrkarte the travel map's range and numbers and the live map's status are tickets
+  with `MapTicketLabel` fields. The year review's cards are accent-colored stories on black (Minimal) or tickets on
+  `Color.canvas` (Fahrkarte), in the shared image too. Accent marks use `Color.brandText`/`.onBrandText`; the
+  review's white-text stories darken the accent with `RGBColor.readable(on:)`. trains too. `LiveTrainsLayer.swift` (#505, all three maps): moves the own trains once a second along their track
   (Kit `LiveTrainMotion`, `OwnTrain` from the leg) and, with `AppSettings.showOtherTrains`, shows every other train
   around (Kit `LiveTrainField`, at most 150, nearest the middle; `OtherTrainsAnnotator` for the MKMapView maps,
   `OtherTrainMarkerView` for the SwiftUI one). bahn.jetzt's list comes at the position interval; Transitous' tracks
@@ -199,17 +214,22 @@ in `project.pbxproj`: new files join their target automatically.
   saved leg of the same train it replaced), so other check-ins count only for stations. Series also count a planned
   series (`TrainSeriesTag` remembers it until a Tz is seen); liveries and trainsets need the Tz. "Neu" badges: IDs collected since the last
   visit (`newCollectionIDs`, UserDefaults `collectionSeenIDs`, the first computation is the starting point).
+  Fahrkarte (#504) shows the categories as small tickets and items as round stamps, dashed until collected.
 - `Features/Tickets/` – `TicketLookupView` (bahn.de's "Auftragssuche" in a hidden SwiftUI `WebView`:
   `DBOrderPage.fillScript` fills the form, `fetchScript` fetches order + PDFs inside the page; shown only when bahn.de
   asks for more, e.g. a captcha), `TicketView` (full-brightness barcode, PDF, `AddToWalletButton`, "Zugbindung
   aufgehoben"), `TicketButton` (in `JourneyDetailView` once the journey has tickets), `AddTicketButton`,
-  `TicketsListView` (Settings → Gespeicherte Tickets; "Zeitkarten" like the Deutschland-Ticket from a screenshot via
+  `TicketsListView` (Settings → Ticket & Reise → Gespeicherte Tickets; "Zeitkarten" like the Deutschland-Ticket from a screenshot via
   `PhotosPicker`, `TravelPassView`), `SeatReservationViews` (`ReservationRow` in `LegCard`;
   `AppModel.reservations(for:)`, only on the leg whose train matches; `SaveSeatButton`/`SaveSeatSheet`, #410).
-- `Features/Trips/TripsView.swift` – upcoming/past journeys, `SaveJourneyButton` (warns "Zug ist
+  `TicketFace` (#504) lays out `TicketView` and `TravelPassView` in both designs: Minimal barcode plus a details
+  `Card`; Fahrkarte one ticket (`ticketBackground()`) with the barcode between two `TicketPerforation`s and the
+  `TicketDetail`s as `TicketFieldLabel` capitals over their values.
+- `Features/Trips/TripsView.swift` – upcoming/past journeys (`PastTripsView` under a header per month; #504
+  Fahrkarte draws them as `PastTripTicket`, like the search page's `TripTicket`), `SaveJourneyButton` (warns "Zug ist
   reservierungspflichtig", in bike mode also "Fahrradreservierung nötig" / "Keine Fahrradmitnahme", via
   `AppModel.saveWarnings`; ticket/reservation imports never warn).
-- Bike mode (#398): Settings → Fahrrad (`AppSettings.bikeOption`: Ausblenden (default), Klapprad, Fahrrad; synced). Unless
+- Bike mode (#398): Settings → Ticket & Reise → Fahrrad (`AppSettings.bikeOption`: Ausblenden (default), Klapprad, Fahrrad; synced). Unless
   hidden, the search options get "Mit Klapprad"/"Mit Fahrrad" (`AppSettings.searchWithBike`, carried as
   `ConnectionSearch.withBike`; results aren't filtered); `AppSettings.bike(searchingWithBike:)` gives the bike in effect.
   `JourneyDetailView` sets the environment value `bikeMode`: `LegCard` shows `BikeTransportRow`
@@ -229,7 +249,8 @@ in `project.pbxproj`: new files join their target automatically.
   `TraewellingLoginButton`, `CustomEmojiViews` (`EmojiMessageField`, `EmojiText`), `CheckinDetailSheet` ("Check-in
   ansehen" for check-ins made in the app, `AppModel.checkinStatusIDs`: edit text/visibility/trip type/tags, delete,
   "Mitreisende"), `CheckoutPrompt` (removing a journey with check-ins: check out at the last stop reached via
-  `TraewellingClient.earlyExit`, delete them, or keep them).
+  `TraewellingClient.earlyExit`, delete them, or keep them). `CheckinTicket` (#504): Minimal a `Card`, Fahrkarte a
+  `ticketBackground()` ticket with the line above a perforation; small buttons in cards use `.compactActionStyle()`.
   `FollowedCheckinsSection` (#196): who the user follows is checked in now, above "Deine Reisen"
   (`AppModel.followedCheckins`, every 2 min while Verbindungen shows, `keepFollowedCheckinsFresh`; one entry per person
   via `TraewellingClient.grouped`). Detail: train (`LegTripSheet`, hidden for manual trips), map with live position
@@ -251,20 +272,45 @@ in `project.pbxproj`: new files join their target automatically.
   `PassengerRightsCard` in details ("Anspruch auf 25/50 % Entschädigung", "Antrag vorbereiten" →
   `PassengerRightsRequestSheet` with DB's form fields, copy buttons, link). `AppModel.passengerRightsClaim(for:)` feeds
   Kit `PassengerRights` (journey, earlier plans, tickets, BahnCard 100 setting); `notifyPassengerRights` notifies once
-  per level after arrival and keeps the worst claim in `SavedJourney.recordedClaim`. Never shows amounts.
+  per level after arrival and keeps the worst claim in `SavedJourney.recordedClaim`. Never shows amounts. Fahrkarte
+  (#504) draws the card as a small ticket with the percentage large.
 - `Features/Sharing/` – shared-journey and DB-share previews; `JourneyShareButton` (menu: "Reise teilen" short link,
   falls back to the long one, `UIActivityViewController`; "Ankunft teilen" #317 adds an `ArrivalShare`, until 2 h after the arrival).
+  `.roundActionBackground()` draws its and `CalendarButton`'s 40 pt circle in either design.
 - `Features/Commute/` – regular trips (#397): `RegularTripButton` (↻ next to "Gespeichert") → `RegularTripEditor` (weekdays,
-  question 15–60 min before, delay threshold, "Pausieren bis"); Settings → Meine Reisen → `RegularTripsView`. `CommuteModel.swift`:
+  question 15–60 min before, delay threshold, "Pausieren bis"); Settings → Ticket & Reise → `RegularTripsView`. `CommuteModel.swift`:
   `AppModel.regularTrips` (synced, `CloudList` key `regularTrips`), `scheduleCommuteQuestions()` (one-shot "Fährst du heute?" for
   14 days, max 40, actions "Ja, ich fahre"/"Heute nicht"), `confirmCommute` (Kit `RegularTripPlanner` → `SavedJourney` with
   `commute: CommuteDay`, ID per trip and day), `syncCommutePush()` (`commutePushWatched`: journeys the Worker reports on). A tap
   asks in the app (`commuteQuestionAlert`), a Worker push opens its journey. `AppModel.refresh` keeps them quiet: delays only from
   the threshold (`CommuteAlerts`), delay reasons only then, cancellations/platforms/transfers left to the Worker when it watches.
-- `Features/Settings/` – settings (privacy link, "not affiliated with DB"), `DataSourcesView` (every source with its
-  attribution/license; keep current when adding one), `BC100RulesView`, quick tags.
+- `Features/Settings/` – settings (#547): the main page is the quick setup row, Design and menus (`SettingsPages.swift`:
+  Ticket & Reise, Mitteilungen, Kalender, Suche & Karten, Zusatzinfos, Träwelling, Für Profis), then Datenquellen,
+  Datenschutz (privacy link, "not affiliated with DB") and Suchverlauf löschen. `SettingsSections.swift`: the sections
+  shared by the menus and the quick setup, each with its side effects (asking for notifications, rescheduling
+  reminders), so add a setting there when the quick setup should offer it. `QuickSetupView` (Kit `QuickSetupStep`:
+  ticket, travel, notifications, calendar, design; one page each, choices apply at once) opens from Settings and once on
+  the first start (`RootView`, Kit `QuickSetup.opensOnLaunch`: not after an update from a version without it,
+  `AppSettings.quickSetupSeen` per device; DEBUG launch argument `-forceFirstStart YES`: every start acts like the first one).
+  `DataSourcesView` (every source with its attribution/license; keep current when adding one), `BC100RulesView`, quick tags. `SettingsDesign.swift` (#504):
+  `.designedForm()` (forms and lists on `AppBackground`), `FormHeader` (section titles, rounded in Fahrkarte),
+  `Color.settingsIcon` (grey symbol tiles; the accent only on Design and Mein Ticket), `TicketFieldLabel`.
+  `DesignSettingsView` (#504): the design (Kit `AppDesign`) with a miniature of each drawn with the real components,
+  the accent color (Kit `AccentChoice`: ten `AccentPreset`s or a color of one's own) and `AppLogoView`. Each preset
+  has an alternate app icon (`AppIcon-<Name>` in the asset catalog, listed in `ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES`);
+  a custom color gets the nearest preset's; `Theme.applyAppIcon()` switches it when the page closes.
 - `Shared/DesignSystem.swift` – `Card`, `SectionHeader`, `LineBadge`, `TimeStack`, `DelayPill`, `PlatformBadge`,
   `InfoChip`, `OperatorLabel`, `Color.brand`, `.transition(.fold)` …; reuse these instead of new styling.
+  `Shared/Theme.swift` holds the picked design and accent (per device); `Color.brand`, `.brandDeep` and `.ticket` read
+  the accent there, so views redraw when it changes, and `.appTheme()` at the root sets `\.appDesign` and the tint.
+  Never hard-code the red: use `Color.brand` or derive from it. Accent as text, chips or small symbols: `Color.brandText`
+  (moved just far enough towards black/white to read 4.5:1 on the card in light and dark mode, Kit `RGBColor.readable(on:)`);
+  on an accent fill `Color.onBrand` (white, black where white wouldn't read, `readableForeground`); a small fill that must
+  show even with a very light accent uses `brandText` with `onBrandText`. `Card`, `AppBackground`, `SectionHeader`, `IconTile`
+  and `.pageButtonStyle(.regular/.circle/.prominent)` draw either design: Minimal has the classic cards with light
+  shadows, a faint glow, sentence-case titles with a grey icon, softly tinted icon tiles and flat buttons (the main
+  action filled with `Color.brand`); Fahrkarte has flat outlined cards on `Color.canvas`, bold rounded titles, grey
+  symbols and Liquid Glass buttons. Branch on `@Environment(\.appDesign)` in a page only where the layout differs.
 - `Shared/ClosesMenusOnScroll.swift` – `.closesMenusOnScroll()` on scroll views with a `Menu` or menu `Picker` in their
   content (journey details, Settings, check-in): an open menu otherwise slides along while the content scrolls.
   Only for a scroll that starts at rest (a menu can only be open then), not when the page is grabbed again while it
@@ -290,8 +336,8 @@ in `project.pbxproj`: new files join their target automatically.
   `BigStations` (DB price class 1 and 2, shown as "Großer"/"Mittlerer Bahnhof", by DHID via `StationNames.dhid(for:)`; boarding, alighting, changing; arriving
   and leaving within 3 h is one visit). Only arrived, not cancelled legs; IC 1 coach sets don't count.
 - `StationNames` (#205) – `Station.displayName`: DB's name for German stations, the national railway's with accents
-  abroad, from `Resources/StationNames.json` (OpenStation with DHID/EVA, names from DB RIS via bahn.expert's
-  `stopPlace/byTerm`). Matched by the DHID in the stop ID ("de:08135:0620" = "de:08135:620"), EVA, `aliases` (non-German
+  abroad, from `Resources/StationNames.json` (OpenStation with DHID/EVA, names from DB RIS::Stations by EVA
+  number, via DB Streckenagent's copy). Matched by the DHID in the stop ID ("de:08135:0620" = "de:08135:620"), EVA, `aliases` (non-German
   feeds' train stops within 300 m, matched within 150 m; German feeds get none, those can be trams), same name within
   600 m (`nameWords`: "…bahnhof"/"…bf" stem), brackets-only difference within 300 m unless they name a mode or border
   point, a part of it within 150 m; abroad `StationNames.folded` within 3 km. Only the shown name changes: `id`/`name`
@@ -397,7 +443,7 @@ in `project.pbxproj`: new files join their target automatically.
   `OccupancyForecast` (highest level from boarding up to the exit). Levels and texts as bahn.de's own `auslastungstexte`:
   1 gering, 2 mittel, 3 hoch, 4/99 außergewöhnlich hoch (`OccupancyLevel`). `occupancy(for: leg)` / `(for: trip, boarding:exit:)`
   share the `journeyCourse` cache (30 min old is fine); `cachedOccupancy(for:)` never asks bahn.de (search results).
-  Shown for the class in Settings → Reiseklasse (`AppSettings.travelClass`, default 2nd, synced): `OccupancyButton`
+  Shown for the class in Settings → Ticket & Reise → Reiseklasse (`AppSettings.travelClass`, default 2nd, synced): `OccupancyButton`
   (icon, tap → words) by the train name in `LegCard` and `TripContent`, `OccupancyDetails` in `LegCard` "Mehr",
   `OccupancyIcon` in `JourneyCard`. DEBUG builds log the raw field per stop (category `occupancy`).
 - `Transit/BahnDe/SeatMap.swift` – DB's seat map per ICE coach (#365, `Resources/SeatMaps.json`): coach numbers, type,
@@ -416,7 +462,7 @@ in `project.pbxproj`: new files join their target automatically.
   platform): from a seat walking there through any class (`otherClass`, „In Wagen 21 (2. Klasse) wechseln"), without
   one, where your class stops 60 m short of it, its nearest coach („… möglichst nah am Ausgang", `nearestOfClass`)
   and from `approachTime` (15 min) before arriving the front in any class (`pickOut`); the connecting
-  train's reservation is the target; class from a seat's coach, else the ticket, else Settings → Reiseklasse,
+  train's reservation is the target; class from a seat's coach, else the ticket, else Settings → Ticket & Reise → Reiseklasse,
   `TravelClass.number`; a seat saved on the train, `AppModel.savedSeats`, counts like a reservation; said only when some
   coach of the train stands 60 m worse than the best of your class, so also when all of your class fit): the arriving train's Wagenreihung at the transfer
   station (its departure there, from its run) against the connecting train's at the same platform
@@ -484,7 +530,7 @@ in `project.pbxproj`: new files join their target automatically.
   description ("zu Gleis 4/5", "1-3"), else the OSM lift on a platform within 30 m; every track along that platform counts.
   `Journey.liftAlerts(among:)`: start, transfers to another platform (not `sharePlatform`), destination, only ahead and
   with a known track. App (`App/LiftAlerts.swift`): banner on `StationBoardView`, `TransferRow`/`LegCard` in
-  `JourneyDetailView`; with Settings → Stufenfrei reisen (`AppSettings.stepFree`, synced) also `JourneyCard`, a
+  `JourneyDetailView`; with Settings → Ticket & Reise → Stufenfrei reisen (`AppSettings.stepFree`, synced) also `JourneyCard`, a
   notification per lift and place (`notifiedIssues`) and the exit reminder's text. DEBUG: `-debugBrokenLifts YES`.
 - `Transit/Timetables/` – DB Timetables XML through `betterbahn2` (holds the key; only where App Attest works). Other
   station levels via `/station` `meta`; no requests for trains over 4 h ago (`changesMemory`); without live data no
@@ -532,6 +578,8 @@ in `project.pbxproj`: new files join their target automatically.
   Träwelling's board is MOTIS' next 50 departures within 200 m, so it also loads only the leg's kind
   (`travelType`, `boardTravelTypes`/`travelType(for:)`). The same train can be on the board twice at the same time (Austrian and
   German data, #449): `matches` lists every candidate and `segments(for:departures:)` takes the first trip with both stops.
+  A candidate has the leg's name or run number (`runNumber(of:)`; "RE 6" alone is a line number, not a run); another
+  brand with the same number (ÖBB's RJ 177 = ICE 177) only counts for long-distance trains (#485).
   `replaceWithManualTrip` (creates the trip, deletes, re-checks in).
   `TraewellingCheckinEdit`: `status(id:)`, `updateStatus`, `deleteStatus`, `tags`, `applyTagChanges`/`StatusTagChanges`,
   exit moves, `earlyExit`, `fellowTravellers(of:)` (`trips/{id}/statuses`). `FollowedCheckinPush`
@@ -552,7 +600,8 @@ in `project.pbxproj`: new files join their target automatically.
   order API client: bahn.de blocks it outside its page.
 - `Tickets/PassengerRights.swift` (#311) – `PassengerRights.claim(for:earlierPlans:hasTicket:hasBahnCard100:)`: delay
   at the destination against the first booked plan (`previousVersions`), 25 % from 60 min, 50 % from 120; only with a
-  ticket, BahnCard 100 or a long-distance train; `requestFields` for DB's form.
+  ticket, BahnCard 100 or a long-distance train; `requestFields` for DB's form (day, departure and trains of the
+  booked plan, `bookedPlan`; after a replan also "Gefahrene Züge").
 - `Sharing/` – `JourneyShareLink` (encoding, payload limits, short IDs), `ShortShareLinkClient` (long link as
   fallback; `arrivalURL`), `ArrivalShare` (#317: last train from boarding to exit, bahn.de journey ID via
   `BahnDeClient.journeyId(for:)`, EVA numbers), `DBShare` + `DBShareImporter` (DB Navigator/bahn.de shared text).
@@ -584,6 +633,17 @@ in `project.pbxproj`: new files join their target automatically.
   (`TrainStatisticsSection` in `LegCard` "Mehr"; in `TripContent` folded into one line, `TrainStatisticsDisclosure`
   with `TrainStatisticsRows.headline`, so the stops don't jump when the figures arrive), tight transfer warning
   (`Journey.tightTransfers`, `TrainStatistics.Stop.transferOutlook`) in `TransferRow` and `JourneyCard`.
+- `Statistics/TrainStatisticsRun.swift` – the delays a train really had on one day, for past journeys whose live data is
+  gone (`SavedJourney.liveDataLifetime`, after which `AppModel.pastJourneys` shows planned times): `TrainStatistics.Run`
+  (the Worker's `run` for a request with a `day`: stops with delays, cancelled/additional, platform),
+  `TrainStatisticsClient.runs(for:)` (a day per train, batches of 8, answers in the order asked), `Leg.statisticsRunQuery`
+  (only DB trains the statistics know, a leg past `runMinimumAge`, no real time yet, regional ones for 29 days,
+  long-distance ones for 360) and `Leg.applying(_:)`/`Journey.applying(_:)` (planned + delay on the leg and its stops,
+  lower levels of big stations folded into the main station, cancelled stops/runs marked; a leg with any real time
+  is never touched). `AppModel.fillDelaysFromStatistics(only:)` (from `PastTripsView` and an opened past
+  `JourneyDetailView`, off with "Zugstatistik anzeigen") asks up to 24 legs in batches 1 s apart, keeps the answer in
+  `SavedJourney.statisticsRuns` by `Leg.id` (a leg without a run isn't asked again once a server that knows days said so (`run: null`, `LegStatistics.confirmed`; an answer without the `run` key is an older Worker, `RunError.dayNotSupported`, nothing is remembered), except for the last 3 days, when
+  the server may not have the day yet; a failed request is tried again next time), and `pastJourneys` applies them.
 - `Support/HTTPClient.swift` – shared HTTP, `TransitError`, `JSONDecoding`; every request sends `identifyingUserAgent`
   (only `BahnDeClient` sends browser agents). `ProductStyle`: `Line.color` = product color, or `Line.lineColorHex`
   (S-/U-Bahn Berlin tables, #206), else `Line.feedColorHex` (Transitous `routeColor` if white text stays readable,

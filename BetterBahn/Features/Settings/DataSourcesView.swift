@@ -1,3 +1,4 @@
+import BetterBahnKit
 import SwiftUI
 
 /// Settings → Datenquellen: every service the app gets data from, with the attribution their terms ask for
@@ -32,11 +33,13 @@ struct DataSourcesView: View {
         Source(name: "Deutsche Bahn – OpenStation der DB InfraGO", usage: String(localized: "Namen der Bahnhöfe, Gleise am selben Bahnsteig und Aufzüge"),
                url: URL(string: "https://mobilithek.info/offers/879076212433727488")!,
                license: (String(localized: "Lizenz: CC0 1.0"), URL(string: "https://creativecommons.org/publicdomain/zero/1.0/deed.de")!)),
+        Source(name: "Deutsche Bahn – RIS::Stations", usage: String(localized: "Namen der Bahnhöfe, wie die Bahn sie anzeigt"),
+               url: URL(string: "https://developers.deutschebahn.com/db-api-marketplace/apis/product/ris-stations")!),
         Source(name: "bahn.de", usage: String(localized: "Wagenreihung, Zusatzhalte, Gleise und Zugnamen; Zeichnungen der ICE-Baureihen aus dem Fahrzeuglexikon, © Deutsche Bahn AG"),
                url: URL(string: "https://www.bahn.de")!),
         Source(name: "vagonweb.cz", usage: String(localized: "Geplante Wagenreihungen und Zugtypen, mit Erlaubnis von vagonweb"),
                url: URL(string: "https://www.vagonweb.cz")!),
-        Source(name: "bahn.expert", usage: String(localized: "Zugtypen, Zugsuche nach Nummer, Namen der Bahnhöfe; Sitzpläne der ICE aus den Wagenreihungsplänen, © Deutsche Bahn AG"), url: URL(string: "https://bahn.expert")!),
+        Source(name: "bahn.expert", usage: String(localized: "Zugtypen und Zugsuche nach Nummer; Sitzpläne der ICE aus den Wagenreihungsplänen, © Deutsche Bahn AG"), url: URL(string: "https://bahn.expert")!),
         Source(name: "bahn.jetzt", usage: String(localized: "Zugpositionen auf der Karte"), url: URL(string: "https://bahn.jetzt")!),
         Source(name: "Träwelling", usage: String(localized: "Check-ins"), url: URL(string: "https://traewelling.de")!),
         Source(name: "Open-Meteo", usage: String(localized: "Wetter bei Ankunft und beim Umstieg"),
@@ -53,6 +56,8 @@ struct DataSourcesView: View {
                url: URL(string: "https://commons.wikimedia.org/wiki/Category:Logos_of_railway_companies")!),
     ]
 
+    @Environment(\.appDesign) private var design
+
     var body: some View {
         List {
             Section {
@@ -60,15 +65,16 @@ struct DataSourcesView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Link(source.name, destination: source.url)
                             .font(.body.weight(.semibold))
+                            .fontDesign(design == .fahrkarte ? .rounded : nil)
                         Text(source.usage)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                         if let license = source.license {
                             Link(license.title, destination: license.url)
-                                .font(.footnote)
+                                .font(.footnote.weight(.medium))
                         }
                     }
-                    .padding(.vertical, 2)
+                    .padding(.vertical, 4)
                     // Two links in one row: without this, a tap anywhere opens both.
                     .buttonStyle(.borderless)
                 }
@@ -76,6 +82,7 @@ struct DataSourcesView: View {
                 Text("Karten: Apple Karten. BetterBahn ist ein privates Projekt und steht in keiner Verbindung zur Deutschen Bahn AG oder den anderen Diensten.")
             }
         }
+        .designedForm()
         .navigationTitle("Datenquellen")
         .navigationBarTitleDisplayMode(.inline)
     }

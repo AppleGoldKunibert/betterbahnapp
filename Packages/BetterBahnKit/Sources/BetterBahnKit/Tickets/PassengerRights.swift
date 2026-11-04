@@ -70,10 +70,7 @@ public enum PassengerRights {
     public static func claim(for journey: Journey, earlierPlans: [Journey] = [], hasTicket: Bool,
                              hasBahnCard100: Bool, now: Date = .now) -> PassengerRightsClaim? {
         guard let last = journey.legs.last, !last.cancelled, let arrival = journey.arrival else { return nil }
-        let destination = last.destination
-        let original = earlierPlans.last { plan in
-            plan.legs.last.map { $0.destination.isSamePlace(as: destination) } ?? false
-        }
+        let original = bookedPlan(replacedBy: journey, earlierPlans: earlierPlans)
         let baseline = original ?? journey
         guard let planned = baseline.arrival?.planned else { return nil }
         // Without live data nothing is known about the real arrival, unless a replacement was chosen.
@@ -97,6 +94,15 @@ public enum PassengerRights {
                                     isFlatRate: hasBahnCard100)
     }
 
+    /// The oldest of `earlierPlans` (newest first) that ended at the same place as `journey`: the plan as
+    /// it was booked, before a cancellation or missed connection replaced it. Nil when it wasn't replaced.
+    public static func bookedPlan(replacedBy journey: Journey, earlierPlans: [Journey]) -> Journey? {
+        guard let destination = journey.legs.last?.destination else { return nil }
+        return earlierPlans.last { plan in
+            plan.legs.last.map { $0.destination.isSamePlace(as: destination) } ?? false
+        }
+    }
+
     /// One thing DB's form asks for.
     public struct RequestField: Sendable, Hashable, Identifiable {
         public var label: String
@@ -105,8 +111,10 @@ public enum PassengerRights {
     }
 
     /// Everything DB's form asks for: day, route, trains, planned and real times and the order
-    /// numbers of the tickets.
-    public static func requestFields(for journey: Journey, claim: PassengerRightsClaim, orderNumbers: [String]) -> [RequestField] {
+    /// numbers of the tickets. Day, route, departure and trains are those of the plan as booked
+    /// (`bookedPlan`); when it was replaced, the trains really taken follow separately.
+    public static func requestFields(for journey: Journey, earlierPlans: [Journey] = [], claim: PassengerRightsClaim,
+                                     orderNumbers: [String]) -> [RequestField] {
         let berlin = TimeZone(identifier: "Europe/Berlin") ?? .current
         let german = Locale(identifier: "de_DE")
         func time(_ date: Date) -> String {
@@ -115,18 +123,29 @@ public enum PassengerRights {
         func day(_ date: Date) -> String {
             date.formatted(Date.FormatStyle(date: .numeric, time: .omitted, locale: german, timeZone: berlin))
         }
+        func trains(of plan: Journey) -> String {
+            plan.transitLegs.map { leg in
+                let name = leg.line?.displayName ?? String(kit: "Zug")
+                return "\(name): \(leg.origin.displayName) \(time(leg.departure.planned)) → \(leg.destination.displayName) \(time(leg.arrival.planned))"
+            }.joined(separator: "\n")
+        }
+        let original = bookedPlan(replacedBy: journey, earlierPlans: earlierPlans)
+        let booked = original ?? journey
         var fields: [RequestField] = []
-        if let departure = journey.departure?.planned { fields.append(RequestField(label: String(kit: "Reisedatum"), value: day(departure))) }
-        if let first = journey.legs.first, let last = journey.legs.last {
+        if let departure = booked.departure?.planned { fields.append(RequestField(label: String(kit: "Reisedatum"), value: day(departure))) }
+        if let first = booked.legs.first, let last = booked.legs.last {
             fields.append(RequestField(label: String(kit: "Von"), value: first.origin.displayName))
             fields.append(RequestField(label: String(kit: "Nach"), value: last.destination.displayName))
         }
-        if let departure = journey.departure?.planned { fields.append(RequestField(label: String(kit: "Geplante Abfahrt"), value: time(departure))) }
-        let trains = journey.transitLegs.map { leg in
-            let name = leg.line?.displayName ?? String(kit: "Zug")
-            return "\(name): \(leg.origin.displayName) \(time(leg.departure.planned)) → \(leg.destination.displayName) \(time(leg.arrival.planned))"
+        if let departure = booked.departure?.planned { fields.append(RequestField(label: String(kit: "Geplante Abfahrt"), value: time(departure))) }
+        let bookedTrains = trains(of: booked)
+        if original == nil {
+            if !bookedTrains.isEmpty { fields.append(RequestField(label: String(kit: "Züge"), value: bookedTrains)) }
+        } else {
+            if !bookedTrains.isEmpty { fields.append(RequestField(label: String(kit: "Gebuchte Züge"), value: bookedTrains)) }
+            let takenTrains = trains(of: journey)
+            if !takenTrains.isEmpty { fields.append(RequestField(label: String(kit: "Gefahrene Züge"), value: takenTrains)) }
         }
-        if !trains.isEmpty { fields.append(RequestField(label: String(kit: "Züge"), value: trains.joined(separator: "\n"))) }
         fields.append(RequestField(label: String(kit: "Geplante Ankunft"), value: time(claim.plannedArrival)))
         fields.append(RequestField(label: String(kit: "Tatsächliche Ankunft"), value: time(claim.actualArrival)))
         fields.append(RequestField(label: String(kit: "Verspätung am Ziel"), value: String(kit: "%lld Minuten", claim.delayMinutes)))
@@ -137,8 +156,9 @@ public enum PassengerRights {
     }
 
     /// `requestFields` as one text to copy.
-    public static func requestText(for journey: Journey, claim: PassengerRightsClaim, orderNumbers: [String]) -> String {
-        requestFields(for: journey, claim: claim, orderNumbers: orderNumbers).map { field in
+    public static func requestText(for journey: Journey, earlierPlans: [Journey] = [], claim: PassengerRightsClaim,
+                                   orderNumbers: [String]) -> String {
+        requestFields(for: journey, earlierPlans: earlierPlans, claim: claim, orderNumbers: orderNumbers).map { field in
             field.value.contains("\n") ? "\(field.label):\n\(field.value)" : "\(field.label): \(field.value)"
         }.joined(separator: "\n")
     }
