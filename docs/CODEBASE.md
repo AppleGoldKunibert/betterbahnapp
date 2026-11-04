@@ -621,6 +621,17 @@ in `project.pbxproj`: new files join their target automatically.
   (`TrainStatisticsSection` in `LegCard` "Mehr"; in `TripContent` folded into one line, `TrainStatisticsDisclosure`
   with `TrainStatisticsRows.headline`, so the stops don't jump when the figures arrive), tight transfer warning
   (`Journey.tightTransfers`, `TrainStatistics.Stop.transferOutlook`) in `TransferRow` and `JourneyCard`.
+- `Statistics/TrainStatisticsRun.swift` – the delays a train really had on one day, for past journeys whose live data is
+  gone (`SavedJourney.liveDataLifetime`, after which `AppModel.pastJourneys` shows planned times): `TrainStatistics.Run`
+  (the Worker's `run` for a request with a `day`: stops with delays, cancelled/additional, platform),
+  `TrainStatisticsClient.runs(for:)` (a day per train, batches of 8, answers in the order asked), `Leg.statisticsRunQuery`
+  (only DB trains the statistics know, a leg past `runMinimumAge`, no real time yet, regional ones for 29 days,
+  long-distance ones for 360) and `Leg.applying(_:)`/`Journey.applying(_:)` (planned + delay on the leg and its stops,
+  lower levels of big stations folded into the main station, cancelled stops/runs marked; a leg with any real time
+  is never touched). `AppModel.fillDelaysFromStatistics(only:)` (from `PastTripsView` and an opened past
+  `JourneyDetailView`, off with "Zugstatistik anzeigen") asks up to 24 legs in batches 1 s apart, keeps the answer in
+  `SavedJourney.statisticsRuns` by `Leg.id` (a leg without a run isn't asked again, except for the last 3 days, when
+  the server may not have the day yet; a failed request is tried again next time), and `pastJourneys` applies them.
 - `Support/HTTPClient.swift` – shared HTTP, `TransitError`, `JSONDecoding`; every request sends `identifyingUserAgent`
   (only `BahnDeClient` sends browser agents). `ProductStyle`: `Line.color` = product color, or `Line.lineColorHex`
   (S-/U-Bahn Berlin tables, #206), else `Line.feedColorHex` (Transitous `routeColor` if white text stays readable,

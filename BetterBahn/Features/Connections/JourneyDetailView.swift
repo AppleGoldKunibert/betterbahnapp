@@ -82,6 +82,14 @@ struct JourneyDetailView: View {
             shownCheckin = ShownCheckin(leg: leg, statusId: id)
         }
         .task {
+            // An old journey gets the delays its day really had from the train statistics.
+            guard readOnly, let entry = model.pastJourneys.first(where: { $0.journey == journey }) else { return }
+            await model.fillDelaysFromStatistics(only: entry.id)
+            if let filled = model.pastJourneys.first(where: { $0.id == entry.id }), filled.journey != journey {
+                withAnimation { journey = filled.journey }
+            }
+        }
+        .task {
             if !readOnly, model.savedEntry(for: journey) == nil, let seen = model.liveJourneys.value(for: journey.id) {
                 journey = seen
             }
