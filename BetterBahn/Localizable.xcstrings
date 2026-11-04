@@ -1795,6 +1795,16 @@
         }
       }
     },
+    "An Check-in erinnern" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remind Me to Check In"
+          }
+        }
+      }
+    },
     "An diesen Tagen fragen wir kurz vor der Abfahrt, ob du fährst. Sagst du Ja, wird die Fahrt gespeichert und meldet sich nur bei Problemen." : {
       "localizations" : {
         "en" : {
@@ -3731,6 +3741,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Enter Boarding and Exit Yourself"
+          }
+        }
+      }
+    },
+    "Einchecken" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check In"
           }
         }
       }
@@ -8848,6 +8868,16 @@
         }
       }
     },
+    "Welcher Zug?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Which train?"
+          }
+        }
+      }
+    },
     "Weniger" : {
       "localizations" : {
         "en" : {
@@ -8964,6 +8994,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Wind %lld km/h"
+          }
+        }
+      }
+    },
+    "Wir erinnern dich 5 Minuten nach der Abfahrt." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "We remind you 5 minutes after departure."
           }
         }
       }
