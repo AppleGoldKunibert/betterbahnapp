@@ -11,6 +11,206 @@
         }
       }
     },
+    "Alles Weitere findest du in den Einstellungen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You'll find everything else in Settings."
+          }
+        }
+      }
+    },
+    "Dein Ticket" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your Ticket"
+          }
+        }
+      }
+    },
+    "Die wichtigsten Einstellungen in %lld Schritten." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The most important settings in %lld steps."
+          }
+        }
+      }
+    },
+    "Für Strecken, die du oft fährst: Wir fragen kurz vor der Abfahrt, ob du heute fährst." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "For routes you travel often: we ask shortly before departure whether you're travelling today."
+          }
+        }
+      }
+    },
+    "Los geht’s" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Let’s Go"
+          }
+        }
+      }
+    },
+    "Mit welchem Ticket fährst du? Die Suche kann dann nur Züge zeigen, in denen es gilt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Which ticket do you travel with? The search can then show only trains it's valid on."
+          }
+        }
+      }
+    },
+    "Nimmst du ein Fahrrad mit oder brauchst du einen Aufzug?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Do you take a bike along or need a lift?"
+          }
+        }
+      }
+    },
+    "Richte die App in %lld kurzen Schritten ein. Alles kannst du später in den Einstellungen ändern." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Set up the app in %lld short steps. You can change everything later in Settings."
+          }
+        }
+      }
+    },
+    "Schnelleinrichtung" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quick Setup"
+          }
+        }
+      }
+    },
+    "Schritt %lld von %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Step %1$lld of %2$lld"
+          }
+        }
+      }
+    },
+    "Später" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Later"
+          }
+        }
+      }
+    },
+    "Such dir aus, wie die App aussieht." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose how the app looks."
+          }
+        }
+      }
+    },
+    "Suche & Karten" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search & Maps"
+          }
+        }
+      }
+    },
+    "Ticket & Reise" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ticket & Travel"
+          }
+        }
+      }
+    },
+    "Trag deine Reisen in den Kalender ein, auf Wunsch automatisch." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add your journeys to your calendar, automatically if you like."
+          }
+        }
+      }
+    },
+    "Unterwegs" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On the Way"
+          }
+        }
+      }
+    },
+    "Weiter" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Next"
+          }
+        }
+      }
+    },
+    "Willkommen bei BetterBahn" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Welcome to BetterBahn"
+          }
+        }
+      }
+    },
+    "Wir sagen dir Bescheid, wenn auf deiner Reise etwas nicht klappt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "We let you know when something goes wrong on your journey."
+          }
+        }
+      }
+    },
+    "Zusatzinfos" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Extra Info"
+          }
+        }
+      }
+    },
     "·" : {
       "localizations" : {
         "en" : {

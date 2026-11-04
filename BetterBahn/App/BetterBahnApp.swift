@@ -144,6 +144,8 @@ struct RootView: View {
     /// A train's live map opened from a widget (`TrainMapLink`).
     @State private var linkedTrainMap: LinkedTrainMap?
     @State private var selectedTab = RootTab.connections
+    /// The quick setup on the first start (#547).
+    @State private var showQuickSetup = false
 
     enum RootTab: Hashable {
         case connections, map, departures, settings
@@ -258,6 +260,25 @@ struct RootView: View {
         .sheet(item: $incomingSharedJourney) { SharedJourneyPreviewView(journey: $0) }
         .sheet(item: $incomingDBShare) { ImportedJourneyView(text: $0.text) }
         .sheet(item: $linkedTrainMap) { LiveTrainMapView(route: $0.route) }
+        .sheet(isPresented: $showQuickSetup) { QuickSetupView(welcome: true) }
+        .task {
+            // A shared journey or widget link opened the app: that comes first, the setup next time.
+            guard incomingSharedJourney == nil, incomingDBShare == nil, linkedTrainMap == nil else { return }
+            #if DEBUG
+            // Launch argument `-showQuickSetup YES`: the first start's setup on a device that has used the app.
+            if UserDefaults.standard.bool(forKey: "showQuickSetup") {
+                showQuickSetup = true
+                return
+            }
+            #endif
+            let hasUsedApp = !model.savedJourneys.isEmpty || !model.favoriteStations.isEmpty || !model.recentSearches.isEmpty
+            if QuickSetup.opensOnLaunch(seen: model.settings.quickSetupSeen, hasUsedApp: hasUsedApp) {
+                showQuickSetup = true
+            } else {
+                // An update from a version without it: it stays in Settings from now on.
+                model.settings.quickSetupSeen = true
+            }
+        }
         .alert("Reise-Link ungültig", isPresented: $showInvalidShareLinkAlert) {
             Button("OK", role: .cancel) {}
         } message: {
