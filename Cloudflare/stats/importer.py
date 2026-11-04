@@ -67,8 +67,6 @@ class Day:
         self.change_stops = {}
         # The latest snapshot of changes read (Berlin local time, as the dataset keeps it).
         self.latest_changes = None
-        # eva → the station's name, as DB's responses spell it (`<timetable station="Fulda">`).
-        self.names = {}
 
     def read(self, api, url, xml, snapshot):
         if not xml or "<s " not in xml:
@@ -76,15 +74,11 @@ class Day:
         root = ET.fromstring(xml)
         if api == "timetables/v1/plan":
             # .../plan/<eva>/<yymmdd>/<hh>
-            raw = url.rstrip("/").split("/")[-3]
-            eva = main_station(raw)
-            self.note_name(raw, eva, root)
+            eva = main_station(url.rstrip("/").split("/")[-3])
             for stop in root.findall("s"):
                 self.plan[stop.get("id")] = (eva, attributes(stop.find("tl")), attributes(stop.find("ar")), attributes(stop.find("dp")))
         elif api == "timetables/v1/fchg":
-            raw = url.rstrip("/").split("/")[-1]
-            eva = main_station(raw)
-            self.note_name(raw, eva, root)
+            eva = main_station(url.rstrip("/").split("/")[-1])
             if self.latest_changes is None or self.latest_changes < snapshot:
                 self.latest_changes = snapshot
             for stop in root.findall("s"):
@@ -101,12 +95,6 @@ class Day:
                     previous = self.changes.get((sid, kind))
                     if previous is None or previous[0] <= snapshot:
                         self.changes[(sid, kind)] = (snapshot, event)
-
-    def note_name(self, raw, eva, root):
-        """The station's name; a lower level ("Frankfurt(Main)Hbf (tief)") only names the main station until that has its own."""
-        name = root.get("station")
-        if name and (eva not in self.names or raw.lstrip("0") == eva):
-            self.names[eva] = name
 
     def read_parquet(self, path):
         import pyarrow.parquet as pq

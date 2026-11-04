@@ -18,6 +18,7 @@ Total cancellations come first, then partial ones, each by category and number. 
 """
 
 import argparse
+import re
 import sys
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -28,6 +29,35 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "Cloudflare" / "
 import importer  # noqa: E402
 
 CATEGORY_ORDER = ["ICE", "IC", "EC", "ECE"]
+STATION = re.compile(r'<timetable[^>]*\sstation="([^"]*)"')
+
+
+class NamedDay(importer.Day):
+    """The importer's day, which also remembers the stations' names (eva → "Fulda") from the responses it reads; the
+    importer itself has no use for them. A lower level of a big station only names the main station until that has
+    its own name."""
+
+    def __init__(self):
+        super().__init__()
+        self.names = {}
+
+    def read(self, api, url, xml, snapshot):
+        super().read(api, url, xml, snapshot)
+        match = STATION.search(xml[:400]) if xml else None
+        if match and api in ("timetables/v1/plan", "timetables/v1/fchg"):
+            raw = url.rstrip("/").split("/")[-3 if api == "timetables/v1/plan" else -1]
+            eva = importer.main_station(raw)
+            if eva not in self.names or raw.lstrip("0") == eva:
+                self.names[eva] = match.group(1)
+
+
+def load_named_day(day, directory):
+    """`importer.load_day` for a `NamedDay`: the day's folder and the next one."""
+    data = NamedDay()
+    for folder in (day, day + timedelta(days=1)):
+        for path in importer.raw_files(folder):
+            data.read_parquet(importer.download(path, directory))
+    return data
 
 
 @dataclass
@@ -199,7 +229,7 @@ def main(argv=None):
     day = parse_day(args.day, today)
     if day >= today:
         sys.exit(f"{day.strftime('%d.%m.%Y')} isn't over yet; the dataset has the day after the next morning.")
-    data = importer.load_day(day, args.raw)
+    data = load_named_day(day, args.raw)
     if not importer.complete(data, day.isoformat()):
         sys.exit(f"{day.strftime('%d.%m.%Y')}: the dataset doesn't have the next morning's changes yet; try again later.")
 

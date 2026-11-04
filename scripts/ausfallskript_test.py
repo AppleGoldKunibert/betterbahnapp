@@ -25,7 +25,7 @@ def plan(eva, name, stops):
 
 
 def sample_day():
-    data = importer.Day()
+    data = ausfallskript.NamedDay()
     # ICE 784 Hamburg -> Hannover -> München: cancelled altogether. ICE 123 Hamburg -> Hannover -> Kassel -> München:
     # Hannover and Kassel cancelled, 12 minutes late at München. IC 2000: all fine. RE 9: regional, ignored.
     data.read("timetables/v1/plan", BASE + "plan/08002549/261021/06", plan("8002549", "Hamburg Hbf", [
@@ -62,6 +62,14 @@ def sample_day():
 
 
 class FindTests(unittest.TestCase):
+    def test_a_lower_level_only_names_the_main_station_until_that_has_its_own(self):
+        data = ausfallskript.NamedDay()
+        data.read("timetables/v1/plan", BASE + "plan/08098105/261021/06", '<timetable station="Frankfurt(Main)Hbf (tief)"/>', 1)
+        self.assertEqual(data.names["8000105"], "Frankfurt(Main)Hbf (tief)")
+        data.read("timetables/v1/plan", BASE + "plan/08000105/261021/06", '<timetable station="Frankfurt(Main)Hbf"/>', 1)
+        data.read("timetables/v1/plan", BASE + "plan/08098105/261021/07", '<timetable station="Frankfurt(Main)Hbf (tief)"/>', 1)
+        self.assertEqual(data.names["8000105"], "Frankfurt(Main)Hbf")
+
     def test_finds_long_distance_cancellations_total_ones_first(self):
         found = ausfallskript.find_cancellations(sample_day(), DAY)
         self.assertEqual([(c.name, c.total) for c in found], [("ICE 784", True), ("ICE 123", False)])
@@ -112,7 +120,7 @@ class CommandLineTests(unittest.TestCase):
         from unittest import mock
 
         out, err = io.StringIO(), io.StringIO()
-        with tempfile.TemporaryDirectory() as folder, mock.patch.object(importer, "load_day", return_value=data), \
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(ausfallskript, "load_named_day", return_value=data), \
                 mock.patch.object(importer, "complete", return_value=True), redirect_stdout(out), redirect_stderr(err):
             ausfallskript.main(arguments + ["--out", folder])
             names = sorted(path.name for path in Path(folder).iterdir())
