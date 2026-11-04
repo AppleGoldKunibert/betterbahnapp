@@ -74,7 +74,7 @@ jobs:
         run: |
           data="$RUNNER_TEMP/data"
           python3 scripts/make-ril100.py "$data/M1 Betriebsstellen.csv" "$data/betriebsstellen.xlsx"
-          # Needs the new Ril100.json for the stations' positions; only asks bahn.expert for new stations.
+          # Needs the new Ril100.json for the stations' positions; only asks DB's RIS::Stations for new stations.
           python3 scripts/make-station-names.py "$data/netex.xml"
           # The collection's big stations (#384), named as in the new StationNames.json.
           python3 scripts/make-big-stations.py "$data/netex.xml"
