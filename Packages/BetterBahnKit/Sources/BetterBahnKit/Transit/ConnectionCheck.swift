@@ -62,6 +62,8 @@ public extension Journey {
         for index in 1..<transit.count {
             let arriving = transit[index - 1], departing = transit[index]
             guard !arriving.cancelled, !departing.cancelled else { continue }
+            // DB's dispatchers hold the connecting train: it's caught however late the arrival looks.
+            guard !departing.waits(for: arriving) else { continue }
             let buffer = Int(((departing.departure.best.timeIntervalSince(arriving.arrival.best)) / 60).rounded(.down))
             let station = departing.origin.displayName
             let a = arriving.line?.name ?? "Zug", d = departing.line?.name ?? "Zug"
