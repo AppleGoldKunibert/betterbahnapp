@@ -262,7 +262,8 @@ public enum StationNames {
 
     /// The stop area's DHID in a stop ID, as `scripts/make-station-names.py` writes it: "de:14612:16" in
     /// "de-DELFI_de:14612:16", "de-DELFI_de:14628:3620:5:Gleis3" or "…_de:11000:900003200:1:51";
-    /// "de:08135:620" in "de-DELFI_de:08135:0620".
+    /// "de:08135:620" in "de-DELFI_de:08135:0620"; "de:05116:23007" in Transitous' grouped stop
+    /// "de-DELFI_de:05116:23007_G" (Mönchengladbach Hbf, whose stops are all "MG Hbf /Europaplatz").
     static func dhid(in id: String) -> String? {
         guard let start = id.range(of: "de:") else { return nil }
         if start.lowerBound != id.startIndex {
@@ -271,7 +272,7 @@ public enum StationNames {
         }
         let parts = id[start.upperBound...].split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
         guard parts.count >= 2, parts[0].count == 5, parts[0].allSatisfy(\.isNumber),
-              let stop = Int(parts[1]) else { return nil }
+              let stop = Int(parts[1].hasSuffix("_G") ? parts[1].dropLast(2) : parts[1]) else { return nil }
         return "de:\(parts[0]):\(stop)"
     }
 
