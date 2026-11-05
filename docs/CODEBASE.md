@@ -455,7 +455,7 @@ in `project.pbxproj`: new files join their target automatically.
   leg's end, long-distance trains only; `seatAvailability(_:)` sends the booking's `data` JSON (planned times in German local
   time, `quellSystem` SIMA, `inventarsystem` RIFF, one person), reads the seats from the page's `ssr_data` (`status` 0
   not to be had, 1 free, 2 the one bahn.de would pick), 409 = `bookedOutAnswer`; a 422 is asked again at Berlin Hbf's other
-  level; cached a minute. Debug builds: `-seedSeatMapTrips` trains get made-up free seats (`debugSeatAvailability`).
+  level; cached a minute. Its `correlationID` is a hash of the ride (`stableHash`), so the same ride gives the same URL and our server's cache answers it. Debug builds: `-seedSeatMapTrips` trains get made-up free seats (`debugSeatAvailability`).
 - `Transit/BahnDe/CoachAdvice.swift`, `StationPlatforms.swift` – where to board (#383). `StationPlatforms.at(eva:)` from
   `Resources/Platforms.json` (`scripts/make-platforms.py`): tracks sharing a platform, per track the OSM platform
   edge (ends, length), stairs/lifts/terminus exit and sector signs in metres along it. `CoachAdvice.plan(for:…)` per

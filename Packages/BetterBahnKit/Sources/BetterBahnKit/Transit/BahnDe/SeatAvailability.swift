@@ -118,9 +118,10 @@ extension BahnDeClient {
         return nil
     }
 
-    /// bahn.de's seat picker page, its request in `data` as the booking sends it. `correlationID` can be anything.
-    static func seatURL(_ request: SeatRequest, originEVA: String, destinationEVA: String,
-                        correlationID: String = "\(UUID().uuidString.lowercased())_\(UUID().uuidString.lowercased())") -> URL {
+    /// bahn.de's seat picker page, its request in `data` as the booking sends it. bahn.de takes any `correlationID`;
+    /// it is the same for the same ride, so our server's cache (keyed by the whole URL) serves everyone opening it.
+    static func seatURL(_ request: SeatRequest, originEVA: String, destinationEVA: String, correlationID: String? = nil) -> URL {
+        let correlationID = correlationID ?? "betterbahn-" + stableHash("\(seatKey(request))|\(originEVA)|\(destinationEVA)")
         let data = SeatPickerData(
             displayinformation: .init(zugbezeichnung: "\(request.category) \(request.number)", abfahrtsbahnhof: request.origin.name,
                                       ankunftsbahnhof: request.destination.name),
@@ -140,6 +141,16 @@ extension BahnDeClient {
         var components = URLComponents(url: baseURL.appending(path: "gsd/gsd_v3"), resolvingAgainstBaseURL: false)!
         components.percentEncodedQuery = "data=\(value)"
         return components.url!
+    }
+
+    /// FNV-1a as 16 hex digits: the same on every device and launch, unlike `Hasher`.
+    static func stableHash(_ text: String) -> String {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in text.utf8 {
+            hash = (hash ^ UInt64(byte)) &* 0x100_0000_01b3
+        }
+        let hex = String(hash, radix: 16)
+        return String(repeating: "0", count: 16 - hex.count) + hex
     }
 
     /// "2026-11-05T05:27:00": the booking's times, local time in Germany without a zone.

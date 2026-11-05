@@ -4402,6 +4402,14 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(need["klasse"] as? String == "KLASSE_2" && need["anzahl"] as? Int == 1)
         #expect((data["displayinformation"] as? [String: String])?["ankunftsbahnhof"] == "Leipzig Hbf & Co+")
         #expect(data["correlationID"] as? String == "x")
+        // The same ride gives the same URL, so our server's cache can answer it; another class or train doesn't.
+        let same = BahnDeClient.seatURL(request, originEVA: "8098160", destinationEVA: "8010205")
+        #expect(same == BahnDeClient.seatURL(request, originEVA: "8098160", destinationEVA: "8010205"))
+        var first = request
+        first.travelClass = .first
+        #expect(same != BahnDeClient.seatURL(first, originEVA: "8098160", destinationEVA: "8010205"))
+        #expect(same != BahnDeClient.seatURL(request, originEVA: "8011160", destinationEVA: "8010205"))
+        #expect(BahnDeClient.stableHash("") == "cbf29ce484222325" && BahnDeClient.stableHash("a") == "af63dc4c8601ec8c")
         // Summer time: two hours ahead of UTC.
         #expect(BahnDeClient.berlinLocalTime(try #require(JSONDecoding.parseISODate("2026-07-01T22:05:09Z"))) == "2026-07-02T00:05:09")
     }
