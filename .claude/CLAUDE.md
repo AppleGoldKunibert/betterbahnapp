@@ -144,7 +144,7 @@ they say no, continue as usual.
   answers lag 1-3 s; `python3 -m venv /tmp/cffi && /tmp/cffi/bin/pip install curl_cffi`) and ask them to paste the output.
 - The app reaches bahn.de only through our server `Server/bahnde-proxy` (browser TLS fingerprint, behind Tailscale
   Funnel; bahn.de refuses Oracle Cloud's addresses). `betterbahn2` is refused by bahn.de since October 2026 and only
-  serves App Attest and DB Timetables; don't touch it.
+  serves App Attest, Play Integrity (Android) and DB Timetables; change only its auth routes, and only for those.
 - The repo is public: never commit secrets or internal operational details (billing, Actions minutes etc.).
 
 ## Attribution
