@@ -133,6 +133,17 @@ import Testing
         #expect(AlternativeDestination.loadsLater(main, alternative: done) == (main: true, alternative: false))
     }
 
+    @Test func aFailedListHoldsTheOtherBackNoLonger() {
+        // The destination's later page failed: its cursor is still there, but it counts as having nothing more.
+        let failed = AlternativeDestination.Results(journeys: [journey(leg("ICE 1", from: "A", to: "Hbf", depart: 30, arrive: 90))],
+                                                    hasLater: false)
+        let ahead = AlternativeDestination.Results(journeys: [journey(leg("RE 2", from: "A", to: "Süd", depart: 120, arrive: 200))],
+                                                   hasLater: true)
+
+        #expect(AlternativeDestination.loadsLater(failed, alternative: ahead) == (main: false, alternative: true))
+        #expect(AlternativeDestination.merging(failed, alternative: ahead).count == 2)
+    }
+
     @Test func alternativeMatchingStartOrDestinationIsNotSearched() {
         let a = station("A", "A"), hbf = station("Hbf", "Hbf"), süd = station("Süd", "Süd")
 

@@ -567,12 +567,14 @@ struct JourneyResultsView: View {
     private func load(_ page: Page) async {
         isLoading = true
         defer { isLoading = false }
-        let loads = page == .later && search.alternativeTo != nil
-            ? AlternativeDestination.loadsLater(.init(journeys: journeys, hasLater: laterCursor != nil),
-                                                alternative: .init(journeys: alternativeJourneys, hasLater: alternativeLaterCursor != nil))
+        // The same lists the results show: one whose page failed holds the other back no longer, and is tried again.
+        let level = page == .later && search.alternativeTo != nil
+            ? AlternativeDestination.loadsLater(mainResults, alternative: alternativeResults)
             : (main: true, alternative: true)
-        async let mainLoad: Void = loads.main ? load(page, to: .main) : ()
-        async let alternativeLoad: Void = loads.alternative ? load(page, to: .alternative) : ()
+        let loadsMain = level.main || (page == .later && error != nil)
+        let loadsAlternative = level.alternative || (page == .later && alternativeError != nil)
+        async let mainLoad: Void = loadsMain ? load(page, to: .main) : ()
+        async let alternativeLoad: Void = loadsAlternative ? load(page, to: .alternative) : ()
         _ = await (mainLoad, alternativeLoad)
     }
 
