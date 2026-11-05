@@ -57,7 +57,8 @@ ROUTES = {
 # of a coach type from gsd_v3's answer ("I5812-412.(12-TLG.)-1"), which doesn't change.
 PATTERN_ROUTES = [
     (re.compile(r"^angebote/verbindung/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"), 3600),
-    (re.compile(r"^gsd/api/wagentypen/[A-Za-z0-9.()-]{1,64}$"), 86400),
+    # Starting with a letter or digit: curl shortens a ".." here, which would lead out of this path.
+    (re.compile(r"^gsd/api/wagentypen/[A-Za-z0-9][A-Za-z0-9.()-]{0,63}$"), 86400),
 ]
 # bahn.de refusing us: leave it alone for a while.
 BLOCK_STATUSES = {403, 429, 452}
