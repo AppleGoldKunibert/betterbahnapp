@@ -4364,6 +4364,99 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         await #expect(throws: TransitError.rateLimited) { try await bahnDe.formation(request) }
         #expect(BlockedProtocol.requests.withLock { $0 } == 1)
     }
+
+    /// bahn.de's seat picker for ICE 593 Berlin Hbf → Leipzig Hbf, 2nd class (shortened): the seats in `ssr_data`,
+    /// 1 free, 2 the one it would pick, 0 not to be had; the 1st-class coach 10 has none for 2nd class.
+    @Test func readsTheSeatPickerPage() throws {
+        let url = try #require(Bundle.module.url(forResource: "bahnde-gsd-ice593", withExtension: "html", subdirectory: "Fixtures"))
+        let seats = try #require(BahnDeClient.seatAvailability(fromPage: String(contentsOf: url, encoding: .utf8)))
+        #expect(seats.freeSeats(in: "1") == ["118", "114", "94", "54"])
+        #expect(seats.freeSeats(in: "7") == ["104", "103", "106"])
+        #expect(seats.coaches["7"]?["106"] == .suggested)
+        #expect(seats.freeSeats(in: "10").isEmpty)
+        #expect(seats.knows(coach: "10") && !seats.knows(coach: "21") && !seats.knows(coach: nil))
+        #expect(seats.freeCount == 7)
+        #expect(!seats.bookedOut)
+        // An error page has no seats.
+        #expect(BahnDeClient.seatAvailability(fromPage: #"<html><script type='application/json' id='ssr_data'>{"type":"error","errorCode":"HttpError","version":"v3"}</script></html>"#) == nil)
+        #expect(BahnDeClient.seatAvailability(fromPage: "<html></html>") == nil)
+    }
+
+    /// The request as bahn.de's booking sends it, times in German local time, everything escaped in `data`.
+    @Test func seatPickerURL() throws {
+        let departure = try #require(JSONDecoding.parseISODate("2026-11-05T04:27:00Z"))
+        let arrival = try #require(JSONDecoding.parseISODate("2026-11-05T05:42:00Z"))
+        let request = BahnDeClient.SeatRequest(category: "ICE", number: "593", origin: station("8011160", "Berlin Hbf"), plannedDeparture: departure,
+                                               destination: station("8010205", "Leipzig Hbf & Co+"), plannedArrival: arrival, travelClass: .second)
+        let url = BahnDeClient.seatURL(request, originEVA: "8098160", destinationEVA: "8010205", correlationID: "x")
+        #expect(url.absoluteString.hasPrefix("https://betterbahn2.betterbahn.workers.dev/web/api/gsd/gsd_v3?data=%7B"))
+        let query = try #require(url.query(percentEncoded: true))
+        #expect(!query.dropFirst("data=".count).contains("&") && !query.contains("+"))
+        let json = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "data" }?.value)
+        let data = try #require(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        let details = try #require((data["buchungskontext"] as? [String: Any])?["buchungsKontextDaten"] as? [String: Any])
+        #expect(details["zugnummer"] as? String == "593")
+        #expect((details["abfahrtHalt"] as? [String: String]) == ["locationId": "8098160", "abfahrtZeit": "2026-11-05T05:27:00"])
+        #expect((details["ankunftHalt"] as? [String: String]) == ["locationId": "8010205", "ankunftZeit": "2026-11-05T06:42:00"])
+        let need = try #require((details["platzbedarfe"] as? [[String: Any]])?.first)
+        #expect(need["klasse"] as? String == "KLASSE_2" && need["anzahl"] as? Int == 1)
+        #expect((data["displayinformation"] as? [String: String])?["ankunftsbahnhof"] == "Leipzig Hbf & Co+")
+        #expect(data["correlationID"] as? String == "x")
+        // Summer time: two hours ahead of UTC.
+        #expect(BahnDeClient.berlinLocalTime(try #require(JSONDecoding.parseISODate("2026-07-01T22:05:09Z"))) == "2026-07-02T00:05:09")
+    }
+
+    /// From the leg's start until the train has left there, then from the next stop it still leaves; never for a
+    /// regional train or once it has left its last stop before the end.
+    @Test func seatRequestStartsWhereTheTrainLeavesNext() throws {
+        let now = try #require(JSONDecoding.parseISODate("2026-11-05T12:00:00Z"))
+        let at = { (minutes: Double) in TimeInfo(planned: now.addingTimeInterval(minutes * 60), actual: nil) }
+        let berlin = station("8011160", "Berlin Hbf"), halle = station("8010159", "Halle(Saale)Hbf"), leipzig = station("8010205", "Leipzig Hbf")
+        var leg = Leg(origin: berlin, destination: leipzig, departure: at(10), arrival: at(80),
+                      departurePlatform: nil, arrivalPlatform: nil, tripId: "593",
+                      line: Line(name: "ICE 593", number: "593", product: .highSpeed, operatorName: "DB Fernverkehr AG"),
+                      direction: "München Hbf", isWalking: false, cancelled: false,
+                      stopovers: [Stopover(station: halle, arrival: at(55), departure: at(58), arrivalPlatform: nil, departurePlatform: nil, cancelled: false),
+                                  Stopover(station: leipzig, arrival: at(80), departure: at(85), arrivalPlatform: nil, departurePlatform: nil, cancelled: false)],
+                      remarks: [], source: .bahnDe)
+
+        let before = try #require(BahnDeClient.seatRequest(for: leg, travelClass: .first, now: now))
+        #expect(before.origin == berlin && before.destination == leipzig && before.travelClass == .first)
+        #expect(before.plannedDeparture == at(10).planned && before.plannedArrival == at(80).planned)
+        #expect(BahnDeClient.seatRequest(for: leg, travelClass: .second, now: now.addingTimeInterval(30 * 60))?.origin == halle)
+        // Past Halle only Leipzig is left, where the leg ends.
+        #expect(BahnDeClient.seatRequest(for: leg, travelClass: .second, now: now.addingTimeInterval(60 * 60)) == nil)
+
+        leg.line = Line(name: "RE 5", number: "5", product: .regional, operatorName: nil)
+        #expect(BahnDeClient.seatRequest(for: leg, travelClass: .second, now: now) == nil)
+    }
+
+    /// bahn.de's 409 when nothing is left is "booked out", not an error; a 422 at Berlin Hbf is asked again at
+    /// its lower level, and nothing pauses the other requests.
+    @Test func seatAvailabilityAnswers() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [SeatPickerProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let gate = BahnDeGate()
+        let bahnDe = BahnDeClient(http: HTTPClient(session: session), gate: gate)
+        let departure = try #require(JSONDecoding.parseISODate("2026-11-05T04:27:00Z"))
+        let request = { (train: String) in
+            BahnDeClient.SeatRequest(category: "ICE", number: train, origin: station("8011160", "Berlin Hbf"), plannedDeparture: departure,
+                                     destination: station("8010205", "Leipzig Hbf"), plannedArrival: departure.addingTimeInterval(4500),
+                                     travelClass: .second)
+        }
+
+        let seats = try await bahnDe.seatAvailability(request("593"))
+        #expect(seats?.freeSeats(in: "7") == ["104", "103", "106"])
+        #expect(SeatPickerProtocol.origins.withLock { $0 } == ["8011160", "8098160"])
+
+        #expect(try await bahnDe.seatAvailability(request("595")) == .bookedOutAnswer)
+        SeatPickerProtocol.origins.withLock { $0 = [] }
+        #expect(try await bahnDe.seatAvailability(request("1")) == nil)
+        #expect(SeatPickerProtocol.origins.withLock { $0 } == ["8011160", "8098160"])
+        #expect(!(await gate.isBlocked))
+    }
 }
 
 /// Our own bahn.de server (#342) is the app's only way to bahn.de; while it fails, requests say so.
@@ -8412,6 +8505,33 @@ private final class LowerLevelSequenceProtocol: URLProtocol, @unchecked Sendable
             ? (try? Data(contentsOf: Bundle.module.url(forResource: "bahnde-vehicle-sequence", withExtension: "json", subdirectory: "Fixtures")!)) ?? Data()
             : Data(#"{"code":"WEB_RBL_NOTFOUND","status":"ERROR"}"#.utf8)
         let response = HTTPURLResponse(url: request.url!, statusCode: found ? 200 : 404, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+}
+
+/// bahn.de's seat picker: ICE 593 only under Berlin Hbf's lower level (422 at the upper one), ICE 595 booked out
+/// (409), any other train unknown (422).
+private final class SeatPickerProtocol: URLProtocol, @unchecked Sendable {
+    static let origins = Mutex<[String]>([])
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+
+    override func startLoading() {
+        let json = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "data" }?.value ?? ""
+        let data = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any]
+        let details = (data?["buchungskontext"] as? [String: Any])?["buchungsKontextDaten"] as? [String: Any]
+        let origin = (details?["abfahrtHalt"] as? [String: String])?["locationId"] ?? ""
+        Self.origins.withLock { $0.append(origin) }
+        let train = details?["zugnummer"] as? String
+        let status = train == "595" ? 409 : train == "593" && origin == "8098160" ? 200 : 422
+        let body = status == 200
+            ? (try? Data(contentsOf: Bundle.module.url(forResource: "bahnde-gsd-ice593", withExtension: "html", subdirectory: "Fixtures")!)) ?? Data()
+            : Data(#"<html><script type='application/json' id='ssr_data'>{"type":"error","errorCode":"HttpError"}</script></html>"#.utf8)
+        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "text/html"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: body)
         client?.urlProtocolDidFinishLoading(self)
