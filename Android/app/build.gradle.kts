@@ -39,6 +39,45 @@ android {
     }
 }
 
+// BetterBahnKit (Swift) can't be built on Windows itself: there Android Studio builds it inside WSL2 before every
+// build whose Kit sources changed (kit/build-wsl.sh, set up once with kit/setup-wsl.sh). Elsewhere kit/build.sh
+// is run by hand or by CI. `-PskipKitBuild` skips the WSL build, e.g. to use libraries copied in from CI.
+val kitDir = rootDir.resolve("kit")
+val kitSources = rootDir.resolve("../Packages/BetterBahnKit/Sources")
+val jniLibs = file("src/main/jniLibs")
+val kitAssets = file("src/main/assets/BetterBahnKit")
+val isWindows = System.getProperty("os.name").startsWith("Windows")
+
+val buildKitInWsl = tasks.register<Exec>("buildKitInWsl") {
+    group = "build"
+    description = "Builds BetterBahnKit for Android inside WSL2 (Windows only)."
+    onlyIf { isWindows && !providers.gradleProperty("skipKitBuild").isPresent }
+    inputs.files(fileTree(kitDir) { exclude(".build/**", "Sources/**", ".linux-test/**", ".linux-bridge/**") })
+    inputs.dir(kitSources)
+    outputs.dir(jniLibs)
+    outputs.dir(kitAssets)
+    // The script may have CRLF line endings in a Windows checkout; bash wants LF.
+    commandLine("wsl.exe", "--cd", rootDir.parentFile.absolutePath, "-e", "bash", "-c",
+        "sed 's/\\r$//' Android/kit/build-wsl.sh | bash -s")
+}
+
+val checkKitLibraries = tasks.register("checkKitLibraries") {
+    description = "Stops the build when BetterBahnKit's libraries are missing, instead of building an app that crashes."
+    dependsOn(buildKitInWsl)
+    val libraries = jniLibs
+    doLast {
+        // The WSL build makes only the emulator's x86_64; any one is enough to run somewhere.
+        if (libraries.listFiles().orEmpty().none { it.resolve("libBetterBahnKit.so").exists() }) {
+            throw GradleException(
+                "BetterBahnKit for Android is missing (Android/app/src/main/jniLibs). " +
+                    if (isWindows) "Set up WSL2 once with Android/kit/setup-wsl.sh (docs/android.md)."
+                    else "Run Android/kit/build.sh first (docs/android.md)."
+            )
+        }
+    }
+}
+tasks.named("preBuild") { dependsOn(checkKitLibraries) }
+
 // KitBridgeTest calls the real bridge, built for Linux by Android/kit/bridge-linux.sh into this folder; without it
 // those tests are skipped.
 tasks.withType<Test>().configureEach {

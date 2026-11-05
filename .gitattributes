@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Shell scripts run in WSL from a Windows checkout too, where CRLF would break bash.
+*.sh text eol=lf

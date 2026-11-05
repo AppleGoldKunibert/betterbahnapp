@@ -35,7 +35,17 @@ both apps always carry the same version. minSdk 28, compileSdk and targetSdk 37;
    its `scripts/setup-android-sdk.sh`) and the Android NDK (r27+), set `ANDROID_NDK_HOME`, then
    `Android/kit/build.sh`. Rerun after every Kit change. Tested with Swift 6.4.1 and NDK r27d.
 2. **App**: open `Android/` in Android Studio (Windows, macOS or Linux) and run it on an emulator, or
-   `cd Android && ./gradlew assembleDebug`. Needs the libraries from step 1.
+   `cd Android && ./gradlew assembleDebug`. Needs the libraries from step 1: without them the build stops with a
+   hint (`checkKitLibraries`) instead of building an app that crashes at launch.
+
+**Windows**: Android Studio builds the Kit itself, inside WSL2. Set it up once: install WSL with Ubuntu (PowerShell:
+`wsl --install -d Ubuntu-24.04`, restart), open the Ubuntu window, go to the repository (`cd /mnt/c/Users/<you>/…/betterbahnapp`)
+and run `sed 's/\r$//' Android/kit/setup-wsl.sh | bash` (asks for the Ubuntu password once; ~5 GB, a few
+minutes). From then on every Run in Android Studio first runs `Android/kit/build-wsl.sh` through `wsl.exe` when the
+Kit's sources changed (Gradle task `buildKitInWsl`, ~2-5 minutes the first time, then only after Kit changes; only x86_64, the emulator's, unless `KIT_ARCHS="aarch64 x86_64"`):
+it mirrors the sources into WSL's own disk (`~/.cache/betterbahn-kit`), builds there and copies the libraries
+back. `-PskipKitBuild` skips it. `*.sh` files are checked out with LF (`.gitattributes`), and the WSL scripts strip
+CRs anyway.
 
 Without a local Swift setup: `.github/workflows/android-build.yml` (Linux) builds both on every PR that changes
 `Android/` or the Kit's sources and uploads the debug APK as the artifact `BetterBahn-Android-debug` (on the PR's

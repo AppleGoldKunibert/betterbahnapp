@@ -2,6 +2,7 @@
 # Builds BetterBahnKit for Android with the Swift SDK for Android (macOS, Linux or WSL2; not native Windows).
 #   Android/kit/build.sh            # debug, arm64 (phones) and x86_64 (emulator on a Windows/Intel PC)
 #   Android/kit/build.sh release    # optimized
+#   KIT_ARCHS=x86_64 Android/kit/build.sh   # only the emulator's (build-wsl.sh does that)
 # Needs a Swift toolchain and the matching Swift SDK for Android (https://www.swift.org/documentation/articles/swift-sdk-for-android-getting-started.html)
 # plus the Android NDK (ANDROID_NDK_HOME). The libraries land in Android/app/src/main/jniLibs/<abi>/.
 set -euo pipefail
@@ -16,7 +17,7 @@ rm -rf "$K/Sources/BetterBahnKit" && mkdir -p "$K/Sources/BetterBahnKit"
 for d in "$KIT"/*/; do ln -s "$(cd "$d" && pwd)" "$K/Sources/BetterBahnKit/$(basename "$d")"; done
 ln -s "$K/Shims" "$K/Sources/BetterBahnKit/AndroidShims"
 
-for arch in aarch64 x86_64; do
+for arch in ${KIT_ARCHS:-aarch64 x86_64}; do
   case $arch in aarch64) abi=arm64-v8a;; x86_64) abi=x86_64;; esac
   args=(--package-path "$K" -c "$CONFIG" --swift-sdk "$arch-unknown-linux-android$API" --static-swift-stdlib --scratch-path "$K/.build")
   swift build "${args[@]}"
@@ -32,4 +33,4 @@ done
 # The Kit's JSON data (station names, platforms, seat maps …), shipped as app assets.
 rm -rf "$K/../app/src/main/assets/BetterBahnKit" && mkdir -p "$K/../app/src/main/assets"
 cp -r "$bin/BetterBahnKitAndroid_BetterBahnKit.bundle" "$K/../app/src/main/assets/BetterBahnKit"
-echo "Built BetterBahnKit ($CONFIG) for arm64-v8a and x86_64."
+echo "Built BetterBahnKit ($CONFIG) for ${KIT_ARCHS:-aarch64 x86_64}."
