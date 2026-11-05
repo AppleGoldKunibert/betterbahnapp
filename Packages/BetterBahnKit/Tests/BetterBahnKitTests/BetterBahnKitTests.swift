@@ -2465,12 +2465,19 @@ private final class TwinTrainProtocol: URLProtocol, @unchecked Sendable {
         #expect(Station.displayName(for: neustadt.name) == "Dresden Bahnhof Neustadt")
     }
 
+    /// Transitous' grouped stop areas end in "_G"; DELFI names Mönchengladbach Hbf's after its forecourt.
+    @Test func groupedStopAreaIsDBsStation() {
+        #expect(stop("de-DELFI_de:05116:23007_G", "MG Hbf /Europaplatz", 51.19716, 6.445286).displayName
+            == "Mönchengladbach Hbf")
+    }
+
     /// DELFI writes some stop numbers with leading zeros, OpenStation without.
     @Test func readsTheStopAreaFromTheStopID() {
         #expect(StationNames.dhid(in: "de-DELFI_de:14612:16") == "de:14612:16")
         #expect(StationNames.dhid(in: "de-DELFI_de:14628:3620:5:Gleis3") == "de:14628:3620")
         #expect(StationNames.dhid(in: "at-Railway-Current-Reference-Data-2026_de:11000:900003200:1:51") == "de:11000:900003200")
         #expect(StationNames.dhid(in: "de-DELFI_de:08135:0620") == "de:08135:620")
+        #expect(StationNames.dhid(in: "de-DELFI_de:05116:23007_G") == "de:05116:23007")
         #expect(StationNames.dhid(in: "de-DELFI_000005400003") == nil)
         #expect(StationNames.dhid(in: "cz-CZPTT_czptt:stop:DE:10533") == nil)
     }

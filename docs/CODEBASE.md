@@ -337,7 +337,7 @@ in `project.pbxproj`: new files join their target automatically.
   and leaving within 3 h is one visit). Only arrived, not cancelled legs; IC 1 coach sets don't count.
 - `StationNames` (#205) – `Station.displayName`: DB's name for German stations, the national railway's with accents
   abroad, from `Resources/StationNames.json` (OpenStation with DHID/EVA, names from DB RIS::Stations by EVA
-  number, via DB Streckenagent's copy). Matched by the DHID in the stop ID ("de:08135:0620" = "de:08135:620"), EVA, `aliases` (non-German
+  number, via DB Streckenagent's copy). Matched by the DHID in the stop ID ("de:08135:0620" = "de:08135:620", Transitous' grouped "…_G" too), EVA, `aliases` (non-German
   feeds' train stops within 300 m, matched within 150 m; German feeds get none, those can be trams), same name within
   600 m (`nameWords`: "…bahnhof"/"…bf" stem), brackets-only difference within 300 m unless they name a mode or border
   point, a part of it within 150 m; abroad `StationNames.folded` within 3 km. Only the shown name changes: `id`/`name`
