@@ -4,20 +4,24 @@ Put it next to a .env file and make it the panel's app file (no requirements fil
     TOKEN_SECRET=…          same value as in the Cloudflare Workers
     BRANCH=indevelopment    the branch to take the server code from
     REPO=AppleGoldKunibert/betterbahnapp   (optional)
-On each start it downloads proxy.py, tzlog.py, tz_seed.json, panel_start.py and requirements.txt of Server/bahnde-proxy from that
-branch, installs the requirements when they changed and hands over to panel_start.py (HTTPS through Tailscale
-Funnel, see there). If GitHub can't be reached, it starts the code it downloaded last time.
+On each start it downloads proxy.py, panel_start.py and requirements.txt of Server/bahnde-proxy from that
+branch, plus tzlog.py and tz_seed.json when the branch has them, installs the requirements when they changed and
+hands over to panel_start.py (HTTPS through Tailscale Funnel, see there). If GitHub can't be reached or a needed file
+is missing on the branch, it starts the code it downloaded last time.
 """
 
 import hashlib
 import os
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-FILES = ("proxy.py", "tzlog.py", "tz_seed.json", "panel_start.py", "requirements.txt")
+FILES = ("proxy.py", "panel_start.py", "requirements.txt")
+# Only on branches with the Tz log (#502): a branch without them still starts its own code.
+OPTIONAL_FILES = ("tzlog.py", "tz_seed.json")
 
 
 def load_env():
@@ -30,16 +34,29 @@ def load_env():
             os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
 
 
-def update():
+def download(url):
+    return urllib.request.urlopen(url, timeout=20).read()
+
+
+def update(fetch=download):
     repo = os.environ.get("REPO", "AppleGoldKunibert/betterbahnapp")
     branch = os.environ.get("BRANCH", "indevelopment")
     base = f"https://raw.githubusercontent.com/{repo}/{branch}/Server/bahnde-proxy/"
     print(f"Updating from {repo}@{branch} …", flush=True)
+    downloaded = {}
     try:
-        downloaded = {name: urllib.request.urlopen(base + name, timeout=20).read() for name in FILES}
+        for name in FILES + OPTIONAL_FILES:
+            try:
+                downloaded[name] = fetch(base + name)
+            except urllib.error.HTTPError as error:
+                if error.code == 404 and name in OPTIONAL_FILES:
+                    continue
+                if error.code == 404:
+                    raise OSError(f"{name} isn't on {repo}@{branch}") from error
+                raise
     except OSError as error:
         if all((HERE / name).exists() for name in FILES):
-            print(f"GitHub not reachable ({error}), starting the last downloaded version.", flush=True)
+            print(f"Can't update ({error}), starting the last downloaded version.", flush=True)
             return
         raise SystemExit(f"Can't download the server code from {base}: {error}")
     for name, content in downloaded.items():

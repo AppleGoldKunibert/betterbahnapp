@@ -139,4 +139,4 @@ curl "http://localhost:8080/web/api/reiseloesung/orte?suchbegriff=Berlin&typ=ALL
 
 ## Tests
 
-`python3 -m unittest Server/bahnde-proxy/proxy_test.py Server/bahnde-proxy/tzlog_test.py` (needs `aiohttp`; no network).
+`python3 -m unittest Server/bahnde-proxy/proxy_test.py Server/bahnde-proxy/tzlog_test.py Server/bahnde-proxy/panel_boot_test.py` (needs `aiohttp`; no network).
