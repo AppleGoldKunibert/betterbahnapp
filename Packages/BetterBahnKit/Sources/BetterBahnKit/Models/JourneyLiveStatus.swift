@@ -20,6 +20,11 @@ public struct JourneyLiveStatus: Sendable, Hashable {
         /// Minutes from the arrival to the next train's departure, live where known; negative when the
         /// connection is already missed.
         public var minutes: Int
+        /// What DB's dispatchers decided for this connection, if anything.
+        public var disposition: TransferDisposition?
+
+        /// Too little time and nobody holds the train: a connection DB lets wait is caught.
+        public var isMissed: Bool { minutes < 0 && disposition != .waiting }
     }
 
     public var step: Step
@@ -47,7 +52,8 @@ public struct JourneyLiveStatus: Sendable, Hashable {
         var transfer: Transfer?
         if index + 1 < legs.count, case .riding = step, leg.arrival.best.timeIntervalSince(now) <= transferLeadTime {
             let next = legs[index + 1]
-            transfer = Transfer(next: next, minutes: minutes(from: leg.arrival.best, to: next.departure.best))
+            transfer = Transfer(next: next, minutes: minutes(from: leg.arrival.best, to: next.departure.best),
+                                disposition: next.disposition(waitingFor: leg))
         }
         return JourneyLiveStatus(step: step, nextTransfer: transfer, upcomingLegs: Array(legs[index...]))
     }
