@@ -625,6 +625,11 @@ class Scanner:
                     complete = False
                     break
                 failures = 0
+                if parse_vehicle_journeys(body)[0] is None:
+                    # A 200 without a trainset (an empty or no JSON body, as the host gives for the oldest day it still
+                    # knows): nothing to learn that day, the other days still count.
+                    statuses["empty"] = statuses.get("empty", 0) + 1
+                    continue
                 if not apply_vehicle_answer(self.store, tz, body, self.now()):
                     # The coach runs in another trainset now (or the API names none): learn it again from the boards.
                     statuses["not-this-trainset"] = statuses.get("not-this-trainset", 0) + 1

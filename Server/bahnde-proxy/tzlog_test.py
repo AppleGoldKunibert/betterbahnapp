@@ -366,6 +366,17 @@ class VehicleRoundTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(statuses)["429"], 1)
         self.assertEqual(note, "done")
 
+    async def test_an_empty_answer_for_a_day_does_not_stop_the_other_days(self):
+        scanner = self.scanner()
+        oldest = (dt.date(2026, 10, 31) - dt.timedelta(days=tzlog.BACKFILL_DAYS)).isoformat()
+        self.answers = {("938000000043", oldest): (200, None),
+                        ("938000000043", "2026-10-31"): self.answer("ICE8043", ("2026-10-31", "ICE", 610))}
+        await scanner.scan_vehicles()
+        self.assertEqual([t["number"] for t in self.store.history("8043")], [610])
+        self.assertTrue(all(done for _, _, done in self.store.vehicles()))
+        statuses = json.loads(self.store.db.execute("SELECT statuses FROM rounds").fetchone()[0])
+        self.assertGreaterEqual(statuses["empty"], 1)
+
     async def test_a_round_keeps_samples_of_answers_naming_another_trainset(self):
         self.answers = {"938000000043": self.answer("ICE8044"), "938000000090": (404, None)}
         await self.scanner().scan_vehicles()
