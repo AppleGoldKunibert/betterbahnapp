@@ -11,6 +11,36 @@
         }
       }
     },
+    "Extra-Features" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Extra features"
+          }
+        }
+      }
+    },
+    "Verbindungen zu einem zweiten Ziel in derselben Liste suchen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search connections to a second destination in the same list."
+          }
+        }
+      }
+    },
+    "Diese Funktionen sind zuerst aus. Schalte ein, was du brauchst." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "These features start switched off. Turn on what you need."
+          }
+        }
+      }
+    },
     "Alternatives Ziel" : {
       "localizations" : {
         "en" : {

@@ -140,7 +140,8 @@ in `project.pbxproj`: new files join their target automatically.
   ahead of the picked train's exit, #430; "Halt hinzufügen" via
   `ManualStopSheet` adds an off-timetable exit, a check-in then becomes a manual trip via
   `AppModel.replaceCheckinWithManualTrip`; a new exit on the last train asks "Reise … beenden" / "Weiter nach …").
-- Alternative destination (#516), in `Features/Connections/`: "Alternatives Ziel" below Ziel sets `ConnectionSearch.alternativeTo` (not remembered); the
+- Alternative destination (#516), in `Features/Connections/`: only with Settings → Extra-Features → Alternatives Ziel
+  (`AppSettings.extraAlternativeDestination`, off by default, synced, not in the quick setup); "Alternatives Ziel" below Ziel sets `ConnectionSearch.alternativeTo` (not remembered); the
   results view loads and pages both destinations side by side and shows them as one list via Kit
   `AlternativeDestination.merging` (by departure; a connection is dropped when one to the other station rides the same
   trains and arrives no later); cards to the alternative say "Nach …" and open with `towardsAlternative`; train
@@ -286,7 +287,8 @@ in `project.pbxproj`: new files join their target automatically.
   asks in the app (`commuteQuestionAlert`), a Worker push opens its journey. `AppModel.refresh` keeps them quiet: delays only from
   the threshold (`CommuteAlerts`), delay reasons only then, cancellations/platforms/transfers left to the Worker when it watches.
 - `Features/Settings/` – settings (#547): the main page is the quick setup row, Design and menus (`SettingsPages.swift`:
-  Ticket & Reise, Mitteilungen, Kalender, Suche & Karten, Zusatzinfos, Träwelling, Für Profis), then Datenquellen,
+  Ticket & Reise, Mitteilungen, Kalender, Suche & Karten, Zusatzinfos, Träwelling, Für Profis, Extra-Features: features off
+  by default that the quick setup never asks about), then Datenquellen,
   Datenschutz (privacy link, "not affiliated with DB") and Suchverlauf löschen. `SettingsSections.swift`: the sections
   shared by the menus and the quick setup, each with its side effects (asking for notifications, rescheduling
   reminders), so add a setting there when the quick setup should offer it. `QuickSetupView` (Kit `QuickSetupStep`:

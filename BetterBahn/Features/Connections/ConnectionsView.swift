@@ -405,8 +405,10 @@ struct ConnectionsView: View {
                          systemImage: "mappin.circle.fill", station: $to, focus: $focused, focusValue: .to)
                 .environment(\.ticketStationFields, ticket)
 
-            alternativeRow
-                .environment(\.ticketStationFields, ticket)
+            if model.settings.extraAlternativeDestination {
+                alternativeRow
+                    .environment(\.ticketStationFields, ticket)
+            }
         }
     }
 
@@ -854,7 +856,7 @@ struct ConnectionsView: View {
 
     /// The alternative destination if it is set and differs from start and destination.
     private var alternativeDestination: Station? {
-        guard showsAlternative, let from, let to else { return nil }
+        guard model.settings.extraAlternativeDestination, showsAlternative, let from, let to else { return nil }
         return AlternativeDestination.usable(alternative, from: from, to: to)
     }
 

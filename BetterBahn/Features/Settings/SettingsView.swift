@@ -93,6 +93,10 @@ struct SettingsView: View {
                             value: settings.expertMode ? String(localized: "An") : String(localized: "Aus")) {
                         ExpertSettingsView()
                     }
+                    menuRow("Extra-Features", systemImage: "puzzlepiece.extension.fill", color: .settingsIcon,
+                            value: settings.extraAlternativeDestination ? String(localized: "An") : String(localized: "Aus")) {
+                        ExtraFeaturesSettingsView()
+                    }
                 }
 
                 Section {
