@@ -286,13 +286,15 @@ private struct TripTicket: View {
             }
             // Shown from 10 minutes before the arrival (`JourneyLiveStatus.transferLeadTime`).
             if let transfer = status.nextTransfer {
-                if transfer.minutes < 0 || transfer.next.cancelled {
+                if transfer.isMissed || transfer.next.cancelled {
                     liveRow(icon: "exclamationmark.triangle.fill", main: transfer.next.origin.displayName,
                             time: String(localized: "Anschluss nicht erreichbar"), timeColor: .heavyDelay, platform: nil)
                 } else {
                     liveRow(icon: "arrow.triangle.swap",
                             main: "\(String(localized: "Dann Umstieg in \(transfer.next.origin.displayName)")) · \(lineName(transfer.next))",
-                            time: String(localized: "\(transfer.minutes) Min."), timeColor: transferColor(transfer.minutes),
+                            time: transfer.disposition == .waiting ? TransferDisposition.waiting.title
+                                : String(localized: "\(transfer.minutes) Min."),
+                            timeColor: transfer.disposition == .waiting ? .punctual : transferColor(transfer.minutes),
                             platform: platform(transfer.next.departurePlatform))
                 }
             }
