@@ -51,6 +51,14 @@ import Testing
         #expect(reminder.body == "In 5 Min. (+30) Ankunft in Fulda – Umstieg in ICE 578, fährt vor der Ankunft ab")
     }
 
+    /// A ride shorter than the lead must not remind before the train has left (the user isn't aboard yet).
+    @Test func shortRideRemindsOnlyAfterDeparture() throws {
+        let short = Journey(legs: [leg("S 1", frankfurt, fulda, dep: time(20), arr: time(28))], source: .bahnDe)
+        let reminder = try #require(short.exitReminders(lead: 10 * 60, now: now, exitSide: { _ in nil }).first)
+        #expect(reminder.fireDate > now.addingTimeInterval(20 * 60))
+        #expect(reminder.fireDate == now.addingTimeInterval(24 * 60))
+    }
+
     /// Only one reminder per stop: once its time passed, a new delay doesn't bring it back.
     @Test func shownReminderDoesNotComeAgain() {
         let later = now.addingTimeInterval(50 * 60)

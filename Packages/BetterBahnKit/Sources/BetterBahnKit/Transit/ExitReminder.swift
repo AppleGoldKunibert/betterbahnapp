@@ -20,7 +20,7 @@ public struct ExitReminder: Sendable, Hashable, Identifiable {
     public var station: String
     /// The last known (live) arrival.
     public var arrival: Date
-    /// The arrival minus the lead time, or `now` when that has already passed. Never later than the
+    /// The arrival minus the lead time (at most half the ride, so never before departure), or `now` when that has already passed. Never later than the
     /// last known arrival allows: a delay that grows while the app can't refresh makes it early, not late.
     public var fireDate: Date
     public var title: String
@@ -73,8 +73,10 @@ public extension Journey {
             for alert in liftAlerts where alert.legID == leg.id && alert.place != .start {
                 details += ". \(alert.alert.text)"
             }
+            // A ride shorter than the lead would remind before the train even left: at most half the ride.
+            let ride = max(arrival.timeIntervalSince(leg.departure.best), 0)
             reminders.append(ExitReminder(legID: leg.id, station: station, arrival: arrival,
-                                          fireDate: max(arrival.addingTimeInterval(-lead), now),
+                                          fireDate: max(arrival.addingTimeInterval(-min(lead, ride / 2)), now),
                                           title: String(kit: "Gleich aussteigen: %@", station), details: details))
         }
         return reminders
