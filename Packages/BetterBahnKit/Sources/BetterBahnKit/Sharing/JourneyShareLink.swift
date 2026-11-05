@@ -1,4 +1,3 @@
-import Compression
 import Foundation
 
 /// Encodes/decodes a `Journey` into a `betterbahn://share` deep link so it can be sent to another
@@ -21,7 +20,7 @@ public enum JourneyShareLink {
     /// The journey as zlib-compressed JSON in base64url: the long link's `data`, and what the Worker stores.
     public static func payload(for journey: Journey) -> String? {
         guard let json = try? JSONEncoder().encode(journey),
-              let compressed = try? (json as NSData).compressed(using: .zlib) as Data? else { return nil }
+              let compressed = RawDeflate.deflate(json) else { return nil }
         return base64URLEncode(compressed)
     }
 
@@ -76,20 +75,9 @@ public enum JourneyShareLink {
     static let maxEncodedLength = 64 * 1024
     static let maxJSONSize = 1024 * 1024
 
-    /// Raw-deflate data (what `NSData.compressed(using: .zlib)` writes), or nil if it would inflate
-    /// to more than `maxJSONSize`.
+    /// Raw-deflate data (what `payload(for:)` writes), or nil if it would inflate to more than `maxJSONSize`.
     static func inflate(_ data: Data) -> Data? {
-        guard !data.isEmpty else { return nil }
-        let capacity = maxJSONSize + 1
-        var output = Data(count: capacity)
-        let size = output.withUnsafeMutableBytes { out in
-            data.withUnsafeBytes { input in
-                compression_decode_buffer(out.bindMemory(to: UInt8.self).baseAddress!, capacity,
-                                          input.bindMemory(to: UInt8.self).baseAddress!, data.count, nil, COMPRESSION_ZLIB)
-            }
-        }
-        guard size > 0, size <= maxJSONSize else { return nil }
-        return output.prefix(size)
+        RawDeflate.inflate(data, limit: maxJSONSize)
     }
 
     private static func base64URLEncode(_ data: Data) -> String {

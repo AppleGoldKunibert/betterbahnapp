@@ -10,16 +10,19 @@ let package = Package(
         // libBetterBahnKit.so: the Kit with the JNI bridge, the Swift runtime linked in.
         .library(name: "BetterBahnKit", type: .dynamic, targets: ["KitBridge"]),
     ],
+    dependencies: [
+        // SHA-256 for Träwelling's PKCE and Wallet passes, where Apple platforms use CryptoKit.
+        .package(url: "https://github.com/apple/swift-crypto.git", "3.0.0"..<"5.0.0"),
+    ],
     targets: [
         .target(name: "KitBridge", dependencies: ["BetterBahnKit"], path: "Bridge"),
+        // zlib from the NDK, for raw DEFLATE (Support/RawDeflate.swift) where Apple platforms use Compression.
+        .systemLibrary(name: "CZlib", path: "CZlib"),
         .target(
             name: "BetterBahnKit",
-            exclude: [
-                // Apple frameworks: CryptoKit, Security, DeviceCheck, Compression, PDFKit, Vision.
-                "Calendar", "Tickets", "Traewelling",
-                "Sharing/JourneyShareLink.swift", "Sharing/ShortShareLinkClient.swift",
-                "Support/WorkerAuth.swift",
-            ],
+            dependencies: ["CZlib", .product(name: "Crypto", package: "swift-crypto")],
+            // App Attest (DeviceCheck) only exists on Apple devices; Shims/ has the Play Integrity stand-in.
+            exclude: ["Support/WorkerAuth.swift"],
             resources: [
                 .copy("Resources/StationHints.json"), .copy("Resources/Ril100.json"), .copy("Resources/StationNames.json"),
                 .copy("Resources/SeatMaps.json"), .copy("Resources/ExitSides.json"), .copy("Resources/ExitSideOverrides.json"),

@@ -72,8 +72,9 @@ public enum UICBarcode {
     static func inflate(_ data: [UInt8]) throws -> [UInt8] {
         guard data.count > 6, data[0] & 0x0F == 8 else { throw DecodingError.malformed }
         let deflated = Data(data[2..<(data.count - 4)])
-        guard let inflated = try? (deflated as NSData).decompressed(using: .zlib) else { throw DecodingError.malformed }
-        return [UInt8](inflated as Data)
+        // Ticket records are a few kilobytes; the cap only keeps a crafted barcode from inflating to gigabytes.
+        guard let inflated = RawDeflate.inflate(deflated, limit: 4 * 1024 * 1024) else { throw DecodingError.malformed }
+        return [UInt8](inflated)
     }
 
     /// The FCB's day numbers and times as dates. The issuing day counts from January 1st, the
