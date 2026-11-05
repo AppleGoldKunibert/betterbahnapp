@@ -192,6 +192,10 @@ class TzStore:
             if column not in {row[1] for row in self.db.execute(f"PRAGMA table_info({table})")}:
                 self.db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
         self.db.execute("CREATE INDEX IF NOT EXISTS by_day ON sightings (day)")
+        # What the vehicle rounds did, kept in the file because a panel's console is gone after minutes.
+        self.db.execute("""CREATE TABLE IF NOT EXISTS rounds (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, started REAL NOT NULL, updated REAL NOT NULL,
+            asked INTEGER NOT NULL, statuses TEXT NOT NULL, note TEXT NOT NULL)""")
         self.db.commit()
 
     def record_unit(self, sighting, now):
@@ -272,6 +276,19 @@ class TzStore:
         restart doesn't keep the last ones from ever being reached."""
         return [(tz, vehicle, bool(done)) for tz, vehicle, done in self.db.execute(
             "SELECT tz, vehicle, backfilled FROM units WHERE vehicle IS NOT NULL ORDER BY backfilled, CAST(tz AS INTEGER)")]
+
+    def start_round(self, now):
+        cursor = self.db.execute("INSERT INTO rounds (started, updated, asked, statuses, note) VALUES (?, ?, 0, '{}', 'running')",
+                                 (now, now))
+        self.db.commit()
+        self.db.execute("DELETE FROM rounds WHERE id <= ?", (cursor.lastrowid - 200,))  # the last 200 rounds
+        return cursor.lastrowid
+
+    def update_round(self, round_id, now, asked, statuses, note):
+        """`statuses`: how often the host answered each HTTP status (599: no answer at all)."""
+        self.db.execute("UPDATE rounds SET updated = ?, asked = ?, statuses = ?, note = ? WHERE id = ?",
+                        (now, asked, json.dumps(statuses, sort_keys=True), note, round_id))
+        self.db.commit()
 
     def mark_backfilled(self, tz):
         self.db.execute("UPDATE units SET backfilled = 1 WHERE tz = ?", (tz,))
@@ -583,6 +600,9 @@ class Scanner:
         if dt.datetime.fromtimestamp(self.now(), BERLIN).hour >= 12:
             recent.append(today + dt.timedelta(days=1))
         failures = asked = 0
+        statuses = {}
+        round_id = self.store.start_round(self.now())
+        note = "done"
         for tz, uic, backfilled in self.store.vehicles():
             days = recent if backfilled else [today - dt.timedelta(days=n) for n in range(BACKFILL_DAYS, -1, -1)]
             complete = True
@@ -593,6 +613,9 @@ class Scanner:
                 except Exception:  # noqa: BLE001 - counts as a failed request
                     status, body = 599, None
                 asked += 1
+                statuses[str(status)] = statuses.get(str(status), 0) + 1
+                if asked % 25 == 0:
+                    self.store.update_round(round_id, self.now(), asked, statuses, f"running, at Tz {tz}")
                 if status == 404:
                     continue  # no journeys that day
                 if status != 200:
@@ -602,13 +625,16 @@ class Scanner:
                 failures = 0
                 if not apply_vehicle_answer(self.store, tz, body, self.now()):
                     # The coach runs in another trainset now (or the API names none): learn it again from the boards.
+                    statuses["not-this-trainset"] = statuses.get("not-this-trainset", 0) + 1
                     complete = False
                     break
             if complete and not backfilled:
                 self.store.mark_backfilled(tz)
             if failures >= RIS_MAX_FAILURES:
                 log.warning("Tz vehicle round stopped: %d requests failed in a row", failures)
+                note = f"stopped at Tz {tz}: {failures} requests failed in a row, last status {status}"
                 break
+        self.store.update_round(round_id, self.now(), asked, statuses, note)
         self.vehicle_day = today
         log.info("Tz vehicle round: %d requests", asked)
 

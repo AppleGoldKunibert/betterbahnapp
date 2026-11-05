@@ -2,6 +2,7 @@
 
 import asyncio
 import datetime as dt
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -353,6 +354,27 @@ class VehicleRoundTests(unittest.IsolatedAsyncioTestCase):
         self.asked.clear()
         await scanner.scan_vehicles()
         self.assertEqual(self.asked, [("938000000043", "2026-10-31"), ("938000000090", "2026-10-31")])
+
+    async def test_a_round_leaves_a_record_in_the_file(self):
+        scanner = self.scanner()
+        self.answers = {"938000000043": self.answer("ICE8043"), "938000000090": (429, None)}
+        await scanner.scan_vehicles()
+        rows = self.store.db.execute("SELECT asked, statuses, note FROM rounds").fetchall()
+        self.assertEqual(len(rows), 1)
+        asked, statuses, note = rows[0]
+        self.assertEqual(asked, len(self.asked))
+        self.assertEqual(json.loads(statuses)["429"], 1)
+        self.assertEqual(note, "done")
+
+    async def test_a_round_that_gives_up_says_why(self):
+        for index in range(tzlog.RIS_MAX_FAILURES):
+            self.store.record_unit({"tz": str(100 + index), "unit": "ICE", "types": [], "vehicle": f"93800000{index:04d}"}, 1)
+        self.answers = {"938000000043": (403, None), "938000000090": (403, None)}
+        for index in range(tzlog.RIS_MAX_FAILURES):
+            self.answers[f"93800000{index:04d}"] = (403, None)
+        await self.scanner().scan_vehicles()
+        note = self.store.db.execute("SELECT note FROM rounds").fetchone()[0]
+        self.assertIn("last status 403", note)
 
     async def test_a_days_first_round_also_asks_the_day_before(self):
         scanner = self.scanner()
