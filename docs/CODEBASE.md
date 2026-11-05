@@ -287,9 +287,9 @@ in `project.pbxproj`: new files join their target automatically.
   asks in the app (`commuteQuestionAlert`), a Worker push opens its journey. `AppModel.refresh` keeps them quiet: delays only from
   the threshold (`CommuteAlerts`), delay reasons only then, cancellations/platforms/transfers left to the Worker when it watches.
 - `Features/Settings/` – settings (#547): the main page is the quick setup row, Design and menus (`SettingsPages.swift`:
-  Ticket & Reise, Mitteilungen, Kalender, Suche & Karten, Zusatzinfos, Träwelling, Für Profis, Extra-Features: features off
-  by default that the quick setup never asks about), then Datenquellen,
-  Datenschutz (privacy link, "not affiliated with DB") and Suchverlauf löschen. `SettingsSections.swift`: the sections
+  Ticket & Reise, Mitteilungen, Kalender, Suche & Karten, Zusatzinfos, Träwelling, Für Profis), then Datenquellen,
+  Datenschutz (privacy link, "not affiliated with DB") and Suchverlauf löschen, and at the very bottom Extra-Features
+  (features off by default that the quick setup never asks about). `SettingsSections.swift`: the sections
   shared by the menus and the quick setup, each with its side effects (asking for notifications, rescheduling
   reminders), so add a setting there when the quick setup should offer it. `QuickSetupView` (Kit `QuickSetupStep`:
   ticket, travel, notifications, calendar, design; one page each, choices apply at once) opens from Settings and once on
