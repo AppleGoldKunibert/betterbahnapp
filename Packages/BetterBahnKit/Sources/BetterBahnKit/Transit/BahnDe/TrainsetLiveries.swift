@@ -7,7 +7,6 @@ enum TrainsetLiveries {
         186: "30 Jahre ICE",
         304: "Regenbogen",
         8029: "Blauer Streifen (Europa)",
-        8052: "#45 Halfway. Full Speed.",
         8055: "Blauer Streifen (Europa)",
         9046: "Female ICE",
         9223: "75 Jahre Bundespolizei",
