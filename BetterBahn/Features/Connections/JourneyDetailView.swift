@@ -27,8 +27,9 @@ struct JourneyDetailView: View {
     /// The destination picked when the journey was edited, so later edits and "Anderer Zug" route there
     /// instead of back to the one the journey was opened with.
     @State private var editedDestination: Station?
-    /// Whether DB's dispatchers let a connecting train wait, keyed by the departing leg's id.
-    @State private var dispositions: [String: TransferDisposition] = [:]
+    /// Whether DB's dispatchers let a connecting train wait, keyed by the departing leg's id. Put onto the
+    /// journey's legs, and again onto each refresh that was asked for before they came in.
+    @State private var dispositions: [String: TransferDispositionUpdate] = [:]
     /// Transfers whose incoming train is often too late there (#316), keyed by the incoming leg's id.
     @State private var transferWarnings: [String: String] = [:]
     /// Where to board for a quick transfer or exit (#383), keyed by the leg to board.
@@ -210,7 +211,7 @@ struct JourneyDetailView: View {
                     )
                     if let info = transferInfo(after: leg) {
                         TransferRow(from: leg, to: info.next, walk: info.walk, isPast: journey.isOver(),
-                                    disposition: dispositions[info.next.id], warning: transferWarnings[leg.id],
+                                    disposition: info.next.disposition(waitingFor: leg), warning: transferWarnings[leg.id],
                                     coachAdvice: coachAdvice[leg.id],
                                     liftWarnings: liftAlerts.filter { $0.place == .transfer && $0.legID == leg.id }.map(\.alert.text))
                     }
@@ -292,7 +293,7 @@ struct JourneyDetailView: View {
     /// Pull-to-refresh: re-fetches realtime data (delays, platforms, cancellations) for every leg.
     private func refreshRealtime() async {
         guard !readOnly else { return }
-        let refreshed = await model.journeyRefresher.refresh(journey)
+        let refreshed = await model.journeyRefresher.refresh(journey).applying(Array(dispositions.values))
         if model.savedEntry(for: journey) == nil { model.rememberLive(refreshed) }
         guard refreshed != journey else { return }
         if let entry = model.savedEntry(for: journey) {
@@ -307,9 +308,13 @@ struct JourneyDetailView: View {
         guard !readOnly, let bahnExpert = model.provider.bahnExpert else { return }
         let updates = await bahnExpert.dispositions(in: journey)
         guard !updates.isEmpty else { return }
-        withAnimation {
-            for update in updates { dispositions[update.departing.id] = update.disposition }
+        for update in updates { dispositions[update.departing.id] = update }
+        let decided = journey.applying(updates)
+        guard decided != journey else { return }
+        if let entry = model.savedEntry(for: journey) {
+            model.updateSavedJourneyData(id: entry.id, journey: decided)
         }
+        withAnimation { journey = decided }
     }
 
     /// A saved journey is only refreshed until 10 minutes after it arrives, so its end keeps whatever
@@ -724,8 +729,13 @@ struct TransferRow: View {
     private var minutes: Int {
         Int((to.departure.best.timeIntervalSince(from.arrival.best) / 60).rounded())
     }
-    private var broken: Bool { minutes < 0 && !isPast }
-    private var color: Color { isPast && minutes < 0 ? .secondary : transferColor(minutes) }
+    /// The connecting train waits for this one: the transfer works, however late the arrival looks.
+    private var held: Bool { disposition == .waiting && !isPast }
+    private var broken: Bool { minutes < 0 && !isPast && !held }
+    private var color: Color {
+        if held { return .punctual }
+        return isPast && minutes < 0 ? .secondary : transferColor(minutes)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {

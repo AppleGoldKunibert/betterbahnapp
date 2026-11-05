@@ -534,6 +534,8 @@ public struct Leg: Codable, Sendable, Hashable, Identifiable {
     public var source: DataSource
     /// Track geometry of the leg, if known.
     public var geometry: [Coordinate]?
+    /// Whether DB's dispatchers let this train wait for the one arriving before it (from bahn.expert).
+    public var waitDecision: WaitDecision?
 
     public init(origin: Station, destination: Station, departure: TimeInfo, arrival: TimeInfo,
                 departurePlatform: PlatformInfo?, arrivalPlatform: PlatformInfo?, tripId: String?,
@@ -560,7 +562,7 @@ public struct Leg: Codable, Sendable, Hashable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case origin, destination, departure, arrival, departurePlatform, arrivalPlatform, tripId, line, direction
-        case isWalking, cancelled, stopovers, remarks, messages, source, geometry
+        case isWalking, cancelled, stopovers, remarks, messages, source, geometry, waitDecision
     }
 
     /// Custom-decoded so journeys saved before `messages` existed still load.
@@ -582,6 +584,7 @@ public struct Leg: Codable, Sendable, Hashable, Identifiable {
         messages = try c.decodeIfPresent([TrainMessage].self, forKey: .messages) ?? []
         source = try c.decode(DataSource.self, forKey: .source)
         geometry = try c.decodeIfPresent([Coordinate].self, forKey: .geometry)
+        waitDecision = try c.decodeIfPresent(WaitDecision.self, forKey: .waitDecision)
     }
 }
 
@@ -644,11 +647,13 @@ public struct Journey: Codable, Sendable, Hashable, Identifiable {
         return spans
     }
 
-    /// Transfers where the next departure is before the previous arrival.
+    /// Transfers where the next departure is before the previous arrival, unless that train waits.
     public var brokenTransferIndices: [Int] {
         let transit = transitLegs
         guard transit.count > 1 else { return [] }
-        return (1..<transit.count).filter { transit[$0].departure.best < transit[$0 - 1].arrival.best }
+        return (1..<transit.count).filter {
+            transit[$0].departure.best < transit[$0 - 1].arrival.best && !transit[$0].waits(for: transit[$0 - 1])
+        }
     }
 }
 
