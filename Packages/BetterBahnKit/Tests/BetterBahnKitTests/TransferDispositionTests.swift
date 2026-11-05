@@ -98,6 +98,51 @@ import Testing
         let updates = await client.dispositions(in: Journey(legs: [ice91, re3], source: .transitous), now: date("2026-10-08T08:00:00Z"))
         #expect(updates.map(\.disposition) == [.notWaiting])
     }
+
+    /// ICE 91 gets in at 08:32, RE3 leaves at 08:23: missed, unless DB lets RE3 wait for it.
+    @Test func waitingTrainMakesTransferWork() throws {
+        let journey = Journey(legs: [ice91, re3], source: .transitous)
+        #expect(journey.connectionIssues().contains { $0.isBlocking })
+        #expect(journey.brokenTransferIndices == [1])
+
+        let waits = TransferDispositionUpdate(arriving: ice91, departing: re3, disposition: .waiting)
+        let held = journey.applying([waits])
+        #expect(held.connectionIssues().isEmpty)
+        #expect(held.brokenTransferIndices.isEmpty)
+        let status = try #require(JourneyLiveStatus.at(date("2026-10-08T08:25:00Z"), of: held))
+        #expect(status.nextTransfer?.disposition == .waiting)
+        #expect(status.nextTransfer?.isMissed == false)
+        #expect(held.id == journey.id)
+
+        // RE3 doesn't wait (any more), or nothing is decided now: missed again.
+        let notWaiting = TransferDispositionUpdate(arriving: ice91, departing: re3, disposition: .notWaiting)
+        #expect(held.applying([notWaiting]).connectionIssues().contains { $0.isBlocking })
+        let undecided = TransferDispositionUpdate(arriving: ice91, departing: re3, disposition: nil)
+        #expect(held.applying([undecided]).legs[1].waitDecision == nil)
+        // No update for the transfer keeps the decision.
+        #expect(held.applying([]).connectionIssues().isEmpty)
+    }
+
+    /// RE3 waits for ICE 91, not for another train put before it ("Anderer Zug").
+    @Test func decisionOnlyForItsTrain() {
+        let held = Journey(legs: [ice91, re3], source: .transitous)
+            .applying([TransferDispositionUpdate(arriving: ice91, departing: re3, disposition: .waiting)])
+        var other = ice91
+        other.tripId = "ice93"
+        other.departure.planned = date("2026-10-08T06:00:00Z")
+        let replaced = Journey(legs: [other, held.legs[1]], source: .transitous)
+        #expect(replaced.connectionIssues().contains { $0.isBlocking })
+        #expect(replaced.brokenTransferIndices == [1])
+    }
+
+    /// Journeys saved before the decision was remembered still load, and it survives saving.
+    @Test func decisionRoundTrips() throws {
+        let held = Journey(legs: [ice91, re3], source: .transitous)
+            .applying([TransferDispositionUpdate(arriving: ice91, departing: re3, disposition: .waiting)])
+        let decoded = try JSONDecoder().decode(Journey.self, from: JSONEncoder().encode(held))
+        #expect(decoded == held)
+        #expect(decoded.legs[1].waitDecision?.disposition == .waiting)
+    }
 }
 
 private final class BahnExpertConnectionsProtocol: URLProtocol, @unchecked Sendable {
