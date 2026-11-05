@@ -366,6 +366,13 @@ class VehicleRoundTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(statuses)["429"], 1)
         self.assertEqual(note, "done")
 
+    async def test_a_round_keeps_samples_of_answers_naming_another_trainset(self):
+        self.answers = {"938000000043": self.answer("ICE8044"), "938000000090": (404, None)}
+        await self.scanner().scan_vehicles()
+        note = self.store.db.execute("SELECT note FROM rounds").fetchone()[0]
+        self.assertIn("Tz 8043 938000000043", note)
+        self.assertIn("group 8044", note)
+
     async def test_a_round_that_gives_up_says_why(self):
         for index in range(tzlog.RIS_MAX_FAILURES):
             self.store.record_unit({"tz": str(100 + index), "unit": "ICE", "types": [], "vehicle": f"93800000{index:04d}"}, 1)

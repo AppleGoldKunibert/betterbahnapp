@@ -601,6 +601,7 @@ class Scanner:
             recent.append(today + dt.timedelta(days=1))
         failures = asked = 0
         statuses = {}
+        samples = []  # the first answers that named another trainset or none, to see what the host really says
         round_id = self.store.start_round(self.now())
         note = "done"
         for tz, uic, backfilled in self.store.vehicles():
@@ -615,7 +616,8 @@ class Scanner:
                 asked += 1
                 statuses[str(status)] = statuses.get(str(status), 0) + 1
                 if asked % 25 == 0:
-                    self.store.update_round(round_id, self.now(), asked, statuses, f"running, at Tz {tz}")
+                    self.store.update_round(round_id, self.now(), asked, statuses,
+                                            " | ".join([f"running, at Tz {tz}"] + samples))
                 if status == 404:
                     continue  # no journeys that day
                 if status != 200:
@@ -626,6 +628,11 @@ class Scanner:
                 if not apply_vehicle_answer(self.store, tz, body, self.now()):
                     # The coach runs in another trainset now (or the API names none): learn it again from the boards.
                     statuses["not-this-trainset"] = statuses.get("not-this-trainset", 0) + 1
+                    if len(samples) < 6:
+                        shown = sorted(body) if isinstance(body, dict) else type(body).__name__
+                        vehicle = body.get("vehicle") if isinstance(body, dict) else None
+                        samples.append(f"Tz {tz} {uic} {day}: group {parse_vehicle_journeys(body)[0]}, keys {shown}, "
+                                       f"vehicle {json.dumps(vehicle)[:160]}")
                     complete = False
                     break
             if complete and not backfilled:
@@ -634,7 +641,7 @@ class Scanner:
                 log.warning("Tz vehicle round stopped: %d requests failed in a row", failures)
                 note = f"stopped at Tz {tz}: {failures} requests failed in a row, last status {status}"
                 break
-        self.store.update_round(round_id, self.now(), asked, statuses, note)
+        self.store.update_round(round_id, self.now(), asked, statuses, " | ".join([note] + samples))
         self.vehicle_day = today
         log.info("Tz vehicle round: %d requests", asked)
 
