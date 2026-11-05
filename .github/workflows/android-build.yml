@@ -8,6 +8,7 @@ on:
     paths:
       - "Android/**"
       - "Packages/BetterBahnKit/Sources/**"
+      - "Packages/BetterBahnKit/Tests/**"
       - ".github/workflows/android-build.yml"
   workflow_dispatch:
 
@@ -26,7 +27,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -59,6 +60,17 @@ jobs:
 
       - name: Build BetterBahnKit for Android
         run: Android/kit/build.sh
+
+      # The Kit's tests with Android's stand-ins (zlib, swift-crypto, files instead of the Keychain), and the
+      # bridge as a Linux library for the app's JVM tests (KitBridgeTest). Linking Foundation statically needs
+      # curl's and libxml2's headers.
+      - name: Test BetterBahnKit on Linux
+        run: |
+          sudo apt-get install -y -q libcurl4-openssl-dev libxml2-dev zlib1g-dev > /dev/null
+          Android/kit/test-linux.sh
+
+      - name: Build the bridge for Linux
+        run: echo "KIT_LINUX_DIR=$(Android/kit/bridge-linux.sh)" >> "$GITHUB_ENV"
 
       - name: Build the app and run its unit tests
         working-directory: Android

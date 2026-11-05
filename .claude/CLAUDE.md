@@ -28,9 +28,9 @@ Compose on the same BetterBahnKit). UI text is German, code and comments English
 - App build: `xcodebuild -project BetterBahn.xcodeproj -scheme BetterBahn -destination 'generic/platform=iOS Simulator' build -quiet`.
   Never run iOS Simulator tests.
 - Logic and models go into BetterBahnKit (`Sendable`, `public`), views stay thin; add a Kit test for behaviour changes.
-- Android: `Android/kit/build.sh`, then `cd Android && ./gradlew assembleDebug` (setup in `docs/android.md`). Kit code
-  must keep building for Android: no new Apple-only imports outside the files `Android/kit/Package.swift` excludes,
-  or guard them with `#if canImport(…)`.
+- Android: `Android/kit/build.sh`, then `cd Android && ./gradlew assembleDebug` (setup in `docs/android.md`); Kit
+  tests on Linux: `Android/kit/test-linux.sh`. Kit code must keep building for Android: guard every Apple-only import
+  with `#if canImport(…)` (the Android build only leaves out `Support/WorkerAuth.swift`).
 
 ## UI texts
 

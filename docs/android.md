@@ -17,9 +17,9 @@ On Android so far:
 
 | Path | Contents |
 | --- | --- |
-| `Android/kit/` | Swift package building BetterBahnKit for Android. `build.sh` links the Kit's source folders into `Sources/BetterBahnKit/` (gitignored), `Package.swift` leaves out what needs Apple frameworks, `Shims/` holds the Android stand-ins (FoundationNetworking/FoundationXML re-exported, a `WorkerAuth` that sends the Play Integrity token the app hands over). Output: `libBetterBahnKit.so` (Swift runtime linked in) + `libc++_shared.so` per ABI in `Android/app/src/main/jniLibs/`, the Kit's JSON data in `Android/app/src/main/assets/BetterBahnKit/` (both gitignored). |
+| `Android/kit/` | Swift package building BetterBahnKit for Android. `build.sh` links the Kit's source folders into `Sources/BetterBahnKit/` (gitignored), `Package.swift` leaves out only `Support/WorkerAuth.swift` (App Attest) and adds what Android lacks: `swift-crypto` for CryptoKit's SHA-256 and `CZlib` (the NDK's zlib) for `Support/RawDeflate.swift`; `Shims/` holds the Android stand-ins (FoundationNetworking/FoundationXML re-exported, a `WorkerAuth` that sends the Play Integrity token the app hands over). Kit code guards Apple frameworks with `#if canImport(…)`: Träwelling's `TokenStore` keeps its items as files in `files/secrets/` where there's no Keychain, `TicketBarcodeReader` (PDFKit, Vision) compiles to nothing. `test-linux.sh` runs the Kit's tests on Linux with the same stand-ins; `bridge-linux.sh` builds the bridge as a Linux library for the app's JVM tests. Output: `libBetterBahnKit.so` (Swift runtime linked in) + `libc++_shared.so` per ABI in `Android/app/src/main/jniLibs/`, the Kit's JSON data in `Android/app/src/main/assets/BetterBahnKit/` (both gitignored). |
 | `Android/kit/Bridge/` | The bridge. `KitBridge.swift`: one JNI function taking a method name and JSON (UTF-8 bytes both ways), run on Swift concurrency. `Methods.swift`: one handler per method (`searchStations`, `journeys` incl. via stations and ticket filter, `completeJourney`, `refreshJourney`, `describeJourneys`, `refreshSaved` (live data plus what to notify, as `AppModel.refresh` on iOS), `journeyExtras` (CO₂, weather), `widgetState`, `boardWidgetRows`, `board`, `trip`, `tripForLeg`, `tripLeg`, `searchTrains`, `trainRun`, `importShared`, `plannedCoachSequence` (vagonweb.cz's plan; answers `needsPage:<url>` when its bot check wants the page loaded in a web view), `setWorkerToken`/`hasWorkerToken` (Play Integrity)), calling the Kit as the iOS views do (same provider, same steps). `Display.swift`: Kit models go out as their own Codable JSON (dates in ms) plus what iOS computes from them (line display name and colour, journey duration, bar spans, issues, intermediate stops …); route shapes are dropped. `StationNames.swift`: adds `displayName` to every station. |
-| `Android/app/` | The Android app (Gradle, AGP 9, Kotlin, Compose, Material 3). `kit/`: `Kit.kt` loads the library, copies the JSON data out of the APK once per update and wraps the methods; `Models.kt` mirrors the Kit's JSON (journeys and trips keep it as `raw` to hand back); `PlayIntegrity.kt` gets the access token for our servers (below); `VagonwebBrowser.kt` loads vagonweb.cz pages in a hidden `WebView` with the iOS app's script; `KitJson.kt` reads answers (unit-tested against recorded answers in `src/test/resources/kit/`). `AppModel.kt`: tabs, a stack of screens per tab (state of results/detail lives in the route), saved journeys. `data/Store.kt`: favourites, recent stations and searches, saved journeys, the ticket, as JSON in SharedPreferences (one store per process). `data/SavedRefresh.kt`: refreshing saved journeys and notifying (in the app and in a `WorkManager` worker, which also reloads the widgets). `widget/`: the Glance widgets, the departures widget's station per widget ID and its config screen. `ui/`: the screens, `Theme.kt`/`Format.kt`/`Components.kt` port the iOS app's colours, formats and badges (`DesignSystem.swift`). |
+| `Android/app/` | The Android app (Gradle, AGP 9, Kotlin, Compose, Material 3). `kit/`: `Kit.kt` loads the library, copies the JSON data out of the APK once per update and wraps the methods; `Models.kt` mirrors the Kit's JSON (journeys and trips keep it as `raw` to hand back); `PlayIntegrity.kt` gets the access token for our servers (below); `VagonwebBrowser.kt` loads vagonweb.cz pages in a hidden `WebView` with the iOS app's script; `KitJson.kt` reads answers (unit-tested against recorded answers in `src/test/resources/kit/`; `KitBridgeTest` calls the real bridge built for Linux). `AppModel.kt`: tabs, a stack of screens per tab (state of results/detail lives in the route), saved journeys. `data/Store.kt`: favourites, recent stations and searches, saved journeys as JSON files in `files/BetterBahn/` (`data/JsonFiles.kt`, written in order on one background thread, like iOS `Storage`; moved there from SharedPreferences on first start), the ticket in SharedPreferences (one store per process). Android's Auto Backup takes those two to a new phone instead of iCloud (`res/xml/backup_rules.xml`, `data_extraction_rules.xml`), not the Träwelling login, the Kit's data or the widgets' settings. `data/SavedRefresh.kt`: refreshing saved journeys and notifying (in the app and in a `WorkManager` worker, which also reloads the widgets). `widget/`: the Glance widgets, the departures widget's station per widget ID and its config screen. `ui/`: the screens, `Theme.kt`/`Format.kt`/`Components.kt` port the iOS app's colours, formats and badges (`DesignSystem.swift`). |
 | `Android/gradle/libs.versions.toml` | Versions of AGP, Kotlin, Compose. |
 
 `applicationId` and package are `de.goldkunibert.betterbahn` (confirmed by the owner; permanent once the app is on
@@ -42,27 +42,25 @@ Without a local Swift setup: `.github/workflows/android-build.yml` (Linux) build
 "Checks" tab, 14 days). Unzip it and drag `app-debug.apk` onto the running emulator. The same run keeps Kit changes
 from breaking the Android build unnoticed.
 
+Tests without an emulator (also what CI runs):
+- `Android/kit/test-linux.sh [--filter …]`: the Kit's tests on Linux with Android's stand-ins (zlib, swift-crypto,
+  files instead of the Keychain). Needs `libcurl4-openssl-dev libxml2-dev zlib1g-dev`.
+- `KIT_LINUX_DIR=$(Android/kit/bridge-linux.sh) ./gradlew testDebugUnitTest` (in `Android/`): the app's JVM tests,
+  `KitBridgeTest` calling the real bridge through JNI (skipped without `KIT_LINUX_DIR`).
+
 From a cloud session: Swift, the SDK and the NDK aren't preinstalled; download them from swift.org and
-dl.google.com (a few GB, ~5 min). Maven Central sometimes answers `429`: rerun Gradle with `--max-workers=1`.
-There's no emulator in the cloud (no KVM), so the app is only built there and tested on the owner's PC. What can be
-checked there: the bridge on Linux (a package with the same sources plus an executable calling `Methods.call`, or
-the bridge built as a Linux `.so` against the JDK's `jni.h` and called from a JVM test through `Kit`), and Compose
-screens rendered with Paparazzi in a scratch copy of `Android/`. Point `PACKAGE_RESOURCE_BUNDLE_PATH` at the folder
-holding `<package>_BetterBahnKit.bundle`.
+dl.google.com (a few GB, ~5 min). Maven Central often answers `429` there: point Gradle at Google's mirror
+(`https://maven-central.storage-download.googleapis.com/maven2/`) with an init script in `~/.gradle/init.d/`, not
+in the repo. There's no emulator in the cloud (no KVM), so the app is only built there and tested on the owner's PC.
+Compose screens can be rendered with Paparazzi in a scratch copy of `Android/`.
 
 ## What's not on Android yet
 
-Left out of the Android Kit build (`Android/kit/Package.swift`) because they need Apple frameworks:
-
-| Kit part | Needs | Android replacement (to do) |
-| --- | --- | --- |
-| `Support/WorkerAuth.swift` | DeviceCheck (App Attest), CryptoKit | Play Integrity (below): written, off until the Google setup exists. Until then requests go out without a token, which our servers refuse unless `ALLOW_UNATTESTED` is set, so bahn.de data doesn't work yet. |
-| `Traewelling/` | CryptoKit (PKCE), Security (Keychain) | swift-crypto, Android Keystore via Kotlin |
-| `Tickets/`, `Calendar/` | CryptoKit, PDFKit, Vision | Google Wallet passes (`pass-signer` needs a second format), ML Kit barcode scanning, Android calendar |
-| `Sharing/JourneyShareLink.swift`, `ShortShareLinkClient.swift` | Compression (zlib) | zlib from the NDK |
-
-Kit code behind `#if canImport(SwiftUI|ActivityKit|PDFKit)` (product colours, Live Activity attributes, ticket
-scanning) compiles to nothing on Android.
+The whole Kit builds for Android except `Support/WorkerAuth.swift` (App Attest): its counterpart is Play Integrity
+(below), written, off until the Google setup exists. Until then requests go out without a token, which our servers
+refuse unless `ALLOW_UNATTESTED` is set, so bahn.de data doesn't work yet. Kit code behind
+`#if canImport(SwiftUI|ActivityKit|PDFKit)` (product colours, Live Activity attributes, ticket scanning) compiles
+to nothing on Android; the app does those itself (ML Kit for barcodes, Google Wallet passes, the Android calendar).
 
 Not ported yet (app side): tickets and passenger rights, Träwelling, live map, the live widgets and Live Activity, bike
 option, "Anderer Zug", regular trips, statistics and the collection, sharing a journey, iCloud sync. bahn.de's
