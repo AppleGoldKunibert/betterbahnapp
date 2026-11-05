@@ -39,10 +39,19 @@ struct JourneyResultsView: View {
         _searchDate = State(initialValue: search.date)
     }
 
-    /// The connections to the destination and to the alternative one in a single list, by departure.
+    /// The connections to the destination and to the alternative one, each searched on its own, in a single list.
     private var results: [Journey] {
         guard search.alternativeTo != nil else { return journeys }
-        return AlternativeDestination.merging(journeys, alternative: alternativeJourneys)
+        return AlternativeDestination.merging(mainResults, alternative: alternativeResults)
+    }
+
+    // A list whose page failed holds the other back no longer.
+    private var mainResults: AlternativeDestination.Results {
+        .init(journeys: journeys, hasLater: laterCursor != nil && error == nil)
+    }
+
+    private var alternativeResults: AlternativeDestination.Results {
+        .init(journeys: alternativeJourneys, hasLater: alternativeLaterCursor != nil && alternativeError == nil)
     }
 
     /// Only routes that fulfil every train requirement are shown once one is set.
@@ -553,12 +562,17 @@ struct JourneyResultsView: View {
 
     private var alternativeIDs: Set<String> { Set(alternativeJourneys.map(\.id)) }
 
-    /// Loads a page of connections to the destination and, alongside, to the alternative one.
+    /// Loads a page of connections to the destination and, alongside, to the alternative one. Later connections
+    /// only for a list that doesn't already reach past the other's end, so both stay level.
     private func load(_ page: Page) async {
         isLoading = true
         defer { isLoading = false }
-        async let mainLoad: Void = load(page, to: .main)
-        async let alternativeLoad: Void = load(page, to: .alternative)
+        let loads = page == .later && search.alternativeTo != nil
+            ? AlternativeDestination.loadsLater(.init(journeys: journeys, hasLater: laterCursor != nil),
+                                                alternative: .init(journeys: alternativeJourneys, hasLater: alternativeLaterCursor != nil))
+            : (main: true, alternative: true)
+        async let mainLoad: Void = loads.main ? load(page, to: .main) : ()
+        async let alternativeLoad: Void = loads.alternative ? load(page, to: .alternative) : ()
         _ = await (mainLoad, alternativeLoad)
     }
 
