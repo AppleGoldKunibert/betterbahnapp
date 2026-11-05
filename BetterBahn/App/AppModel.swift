@@ -1290,7 +1290,13 @@ final class AppModel {
 
     /// Fetches realtime data for one saved journey, stores it and sends notifications for new issues.
     func refresh(_ entry: SavedJourney, using refresher: JourneyRefresher) async {
-        let refreshed = await refresher.refresh(entry.journey)
+        var refreshed = await refresher.refresh(entry.journey)
+        // DB's dispatchers decided whether a connecting train waits (from bahn.expert); also named in the exit reminders.
+        // A train held for the transfer makes it work, so it is no missed connection below.
+        let dispositions = settings.connectionWarnings || settings.exitReminders
+            ? await (provider.bahnExpert?.dispositions(in: refreshed) ?? []) : []
+        for update in dispositions { transferDispositions[update.departing.id] = update.disposition }
+        refreshed = refreshed.applying(dispositions)
         // The refresh takes seconds; if the user replanned meanwhile (same entry ID, new journey),
         // this result belongs to the old plan and must neither overwrite nor notify. The next
         // refresh picks up the new plan.
@@ -1298,10 +1304,6 @@ final class AppModel {
         var updated = savedJourneys[index]
         let previous = updated.journey
         updated.journey = refreshed
-        // DB's dispatchers decided whether a connecting train waits (from bahn.expert); also named in the exit reminders.
-        let dispositions = settings.connectionWarnings || settings.exitReminders
-            ? await (provider.bahnExpert?.dispositions(in: refreshed) ?? []) : []
-        for update in dispositions { transferDispositions[update.departing.id] = update.disposition }
         if settings.connectionWarnings {
             let known = Set(updated.notifiedIssues ?? [])
             // A regular trip's day (#397) stays quiet while its trains run fine; when the push Worker looks
