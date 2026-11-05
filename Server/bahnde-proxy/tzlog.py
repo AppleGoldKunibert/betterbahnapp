@@ -160,11 +160,13 @@ def parse_vehicle_journeys(body):
 
 
 def apply_vehicle_answer(store, tz, body, now):
-    """Records the journeys of a vehicle-journeys answer for `tz`. False, and the coach forgotten, when the
-    answer names another trainset (or none): the coach doesn't belong to `tz`."""
+    """Records the journeys of a vehicle-journeys answer for `tz`. False when it doesn't tell: the coach is
+    forgotten when the answer names another trainset (it doesn't belong to `tz`), but kept when it names none (an
+    empty or partial answer from the host says nothing about the coach)."""
     group, trains = parse_vehicle_journeys(body)
     if group != tz:
-        store.drop_vehicle(tz)
+        if group is not None:
+            store.drop_vehicle(tz)
         return False
     for day, category, number, start, start_eva in trains:
         store.record(day, {"tz": tz, "category": category, "number": number, "start": start, "start_eva": start_eva},

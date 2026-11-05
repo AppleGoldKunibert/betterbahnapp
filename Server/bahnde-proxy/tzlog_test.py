@@ -139,6 +139,15 @@ class StoreTests(unittest.TestCase):
             self.assertEqual(store.load_seed(Path(folder) / "missing.json"), 0)
         self.assertEqual(store.vehicles(), [("8043", "938000000043", False), ("9490", "938024120900", False)])
 
+    def test_an_answer_without_a_trainset_keeps_the_coach_but_another_one_drops_it(self):
+        store = tzlog.TzStore()
+        self.record(store, "2026-10-31", "8043", 1, vehicle="938000000043")
+        self.assertFalse(tzlog.apply_vehicle_answer(store, "8043", {"journeys": []}, 1))
+        self.assertEqual([tz for tz, _, _ in store.vehicles()], ["8043"])
+        other = {"vehicle": {"vehicleGroupName": "ICE8044"}, "journeys": []}
+        self.assertFalse(tzlog.apply_vehicle_answer(store, "8043", other, 1))
+        self.assertEqual(store.vehicles(), [])
+
     def test_seed_gives_a_known_tz_without_a_coach_the_seeded_one(self):
         import json
         import tempfile
