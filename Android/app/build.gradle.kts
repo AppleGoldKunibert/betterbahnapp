@@ -39,6 +39,15 @@ android {
     }
 }
 
+// KitBridgeTest calls the real bridge, built for Linux by Android/kit/bridge-linux.sh into this folder; without it
+// those tests are skipped.
+tasks.withType<Test>().configureEach {
+    providers.environmentVariable("KIT_LINUX_DIR").orNull?.let {
+        systemProperty("betterbahn.kitLinuxDir", it)
+        systemProperty("java.library.path", it)
+    }
+}
+
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)

@@ -42,8 +42,9 @@ data class SavedJourney(
 )
 
 /**
- * What the app keeps on the device: favourite and recent stations, recent searches, saved journeys. JSON in
- * SharedPreferences, like the iOS app's JSON files (without iCloud).
+ * What the app keeps on the device: favourite and recent stations, recent searches, saved journeys as JSON files
+ * (`JsonFiles`, like the iOS app's `Storage`), the settings in SharedPreferences (like `AppSettings`). Instead of
+ * iCloud, Android's Auto Backup brings both to a new phone.
  */
 class Store private constructor(context: Context) {
     companion object {
@@ -55,6 +56,10 @@ class Store private constructor(context: Context) {
     }
 
     private val prefs = context.getSharedPreferences("betterbahn", Context.MODE_PRIVATE)
+    private val files = JsonFiles(context).apply {
+        // Versions before kept the lists in SharedPreferences.
+        for (key in listOf("favorites", "recentStations", "recentSearches", "savedJourneys")) migrate(prefs, key)
+    }
 
     private val _favorites = MutableStateFlow(load("favorites", Station.serializer()))
     val favorites: StateFlow<List<Station>> = _favorites
@@ -136,12 +141,12 @@ class Store private constructor(context: Context) {
     }
 
     private fun <T> load(key: String, serializer: KSerializer<T>): List<T> =
-        prefs.getString(key, null)?.let {
+        files.read(key)?.let {
             runCatching { KitJson.json.decodeFromString(ListSerializer(serializer), it) }.getOrNull()
         } ?: emptyList()
 
     private fun <T> set(key: String, serializer: KSerializer<T>, flow: MutableStateFlow<List<T>>, value: List<T>) {
         flow.value = value
-        prefs.edit().putString(key, KitJson.json.encodeToString(ListSerializer(serializer), value)).apply()
+        files.write(key, KitJson.json.encodeToString(ListSerializer(serializer), value))
     }
 }

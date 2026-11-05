@@ -63,6 +63,9 @@ object Kit {
 
     @Volatile private var appContext: Context? = null
 
+    /** For the JVM tests on the Linux build of the bridge (`KitBridgeTest`): the folder holding the Kit's data. */
+    internal fun startForTests(resources: String) = nativeStart(resources)
+
     /**
      * Runs a Kit method off the main thread; its result, or a [KitException]. Gets the Play Integrity token for our
      * servers first when it's missing or about to expire.
