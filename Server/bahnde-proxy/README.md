@@ -43,6 +43,8 @@ The `betterbahn` Worker also asks it for the live times of shared arrivals when 
 | `MIN_INTERVAL` | `0.25` | Seconds between the starts of two requests to bahn.de. |
 | `RATE_LIMIT` | `120` | Requests per minute per app install, counted separately for bahn.de and RIS::Journeys. |
 | `ALLOW_UNATTESTED` | — | `true` lets requests without a token through. Only for a quick test, never in production. |
+| `REGIO` | `true` | Coach sequences from DB Regio's Wi-Fi portal first (below); `false` asks bahn.de only. |
+| `REGIO_LOG` | `logs/regio.log` | The portal's log (below), in the volume `regio-logs`. |
 | `DB_CLIENT_ID`, `DB_API_KEY` | — | DB API Marketplace key with RIS::Journeys. The server passes `/db/apis/ris-journeys/v2/find` and `/{journeyID}` on with it (the app asks these before bahn.expert); without it those paths answer 404. Put both into `.env`, never into the repo. |
 
 ## Run it
@@ -104,6 +106,25 @@ A quick test without the app (remove `ALLOW_UNATTESTED` afterwards):
 docker run --rm -p 8080:8080 -e ALLOW_UNATTESTED=true $(docker build -q .)
 curl "http://localhost:8080/web/api/reiseloesung/orte?suchbegriff=Berlin&typ=ALL&limit=1"
 ```
+
+## Coach sequences from DB Regio's Wi-Fi portal
+
+The server asks coach sequences ("Wagenreihung") at DB Regio's Wi-Fi portal (`wifi-landingpage.dbregio.de`) before
+bahn.de. bahn.de shows the same data (DB's RIS::Transports), and the portal is asked far less and doesn't sit behind
+bahn.de's bot protection. The server loads the portal's page first for its CSRF token, then turns the answer into
+bahn.de's, so the app sees no difference.
+
+- **Refused** (401/403/419/429/452 or no CSRF token): asked again, each time with a new page, 10 times in all; meanwhile
+  bahn.de answers the other requests. All 10 refused: bahn.de answers for 5 minutes. The next request then asks the
+  portal again; refused another 10 times, the portal stays off until the server restarts.
+- **404:** the portal has no coach sequence yet, so bahn.de has none either: the app gets 404 (kept for a minute).
+- **Anything else** (5xx, unreachable): bahn.de answers that request.
+
+`logs/regio.log` (volume `regio-logs`) gets every refusal (`BLOCK`, with the answer and the train), the pause
+(`PAUSE`), the switch-off (`OFF`), and each coach sequence the portal didn't have although it should (`MISSING`: a train, not
+an S-Bahn, bus, tram or subway, leaving a German station within 20 hours; the app only asks where a train departs,
+never at its last stop). No app install or address is logged. Read it with
+`docker compose exec bahnde-proxy cat logs/regio.log`.
 
 ## Tests
 

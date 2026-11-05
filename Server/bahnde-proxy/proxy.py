@@ -24,10 +24,17 @@ key the app mustn't carry: `/db/apis/ris-journeys/v2/find` and `/{journeyID}`, t
 apis.deutschebahn.com. That is a second `Proxy` with its own cache, rate and pauses, so bahn.de refusing
 the server doesn't stop it; it only pauses after a 429.
 
+Coach sequences ("Wagenreihung", `vehicle-sequence`) are asked at DB Regio's Wi-Fi portal first
+(`RegioSequences`): the same RIS::Transports data bahn.de shows, translated into bahn.de's answer, so the app
+doesn't notice. A refusal there is tried 10 times; then bahn.de answers for 5 minutes, and a second refusal
+right after that turns the portal off until the server restarts. Refusals, and coach sequences the portal
+doesn't have for a train it should have, go to `REGIO_LOG`.
+
 Environment: TOKEN_SECRET (required, same as in the Workers), PORT (8080), IMPERSONATE (safari),
 FIRST_PAUSE (60), BLOCK_PAUSE (600), MAX_PARALLEL (4), MIN_INTERVAL (0.25), RATE_LIMIT (120),
 ALLOW_UNATTESTED ("true" lets requests without a token through, for testing only),
-DB_CLIENT_ID and DB_API_KEY (DB API Marketplace; without them the RIS paths answer 404).
+DB_CLIENT_ID and DB_API_KEY (DB API Marketplace; without them the RIS paths answer 404),
+REGIO ("false" asks bahn.de for coach sequences only), REGIO_LOG (logs/regio.log).
 """
 
 import asyncio
@@ -42,6 +49,7 @@ import time
 import uuid
 from collections import OrderedDict
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 from aiohttp import web
 
@@ -263,7 +271,8 @@ class Proxy:
     def paused(self):
         return self.paused_until > self.clock()
 
-    async def handle(self, request):
+    async def handle(self, request, counted=False):
+        """`counted`: the request already counted towards its install's rate (`RegioSequences`)."""
         if request.path == "/health":
             return json_response(200, {"ok": True, "paused": self.paused})
         if not request.path.startswith(self.prefix):
@@ -277,7 +286,7 @@ class Proxy:
         key = self.authorized(request)
         if key is None:
             return json_response(401, {"error": "unauthorized"})
-        if not self.within_rate(key):
+        if not counted and not self.within_rate(key):
             return json_response(429, {"error": "rate_limited"})
         # The query exactly as sent, e.g. "%23" in journey IDs.
         query = request.rel_url.raw_query_string
@@ -433,17 +442,304 @@ class RISFetch:
             return Answer(response.status, body, response.headers.get("Content-Type") or "application/json; charset=utf-8")
 
 
+# MARK: - Coach sequences from DB Regio's Wi-Fi portal
+
+SEQUENCE_PATH = "reisebegleitung/wagenreihung/vehicle-sequence"
+REGIO_PAGE = "https://wifi-landingpage.dbregio.de/"
+REGIO_UPSTREAM = "https://wifi-landingpage.dbregio.de/api/transports/vehicle-sequences/departures/unmatched"
+REGIO_CSRF = re.compile(r'name="csrf-token" content="([^"]+)"')
+# The portal refusing us (or no CSRF token): tried again, then paused, then off.
+REGIO_BLOCK_STATUSES = {401, 403, 419, 429, 452}
+REGIO_ATTEMPTS = 10
+REGIO_RETRY_DELAY = 0.3
+REGIO_PAUSE = 300
+# A coach sequence the portal should have: a train (not S-Bahn, bus, tram, subway) leaving a German station
+# (EVA numbers 80…) within this many seconds. It is asked only where the train departs, never at its last stop.
+REGIO_EXPECTED_WITHIN = 20 * 3600
+REGIO_NOT_TRAINS = {"S", "BUS", "STR", "TRAM", "U", "SEV", "BSV", "FAE", "SCH"}
+# A run the portal had no coach sequence for, so the app's next look doesn't ask again right away.
+REGIO_MISSING_TTL = 60
+REGIO_SESSION_MAX_AGE = 1800
+REGIO_USER_AGENT = ("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 "
+                    "(KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1")
+
+
+class RegioBlocked(Exception):
+    """The portal refused us; `reason` says how (status or a missing CSRF token)."""
+
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
+
+
+def regio_url(query):
+    """The portal's request for bahn.de's coach-sequence query (`category`, `number`, `evaNumber`, `date`,
+    `time` as the app sends it), or None when one is missing."""
+    try:
+        when = parse_time(query["time"])
+        params = {"category": query["category"], "journeyNumber": query["number"], "evaNumber": query["evaNumber"],
+                  "date": query["date"], "timeSchedule": when.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                  "includeAmenities": "true", "includePosition": "true"}
+    except (KeyError, ValueError):
+        return None
+    from urllib.parse import urlencode
+
+    return REGIO_UPSTREAM + "?" + urlencode(params)
+
+
+def parse_time(text):
+    """The app's `time` (UTC, "2026-11-05T14:45:00.000Z")."""
+    return datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone(timezone.utc)
+
+
+def bahn_de_sequence(regio):
+    """The portal's coach sequence (RIS::Transports) in bahn.de's shape. The portal has every field bahn.de
+    has, with a few more kept as they are; only the platform and each group's train sit elsewhere."""
+    answer = {key: value for key, value in regio.items() if key not in ("platform", "groups")}
+    platform = regio.get("platform") or {}
+    if "platform" in platform:
+        answer["departurePlatform"] = platform["platform"]
+    if "platformSchedule" in platform:
+        answer["departurePlatformSchedule"] = platform["platformSchedule"]
+    details = platform.get("details")
+    if details:
+        answer["platform"] = {"name": details.get("name"), "start": details.get("start"), "end": details.get("end"),
+                              "sectors": [{key: sector.get(key) for key in ("name", "start", "end")}
+                                          for sector in details.get("sectors") or []]}
+    groups = []
+    for group in regio.get("groups") or []:
+        group = dict(group)
+        relation = group.get("journeyRelation") or {}
+        destination = group.get("destination") or {}
+        group["transport"] = {"category": relation.get("startCategory"), "number": relation.get("startJourneyNumber"),
+                              "destination": {"name": destination.get("name")}, "journeyID": group.get("journeyID")}
+        groups.append(group)
+    answer["groups"] = groups
+    return answer
+
+
+def expected_sequence(query, now):
+    """Whether the portal should have had this coach sequence (see REGIO_EXPECTED_WITHIN)."""
+    try:
+        departure = parse_time(query["time"])
+    except (KeyError, ValueError):
+        return False
+    ahead = (departure - now).total_seconds()
+    return (0 <= ahead <= REGIO_EXPECTED_WITHIN and query.get("evaNumber", "").startswith("80")
+            and query.get("category", "").upper() not in REGIO_NOT_TRAINS)
+
+
+class RegioFetch:
+    """`fetch` asking the portal like its page does: the page first (cookie `__Host-csrf` and the meta tag
+    `csrf-token`), then the API with that token as `Csrf-Token`. `reset()` starts over with a new page."""
+
+    def __init__(self, clock=time.monotonic):
+        self.clock = clock
+        self.session = None
+        self.token = None
+        self.started = 0
+
+    def reset(self):
+        session, self.session, self.token = self.session, None, None
+        if session is not None:
+            asyncio.ensure_future(session.close())
+
+    async def _start(self):
+        import aiohttp
+
+        session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=UPSTREAM_TIMEOUT),
+                                        headers={"User-Agent": REGIO_USER_AGENT, "Accept-Language": "de"})
+        async with session.get(REGIO_PAGE) as response:
+            page = await response.text()
+            match = REGIO_CSRF.search(page) if response.status == 200 else None
+        if not match:
+            await session.close()
+            raise RegioBlocked(f"page {response.status}, no CSRF token")
+        self.session, self.token, self.started = session, match.group(1), self.clock()
+
+    async def __call__(self, url):
+        if self.session is None or self.clock() - self.started > REGIO_SESSION_MAX_AGE:
+            self.reset()
+            await self._start()
+        began = time.perf_counter()
+        async with self.session.get(url, headers={"Csrf-Token": self.token, "Accept": "application/json"}) as response:
+            body = await response.read()
+            log.info("Regio %s %s in %d ms", response.status, url.split("journeyNumber=")[-1].split("&")[0],
+                     (time.perf_counter() - began) * 1000)
+            return Answer(response.status, body, response.headers.get("Content-Type") or "application/json; charset=utf-8")
+
+
+@dataclass
+class RegioSequences:
+    """Coach sequences from DB Regio's Wi-Fi portal before bahn.de (`proxy`):
+    - a refusal (REGIO_BLOCK_STATUSES or no CSRF token) is tried again, up to REGIO_ATTEMPTS times in all,
+      each with a new page; meanwhile other requests go to bahn.de;
+    - all refused: bahn.de answers for `pause` seconds, then the portal is asked again; refused once more
+      right then (all attempts), the portal stays off until the server restarts;
+    - a 404 is the answer (bahn.de has the same data, so it has none either): the app gets 404, and when the
+      portal should have had it (`expected_sequence`) a line goes to the log;
+    - any other failure (5xx, unreachable, an answer that isn't JSON) goes to bahn.de for that request.
+    Every refusal is written to `log_path` with time, answer and request."""
+
+    fetch: object
+    proxy: object
+    log_path: str = "logs/regio.log"
+    attempts: int = REGIO_ATTEMPTS
+    retry_delay: float = REGIO_RETRY_DELAY
+    pause: float = REGIO_PAUSE
+    clock: object = time.monotonic
+    now: object = lambda: datetime.now(timezone.utc)  # noqa: E731 - replaced in tests
+    sleep: object = asyncio.sleep
+    cache: OrderedDict = field(default_factory=OrderedDict)
+    paused_until: float = 0
+    # Refused after a pause: off until the server restarts.
+    off: bool = False
+    # A pause ended and the next request decides whether the portal is back.
+    on_probation: bool = False
+    trying: bool = False
+    missing_logged: set = field(default_factory=set)
+
+    def write_log(self, kind, text):
+        line = f"{self.now().strftime('%Y-%m-%d %H:%M:%S')} UTC {kind} {text}\n"
+        try:
+            directory = os.path.dirname(self.log_path)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+            with open(self.log_path, "a", encoding="utf-8") as file:
+                file.write(line)
+        except OSError as error:
+            log.warning("Regio log not written: %s", error)
+
+    @property
+    def usable(self):
+        return not self.off and not self.trying and self.paused_until <= self.clock()
+
+    async def handle(self, request):
+        """The coach sequence from the portal, or bahn.de's (`proxy.handle`) when the portal can't answer."""
+        query = dict(request.rel_url.query)
+        url = regio_url(query)
+        hit = self.cached(self.query_key(query))
+        if request.method != "GET" or url is None or len(request.rel_url.raw_query_string) > MAX_QUERY_LENGTH \
+                or (hit is None and not self.usable):
+            return await self.proxy.handle(request)
+        key = self.proxy.authorized(request)
+        if key is None:
+            return json_response(401, {"error": "unauthorized"})
+        if not self.proxy.within_rate(key):
+            return json_response(429, {"error": "rate_limited"})
+        if hit is None:
+            hit = await self.ask(url, query)
+        if hit is None:
+            return await self.proxy.handle(request, counted=True)
+        status, body = hit
+        ok = status == 200
+        return web.Response(status=status, body=body, headers={
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": f"public, max-age={ROUTES[SEQUENCE_PATH]}" if ok else "no-store",
+            "X-Proxy-Source": "regio",
+        })
+
+    def cached(self, query):
+        entry = self.cache.get(query)
+        if entry is None:
+            return None
+        expires, answer = entry
+        if expires <= self.clock():
+            del self.cache[query]
+            return None
+        return answer
+
+    def store(self, query, answer, ttl):
+        self.cache[query] = (self.clock() + ttl, answer)
+        self.cache.move_to_end(query)
+        while len(self.cache) > MAX_CACHE_ENTRIES:
+            self.cache.popitem(last=False)
+
+    async def ask(self, url, query):
+        """(status, body) in bahn.de's shape, or None for bahn.de to answer."""
+        try:
+            for attempt in range(1, self.attempts + 1):
+                try:
+                    answer = await self.fetch(url)
+                except RegioBlocked as blocked:
+                    reason = blocked.reason
+                except Exception as error:  # noqa: BLE001 - unreachable: bahn.de answers this one
+                    log.warning("Regio unreachable: %s", type(error).__name__)
+                    return None
+                else:
+                    if answer.status not in REGIO_BLOCK_STATUSES:
+                        self.on_probation = False
+                        return self.answered(answer, url, query)
+                    reason = f"{answer.status} {answer.body[:120].decode('utf-8', 'replace')}"
+                # While this request tries again, the others go to bahn.de.
+                self.trying = True
+                self.write_log("BLOCK", f"attempt {attempt}/{self.attempts}: {reason} ({self.describe(query)})")
+                reset = getattr(self.fetch, "reset", None)
+                if reset:
+                    reset()
+                if attempt < self.attempts:
+                    await self.sleep(self.retry_delay * attempt)
+            if self.on_probation:
+                self.off = True
+                self.write_log("OFF", "refused again after the pause: bahn.de only until the server restarts")
+                log.warning("Regio refused again after its pause: off until restart")
+            else:
+                self.paused_until = self.clock() + self.pause
+                self.on_probation = True
+                self.write_log("PAUSE", f"refused {self.attempts} times: bahn.de for {int(self.pause)} s")
+                log.warning("Regio refused %d times: bahn.de for %ds", self.attempts, self.pause)
+            return None
+        finally:
+            self.trying = False
+
+    def answered(self, answer, url, query):
+        if answer.status == 404:
+            if expected_sequence(query, self.now()):
+                seen = (query.get("category"), query.get("number"), query.get("date"), query.get("evaNumber"))
+                if seen not in self.missing_logged:
+                    self.missing_logged.add(seen)
+                    if len(self.missing_logged) > 10000:
+                        self.missing_logged.clear()
+                    self.write_log("MISSING", f"no coach sequence for {self.describe(query)}")
+            result = (404, json.dumps({"error": "not_found"}).encode())
+            self.store(self.query_key(query), result, REGIO_MISSING_TTL)
+            return result
+        if answer.status != 200:
+            log.warning("Regio answered %s", answer.status)
+            return None
+        try:
+            body = json.dumps(bahn_de_sequence(json.loads(answer.body)), ensure_ascii=False).encode()
+        except (ValueError, TypeError, AttributeError):
+            log.warning("Regio answer isn't a coach sequence")
+            return None
+        result = (200, body)
+        self.store(self.query_key(query), result, ROUTES[SEQUENCE_PATH])
+        return result
+
+    @staticmethod
+    def query_key(query):
+        return "&".join(f"{key}={query.get(key, '')}" for key in ("category", "number", "evaNumber", "date", "time"))
+
+    @staticmethod
+    def describe(query):
+        return (f"{query.get('category', '?')} {query.get('number', '?')} at {query.get('evaNumber', '?')}, "
+                f"{query.get('time', '?')}")
+
+
 def ris_proxy(fetch, secret, **options):
     """The proxy for RIS::Journeys: the same tokens and rate, its own cache and pauses."""
     return Proxy(fetch=fetch, secret=secret, prefix=RIS_PREFIX, upstream_base=RIS_UPSTREAM, ttl_for=ris_route_ttl,
                  block_statuses=frozenset(RIS_BLOCK_STATUSES), name="RIS", **options)
 
 
-def make_app(proxy, ris=None):
-    """`proxy` (bahn.de) answers everything but RIS_PREFIX, which goes to `ris` (404 without one)."""
+def make_app(proxy, ris=None, regio=None):
+    """`proxy` (bahn.de) answers everything but RIS_PREFIX, which goes to `ris` (404 without one), and coach
+    sequences, which `regio` answers first when there is one."""
     async def handle(request):
         if request.path.startswith(RIS_PREFIX):
             return await ris.handle(request) if ris else json_response(404, {"error": "not_found"})
+        if regio and request.path == proxy.prefix + SEQUENCE_PATH:
+            return await regio.handle(request)
         return await proxy.handle(request)
 
     app = web.Application(client_max_size=4096)
@@ -475,7 +771,9 @@ def main():
                     rate_limit=rate_limit) if client_id and api_key else None
     if ris is None:
         log.info("DB_CLIENT_ID/DB_API_KEY not set: RIS::Journeys answers 404")
-    web.run_app(make_app(proxy, ris), port=int(os.environ.get("PORT", "8080")), access_log=None)
+    regio = None if os.environ.get("REGIO") == "false" else RegioSequences(
+        fetch=RegioFetch(), proxy=proxy, log_path=os.environ.get("REGIO_LOG", "logs/regio.log"))
+    web.run_app(make_app(proxy, ris, regio), port=int(os.environ.get("PORT", "8080")), access_log=None)
 
 
 if __name__ == "__main__":

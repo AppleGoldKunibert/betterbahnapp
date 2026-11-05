@@ -3831,6 +3831,23 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(formation.unitDescription == "Tz 9457 „Bundesrepublik Deutschland“ + 9018 „Freistaat Bayern“")
     }
 
+    /// Our server asks DB Regio's Wi-Fi portal for coach sequences before bahn.de and hands its answer over in
+    /// bahn.de's shape (`Server/bahnde-proxy`, `bahn_de_sequence`); here ICE 615 at Hamburg Hbf (2026-11-05),
+    /// shortened, as the server sends it. The app reads it like bahn.de's.
+    @Test func readsTheRegioPortalsCoachSequenceLikeBahnDes() throws {
+        let json = #"""
+        {"journeyID": "20261105-66eda5b0-b326-31f6-8b4d-26ab71341a86", "departureID": "8002549_D_1", "sequenceStatus": "MATCHES_SCHEDULE", "sequenceChange": "NO_CHANGE", "barrierFreeAccess": "UNKNOWN", "occupancy": {"levelFirstClass": "UNDEFINED", "levelEconomyClass": "UNDEFINED"}, "departurePlatform": "14", "departurePlatformSchedule": "14", "platform": {"name": "14", "start": 0.0, "end": 439.75, "sectors": [{"name": "F", "start": 0.0, "end": 109.8}, {"name": "E", "start": 109.8, "end": 158.95}]}, "groups": [{"name": "ICE9499", "journeyID": "20261105-66eda5b0-b326-31f6-8b4d-26ab71341a86", "journeyRelation": {"startTime": "2026-11-05T14:26:00Z", "startEvaNumber": "8002553", "startAdministrationID": "80", "startCategory": "ICE", "startJourneyNumber": 615}, "destination": {"evaNumber": "8000261", "ifopt": "", "name": "München Hbf"}, "occupancy": {"levelFirstClass": "UNDEFINED", "levelEconomyClass": "UNDEFINED"}, "vehicles": [{"vehicleID": "938058120990", "type": {"category": "CONTROLCAR_ECONOMY_CLASS", "constructionType": "I5812", "constructionTypeLabel": "I581250_ICE 4", "layoutID": "412.(13-TLG.)", "hasFirstClass": false, "hasEconomyClass": true}, "wagonIdentificationNumber": 1, "status": "OPEN", "orientation": "FORWARDS", "barrierFreeAccess": "UNKNOWN", "platformPosition": {"start": 367.05, "end": 395.65, "sector": "A"}, "capacity": {"seatsFirstClass": 0, "seatsEconomyClass": 59, "placesWheelchair": 0, "placesBike": 8}, "occupancy": {"levelFirstClass": "UNDEFINED", "levelEconomyClass": "UNDEFINED"}}, {"vehicleID": "938024128994", "type": {"category": "PASSENGERCARRIAGE_ECONOMY_CLASS", "constructionType": "I2412", "constructionTypeLabel": "I241220_ICE 4", "layoutID": "412.(13-TLG.)", "hasFirstClass": false, "hasEconomyClass": true}, "wagonIdentificationNumber": 2, "status": "OPEN", "orientation": "FORWARDS", "barrierFreeAccess": "UNKNOWN", "platformPosition": {"start": 339.15, "end": 367.05, "sector": "A"}, "capacity": {"seatsFirstClass": 0, "seatsEconomyClass": 88, "placesWheelchair": 0, "placesBike": 0}, "occupancy": {"levelFirstClass": "UNDEFINED", "levelEconomyClass": "UNDEFINED"}}], "transport": {"category": "ICE", "number": 615, "destination": {"name": "München Hbf"}, "journeyID": "20261105-66eda5b0-b326-31f6-8b4d-26ab71341a86"}}]}
+        """#
+        let response = try JSONDecoding.decoder.decode(BahnDeClient.SequenceResponse.self, from: Data(json.utf8))
+        #expect(response.departurePlatform == "14")
+        let sequence = BahnDeClient.coachSequence(from: response, category: "ICE", number: 615)
+        #expect(sequence.coaches.map(\.number) == ["1", "2"])
+        #expect(sequence.coaches.first?.sector == "A")
+        #expect(sequence.groups.first?.destination == "München Hbf")
+        #expect(sequence.groups.first?.isRequestedTrain == true)
+        #expect(sequence.sectors.map(\.name) == ["F", "E"])
+    }
+
     /// IC 1189 (IC 1 farewell run) showed "Tz 450007": loco-hauled IC 1 coaches have no Tz.
     @Test func ic1HasNoTrainsetNumber() throws {
         let json = #"""
