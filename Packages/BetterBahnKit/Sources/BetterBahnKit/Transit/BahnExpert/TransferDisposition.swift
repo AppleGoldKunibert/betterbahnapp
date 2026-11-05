@@ -31,6 +31,47 @@ public enum TransferDisposition: String, Codable, Sendable, Hashable {
     }
 }
 
+/// DB's decision for a leg's train, remembered with the leg (`Leg.waitDecision`): only valid for the train it
+/// was made for, so a transfer from another train (after "Anderer Zug") doesn't inherit it.
+public struct WaitDecision: Codable, Sendable, Hashable {
+    /// `Leg.id` of the train arriving before.
+    public var arrivingLegID: String
+    public var disposition: TransferDisposition
+
+    public init(arrivingLegID: String, disposition: TransferDisposition) {
+        self.arrivingLegID = arrivingLegID
+        self.disposition = disposition
+    }
+}
+
+public extension Leg {
+    /// What DB decided for this train and `arriving`, if anything.
+    func disposition(waitingFor arriving: Leg) -> TransferDisposition? {
+        waitDecision.flatMap { $0.arrivingLegID == arriving.id ? $0.disposition : nil }
+    }
+
+    /// DB's dispatchers hold this train for `arriving`: the transfer is caught, however late `arriving` is.
+    func waits(for arriving: Leg) -> Bool {
+        disposition(waitingFor: arriving) == .waiting
+    }
+}
+
+public extension Journey {
+    /// The journey with DB's decisions on its connecting legs. A decision that's gone (nil) clears the
+    /// one remembered; legs without an update keep theirs.
+    func applying(_ updates: [TransferDispositionUpdate]) -> Journey {
+        var journey = self
+        for update in updates {
+            for index in journey.legs.indices where journey.legs[index].id == update.departing.id {
+                journey.legs[index].waitDecision = update.disposition.map {
+                    WaitDecision(arrivingLegID: update.arriving.id, disposition: $0)
+                }
+            }
+        }
+        return journey
+    }
+}
+
 /// DB's decision for one transfer of a journey, as looked up by `BahnExpertClient.dispositions(in:now:)`.
 public struct TransferDispositionUpdate: Sendable, Hashable {
     public var arriving: Leg
