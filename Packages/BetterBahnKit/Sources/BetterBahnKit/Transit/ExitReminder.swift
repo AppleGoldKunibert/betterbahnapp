@@ -64,7 +64,7 @@ public extension Journey {
             var details = Self.delay(leg.arrival).map { "(\($0)) " } ?? ""
             if index + 1 < transit.count {
                 let next = transit[index + 1]
-                details += String(kit: "Ankunft in %@ – %@", place, Self.transfer(from: leg, to: next, disposition: dispositions[next.id]))
+                details += String(kit: "Ankunft in %@ – %@", place, Self.transfer(from: leg, to: next, disposition: dispositions[next.id] ?? next.disposition(waitingFor: leg)))
             } else if leg.destination.isSamePlace(as: legs.last?.destination ?? leg.destination) {
                 details += String(kit: "Ankunft am Ziel %@", place)
             } else {
