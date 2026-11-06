@@ -74,7 +74,7 @@ stops the scan (the log is still served), `TZ_RIS=false` the WiFi host.
 | `TZ_BOARDS` | `true` | `false` never reads bahn.de's boards. |
 | `TZ_SCAN_EVERY` | `43200` | Seconds between two board scans (each reads up to midnight at most). |
 | `TZ_RIS` | `true` | `false` turns the WiFi host (vehicle lookups) off. |
-| `TZ_RIS_INTERVAL` | `1` | Seconds between two requests to the WiFi host. |
+| `TZ_RIS_INTERVAL` | `2` | Seconds between two requests to the WiFi host (its firewall rejects an address that asks faster for long). |
 | `TZ_VEHICLE_EVERY` | `43200` | Seconds between two vehicle rounds. |
 | `ALLOW_UNATTESTED` | — | `true` lets requests without a token through. Only for a quick test, never in production. |
 

@@ -19,7 +19,7 @@ records no one who asks.
 
 Environment: TZ_DB (file, default `tz.db` next to this file), TZ_SEED (default `tz_seed.json` next to this file),
 TZ_SCAN ("false" turns the scan off, the log is still served), TZ_VEHICLE_EVERY (43200: seconds between two rounds),
-TZ_RIS ("false" turns the WiFi host off), TZ_RIS_INTERVAL (1), TZ_BOARDS ("false" never asks bahn.de),
+TZ_RIS ("false" turns the WiFi host off), TZ_RIS_INTERVAL (2), TZ_BOARDS ("false" never asks bahn.de),
 TZ_SCAN_INTERVAL (3).
 """
 
@@ -52,6 +52,10 @@ RIS_USER_AGENT = "BetterBahn tz log (+https://betterbahn.betterbahn.workers.dev/
 RIS_SESSION_MAX_AGE = 3600
 # This many failed requests in a row end a round at the WiFi host.
 RIS_MAX_FAILURES = 5
+# The host's firewall rejects an address that asks too much: a round then waits this long (seconds) and goes on
+# where it was, at most `RIS_MAX_PAUSES` times, then stops until the next round.
+RIS_BLOCK_PAUSE = 600
+RIS_MAX_PAUSES = 3
 
 # Stations whose boards the server reads to find Tz the seed list lacks: the busiest long-distance stations, which a
 # new trainset passes within days. bahn.de's EVA number and name.
@@ -400,6 +404,9 @@ class RisClient:
                     body = json.loads(raw) if raw else None
                 except ValueError:  # no JSON, e.g. an error page
                     body = None
+                if body is None and b"Request Rejected" in raw:
+                    # The host's firewall page (with a 200): too many requests from this address for now.
+                    return 429, None
                 if body is None:
                     # Kept for the round record: what the host sent instead of JSON.
                     self.last_empty = (f"{response.status} {response.headers.get('Content-Type')} "
@@ -477,7 +484,7 @@ class Scanner:
     (status, body)` the WiFi host (`RisClient`, none: no vehicle lookups); replaced in tests."""
 
     def __init__(self, store, get, hubs=HUBS, interval=3.0, every=43200, now=time.time, sleep=asyncio.sleep,
-                 pause_left=lambda: 0, ris=None, ris_interval=1.0, vehicle_every=43200):
+                 pause_left=lambda: 0, ris=None, ris_interval=2.0, vehicle_every=43200):
         self.store = store
         self.get = get
         self.hubs = hubs
@@ -610,17 +617,34 @@ class Scanner:
         samples = []  # the first answers that named another trainset or none, to see what the host really says
         round_id = self.store.start_round(self.now())
         note = "done"
+        pauses = 0
+        blocked = False
         for tz, uic, backfilled in self.store.vehicles():
             days = recent if backfilled else [today - dt.timedelta(days=n) for n in range(BACKFILL_DAYS, -1, -1)]
             complete = True
             for day in days:
-                await self.sleep(self.ris_interval)
-                try:
-                    status, body = await self.ris(uic, day.isoformat())
-                except Exception:  # noqa: BLE001 - counts as a failed request
-                    status, body = 599, None
-                asked += 1
-                statuses[str(status)] = statuses.get(str(status), 0) + 1
+                while True:
+                    await self.sleep(self.ris_interval)
+                    try:
+                        status, body = await self.ris(uic, day.isoformat())
+                    except Exception:  # noqa: BLE001 - counts as a failed request
+                        status, body = 599, None
+                    asked += 1
+                    statuses[str(status)] = statuses.get(str(status), 0) + 1
+                    if status != 429 or pauses >= RIS_MAX_PAUSES:
+                        break
+                    pauses += 1
+                    self.store.update_round(round_id, self.now(), asked, statuses,
+                                            " | ".join([f"rejected at Tz {tz}, pause {pauses}"] + samples))
+                    log.warning("Tz vehicle round: the WiFi host rejects us, pausing %ds", RIS_BLOCK_PAUSE)
+                    close = getattr(self.ris, "close", None)
+                    if close is not None:
+                        await close()  # a new session afterwards
+                    await self.sleep(RIS_BLOCK_PAUSE)
+                if status == 429:
+                    blocked = True
+                    complete = False
+                    break
                 if asked % 25 == 0:
                     self.store.update_round(round_id, self.now(), asked, statuses,
                                             " | ".join([f"running, at Tz {tz}"] + samples))
@@ -658,6 +682,10 @@ class Scanner:
                     break
             if complete and not backfilled:
                 self.store.mark_backfilled(tz)
+            if blocked:
+                note = f"stopped at Tz {tz}: the WiFi host still rejects us after {pauses} pauses"
+                log.warning("Tz vehicle round stopped: the WiFi host rejects us")
+                break
             if failures >= RIS_MAX_FAILURES:
                 log.warning("Tz vehicle round stopped: %d requests failed in a row", failures)
                 note = f"stopped at Tz {tz}: {failures} requests failed in a row, last status {status}"

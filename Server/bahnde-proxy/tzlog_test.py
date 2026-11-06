@@ -357,13 +357,13 @@ class VehicleRoundTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_round_leaves_a_record_in_the_file(self):
         scanner = self.scanner()
-        self.answers = {"938000000043": self.answer("ICE8043"), "938000000090": (429, None)}
+        self.answers = {"938000000043": self.answer("ICE8043"), "938000000090": (503, None)}
         await scanner.scan_vehicles()
         rows = self.store.db.execute("SELECT asked, statuses, note FROM rounds").fetchall()
         self.assertEqual(len(rows), 1)
         asked, statuses, note = rows[0]
         self.assertEqual(asked, len(self.asked))
-        self.assertEqual(json.loads(statuses)["429"], 1)
+        self.assertEqual(json.loads(statuses)["503"], 1)
         self.assertEqual(note, "done")
 
     async def test_an_empty_answer_for_a_day_does_not_stop_the_other_days(self):
@@ -400,6 +400,29 @@ class VehicleRoundTests(unittest.IsolatedAsyncioTestCase):
         note = self.store.db.execute("SELECT note FROM rounds").fetchone()[0]
         self.assertIn("Tz 8043 938000000043", note)
         self.assertIn("group 8044", note)
+
+    async def test_a_rejected_round_pauses_and_goes_on_where_it_was(self):
+        rejections = {"left": 2}
+
+        async def ris(uic, day):
+            self.asked.append((uic, day))
+            if uic == "938000000090" and rejections["left"]:
+                rejections["left"] -= 1
+                return 429, None
+            return self.answer("ICE8043" if uic == "938000000043" else "ICE9490", (day, "ICE", 1))
+
+        scanner = self.scanner()
+        scanner.ris = ris
+        await scanner.scan_vehicles()
+        self.assertIn(tzlog.RIS_BLOCK_PAUSE, scanner.sleep.slept)
+        self.assertTrue(all(done for _, _, done in self.store.vehicles()))
+
+    async def test_a_round_still_rejected_after_its_pauses_stops(self):
+        self.answers = {"938000000043": (429, None), "938000000090": self.answer("ICE9490")}
+        await self.scanner().scan_vehicles()
+        self.assertEqual(len(self.asked), tzlog.RIS_MAX_PAUSES + 1, "the next Tz isn't asked")
+        note = self.store.db.execute("SELECT note FROM rounds").fetchone()[0]
+        self.assertIn("rejects us", note)
 
     async def test_a_round_that_gives_up_says_why(self):
         for index in range(tzlog.RIS_MAX_FAILURES):
@@ -600,6 +623,7 @@ class RisClientTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.requests = []
         self.reject_first = False
+        self.firewall = False
 
         async def page(request):
             self.requests.append("page")
@@ -609,6 +633,9 @@ class RisClientTests(unittest.IsolatedAsyncioTestCase):
 
         async def journeys(request):
             self.requests.append(f"journeys {request.match_info['uic']} {request.query.get('date')}")
+            if self.firewall:
+                return web.Response(text="<html><head><title>Request Rejected</title></head><body>The requested URL was rejected.</body></html>",
+                                    content_type="text/html")
             if self.reject_first and self.requests.count("page") == 1:
                 return web.json_response({"error": "csrf"}, status=403)
             if request.headers.get("Csrf-Token") != "tok-1" or request.cookies.get("csrf") != "cookie-1":
@@ -635,6 +662,11 @@ class RisClientTests(unittest.IsolatedAsyncioTestCase):
         status, _ = await self.client("938000000043", "2026-11-03")
         self.assertEqual(status, 200)
         self.assertEqual(self.requests.count("page"), 2)
+
+    async def test_the_firewall_page_counts_as_a_rejection(self):
+        self.firewall = True
+        status, body = await self.client("938000000043", "2026-11-03")
+        self.assertEqual((status, body), (429, None))
 
     async def test_only_digits_are_asked_for(self):
         self.assertEqual((await self.client("../x", "2026-11-03"))[0], 400)
