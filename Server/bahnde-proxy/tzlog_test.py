@@ -171,6 +171,21 @@ class StoreTests(unittest.TestCase):
         store.mark_backfilled("169")
         self.assertEqual([tz for tz, _, _ in store.vehicles()], ["303", "169"])
 
+    def test_a_file_from_rounds_that_took_the_firewall_page_for_empty_days_backfills_once_more(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            path = str(Path(folder) / "tz.db")
+            store = tzlog.TzStore(path)
+            self.record(store, "2026-10-31", "1111", 1, vehicle="938054111118")
+            store.mark_backfilled("1111")
+            store.update_round(store.start_round(1), 2, 10, {"200": 5, "empty": 5}, "done")
+            store.db.close()
+            again = tzlog.TzStore(path)
+            self.assertEqual(again.vehicles(), [("1111", "938054111118", False)])
+            again.mark_backfilled("1111")
+            again.db.close()
+            self.assertEqual(tzlog.TzStore(path).vehicles(), [("1111", "938054111118", True)], "only once")
+
     def test_history_newest_first_and_prune_after_a_year(self):
         store = tzlog.TzStore()
         self.record(store, "2025-10-01", "8043", 1)

@@ -201,6 +201,12 @@ class TzStore:
         self.db.execute("""CREATE TABLE IF NOT EXISTS rounds (
             id INTEGER PRIMARY KEY AUTOINCREMENT, started REAL NOT NULL, updated REAL NOT NULL,
             asked INTEGER NOT NULL, statuses TEXT NOT NULL, note TEXT NOT NULL)""")
+        # Rounds before the firewall page was recognised took it for an empty day and marked Tz as backfilled
+        # without their trains: those files backfill every Tz once more (what is known stays).
+        if self.db.execute("SELECT 1 FROM rounds WHERE statuses LIKE '%\"empty\"%' LIMIT 1").fetchone() and \
+                not self.db.execute("SELECT 1 FROM state WHERE key = 'rebackfilled'").fetchone():
+            self.db.execute("UPDATE units SET backfilled = 0")
+            self.db.execute("INSERT INTO state (key, value) VALUES ('rebackfilled', '1')")
         self.db.commit()
 
     def record_unit(self, sighting, now):
