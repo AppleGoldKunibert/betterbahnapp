@@ -8,6 +8,11 @@ struct JourneyResultsView: View {
     @Environment(\.appDesign) private var design
     @State private var searchDate: Date
     @State private var journeys: [Journey] = []
+    /// Expert option "Nur Ein-/Ausstieg ignorieren": the direct trains the search leaves out, shown
+    /// among `journeys` only where those reach (see `StationCalls.merging`).
+    @State private var restrictedExtras: [Journey] = []
+    /// The time `restrictedExtras` were looked up for, so a further page only looks up what's new.
+    @State private var restrictedRange: ClosedRange<Date>?
     @State private var earlierCursor: String?
     @State private var laterCursor: String?
     @State private var hiddenCount = 0
@@ -33,20 +38,27 @@ struct JourneyResultsView: View {
         _searchDate = State(initialValue: search.date)
     }
 
+    /// The search results with the expert option's extra trains among them.
+    private var listedJourneys: [Journey] {
+        restrictedExtras.isEmpty ? journeys : StationCalls.merging(restrictedExtras, into: journeys)
+    }
+
     /// Only routes that fulfil every train requirement are shown once one is set.
     private var visibleJourneys: [Journey] {
         guard requirements.isEmpty else { return (plan?.journeys ?? []).removingDuplicateIDs() }
-        return ticketJourneys.isEmpty ? journeys : ticketJourneys
+        let listed = listedJourneys
+        let valid = ticketJourneys(listed)
+        return valid.isEmpty ? listed : valid
     }
 
     /// With the ticket filter on, the connections the ticket covers; all of them without it.
-    private var ticketJourneys: [Journey] {
-        search.onlyValidTicket ? journeys.filter(model.ticketFilter.isValid) : journeys
+    private func ticketJourneys(_ listed: [Journey]) -> [Journey] {
+        search.onlyValidTicket ? listed.filter(model.ticketFilter.isValid) : listed
     }
 
     /// The ticket covers none of the connections, they only cross a border: shown with a warning.
     private var showsBorderFallback: Bool {
-        requirements.isEmpty && search.onlyValidTicket && ticketJourneys.isEmpty && !journeys.isEmpty
+        requirements.isEmpty && search.onlyValidTicket && !journeys.isEmpty && ticketJourneys(listedJourneys).isEmpty
     }
 
     /// The warning when the ticket covers none of the connections: they are abroad entirely, or only reach the border.
@@ -157,8 +169,9 @@ struct JourneyResultsView: View {
                 }
 
                 VStack(spacing: 8) {
-                    if hiddenCount + journeys.count - visibleJourneys.count > 0, requirements.isEmpty {
-                        InfoChip(text: String(localized: "\(hiddenCount + journeys.count - visibleJourneys.count) nicht mit \(model.settings.ticketType.shortName) nutzbar"), systemImage: "eye.slash.fill")
+                    let hidden = hiddenCount + listedJourneys.count - visibleJourneys.count
+                    if hidden > 0, requirements.isEmpty {
+                        InfoChip(text: String(localized: "\(hidden) nicht mit \(model.settings.ticketType.shortName) nutzbar"), systemImage: "eye.slash.fill")
                     }
                     if source == .transitous {
                         SourceNotice()
@@ -486,6 +499,8 @@ struct JourneyResultsView: View {
     /// Re-runs the search from scratch, e.g. after the user picks a new time.
     private func reload() async {
         journeys = []
+        restrictedExtras = []
+        restrictedRange = nil
         earlierCursor = nil
         laterCursor = nil
         hiddenCount = 0
@@ -525,12 +540,14 @@ struct JourneyResultsView: View {
         defer { isLoading = false }
         // First page: which trains call at both ends is looked up alongside the search, so detours are
         // gone and the expert option's trains are there about when the results show.
-        let lookup: Task<DetourLookup, Never>? = cursor == nil && search.via.isEmpty ? {
+        let firstRange: ClosedRange<Date>? = cursor == nil && search.via.isEmpty ? {
             let start = search.isArrival ? searchDate.addingTimeInterval(-Self.lookupWindow) : searchDate
-            let addingRestricted = model.settings.ignoreBoardingRulesEnabled
-            return Task { await detourLookup(start: start, end: start.addingTimeInterval(2 * Self.lookupWindow),
-                                             addingRestricted: addingRestricted) }
+            return start...start.addingTimeInterval(2 * Self.lookupWindow)
         }() : nil
+        let lookup: Task<DetourLookup, Never>? = firstRange.map { range in
+            let addingRestricted = model.settings.ignoreBoardingRulesEnabled
+            return Task { await detourLookup(start: range.lowerBound, end: range.upperBound, addingRestricted: addingRestricted) }
+        }
         do {
             var result: [Journey]
             var page: JourneyPage?
@@ -571,6 +588,8 @@ struct JourneyResultsView: View {
             if let early { result = applying(early, to: result) }
             if cursor == nil {
                 journeys = result.removingDuplicateIDs().removingSameTrainDuplicates()
+                restrictedExtras = early?.extra ?? []
+                restrictedRange = model.settings.ignoreBoardingRulesEnabled ? firstRange : nil
                 // The first connection is the one most likely opened next: have its live data ready.
                 if let first = result.first(where: { ($0.departure?.best ?? .distantFuture) > .now }) {
                     model.prepareLiveData(for: first)
@@ -587,13 +606,28 @@ struct JourneyResultsView: View {
             error = nil
             if let lookup, early == nil {
                 let found = await lookup.value
-                if !Task.isCancelled { withAnimation(.snappy) { journeys = applying(found, to: journeys) } }
+                if !Task.isCancelled {
+                    withAnimation(.snappy) {
+                        journeys = applying(found, to: journeys)
+                        restrictedExtras = found.extra
+                    }
+                }
             } else if cursor != nil, search.via.isEmpty, !result.isEmpty {
-                // A further page: its own window, detours and markings only.
+                // A further page: its own window. The expert option's trains only where not looked up yet.
                 let start = result.compactMap(\.departure?.planned).min() ?? searchDate
-                let end = result.compactMap(\.arrival?.planned).max() ?? start
-                let found = await detourLookup(start: start, end: end, addingRestricted: false)
-                if !Task.isCancelled { withAnimation(.snappy) { journeys = applying(found, to: journeys) } }
+                let end = max(start, result.compactMap(\.arrival?.planned).max() ?? start)
+                let addingRestricted = model.settings.ignoreBoardingRulesEnabled
+                    && !(restrictedRange.map { $0.contains(start) && $0.contains(end) } ?? false)
+                let found = await detourLookup(start: start, end: end, addingRestricted: addingRestricted)
+                if !Task.isCancelled {
+                    withAnimation(.snappy) {
+                        journeys = applying(found, to: journeys)
+                        if addingRestricted {
+                            restrictedExtras = (restrictedExtras + found.extra).removingDuplicateIDs()
+                            restrictedRange = restrictedRange.map { min($0.lowerBound, start)...max($0.upperBound, end) } ?? start...end
+                        }
+                    }
+                }
             }
             await fillMissingPlatforms(in: result)
             await correctLateTrainNames(in: result)
@@ -640,20 +674,10 @@ struct JourneyResultsView: View {
         return DetourLookup(calls: calls, extra: extra)
     }
 
+    /// The results without detours, "Nur Ein-/Ausstieg" marked. The expert option's extra trains are
+    /// kept apart (`restrictedExtras`) and placed among the results by `StationCalls.merging`.
     private func applying(_ lookup: DetourLookup, to list: [Journey]) -> [Journey] {
-        let kept = list.filter { !lookup.calls.isDetour($0) }.map(lookup.calls.marking)
-        let direct = StationCalls.directTripIds(kept)
-        let extra = lookup.extra.filter { journey in
-            guard !(journey.transitLegs.first?.tripId.map(direct.contains) ?? false) else { return false }
-            // Not worth showing when a normal connection leaves no earlier and arrives no later.
-            guard let departure = journey.departure?.best, let arrival = journey.arrival?.best else { return true }
-            return !kept.contains { ($0.departure?.best ?? .distantPast) >= departure && ($0.arrival?.best ?? .distantFuture) <= arrival }
-        }
-        var updated = (kept + extra).removingDuplicateIDs()
-        if !extra.isEmpty {
-            updated.sort { ($0.departure?.planned ?? .distantFuture) < ($1.departure?.planned ?? .distantFuture) }
-        }
-        return updated
+        list.filter { !lookup.calls.isDetour($0) }.map(lookup.calls.marking)
     }
 
     /// Loads the live times of a result once it scrolls into view, so a missed transfer or a
