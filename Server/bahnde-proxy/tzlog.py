@@ -363,6 +363,7 @@ class RisClient:
         self.session = None
         self.token = None
         self.started = 0
+        self.last_empty = None
 
     async def close(self):
         session, self.session = self.session, None
@@ -394,10 +395,15 @@ class RisClient:
                 if response.status in (401, 403) and attempt == 0:
                     await self.close()  # a new session, a new token
                     continue
+                raw = await response.read()
                 try:
-                    body = await response.json(content_type=None)
-                except Exception:  # noqa: BLE001 - no JSON, e.g. an error page
+                    body = json.loads(raw) if raw else None
+                except ValueError:  # no JSON, e.g. an error page
                     body = None
+                if body is None:
+                    # Kept for the round record: what the host sent instead of JSON.
+                    self.last_empty = (f"{response.status} {response.headers.get('Content-Type')} "
+                                       f"{response.headers.get('Content-Encoding')} {len(raw)} bytes {raw[:80]!r}")
                 return response.status, body
         return 403, None
 
@@ -626,10 +632,20 @@ class Scanner:
                     break
                 failures = 0
                 if parse_vehicle_journeys(body)[0] is None:
-                    # A 200 without a trainset (an empty or no JSON body, as the host gives for the oldest day it still
-                    # knows): nothing to learn that day, the other days still count.
+                    # A 200 without a trainset (an empty or no JSON body): asked once more a little later, then
+                    # nothing to learn that day; the other days still count.
                     statuses["empty"] = statuses.get("empty", 0) + 1
-                    continue
+                    if len(samples) < 6:
+                        samples.append(f"empty: Tz {tz} {uic} {day}: {getattr(self.ris, 'last_empty', None)}")
+                    await self.sleep(max(self.ris_interval, 2.0))
+                    try:
+                        status, body = await self.ris(uic, day.isoformat())
+                    except Exception:  # noqa: BLE001 - counts like the empty answer
+                        status, body = 599, None
+                    asked += 1
+                    if status != 200 or parse_vehicle_journeys(body)[0] is None:
+                        continue
+                    statuses["empty-then-ok"] = statuses.get("empty-then-ok", 0) + 1
                 if not apply_vehicle_answer(self.store, tz, body, self.now()):
                     # The coach runs in another trainset now (or the API names none): learn it again from the boards.
                     statuses["not-this-trainset"] = statuses.get("not-this-trainset", 0) + 1

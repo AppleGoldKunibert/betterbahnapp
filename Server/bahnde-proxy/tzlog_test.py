@@ -377,6 +377,23 @@ class VehicleRoundTests(unittest.IsolatedAsyncioTestCase):
         statuses = json.loads(self.store.db.execute("SELECT statuses FROM rounds").fetchone()[0])
         self.assertGreaterEqual(statuses["empty"], 1)
 
+    async def test_an_empty_answer_is_asked_once_more(self):
+        replies = {"n": 0}
+
+        async def ris(uic, day):
+            self.asked.append((uic, day))
+            if uic == "938000000043" and day == "2026-10-31":
+                replies["n"] += 1
+                return (200, None) if replies["n"] == 1 else self.answer("ICE8043", ("2026-10-31", "ICE", 610))
+            return 404, None
+
+        scanner = self.scanner()
+        scanner.ris = ris
+        await scanner.scan_vehicles()
+        self.assertEqual([t["number"] for t in self.store.history("8043")], [610])
+        statuses = json.loads(self.store.db.execute("SELECT statuses FROM rounds").fetchone()[0])
+        self.assertEqual(statuses["empty-then-ok"], 1)
+
     async def test_a_round_keeps_samples_of_answers_naming_another_trainset(self):
         self.answers = {"938000000043": self.answer("ICE8044"), "938000000090": (404, None)}
         await self.scanner().scan_vehicles()
