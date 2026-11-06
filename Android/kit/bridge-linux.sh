@@ -15,6 +15,7 @@ rm -rf "$P/Sources" && mkdir -p "$P/Sources/BetterBahnKit" "$P/Sources/jni"
 for d in "$KIT"/*/; do ln -s "$d" "$P/Sources/BetterBahnKit/$(basename "$d")"; done
 ln -s "$K/Shims" "$P/Sources/BetterBahnKit/AndroidShims"
 ln -s "$K/CZlib" "$P/Sources/CZlib"
+ln -sfn "$K/CxxShims" "$P/CxxShims"
 ln -s "$K/Bridge" "$P/Sources/KitBridge"
 # On Android the NDK's sysroot has a `jni` module; here it's the JDK's header.
 printf 'module jni [system] {\n    header "%s/include/jni.h"\n    export *\n}\n' "$JDK" > "$P/Sources/jni/module.modulemap"

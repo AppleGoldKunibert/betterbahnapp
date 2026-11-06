@@ -33,7 +33,10 @@ both apps always carry the same version. minSdk 28, compileSdk and targetSdk 37;
 1. **Kit** (macOS, Linux or WSL2 on Windows; the Swift SDK for Android has no native Windows host): install a
    Swift toolchain, the matching Swift SDK for Android (`swift sdk install …_android.artifactbundle.tar.gz`, then
    its `scripts/setup-android-sdk.sh`) and the Android NDK (r27+), set `ANDROID_NDK_HOME`, then
-   `Android/kit/build.sh`. Rerun after every Kit change. Tested with Swift 6.4.1 and NDK r27d.
+   `Android/kit/build.sh`. Rerun after every Kit change. Tested with Swift 6.4.1 and NDK r27d. `build.sh` stops when the library
+   needs a symbol no library on the phone provides (Android would refuse to load it and the app crash at launch):
+   `Package.swift` therefore links the SDK's OpenSSL, which its static libcurl needs, and `CxxShims/` defines
+   `std::__hash_memory`, which the Swift runtime calls but the NDK's libc++ lacks.
 2. **App**: open `Android/` in Android Studio (Windows, macOS or Linux) and run it on an emulator, or
    `cd Android && ./gradlew assembleDebug`. Needs the libraries from step 1: without them the build stops with a
    hint (`checkKitLibraries`) instead of building an app that crashes at launch.
