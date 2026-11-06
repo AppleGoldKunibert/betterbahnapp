@@ -154,8 +154,11 @@ struct JourneyResultsView: View {
 
                 ForEach(Array(visibleJourneys.enumerated()), id: \.element.id) { index, result in
                     let journey = liveResults[result.id].map { JourneyRefresher.keepingPlatforms(of: result, in: $0) } ?? result
-                    NavigationLink(value: ConnectionsRoute.journey(JourneyRoute(journey: journey, finalDestination: search.to, search: search))) {
-                        JourneyCard(journey: journey, warnsAboutTransfers: true,
+                    // Connections to the alternative destination (#516) say so and open towards it.
+                    let alternative = alternativeIDs.contains(result.id) ? search.towardsAlternative : nil
+                    NavigationLink(value: ConnectionsRoute.journey(JourneyRoute(journey: journey, finalDestination: alternative?.to ?? search.to,
+                                                                                search: alternative ?? search))) {
+                        JourneyCard(journey: journey, warnsAboutTransfers: true, alternativeDestination: alternative?.to,
                                     highlighted: !requirements.isEmpty && index == 0)
                     }
                     .buttonStyle(.plain)
