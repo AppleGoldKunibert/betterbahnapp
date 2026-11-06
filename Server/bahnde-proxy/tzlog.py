@@ -196,6 +196,7 @@ class TzStore:
             if column not in {row[1] for row in self.db.execute(f"PRAGMA table_info({table})")}:
                 self.db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
         self.db.execute("CREATE INDEX IF NOT EXISTS by_day ON sightings (day)")
+        self.db.execute("CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         # What the vehicle rounds did, kept in the file because a panel's console is gone after minutes.
         self.db.execute("""CREATE TABLE IF NOT EXISTS rounds (
             id INTEGER PRIMARY KEY AUTOINCREMENT, started REAL NOT NULL, updated REAL NOT NULL,
@@ -280,6 +281,22 @@ class TzStore:
         restart doesn't keep the last ones from ever being reached."""
         return [(tz, vehicle, bool(done)) for tz, vehicle, done in self.db.execute(
             "SELECT tz, vehicle, backfilled FROM units WHERE vehicle IS NOT NULL ORDER BY backfilled, CAST(tz AS INTEGER)")]
+
+    def get_state(self, key):
+        row = self.db.execute("SELECT value FROM state WHERE key = ?", (key,)).fetchone()
+        return row[0] if row else None
+
+    def set_state(self, key, value):
+        self.db.execute("INSERT INTO state (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                        (key, str(value)))
+        self.db.commit()
+
+    def last_finished_round(self):
+        """When the last vehicle round started, if it ran to its end (a restart cuts one off, it then reads "running")."""
+        row = self.db.execute("SELECT started, note FROM rounds ORDER BY id DESC LIMIT 1").fetchone()
+        if row is None or row[1].startswith(("running", "rejected")):
+            return None
+        return row[0]
 
     def start_round(self, now):
         cursor = self.db.execute("INSERT INTO rounds (started, updated, asked, statuses, note) VALUES (?, ?, 0, '{}', 'running')",
@@ -505,7 +522,13 @@ class Scanner:
     async def run(self):
         """Vehicle rounds `vehicle_every` apart and board scans `every` apart, whatever one took; a round's vehicle
         lookups come first, so the boards only ask for trains they didn't explain."""
-        next_boards = next_vehicles = self.now()
+        # A restart doesn't start rounds early: they go on from when the last ones ran (kept in the file), only a
+        # vehicle round a restart cut off is done again right away.
+        now = self.now()
+        last_boards = self.store.get_state("boards_started")
+        next_boards = float(last_boards) + self.every if last_boards else now
+        last_vehicles = self.store.last_finished_round()
+        next_vehicles = last_vehicles + self.vehicle_every if last_vehicles is not None else now
         while True:
             for name in ("vehicles", "boards"):
                 due = next_boards if name == "boards" else next_vehicles
@@ -520,6 +543,7 @@ class Scanner:
                     log.exception("Tz %s round failed", name)
                 if name == "boards":
                     next_boards = started + self.every
+                    self.store.set_state("boards_started", started)
                 else:
                     next_vehicles = started + self.vehicle_every
             upcoming = [next_boards] + ([next_vehicles] if self.ris is not None else [])

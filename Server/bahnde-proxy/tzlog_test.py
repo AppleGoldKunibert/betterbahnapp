@@ -596,6 +596,42 @@ class RunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[:5], [("vehicles", 1000.0), ("boards", 1000.0), ("boards", 1100.0), ("boards", 1200.0),
                                      ("vehicles", 1250.0)])
 
+    def restarted(self, store, clock, calls, stop_after=1):
+        async def sleep(seconds):
+            clock[0] += seconds
+            if len(calls) >= stop_after:
+                raise asyncio.CancelledError
+
+        scanner = tzlog.Scanner(store, None, hubs=[], every=100, vehicle_every=250, now=lambda: clock[0],
+                                sleep=sleep, ris=lambda *args: None)
+
+        async def boards():
+            calls.append(("boards", clock[0]))
+
+        async def vehicles():
+            calls.append(("vehicles", clock[0]))
+
+        scanner.scan, scanner.scan_vehicles = boards, vehicles
+        return scanner
+
+    async def test_a_restart_goes_on_from_the_last_rounds(self):
+        store = tzlog.TzStore()
+        store.update_round(store.start_round(1000.0), 1010.0, 5, {}, "done")
+        store.set_state("boards_started", 1050.0)
+        clock, calls = [1100.0], []
+        with self.assertRaises(asyncio.CancelledError):
+            await self.restarted(store, clock, calls, stop_after=2).run()
+        self.assertEqual(calls[:2], [("boards", 1150.0), ("vehicles", 1250.0)])
+
+    async def test_a_round_a_restart_cut_off_runs_again_at_once(self):
+        store = tzlog.TzStore()
+        store.update_round(store.start_round(1000.0), 1010.0, 5, {}, "running, at Tz 303")
+        store.set_state("boards_started", 1050.0)
+        clock, calls = [1100.0], []
+        with self.assertRaises(asyncio.CancelledError):
+            await self.restarted(store, clock, calls).run()
+        self.assertEqual(calls, [("vehicles", 1100.0)])
+
     async def test_without_a_wifi_host_only_the_boards_run(self):
         clock = [0.0]
         calls = []

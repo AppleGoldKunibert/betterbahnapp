@@ -43,6 +43,7 @@ page (`RisClient`): every `TZ_VEHICLE_EVERY` seconds one request per known Tz as
 the landing page and sends its CSRF cookie and token back. It is not a documented API, so DB can change or close it; the log
 then stops growing from there. About 400 requests a day, `TZ_RIS_INTERVAL` apart, plus ~2400 once for the first week.
 Each vehicle round also writes a row to the `rounds` table of `tz.db` (requests, answers per HTTP status, why it stopped), as a panel's console is gone after minutes: `sqlite3 tz.db 'select * from rounds order by id desc limit 5'`.
+A restart doesn't start rounds early: the vehicle rounds and the board scans go on from when the last ones ran (kept in `tz.db`); only a vehicle round a restart cut off runs again right away.
 
 - **The Tz list is a file:** `tz_seed.json` has every known Tz with the UIC number of one coach and is loaded at start.
   `make_tz_seed.py` makes and extends it: it reads the boards of 15 stations once (about 700 requests to bahn.de through
