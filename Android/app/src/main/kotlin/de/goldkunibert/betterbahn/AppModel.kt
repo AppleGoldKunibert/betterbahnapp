@@ -93,6 +93,11 @@ class AppModel(application: Application) : AndroidViewModel(application) {
     var refreshingSaved by mutableStateOf(false)
         private set
 
+    /** The saved journeys as Compose state, so "Speichern"/"Gespeichert" updates right away. Declared before
+     * `init`: its collector runs at once (Main.immediate) and sets it in the constructor. */
+    var saved by mutableStateOf(store.savedJourneys.value)
+        private set
+
     init {
         // Describe saved journeys whenever the list changes (saved here, or refreshed in the background).
         viewModelScope.launch {
@@ -112,10 +117,6 @@ class AppModel(application: Application) : AndroidViewModel(application) {
 
     /** Set once the first journey is saved: time to ask for notifications (the activity asks). */
     var wantsNotificationPermission by mutableStateOf(false)
-
-    /** The saved journeys as Compose state, so "Speichern"/"Gespeichert" updates right away. */
-    var saved by mutableStateOf(store.savedJourneys.value)
-        private set
 
     fun isSaved(journey: JourneyDisplay) = saved.any { it.journeyId == journey.id }
 
