@@ -23,19 +23,15 @@ public enum AlternativeDestination {
         var lastDeparture: Date? { journeys.compactMap(\.departure?.planned).max() }
     }
 
-    /// The connections to both destinations as one list, as either destination will do:
-    /// - A connection is dropped when one to the other destination leaves no earlier, arrives no later, changes no
-    ///   more often and needs no long-distance train it doesn't (e.g. the same ICE calling at both stations, or a
-    ///   change at the first just to get to the second). On a full tie the one to the destination itself stays.
+    /// The connections to both destinations as one list. Each destination keeps all of its connections, so a train
+    /// serving both shows once per destination.
     /// - Sorted by planned departure, then by arrival, fewer changes, and the destination itself first.
     /// - Ends where both lists are known: while one can still load later connections, the other's connections
-    ///   leaving after its last one wait for that page, so the list neither changes order there nor shows a
-    ///   connection the next page would drop.
+    ///   leaving after its last one wait for that page, so the end of the list doesn't show only one destination
+    ///   and nothing gets sorted in above it later.
     public static func merging(_ main: Results, alternative: Results) -> [Journey] {
-        let keptAlternative = alternative.journeys.filter { journey in !main.journeys.contains { $0.dominates(journey) } }
-        let keptMain = main.journeys.filter { journey in !keptAlternative.contains { $0.dominates(journey) } }
         let end = end(main, alternative)
-        let all = (keptMain.map { ($0, true) } + keptAlternative.map { ($0, false) })
+        let all = (main.journeys.map { ($0, true) } + alternative.journeys.map { ($0, false) })
             .filter { journey, _ in end.map { (journey.departure?.planned ?? .distantFuture) <= $0 } ?? true }
         return all.sorted { a, b in
             let left = (a.0.departure?.planned ?? .distantFuture, a.0.arrival?.best ?? .distantFuture, a.0.transfers)
@@ -66,20 +62,4 @@ public enum AlternativeDestination {
     public static func merging(_ main: [Journey], alternative: [Journey]) -> [Journey] {
         merging(Results(journeys: main), alternative: Results(journeys: alternative))
     }
-}
-
-extension Journey {
-    /// At least as good as `other` when either destination will do: leaves no earlier, arrives no later (both with
-    /// live times), changes no more often and needs no long-distance train `other` doesn't. A cancelled
-    /// connection or one with a missed change is no replacement.
-    func dominates(_ other: Journey) -> Bool {
-        guard !transitLegs.isEmpty, !isCancelled, brokenTransferIndices.isEmpty,
-              let departure = departure?.best, let arrival = arrival?.best,
-              let otherDeparture = other.departure?.best, let otherArrival = other.arrival?.best,
-              departure >= otherDeparture, arrival <= otherArrival, transfers <= other.transfers
-        else { return false }
-        return !usesLongDistance || other.usesLongDistance
-    }
-
-    var usesLongDistance: Bool { transitLegs.contains { $0.line?.product.isLongDistance == true } }
 }

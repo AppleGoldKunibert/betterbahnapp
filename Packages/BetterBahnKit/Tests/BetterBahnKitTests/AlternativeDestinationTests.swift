@@ -6,13 +6,13 @@ import Testing
     private func time(_ minutes: Int) -> Date { Date(timeIntervalSince1970: 1_780_000_000).addingTimeInterval(TimeInterval(minutes * 60)) }
 
     private func leg(_ line: String, from: String, to: String, depart: Int, arrive: Int,
-                     product: Product = .highSpeed, delay: Int? = nil, cancelled: Bool = false) -> Leg {
+                     product: Product = .highSpeed) -> Leg {
         Leg(origin: station(from, from), destination: station(to, to),
-            departure: TimeInfo(planned: time(depart), actual: delay.map { time(depart + $0) }),
-            arrival: TimeInfo(planned: time(arrive), actual: delay.map { time(arrive + $0) }),
+            departure: TimeInfo(planned: time(depart), actual: nil),
+            arrival: TimeInfo(planned: time(arrive), actual: nil),
             departurePlatform: nil, arrivalPlatform: nil, tripId: "trip-\(line)-\(depart)",
             line: Line(name: line, number: line, product: product, operatorName: nil),
-            direction: nil, isWalking: false, cancelled: cancelled,
+            direction: nil, isWalking: false, cancelled: false,
             stopovers: [], remarks: [], source: .bahnDe)
     }
 
@@ -28,59 +28,27 @@ import Testing
         #expect(merged.map { $0.transitLegs[0].line?.name } == ["ICE 1", "RE 2", "ICE 3"])
     }
 
-    @Test func sameTrainServingBothKeepsTheEarlierArrival() {
-        // The ICE calls at Süd first, then at Hbf.
-        let toHbf = journey(leg("ICE 1", from: "A", to: "Hbf", depart: 0, arrive: 70))
-        let toSüd = journey(leg("ICE 1", from: "A", to: "Süd", depart: 0, arrive: 60))
+    @Test func sameTrainServingBothShowsOncePerDestination() {
+        // The RE calls at Süd first, then at Hbf.
+        let toHbf = journey(leg("RE 3", from: "A", to: "Hbf", depart: 0, arrive: 20, product: .regionalExpress))
+        let toSüd = journey(leg("RE 3", from: "A", to: "Süd", depart: 0, arrive: 7, product: .regionalExpress))
 
-        let merged = AlternativeDestination.merging([toHbf], alternative: [toSüd])
-
-        #expect(merged == [toSüd])
+        #expect(AlternativeDestination.merging([toHbf], alternative: [toSüd]) == [toSüd, toHbf])
     }
 
-    @Test func changingJustToReachTheOtherStationIsDropped() {
+    @Test func changingToReachTheOtherStationStaysToo() {
         let toHbf = journey(leg("ICE 1", from: "A", to: "Hbf", depart: 0, arrive: 60))
         let toSüd = journey(leg("ICE 1", from: "A", to: "Hbf", depart: 0, arrive: 60),
                             leg("S 1", from: "Hbf", to: "Süd", depart: 65, arrive: 75))
 
-        #expect(AlternativeDestination.merging([toHbf], alternative: [toSüd]) == [toHbf])
-        #expect(AlternativeDestination.merging([toSüd], alternative: [toHbf]) == [toHbf])
+        #expect(AlternativeDestination.merging([toHbf], alternative: [toSüd]) == [toHbf, toSüd])
     }
 
-    @Test func sameChangesButLaterArrivalIsDropped() {
-        let viaB = journey(leg("ICE 1", from: "A", to: "B", depart: 0, arrive: 30),
-                           leg("RE 5", from: "B", to: "Hbf", depart: 40, arrive: 70))
-        let viaC = journey(leg("ICE 1", from: "A", to: "C", depart: 0, arrive: 45),
-                           leg("RE 7", from: "C", to: "Süd", depart: 50, arrive: 80))
+    @Test func equalTimesShowTheDestinationItselfFirst() {
+        let toHbf = journey(leg("ICE 1", from: "A", to: "Hbf", depart: 0, arrive: 60))
+        let toSüd = journey(leg("ICE 1", from: "A", to: "Süd", depart: 0, arrive: 60))
 
-        #expect(AlternativeDestination.merging([viaB], alternative: [viaC]) == [viaB])
-    }
-
-    @Test func fewerChangesOrALaterDepartureStayBoth() {
-        let direct = journey(leg("ICE 1", from: "A", to: "Hbf", depart: 0, arrive: 70))
-        let faster = journey(leg("ICE 2", from: "A", to: "B", depart: 0, arrive: 30),
-                             leg("ICE 4", from: "B", to: "Süd", depart: 35, arrive: 60))
-        let leavesLater = journey(leg("ICE 6", from: "A", to: "Süd", depart: 10, arrive: 90))
-
-        #expect(AlternativeDestination.merging([direct], alternative: [faster, leavesLater]).count == 3)
-    }
-
-    @Test func regionalConnectionStaysNextToAFasterICE() {
-        let regional = journey(leg("RE 1", from: "A", to: "Hbf", depart: 0, arrive: 90, product: .regionalExpress))
-        let ice = journey(leg("ICE 1", from: "A", to: "Süd", depart: 0, arrive: 60))
-
-        #expect(AlternativeDestination.merging([regional], alternative: [ice]).count == 2)
-        // The other way round the ICE isn't needed: the RE is there sooner without one.
-        let slowICE = journey(leg("ICE 1", from: "A", to: "Süd", depart: 0, arrive: 95))
-        #expect(AlternativeDestination.merging([regional], alternative: [slowICE]) == [regional])
-    }
-
-    @Test func cancelledOrDelayedConnectionReplacesNothing() {
-        let toHbf = journey(leg("ICE 1", from: "A", to: "Hbf", depart: 0, arrive: 70))
-        let cancelled = journey(leg("ICE 2", from: "A", to: "Süd", depart: 0, arrive: 60, cancelled: true))
-        let late = journey(leg("ICE 3", from: "A", to: "Süd", depart: 0, arrive: 60, delay: 15))
-
-        #expect(AlternativeDestination.merging([toHbf], alternative: [cancelled, late]).count == 3)
+        #expect(AlternativeDestination.merging([toHbf], alternative: [toSüd]) == [toHbf, toSüd])
     }
 
     @Test func sortsByDepartureThenArrival() {
@@ -109,13 +77,6 @@ import Testing
         let complete = AlternativeDestination.merging(.init(journeys: main, hasLater: true),
                                                       alternative: .init(journeys: alternative, hasLater: false))
         #expect(complete.count == 4)
-    }
-
-    @Test func equalArrivalKeepsTheDestinationItself() {
-        let toHbf = journey(leg("ICE 1", from: "A", to: "Hbf", depart: 0, arrive: 60))
-        let toSüd = journey(leg("ICE 1", from: "A", to: "Süd", depart: 0, arrive: 60))
-
-        #expect(AlternativeDestination.merging([toHbf], alternative: [toSüd]) == [toHbf])
     }
 
     @Test func pagesOnlyTheListThatIsBehind() {

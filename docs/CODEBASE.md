@@ -143,9 +143,8 @@ in `project.pbxproj`: new files join their target automatically.
 - Alternative destination (#516), in `Features/Connections/`: only with Settings → Extra-Features → Alternatives Ziel
   (`AppSettings.extraAlternativeDestination`, off by default, synced, not in the quick setup); "Alternatives Ziel" below Ziel sets `ConnectionSearch.alternativeTo` (not remembered); the
   results view searches and pages both destinations on their own and shows them as one list via Kit
-  `AlternativeDestination.merging`: a connection is dropped when one to the other destination leaves no earlier, arrives
-  no later, changes no more often and needs no long-distance train it doesn't (tie: the destination itself stays);
-  sorted by planned departure, then arrival, changes; the list ends at the shorter list's last departure while that one
+  `AlternativeDestination.merging`: each destination keeps all its connections (a train serving both shows once per
+  destination); sorted by planned departure, then arrival, changes, the destination itself first; the list ends at the shorter list's last departure while that one
   can still page, and "Spätere Verbindungen" pages only the list(s) behind (`loadsLater`); cards to the alternative say "Nach …" and open with `towardsAlternative`; train
   requirements only plan to the destination.
 - `Features/Departures/` – two layouts by `\.appDesign` (#504): Minimal has the station and the time in one card; Fahrkarte
