@@ -363,6 +363,14 @@ private struct CollectionItemSheet: View {
                     }
                     .accessibilityElement(children: .combine)
                 }
+                if item.unitNumber != nil {
+                    // A Tz or livery: its trips on top, yours and every train it ran as (#502).
+                    Section {
+                        TzRunsLink(item: item, startsWithAll: !item.isCollected) {
+                            Label("Fahrten", systemImage: "train.side.front.car")
+                        }
+                    }
+                }
                 if let first = item.firstSighting {
                     Section("Zuerst gesammelt") { SightingRow(sighting: first) }
                     if item.sightings.count > 1 {
@@ -516,7 +524,13 @@ private struct TrainsetRows: View {
                         CollectionRideLink(sighting: sighting)
                             .padding(.leading, 28)
                     }
+                    TzRunsLink(item: item, startsWithAll: true)
+                        .font(.subheadline)
+                        .padding(.leading, 28)
                 }
+            } else if item.unitNumber != nil {
+                // Not ridden yet, but where it runs today is worth a look (#502).
+                TzRunsLink(item: item, startsWithAll: true) { TrainsetLabel(item: item, isNew: false) }
             } else {
                 TrainsetLabel(item: item, isNew: false)
             }
@@ -553,7 +567,7 @@ private struct TrainsetLabel: View {
 }
 
 /// A ride of a collected item; opens its journey.
-private struct CollectionRideLink: View {
+struct CollectionRideLink: View {
     let sighting: TravelCollection.Sighting
     @Environment(AppModel.self) private var model
 
@@ -568,7 +582,7 @@ private struct CollectionRideLink: View {
     }
 }
 
-private struct SightingRow: View {
+struct SightingRow: View {
     let sighting: TravelCollection.Sighting
 
     var body: some View {

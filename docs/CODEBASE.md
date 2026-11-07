@@ -70,7 +70,7 @@ in `project.pbxproj`: new files join their target automatically.
   a map shows (Kit `TrainPositionRefresh`: 15 s, 60 s on mobile data/Low Data Mode, "Aus" loads once); delay
   notifications, geometry/heatmap caches, Live Activity selection. Defines `SavedJourney`, `PlanVersion`,
   `ImportedTrip`, `RecentSearch`, `Storage`, `AppSettings`, `ConnectionNotifier`. `SavedJourney.formations` keeps
-  the Tz/Taufname seen per leg (`Leg.formationKey`, `rememberFormation`, used by `TrainFormationLabel`/`TrainSeriesTag`).
+  the Tz/Taufname seen per leg (`Leg.formationKey`, `rememberFormation`, used by `TrainFormationLabel`/`TrainSeriesTag`). "Wendet aus ICE 567 · Wendet zu ICE 1501" (#501, `TrainTurnaroundLabel` under the Tz line of the train view (`TripView`) only, `AppModel.turnaround`, only within 36 h of the ride): Kit `TzLogClient.turnaround(for:on:)` asks our server's Tz log (#502), which refreshes the trainset's journeys at most every 30 min and only when asked; the label asks again every 30 min while the trip is open and the model caches per train and day (`TzTurnaround`).
 - **Persistence:** `Storage.save/load(key:)` → `Application Support/BetterBahn/<key>.json` (migrates old
   UserDefaults); `AppSettings` uses UserDefaults. Saved data must stay decodable across versions (e.g.
   `DataSource.dbRest` kept only for decoding).
@@ -220,6 +220,9 @@ in `project.pbxproj`: new files join their target automatically.
   series (`TrainSeriesTag` remembers it until a Tz is seen); liveries and trainsets need the Tz. "Neu" badges: IDs collected since the last
   visit (`newCollectionIDs`, UserDefaults `collectionSeenIDs`, the first computation is the starting point).
   Fahrkarte (#504) shows the categories as small tickets and items as round stamps, dashed until collected.
+  Trips of a Tz (#502, `TzRunsView` in `TzListView.swift`): a Tz row (opened or not ridden yet) and a Tz/livery item's sheet
+  ("Fahrten" on top) open "Meine" (own rides, which open their journey) and "Alle" (`TzLogClient.history(of:)`: today,
+  then each day of the last year, from the server's Tz log).
 - `Features/Tickets/` – `TicketLookupView` (bahn.de's "Auftragssuche" in a hidden SwiftUI `WebView`:
   `DBOrderPage.fillScript` fills the form, `fetchScript` fetches order + PDFs inside the page; shown only when bahn.de
   asks for more, e.g. a captcha), `TicketView` (full-brightness barcode, PDF, `AddToWalletButton`, "Zugbindung
@@ -492,6 +495,10 @@ in `project.pbxproj`: new files join their target automatically.
   departure; the feed's trip ID can change), `trainName` as reservations name it ("RE 3307" for a regional line's
   run), `offered(on:)` from 15 min before the departure until the arrival, `saving(_:for:in:)` keeps one per ride
   and drops those 6 h past their arrival. `AppModel.savedSeats` (`savedSeats.json`, this device only).
+- `Transit/TzLog/TzLogClient.swift` (#502) – reads our server's Tz log (`BahnDeProxy.baseURL` + `/tz/list`, `/tz/history?tz=`,
+  App Attest token like the bahn.de requests): `TzUnit` (Tz, group name "ICE8043"/"ICD4886", vehicle construction types
+  → `series` via `BahnDeClient.model`, Taufname, livery, trains of the latest day) and `TzTurnaround` (`turnaround(category:number:day:)`, the trains just before and after a train's trainset, refreshed by the server when a trip is looked at, at most every 30 min per trainset) and `TzRun` (day in Germany,
+  train, destination, `changedFromPlan` when bahn.de's `sequenceStatus` is `DIFFERS_FROM_SCHEDULE`).
 - `Transit/Vagonweb/` – vagonweb.cz (with permission, #95): planned compositions for the timetable year from the train's
   HTML (`VagonwebComposition.scheduled`, fixtures `vagonweb-ice*.html`), used when bahn.de has none: `AppModel.trainType`
   and "Plan-Wagenreihung" (`CoachSequence.source == .vagonweb`). Cloudflare bot check → hidden `WebPage`

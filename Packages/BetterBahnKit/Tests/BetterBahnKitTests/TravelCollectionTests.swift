@@ -215,4 +215,16 @@ import Testing
         #expect(collection.collectedIDs.contains("station:de:11000:900003201"))
         #expect(collection.collectedIDs.contains { $0.hasPrefix("station:de:02000:") })
     }
+
+    /// #502: trainset and livery items know their Tz (the Sammlung opens its trips from it); others don't.
+    @Test func itemsKnowTheirTz() {
+        let result = collection([
+            ride("ICE 597", berlin, hamburg, departure: "2026-05-01T08:00:00Z", units: [.init(model: "ICE 4", number: "9018")]),
+        ])
+        let items = result.groups.flatMap(\.items)
+        #expect(items.first { $0.id == "trainset:9018" }?.unitNumber == 9018)
+        #expect(items.first { $0.id == "livery:304" }?.unitNumber == 304)
+        #expect(items.first { $0.id.hasPrefix("series:") }?.unitNumber == nil)
+        #expect(items.first { $0.id.hasPrefix("station:") }?.unitNumber == nil)
+    }
 }
