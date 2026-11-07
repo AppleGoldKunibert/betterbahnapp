@@ -1,6 +1,12 @@
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+import Crypto
+#endif
 import Foundation
+#if canImport(Security)
 import Security
+#endif
 
 public struct PKCE: Sendable {
     public let verifier: String
@@ -147,6 +153,7 @@ public struct TokenStore: Sendable {
     private var accessAccount: String { "\(account).access" }
     private var pendingLogoutsAccount: String { "\(account).pendingLogouts" }
 
+#if canImport(Security)
     /// Matches the item whether or not it syncs (older versions saved it device-only).
     private func baseQuery(_ account: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
@@ -182,6 +189,32 @@ public struct TokenStore: Sendable {
     private func delete(account: String) {
         SecItemDelete(baseQuery(account) as CFDictionary)
     }
+#else
+    /// Without a Keychain (Android) each item is a JSON file in the app's own folder (`$HOME`, which the Kit
+    /// bridge sets to the app's files folder): other apps can't read it, and nothing syncs.
+    private func file(_ account: String) -> URL {
+        let home = ProcessInfo.processInfo.environment["HOME"].map(URL.init(fileURLWithPath:))
+            ?? FileManager.default.temporaryDirectory
+        return home.appendingPathComponent("secrets", isDirectory: true)
+            .appendingPathComponent("\(service).\(account).json")
+    }
+
+    private func read<Value: Decodable>(_ type: Value.Type, account: String) -> Value? {
+        guard let data = try? Data(contentsOf: file(account)) else { return nil }
+        return try? JSONDecoder().decode(Value.self, from: data)
+    }
+
+    private func write(_ value: some Encodable, account: String, synchronizable: Bool) {
+        guard let data = try? JSONEncoder().encode(value) else { return }
+        let url = file(account)
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: url, options: .atomic)
+    }
+
+    private func delete(account: String) {
+        try? FileManager.default.removeItem(at: file(account))
+    }
+#endif
 
     // MARK: Before #452
 
@@ -196,11 +229,13 @@ public struct TokenStore: Sendable {
 
     /// Re-saves a token older versions kept device-only so it syncs from now on.
     public func migrateToSynchronizable() {
+        #if canImport(Security)
         var query = baseQuery(account)
         query[kSecAttrSynchronizable as String] = kCFBooleanFalse
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         guard SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess, let token = load() else { return }
         save(token)
+        #endif
     }
 
     /// Deletes the token from before #452, here and (synced) on the user's other devices.

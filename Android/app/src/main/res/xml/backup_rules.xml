@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Auto Backup up to Android 11: only favourites, recent searches, saved journeys and the settings. Not the
+     Träwelling login (files/secrets), the Kit's data and caches or the widgets' settings, which belong to this
+     phone's widget IDs. -->
+<full-backup-content>
+    <include domain="file" path="BetterBahn/" />
+    <include domain="sharedpref" path="betterbahn.xml" />
+</full-backup-content>

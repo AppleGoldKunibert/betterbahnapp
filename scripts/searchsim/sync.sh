@@ -12,9 +12,10 @@ cp "$R"/Sources/BetterBahnKit/Resources/*.json "$S/Sources/Kit/Resources/"
 cd "$R/Sources/BetterBahnKit"
 for f in $(find . -name "*.swift"); do
   # Tickets (and the calendar events using them), Träwelling and anything importing Apple-only frameworks stay out.
-  # ShortShareLinkClient needs JourneyShareLink, which imports Compression.
-  case "$f" in ./Traewelling/*|./Tickets/*|./Calendar/*|./Sharing/ShortShareLinkClient.swift) continue;; esac
-  grep -qE "^import (ActivityKit|Compression|CoreGraphics|CryptoKit|DeviceCheck|ImageIO|PDFKit|Security|SwiftUI|UniformTypeIdentifiers|Vision)" "$f" && continue
+  # Share links need zlib (RawDeflate), which only Android/kit/test-linux.sh links.
+  case "$f" in ./Traewelling/*|./Tickets/*|./Calendar/*|./Sharing/*ShareLink*.swift|./Support/RawDeflate.swift) continue;; esac
+  # Files that guard their Apple imports with `#if canImport(…)` compile on Linux as they are.
+  ! grep -q "^#if canImport" "$f" && grep -qE "^import (ActivityKit|Compression|CoreGraphics|CryptoKit|DeviceCheck|ImageIO|PDFKit|Security|SwiftUI|UniformTypeIdentifiers|Vision)" "$f" && continue
   mkdir -p "$S/Sources/Kit/$(dirname "$f")"
   { printf '#if canImport(FoundationNetworking)\nimport FoundationNetworking\n#endif\n#if canImport(FoundationXML)\nimport FoundationXML\n#endif\n'; cat "$f"; } > "$S/Sources/Kit/$f"
 done

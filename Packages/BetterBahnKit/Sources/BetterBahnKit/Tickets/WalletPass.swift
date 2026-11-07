@@ -1,4 +1,8 @@
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+import Crypto
+#endif
 import Foundation
 
 /// The `pass.json` of an Apple Wallet pass for a DB ticket or a pass like the Deutschland-Ticket. The `Cloudflare/pass-signer` Worker adds

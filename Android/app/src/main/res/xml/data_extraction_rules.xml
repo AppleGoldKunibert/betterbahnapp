@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Auto Backup and moving to a new phone from Android 12 on: the same as backup_rules.xml. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <include domain="file" path="BetterBahn/" />
+        <include domain="sharedpref" path="betterbahn.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="file" path="BetterBahn/" />
+        <include domain="sharedpref" path="betterbahn.xml" />
+    </device-transfer>
+</data-extraction-rules>

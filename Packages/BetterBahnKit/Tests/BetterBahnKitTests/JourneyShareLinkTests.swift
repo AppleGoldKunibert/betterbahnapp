@@ -32,10 +32,26 @@ import Testing
         #expect(JourneyShareLink.shortLinkID(from: URL(string: "betterbahn://share?data=abc")!) == nil)
     }
 
+    /// Raw DEFLATE as other zlibs write it (Python's, the Workers') inflates the same on iOS and Android, and
+    /// what the app writes comes back unchanged.
+    @Test func rawDeflateMatchesZlib() throws {
+        let fromZlib = try #require(Data(base64Encoded: "q1ZKK8rPVbJS8j68LSdPwSMpTUlHqSQfKOB7eE9eckYqRKy2msrqAA=="))
+        let text = String(repeating: #"{"from":"Köln Hbf","to":"München Hbf"}"#, count: 3)
+        #expect(RawDeflate.inflate(fromZlib, limit: 1024) == Data(text.utf8))
+        #expect(RawDeflate.inflate(fromZlib, limit: 10) == nil)
+        #expect(RawDeflate.inflate(fromZlib.prefix(10), limit: 1024) == nil)
+        #expect(RawDeflate.inflate(Data([0xFF, 0xFF, 0xFF]), limit: 1024) == nil)
+
+        let json = Data(String(repeating: "Frankfurt (Main) Hbf → Berlin Hbf, ", count: 500).utf8)
+        let deflated = try #require(RawDeflate.deflate(json))
+        #expect(deflated.count < json.count / 10)
+        #expect(RawDeflate.inflate(deflated, limit: json.count) == json)
+    }
+
     /// A few kilobytes that would inflate to megabytes are refused instead of decompressed.
     @Test func refusesPayloadsThatInflateTooFar() throws {
         let huge = Data(repeating: UInt8(ascii: " "), count: 8 * 1024 * 1024)
-        let compressed = try #require(try (huge as NSData).compressed(using: .zlib) as Data)
+        let compressed = try #require(RawDeflate.deflate(huge))
         #expect(compressed.count < JourneyShareLink.maxEncodedLength)
         #expect(JourneyShareLink.inflate(compressed) == nil)
 

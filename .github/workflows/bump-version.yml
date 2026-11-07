@@ -20,6 +20,8 @@
 # such a push starts finds the version up to date and pushes nothing, so nothing loops. Without those
 # permissions the GITHUB_TOKEN pushes, which starts no other workflow. Pull before pushing to a bumped PR
 # branch again.
+# PRs labeled "android" never bump: the Android app shares the iOS version, which goes up with the iOS PR of
+# the same feature (docs/android.md).
 name: Bump version
 
 on:
@@ -60,6 +62,10 @@ jobs:
 
             async function count(pr) {
               const body = pr.body ?? "";
+              if (has(pr.labels, "android")) {
+                core.info(`#${pr.number}: Android PR, the version goes up with the iOS PR`);
+                return { features: 0, bugs: 0 };
+              }
               const pattern = /\b(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?)\s*:?\s+#(\d+)/gi;
               const numbers = [...new Set([...body.matchAll(pattern)].map((m) => Number(m[1])))];
 

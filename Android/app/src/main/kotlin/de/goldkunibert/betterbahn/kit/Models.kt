@@ -1,0 +1,385 @@
+@file:UseSerializers(MillisSerializer::class)
+
+package de.goldkunibert.betterbahn.kit
+
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.UseSerializers
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.Transient
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlin.math.roundToInt
+
+// BetterBahnKit's models as its Codable JSON has them (Android/kit/Bridge/Methods.swift), only the fields the app
+// uses. Dates are milliseconds since 1970. What the iOS app computes with Kit code comes precomputed in the
+// `…Display` types; models that go back to the Kit (journeys, legs) keep their JSON as `raw`.
+
+/** Swift writes dates as a double; a fraction of a millisecond must not break decoding. */
+object MillisSerializer : KSerializer<Long> {
+    override val descriptor = PrimitiveSerialDescriptor("Millis", PrimitiveKind.DOUBLE)
+    override fun deserialize(decoder: Decoder): Long = decoder.decodeDouble().toLong()
+    override fun serialize(encoder: Encoder, value: Long) = encoder.encodeLong(value)
+}
+
+@Serializable
+data class Coordinate(val latitude: Double, val longitude: Double)
+
+/** Complete, so the app can store a station and hand it back to the Kit. */
+@Serializable
+data class Station(
+    val id: String,
+    val name: String,
+    val coordinate: Coordinate? = null,
+    val evaNumber: String? = null,
+    val source: String,
+    val region: String? = null,
+    val country: String? = null,
+    /** The name the iOS app shows (`Station.displayName`), added by the bridge. */
+    val displayName: String? = null,
+) {
+    val shownName: String get() = displayName ?: name
+
+    /** Loose equality across sources, like `Station.isSamePlace(as:)` for what the picker needs. */
+    fun isSamePlace(other: Station): Boolean =
+        (source == other.source && id == other.id) ||
+            (evaNumber != null && evaNumber == other.evaNumber) ||
+            shownName.equals(other.shownName, ignoreCase = true)
+}
+
+@Serializable
+data class TimeInfo(val planned: Long, val actual: Long? = null) {
+    val best: Long get() = actual ?: planned
+    val delayMinutes: Int? get() = actual?.let { ((it - planned) / 60_000.0).roundToInt() }
+}
+
+@Serializable
+data class PlatformInfo(val planned: String? = null, val actual: String? = null, val source: String? = null) {
+    val best: String? get() = actual ?: planned
+    val hasChanged: Boolean get() = planned != null && actual != null && planned != actual
+}
+
+@Serializable
+data class CoupledTrain(val name: String, val direction: String? = null, val tripId: String? = null)
+
+@Serializable
+data class Line(
+    val name: String,
+    val number: String? = null,
+    val product: String,
+    val operatorName: String? = null,
+    val alternateName: String? = null,
+    val tripNumber: String? = null,
+    val coupledTrains: List<CoupledTrain>? = null,
+)
+
+/** What the Kit computes for a line (`Android/kit/Bridge/Display.swift`). */
+@Serializable
+data class LineDisplay(
+    val displayName: String,
+    val nameWithTripNumber: String,
+    val filterProduct: String,
+    val isNightTrain: Boolean = false,
+    /** 0xRRGGBB of the line's own colour (some S-/U-Bahn lines), else the product's. */
+    val colorHex: Long? = null,
+)
+
+@Serializable
+data class TrainMessage(val kind: String, val text: String, val timestamp: Long? = null)
+
+@Serializable
+data class Stopover(
+    val station: Station,
+    val arrival: TimeInfo? = null,
+    val departure: TimeInfo? = null,
+    val arrivalPlatform: PlatformInfo? = null,
+    val departurePlatform: PlatformInfo? = null,
+    val arrivalCancelled: Boolean = false,
+    val departureCancelled: Boolean = false,
+    /** normal, exitOnly, entryOnly, passThrough */
+    val access: String = "normal",
+    val isAdditional: Boolean = false,
+    val isManual: Boolean = false,
+) {
+    val cancelled: Boolean
+        get() = if (arrival == null && departure == null) arrivalCancelled && departureCancelled
+        else (arrival == null || arrivalCancelled) && (departure == null || departureCancelled)
+    val allowsBoarding: Boolean get() = access == "normal" || access == "entryOnly"
+    val allowsAlighting: Boolean get() = access == "normal" || access == "exitOnly"
+}
+
+@Serializable
+data class Leg(
+    val origin: Station,
+    val destination: Station,
+    val departure: TimeInfo,
+    val arrival: TimeInfo,
+    val departurePlatform: PlatformInfo? = null,
+    val arrivalPlatform: PlatformInfo? = null,
+    val tripId: String? = null,
+    val line: Line? = null,
+    val direction: String? = null,
+    val isWalking: Boolean = false,
+    val cancelled: Boolean = false,
+    val stopovers: List<Stopover> = emptyList(),
+    val remarks: List<String> = emptyList(),
+    val messages: List<TrainMessage> = emptyList(),
+    val source: String,
+)
+
+@Serializable
+data class Journey(val legs: List<Leg>, val source: String) {
+    val departure: TimeInfo? get() = legs.firstOrNull()?.departure
+    val arrival: TimeInfo? get() = legs.lastOrNull()?.arrival
+    val origin: Station? get() = legs.firstOrNull()?.origin
+    val destination: Station? get() = legs.lastOrNull()?.destination
+    val transitLegs: List<Leg> get() = legs.filter { !it.isWalking }
+}
+
+@Serializable
+data class LegDisplay(
+    val line: LineDisplay? = null,
+    val direction: String? = null,
+    val intermediateStops: List<Stopover> = emptyList(),
+    val hasDelayReason: Boolean = false,
+    /** "Ausstieg in Fahrtrichtung links", if known. */
+    val exitSide: String? = null,
+)
+
+@Serializable
+data class Issue(val title: String, val message: String, val isBlocking: Boolean)
+
+@Serializable
+data class JourneyDisplay(
+    val id: String,
+    val journey: Journey,
+    val legs: List<LegDisplay>,
+    val transfers: Int,
+    val durationSeconds: Double? = null,
+    /** Per leg, start and end on the journey's bar (ms). */
+    val barSpans: List<List<Long>> = emptyList(),
+    val isCancelled: Boolean,
+    val isOver: Boolean = false,
+    val brokenTransferIndices: List<Int> = emptyList(),
+    val issues: List<Issue> = emptyList(),
+    /** With a ticket filter: whether the ticket covers it. */
+    val validWithTicket: Boolean? = null,
+) {
+    /** The journey's Kit JSON, to hand back (save, refresh, open a leg's train). */
+    @Transient
+    var raw: JsonObject = JsonObject(emptyMap())
+
+    fun rawLeg(index: Int): JsonObject = raw.getValue("legs").jsonArray[index].jsonObject
+}
+
+@Serializable
+data class JourneysPage(
+    val journeys: List<JourneyDisplay>,
+    val earlierCursor: String? = null,
+    val laterCursor: String? = null,
+    /** Dropped by the ticket filter. */
+    val hiddenCount: Int = 0,
+)
+
+/** The ticket for the "only with my ticket" filters (`TicketType`). */
+enum class TicketType(val id: String, val displayName: String, val shortName: String, val filterSubtitle: String) {
+    Deutschlandticket("deutschlandticket", "Deutschlandticket", "D-Ticket", "ICE, IC & Co. ausblenden"),
+    BahnCard100("bahnCard100", "BahnCard 100", "BC100", "FlixTrain & Co. ausblenden");
+
+    val filterTitle: String get() = "Nur $displayName"
+
+    companion object {
+        fun of(id: String?): TicketType = entries.firstOrNull { it.id == id } ?: Deutschlandticket
+    }
+}
+
+@Serializable
+data class BoardEntry(
+    /** departures or arrivals */
+    val kind: String,
+    val tripId: String,
+    val station: Station,
+    val line: Line,
+    /** Departures: where the train goes. Arrivals: where it comes from. */
+    val otherEnd: String? = null,
+    val time: TimeInfo,
+    val platform: PlatformInfo = PlatformInfo(),
+    val cancelled: Boolean = false,
+    val remarks: List<String> = emptyList(),
+    val access: String = "normal",
+    val source: String,
+)
+
+@Serializable
+data class BoardEntryDisplay(val id: String, val entry: BoardEntry, val line: LineDisplay)
+
+@Serializable
+data class Trip(
+    val id: String,
+    val line: Line? = null,
+    val direction: String? = null,
+    val stopovers: List<Stopover> = emptyList(),
+    val cancelled: Boolean = false,
+    val remarks: List<String> = emptyList(),
+    val messages: List<TrainMessage> = emptyList(),
+    val source: String,
+) {
+    val origin: Station? get() = stopovers.firstOrNull()?.station
+    val destination: Station? get() = stopovers.lastOrNull()?.station
+}
+
+@Serializable
+data class TripDisplay(val trip: Trip, val line: LineDisplay? = null) {
+    /** The trip's Kit JSON, to build a ride from it. */
+    @Transient
+    var raw: JsonObject = JsonObject(emptyMap())
+}
+
+/** A run found by its number (`TrainSearchResult`); [raw] goes back to the Kit to open it. */
+@Serializable
+data class TrainResult(
+    val journeyId: String,
+    val name: String? = null,
+    val lineName: String? = null,
+    val product: String,
+    val origin: String,
+    val destination: String,
+) {
+    @Transient
+    var raw: JsonObject = JsonObject(emptyMap())
+}
+
+/** A found run, opened: the entry as on a board, and the trip. */
+data class TrainRun(val entry: BoardEntryDisplay, val trip: TripDisplay)
+
+/** The Kit's product groups (`Product`), in the order the filter chips show them. */
+@Serializable(with = ProductSerializer::class)
+enum class Product(val id: String, val displayName: String, val isTrain: Boolean, val isLongDistance: Boolean) {
+    HighSpeed("highSpeed", "Hochgeschwindigkeit", true, true),
+    LongDistance("longDistance", "IC / EC", true, true),
+    NightTrain("nightTrain", "Nachtzug", true, true),
+    Interregio("interregio", "IR / FLX", true, true),
+    RegionalExpress("regionalExpress", "RE", true, false),
+    Regional("regional", "RB", true, false),
+    Suburban("suburban", "S-Bahn", true, false),
+    Subway("subway", "U-Bahn", false, false),
+    Tram("tram", "Tram", false, false),
+    Bus("bus", "Bus", false, false),
+    Coach("coach", "Fernbus", false, false),
+    Ferry("ferry", "Fähre", false, false),
+    Other("other", "Sonstige", false, false);
+
+    companion object {
+        fun of(id: String): Product = entries.firstOrNull { it.id == id } ?: Other
+        val all: Set<Product> = entries.toSet()
+        val trains: Set<Product> = entries.filter { it.isTrain }.toSet()
+        val longDistance: Set<Product> = entries.filter { it.isLongDistance }.toSet()
+        /** The board's "Nur Regionalverkehr": RE and RB only. */
+        val regional: Set<Product> = setOf(RegionalExpress, Regional)
+    }
+}
+
+/** Products are stored by the Kit's raw values; an unknown one reads as [Product.Other], as in the Kit. */
+object ProductSerializer : KSerializer<Product> {
+    override val descriptor = PrimitiveSerialDescriptor("Product", PrimitiveKind.STRING)
+    override fun deserialize(decoder: Decoder): Product = Product.of(decoder.decodeString())
+    override fun serialize(encoder: Encoder, value: Product) = encoder.encodeString(value.id)
+}
+
+/** Something new about a saved journey to tell the user (`Methods.refreshSaved`). */
+@Serializable
+data class SavedNotification(
+    val id: String,
+    val title: String,
+    /** Lines of the text; [since] belongs after the first. */
+    val lines: List<String>,
+    val since: Long? = null,
+    val urgent: Boolean = false,
+)
+
+data class RefreshedSaved(val journey: JourneyDisplay, val notifications: List<SavedNotification>, val notified: List<String>)
+
+@Serializable
+data class ArrivalWeather(val temperature: String, val condition: String, val weatherCode: Int, val isDay: Boolean = true)
+
+/** The CO₂ comparison and the weather at each arrival (`Methods.journeyExtras`). */
+@Serializable
+data class JourneyExtras(
+    val co2SavedKilograms: Double = 0.0,
+    /** By leg index. */
+    val arrivalWeather: Map<String, ArrivalWeather> = emptyMap(),
+)
+
+/** What the "Reiseübersicht" widget shows now (`JourneyWidgetState`). */
+@Serializable
+data class WidgetState(
+    /** beforeDeparture, riding, transfer, arrived */
+    val phase: String,
+    val trainName: String,
+    val product: String,
+    val nextStopName: String,
+    val nextStopTime: Long,
+    val nextStopDelayMinutes: Int? = null,
+    val platform: String? = null,
+    val originName: String,
+    val destinationName: String,
+    val finalArrival: Long,
+    val finalDelayMinutes: Int? = null,
+    val cancelled: Boolean = false,
+    val warning: String? = null,
+    val transferStation: String? = null,
+    val transferTrain: String? = null,
+    val transferPlatform: String? = null,
+    val transferDeparture: Long? = null,
+)
+
+/** A row of the departures widget (`BoardWidgetRow`). */
+@Serializable
+data class BoardWidgetRow(
+    val id: String,
+    val departure: TimeInfo,
+    val cancelled: Boolean = false,
+    val lineName: String,
+    val product: String,
+    val isNightTrain: Boolean = false,
+    val destination: String,
+    val platform: String? = null,
+)
+
+/** A train's planned Wagenreihung from vagonweb.cz (`CoachSequence`), front first. */
+@Serializable
+data class CoachSequence(
+    val groups: List<CoachGroup> = emptyList(),
+    val coaches: List<Coach> = emptyList(),
+    /** Whether the train leaves towards the last coach (right); null when unknown. */
+    val travelsTowardsPlatformEnd: Boolean? = null,
+    val reversals: List<String> = emptyList(),
+    val validFrom: Long? = null,
+    val validUntil: Long? = null,
+)
+
+@Serializable
+data class CoachGroup(
+    val trainName: String? = null,
+    val destination: String? = null,
+    val isRequestedTrain: Boolean = true,
+    val isLocomotiveOnly: Boolean = false,
+)
+
+@Serializable
+data class Coach(
+    val number: String? = null,
+    /** passenger, diningCar, halfDiningCar, sleeper, couchette, locomotive, powerCar, other */
+    val kind: String = "passenger",
+    val firstClass: Boolean = false,
+    val secondClass: Boolean = false,
+    val closed: Boolean = false,
+    val amenities: List<String> = emptyList(),
+    val bikeSpaces: Int? = null,
+    val group: Int = 0,
+    val isPassengerCoach: Boolean = true,
+)

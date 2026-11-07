@@ -1,0 +1,5 @@
+# Linked by build.sh
+Sources/
+.build/
+.linux-test/
+.linux-bridge/
