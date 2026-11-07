@@ -598,17 +598,8 @@ public struct TimetablesClient: Sendable {
     public func scheduledTimes(category: String?, number: String, at station: Station,
                                from: Date, duration: Int) async -> [Date] {
         guard let eva = await eva(for: station) else { return [] }
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = Self.berlin
         let end = from.addingTimeInterval(TimeInterval(duration * 60))
-        var hours: [Date] = []
-        var cursor = from
-        // `/plan` is bucketed by hour; cap the pagination so a generous window (e.g. the custom-train
-        // picker's default 8h) can't fire dozens of concurrent requests.
-        repeat {
-            hours.append(cursor)
-            cursor = calendar.date(byAdding: .hour, value: 1, to: cursor) ?? cursor.addingTimeInterval(3600)
-        } while cursor < end && hours.count < 10
+        let hours = Self.planHours(from: from, duration: duration)
 
         let stops = await withTaskGroup(of: [TimetablesStop].self) { group in
             for hour in hours {
@@ -627,6 +618,23 @@ public struct TimetablesClient: Sendable {
             .compactMap { ($0.departure ?? $0.arrival)?.planned }
             .filter { $0 >= from.addingTimeInterval(-60) && $0 <= end }
             .sorted()
+    }
+
+    /// The `/plan` hour buckets covering `from … from + duration`. The cursor starts at the beginning of
+    /// `from`'s hour (Berlin time), so the bucket holding the window's end is included even when `from`
+    /// isn't on the full hour. `/plan` is bucketed by hour; the count is capped so a generous window
+    /// (e.g. the custom-train picker's default 8h) can't fire dozens of concurrent requests.
+    static func planHours(from: Date, duration: Int) -> [Date] {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = berlin
+        let end = from.addingTimeInterval(TimeInterval(duration * 60))
+        var hours: [Date] = []
+        var cursor = calendar.dateInterval(of: .hour, for: from)?.start ?? from
+        repeat {
+            hours.append(cursor)
+            cursor = calendar.date(byAdding: .hour, value: 1, to: cursor) ?? cursor.addingTimeInterval(3600)
+        } while cursor < end && hours.count < 10
+        return hours
     }
 
     /// "ICE 571" -> "ICE". Also handles names with no space between category and number ("S15" -> "S",
