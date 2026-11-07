@@ -188,7 +188,8 @@ struct JourneyResultsView: View {
                     if hiddenCount + results.count - visibleJourneys.count > 0, requirements.isEmpty {
                         InfoChip(text: String(localized: "\(hiddenCount + results.count - visibleJourneys.count) nicht mit \(model.settings.ticketType.shortName) nutzbar"), systemImage: "eye.slash.fill")
                     }
-                    if source == .transitous {
+                    // Not under "Suche Verbindungen …": the source is known a moment before the list shows.
+                    if source == .transitous, !(isLoading && results.isEmpty) {
                         SourceNotice()
                     }
                 }
