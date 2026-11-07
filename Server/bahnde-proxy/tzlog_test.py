@@ -416,6 +416,13 @@ class VehicleRoundTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Tz 8043 938000000043", note)
         self.assertIn("group 8044", note)
 
+    async def test_a_round_for_new_tz_asks_only_them_and_keeps_the_schedule(self):
+        self.store.mark_backfilled("8043")
+        self.store.update_round(self.store.start_round(500.0), 600.0, 1, {}, "done")
+        await self.scanner().scan_vehicles(only_new=True)
+        self.assertEqual({uic for uic, _ in self.asked}, {"938000000090"})
+        self.assertEqual(self.store.last_finished_round(), 500.0)
+
     async def test_a_rejected_round_pauses_and_goes_on_where_it_was(self):
         rejections = {"left": 2}
 
@@ -637,6 +644,25 @@ class RunTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(asyncio.CancelledError):
             await self.restarted(store, clock, calls, stop_after=2).run()
         self.assertEqual(calls[:2], [("boards", 1150.0), ("vehicles", 1250.0)])
+
+    async def test_a_restart_backfills_tz_new_in_the_seed_at_once_and_keeps_the_schedule(self):
+        store = tzlog.TzStore()
+        store.update_round(store.start_round(1000.0), 1010.0, 5, {}, "done")
+        store.set_state("boards_started", 1050.0)
+        store.record_unit({"tz": "302", "unit": "ICE302", "types": [], "vehicle": "938054031027"}, 1)
+        clock, calls = [1100.0], []
+        scanner = self.restarted(store, clock, calls, stop_after=3)
+        only_new = []
+
+        async def vehicles(only_new_flag=False):
+            only_new.append(only_new_flag)
+            calls.append(("vehicles", clock[0]))
+
+        scanner.scan_vehicles = lambda only_new=False: vehicles(only_new)
+        with self.assertRaises(asyncio.CancelledError):
+            await scanner.run()
+        self.assertEqual(calls[:3], [("vehicles", 1100.0), ("boards", 1150.0), ("vehicles", 1250.0)])
+        self.assertEqual(only_new[:2], [True, False])
 
     async def test_a_round_a_restart_cut_off_runs_again_at_once(self):
         store = tzlog.TzStore()

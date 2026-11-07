@@ -299,7 +299,7 @@ class TzStore:
 
     def last_finished_round(self):
         """When the last vehicle round started, if it ran to its end (a restart cuts one off, it then reads "running")."""
-        row = self.db.execute("SELECT started, note FROM rounds ORDER BY id DESC LIMIT 1").fetchone()
+        row = self.db.execute("SELECT started, note FROM rounds WHERE note NOT LIKE 'new Tz:%' ORDER BY id DESC LIMIT 1").fetchone()
         if row is None or row[1].startswith(("running", "rejected")):
             return None
         return row[0]
@@ -535,6 +535,14 @@ class Scanner:
         next_boards = float(last_boards) + self.every if last_boards else now
         last_vehicles = self.store.last_finished_round()
         next_vehicles = last_vehicles + self.vehicle_every if last_vehicles is not None else now
+        # Tz new in the seed get their week right away, not only with the next round.
+        if self.ris is not None and next_vehicles > now and any(not done for _, _, done in self.store.vehicles()):
+            try:
+                await self.scan_vehicles(only_new=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 - the next round does them
+                log.exception("Tz round for new Tz failed")
         while True:
             for name in ("vehicles", "boards"):
                 due = next_boards if name == "boards" else next_vehicles
@@ -632,9 +640,10 @@ class Scanner:
             at = last if last is not None and last > at else at + dt.timedelta(hours=1)
         return [e for e in entries if _before(e, end)]
 
-    async def scan_vehicles(self):
+    async def scan_vehicles(self, only_new=False):
         """One request per known Tz and day to the WiFi host: today (and the day before in a day's first round); a
-        Tz seen for the first time also gets the last `BACKFILL_DAYS` days."""
+        Tz seen for the first time also gets the last `BACKFILL_DAYS` days. `only_new`: just the Tz not backfilled
+        yet (new in the seed), which doesn't count as a round for the schedule."""
         if self.ris is None:
             return
         today = dt.datetime.fromtimestamp(self.now(), BERLIN).date()
@@ -646,10 +655,13 @@ class Scanner:
         statuses = {}
         samples = []  # the first answers that named another trainset or none, to see what the host really says
         round_id = self.store.start_round(self.now())
-        note = "done"
+        prefix = "new Tz: " if only_new else ""
+        note = prefix + "done"
         pauses = 0
         blocked = False
         for tz, uic, backfilled in self.store.vehicles():
+            if only_new and backfilled:
+                continue
             days = recent if backfilled else [today - dt.timedelta(days=n) for n in range(BACKFILL_DAYS, -1, -1)]
             complete = True
             for day in days:
@@ -665,7 +677,7 @@ class Scanner:
                         break
                     pauses += 1
                     self.store.update_round(round_id, self.now(), asked, statuses,
-                                            " | ".join([f"rejected at Tz {tz}, pause {pauses}"] + samples))
+                                            " | ".join([f"{prefix}rejected at Tz {tz}, pause {pauses}"] + samples))
                     log.warning("Tz vehicle round: the WiFi host rejects us, pausing %ds", RIS_BLOCK_PAUSE)
                     close = getattr(self.ris, "close", None)
                     if close is not None:
@@ -677,7 +689,7 @@ class Scanner:
                     break
                 if asked % 25 == 0:
                     self.store.update_round(round_id, self.now(), asked, statuses,
-                                            " | ".join([f"running, at Tz {tz}"] + samples))
+                                            " | ".join([f"{prefix}running, at Tz {tz}"] + samples))
                 if status == 404:
                     continue  # no journeys that day
                 if status != 200:
@@ -713,16 +725,17 @@ class Scanner:
             if complete and not backfilled:
                 self.store.mark_backfilled(tz)
             if blocked:
-                note = f"stopped at Tz {tz}: the WiFi host still rejects us after {pauses} pauses"
+                note = f"{prefix}stopped at Tz {tz}: the WiFi host still rejects us after {pauses} pauses"
                 log.warning("Tz vehicle round stopped: the WiFi host rejects us")
                 break
             if failures >= RIS_MAX_FAILURES:
                 log.warning("Tz vehicle round stopped: %d requests failed in a row", failures)
-                note = f"stopped at Tz {tz}: {failures} requests failed in a row, last status {status}"
+                note = f"{prefix}stopped at Tz {tz}: {failures} requests failed in a row, last status {status}"
                 break
         self.store.update_round(round_id, self.now(), asked, statuses, " | ".join([note] + samples))
-        self.vehicle_day = today
-        log.info("Tz vehicle round: %d requests", asked)
+        if not only_new:
+            self.vehicle_day = today
+        log.info("Tz vehicle round%s: %d requests", " (new Tz)" if only_new else "", asked)
 
 
 def _before(entry, end):
