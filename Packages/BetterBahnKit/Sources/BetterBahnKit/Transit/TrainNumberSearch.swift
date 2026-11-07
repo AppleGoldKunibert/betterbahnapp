@@ -259,19 +259,22 @@ public struct TrainNumberSearch: Sendable {
 
     /// `entry` and `trip` of a long-distance train under the name DB's search result gives it. For some
     /// cross-border trains Transitous only has DB's GTFS entry, which brands them generically, e.g. the ČD
-    /// Railjet "RJ 171" Hamburg–Dresden as "ICE 171"; the result's name (bahn.expert) is DB's own.
+    /// Railjet "RJ 171" Hamburg–Dresden as "ICE 171"; the result's name (RIS::Journeys or bahn.expert) is DB's
+    /// own. Each is renamed on its own: the board may already carry bahn.de's "RJ 178" while the trip opened
+    /// from it is still Transitous' "ICE 178" (#552).
     static func named(after result: TrainSearchResult, entry: BoardEntry, trip: Trip) -> (entry: BoardEntry, trip: Trip) {
-        guard BahnDeClient.longDistanceCategories.contains(result.category.uppercased()),
-              BahnDeClient.trainReference(for: entry.line)?.number == String(result.number),
-              BahnDeClient.normalizedTrainName(entry.line.name) != BahnDeClient.normalizedTrainName(result.name) else {
-            return (entry, trip)
-        }
+        guard BahnDeClient.longDistanceCategories.contains(result.category.uppercased()) else { return (entry, trip) }
         var entry = entry, trip = trip
-        entry.line = BahnDeClient.renamed(entry.line, to: result.name)
-        if let line = trip.line, BahnDeClient.trainReference(for: line)?.number == String(result.number) {
-            trip.line = BahnDeClient.renamed(line, to: result.name)
-        }
+        if let line = renamed(entry.line, after: result) { entry.line = line }
+        if let line = trip.line.flatMap({ renamed($0, after: result) }) { trip.line = line }
         return (entry, trip)
+    }
+
+    /// `line` under the result's name, if it is the same train number under another name.
+    private static func renamed(_ line: Line, after result: TrainSearchResult) -> Line? {
+        guard BahnDeClient.trainReference(for: line)?.number == String(result.number),
+              BahnDeClient.normalizedTrainName(line.name) != BahnDeClient.normalizedTrainName(result.name) else { return nil }
+        return BahnDeClient.renamed(line, to: result.name)
     }
 
     /// bahn.de's station search knows the EVA numbers bahn.expert gives; the provider's is the fallback.

@@ -1,8 +1,11 @@
 """Tests for proxy.py: `python3 -m unittest Server/bahnde-proxy/proxy_test.py` (needs aiohttp; no network)."""
 
 import asyncio
+import json
 import sys
+import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 from aiohttp.test_utils import TestClient, TestServer
@@ -256,5 +259,214 @@ class BrowserFetchTests(unittest.IsolatedAsyncioTestCase):
             await self.fetch(proxy.UPSTREAM + "a")
 
 
+
+RUN = "20261103-c5ed6631-9860-3f62-aa16-50637daedbaf"
+
+
+class RISTests(unittest.IsolatedAsyncioTestCase):
+    """RIS::Journeys through the same server: its own paths, cache and pauses."""
+
+    async def start(self, ris_status=200, with_ris=True):
+        self.bahn_de = FakeBahnDe()
+        self.ris = FakeBahnDe(status=ris_status)
+        self.clock = Clock()
+        self.proxy = proxy.Proxy(fetch=self.bahn_de, secret=SECRET, clock=self.clock)
+        self.ris_proxy = proxy.ris_proxy(self.ris, SECRET, clock=self.clock) if with_ris else None
+        self.client = TestClient(TestServer(proxy.make_app(self.proxy, self.ris_proxy)))
+        await self.client.start_server()
+        self.addAsyncCleanup(self.client.close)
+
+    async def get(self, path, token=WORKER_TOKEN):
+        return await self.client.get(path, headers={proxy.TOKEN_HEADER: token} if token else {})
+
+    async def test_passes_find_and_a_run_on_to_dbs_api(self):
+        await self.start()
+        find = await self.get("/db/apis/ris-journeys/v2/find?journeyNumber=7&date=2026-11-03")
+        self.assertEqual(find.status, 200)
+        self.assertEqual(find.headers["Cache-Control"], "public, max-age=300")
+        self.assertEqual((await self.get(f"/db/apis/ris-journeys/v2/{RUN}")).status, 200)
+        self.assertEqual(self.ris.urls, [
+            "https://apis.deutschebahn.com/db/apis/ris-journeys/v2/find?journeyNumber=7&date=2026-11-03",
+            f"https://apis.deutschebahn.com/db/apis/ris-journeys/v2/{RUN}",
+        ])
+        self.assertEqual(self.bahn_de.urls, [])
+
+    async def test_only_its_paths_and_only_the_app(self):
+        await self.start()
+        self.assertEqual((await self.get("/db/apis/ris-journeys/v2/anything")).status, 404)
+        self.assertEqual((await self.get("/db/apis/ris-boards/v1/public/departures/8000105")).status, 404)
+        self.assertEqual((await self.get(f"/db/apis/ris-journeys/v2/{RUN}", token=None)).status, 401)
+        self.assertEqual(self.ris.urls, [])
+
+    async def test_without_a_key_ris_answers_404(self):
+        await self.start(with_ris=False)
+        self.assertEqual((await self.get(f"/db/apis/ris-journeys/v2/{RUN}")).status, 404)
+        self.assertEqual((await self.get(ORTE)).status, 200)
+
+    async def test_a_refused_key_doesnt_pause(self):
+        await self.start(ris_status=401)
+        self.assertEqual((await self.get(f"/db/apis/ris-journeys/v2/{RUN}")).status, 401)
+        self.assertEqual((await self.get(f"/db/apis/ris-journeys/v2/{RUN}")).status, 401)
+        self.assertEqual(len(self.ris.urls), 2)
+
+    async def test_a_rate_limit_pauses_ris_but_not_bahn_de(self):
+        await self.start(ris_status=429)
+        self.assertEqual((await self.get(f"/db/apis/ris-journeys/v2/{RUN}")).status, 429)
+        self.assertEqual((await self.get("/db/apis/ris-journeys/v2/find?journeyNumber=7&date=2026-11-03")).status, 503)
+        self.assertEqual(len(self.ris.urls), 1)
+        self.assertEqual((await self.get(ORTE)).status, 200)
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+SEQUENCE = ("/web/api/reisebegleitung/wagenreihung/vehicle-sequence?administrationId=80&category=ICE"
+            "&date=2026-11-05&evaNumber=8002549&number=615&time=2026-11-05T14:45:00.000Z")
+# DB Regio's portal for ICE 615 at Hamburg Hbf (2026-11-05), shortened.
+REGIO_615 = {
+    "journeyID": "20261105-66eda5b0", "departureID": "8002549_D_1", "sequenceStatus": "MATCHES_SCHEDULE",
+    "platform": {"platformSchedule": "14", "platform": "14", "details": {
+        "name": "14", "start": 0.0, "end": 439.75, "sectors": [{"name": "F", "start": 0.0, "end": 109.8, "cubePosition": 87.25}]}},
+    "groups": [{"name": "ICE9499", "journeyID": "20261105-66eda5b0",
+                "journeyRelation": {"startCategory": "ICE", "startJourneyNumber": 615, "startEvaNumber": "8002553"},
+                "destination": {"evaNumber": "8000261", "name": "München Hbf"},
+                "vehicles": [{"vehicleID": "938058120990", "wagonIdentificationNumber": 1, "status": "OPEN",
+                              "type": {"category": "CONTROLCAR_ECONOMY_CLASS", "constructionType": "I5812"},
+                              "platformPosition": {"start": 367.05, "end": 395.65, "sector": "A"}}]}],
+}
+
+
+class FakeRegio:
+    """The portal: answers `statuses` in turn (the last one from then on), `REGIO_615` for a 200."""
+
+    def __init__(self, *statuses):
+        self.statuses = list(statuses) or [200]
+        self.urls = []
+        self.resets = 0
+
+    def reset(self):
+        self.resets += 1
+
+    async def __call__(self, url):
+        self.urls.append(url)
+        status = self.statuses.pop(0) if len(self.statuses) > 1 else self.statuses[0]
+        if status == "no-token":
+            raise proxy.RegioBlocked("page 403, no CSRF token")
+        body = json.dumps(REGIO_615) if status == 200 else '{"errorCode": 1}'
+        return proxy.Answer(status, body.encode())
+
+
+class RegioTests(unittest.IsolatedAsyncioTestCase):
+    async def start(self, regio, now="2026-11-05T14:00:00+00:00"):
+        self.bahn_de = FakeBahnDe()
+        self.clock = Clock()
+        self.regio_fake = regio
+        self.proxy = proxy.Proxy(fetch=self.bahn_de, secret=SECRET, clock=self.clock)
+        self.log = Path(self.enterContext(tempfile.TemporaryDirectory())) / "logs" / "regio.log"
+        self.slept = []
+
+        async def sleep(seconds):
+            self.slept.append(seconds)
+
+        self.regio = proxy.RegioSequences(fetch=regio, proxy=self.proxy, log_path=str(self.log), clock=self.clock,
+                                          now=lambda: datetime.fromisoformat(now), sleep=sleep)
+        self.client = TestClient(TestServer(proxy.make_app(self.proxy, regio=self.regio)))
+        await self.client.start_server()
+        self.addAsyncCleanup(self.client.close)
+
+    async def get(self, path=SEQUENCE):
+        return await self.client.get(path, headers={proxy.TOKEN_HEADER: WORKER_TOKEN})
+
+    def logged(self):
+        return self.log.read_text().splitlines() if self.log.exists() else []
+
+    async def test_asks_the_portal_first_and_answers_like_bahn_de(self):
+        await self.start(FakeRegio(200))
+        response = await self.get()
+        self.assertEqual(response.status, 200)
+        self.assertEqual(self.bahn_de.urls, [])
+        self.assertIn("journeyNumber=615", self.regio_fake.urls[0])
+        self.assertIn("timeSchedule=2026-11-05T14%3A45%3A00Z", self.regio_fake.urls[0])
+        body = await response.json()
+        self.assertEqual(body["departurePlatform"], "14")
+        self.assertEqual(body["platform"], {"name": "14", "start": 0.0, "end": 439.75,
+                                            "sectors": [{"name": "F", "start": 0.0, "end": 109.8}]})
+        group = body["groups"][0]
+        self.assertEqual(group["transport"], {"category": "ICE", "number": 615, "destination": {"name": "München Hbf"},
+                                              "journeyID": "20261105-66eda5b0"})
+        self.assertEqual(group["vehicles"][0]["wagonIdentificationNumber"], 1)
+        self.assertEqual(body["sequenceStatus"], "MATCHES_SCHEDULE")
+        await self.get()
+        self.assertEqual(len(self.regio_fake.urls), 1, "cached")
+        self.assertEqual((await self.client.get(SEQUENCE)).status, 401)
+
+    async def test_a_refusal_is_tried_ten_times(self):
+        await self.start(FakeRegio(403, 403, "no-token", 200))
+        self.assertEqual((await self.get()).status, 200)
+        self.assertEqual(len(self.regio_fake.urls), 4, "the third time without a CSRF token")
+        self.assertEqual(self.bahn_de.urls, [])
+        self.assertEqual(self.regio_fake.resets, 3)
+        self.assertEqual(len([line for line in self.logged() if " BLOCK " in line]), 3)
+        self.assertIn("ICE 615 at 8002549", self.logged()[0])
+
+    async def test_ten_refusals_pause_for_five_minutes_and_a_second_turns_it_off(self):
+        await self.start(FakeRegio(403))
+        self.assertEqual((await self.get()).status, 200)
+        self.assertEqual(len(self.regio_fake.urls), 10)
+        self.assertEqual(len(self.bahn_de.urls), 1, "bahn.de answered after the tenth refusal")
+        self.assertTrue(self.logged()[-1].endswith("PAUSE refused 10 times: bahn.de for 300 s"))
+        # Within the 5 minutes: bahn.de only.
+        self.clock.now += 299
+        self.proxy.cache.clear()
+        await self.get()
+        self.assertEqual(len(self.regio_fake.urls), 10)
+        self.assertEqual(len(self.bahn_de.urls), 2)
+        # Then the portal again; refused 10 more times: off until the server restarts.
+        self.clock.now += 2
+        self.proxy.cache.clear()
+        await self.get()
+        self.assertEqual(len(self.regio_fake.urls), 20)
+        self.assertTrue(self.regio.off)
+        self.assertIn(" OFF ", self.logged()[-1])
+        self.clock.now += 86400
+        self.proxy.cache.clear()
+        await self.get()
+        self.assertEqual(len(self.regio_fake.urls), 20)
+
+    async def test_back_after_the_pause_starts_over(self):
+        await self.start(FakeRegio(*([403] * 10), 200, 403))
+        await self.get()
+        self.clock.now += 301
+        self.assertEqual((await self.get()).headers.get("X-Proxy-Source"), "regio")
+        self.assertFalse(self.regio.on_probation)
+        self.regio.cache.clear()
+        await self.get()
+        self.assertFalse(self.regio.off, "a pause first, not off")
+        self.assertTrue(self.regio.on_probation)
+
+    async def test_a_missing_sequence_is_a_404_not_bahn_de_and_logged_when_expected(self):
+        await self.start(FakeRegio(404))
+        self.assertEqual((await self.get()).status, 404)
+        self.assertEqual(self.bahn_de.urls, [])
+        await self.get()
+        self.assertEqual(len(self.regio_fake.urls), 1, "kept a minute")
+        self.assertEqual(len(self.logged()), 1)
+        self.assertIn("MISSING no coach sequence for ICE 615 at 8002549", self.logged()[0])
+
+    async def test_logs_only_missing_trains_leaving_germany_within_20_hours(self):
+        now = proxy.parse_time("2026-11-05T14:00:00Z")
+        query = {"category": "ICE", "number": "615", "evaNumber": "8002549", "date": "2026-11-05",
+                 "time": "2026-11-05T14:45:00.000Z"}
+        self.assertTrue(proxy.expected_sequence(query, now))
+        self.assertTrue(proxy.expected_sequence({**query, "category": "RB"}, now))
+        for other in ({"category": "S"}, {"category": "BUS"}, {"category": "STR"}, {"evaNumber": "8101236"},
+                      {"time": "2026-11-06T10:01:00.000Z"}, {"time": "2026-11-05T13:59:00.000Z"}):
+            self.assertFalse(proxy.expected_sequence({**query, **other}, now), other)
+
+    async def test_other_failures_go_to_bahn_de(self):
+        await self.start(FakeRegio(500))
+        self.assertEqual((await self.get()).status, 200)
+        self.assertEqual(len(self.bahn_de.urls), 1)
+        self.assertEqual(self.logged(), [])
+        self.assertTrue(self.regio.usable)

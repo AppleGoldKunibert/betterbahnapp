@@ -9241,12 +9241,12 @@
         }
       }
     },
-    "Zeigt Züge aus allen Ländern, die bahn.expert kennt." : {
+    "Zeigt Züge aus allen Ländern, die die Deutsche Bahn kennt." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Shows trains from all countries bahn.expert knows."
+            "value" : "Shows trains from all countries Deutsche Bahn knows."
           }
         }
       }
@@ -9613,6 +9613,16 @@
         }
       }
     },
+    "Zugsuche nach Nummer, Echtzeiten und Gleise der Züge" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Train search by number, live times and platforms of trains"
+          }
+        }
+      }
+    },
     "Zugteil" : {
       "localizations" : {
         "en" : {
@@ -9643,12 +9653,12 @@
         }
       }
     },
-    "Zugtypen und Zugsuche nach Nummer; Sitzpläne der ICE aus den Wagenreihungsplänen, © Deutsche Bahn AG" : {
+    "Zugtypen; Sitzpläne der ICE aus den Wagenreihungsplänen, © Deutsche Bahn AG" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Train types and train search by number; ICE seat maps from the coach sequence plans, © Deutsche Bahn AG"
+            "value" : "Train types; ICE seat maps from the coach sequence plans, © Deutsche Bahn AG"
           }
         }
       }
