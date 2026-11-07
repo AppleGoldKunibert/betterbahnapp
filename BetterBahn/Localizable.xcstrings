@@ -9181,6 +9181,16 @@
         }
       }
     },
+    "Zeigt die anderen fahrenden Züge auf der Karte" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shows the other running trains on the map"
+          }
+        }
+      }
+    },
     "Zeigt die ganze Fahrt" : {
       "localizations" : {
         "en" : {
@@ -9569,6 +9579,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Train positions on the map"
+          }
+        }
+      }
+    },
+    "Zugpositionen, wenn unser Server keine hat" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Train positions when our server has none"
           }
         }
       }

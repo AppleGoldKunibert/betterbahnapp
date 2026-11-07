@@ -1,9 +1,25 @@
 import Foundation
 
+/// How a train tapped on the map opens its route.
+public enum LiveTrainOpening: Sendable, Hashable, Identifiable {
+    /// Transitous' trip.
+    case trip(String)
+    /// A train only the position list knows: its run, looked up like the train search does
+    /// (`TrainNumberSearch.run(of:)`).
+    case journey(TrainSearchResult)
+
+    public var id: String {
+        switch self {
+        case .trip(let id): "trip:\(id)"
+        case .journey(let result): "journey:\(result.journeyId)"
+        }
+    }
+}
+
 /// A train drawn on a map at one moment.
 public struct LiveTrainMarker: Sendable, Hashable, Identifiable {
     public var id: String
-    /// Transitous' trip, to open the train's route; nil for trains only bahn.jetzt knows.
+    /// Transitous' trip, to open the train's route; nil for trains only the position list knows.
     public var tripId: String?
     public var name: String
     public var coordinate: Coordinate
@@ -13,6 +29,14 @@ public struct LiveTrainMarker: Sendable, Hashable, Identifiable {
     public var isLongDistance: Bool
     /// Whether the marker moves along the track between refreshes; bahn.jetzt-only trains stay put.
     public var followsTrack: Bool
+    /// The run of a train no Transitous trip matched (e.g. running later than Transitous thinks).
+    public var journey: TrainSearchResult? = nil
+
+    /// How tapping opens the train's route; nil when it can't be looked up at all.
+    public var opening: LiveTrainOpening? {
+        if let tripId { return .trip(tripId) }
+        return journey.map(LiveTrainOpening.journey)
+    }
 }
 
 /// Every train on the map: Transitous' stretches between stops give the track and the timetable,
@@ -52,6 +76,10 @@ public struct LiveTrainField: Sendable {
     let anchors: [String: Anchor]
     /// bahn.jetzt trains no trip matched; shown where bahn.jetzt last saw them.
     let unmatched: [BahnJetztClient.RunningTrain]
+    /// Loaded trips an unmatched train goes by (name or run number) but whose loaded stretches don't
+    /// reach it: it runs later than Transitous thinks. Loading the whole trip
+    /// (`TransitousProvider.liveTrainSegments(completing:)`) lets it run on its track.
+    public let tripsToComplete: [String]
     let ownTrains: [(name: String, coordinate: Coordinate)]
 
     /// - Parameter ownTrains: the user's own trains, which the map draws itself and which are left out here.
@@ -72,10 +100,12 @@ public struct LiveTrainField: Sendable {
 
         // Best fix per trip; a bahn.jetzt train serves one trip only, the closest match first.
         var candidates: [(trip: String, train: String, anchor: Anchor, score: Double)] = []
+        var tripsByTrain: [String: [String]] = [:]
         for trip in trips {
             // A regional run number names the train; feeds disagree on RE vs. RB and the line's spelling.
             let trains = trip.runNumber.flatMap { regionalByNumber[$0] } ?? byName[Self.normalized(trip.name)] ?? []
             for train in Set(trains) {
+                tripsByTrain[train.id, default: []].append(trip.id)
                 if let (anchor, score) = Self.anchor(of: train, on: trip) {
                     candidates.append((trip.id, train.id, anchor, score))
                 }
@@ -91,6 +121,13 @@ public struct LiveTrainField: Sendable {
         self.trips = trips
         self.anchors = anchors
         self.unmatched = running.filter { !usedTrains.contains($0.id) }
+        var toComplete: [String] = []
+        for train in unmatched {
+            for trip in tripsByTrain[train.id] ?? [] where anchors[trip] == nil && !toComplete.contains(trip) {
+                toComplete.append(trip)
+            }
+        }
+        self.tripsToComplete = toComplete
         self.ownTrains = ownTrains
     }
 
@@ -146,9 +183,9 @@ public struct LiveTrainField: Sendable {
         }
         for train in unmatched {
             markers.append(LiveTrainMarker(id: "bahn.jetzt:\(train.id)", tripId: nil, name: train.name, coordinate: train.position.coordinate,
-                                           nextStop: nil, speedKmh: train.position.speedKmh,
+                                           nextStop: train.destination.map { Station.displayName(for: $0) }, speedKmh: train.position.speedKmh,
                                            isLongDistance: train.category.map { BahnDeClient.longDistanceCategories.contains($0.uppercased()) } ?? false,
-                                           followsTrack: false))
+                                           followsTrack: false, journey: train.journey))
         }
         markers.removeAll { marker in
             (area.map { !$0.contains(marker.coordinate) } ?? false) || ownTrains.contains {
@@ -198,7 +235,11 @@ public struct LiveTrainCoverage: Sendable, Hashable {
     }
 
     /// How far ahead one load reaches.
-    public static let window: TimeInterval = 20 * 60
+    public static let window: TimeInterval = 15 * 60
+    /// How far back one load reaches: a train running later than Transitous thinks is still on a stretch
+    /// Transitous has already finished. Back and ahead together stay below what Transitous answers
+    /// ("too many trips" from about 35 minutes in a city at street zoom).
+    public static let lookback: TimeInterval = 10 * 60
     /// Loaded again this long before the window runs out.
     public static let refreshMargin: TimeInterval = 2 * 60
     /// Zoomed out further than this (degrees on screen), nothing is loaded: the answer would be megabytes.

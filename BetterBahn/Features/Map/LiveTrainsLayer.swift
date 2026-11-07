@@ -17,6 +17,8 @@ final class LiveTrainsLayer {
         var stops: [Coordinate] = []
         /// The leg it rides, to look up its track when it came without.
         var leg: Leg?
+        /// Whether the map is still looking up `track` itself.
+        var trackPending = false
     }
 
     /// At most this many other trains are drawn, the ones nearest the middle of the map.
@@ -31,6 +33,15 @@ final class LiveTrainsLayer {
 
     @ObservationIgnored private var field = LiveTrainField(segments: [], running: [])
     @ObservationIgnored private var segments: [LiveTrainSegment] = []
+    /// Whole trips of trains running later than the loaded stretches reach, by trip ID (`completeTrips`).
+    @ObservationIgnored private var completedTrips: [String: [LiveTrainSegment]] = [:]
+    @ObservationIgnored private var requestedTrips: Set<String> = []
+    /// Bumped whenever the other trains are cleared, so answers to requests from before don't bring them back.
+    @ObservationIgnored private var othersGeneration = 0
+    /// Bumped by every `rebuildField`, so only the latest one's field is kept.
+    @ObservationIgnored private var rebuildID = 0
+    /// At most this many trips are loaded one by one after each rebuild.
+    static let maxTripsToComplete = 6
     @ObservationIgnored private var running: [BahnJetztClient.RunningTrain] = []
     @ObservationIgnored private var coverage: LiveTrainCoverage?
     @ObservationIgnored private var visible: MapArea?
@@ -39,6 +50,11 @@ final class LiveTrainsLayer {
     /// Tracks of own trains' legs that came without, by leg ID.
     @ObservationIgnored private var legTracks: [String: [Coordinate]] = [:]
     @ObservationIgnored private var requestedLegTracks: Set<String> = []
+    /// When each own train was first handed over, to wait a moment for its track (`trackWait`).
+    @ObservationIgnored private var firstSeen: [String: Date] = [:]
+    /// An own train whose track is still loading isn't drawn for this long: drawn at its last fix first, it would
+    /// slide onto the track and to where it is by now once the track arrives.
+    static let trackWait: TimeInterval = 3
     @ObservationIgnored private weak var model: AppModel?
     @ObservationIgnored private var smoother = LiveTrainSmoother()
     @ObservationIgnored private var dataChanged = false
@@ -79,12 +95,34 @@ final class LiveTrainsLayer {
                 return
             }
             // A failed fetch keeps the last list; its fixes soon count as too old to move on.
-            if let running = await model.runningTrains() {
+            let generation = self.othersGeneration
+            if let running = await model.runningTrains(), self.othersStillWanted(generation) {
                 self.running = running
                 await self.rebuildField()
             }
             self.loadSegmentsIfNeeded(model: model)
         }
+    }
+
+    /// The "Andere Züge" button (or the setting) was switched: shows or clears the others right away instead of
+    /// at the next position refresh.
+    func otherTrainsSettingChanged(model: AppModel) {
+        guard model.settings.showOtherTrains else {
+            clearOthers()
+            return
+        }
+        let generation = othersGeneration
+        Task {
+            guard let running = await model.runningTrains(), othersStillWanted(generation) else { return }
+            self.running = running
+            await rebuildField()
+            loadSegmentsIfNeeded(model: model)
+        }
+    }
+
+    /// Whether the other trains are still wanted as they were when a request started.
+    private func othersStillWanted(_ generation: Int) -> Bool {
+        generation == othersGeneration && model?.settings.showOtherTrains == true
     }
 
     /// What the map shows right now; loads the tracks there when needed.
@@ -116,6 +154,8 @@ final class LiveTrainsLayer {
             motions[train.name] = motion
         }
         self.motions = motions
+        let now = Date.now
+        firstSeen = Dictionary(trains.map { ($0.name, firstSeen[$0.name] ?? now) }, uniquingKeysWith: { first, _ in first })
         ownTrains = trains
         dataChanged = true
         Task { await rebuildField() }
@@ -137,9 +177,20 @@ final class LiveTrainsLayer {
         }
     }
 
+    /// Whether `train` is held back while its leg's track loads (see `trackWait`).
+    private func waitsForTrack(_ train: OwnTrain, at now: Date) -> Bool {
+        guard motions[train.name] == nil, train.track == nil, let first = firstSeen[train.name] else { return false }
+        let loadingLegTrack = train.leg.map { legTracks[$0.id] == nil && requestedLegTracks.contains($0.id) } ?? false
+        return (train.trackPending || loadingLegTrack) && now.timeIntervalSince(first) < Self.trackWait
+    }
+
     private func clearOthers() {
+        othersGeneration += 1
+        rebuildID += 1
         running = []
         segments = []
+        completedTrips = [:]
+        requestedTrips = []
         coverage = nil
         loading?.cancel()
         loading = nil
@@ -178,15 +229,49 @@ final class LiveTrainsLayer {
         }
     }
 
-    /// Matches bahn.jetzt's fixes to Transitous' trips off the main thread: the tracks have thousands of points.
+    /// Matches the position list's fixes to Transitous' trips off the main thread: the tracks have thousands of points.
     private func rebuildField() async {
-        let segments = segments, running = running
+        // A completed trip replaces its loaded stretches; once it has ended it's dropped.
+        let now = Date.now
+        completedTrips = completedTrips.filter { $0.value.last.map { $0.arrival.addingTimeInterval(30 * 60) > now } ?? false }
+        let segments = segments.filter { completedTrips[$0.tripId] == nil } + completedTrips.values.flatMap { $0 }
+        let running = running
         let own = ownTrains.map { (name: $0.name, coordinate: $0.position.coordinate) }
-        field = await Task.detached(priority: .userInitiated) {
+        rebuildID += 1
+        let id = rebuildID
+        let built = await Task.detached(priority: .userInitiated) {
             LiveTrainField(segments: segments, running: running, ownTrains: own)
         }.value
+        // A newer rebuild (or clearing the others) started meanwhile: its field counts.
+        guard id == rebuildID else { return }
+        field = built
         dataChanged = true
         tick()
+        completeTrips()
+    }
+
+    /// Loads the whole trip of trains running later than Transitous thinks, once each, so they run on their
+    /// track instead of standing where they were last seen.
+    private func completeTrips() {
+        guard let model else { return }
+        let wanted = field.tripsToComplete.filter { !requestedTrips.contains($0) }.prefix(Self.maxTripsToComplete)
+        for tripId in wanted {
+            guard let segment = segments.first(where: { $0.tripId == tripId }) else { continue }
+            requestedTrips.insert(tripId)
+            let generation = othersGeneration
+            Task {
+                let whole = await model.liveTrainSegments(completing: segment)
+                guard othersStillWanted(generation) else { return }
+                guard let whole, !whole.isEmpty else {
+                    // Offline or refused: asked again after a while, not on every refresh.
+                    try? await Task.sleep(for: .seconds(Self.retryDelay))
+                    if generation == othersGeneration { requestedTrips.remove(tripId) }
+                    return
+                }
+                completedTrips[tripId] = whole
+                await rebuildField()
+            }
+        }
     }
 
     private func tick() {
@@ -197,7 +282,7 @@ final class LiveTrainsLayer {
             others = field.markers(at: now, in: visible.expanded(by: 0.1), limit: Self.limit)
             for marker in others { raw[marker.id] = marker.coordinate }
         }
-        for train in ownTrains {
+        for train in ownTrains where !waitsForTrack(train, at: now) {
             raw["own:" + train.name] = motions[train.name]?.coordinate(at: now) ?? train.position.coordinate
         }
         let shown = smoother.positions(raw, dataChanged: dataChanged, at: now)
@@ -208,7 +293,7 @@ final class LiveTrainsLayer {
         var own: [String: Coordinate] = [:]
         var speeds: [String: Double] = [:]
         for train in ownTrains {
-            own[train.name] = shown["own:" + train.name]
+            if let coordinate = shown["own:" + train.name] { own[train.name] = coordinate }
             speeds[train.name] = motions[train.name]?.speedKmh ?? train.position.speedKmh
         }
         if speeds != ownSpeeds { ownSpeeds = speeds }
@@ -236,7 +321,7 @@ extension LiveTrainsLayer.OwnTrain {
 /// Another train on a UIKit map; its coordinate moves every second.
 final class OtherTrainAnnotation: NSObject, MKAnnotation {
     let id: String
-    let tripId: String?
+    private(set) var opening: LiveTrainOpening?
     @objc dynamic var coordinate: CLLocationCoordinate2D
     @objc dynamic var title: String?
     @objc dynamic var subtitle: String?
@@ -244,7 +329,7 @@ final class OtherTrainAnnotation: NSObject, MKAnnotation {
 
     init(_ marker: LiveTrainMarker) {
         id = marker.id
-        tripId = marker.tripId
+        opening = marker.opening
         coordinate = CLLocationCoordinate2D(latitude: marker.coordinate.latitude, longitude: marker.coordinate.longitude)
         isLongDistance = marker.isLongDistance
         super.init()
@@ -255,6 +340,7 @@ final class OtherTrainAnnotation: NSObject, MKAnnotation {
         title = marker.name
         subtitle = marker.subtitle
         isLongDistance = marker.isLongDistance
+        opening = marker.opening
     }
 }
 
@@ -300,7 +386,7 @@ final class OtherTrainsAnnotator {
         view.image = Self.image(longDistance: annotation.isLongDistance)
         view.canShowCallout = true
         // Opens the train's route (`mapView(_:annotationView:calloutAccessoryControlTapped:)`).
-        view.rightCalloutAccessoryView = annotation.tripId == nil ? nil : UIButton(type: .detailDisclosure)
+        view.rightCalloutAccessoryView = annotation.opening == nil ? nil : UIButton(type: .detailDisclosure)
         // Crowded stations: MapKit hides the trains that would overlap, the own train always stays.
         view.displayPriority = annotation.isLongDistance ? .defaultHigh : .defaultLow
         view.collisionMode = .circle
@@ -328,6 +414,27 @@ final class OtherTrainsAnnotator {
                                        width: symbol.size.width, height: symbol.size.height))
             }
         }
+    }
+}
+
+// MARK: - The maps' "Andere Züge" button
+
+/// Switches the other trains on every map on or off (`showOtherTrains`); the next map starts the same way.
+struct OtherTrainsButton: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var settings = model.settings
+        Toggle("Andere Züge", systemImage: settings.showOtherTrains ? "tram.fill" : "tram", isOn: $settings.showOtherTrains)
+            .toggleStyle(.button)
+            .accessibilityHint("Zeigt die anderen fahrenden Züge auf der Karte")
+    }
+}
+
+extension View {
+    /// Keeps `layer` in step with the "Andere Züge" button.
+    func followsOtherTrainsSetting(_ layer: LiveTrainsLayer, model: AppModel) -> some View {
+        onChange(of: model.settings.showOtherTrains) { layer.otherTrainsSettingChanged(model: model) }
     }
 }
 
@@ -363,7 +470,7 @@ struct OtherTrainMarkerView: View {
                                 Text(subtitle).font(.caption2).foregroundStyle(.secondary)
                             }
                         }
-                        if marker.tripId != nil {
+                        if marker.opening != nil {
                             Image(systemName: "chevron.right").font(.caption2.weight(.bold)).foregroundStyle(.tertiary)
                         }
                     }
@@ -372,8 +479,8 @@ struct OtherTrainMarkerView: View {
                     .background(.regularMaterial, in: .rect(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
-                .disabled(marker.tripId == nil)
-                .accessibilityHint(marker.tripId == nil ? Text(verbatim: "") : Text("Zeigt die ganze Fahrt"))
+                .disabled(marker.opening == nil)
+                .accessibilityHint(marker.opening == nil ? Text(verbatim: "") : Text("Zeigt die ganze Fahrt"))
             } else if showsName {
                 Text(marker.name)
                     .font(.caption2.weight(.semibold))
@@ -389,15 +496,16 @@ struct OtherTrainMarkerView: View {
 
 // MARK: - A tapped train's route
 
-/// Which train's route to show (`tripId` from `LiveTrainMarker`).
+/// Which train's route to show (`LiveTrainMarker.opening`).
 struct LiveTrainTripRequest: Identifiable, Hashable {
-    let tripId: String
-    var id: String { tripId }
+    let opening: LiveTrainOpening
+    var id: String { opening.id }
 }
 
-/// A train tapped on the map: its whole route, opened at the stop it runs to next.
+/// A train tapped on the map: its whole route, opened at the stop it runs to next. A train no Transitous
+/// trip matched (e.g. running later than Transitous thinks) is looked up like in the train search.
 struct LiveTrainTripSheet: View {
-    let tripId: String
+    let opening: LiveTrainOpening
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -421,13 +529,23 @@ struct LiveTrainTripSheet: View {
                 }
             }
         }
-        .task(id: tripId) {
-            guard let trip = try? await model.provider.plainTrip(id: tripId, source: .transitous),
-                  let entry = BoardEntry.liveTrain(trip) else {
-                failed = true
-                return
+        .task(id: opening) {
+            switch opening {
+            case .trip(let tripId):
+                guard let trip = try? await model.provider.plainTrip(id: tripId, source: .transitous),
+                      let entry = BoardEntry.liveTrain(trip) else {
+                    failed = true
+                    return
+                }
+                self.entry = entry
+            case .journey(let result):
+                guard let finder = TrainNumberSearch(provider: model.provider),
+                      let run = try? await finder.run(of: result) else {
+                    failed = true
+                    return
+                }
+                self.entry = BoardEntry.liveTrain(run.trip) ?? run.entry
             }
-            self.entry = entry
         }
     }
 }

@@ -3,17 +3,20 @@ import Foundation
 /// Where a running train is right now.
 public struct TrainPosition: Codable, Sendable, Hashable {
     public var coordinate: Coordinate
-    /// When this position was fetched (bahn.jetzt doesn't say when the fix itself was taken).
+    /// When this position was fetched.
     public var time: Date
     public var speedKmh: Double?
-    /// Where the fix came from, e.g. "bahn.jetzt".
+    /// Where the fix came from: "RIS::Maps" (DB, through our Worker) or "bahn.jetzt".
     public var source: String?
+    /// When the fix itself was taken, where the source says so (RIS::Maps does, bahn.jetzt doesn't).
+    public var fixTime: Date?
 
-    public init(coordinate: Coordinate, time: Date, speedKmh: Double?, source: String?) {
+    public init(coordinate: Coordinate, time: Date, speedKmh: Double?, source: String?, fixTime: Date? = nil) {
         self.coordinate = coordinate
         self.time = time
         self.speedKmh = speedKmh
         self.source = source
+        self.fixTime = fixTime
     }
 
     /// An older position means refreshing has stalled (no network, or the train left the feed).
@@ -28,27 +31,39 @@ public struct TrainPosition: Codable, Sendable, Hashable {
 ///
 /// The API documents no rate limit; the list is fetched at most once per `listMaxAge`, and after a
 /// 403/429 nothing is sent for `blockCooldown`.
+///
+/// bahn.jetzt's list is DB's RIS::Maps, which the app now asks through our own Worker first
+/// (`RISMapsClient`, combined in `TrainPositionClient`). Both lists go through the matching here
+/// (`match`, `isPlausible`, `runningTrains(in:)`), so a train is found the same way in either.
 public struct BahnJetztClient: Sendable {
+    public static let source = "bahn.jetzt"
     public static let baseURL = URL(string: "https://bahn.jetzt/api")!
     /// bahn.jetzt rejects generic agents and asks for one that describes the caller.
     static let userAgent = HTTPClient.identifyingUserAgent
 
     let http: HTTPClient
     let state: State
+    let baseURL: URL
 
-    public init(http: HTTPClient = HTTPClient(timeout: 10), state: State = .shared) {
+    public init(http: HTTPClient = HTTPClient(timeout: 10), state: State = .shared, baseURL: URL = BahnJetztClient.baseURL) {
         self.http = http
         self.state = state
+        self.baseURL = baseURL
     }
 
     // MARK: Wire types
 
     struct Journey: Decodable, Sendable {
         struct Details: Decodable, Sendable {
-            struct Transport: Decodable, Sendable { var category: String?; var journeyNumber: Int?; var journeyName: String? }
+            struct Transport: Decodable, Sendable {
+                var category: String?; var journeyNumber: Int?; var journeyName: String?
+                /// RIS' transport type, e.g. "HIGH_SPEED_TRAIN", "REGIONAL_TRAIN", "CITY_TRAIN".
+                var type: String? = nil
+            }
             struct Stop: Decodable, Sendable { var evaNumber: String?; var name: String? }
             var transportAtStart: Transport?
             var destination: Stop?
+            var origin: Stop? = nil
         }
         /// e.g. "20260929-65771c12-fbc7-3dc8-8f7e-9dbe745ba3a4"; starts with the day the run began.
         var journeyId: String
@@ -57,11 +72,15 @@ public struct BahnJetztClient: Sendable {
         var speed: Double?
         var name: String?
         var details: Details?
+        /// When the fix was taken; only RIS::Maps says so.
+        var fixTime: Date?
     }
 
+    /// One list of running trains, from bahn.jetzt or RIS::Maps (`source`).
     struct Snapshot: Sendable {
         var journeys: [Journey]
         var fetchedAt: Date
+        var source: String = BahnJetztClient.source
     }
 
     // MARK: Lookup
@@ -89,6 +108,9 @@ public struct BahnJetztClient: Sendable {
         public var lineName: String?
         public var destination: String?
         public var position: TrainPosition
+        /// The run as the train search knows it (RIS' journey ID, the same as bahn.expert's), to open its
+        /// route when no Transitous trip matched it; nil without a category and number.
+        public var journey: TrainSearchResult? = nil
     }
 
     /// Every train bahn.jetzt has a position for (one list, shared with `position(of:…)`).
@@ -110,8 +132,25 @@ public struct BahnJetztClient: Sendable {
             return RunningTrain(id: journey.journeyId, name: name, category: category, number: transport?.journeyNumber,
                                 lineName: transport?.journeyName ?? journey.name, destination: journey.details?.destination?.name,
                                 position: TrainPosition(coordinate: Coordinate(latitude: position[1], longitude: position[0]),
-                                                        time: snapshot.fetchedAt, speedKmh: journey.speed, source: "bahn.jetzt"))
+                                                        time: snapshot.fetchedAt, speedKmh: journey.speed, source: snapshot.source,
+                                                        fixTime: journey.fixTime),
+                                journey: searchResult(for: journey))
         }
+    }
+
+    /// `journey` as a train search result, so `TrainNumberSearch.run(of:)` can open its route.
+    static func searchResult(for journey: Journey) -> TrainSearchResult? {
+        let transport = journey.details?.transportAtStart
+        guard let category = transport?.category?.trimmingCharacters(in: .whitespaces), !category.isEmpty,
+              let number = transport?.journeyNumber else { return nil }
+        let line = transport?.journeyName ?? journey.name
+        let longDistance = BahnDeClient.longDistanceCategories.contains(category.uppercased())
+        return TrainSearchResult(
+            journeyId: journey.journeyId, category: category, number: number, line: longDistance ? nil : line,
+            product: BahnExpertClient.product(transportType: transport?.type ?? (longDistance ? "INTERCITY_TRAIN" : "REGIONAL_TRAIN"),
+                                               category: category, line: line),
+            origin: journey.details?.origin?.name ?? "", destination: journey.details?.destination?.name ?? "",
+            originEVA: journey.details?.origin?.evaNumber, destinationEVA: journey.details?.destination?.evaNumber)
     }
 
     /// What a regional match is checked against, since run numbers are only unique within one country.
@@ -131,10 +170,7 @@ public struct BahnJetztClient: Sendable {
     /// - Returns: nil while the train isn't in bahn.jetzt's list of running trains.
     /// - Throws: `TransitError.rateLimited` while bahn.jetzt is refusing requests.
     public func position(for leg: Leg) async throws -> TrainPosition? {
-        let path = leg.geometry.flatMap { $0.isEmpty ? nil : $0 }
-            ?? ([leg.origin] + leg.stopovers.map(\.station) + [leg.destination]).compactMap(\.coordinate)
-        return try await position(of: leg.line, plannedDeparture: leg.departure.planned,
-                                  route: RouteHint(destination: leg.direction, path: path))
+        try await position(of: leg.line, plannedDeparture: leg.departure.planned, route: Self.routeHint(for: leg))
     }
 
     /// Live position of `line`'s run that departs (somewhere along its route) at `plannedDeparture`.
@@ -142,16 +178,29 @@ public struct BahnJetztClient: Sendable {
     /// - Returns: nil while the train isn't in bahn.jetzt's list of running trains.
     /// - Throws: `TransitError.rateLimited` while bahn.jetzt is refusing requests.
     public func position(of line: Line?, plannedDeparture: Date, route: RouteHint? = nil) async throws -> TrainPosition? {
-        guard let ref = Self.reference(for: line), let number = Int(ref.number) else { return nil }
-        let snapshot = try await snapshot()
-        guard let journey = Self.match(category: ref.category, number: number, departure: plannedDeparture, in: snapshot.journeys),
+        guard Self.reference(for: line) != nil else { return nil }
+        return Self.position(of: line, plannedDeparture: plannedDeparture, route: route, in: try await snapshot())
+    }
+
+    /// The route bahn.jetzt's lookups check a leg's regional train against: its track, else its stops.
+    static func routeHint(for leg: Leg) -> RouteHint {
+        let path = leg.geometry.flatMap { $0.isEmpty ? nil : $0 }
+            ?? ([leg.origin] + leg.stopovers.map(\.station) + [leg.destination]).compactMap(\.coordinate)
+        return RouteHint(destination: leg.direction, path: path)
+    }
+
+    /// `line`'s position in one list (bahn.jetzt's or RIS::Maps'); nil when it isn't there.
+    static func position(of line: Line?, plannedDeparture: Date, route: RouteHint?, in snapshot: Snapshot) -> TrainPosition? {
+        guard let ref = reference(for: line), let number = Int(ref.number) else { return nil }
+        guard let journey = match(category: ref.category, number: number, departure: plannedDeparture, in: snapshot.journeys),
               let position = journey.position, position.count == 2 else { return nil }
         let coordinate = Coordinate(latitude: position[1], longitude: position[0])
         if let route, !BahnDeClient.longDistanceCategories.contains(ref.category.uppercased()),
-           !Self.isPlausible(journey, at: coordinate, for: route) {
+           !isPlausible(journey, at: coordinate, for: route) {
             return nil
         }
-        return TrainPosition(coordinate: coordinate, time: snapshot.fetchedAt, speedKmh: journey.speed, source: "bahn.jetzt")
+        return TrainPosition(coordinate: coordinate, time: snapshot.fetchedAt, speedKmh: journey.speed, source: snapshot.source,
+                             fixTime: journey.fixTime)
     }
 
     /// How far a regional train may be from its known route and still count, when its destination
@@ -222,14 +271,15 @@ public struct BahnJetztClient: Sendable {
 
     func snapshot() async throws -> Snapshot {
         try await state.snapshot(maxAge: Self.listMaxAge, cooldown: Self.blockCooldown) {
-            var request = URLRequest(url: Self.baseURL.appending(path: "journeys"), timeoutInterval: self.http.timeout)
+            var request = URLRequest(url: self.baseURL.appending(path: "journeys"), timeoutInterval: self.http.timeout)
             request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
             request.setValue("application/json", forHTTPHeaderField: "Accept")
             return Snapshot(journeys: try await self.http.send(request, as: [Journey].self), fetchedAt: .now)
         }
     }
 
-    /// The last list fetched and whether bahn.jetzt is currently being left alone after a block.
+    /// The last list fetched and whether the source is currently being left alone after a block
+    /// (one per source: bahn.jetzt's `shared`, RIS::Maps' `RISMapsClient.sharedState`).
     public actor State {
         public static let shared = State()
 

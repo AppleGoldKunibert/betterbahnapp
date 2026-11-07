@@ -56,7 +56,7 @@ struct LiveTrainRoute: Hashable {
         end = (trip.stopovers.last?.arrival?.best ?? .distantFuture).addingTimeInterval(10 * 60)
     }
 
-    var isSupported: Bool { BahnJetztClient.supports(line) }
+    var isSupported: Bool { TrainPositionClient.supports(line) }
 
     var hint: BahnJetztClient.RouteHint { .init(destination: destination, path: path) }
 
@@ -143,6 +143,8 @@ struct LiveTrainMapView: View {
     /// The route along the tracks; nil until known, and then the map shows only the stops rather
     /// than straight lines across country.
     @State private var track: [Coordinate]?
+    /// Whether looking up `track` has finished (found or not), so the train isn't held back for it any longer.
+    @State private var trackLookedUp = false
     /// Moves the train between fixes and shows the other trains around (#505).
     @State private var layer = LiveTrainsLayer()
     /// Zoomed in this far (degrees north–south), the other trains show their names.
@@ -183,12 +185,13 @@ struct LiveTrainMapView: View {
                     Annotation(marker.name, coordinate: marker.coordinate.clCoordinate, anchor: .center) {
                         OtherTrainMarkerView(marker: marker, showsName: showsTrainNames, isSelected: selectedTrain == marker.id,
                                              onTap: { selectedTrain = selectedTrain == marker.id ? nil : marker.id },
-                                             onOpen: { tappedTrain = marker.tripId.map(LiveTrainTripRequest.init(tripId:)) })
+                                             onOpen: { tappedTrain = marker.opening.map(LiveTrainTripRequest.init(opening:)) })
                     }
                     .annotationTitles(.hidden)
                 }
-                if let position {
-                    Annotation(trainName, coordinate: (layer.ownCoordinates[trainName] ?? position.coordinate).clCoordinate, anchor: .center) {
+                // Drawn once the live layer places it (on its track, where it is by now), not at the last fix first.
+                if let position, let shownAt = layer.ownCoordinates[trainName] {
+                    Annotation(trainName, coordinate: shownAt.clCoordinate, anchor: .center) {
                         Image(systemName: route.line?.symbolName ?? "tram.fill")
                             .font(.system(size: 15, weight: .bold))
                             .foregroundStyle(position.isStale() ? Color.white : glyphColor)
@@ -232,17 +235,21 @@ struct LiveTrainMapView: View {
                     }
                     .disabled(position == nil)
                 }
+                ToolbarItem(placement: .topBarTrailing) { OtherTrainsButton() }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Fertig", systemImage: "xmark", role: .cancel) { dismiss() }
                 }
             }
+            .followsOtherTrainsSetting(layer, model: model)
         }
         .task(id: route) {
+            trackLookedUp = false
             if RouteGeometryService.followsTracks(route.path) {
                 track = route.path
             } else if let leg = route.geometryLeg {
                 track = await model.geometry(for: leg)
             }
+            trackLookedUp = true
         }
         .task(id: route) {
             await model.followPosition(of: route) { new in
@@ -252,14 +259,16 @@ struct LiveTrainMapView: View {
             }
         }
         .task { await layer.run(model: model) }
-        .sheet(item: $tappedTrain) { LiveTrainTripSheet(tripId: $0.tripId) }
+        .sheet(item: $tappedTrain) { LiveTrainTripSheet(opening: $0.opening) }
         .onChange(of: track) { updateOwnTrain() }
+        .onChange(of: trackLookedUp) { updateOwnTrain() }
     }
 
     private func updateOwnTrain() {
         guard let position else { return layer.setOwnTrains([]) }
         layer.setOwnTrains([LiveTrainsLayer.OwnTrain(name: trainName, position: position, track: track,
-                                                     stops: route.stops.filter { !$0.cancelled }.compactMap(\.station.coordinate))])
+                                                     stops: route.stops.filter { !$0.cancelled }.compactMap(\.station.coordinate),
+                                                     trackPending: track == nil && !trackLookedUp)])
     }
 
     private func center() {

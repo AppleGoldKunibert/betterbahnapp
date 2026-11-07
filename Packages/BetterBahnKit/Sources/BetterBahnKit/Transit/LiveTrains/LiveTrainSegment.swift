@@ -126,6 +126,35 @@ extension TransitousProvider {
         return Self.liveTrainSegments(from: segments)
     }
 
+    /// All stretches of `segment`'s trip, from its first stop to its last (`v5/trip`), for a train that runs later
+    /// than Transitous thinks: the stretch it is still on is no longer in the map's window.
+    public func liveTrainSegments(completing segment: LiveTrainSegment) async throws -> [LiveTrainSegment] {
+        let itinerary = try await http.get(url("v5/trip", [.init(name: "tripId", value: segment.tripId)]), as: MItinerary.self,
+                                           headers: ["User-Agent": HTTPClient.identifyingUserAgent])
+        return Self.liveTrainSegments(completing: segment, from: itinerary)
+    }
+
+    /// The trip's stretches between two stops each, named like `segment` so they join its trip.
+    static func liveTrainSegments(completing segment: LiveTrainSegment, from itinerary: MItinerary) -> [LiveTrainSegment] {
+        guard let leg = itinerary.legs.first(where: { !$0.isWalking }), let shape = leg.geometry, shape.count > 1 else { return [] }
+        let track = TrackPath(shape)
+        var stops: [(place: MPlace, meters: Double)] = []
+        for place in [leg.from] + (leg.intermediateStops ?? []) + [leg.to] {
+            let near = stops.last?.meters ?? 0
+            guard let located = track.locate(Coordinate(latitude: place.lat, longitude: place.lon), near: near),
+                  located.distance < 1_000, located.meters >= near else { continue }
+            stops.append((place, located.meters))
+        }
+        return zip(stops, stops.dropFirst()).compactMap { from, to in
+            guard let departure = from.place.departure ?? from.place.arrival, let arrival = to.place.arrival ?? to.place.departure,
+                  to.meters > from.meters, case let points = track.points(from: from.meters, to: to.meters), points.count > 1
+            else { return nil }
+            return LiveTrainSegment(tripId: segment.tripId, name: segment.name, runNumber: segment.runNumber, from: from.place.name,
+                                    to: to.place.name, departure: departure, arrival: arrival, track: TrackPath(points),
+                                    isLongDistance: segment.isLongDistance, isSuburban: segment.isSuburban)
+        }
+    }
+
     static func liveTrainSegments(from segments: [MTripSegment]) -> [LiveTrainSegment] {
         var seen = Set<String>()
         return segments.compactMap { segment in

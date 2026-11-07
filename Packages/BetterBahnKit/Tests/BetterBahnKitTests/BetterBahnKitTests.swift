@@ -4824,7 +4824,7 @@ private final class BlockedProtocol: URLProtocol, @unchecked Sendable {
         let session = URLSession(configuration: config)
         defer { session.invalidateAndCancel() }
         let expert = BahnExpertClient(http: HTTPClient(session: session))
-        let provider = CombinedProvider(primary: TransitousProvider(), bahnDe: nil, bahnExpert: expert, vagonweb: nil, bahnJetzt: nil)
+        let provider = CombinedProvider(primary: TransitousProvider(), bahnDe: nil, bahnExpert: expert, vagonweb: nil, trainPositions: nil)
         let search = try #require(TrainNumberSearch(provider: provider))
         let query = TrainNumberQuery(category: nil, number: 63)
         let german = try await search.trains(query, on: .now)
@@ -6015,6 +6015,276 @@ private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
     override func stopLoading() {}
 }
 
+/// RIS::Maps through our Worker (`RISMapsClient`) and the "Worker, then bahn.jetzt" entry point (`TrainPositionClient`).
+@Suite struct TrainPositionClientTests {
+    /// The Worker's compact list (Cloudflare/positions), from a real RIS::Maps answer.
+    static let workerList = #"""
+    {"fetchedAt": "2026-11-03T03:24:00.000Z", "trains": [
+      {"id": "20261102-517e7679", "category": "ICE", "number": 693, "name": "ICE 693", "type": "HIGH_SPEED_TRAIN",
+       "origin": "Frankfurt (Main) Hbf", "originEva": "8000105", "destination": "München Hbf", "destinationEva": "8000261",
+       "lat": 50.11, "lon": 8.66, "speed": 26.74, "time": "2026-11-03T03:23:48Z", "source": "SENSOR"},
+      {"id": "20260929-7ce51213", "category": "RE", "number": 17677, "name": "RE14a", "line": "RE14a", "destination": "Rottweil",
+       "lat": 48.7455, "lon": 9.1162, "time": "2026-11-03T03:21:37Z", "source": "SIGNALLING"}
+    ]}
+    """#
+
+    static func leg(_ line: Line, departure: Date, direction: String? = nil) -> Leg {
+        Leg(origin: station("8000105", "Frankfurt (Main) Hbf"), destination: station("8000261", "München Hbf"),
+            departure: TimeInfo(planned: departure, actual: nil), arrival: TimeInfo(planned: departure.addingTimeInterval(14_400), actual: nil),
+            departurePlatform: nil, arrivalPlatform: nil, tripId: nil, line: line,
+            direction: direction, isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+    }
+
+    static let ice = Line(name: "ICE 693", number: "693", product: .highSpeed, operatorName: nil)
+    static let ic = Line(name: "IC 2033", number: "2033", product: .longDistance, operatorName: nil)
+    static let re = Line(name: "RE 14a", number: "14a", product: .regionalExpress, operatorName: nil, tripNumber: "17677")
+
+    /// A client whose Worker answers `worker` at its own host, so tests running in parallel don't share counts.
+    static func client(_ worker: PositionsProtocol.Answer, host: String, health: TrainPositionClient.Health = .init())
+        -> (TrainPositionClient, URLSession) {
+        PositionsProtocol.answers.withLock { $0[host] = worker }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [PositionsProtocol.self]
+        let session = URLSession(configuration: config)
+        let http = HTTPClient(session: session)
+        let client = TrainPositionClient(
+            primary: RISMapsClient(http: http, state: .init(), baseURL: URL(string: "https://\(host)")!),
+            fallback: BahnJetztClient(http: http, state: .init(), baseURL: URL(string: "https://jetzt-\(host)/api")!),
+            health: health)
+        return (client, session)
+    }
+
+    static func requests(_ host: String) -> Int { PositionsProtocol.requests.withLock { $0[host] ?? 0 } }
+
+    @Test func workerTrainsAreMatchedLikeBahnJetzts() throws {
+        let answer = try JSONDecoder().decode(RISMapsClient.Answer.self, from: Data(Self.workerList.utf8))
+        let snapshot = BahnJetztClient.Snapshot(journeys: RISMapsClient.journeys(in: answer), fetchedAt: .now, source: RISMapsClient.source)
+        let departure = try #require(JSONDecoding.parseISODate("2026-11-03T02:00:00Z"))
+
+        let ice = try #require(BahnJetztClient.position(of: Self.ice, plannedDeparture: departure, route: nil, in: snapshot))
+        #expect(ice.coordinate == Coordinate(latitude: 50.11, longitude: 8.66))
+        #expect(ice.speedKmh == 26.74)
+        #expect(ice.source == "RIS::Maps")
+        #expect(ice.fixTime == JSONDecoding.parseISODate("2026-11-03T03:23:48Z"))
+        // Regional trains by their run number, and only where destination or route fits.
+        let rottweil = BahnJetztClient.RouteHint(destination: "Rottweil", path: [])
+        #expect(BahnJetztClient.position(of: Self.re, plannedDeparture: departure, route: rottweil, in: snapshot)?.speedKmh == nil)
+        #expect(BahnJetztClient.position(of: Self.re, plannedDeparture: departure, route: rottweil, in: snapshot) != nil)
+        let zurich = BahnJetztClient.RouteHint(destination: "Aarau", path: [Coordinate(latitude: 47.378, longitude: 8.540)])
+        #expect(BahnJetztClient.position(of: Self.re, plannedDeparture: departure, route: zurich, in: snapshot) == nil)
+        // Long-distance trains must match their category.
+        #expect(BahnJetztClient.position(of: Line(name: "IC 693", number: "693", product: .longDistance, operatorName: nil),
+                                         plannedDeparture: departure, route: nil, in: snapshot) == nil)
+
+        let running = BahnJetztClient.runningTrains(in: snapshot)
+        #expect(running.map(\.name) == ["ICE 693", "RE14a"])
+        #expect(running.allSatisfy { $0.position.source == "RIS::Maps" })
+        #expect(running.last?.destination == "Rottweil")
+    }
+
+    @Test func trainsWithoutTransitousTripOpenTheirRunAndShowWhereTheyGo() throws {
+        let answer = try JSONDecoder().decode(RISMapsClient.Answer.self, from: Data(Self.workerList.utf8))
+        let snapshot = BahnJetztClient.Snapshot(journeys: RISMapsClient.journeys(in: answer), fetchedAt: .now, source: RISMapsClient.source)
+        let running = BahnJetztClient.runningTrains(in: snapshot)
+        let ice = try #require(running.first?.journey)
+        #expect(ice.journeyId == "20261102-517e7679")
+        #expect(ice.name == "ICE 693")
+        #expect(ice.product == .highSpeed)
+        #expect(ice.line == nil)
+        #expect(ice.origin == "Frankfurt (Main) Hbf")
+        #expect(ice.destinationEVA == "8000261")
+        let re = try #require(running.last?.journey)
+        #expect(re.product == .regionalExpress)
+        #expect(re.number == 17677)
+        #expect(re.line == "RE14a")
+
+        // No Transitous trip matches (e.g. it runs later than Transitous thinks): the marker still opens the run.
+        let markers = LiveTrainField(segments: [], running: running).markers(at: .now)
+        let marker = try #require(markers.first { $0.name == "ICE 693" })
+        #expect(marker.tripId == nil)
+        #expect(marker.opening == .journey(ice))
+        #expect(marker.nextStop == Station.displayName(for: "München Hbf"))
+    }
+
+    @Test func workerFirstThenNoBahnJetzt() async throws {
+        let host = "ris-ok.test"
+        let (client, session) = Self.client(.ok(Self.workerList), host: host)
+        defer { session.invalidateAndCancel() }
+        let departure = try #require(JSONDecoding.parseISODate("2026-11-03T02:00:00Z"))
+        let position = try #require(try await client.position(for: Self.leg(Self.ice, departure: departure)))
+        #expect(position.source == "RIS::Maps")
+        #expect(try await client.runningTrains().count == 2)
+        #expect(Self.requests(host) == 1)
+        #expect(Self.requests("jetzt-\(host)") == 0)
+    }
+
+    @Test func trainTheWorkerDoesNotKnowComesFromBahnJetzt() async throws {
+        let host = "ris-unknown.test"
+        let (client, session) = Self.client(.ok(Self.workerList), host: host)
+        defer { session.invalidateAndCancel() }
+        // bahn.jetzt's list (BahnJetztTests.list) has ICE 693 on 29 September; the Worker's list has no IC 2033 at all.
+        let departure = try #require(JSONDecoding.parseISODate("2026-09-29T10:00:00Z"))
+        #expect(try await client.position(for: Self.leg(Self.ic, departure: departure)) == nil)
+        #expect(Self.requests("jetzt-\(host)") == 1)
+        // Known to the Worker: bahn.jetzt isn't asked again.
+        #expect(try await client.position(for: Self.leg(Self.ice, departure: departure))?.source == "RIS::Maps")
+        #expect(Self.requests("jetzt-\(host)") == 1)
+    }
+
+    @Test func failingWorkerFallsBackAndIsLeftAloneForAWhile() async throws {
+        let host = "ris-down.test"
+        let (client, session) = Self.client(.status(502), host: host)
+        defer { session.invalidateAndCancel() }
+        let departure = try #require(JSONDecoding.parseISODate("2026-09-29T10:00:00Z"))
+        let position = try #require(try await client.position(for: Self.leg(Self.ice, departure: departure)))
+        #expect(position.source == "bahn.jetzt")
+        #expect(position.coordinate == Coordinate(latitude: 50.1068, longitude: 8.6632))
+        #expect(try await client.runningTrains().first?.position.source == "bahn.jetzt")
+        // The second lookup within the cooldown goes straight to bahn.jetzt.
+        #expect(Self.requests(host) == 1)
+    }
+
+    @Test func workerIsAskedAgainAfterTheCooldown() async {
+        let health = TrainPositionClient.Health(cooldown: 60)
+        let start = Date.now
+        #expect(await health.mayAsk(now: start))
+        await health.failed(now: start)
+        #expect(!(await health.mayAsk(now: start.addingTimeInterval(30))))
+        #expect(await health.mayAsk(now: start.addingTimeInterval(61)))
+    }
+
+    @Test func withoutWorkerOnlyBahnJetzt() async throws {
+        let host = "ris-none.test"
+        let (full, session) = Self.client(.ok(Self.workerList), host: host)
+        defer { session.invalidateAndCancel() }
+        let client = TrainPositionClient(primary: nil, fallback: full.fallback, health: .init())
+        let departure = try #require(JSONDecoding.parseISODate("2026-09-29T10:00:00Z"))
+        #expect(try await client.position(for: Self.leg(Self.ice, departure: departure))?.source == "bahn.jetzt")
+        #expect(Self.requests(host) == 0)
+        // Unsupported lines aren't looked up anywhere.
+        #expect(try await client.position(of: Line(name: "U 2", number: "2", product: .subway, operatorName: nil, tripNumber: "12"),
+                                          plannedDeparture: departure) == nil)
+    }
+
+    @Test func positionKeepsDecodingWithoutFixTime() throws {
+        // Positions the app stored for the widgets before `fixTime` existed.
+        let json = #"{"coordinate": {"latitude": 50, "longitude": 8}, "time": 0, "speedKmh": null, "source": "bahn.jetzt"}"#
+        let position = try JSONDecoder().decode(TrainPosition.self, from: Data(json.utf8))
+        #expect(position.fixTime == nil)
+        #expect(position.source == "bahn.jetzt")
+    }
+}
+
+/// Trains running later than Transitous thinks: their stretch is no longer in the map's window.
+@Suite struct LateLiveTrainTests {
+    // Köln → Siegburg → Frankfurt Flughafen, roughly along the line.
+    static let koeln = Coordinate(latitude: 50.943, longitude: 6.959)
+    static let siegburg = Coordinate(latitude: 50.794, longitude: 7.203)
+    static let flughafen = Coordinate(latitude: 50.053, longitude: 8.570)
+    static let mannheim = Coordinate(latitude: 49.479, longitude: 8.469)
+    static let start = Date(timeIntervalSince1970: 1_800_000_000)
+
+    static func segment(from: Coordinate, to: Coordinate, departure: Date, minutes: Double) -> LiveTrainSegment {
+        LiveTrainSegment(tripId: "t105", name: "ICE 105", from: "A", to: "B", departure: departure,
+                         arrival: departure.addingTimeInterval(minutes * 60), track: TrackPath([from, to]), isLongDistance: true)
+    }
+
+    static func ice105(at coordinate: Coordinate, time: Date) -> BahnJetztClient.RunningTrain {
+        .init(id: "ris-105", name: "ICE 105", category: "ICE", number: 105, lineName: "ICE 105", destination: "Chur",
+              position: TrainPosition(coordinate: coordinate, time: time, speedKmh: 250, source: "RIS::Maps"))
+    }
+
+    @Test func aTrainBehindItsLoadedStretchesAsksForItsWholeTrip() throws {
+        // Only the stretch after Flughafen is loaded; the train is still between Siegburg and Flughafen.
+        let next = Self.segment(from: Self.flughafen, to: Self.mannheim, departure: Self.start, minutes: 30)
+        let between = Coordinate(latitude: 50.40, longitude: 7.90)
+        let late = Self.ice105(at: between, time: Self.start.addingTimeInterval(60))
+        let field = LiveTrainField(segments: [next], running: [late])
+        #expect(field.tripsToComplete == ["t105"])
+        let standing = try #require(field.markers(at: Self.start.addingTimeInterval(60)).first { $0.tripId == nil })
+        #expect(!standing.followsTrack)
+
+        // With the whole trip it runs on its track towards Flughafen.
+        let earlier = Self.segment(from: Self.siegburg, to: Self.flughafen, departure: Self.start.addingTimeInterval(-40 * 60), minutes: 38)
+        let completed = LiveTrainField(segments: [earlier, next], running: [late])
+        #expect(completed.tripsToComplete.isEmpty)
+        let markers = completed.markers(at: Self.start.addingTimeInterval(60))
+        // One marker for the train, on its track; none left standing.
+        #expect(markers.count == 1)
+        let first = try #require(markers.first)
+        let later = try #require(completed.markers(at: Self.start.addingTimeInterval(80)).first)
+        #expect(first.followsTrack)
+        #expect(first.tripId == "t105")
+        #expect(first.coordinate.distance(to: later.coordinate) > 1_000)
+        #expect(later.coordinate.distance(to: Self.flughafen) < first.coordinate.distance(to: Self.flughafen))
+    }
+
+    @Test func trainsWithoutAnyLoadedTripAskForNothing() {
+        let field = LiveTrainField(segments: [], running: [Self.ice105(at: Self.siegburg, time: Self.start)])
+        #expect(field.tripsToComplete.isEmpty)
+    }
+
+    @Test func wholeTripIsSplitAtItsStops() throws {
+        let shape = Polyline.encode([Self.koeln, Self.siegburg, Self.flughafen, Self.mannheim])
+        func place(_ name: String, _ c: Coordinate, arrival: String?, departure: String?) -> String {
+            let times = [arrival.map { "\"arrival\": \"\($0)\"" }, departure.map { "\"departure\": \"\($0)\"" }].compactMap { $0 }
+            return #"{"name": "\#(name)", "lat": \#(c.latitude), "lon": \#(c.longitude)\#(times.isEmpty ? "" : ", " + times.joined(separator: ", "))}"#
+        }
+        let json = #"""
+        {"legs": [{"mode": "HIGHSPEED_RAIL", "startTime": "2027-01-15T08:00:00Z", "endTime": "2027-01-15T09:40:00Z",
+          "routeShortName": "105", "tripId": "t105",
+          "from": \#(place("Köln Hbf", Self.koeln, arrival: nil, departure: "2027-01-15T08:00:00Z")),
+          "intermediateStops": [\#(place("Siegburg/Bonn", Self.siegburg, arrival: "2027-01-15T08:15:00Z", departure: "2027-01-15T08:17:00Z")),
+                                \#(place("Frankfurt(M) Flughafen Fernbf", Self.flughafen, arrival: "2027-01-15T08:55:00Z", departure: "2027-01-15T08:58:00Z"))],
+          "to": \#(place("Mannheim Hbf", Self.mannheim, arrival: "2027-01-15T09:40:00Z", departure: nil)),
+          "legGeometry": {"points": "\#(shape)", "precision": 6}}]}
+        """#
+        let itinerary = try JSONDecoding.decoder.decode(MItinerary.self, from: Data(json.utf8))
+        let loaded = Self.segment(from: Self.flughafen, to: Self.mannheim, departure: Self.start, minutes: 42)
+        let whole = TransitousProvider.liveTrainSegments(completing: loaded, from: itinerary)
+        #expect(whole.map(\.to) == ["Siegburg/Bonn", "Frankfurt(M) Flughafen Fernbf", "Mannheim Hbf"])
+        // Named like the loaded stretch, so they join its trip.
+        #expect(whole.allSatisfy { $0.tripId == "t105" && $0.name == "ICE 105" && $0.isLongDistance })
+        #expect(whole[1].departure == JSONDecoding.parseISODate("2027-01-15T08:17:00Z"))
+        #expect(whole[1].arrival == JSONDecoding.parseISODate("2027-01-15T08:55:00Z"))
+        let middle = whole[1].track
+        #expect(try #require(middle.points.first).distance(to: Self.siegburg) < 50)
+        #expect(try #require(middle.points.last).distance(to: Self.flughafen) < 50)
+    }
+
+    @Test func trackPartBetweenTwoPoints() {
+        let track = TrackPath([Self.koeln, Self.siegburg, Self.flughafen])
+        let first = Self.koeln.distance(to: Self.siegburg)
+        let part = track.points(from: first / 2, to: first + 1_000)
+        #expect(part.count == 3)
+        #expect(part[1] == Self.siegburg)
+        #expect(track.points(from: 500, to: 100).isEmpty)
+    }
+}
+
+/// Answers the Worker's `/journeys` per host as configured, and bahn.jetzt's list on `jetzt-*` hosts.
+final class PositionsProtocol: URLProtocol, @unchecked Sendable {
+    enum Answer: Sendable { case ok(String), status(Int) }
+    static let answers = Mutex<[String: Answer]>([:])
+    static let requests = Mutex<[String: Int]>([:])
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let host = request.url?.host ?? ""
+        Self.requests.withLock { $0[host, default: 0] += 1 }
+        let answer: Answer = host.hasPrefix("jetzt-") ? .ok(BahnJetztTests.list) : Self.answers.withLock { $0[host] } ?? .status(404)
+        let (status, body): (Int, String) = switch answer {
+        case .ok(let body): (200, body)
+        case .status(let status): (status, "{}")
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
 @Suite struct GeometryTests {
     @Test func polylineRoundTrip() {
         let coords = [Coordinate(latitude: 50.943029, longitude: 6.958729), Coordinate(latitude: 51.21996, longitude: 6.794315),
@@ -6616,7 +6886,7 @@ final class RoutingMockProvider: TransitProvider, @unchecked Sendable {
                                time: time(0), platform: PlatformInfo(planned: "2", actual: nil), cancelled: false,
                                terminatesOrOriginatesHere: false, remarks: [], access: .exitOnly, source: .bahnDe)
         let calls = StationCalls(departuresAtOrigin: [entry], departuresAtDestination: [], arrivalsAtDestination: [])
-        let picker = TrainPicker(provider: CombinedProvider(primary: mock, bahnDe: nil, bahnExpert: nil, vagonweb: nil, bahnJetzt: nil))
+        let picker = TrainPicker(provider: CombinedProvider(primary: mock, bahnDe: nil, bahnExpert: nil, vagonweb: nil, trainPositions: nil))
 
         let journeys = await picker.journeysContinuingFromRestrictedTrains(
             JourneyQuery(from: harburg, to: berlin, date: base), calls: calls, end: base.addingTimeInterval(3600), maxAlightStops: 1)

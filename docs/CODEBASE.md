@@ -9,13 +9,14 @@ only the files you change. Keep it current when structure changes. Build, test a
 | Path | Contents |
 | --- | --- |
 | `BetterBahn/` | App target (UI + app state). Default isolation **MainActor** (hence `nonisolated` on some types). `PrivacyInfo.xcprivacy` declares required-reason APIs (UserDefaults); keep it current. |
-| `BetterBahnWidgets/` | `TripLiveActivity` (Lock Screen / Dynamic Island); `JourneyOverviewWidget` ("Reiseübersicht", small/medium, timer target via `JourneyWidgetIntent`); `CurrentTrainWidget` ("Aktueller Zug": next stops, delays, exit). `LiveTrainWidgets.swift`: "Live-Geschwindigkeit" (home + lock screen) and "Live-Position" (`MKMapSnapshotter`) fetch the ridden train (`JourneyWidgetState.ridingLeg`) from bahn.jetzt, fall back to the app's stored position, else next stop + timer; `RefreshLiveWidgetIntent` reloads, tap opens `TrainMapLink`; on tinted/clear Home Screens (`widgetRenderingMode != .fullColor`) the position widget draws `RouteSketch` (track + train from `MapRoute`) instead of the map tiles, which flatten to a blot there. `StationBoardWidget.swift` ("Abfahrten", #314, small/medium/large + lock screen): the next departures of a station picked in the widget's settings (`StationBoardWidgetIntent`: `StationEntity` from the favourites, `onlyToDestination` toggle + `RouteDestinationEntity` for a commuter route – then the next connections there with arrival and changes; the toggle because the widget editor can't clear a picked station –, `BoardWidgetProducts` filter; rows per family via `ViewThatFits`); fetches Transitous itself (`StationBoardProvider`, no bahn.de: no Worker auth in the extension), timeline entries at each departure (Kit `BoardWidgetRows`), reload after 20 min; tap opens `BoardWidgetLink` (the board, or the route in the search). All read the `WidgetSnapshot` (and `WidgetStations`) from App Group `group.de.goldkunibert.BetterBahn` (Info.plist key `BetterBahnAppGroup`). |
+| `BetterBahnWidgets/` | `TripLiveActivity` (Lock Screen / Dynamic Island); `JourneyOverviewWidget` ("Reiseübersicht", small/medium, timer target via `JourneyWidgetIntent`); `CurrentTrainWidget` ("Aktueller Zug": next stops, delays, exit). `LiveTrainWidgets.swift`: "Live-Geschwindigkeit" (home + lock screen) and "Live-Position" (`MKMapSnapshotter`) fetch the ridden train (`JourneyWidgetState.ridingLeg`) from bahn.jetzt (not our positions Worker: no App Attest in extensions), fall back to the app's stored position (often RIS::Maps), else next stop + timer; `RefreshLiveWidgetIntent` reloads, tap opens `TrainMapLink`; on tinted/clear Home Screens (`widgetRenderingMode != .fullColor`) the position widget draws `RouteSketch` (track + train from `MapRoute`) instead of the map tiles, which flatten to a blot there. `StationBoardWidget.swift` ("Abfahrten", #314, small/medium/large + lock screen): the next departures of a station picked in the widget's settings (`StationBoardWidgetIntent`: `StationEntity` from the favourites, `onlyToDestination` toggle + `RouteDestinationEntity` for a commuter route – then the next connections there with arrival and changes; the toggle because the widget editor can't clear a picked station –, `BoardWidgetProducts` filter; rows per family via `ViewThatFits`); fetches Transitous itself (`StationBoardProvider`, no bahn.de: no Worker auth in the extension), timeline entries at each departure (Kit `BoardWidgetRows`), reload after 20 min; tap opens `BoardWidgetLink` (the board, or the route in the search). All read the `WidgetSnapshot` (and `WidgetStations`) from App Group `group.de.goldkunibert.BetterBahn` (Info.plist key `BetterBahnAppGroup`). |
 | `BetterBahnShare/` | `ShareViewController`: shared DB text/URL → `betterbahn://import?...`. |
 | `Packages/BetterBahnKit/` | Models, networking, logic (iOS 26 + macOS 26, all `Sendable`) and tests. |
 | `Config/` | xcconfigs, Info.plists, entitlements. `Signing.xcconfig` holds the team ID; gitignored `Local.xcconfig` overrides it. |
 | `Cloudflare/` | Worker `betterbahn` (`wrangler.toml`): Träwelling OAuth bounce to `betterbahn://oauth`, privacy policy `/datenschutz`, support page `/support`, short links (`/share`, `/s/<id>`, `apple-app-site-association`, KV 30 days, App Attest + rate limit). "Ankunft teilen" (#317, `arrival.mjs`): with the last train attached, `/s/<id>` is a pickup page (arrival, delay, platform, stops), live from IRIS per stop, else bahn.de's `fahrt` via `Server/bahnde-proxy` (refusals logged as `arrival upstream`), refreshing via `/share/<id>/live`; such links expire 2 h after the arrival. |
 | `Cloudflare/bahnde-proxy/` | Worker `betterbahn2`: DB Timetables (`/timetables/v1/…`, API key as secret), DB FaSta's lifts out of order (`/fasta/v2/facilities`, always the whole list, 5 min, #486) and App Attest tokens (`/auth/…`). No bahn.de paths: bahn.de refuses Workers since October 2026. `TimetablesClient.baseURL`, `WorkerAuth.baseURL`; `BahnDeClient.baseURL` is only the template `BahnDeProxy` rewrites to the server. |
 | `Server/bahnde-proxy/` | Docker server (Python, curl_cffi) asking bahn.de with a browser's TLS fingerprint, which Akamai demands and Workers can't make (#342): bahn.de's `/web/api/…` paths with the Worker's App Attest tokens, cache, rate limit, requests to bahn.de spaced `MIN_INTERVAL` apart, pause after a block (a new session; requests running on the old one finish there, #411). The app's only way to bahn.de (`BahnDeProxy.baseURL`; game-server host behind Tailscale Funnel, `panel_boot.py`; bahn.de refuses Oracle Cloud). `python3 -m unittest Server/bahnde-proxy/proxy_test.py`. |
+| `Cloudflare/positions/` | Worker `betterbahn-positions`: `GET /journeys`, DB RIS::Maps' live positions of every running DB Fernverkehr/DB Regio train (`ADMIN_IDS`, else `DEFAULT_ADMIN_IDS`) in a compact list, API key as secret, cached 15 s, App Attest always required (token from `betterbahn2`). `node --test Cloudflare/positions/worker.test.mjs`. App side `RISMapsClient`. |
 | `Cloudflare/pass-signer/` | Worker `betterbahn-pass`: signs Wallet passes for DB tickets (Pass Type ID certificate as secrets). Needs App Attest, only UIC `#UT` barcodes whose issuer signature verifies (`uicsignature.mjs`). `npm install && npm test`. |
 | `Cloudflare/stats/` | Worker `betterbahn-stats` (D1) answering `POST /train-stats` (#316): per train number and stop the delays, cancellations and platform moves of 30 days, one row per train and day (`schema.sql`, `train_days`). `long_distance_days` keeps the ICE/IC/EC … runs for ~400 days, so a request with a `day` gets that day's run with its stops' real delays (`run`). Filled daily by `importer.py` from piebro/deutsche-bahn-data (CC BY 4.0; Action `train-stats-import.yml`), so nothing asks bahn.de and the app reports nothing (#336). `node --test Cloudflare/stats/worker.test.mjs`, `python3 -m unittest Cloudflare/stats/importer_test.py`. |
 | `Cloudflare/checkin-push/` | Worker `betterbahn-push` (D1, cron every minute): keeps the app's Träwelling login (#452, `logins.mjs`, table `logins`, AES-GCM): `POST /logins` (code + PKCE verifier, or an old refresh token handed over), `POST /logins/<id>/token` (renews below 15 min left, one request at a time via `renewing`), `PUT` signs in again in place, `DELETE` logs out; the cron renews logins idle for 20 days and ends those unused for 180; old D1 needs `migrations/0002_…`. Notifications read with that login (`login_id`; sign-ups from before have their own), per `kinds` (#447) checks the dashboard (`followed`) and Träwelling's notifications (`likes`: `StatusLiked`, `companions`: `UserJoinedConnection`) every 2 min, sends APNs pushes (`followedStatusID`, `ownStatusID`, `companionStatusID`); likes/fellow travellers also right away via Träwelling's webhook (`/traewelling/webhook`, made with the app's login when `/login-options` offers it while `TRAEWELLING_WEBHOOKS` is "true"; pushes to every sign-up on the login); old D1 needs `migrations/0001_…` before deploying, and `migrations/0003_…` for the app's notification language (#479). Also regular trips (#397, `commute.mjs`, table `commutes`): `PUT /commutes/<id>` with the day's trains (category + number, EVA + planned times), found in IRIS' `plan`, then `fchg` every 2 min from 2 h before departure → cancellation, delay from the threshold (again +5), platform change, tight transfer (`commuteJourneyID`); never bahn.de. APNs in `apns.mjs`. `node --test Cloudflare/checkin-push/*.test.mjs`. |
@@ -184,7 +185,7 @@ in `project.pbxproj`: new files join their target automatically.
   typing, day behind a calendar button, filtered by `AppSettings.trainSearchKinds` (all but "Sonstiges" by default)
   and `trainSearchCountries` (Germany), both synced. `TrainSearchResultView`: "Zugdetails anzeigen" (`TripView`),
   Wagenreihung (next stop; `CoachSequenceByStop` unfolds a list of the other stops, `BahnDeClient.formationStops(of:)`;
-  a train not running starts at its first stop), "Auf Karte zeigen" (only while bahn.jetzt has a position).
+  a train not running starts at its first stop), "Auf Karte zeigen" (only while a live position is known).
 - `Features/Map/` – `TravelMapView` heatmap of past trips (`TravelMapHeatmap`; `RailwayTileOverlay`: OpenRailwayMap,
   512 px, disk cache 7 days, 10-min pause after 403/429). A ride both saved and checked in is drawn from the check-in
   (`RideMatch.uncovered`). `YearReviewView` (#319, "Jahresrückblick", only via `YearReviewBanner` on Verbindungen in
@@ -197,15 +198,18 @@ in `project.pbxproj`: new files join their target automatically.
   with `MapTicketLabel` fields. The year review's cards are accent-colored stories on black (Minimal) or tickets on
   `Color.canvas` (Fahrkarte), in the shared image too. Accent marks use `Color.brandText`/`.onBrandText`; the
   review's white-text stories darken the accent with `RGBColor.readable(on:)`. trains too. `LiveTrainsLayer.swift` (#505, all three maps): moves the own trains once a second along their track
-  (Kit `LiveTrainMotion`, `OwnTrain` from the leg) and, with `AppSettings.showOtherTrains`, shows every other train
+  (Kit `LiveTrainMotion`, `OwnTrain` from the leg) and, with `AppSettings.showOtherTrains` (off by default; the "Andere Züge" button on all three maps, `OtherTrainsButton`, switches it and the next map starts the same way, `followsOtherTrainsSetting` reacts at once), shows every other train
   around (Kit `LiveTrainField`, at most 150, nearest the middle; `OtherTrainsAnnotator` for the MKMapView maps,
-  `OtherTrainMarkerView` for the SwiftUI one). bahn.jetzt's list comes at the position interval; Transitous' tracks
-  only for the visible area up to 2.5° × 4° (`LiveTrainCoverage`, 20 min ahead, reloaded on leaving the area), never
+  `OtherTrainMarkerView` for the SwiftUI one). The position list (`TrainPositionClient.runningTrains`) comes at the position interval; Transitous' tracks
+  only for the visible area up to 2.5° × 4° (`LiveTrainCoverage`, 10 min back and 15 min ahead, so trains running late are still on their stretch; reloaded on leaving the area; a train still behind its loaded stretches gets its whole trip from `v5/trip`, `LiveTrainField.tripsToComplete`, at most 6 per rebuild, once each), never
   in Low Data Mode, on mobile data only with `otherTrainsOnMobileData`. Jumps on new data are blended over 3 s
   (`LiveTrainSmoother`); markers animate linearly between the seconds. Own trains show their speed (`ownSpeeds`; in
   the MKMapView maps in the marker's title), legs saved without a track get it via `AppModel.geometry(for:)`. A
   tapped other train (callout button; on the live map a tap shows name and next stop, a second tap opens it) opens
-  `LiveTrainTripSheet`: `TripView` at the stop it runs to next (Kit `BoardEntry.liveTrain`).
+  `LiveTrainTripSheet`: `TripView` at the stop it runs to next (Kit `BoardEntry.liveTrain`). Every train opens
+  (`LiveTrainMarker.opening`): Transitous' trip, else (no trip matched, e.g. running later than Transitous thinks,
+  so its last stretch is no longer loaded) the position list's run (`RunningTrain.journey`, RIS' journey ID =
+  bahn.expert's) through `TrainNumberSearch.run(of:)`; such trains show their destination as the next stop.
 - `Features/Collection/` – `CollectionView` (#384, "Sammlung", `CollectionButton` next to "Vergangene Fahrten" on
   Verbindungen): progress per category, `CollectionCategoryView` grid (not collected greyed out), sheet with the first and
   all rides. Triebzüge (#521): `CollectionTrainsetsView` list to expand by series, then length (ICE 4 7-/12-/13-teilig),
@@ -372,7 +376,7 @@ in `project.pbxproj`: new files join their target automatically.
 
 - `Transit/TransitProvider.swift` – `TransitProvider` (`searchStations`, `journeys`, `board`, `trip`), `JourneyQuery`.
 - `Transit/CombinedProvider.swift` – what the app uses: `TransitousProvider` (no fallback configured), cooldown
-  health check, `BahnDeClient`, `VagonwebClient`, `BahnExpertClient`, `BahnJetztClient`.
+  health check, `BahnDeClient`, `VagonwebClient`, `BahnExpertClient`, `TrainPositionClient`.
 - `Transit/StationSearch.swift` (#90) – shortcuts "b" (bus), "t" (tram), "l" (nearest first) as a separate word.
   Without "b", bus-only stops are left out of the picker unless nothing else matches;
   `TransitousProvider.searchStations(_:near:)` passes modes to the geocoder and filters after
@@ -516,8 +520,16 @@ in `project.pbxproj`: new files join their target automatically.
   failures not cached, `boardExtras`). `catchable`: trains leaving at most 2 min before the traveller is there, plus
   the 2 latest of the previous 30 min at the origin (`TrainRoutePlanner.plan(pickedEarlier:)`). Picked run pinned in
   `TrainRequirement.tripId`.
-- `Transit/BahnJetzt/` – live positions from `/api/journeys` (`AppModel.followTrainPositions()` while a map shows);
-  long-distance by number, regional/S-Bahn by `Line.tripNumber`. `runningTrains()`: the whole list (other trains, #505).
+- `Transit/TrainPositions/TrainPositionClient.swift` – the app's live positions (`CombinedProvider.trainPositions`,
+  `AppModel.followTrainPositions()` while a map shows): `RISMapsClient` (our Worker `Cloudflare/positions`, DB RIS::Maps,
+  App Attest) first, `BahnJetztClient` when the Worker fails (then left alone 60 s, `Health`) or doesn't have the train;
+  `runningTrains()` is the Worker's list, else bahn.jetzt's. `TrainPosition.source` "RIS::Maps"/"bahn.jetzt", `fixTime`
+  when the fix was taken (RIS::Maps only).
+- `Transit/RISMaps/RISMapsClient.swift` – the Worker's `/journeys` mapped onto `BahnJetztClient.Journey`, so both lists
+  share the matching; own `State` (cache 10 s, cooldown after 403/429); no request without an App Attest token.
+- `Transit/BahnJetzt/` – bahn.jetzt's `/api/journeys` (fallback; the widgets ask it directly) and the shared matching:
+  long-distance by number, regional/S-Bahn by `Line.tripNumber` (`match`, `isPlausible`, `position(of:…in:)`).
+  `runningTrains()`: the whole list (other trains, #505).
 - `Transit/LiveTrains/` (#505) – `TrackPath` (meters along a polyline, `locate`), `LiveTrainSegment` + `MapArea` and
   `TransitousProvider.liveTrainSegments(in:zoom:from:to:)` (`v1/map/trips`: each train's stretch between two stops with
   track (polyline precision 5) and real-time times; trains only, S-Bahns filed as `METRO` too, night buses named
@@ -525,7 +537,7 @@ in `project.pbxproj`: new files join their target automatically.
   (long-distance by name, regional by run number, else line name nearest the timetable), runs on at its speed for
   90 s at most and never past the next stop, else by timetable; S-Bahns (`isSuburban`, too frequent to tell apart)
   never by timetable, only with a fix within 4 km of their timetable spot; own trains left out by name within 3 km;
-  unmatched bahn.jetzt trains stay put. `LiveTrainMotion` (own train on its leg's track, waits at its stops; without bahn.jetzt speed it works one out
+  unmatched bahn.jetzt trains stay put. `LiveTrainMotion` (own train on its leg's track, waits at its stops; while that track still loads the app's `LiveTrainsLayer` holds the own train back up to 3 s (`trackWait`) so it doesn't appear at its last fix and slide onto the track; without bahn.jetzt speed it works one out
   from the last two different fixes, standing after a minute unmoved), `LiveTrainSmoother`,
   `LiveTrainCoverage` (when to load which area).
 - `Transit/Lifts/` – lifts out of order (#486). `FacilityClient.brokenLifts()`: DB FaSta's whole list through `betterbahn2`
