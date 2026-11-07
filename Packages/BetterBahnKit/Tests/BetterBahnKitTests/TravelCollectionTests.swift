@@ -80,6 +80,19 @@ import Testing
         #expect(!trainsets.items[0].isCollected)
     }
 
+    /// A Tz of a series' fleet counts for that series whatever model was remembered with it.
+    @Test func aTrainsetCountsForItsFleetSeries() {
+        let result = TravelCollection(rides: [
+            ride("IC 2049", berlin, hamburg, departure: "2026-05-01T08:00:00Z",
+                 units: [.init(model: "Twindexx Vario", number: "2850")]),
+            ride("IC 2048", hamburg, berlin, departure: "2026-06-01T08:00:00Z", units: [.init(model: nil, number: "4890")]),
+        ], now: date("2026-10-18T12:00:00Z"), stations: stations, liveries: [:], trainsetNames: [:],
+           fleet: [TrainsetFleet.Series(name: "IC 2 Twindexx", variants: [.init(numbers: [2850, 4890])])], dhid: dhid)
+        let twindexx = result.group(.series)!.items.first { $0.title == "IC 2 Twindexx" }!
+        #expect(twindexx.isCollected)
+        #expect(twindexx.sightings.count == 2)
+    }
+
     /// Trainsets without a name count too, sorted by series and then by length.
     @Test func groupsTrainsetsBySeriesAndLength() {
         let journey = Journey(legs: [], source: .bahnDe)

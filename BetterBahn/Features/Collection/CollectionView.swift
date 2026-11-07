@@ -491,7 +491,8 @@ private struct TrainsetGroupLabel: View {
     }
 }
 
-/// One row per Tz: a collected one expands to its rides, one not collected yet is greyed out.
+/// One row per Tz: one with a number opens its page (`TzRunsView`), collected or not; a collected one without a
+/// number expands to its rides; one not collected yet is greyed out.
 /// The rides are plain rows under the Tz: a third level of `DisclosureGroup` made the whole list jump down
 /// when one opened (#539). Every row has its own ID (Tz, ride, "Alle Einsätze"): rides counted per Tz from 0 gave
 /// two open Tz the same IDs, and opening one in the middle made the list jump.
@@ -516,7 +517,7 @@ private struct TrainsetRows: View {
 
     private var rows: [Row] {
         items.flatMap { item -> [Row] in
-            guard item.isCollected, expanded.contains(item.id) else { return [.trainset(item)] }
+            guard item.isCollected, item.unitNumber == nil, expanded.contains(item.id) else { return [.trainset(item)] }
             return [.trainset(item)] + item.sightings.indices.map { .ride(item, $0) } + [.allRuns(item)]
         }
     }
@@ -537,7 +538,13 @@ private struct TrainsetRows: View {
     }
 
     @ViewBuilder private func trainsetRow(_ item: TravelCollection.Item) -> some View {
-        if item.isCollected {
+        if item.unitNumber != nil {
+            // Collected or not, a Tz opens its own page: your rides ("Meine") and where it runs (#502). With many
+            // rides that reads better than a long list opened under it.
+            TzRunsLink(item: item, startsWithAll: !item.isCollected) {
+                TrainsetLabel(item: item, isNew: newIDs.contains(item.id))
+            }
+        } else if item.isCollected {
             let isExpanded = expanded.contains(item.id)
             Button {
                 withAnimation(.snappy) {
@@ -555,9 +562,6 @@ private struct TrainsetRows: View {
             }
             .buttonStyle(.plain)
             .accessibilityHint(isExpanded ? Text("Fahrten ausblenden") : Text("Fahrten anzeigen"))
-        } else if item.unitNumber != nil {
-            // Not ridden yet, but where it runs today is worth a look (#502).
-            TzRunsLink(item: item, startsWithAll: true) { TrainsetLabel(item: item, isNew: false) }
         } else {
             TrainsetLabel(item: item, isNew: false)
         }
