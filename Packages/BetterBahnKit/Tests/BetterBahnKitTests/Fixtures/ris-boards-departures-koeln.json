@@ -1,0 +1,39 @@
+{
+ "departures": [
+  {
+   "journeyID": "20261104-3b5f21fb-73e4-3fcf-8b02-66251a64ce7d",
+   "timeSchedule": "2026-11-04T12:10:00+01:00",
+   "time": "2026-11-04T12:12:00+01:00",
+   "timeType": "REAL",
+   "platform": "3",
+   "platformSchedule": "3",
+   "canceled": false,
+   "messages": [],
+   "administration": {
+    "administrationID": "vrs001",
+    "operatorCode": "DPN",
+    "operatorName": "Nahreisezug"
+   },
+   "transport": {
+    "type": "TRAM",
+    "category": "STR",
+    "number": 8438,
+    "line": "18",
+    "label": "",
+    "journeyDescription": "STR 18",
+    "destination": {
+     "canceled": false,
+     "evaNumber": "442275",
+     "ifopt": "de:05362:84711:1",
+     "name": "Schwadorf, Brühl (Rheinland)"
+    },
+    "journeyID": "20261104-3b5f21fb-73e4-3fcf-8b02-66251a64ce7d"
+   },
+   "station": {
+    "evaNumber": "180009",
+    "ifopt": "de:05315:11212:12",
+    "name": "Breslauer Platz/Hauptbahnhof, Köln"
+   }
+  }
+ ]
+}

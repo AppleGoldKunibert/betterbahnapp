@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<timetable station="Köln Hbf">
+<s id="ice22-1"><tl f="F" t="p" o="80" c="ICE" n="22"/><ar pt="2611041206" pp="4 A-C" ppth="Frankfurt(Main)Hbf|Bonn Hbf"/><dp pt="2611041214" pp="4 A-C" ppth="Solingen Hbf|Dortmund Hbf"/></s>
+<s id="re1-1"><tl f="N" t="p" o="R1" c="NX" n="26832"/><ar pt="2611041212" pp="9 D-G" l="RE1" ppth="Hamm(Westf)Hbf|Köln Messe/Deutz"/><dp pt="2611041215" pp="9 D-G" l="RE1" ppth="Köln-Ehrenfeld|Aachen Hbf"/></s>
+<s id="s11-1"><tl f="S" t="p" o="800337" c="S" n="30123"/><dp pt="2611041220" pp="10" l="S11" ppth="Köln Messe/Deutz|Bergisch Gladbach"/></s>
+<s id="late-1"><tl f="F" t="p" o="80" c="IC" n="2005"/><dp pt="2611041355" pp="2" ppth="Bonn Hbf"/></s>
+</timetable>

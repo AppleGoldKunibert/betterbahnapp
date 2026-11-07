@@ -88,13 +88,15 @@ Bahnhöfe, Zeiten und Zugnummern) an diese Dienste. Dabei sehen sie, wie bei jed
 IP-Adresse deines Geräts. Die App nennt sich dabei mit Name, Version und einer Kontaktadresse (User-Agent),
 aber nicht mit Daten über dich:</p>
 <ul>
-<li><a href="https://transitous.org">Transitous</a> (Verbindungen, Abfahrten, Bahnhofssuche und die anderen Züge auf der Karte –
+<li><a href="https://transitous.org">Transitous</a> (Verbindungen, Abfahrten und Bahnhofssuche, wo die Deutsche Bahn keine Daten hat, und die anderen Züge auf der Karte –
 dafür geht der gezeigte Kartenausschnitt an den Dienst, nie dein Standort)</li>
+<li><a href="https://www.bahnhof.de">bahnhof.de</a> der Deutschen Bahn (Verbindungen; es gelten die
+<a href="https://www.bahn.de/datenschutz">Datenschutzhinweise der Deutschen Bahn</a>)</li>
 <li><a href="https://www.vagonweb.cz">vagonweb.cz</a> (geplante Wagenreihungen und Zugtypen), <a href="https://bahn.expert">bahn.expert</a> (Zugtypen) und <a href="https://bahn.jetzt">bahn.jetzt</a> (Zugpositionen auf der Karte)</li>
 <li><a href="https://www.openrailwaymap.org">OpenRailwayMap</a> (Kartenkacheln mit Daten von <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>) und Apple Karten</li>
 <li><a href="https://open-meteo.com">Open-Meteo</a> (Wetter bei Ankunft und beim Umstieg; abschaltbar in den Einstellungen) –
 dafür geht nur die ungefähre Lage des Bahnhofs an den Dienst, nie dein Standort</li>
-<li>bahn.de und die Timetables- und FaSta-Schnittstellen der Deutschen Bahn (Aufzüge außer Betrieb) – diese Anfragen laufen über den Server von
+<li>bahn.de und die Timetables-, RIS::Journeys-, RIS::Boards- und FaSta-Schnittstellen der Deutschen Bahn (Bahnhofssuche, Abfahrtstafeln, Zugsuche nach Nummer, Zugverläufe, Echtzeiten, Aufzüge außer Betrieb) – diese Anfragen laufen über den Server von
 BetterBahn (siehe unten), daher sieht die Deutsche Bahn nicht deine IP-Adresse, sondern die des Servers. Es gelten die
 <a href="https://www.bahn.de/datenschutz">Datenschutzhinweise der Deutschen Bahn</a>.</li>
 </ul>

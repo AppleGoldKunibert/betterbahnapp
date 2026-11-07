@@ -19,9 +19,15 @@ bahn.de tolerates this as long as the traffic stays small, so the server keeps i
   each refusal soon after the last one up to `BLOCK_PAUSE`. Meanwhile the app gets 503 and says the live
   data is missing. Requests already running finish on the old session.
 
+It also passes the app's requests for DB's official RIS::Journeys and RIS::Boards (DB API Marketplace) on,
+with the key the app mustn't carry: `/db/apis/ris-journeys/v2/find` and `/{journeyID}`,
+`/db/apis/ris-boards/v1/public/departures|arrivals/{eva}`, the same paths as on apis.deutschebahn.com. That is a second `Proxy` with its own cache, rate and pauses, so bahn.de refusing
+the server doesn't stop it; it only pauses after a 429.
+
 Environment: TOKEN_SECRET (required, same as in the Workers), PORT (8080), IMPERSONATE (safari),
 FIRST_PAUSE (60), BLOCK_PAUSE (600), MAX_PARALLEL (4), MIN_INTERVAL (0.25), RATE_LIMIT (120),
-ALLOW_UNATTESTED ("true" lets requests without a token through, for testing only).
+ALLOW_UNATTESTED ("true" lets requests without a token through, for testing only),
+DB_CLIENT_ID and DB_API_KEY (DB API Marketplace; without them the RIS paths answer 404).
 """
 
 import asyncio
@@ -62,6 +68,19 @@ PATTERN_ROUTES = [
 ]
 # bahn.de refusing us: leave it alone for a while.
 BLOCK_STATUSES = {403, 429, 452}
+
+# DB's RIS::Journeys, below the same path as on apis.deutschebahn.com.
+RIS_PREFIX = "/db/apis/ris-journeys/v2/"
+RIS_UPSTREAM = "https://apis.deutschebahn.com/db/apis/ris-journeys/v2/"
+RIS_ACCEPT = "application/vnd.de.db.ris+json"
+# A run's ID: its day and a UUID, "20261103-c5ed6631-9860-3f62-aa16-50637daedbaf".
+RIS_JOURNEY_ID = re.compile(r"^\d{8}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+# DB's RIS::Boards: a station's departures and arrivals (the app takes buses, trams and subways from here).
+RIS_BOARDS_PREFIX = "/db/apis/ris-boards/v1/public/"
+RIS_BOARDS_UPSTREAM = "https://apis.deutschebahn.com/db/apis/ris-boards/v1/public/"
+RIS_BOARD = re.compile(r"^(departures|arrivals)/\d{6,9}$")
+# Only a rate limit pauses RIS; a refused key (401) would not get better by waiting.
+RIS_BLOCK_STATUSES = {429}
 MAX_CACHE_ENTRIES = 5000
 MAX_QUERY_LENGTH = 2000
 UPSTREAM_TIMEOUT = 10
@@ -82,6 +101,18 @@ def route_ttl(path):
     if path in ROUTES:
         return ROUTES[path]
     return next((ttl for pattern, ttl in PATTERN_ROUTES if pattern.match(path)), None)
+
+
+def ris_route_ttl(path):
+    """Cache time of an allowed path relative to RIS_PREFIX, or None: the runs of a number, or one run."""
+    if path == "find":
+        return 300
+    return 30 if RIS_JOURNEY_ID.match(path) else None
+
+
+def ris_board_ttl(path):
+    """Cache time of an allowed path relative to RIS_BOARDS_PREFIX, or None: a station's departures or arrivals."""
+    return 30 if RIS_BOARD.match(path) else None
 
 
 # MARK: - App Attest tokens (as verifyToken in Cloudflare/shared/appattest.mjs)
@@ -130,6 +161,13 @@ class Proxy:
 
     fetch: object
     secret: str
+    # Where the app's paths start, what they are asked at, which are allowed (path -> cache seconds or None)
+    # and which answers pause asking: bahn.de's by default, RIS::Journeys' for `ris_proxy`.
+    prefix: str = "/web/api/"
+    upstream_base: str = UPSTREAM
+    ttl_for: object = route_ttl
+    block_statuses: frozenset = frozenset(BLOCK_STATUSES)
+    name: str = "bahn.de"
     allow_unattested: bool = False
     first_pause: float = 60
     block_pause: float = 600
@@ -211,7 +249,7 @@ class Proxy:
             answer = await self.fetch(url)
         if 200 <= answer.status < 300:
             self.store(url, answer, ttl)
-        elif answer.status in BLOCK_STATUSES and not self.paused:
+        elif answer.status in self.block_statuses and not self.paused:
             # Requests already running when bahn.de refused come back refused too; one pause covers them.
             self.block(answer.status, url)
         return answer
@@ -232,8 +270,8 @@ class Proxy:
         reset = getattr(self.fetch, "reset", None)
         if reset:
             reset()
-        path = url[len(UPSTREAM):].split("?")[0]
-        log.warning("bahn.de answered %s to %s, new session, pausing for %ss", status, path, int(self.last_pause))
+        path = url[len(self.upstream_base):].split("?")[0]
+        log.warning("%s answered %s to %s, new session, pausing for %ss", self.name, status, path, int(self.last_pause))
 
     @property
     def paused(self):
@@ -242,10 +280,10 @@ class Proxy:
     async def handle(self, request):
         if request.path == "/health":
             return json_response(200, {"ok": True, "paused": self.paused})
-        if not request.path.startswith("/web/api/"):
+        if not request.path.startswith(self.prefix):
             return json_response(404, {"error": "not_found"})
-        path = request.path[len("/web/api/"):]
-        ttl = route_ttl(path)
+        path = request.path[len(self.prefix):]
+        ttl = self.ttl_for(path)
         if ttl is None:
             return json_response(404, {"error": "not_found"})
         if request.method != "GET":
@@ -259,7 +297,7 @@ class Proxy:
         query = request.rel_url.raw_query_string
         if len(query) > MAX_QUERY_LENGTH:
             return json_response(414, {"error": "too_long"})
-        url = UPSTREAM + path + ("?" + query if query else "")
+        url = self.upstream_base + path + ("?" + query if query else "")
 
         hit = self.cached(url)
         if hit is None and self.paused:
@@ -268,7 +306,7 @@ class Proxy:
         try:
             answer, from_cache = (hit, True) if hit is not None else await self.upstream(url, ttl)
         except Exception as error:  # noqa: BLE001 - any failure to reach bahn.de is a 502 for the app
-            log.warning("bahn.de unreachable: %s", type(error).__name__)
+            log.warning("%s unreachable: %s", self.name, type(error).__name__)
             return json_response(502, {"error": "upstream_unreachable"})
         ok = 200 <= answer.status < 300
         return web.Response(status=answer.status, body=answer.body, headers={
@@ -388,9 +426,50 @@ class BrowserFetch:
                       response.headers.get("Content-Type") or "application/json; charset=utf-8")
 
 
-def make_app(proxy):
+class RISFetch:
+    """`fetch` asking DB's API Marketplace with the server's key; no browser needed there."""
+
+    def __init__(self, client_id, api_key):
+        self.headers = {"DB-Client-Id": client_id, "DB-Api-Key": api_key, "Accept": RIS_ACCEPT,
+                        "Accept-Encoding": "gzip"}
+        self.session = None
+
+    async def __call__(self, url):
+        import aiohttp
+
+        if self.session is None:
+            self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=UPSTREAM_TIMEOUT))
+        began = time.perf_counter()
+        async with self.session.get(url, headers=self.headers) as response:
+            body = await response.read()
+            log.info("RIS %s %s in %d ms", response.status, url.split("/db/apis/")[-1].split("?")[0][:30],
+                     (time.perf_counter() - began) * 1000)
+            return Answer(response.status, body, response.headers.get("Content-Type") or "application/json; charset=utf-8")
+
+
+def ris_proxy(fetch, secret, **options):
+    """The proxy for RIS::Journeys: the same tokens and rate, its own cache and pauses."""
+    return Proxy(fetch=fetch, secret=secret, prefix=RIS_PREFIX, upstream_base=RIS_UPSTREAM, ttl_for=ris_route_ttl,
+                 block_statuses=frozenset(RIS_BLOCK_STATUSES), name="RIS", **options)
+
+
+def ris_boards_proxy(fetch, secret, **options):
+    """The proxy for RIS::Boards: the same key, tokens and rate as RIS::Journeys, its own cache and pauses."""
+    return Proxy(fetch=fetch, secret=secret, prefix=RIS_BOARDS_PREFIX, upstream_base=RIS_BOARDS_UPSTREAM,
+                 ttl_for=ris_board_ttl, block_statuses=frozenset(RIS_BLOCK_STATUSES), name="RIS::Boards", **options)
+
+
+def make_app(proxy, ris=None, boards=None):
+    """`proxy` (bahn.de) answers everything but RIS_PREFIX and RIS_BOARDS_PREFIX, which go to `ris` and
+    `boards` (404 without them)."""
+    async def handle(request):
+        for prefix, target in ((RIS_PREFIX, ris), (RIS_BOARDS_PREFIX, boards)):
+            if request.path.startswith(prefix):
+                return await target.handle(request) if target else json_response(404, {"error": "not_found"})
+        return await proxy.handle(request)
+
     app = web.Application(client_max_size=4096)
-    app.router.add_route("*", "/{tail:.*}", proxy.handle)
+    app.router.add_route("*", "/{tail:.*}", handle)
     return app
 
 
@@ -402,6 +481,7 @@ def main():
     allow_unattested = os.environ.get("ALLOW_UNATTESTED") == "true"
     if not secret and not allow_unattested:
         raise SystemExit("TOKEN_SECRET is missing (the same value as in the Cloudflare Workers).")
+    rate_limit = int(os.environ.get("RATE_LIMIT", "120"))
     proxy = Proxy(
         fetch=BrowserFetch(os.environ.get("IMPERSONATE", "safari")),
         secret=secret,
@@ -410,9 +490,17 @@ def main():
         block_pause=float(os.environ.get("BLOCK_PAUSE", "600")),
         max_parallel=int(os.environ.get("MAX_PARALLEL", "4")),
         min_interval=float(os.environ.get("MIN_INTERVAL", "0.25")),
-        rate_limit=int(os.environ.get("RATE_LIMIT", "120")),
+        rate_limit=rate_limit,
     )
-    web.run_app(make_app(proxy), port=int(os.environ.get("PORT", "8080")), access_log=None)
+    client_id, api_key = os.environ.get("DB_CLIENT_ID", ""), os.environ.get("DB_API_KEY", "")
+    keyed = client_id and api_key
+    ris = ris_proxy(RISFetch(client_id, api_key), secret, allow_unattested=allow_unattested,
+                    rate_limit=rate_limit) if keyed else None
+    boards = ris_boards_proxy(RISFetch(client_id, api_key), secret, allow_unattested=allow_unattested,
+                              rate_limit=rate_limit) if keyed else None
+    if not keyed:
+        log.info("DB_CLIENT_ID/DB_API_KEY not set: RIS::Journeys and RIS::Boards answer 404")
+    web.run_app(make_app(proxy, ris, boards), port=int(os.environ.get("PORT", "8080")), access_log=None)
 
 
 if __name__ == "__main__":

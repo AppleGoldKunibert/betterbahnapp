@@ -1,0 +1,6 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<timetable station="Köln Hbf" eva="8000207">
+<s id="ice22-1" eva="8000207"><dp ct="2611041221" cp="5"/><m id="r1" t="d" c="36" ts="2611041150"/></s>
+<s id="s11-1" eva="8000207"><dp cs="c" clt="2611041100"/></s>
+<s id="extra-1" eva="8000207"><tl f="N" t="e" o="R1" c="RB" n="99999"/><dp pt="2611041230" pp="1" l="RB24" ppth="Euskirchen"/></s>
+</timetable>
