@@ -79,6 +79,24 @@ import Testing
         #expect(complete.count == 4)
     }
 
+    @Test func extraTrainsBeyondThePageDontEndItLater() {
+        // The page to Hbf ends at 0:17; the RE at 0:24 is on its next page. An extra train (expert option, looked
+        // up hours ahead) leaves at 0:27, but the list may only reach as far as the page itself.
+        let main = AlternativeDestination.Results(
+            journeys: [journey(leg("S 15", from: "A", to: "Hbf", depart: 17, arrive: 22, product: .suburban)),
+                       journey(leg("ICE 1104", from: "A", to: "Hbf", depart: 27, arrive: 31))],
+            hasLater: true, coveredUntil: time(17))
+        let alternative = AlternativeDestination.Results(
+            journeys: [journey(leg("RE 3", from: "A", to: "Süd", depart: 24, arrive: 44, product: .regionalExpress)),
+                       journey(leg("RE 3", from: "A", to: "Süd", depart: 84, arrive: 104, product: .regionalExpress))],
+            hasLater: true)
+
+        let merged = AlternativeDestination.merging(main, alternative: alternative)
+
+        #expect(merged.map { $0.transitLegs[0].line?.name } == ["S 15"])
+        #expect(AlternativeDestination.loadsLater(main, alternative: alternative) == (main: true, alternative: false))
+    }
+
     @Test func pagesOnlyTheListThatIsBehind() {
         let main = AlternativeDestination.Results(journeys: [journey(leg("ICE 1", from: "A", to: "Hbf", depart: 120, arrive: 180))],
                                                   hasLater: true)

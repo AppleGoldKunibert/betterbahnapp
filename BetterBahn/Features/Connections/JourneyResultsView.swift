@@ -14,6 +14,9 @@ struct JourneyResultsView: View {
     @State private var alternativeJourneys: [Journey] = []
     @State private var alternativeEarlierCursor: String?
     @State private var alternativeLaterCursor: String?
+    /// How far the loaded pages to each destination reach, without the expert option's extra trains (#516).
+    @State private var coveredUntil: Date?
+    @State private var alternativeCoveredUntil: Date?
     @State private var hiddenCount = 0
     @State private var source: DataSource?
     @State private var isLoading = false
@@ -47,11 +50,12 @@ struct JourneyResultsView: View {
 
     // A list whose page failed holds the other back no longer.
     private var mainResults: AlternativeDestination.Results {
-        .init(journeys: journeys, hasLater: laterCursor != nil && error == nil)
+        .init(journeys: journeys, hasLater: laterCursor != nil && error == nil, coveredUntil: coveredUntil)
     }
 
     private var alternativeResults: AlternativeDestination.Results {
-        .init(journeys: alternativeJourneys, hasLater: alternativeLaterCursor != nil && alternativeError == nil)
+        .init(journeys: alternativeJourneys, hasLater: alternativeLaterCursor != nil && alternativeError == nil,
+              coveredUntil: alternativeCoveredUntil)
     }
 
     /// Only routes that fulfil every train requirement are shown once one is set.
@@ -526,6 +530,8 @@ struct JourneyResultsView: View {
         alternativeJourneys = []
         alternativeEarlierCursor = nil
         alternativeLaterCursor = nil
+        coveredUntil = nil
+        alternativeCoveredUntil = nil
         hiddenCount = 0
         await load(.first)
         // Train requirements survive a new time – they're only cleared by the reset button.
@@ -602,6 +608,12 @@ struct JourneyResultsView: View {
         }
     }
 
+    /// Extends how far `target`'s pages reach by a page whose own connections leave up to `end`.
+    private func extendCovered(to end: Date?, _ target: Target) {
+        guard let end else { return }
+        if target == .main { coveredUntil = max(coveredUntil ?? end, end) } else { alternativeCoveredUntil = max(alternativeCoveredUntil ?? end, end) }
+    }
+
     private func setError(_ error: Error?, _ target: Target) {
         if target == .main { self.error = error } else { alternativeError = error }
     }
@@ -664,6 +676,8 @@ struct JourneyResultsView: View {
             }
             if target == .main { source = loadedPage?.source ?? model.provider.source }
             // Wait a moment for the lookup, so the list doesn't change right after it shows.
+            // Where this page ends, before the expert option's extra trains (looked up hours ahead) join it.
+            let pageEnd = loadedPage?.journeys.compactMap(\.departure?.planned).max()
             let early = await lookup?.value(within: .milliseconds(1500))
             if let early { result = applying(early, to: result) }
             switch page {
@@ -674,12 +688,14 @@ struct JourneyResultsView: View {
                     model.prepareLiveData(for: first)
                 }
                 setCursors(earlier: .some(loadedPage?.earlierCursor), later: .some(loadedPage?.laterCursor), target)
+                extendCovered(to: pageEnd, target)
             case .earlier:
                 setList((result + list(target)).removingDuplicateIDs().removingSameTrainDuplicates(), target)
                 setCursors(earlier: .some(loadedPage?.earlierCursor), later: nil, target)
             case .later:
                 setList((list(target) + result).removingDuplicateIDs().removingSameTrainDuplicates(), target)
                 setCursors(earlier: nil, later: .some(loadedPage?.laterCursor), target)
+                extendCovered(to: pageEnd, target)
             }
             setError(nil, target)
             if let lookup, early == nil {

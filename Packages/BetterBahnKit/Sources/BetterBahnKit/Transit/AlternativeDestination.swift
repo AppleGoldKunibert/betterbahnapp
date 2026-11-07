@@ -14,13 +14,17 @@ public enum AlternativeDestination {
         public var journeys: [Journey]
         /// More connections can be loaded after the last one.
         public var hasLater: Bool
+        /// The last departure the loaded pages reach. Trains added from another lookup (the expert option's)
+        /// can leave later, while the page's own next connections are still missing; nil: the last journey's.
+        public var coveredUntil: Date?
 
-        public init(journeys: [Journey], hasLater: Bool = false) {
+        public init(journeys: [Journey], hasLater: Bool = false, coveredUntil: Date? = nil) {
             self.journeys = journeys
             self.hasLater = hasLater
+            self.coveredUntil = coveredUntil
         }
 
-        var lastDeparture: Date? { journeys.compactMap(\.departure?.planned).max() }
+        var lastDeparture: Date? { coveredUntil ?? journeys.compactMap(\.departure?.planned).max() }
     }
 
     /// The connections to both destinations as one list. Each destination keeps all of its connections, so a train
