@@ -1,6 +1,96 @@
 {
   "sourceLanguage" : "de",
   "strings" : {
+    "Alle Einsätze" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All trips"
+          }
+        }
+      }
+    },
+    "DB hält die Fahrten nur für kurze Zeit vor." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DB only keeps trips for a short time."
+          }
+        }
+      }
+    },
+    "Den Zuglauf von %@ gibt es für diesen Tag nicht mehr." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The route of %@ is no longer available for this day."
+          }
+        }
+      }
+    },
+    "Der Verlauf ist gerade nicht verfügbar." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The history isn't available right now."
+          }
+        }
+      }
+    },
+    "Der Zuglauf ist gerade nicht abrufbar." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The route isn't available right now."
+          }
+        }
+      }
+    },
+    "Dieser Triebzug ist unserem Server noch nicht aufgefallen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Our server hasn't seen this trainset yet."
+          }
+        }
+      }
+    },
+    "Du bist mit diesem Triebzug noch nicht gefahren." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You haven't ridden this trainset yet."
+          }
+        }
+      }
+    },
+    "Kurzfristig getauscht" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Swapped at short notice"
+          }
+        }
+      }
+    },
+    "Meine" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mine"
+          }
+        }
+      }
+    },
     " (seit %@)" : {
       "localizations" : {
         "en" : {
@@ -414,9 +504,7 @@
         }
       }
     },
-    "%@ km" : {
-
-    },
+    "%@ km" : {},
     "%@ kommt um %@ in %@ an, %@ fährt dort schon um %@. Andere Züge dafür anzeigen oder den Plan so lassen?" : {
       "localizations" : {
         "en" : {
@@ -9473,6 +9561,16 @@
         }
       }
     },
+    "Zugnummer, Tz oder Name" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Train number, Tz or name"
+          }
+        }
+      }
+    },
     "Zug suchen" : {
       "localizations" : {
         "en" : {
@@ -9583,16 +9681,6 @@
         }
       }
     },
-    "Zugnummer, z. B. ICE 123" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Train number, e.g. ICE 123"
-          }
-        }
-      }
-    },
     "Zugpositionen auf der Karte" : {
       "localizations" : {
         "en" : {
@@ -9699,6 +9787,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Reset chosen trains"
+          }
+        }
+      }
+    },
+    "Zuletzt am %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last on %@"
           }
         }
       }
