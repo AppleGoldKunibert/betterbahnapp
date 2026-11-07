@@ -2015,6 +2015,14 @@ final class AppSettings {
             uploadToCloud()
         }
     }
+    /// Settings › Extra-Features: "Alternatives Ziel" below Ziel in the connection search (#516). Off by default
+    /// and not offered in the quick setup.
+    var extraAlternativeDestination: Bool {
+        didSet {
+            UserDefaults.standard.set(extraAlternativeDestination, forKey: "extraAlternativeDestination")
+            uploadToCloud()
+        }
+    }
 
     /// Träwelling check-ins, login and map import.
     var traewellingEnabled: Bool { expertMode && expertTraewelling }
@@ -2055,6 +2063,7 @@ final class AppSettings {
         expertTrainChoice = defaults.bool(forKey: "expertTrainChoice")
         expertIgnoreBoardingRules = defaults.bool(forKey: "expertIgnoreBoardingRules")
         expertRil100 = defaults.bool(forKey: "expertRil100")
+        extraAlternativeDestination = defaults.bool(forKey: "extraAlternativeDestination")
         traewellingVisibility = TraewellingVisibility(rawValue: defaults.integer(forKey: "traewellingVisibility")) ?? .publicVisible
         bc100Rules = Storage.load(key: "bc100Rules") ?? .default
         syncTraewellingToMap = defaults.object(forKey: "syncTraewellingToMap") as? Bool ?? true
@@ -2108,6 +2117,7 @@ final class AppSettings {
         var bikeOption: BikeOption?
         var travelClass: TravelClass?
         var stepFree: Bool?
+        var extraAlternativeDestination: Bool?
     }
 
     /// What iCloud stores: the settings and when they were last changed.
@@ -2125,7 +2135,7 @@ final class AppSettings {
         trainSearchKinds: TrainSearchKind.defaults.sorted(by: { $0.rawValue < $1.rawValue }),
         trainSearchCountries: TrainSearchCountry.defaults.sorted(), exitReminders: true, exitReminderLead: .five,
         liveActivityServerUpdates: true, showWeather: true, searchWithBike: false, bikeOption: .hidden, travelClass: .second,
-        stepFree: false)
+        stepFree: false, extraAlternativeDestination: false)
 
     @ObservationIgnored private var isApplyingCloudValue = false
 
@@ -2141,7 +2151,8 @@ final class AppSettings {
                    trainSearchCountries: trainSearchCountries.sorted(), exitReminders: exitReminders,
                    exitReminderLead: exitReminderLead, liveActivityServerUpdates: liveActivityServerUpdates,
                    showWeather: showWeather, searchWithBike: searchWithBike, bikeOption: bikeOption,
-                   travelClass: travelClass, stepFree: stepFree)
+                   travelClass: travelClass, stepFree: stepFree,
+                   extraAlternativeDestination: extraAlternativeDestination)
     }
 
     /// When the settings were last changed on this device or taken over from iCloud. Before
@@ -2198,6 +2209,7 @@ final class AppSettings {
         bikeOption = value.bikeOption ?? bikeOption
         travelClass = value.travelClass ?? travelClass
         stepFree = value.stepFree ?? stepFree
+        extraAlternativeDestination = value.extraAlternativeDestination ?? extraAlternativeDestination
     }
 }
 
