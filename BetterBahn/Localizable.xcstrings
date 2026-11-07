@@ -754,6 +754,16 @@
         }
       }
     },
+    "%lld frei" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld free"
+          }
+        }
+      }
+    },
     "%lld km/h" : {
       "localizations" : {
         "en" : {
@@ -4734,6 +4744,16 @@
         }
       }
     },
+    "Grüne Plätze sind auf deiner Strecke in der %@ noch frei." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Green seats are still free in %@ on your ride."
+          }
+        }
+      }
+    },
     "Gültig" : {
       "localizations" : {
         "en" : {
@@ -4961,6 +4981,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "No trains here in the next 90 minutes."
+          }
+        }
+      }
+    },
+    "In der %@ ist auf deiner Strecke kein Platz mehr frei." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No seat is left in %@ on your ride."
           }
         }
       }

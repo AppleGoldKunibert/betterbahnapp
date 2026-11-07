@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from aiohttp.test_utils import TestClient, TestServer
+from yarl import URL
 
 sys.path.insert(0, str(Path(__file__).parent))
 import proxy  # noqa: E402
@@ -78,6 +79,34 @@ class ProxyTests(unittest.IsolatedAsyncioTestCase):
         vbid = "/web/api/angebote/verbindung/0f0e0d0c-1111-2222-3333-444455556666"
         self.assertEqual((await self.get(vbid)).status, 200)
         self.assertEqual(len(self.bahn_de.urls), 1)
+
+    async def test_the_seat_picker_paths(self):
+        await self.start()
+        seats = await self.get("/web/api/gsd/gsd_v3?data=%7B%22lang%22%7D")
+        self.assertEqual(seats.status, 200)
+        self.assertEqual(seats.headers["Cache-Control"], "public, max-age=30")
+        plan = await self.get("/web/api/gsd/api/wagentypen/I5812-412.(12-TLG.)-1")
+        self.assertEqual(plan.status, 200)
+        self.assertEqual(plan.headers["Cache-Control"], "public, max-age=86400")
+        self.assertEqual(self.bahn_de.urls, [
+            "https://www.bahn.de/web/api/gsd/gsd_v3?data=%7B%22lang%22%7D",
+            "https://www.bahn.de/web/api/gsd/api/wagentypen/I5812-412.(12-TLG.)-1",
+        ])
+
+    async def test_nothing_else_below_the_seat_picker(self):
+        await self.start()
+        for path in ["gsd/assets/D9vPiMVD.mjs", "gsd/api/wagentypen/", "gsd/api/wagentypen/a%2Fb", "gsd/api/other"]:
+            self.assertEqual((await self.get("/web/api/" + path)).status, 404, path)
+        self.assertEqual(self.bahn_de.urls, [])
+
+    async def test_no_way_out_of_the_coach_types(self):
+        await self.start()
+        # Sent as they are (a plain string would be shortened here): curl shortens "..", so bahn.de would be asked
+        # for a path that isn't allowed.
+        for coach_type in ["%2E%2E", "%2E", "...", ".a"]:
+            path = URL("/web/api/gsd/api/wagentypen/" + coach_type, encoded=True)
+            self.assertEqual((await self.get(path)).status, 404, coach_type)
+        self.assertEqual(self.bahn_de.urls, [])
 
     async def test_only_the_app_with_a_token_from_the_workers(self):
         await self.start()
