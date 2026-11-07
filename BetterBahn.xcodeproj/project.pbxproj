@@ -319,7 +319,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 50;
+				CURRENT_PROJECT_VERSION = 51;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Config/BetterBahn-Info.plist";
@@ -352,7 +352,7 @@
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 50;
+				CURRENT_PROJECT_VERSION = 51;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Config/BetterBahnWidgets-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = BetterBahn;
@@ -378,7 +378,7 @@
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 50;
+				CURRENT_PROJECT_VERSION = 51;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Config/BetterBahnShare-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = BetterBahn;
@@ -407,7 +407,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 50;
+				CURRENT_PROJECT_VERSION = 51;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Config/BetterBahn-Info.plist";
@@ -440,7 +440,7 @@
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 50;
+				CURRENT_PROJECT_VERSION = 51;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Config/BetterBahnWidgets-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = BetterBahn;
@@ -466,7 +466,7 @@
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 50;
+				CURRENT_PROJECT_VERSION = 51;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Config/BetterBahnShare-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = BetterBahn;
