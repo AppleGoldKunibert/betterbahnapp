@@ -245,6 +245,27 @@ struct ExpertSettingsView: View {
     }
 }
 
+/// Settings › Extra-Features: features off by default that the quick setup doesn't offer.
+struct ExtraFeaturesSettingsView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var settings = model.settings
+        Form {
+            Section {
+                Toggle(isOn: $settings.extraAlternativeDestination) {
+                    IconLabel(title: String(localized: "Alternatives Ziel"), systemImage: "mappin.and.ellipse", color: .settingsIcon,
+                              subtitle: String(localized: "Verbindungen zu einem zweiten Ziel in derselben Liste suchen."))
+                }
+                .tint(.brandText)
+            } footer: {
+                Text("Diese Funktionen sind zuerst aus. Schalte ein, was du brauchst.")
+            }
+        }
+        .settingsPage("Extra-Features")
+    }
+}
+
 /// Settings › Träwelling: login, map import, notifications, visibility and tags. Only while the expert
 /// feature is on.
 struct TraewellingSettingsView: View {
