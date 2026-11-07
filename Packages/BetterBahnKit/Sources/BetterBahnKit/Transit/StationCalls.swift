@@ -51,6 +51,40 @@ public struct StationCalls: Sendable {
         Set(journeys.compactMap { $0.transitLegs.count == 1 ? $0.transitLegs[0].tripId : nil })
     }
 
+    /// The expert option's extra trains placed among the search results by departure. Only those
+    /// leaving within the time the results already cover show: the lookup reaches hours ahead, and
+    /// without the limit those trains would pile up below the last result (Berlin Hbf → Gesundbrunnen:
+    /// nothing but ICEs with "Kein Einstieg" until the evening). Loading later results reveals the
+    /// next ones in place. Left out: trains the results already ride directly, and trains a result
+    /// beats (leaving no earlier and arriving no later). The results keep their order.
+    public static func merging(_ extras: [Journey], into results: [Journey]) -> [Journey] {
+        let departures = results.compactMap(\.departure?.planned)
+        guard let first = departures.min(), let last = departures.max() else { return results }
+        let direct = directTripIds(results)
+        let shown = extras
+            .filter { extra in
+                guard let planned = extra.departure?.planned, planned >= first, planned <= last,
+                      !(extra.transitLegs.first?.tripId.map(direct.contains) ?? false) else { return false }
+                guard let departure = extra.departure?.best, let arrival = extra.arrival?.best else { return true }
+                return !results.contains {
+                    ($0.departure?.best ?? .distantPast) >= departure && ($0.arrival?.best ?? .distantFuture) <= arrival
+                }
+            }
+            .sorted { ($0.departure?.planned ?? .distantFuture) < ($1.departure?.planned ?? .distantFuture) }
+        guard !shown.isEmpty else { return results }
+        var merged: [Journey] = []
+        var pending = shown[...]
+        for result in results {
+            let departure = result.departure?.planned ?? .distantFuture
+            while let next = pending.first, let planned = next.departure?.planned, planned < departure {
+                merged.append(next)
+                pending.removeFirst()
+            }
+            merged.append(result)
+        }
+        return (merged + pending).removingDuplicateIDs()
+    }
+
     /// Whether `journey` changes onto a train that also calls at the origin while the journey is
     /// under way, or gets off a train that also calls at the destination. Either way the route loops
     /// back over a station a single train already serves: in Alfred's example the ICE boarded in Halle
