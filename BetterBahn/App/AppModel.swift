@@ -957,6 +957,17 @@ final class AppModel {
         return try await bahnDe.coachSequence(request)
     }
 
+    /// The seats still free on `leg`'s train in the class from the settings (bahn.de's seat picker), from the
+    /// next stop it leaves to the leg's end; nil when bahn.de has none for it or can't be reached.
+    func seatAvailability(for leg: Leg) async -> SeatAvailability? {
+        guard let request = BahnDeClient.seatRequest(for: leg, travelClass: settings.travelClass) else { return nil }
+        #if DEBUG
+        if let demo = debugSeatAvailability(for: leg) { return demo }
+        #endif
+        guard let bahnDe = provider.bahnDe else { return nil }
+        return try? await bahnDe.seatAvailability(request)
+    }
+
     /// The seat saved on the train `leg` rides (#410), if any.
     func savedSeat(for leg: Leg) -> SavedSeat? {
         savedSeats.first { $0.belongs(to: leg) }

@@ -56,10 +56,15 @@ ROUTES = {
     "reiseloesung/ankuenfte": 30,
     "reiseloesung/fahrt": 30,
     "reisebegleitung/wagenreihung/vehicle-sequence": 120,
+    # The seats of a train and class that can be reserved (HTML with the JSON in `ssr_data`, 409 when booked out).
+    "gsd/gsd_v3": 30,
 }
-# A connection shared from the DB Navigator or bahn.de (the "Verbindung ansehen" link's vbid).
+# A connection shared from the DB Navigator or bahn.de (the "Verbindung ansehen" link's vbid), and the seat plan
+# of a coach type from gsd_v3's answer ("I5812-412.(12-TLG.)-1"), which doesn't change.
 PATTERN_ROUTES = [
     (re.compile(r"^angebote/verbindung/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"), 3600),
+    # Starting with a letter or digit: curl shortens a ".." here, which would lead out of this path.
+    (re.compile(r"^gsd/api/wagentypen/[A-Za-z0-9][A-Za-z0-9.()-]{0,63}$"), 86400),
 ]
 # bahn.de refusing us: leave it alone for a while.
 BLOCK_STATUSES = {403, 429, 452}
