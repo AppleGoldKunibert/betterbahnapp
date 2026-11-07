@@ -3622,6 +3622,36 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(StationCalls.directTripIds([marked, viaHalle]) == ["594"])
     }
 
+    /// Berlin Hbf → Gesundbrunnen with the expert option: the ICEs without boarding at Hbf go between
+    /// the S-Bahns by departure, only as far as the loaded results reach, never as a block below them.
+    @Test func restrictedExtrasMergeWithinTheLoadedResults() {
+        let hbf = station("8011160", "Berlin Hbf"), gesundbrunnen = station("8011102", "Berlin Gesundbrunnen")
+        let base = Date(timeIntervalSince1970: 1_790_000_000)
+        func journey(_ trip: String, _ dep: Double, _ arr: Double) -> Journey {
+            let leg = Leg(origin: hbf, destination: gesundbrunnen,
+                          departure: TimeInfo(planned: base.addingTimeInterval(dep * 60), actual: nil),
+                          arrival: TimeInfo(planned: base.addingTimeInterval(arr * 60), actual: nil),
+                          departurePlatform: nil, arrivalPlatform: nil, tripId: trip,
+                          line: Line(name: trip, number: trip, product: .highSpeed, operatorName: nil),
+                          direction: nil, isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+            return Journey(legs: [leg], source: .transitous)
+        }
+        func trips(_ journeys: [Journey]) -> [String] { journeys.compactMap { $0.transitLegs.first?.tripId } }
+        let page1 = [journey("S1", 0, 10), journey("S2", 10, 20), journey("S3", 20, 30)]
+        let extras = [journey("ICE 9", 600, 607), journey("ICE 1", 5, 12), journey("ICE 2", 15, 22),
+                      // Beaten by S3, which leaves later and arrives no later.
+                      journey("ICE 3", 18, 30),
+                      // Already among the results as a direct ride.
+                      journey("S2", 10, 20)]
+        #expect(trips(StationCalls.merging(extras, into: page1)) == ["S1", "ICE 1", "S2", "ICE 2", "S3"])
+
+        // A later page reaches the evening ICE; the earlier ones stay where they were.
+        let page2 = page1 + [journey("S4", 590, 600), journey("S5", 610, 620)]
+        #expect(trips(StationCalls.merging(extras, into: page2)) == ["S1", "ICE 1", "S2", "ICE 2", "S3", "S4", "ICE 9", "S5"])
+
+        #expect(StationCalls.merging(extras, into: []).isEmpty)
+    }
+
     /// Expert option "Nur Ein-/Ausstieg ignorieren": only trains you may not board at the origin, or
     /// not leave at the destination, are looked up; normal ones the search already has.
     @Test func restrictedCandidatesAreTrainsWithoutBoardingOrAlighting() {
