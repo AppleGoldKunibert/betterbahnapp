@@ -140,6 +140,13 @@ in `project.pbxproj`: new files join their target automatically.
   ahead of the picked train's exit, #430; "Halt hinzufügen" via
   `ManualStopSheet` adds an off-timetable exit, a check-in then becomes a manual trip via
   `AppModel.replaceCheckinWithManualTrip`; a new exit on the last train asks "Reise … beenden" / "Weiter nach …").
+- Alternative destination (#516), in `Features/Connections/`: only with Settings → Extra-Features → Alternatives Ziel
+  (`AppSettings.extraAlternativeDestination`, off by default, synced, not in the quick setup); "Alternatives Ziel" below Ziel sets `ConnectionSearch.alternativeTo` (not remembered); the
+  results view searches and pages both destinations on their own and shows them as one list via Kit
+  `AlternativeDestination.merging`: each destination keeps all its connections (a train serving both shows once per
+  destination); sorted by planned departure, then arrival, changes, the destination itself first; the list ends at the shorter list's last departure while that one
+  can still page (`Results.coveredUntil`: the pages' own reach, not the expert option's extra trains), and "Spätere Verbindungen" pages only the list(s) behind (`loadsLater`); cards to the alternative say "Nach …" and open with `towardsAlternative`; train
+  requirements only plan to the destination.
 - `Features/Departures/` – two layouts by `\.appDesign` (#504): Minimal has the station and the time in one card; Fahrkarte
   puts them on a ticket under its own headline, with "Zeit / Nach / Gleis" over the board (`BoardColumnLabels`), and draws
   `TripContent`'s header as a ticket with "Von" and "Nach" below its perforation. `StationBoardView`/`BoardRow`, `TripView` (and `LegTripSheet`, the read-only run of a journey's
@@ -284,7 +291,8 @@ in `project.pbxproj`: new files join their target automatically.
   the threshold (`CommuteAlerts`), delay reasons only then, cancellations/platforms/transfers left to the Worker when it watches.
 - `Features/Settings/` – settings (#547): the main page is the quick setup row, Design and menus (`SettingsPages.swift`:
   Ticket & Reise, Mitteilungen, Kalender, Suche & Karten, Zusatzinfos, Träwelling, Für Profis), then Datenquellen,
-  Datenschutz (privacy link, "not affiliated with DB") and Suchverlauf löschen. `SettingsSections.swift`: the sections
+  Datenschutz (privacy link, "not affiliated with DB") and Suchverlauf löschen, and at the very bottom Extra-Features
+  (features off by default that the quick setup never asks about). `SettingsSections.swift`: the sections
   shared by the menus and the quick setup, each with its side effects (asking for notifications, rescheduling
   reminders), so add a setting there when the quick setup should offer it. `QuickSetupView` (Kit `QuickSetupStep`:
   ticket, travel, notifications, calendar, design; one page each, choices apply at once) opens from Settings and once on
