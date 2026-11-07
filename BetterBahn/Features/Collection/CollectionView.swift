@@ -493,47 +493,73 @@ private struct TrainsetGroupLabel: View {
 
 /// One row per Tz: a collected one expands to its rides, one not collected yet is greyed out.
 /// The rides are plain rows under the Tz: a third level of `DisclosureGroup` made the whole list jump down
-/// when one opened (#539).
+/// when one opened (#539). Every row has its own ID (Tz, ride, "Alle Einsätze"): rides counted per Tz from 0 gave
+/// two open Tz the same IDs, and opening one in the middle made the list jump.
 private struct TrainsetRows: View {
     let items: [TravelCollection.Item]
     let newIDs: Set<String>
     @State private var expanded: Set<String> = []
 
-    var body: some View {
-        ForEach(items) { item in
-            if item.isCollected {
-                let isExpanded = expanded.contains(item.id)
-                Button {
-                    withAnimation(.snappy) {
-                        if isExpanded { expanded.remove(item.id) } else { expanded.insert(item.id) }
-                    }
-                } label: {
-                    HStack(spacing: 8) {
-                        TrainsetLabel(item: item, isNew: newIDs.contains(item.id))
-                        Image(systemName: "chevron.right")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                    }
-                    .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .accessibilityHint(isExpanded ? Text("Fahrten ausblenden") : Text("Fahrten anzeigen"))
-                if isExpanded {
-                    ForEach(Array(item.sightings.enumerated()), id: \.offset) { _, sighting in
-                        CollectionRideLink(sighting: sighting)
-                            .padding(.leading, 28)
-                    }
-                    TzRunsLink(item: item, startsWithAll: true)
-                        .font(.subheadline)
-                        .padding(.leading, 28)
-                }
-            } else if item.unitNumber != nil {
-                // Not ridden yet, but where it runs today is worth a look (#502).
-                TzRunsLink(item: item, startsWithAll: true) { TrainsetLabel(item: item, isNew: false) }
-            } else {
-                TrainsetLabel(item: item, isNew: false)
+    private enum Row: Identifiable {
+        case trainset(TravelCollection.Item)
+        case ride(TravelCollection.Item, Int)
+        case allRuns(TravelCollection.Item)
+
+        var id: String {
+            switch self {
+            case .trainset(let item): item.id
+            case .ride(let item, let index): "\(item.id)#ride\(index)"
+            case .allRuns(let item): "\(item.id)#all"
             }
+        }
+    }
+
+    private var rows: [Row] {
+        items.flatMap { item -> [Row] in
+            guard item.isCollected, expanded.contains(item.id) else { return [.trainset(item)] }
+            return [.trainset(item)] + item.sightings.indices.map { .ride(item, $0) } + [.allRuns(item)]
+        }
+    }
+
+    var body: some View {
+        ForEach(rows) { row in
+            switch row {
+            case .trainset(let item): trainsetRow(item)
+            case .ride(let item, let index):
+                CollectionRideLink(sighting: item.sightings[index])
+                    .padding(.leading, 28)
+            case .allRuns(let item):
+                TzRunsLink(item: item, startsWithAll: true)
+                    .font(.subheadline)
+                    .padding(.leading, 28)
+            }
+        }
+    }
+
+    @ViewBuilder private func trainsetRow(_ item: TravelCollection.Item) -> some View {
+        if item.isCollected {
+            let isExpanded = expanded.contains(item.id)
+            Button {
+                withAnimation(.snappy) {
+                    if isExpanded { expanded.remove(item.id) } else { expanded.insert(item.id) }
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    TrainsetLabel(item: item, isNew: newIDs.contains(item.id))
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(isExpanded ? Text("Fahrten ausblenden") : Text("Fahrten anzeigen"))
+        } else if item.unitNumber != nil {
+            // Not ridden yet, but where it runs today is worth a look (#502).
+            TzRunsLink(item: item, startsWithAll: true) { TrainsetLabel(item: item, isNew: false) }
+        } else {
+            TrainsetLabel(item: item, isNew: false)
         }
     }
 }
