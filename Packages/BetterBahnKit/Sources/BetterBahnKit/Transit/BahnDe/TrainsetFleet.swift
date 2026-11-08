@@ -3,10 +3,10 @@ import Foundation
 /// The trainsets DB Fernverkehr runs, by series and (for the ICE 4) by length: what the collection's
 /// "Triebzüge" can be collected from. Tz numbers as DB's coach sequence reports them (BR 407 as 4701…).
 ///
-/// From the German Wikipedia articles on BR 401, 402, 403, 407, 408, 411, 412, the ICE L and the IC 2, October
-/// 2026: dissolved or retired trainsets are left out (ICE 1 Tz 109, ICE 2 retired since 2024, ICE 3 Tz 326
+/// From the German Wikipedia articles on BR 401, 402, 403, 407, 408, 411, 412, the ICE L and the IC 2, November
+/// 2026: dissolved or retired trainsets are left out (ICE 1 Tz 109 and 120, ICE 2 retired since 2024, ICE 3 Tz 326
 /// and 351, ICE T Tz 1106/1114–1116/1120–1124, the BR 406 and 415 and the IC 2 KISS), the ICE 3neo is
-/// listed with every Tz ordered. A retired trainset someone has ridden still shows up as collected.
+/// listed with every Tz called off so far (8001–8073; 8074–8090 aren't ordered yet). A retired trainset someone has ridden still shows up as collected.
 enum TrainsetFleet {
     struct Series: Sendable, Hashable {
         /// One of `TravelCollection.series`, e.g. "ICE 4".
@@ -22,7 +22,7 @@ enum TrainsetFleet {
 
     static let all: [Series] = [
         Series(name: "ICE 1", variants: [
-            Variant(numbers: Array(101...120).filter { $0 != 109 } + Array(152...190)),
+            Variant(numbers: Array(101...120).filter { $0 != 109 && $0 != 120 } + Array(152...190)),
         ]),
         Series(name: "ICE 2", variants: [
             Variant(numbers: [201, 202, 204, 206, 208, 210, 211, 213, 220, 221, 222, 223, 224, 225, 226, 228, 229,
@@ -32,7 +32,7 @@ enum TrainsetFleet {
             Variant(numbers: Array(301...337).filter { $0 != 326 } + Array(352...363)),
         ]),
         Series(name: "ICE 3 Velaro", variants: [Variant(numbers: Array(4701...4717))]),
-        Series(name: "ICE 3neo", variants: [Variant(numbers: Array(8001...8090))]),
+        Series(name: "ICE 3neo", variants: [Variant(numbers: Array(8001...8073))]),
         Series(name: "ICE 4", variants: [
             Variant(name: String(kit: "7-teilig"), numbers: Array(9201...9237)),
             Variant(name: String(kit: "12-teilig"), numbers: Array(9001...9050)),
