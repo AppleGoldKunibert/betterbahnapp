@@ -5,8 +5,10 @@ import Foundation
 ///
 /// From the German Wikipedia articles on BR 401, 402, 403, 407, 408, 411, 412, the ICE L and the IC 2, November
 /// 2026: dissolved or retired trainsets are left out (ICE 1 Tz 109 and 120, ICE 2 retired since 2024, ICE 3 Tz 326
-/// and 351, ICE T Tz 1106/1114–1116/1120–1124, the BR 406 and 415 and the IC 2 KISS), the ICE 3neo is
-/// listed with every Tz called off so far (8001–8073; 8074–8090 aren't ordered yet). A retired trainset someone has ridden still shows up as collected.
+/// and 351, ICE T Tz 1106/1114–1116/1120–1124, the BR 406 and 415 and the IC 2 KISS), as are those not (or no
+/// longer) carrying passengers, so a series can be collected in full: ICE 1 Tz 106 (spare parts), the ICE 3neo not
+/// accepted yet (8023 and the ones not delivered), the ICE L not in passenger service yet and the IC 2 Tz 4918/4919
+/// (at the manufacturer). Add them once they run. A retired trainset someone has ridden still shows up as collected.
 enum TrainsetFleet {
     struct Series: Sendable, Hashable {
         /// One of `TravelCollection.series`, e.g. "ICE 4".
@@ -22,7 +24,7 @@ enum TrainsetFleet {
 
     static let all: [Series] = [
         Series(name: "ICE 1", variants: [
-            Variant(numbers: Array(101...120).filter { $0 != 109 && $0 != 120 } + Array(152...190)),
+            Variant(numbers: Array(101...120).filter { ![106, 109, 120].contains($0) } + Array(152...190)),
         ]),
         Series(name: "ICE 2", variants: [
             Variant(numbers: [201, 202, 204, 206, 208, 210, 211, 213, 220, 221, 222, 223, 224, 225, 226, 228, 229,
@@ -32,7 +34,7 @@ enum TrainsetFleet {
             Variant(numbers: Array(301...337).filter { $0 != 326 } + Array(352...363)),
         ]),
         Series(name: "ICE 3 Velaro", variants: [Variant(numbers: Array(4701...4717))]),
-        Series(name: "ICE 3neo", variants: [Variant(numbers: Array(8001...8073))]),
+        Series(name: "ICE 3neo", variants: [Variant(numbers: Array(8001...8058).filter { ![8023, 8024, 8025, 8027, 8028, 8056].contains($0) })]),
         Series(name: "ICE 4", variants: [
             Variant(name: String(kit: "7-teilig"), numbers: Array(9201...9237)),
             Variant(name: String(kit: "12-teilig"), numbers: Array(9001...9050)),
@@ -42,9 +44,9 @@ enum TrainsetFleet {
             Variant(numbers: Array(1101...1132).filter { ![1106, 1114, 1115, 1116, 1120, 1121, 1122, 1123, 1124].contains($0) }
                 + Array(1151...1178) + Array(1180...1184) + Array(1190...1192)),
         ]),
-        // The first delivery series; the Tz of later ones aren't known yet.
-        Series(name: "ICE L", variants: [Variant(numbers: Array(1801...1823))]),
-        Series(name: "IC 2 Twindexx", variants: [Variant(numbers: Array(2850...2876) + Array(4877...4919))]),
+        // The ones carrying passengers so far.
+        Series(name: "ICE L", variants: [Variant(numbers: Array(1805...1815) + [1817, 1823])]),
+        Series(name: "IC 2 Twindexx", variants: [Variant(numbers: Array(2850...2876) + Array(4877...4917))]),
     ]
 
     /// The series and variant name of each Tz in `fleet`.
