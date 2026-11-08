@@ -624,9 +624,10 @@ class Scanner:
         entries, seen, at = [], set(), start
         while at < end:
             status, body = await self._ask(board_path(eva, at))
-            page = (body or {}).get("entries") if status == 200 and isinstance(body, dict) else None
-            if page is None:
+            if status != 200 or not isinstance(body, dict):
                 break
+            # A window without trains (at night) answers {} without "entries": an empty page, not the end.
+            page = body.get("entries") or []
             fresh = [e for e in page if e.get("journeyId") not in seen]
             seen.update(e.get("journeyId") for e in fresh)
             entries += fresh

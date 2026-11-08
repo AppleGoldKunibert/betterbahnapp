@@ -300,6 +300,22 @@ class BoardScanTests(unittest.IsolatedAsyncioTestCase):
         # The first reads 10:00 up to 11:00, the second 11:00 (not 11:20) on, up to 12:20.
         self.assertEqual(boards, ["10:00:00", "11:00:00", "12:00:00"])
 
+    async def test_a_night_board_answering_without_entries_does_not_end_the_hub(self):
+        # bahn.de answers {} (no "entries") for an hour without trains; the morning's trains still have to be read.
+        async def get(path):
+            if path.startswith("reiseloesung/abfahrten"):
+                zeit = path.split("zeit=")[1].split("&")[0]
+                if zeit == "12:00:00":
+                    return 200, {"entries": [FakeBahnDe.entry(1008, "2026-10-31T12:34:00")]}
+                return 200, {}
+            return 200, sequence(("ICE0302", 1008, [("938054031027", "I4030")]))
+
+        store = tzlog.TzStore()
+        scanner = tzlog.Scanner(store, get, hubs=[("1", "München Hbf")], interval=0, every=4 * 3600,
+                                now=lambda: NOW, sleep=noop_sleep())
+        await scanner.scan()
+        self.assertEqual(store.tz_of("2026-10-31", "ICE", 1008), "302")
+
     async def test_a_scan_ends_at_midnight(self):
         boards = []
 
