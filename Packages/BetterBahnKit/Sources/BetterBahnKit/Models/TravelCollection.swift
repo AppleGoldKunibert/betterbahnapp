@@ -76,6 +76,12 @@ public struct TravelCollection: Sendable, Hashable {
         /// Newest first.
         public var sightings: [Sighting]
 
+        /// The Tz of a trainset or livery item ("trainset:9018" → 9018); nil for any other.
+        public var unitNumber: Int? {
+            guard category == .trainsets || category == .liveries else { return nil }
+            return id.split(separator: ":").last.flatMap { Int($0) }
+        }
+
         public var isCollected: Bool { !sightings.isEmpty }
         public var firstSighting: Sighting? { sightings.last }
     }
@@ -179,6 +185,12 @@ public struct TravelCollection: Sendable, Hashable {
         /// The series of each Tz ridden, from its model; nil when not known.
         var unitSeries: [Int: String?] = [:]
         let bigStations = Set(stations.map(\.dhid))
+        // The series a Tz number belongs to: counts even where the remembered model says something else
+        // ("Twindexx Vario" for an IC 2 Tz) or nothing.
+        var fleetSeries: [Int: String] = [:]
+        for series in fleet where Self.series.contains(series.name) {
+            for variant in series.variants { for number in variant.numbers { fleetSeries[number] = series.name } }
+        }
         for ride in rides {
             let leg = ride.leg
             let train = YearReview.trainName(leg)
@@ -192,6 +204,7 @@ public struct TravelCollection: Sendable, Hashable {
                 let model = unit.model.map(Self.seriesName(of:))
                 if let model { keys.insert("series:\(model)") }
                 if let number = unit.number.flatMap(Int.init) {
+                    if let series = fleetSeries[number] { keys.insert("series:\(series)") }
                     keys.insert("trainset:\(number)")
                     keys.insert("livery:\(number)")
                     if let model { unitSeries[number] = model } else if unitSeries[number] == nil { unitSeries[number] = .some(nil) }

@@ -80,6 +80,19 @@ import Testing
         #expect(!trainsets.items[0].isCollected)
     }
 
+    /// A Tz of a series' fleet counts for that series whatever model was remembered with it.
+    @Test func aTrainsetCountsForItsFleetSeries() {
+        let result = TravelCollection(rides: [
+            ride("IC 2049", berlin, hamburg, departure: "2026-05-01T08:00:00Z",
+                 units: [.init(model: "Twindexx Vario", number: "2850")]),
+            ride("IC 2048", hamburg, berlin, departure: "2026-06-01T08:00:00Z", units: [.init(model: nil, number: "4890")]),
+        ], now: date("2026-10-18T12:00:00Z"), stations: stations, liveries: [:], trainsetNames: [:],
+           fleet: [TrainsetFleet.Series(name: "IC 2 Twindexx", variants: [.init(numbers: [2850, 4890])])], dhid: dhid)
+        let twindexx = result.group(.series)!.items.first { $0.title == "IC 2 Twindexx" }!
+        #expect(twindexx.isCollected)
+        #expect(twindexx.sightings.count == 2)
+    }
+
     /// Trainsets without a name count too, sorted by series and then by length.
     @Test func groupsTrainsetsBySeriesAndLength() {
         let journey = Journey(legs: [], source: .bahnDe)
@@ -214,5 +227,17 @@ import Testing
                                           now: date("2026-10-18T12:00:00Z"))
         #expect(collection.collectedIDs.contains("station:de:11000:900003201"))
         #expect(collection.collectedIDs.contains { $0.hasPrefix("station:de:02000:") })
+    }
+
+    /// #502: trainset and livery items know their Tz (the Sammlung opens its trips from it); others don't.
+    @Test func itemsKnowTheirTz() {
+        let result = collection([
+            ride("ICE 597", berlin, hamburg, departure: "2026-05-01T08:00:00Z", units: [.init(model: "ICE 4", number: "9018")]),
+        ])
+        let items = result.groups.flatMap(\.items)
+        #expect(items.first { $0.id == "trainset:9018" }?.unitNumber == 9018)
+        #expect(items.first { $0.id == "livery:304" }?.unitNumber == 304)
+        #expect(items.first { $0.id.hasPrefix("series:") }?.unitNumber == nil)
+        #expect(items.first { $0.id.hasPrefix("station:") }?.unitNumber == nil)
     }
 }
