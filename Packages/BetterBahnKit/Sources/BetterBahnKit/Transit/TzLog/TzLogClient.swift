@@ -138,6 +138,13 @@ public struct TzLogClient: Sendable {
         ]), as: TzTurnaround.self, auth: auth)
     }
 
+    /// The same for a leg's or trip's line on the day it departs (Berlin time); nothing for a train that isn't a DB
+    /// ICE/IC/EC (those aren't in the log).
+    public func turnaround(for line: Line?, on date: Date) async throws -> TzTurnaround {
+        guard let ref = BahnDeClient.trainReference(for: line), let number = Int(ref.number) else { return .none }
+        return try await turnaround(category: ref.category, number: number, day: BahnDeClient.berlinDay(date))
+    }
+
     func url(_ path: String, query: [URLQueryItem] = []) throws -> URL {
         guard let baseURL else { throw TransitError.notFound(path) }
         return query.isEmpty ? baseURL.appending(path: path) : baseURL.appending(path: path).appending(queryItems: query)
