@@ -39,9 +39,11 @@ trainset of that train ran as just before and runs as just after it ("Wendet aus
 refreshes that trainset's journeys at the WiFi host (3 requests: the day and the days around it) when nobody looked at them for 30 minutes,
 so the host is only asked while someone looks at a trip, once per trainset and half hour however many look. It runs on one source, the RIS::Transports API behind DB Regio's WiFi landing
 page (`RisClient`): every `TZ_VEHICLE_EVERY` seconds one request per known Tz asks the journeys of one of its coaches
-(`/api/transports/vehicles/<UIC>/journeys?date=`), the first time also the last 6 days. No login: like the page itself it loads
+(`/api/transports/vehicles/<UIC>/journeys?date=`), the first time also the last 6 days, and from noon on tomorrow's early trains too. No login: like the page itself it loads
 the landing page and sends its CSRF cookie and token back. It is not a documented API, so DB can change or close it; the log
 then stops growing from there. About 400 requests a day, `TZ_RIS_INTERVAL` apart, plus ~2400 once for the first week.
+Each vehicle round also writes a row to the `rounds` table of `tz.db` (requests, answers per HTTP status, why it stopped), as a panel's console is gone after minutes: `sqlite3 tz.db 'select * from rounds order by id desc limit 5'`.
+A restart doesn't start rounds early: the vehicle rounds and the board scans go on from when the last ones ran (kept in `tz.db`); only a vehicle round a restart cut off runs again right away.
 
 - **The Tz list is a file:** `tz_seed.json` has every known Tz with the UIC number of one coach and is loaded at start.
   `make_tz_seed.py` makes and extends it: it reads the boards of 15 stations once (about 700 requests to bahn.de through
@@ -73,7 +75,7 @@ stops the scan (the log is still served), `TZ_RIS=false` the WiFi host.
 | `TZ_BOARDS` | `true` | `false` never reads bahn.de's boards. |
 | `TZ_SCAN_EVERY` | `43200` | Seconds between two board scans (each reads up to midnight at most). |
 | `TZ_RIS` | `true` | `false` turns the WiFi host (vehicle lookups) off. |
-| `TZ_RIS_INTERVAL` | `1` | Seconds between two requests to the WiFi host. |
+| `TZ_RIS_INTERVAL` | `2` | Seconds between two requests to the WiFi host (its firewall rejects an address that asks faster for long). |
 | `TZ_VEHICLE_EVERY` | `43200` | Seconds between two vehicle rounds. |
 | `ALLOW_UNATTESTED` | — | `true` lets requests without a token through. Only for a quick test, never in production. |
 
@@ -139,4 +141,4 @@ curl "http://localhost:8080/web/api/reiseloesung/orte?suchbegriff=Berlin&typ=ALL
 
 ## Tests
 
-`python3 -m unittest Server/bahnde-proxy/proxy_test.py Server/bahnde-proxy/tzlog_test.py` (needs `aiohttp`; no network).
+`python3 -m unittest Server/bahnde-proxy/proxy_test.py Server/bahnde-proxy/tzlog_test.py Server/bahnde-proxy/panel_boot_test.py` (needs `aiohttp`; no network).

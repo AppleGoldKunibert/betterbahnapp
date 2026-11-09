@@ -32,17 +32,18 @@ struct TzRunsView: View {
     let number: Int
     let title: String
     let subtitle: String?
-    let rides: [TravelCollection.Sighting]
+    /// Your own rides with it; nil where they aren't known (the train search): then only "Alle" is shown.
+    let rides: [TravelCollection.Sighting]?
     @State private var showsAll: Bool
     @State private var runs: [TzRun]?
     @State private var failed = false
 
-    init(number: Int, title: String, subtitle: String?, rides: [TravelCollection.Sighting], startsWithAll: Bool) {
+    init(number: Int, title: String, subtitle: String?, rides: [TravelCollection.Sighting]?, startsWithAll: Bool) {
         self.number = number
         self.title = title
         self.subtitle = subtitle
         self.rides = rides
-        _showsAll = State(initialValue: startsWithAll)
+        _showsAll = State(initialValue: startsWithAll || rides == nil)
     }
 
     var body: some View {
@@ -52,19 +53,21 @@ struct TzRunsView: View {
                     Text(title).font(.title3.weight(.semibold))
                     if let subtitle { Text(subtitle).foregroundStyle(.secondary) }
                 }
-                Picker("Fahrten", selection: $showsAll) {
-                    Text("Meine").tag(false)
-                    Text("Alle").tag(true)
+                if rides != nil {
+                    Picker("Fahrten", selection: $showsAll) {
+                        Text("Meine").tag(false)
+                        Text("Alle").tag(true)
+                    }
+                    .pickerStyle(.segmented)
                 }
-                .pickerStyle(.segmented)
             }
             if showsAll {
                 allRuns
-            } else if rides.isEmpty {
+            } else if let rides, rides.isEmpty {
                 Section {
                     Text("Du bist mit diesem Triebzug noch nicht gefahren.").foregroundStyle(.secondary)
                 }
-            } else {
+            } else if let rides {
                 Section("\(rides.count) Fahrten") {
                     ForEach(Array(rides.enumerated()), id: \.offset) { CollectionRideLink(sighting: $0.element) }
                 }
@@ -87,7 +90,9 @@ struct TzRunsView: View {
                 let days = Dictionary(grouping: runs, by: \.day).sorted { $0.key > $1.key }
                 ForEach(Array(days.enumerated()), id: \.element.key) { index, day in
                     Section(header: Text(header(for: day.key, first: index == 0))) {
-                        ForEach(day.value) { RunRow(run: $0) }
+                        ForEach(day.value) { run in
+                            NavigationLink { TzTrainRunView(run: run) } label: { RunRow(run: run) }
+                        }
                     }
                 }
             }
@@ -103,6 +108,7 @@ struct TzRunsView: View {
 
     private func header(for day: String, first: Bool) -> String {
         if day == TzRun.day() { return String(localized: "Heute") }
+        if day == TzRun.day(of: Calendar.current.date(byAdding: .day, value: 1, to: .now) ?? .now) { return String(localized: "Morgen") }
         let date = TzRun(day: day, category: "", number: 0).date?.formatted(date: .long, time: .omitted) ?? day
         return first ? String(localized: "Zuletzt am \(date)") : date
     }
@@ -131,5 +137,65 @@ private struct RunRow: View {
             }
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// The Zuglauf of a train a Tz ran as: the run is found by its number on that day like in the train search
+/// (`TrainNumberSearch`) and shown like there (`TrainSearchResultView`: stops, Wagenreihung, map). Days that DB no
+/// longer has say so.
+struct TzTrainRunView: View {
+    let run: TzRun
+    @Environment(AppModel.self) private var model
+    @State private var result: TrainSearchResult?
+    @State private var missing = false
+    @State private var failed = false
+
+    var body: some View {
+        Group {
+            if let result {
+                TrainSearchResultView(result: result)
+            } else if missing {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Den Zuglauf von \(run.trainName) gibt es für diesen Tag nicht mehr.").font(.headline)
+                    Text("DB hält die Fahrten nur für kurze Zeit vor.").font(.subheadline).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+            } else if failed {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Der Zuglauf ist gerade nicht abrufbar.")
+                    Button("Erneut versuchen") { Task { await load() } }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+            } else {
+                ProgressView().frame(maxWidth: .infinity).padding(.top, 60)
+            }
+        }
+        .background { AppBackground() }
+        .navigationTitle(run.trainName)
+        .navigationBarTitleDisplayMode(.inline)
+        .task { if result == nil && !missing { await load() } }
+    }
+
+    private func load() async {
+        failed = false
+        guard let finder = TrainNumberSearch(provider: model.provider) else {
+            failed = true
+            return
+        }
+        do {
+            let found = try await finder.trains(TrainNumberQuery(category: run.category, number: run.number),
+                                                on: run.date ?? .now, filter: TrainSearchFilter(countries: []))
+            if let match = found.first(where: { $0.number == run.number && $0.category.uppercased() == run.category.uppercased() })
+                ?? found.first {
+                result = match
+            } else {
+                missing = true
+            }
+        } catch is CancellationError {
+        } catch {
+            failed = true
+        }
     }
 }

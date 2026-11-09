@@ -508,7 +508,7 @@ def main():
                 "every": int(os.environ.get("TZ_SCAN_EVERY", "43200")),
                 "hubs": tzlog.HUBS if os.environ.get("TZ_BOARDS", "true") != "false" else [],
                 "ris": os.environ.get("TZ_RIS", "true") != "false",
-                "ris_interval": float(os.environ.get("TZ_RIS_INTERVAL", "1")),
+                "ris_interval": float(os.environ.get("TZ_RIS_INTERVAL", "2")),
                 "vehicle_every": int(os.environ.get("TZ_VEHICLE_EVERY", "43200"))}
     web.run_app(make_app(proxy, scan), port=int(os.environ.get("PORT", "8080")), access_log=None)
 

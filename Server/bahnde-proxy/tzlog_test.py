@@ -2,6 +2,7 @@
 
 import asyncio
 import datetime as dt
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -139,6 +140,52 @@ class StoreTests(unittest.TestCase):
             self.assertEqual(store.load_seed(Path(folder) / "missing.json"), 0)
         self.assertEqual(store.vehicles(), [("8043", "938000000043", False), ("9490", "938024120900", False)])
 
+    def test_an_answer_without_a_trainset_keeps_the_coach_but_another_one_drops_it(self):
+        store = tzlog.TzStore()
+        self.record(store, "2026-10-31", "8043", 1, vehicle="938000000043")
+        self.assertFalse(tzlog.apply_vehicle_answer(store, "8043", {"journeys": []}, 1))
+        self.assertEqual([tz for tz, _, _ in store.vehicles()], ["8043"])
+        other = {"vehicle": {"vehicleGroupName": "ICE8044"}, "journeys": []}
+        self.assertFalse(tzlog.apply_vehicle_answer(store, "8043", other, 1))
+        self.assertEqual(store.vehicles(), [])
+
+    def test_seed_gives_a_known_tz_without_a_coach_the_seeded_one(self):
+        import json
+        import tempfile
+        store = tzlog.TzStore()
+        store.record_unit({"tz": "303", "unit": "ICE303", "types": [], "vehicle": None}, 1)  # a board showed no coach
+        self.record(store, "2026-10-31", "8043", 2, vehicle="938000000043")
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "seed.json"
+            path.write_text(json.dumps([
+                {"tz": "303", "unit": "ICE303", "types": [], "vehicle": "938054036034"},
+                {"tz": "8043", "unit": "ICE8043", "types": [], "vehicle": "938000000999"},
+            ]))
+            self.assertEqual(store.load_seed(path), 0)
+        self.assertEqual(sorted(store.vehicles()), [("303", "938054036034", False), ("8043", "938000000043", False)])
+
+    def test_vehicles_lists_the_ones_still_to_backfill_first(self):
+        store = tzlog.TzStore()
+        self.record(store, "2026-10-31", "169", 1, vehicle="938000000169")
+        self.record(store, "2026-10-31", "303", 2, vehicle="938000000303")
+        store.mark_backfilled("169")
+        self.assertEqual([tz for tz, _, _ in store.vehicles()], ["303", "169"])
+
+    def test_a_file_from_rounds_that_took_the_firewall_page_for_empty_days_backfills_once_more(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            path = str(Path(folder) / "tz.db")
+            store = tzlog.TzStore(path)
+            self.record(store, "2026-10-31", "1111", 1, vehicle="938054111118")
+            store.mark_backfilled("1111")
+            store.update_round(store.start_round(1), 2, 10, {"200": 5, "empty": 5}, "done")
+            store.db.close()
+            again = tzlog.TzStore(path)
+            self.assertEqual(again.vehicles(), [("1111", "938054111118", False)])
+            again.mark_backfilled("1111")
+            again.db.close()
+            self.assertEqual(tzlog.TzStore(path).vehicles(), [("1111", "938054111118", True)], "only once")
+
     def test_history_newest_first_and_prune_after_a_year(self):
         store = tzlog.TzStore()
         self.record(store, "2025-10-01", "8043", 1)
@@ -253,6 +300,22 @@ class BoardScanTests(unittest.IsolatedAsyncioTestCase):
         # The first reads 10:00 up to 11:00, the second 11:00 (not 11:20) on, up to 12:20.
         self.assertEqual(boards, ["10:00:00", "11:00:00", "12:00:00"])
 
+    async def test_a_night_board_answering_without_entries_does_not_end_the_hub(self):
+        # bahn.de answers {} (no "entries") for an hour without trains; the morning's trains still have to be read.
+        async def get(path):
+            if path.startswith("reiseloesung/abfahrten"):
+                zeit = path.split("zeit=")[1].split("&")[0]
+                if zeit == "12:00:00":
+                    return 200, {"entries": [FakeBahnDe.entry(1008, "2026-10-31T12:34:00")]}
+                return 200, {}
+            return 200, sequence(("ICE0302", 1008, [("938054031027", "I4030")]))
+
+        store = tzlog.TzStore()
+        scanner = tzlog.Scanner(store, get, hubs=[("1", "München Hbf")], interval=0, every=4 * 3600,
+                                now=lambda: NOW, sleep=noop_sleep())
+        await scanner.scan()
+        self.assertEqual(store.tz_of("2026-10-31", "ICE", 1008), "302")
+
     async def test_a_scan_ends_at_midnight(self):
         boards = []
 
@@ -323,11 +386,108 @@ class VehicleRoundTests(unittest.IsolatedAsyncioTestCase):
         await scanner.scan_vehicles()
         self.assertEqual(self.asked, [("938000000043", "2026-10-31"), ("938000000090", "2026-10-31")])
 
+    async def test_a_round_leaves_a_record_in_the_file(self):
+        scanner = self.scanner()
+        self.answers = {"938000000043": self.answer("ICE8043"), "938000000090": (503, None)}
+        await scanner.scan_vehicles()
+        rows = self.store.db.execute("SELECT asked, statuses, note FROM rounds").fetchall()
+        self.assertEqual(len(rows), 1)
+        asked, statuses, note = rows[0]
+        self.assertEqual(asked, len(self.asked))
+        self.assertEqual(json.loads(statuses)["503"], 1)
+        self.assertEqual(note, "done")
+
+    async def test_an_empty_answer_for_a_day_does_not_stop_the_other_days(self):
+        scanner = self.scanner()
+        oldest = (dt.date(2026, 10, 31) - dt.timedelta(days=tzlog.BACKFILL_DAYS)).isoformat()
+        self.answers = {("938000000043", oldest): (200, None),
+                        ("938000000043", "2026-10-31"): self.answer("ICE8043", ("2026-10-31", "ICE", 610))}
+        await scanner.scan_vehicles()
+        self.assertEqual([t["number"] for t in self.store.history("8043")], [610])
+        self.assertTrue(all(done for _, _, done in self.store.vehicles()))
+        statuses = json.loads(self.store.db.execute("SELECT statuses FROM rounds").fetchone()[0])
+        self.assertGreaterEqual(statuses["empty"], 1)
+
+    async def test_an_empty_answer_is_asked_once_more(self):
+        replies = {"n": 0}
+
+        async def ris(uic, day):
+            self.asked.append((uic, day))
+            if uic == "938000000043" and day == "2026-10-31":
+                replies["n"] += 1
+                return (200, None) if replies["n"] == 1 else self.answer("ICE8043", ("2026-10-31", "ICE", 610))
+            return 404, None
+
+        scanner = self.scanner()
+        scanner.ris = ris
+        await scanner.scan_vehicles()
+        self.assertEqual([t["number"] for t in self.store.history("8043")], [610])
+        statuses = json.loads(self.store.db.execute("SELECT statuses FROM rounds").fetchone()[0])
+        self.assertEqual(statuses["empty-then-ok"], 1)
+
+    async def test_a_round_keeps_samples_of_answers_naming_another_trainset(self):
+        self.answers = {"938000000043": self.answer("ICE8044"), "938000000090": (404, None)}
+        await self.scanner().scan_vehicles()
+        note = self.store.db.execute("SELECT note FROM rounds").fetchone()[0]
+        self.assertIn("Tz 8043 938000000043", note)
+        self.assertIn("group 8044", note)
+
+    async def test_a_round_for_new_tz_asks_only_them_and_keeps_the_schedule(self):
+        self.store.mark_backfilled("8043")
+        self.store.update_round(self.store.start_round(500.0), 600.0, 1, {}, "done")
+        await self.scanner().scan_vehicles(only_new=True)
+        self.assertEqual({uic for uic, _ in self.asked}, {"938000000090"})
+        self.assertEqual(self.store.last_finished_round(), 500.0)
+
+    async def test_a_rejected_round_pauses_and_goes_on_where_it_was(self):
+        rejections = {"left": 2}
+
+        async def ris(uic, day):
+            self.asked.append((uic, day))
+            if uic == "938000000090" and rejections["left"]:
+                rejections["left"] -= 1
+                return 429, None
+            return self.answer("ICE8043" if uic == "938000000043" else "ICE9490", (day, "ICE", 1))
+
+        scanner = self.scanner()
+        scanner.ris = ris
+        await scanner.scan_vehicles()
+        self.assertIn(tzlog.RIS_BLOCK_PAUSE, scanner.sleep.slept)
+        self.assertTrue(all(done for _, _, done in self.store.vehicles()))
+
+    async def test_a_round_still_rejected_after_its_pauses_stops(self):
+        self.answers = {"938000000043": (429, None), "938000000090": self.answer("ICE9490")}
+        await self.scanner().scan_vehicles()
+        self.assertEqual(len(self.asked), tzlog.RIS_MAX_PAUSES + 1, "the next Tz isn't asked")
+        note = self.store.db.execute("SELECT note FROM rounds").fetchone()[0]
+        self.assertIn("rejects us", note)
+
+    async def test_a_round_that_gives_up_says_why(self):
+        for index in range(tzlog.RIS_MAX_FAILURES):
+            self.store.record_unit({"tz": str(100 + index), "unit": "ICE", "types": [], "vehicle": f"93800000{index:04d}"}, 1)
+        self.answers = {"938000000043": (403, None), "938000000090": (403, None)}
+        for index in range(tzlog.RIS_MAX_FAILURES):
+            self.answers[f"93800000{index:04d}"] = (403, None)
+        await self.scanner().scan_vehicles()
+        note = self.store.db.execute("SELECT note FROM rounds").fetchone()[0]
+        self.assertIn("last status 403", note)
+
     async def test_a_days_first_round_also_asks_the_day_before(self):
         scanner = self.scanner()
         await scanner.scan_vehicles()
         self.asked.clear()
         scanner.now = lambda: NOW + 24 * 3600
+        await scanner.scan_vehicles()
+        self.assertEqual([d for _, d in self.asked], ["2026-10-31", "2026-11-01"] * 2)
+
+    async def test_from_noon_on_tomorrow_is_asked_too(self):
+        scanner = self.scanner()
+        scanner.now = lambda: NOW + 5 * 3600  # 15:00 in Berlin
+        self.store.mark_backfilled("8043")
+        self.store.mark_backfilled("9490")
+        await scanner.scan_vehicles()
+        self.assertEqual([d for _, d in self.asked], ["2026-10-30", "2026-10-31", "2026-11-01"] * 2)
+        self.asked.clear()
         await scanner.scan_vehicles()
         self.assertEqual([d for _, d in self.asked], ["2026-10-31", "2026-11-01"] * 2)
 
@@ -474,6 +634,61 @@ class RunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[:5], [("vehicles", 1000.0), ("boards", 1000.0), ("boards", 1100.0), ("boards", 1200.0),
                                      ("vehicles", 1250.0)])
 
+    def restarted(self, store, clock, calls, stop_after=1):
+        async def sleep(seconds):
+            clock[0] += seconds
+            if len(calls) >= stop_after:
+                raise asyncio.CancelledError
+
+        scanner = tzlog.Scanner(store, None, hubs=[], every=100, vehicle_every=250, now=lambda: clock[0],
+                                sleep=sleep, ris=lambda *args: None)
+
+        async def boards():
+            calls.append(("boards", clock[0]))
+
+        async def vehicles():
+            calls.append(("vehicles", clock[0]))
+
+        scanner.scan, scanner.scan_vehicles = boards, vehicles
+        return scanner
+
+    async def test_a_restart_goes_on_from_the_last_rounds(self):
+        store = tzlog.TzStore()
+        store.update_round(store.start_round(1000.0), 1010.0, 5, {}, "done")
+        store.set_state("boards_started", 1050.0)
+        clock, calls = [1100.0], []
+        with self.assertRaises(asyncio.CancelledError):
+            await self.restarted(store, clock, calls, stop_after=2).run()
+        self.assertEqual(calls[:2], [("boards", 1150.0), ("vehicles", 1250.0)])
+
+    async def test_a_restart_backfills_tz_new_in_the_seed_at_once_and_keeps_the_schedule(self):
+        store = tzlog.TzStore()
+        store.update_round(store.start_round(1000.0), 1010.0, 5, {}, "done")
+        store.set_state("boards_started", 1050.0)
+        store.record_unit({"tz": "302", "unit": "ICE302", "types": [], "vehicle": "938054031027"}, 1)
+        clock, calls = [1100.0], []
+        scanner = self.restarted(store, clock, calls, stop_after=3)
+        only_new = []
+
+        async def vehicles(only_new_flag=False):
+            only_new.append(only_new_flag)
+            calls.append(("vehicles", clock[0]))
+
+        scanner.scan_vehicles = lambda only_new=False: vehicles(only_new)
+        with self.assertRaises(asyncio.CancelledError):
+            await scanner.run()
+        self.assertEqual(calls[:3], [("vehicles", 1100.0), ("boards", 1150.0), ("vehicles", 1250.0)])
+        self.assertEqual(only_new[:2], [True, False])
+
+    async def test_a_round_a_restart_cut_off_runs_again_at_once(self):
+        store = tzlog.TzStore()
+        store.update_round(store.start_round(1000.0), 1010.0, 5, {}, "running, at Tz 303")
+        store.set_state("boards_started", 1050.0)
+        clock, calls = [1100.0], []
+        with self.assertRaises(asyncio.CancelledError):
+            await self.restarted(store, clock, calls).run()
+        self.assertEqual(calls, [("vehicles", 1100.0)])
+
     async def test_without_a_wifi_host_only_the_boards_run(self):
         clock = [0.0]
         calls = []
@@ -501,6 +716,7 @@ class RisClientTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.requests = []
         self.reject_first = False
+        self.firewall = False
 
         async def page(request):
             self.requests.append("page")
@@ -510,6 +726,9 @@ class RisClientTests(unittest.IsolatedAsyncioTestCase):
 
         async def journeys(request):
             self.requests.append(f"journeys {request.match_info['uic']} {request.query.get('date')}")
+            if self.firewall:
+                return web.Response(text="<html><head><title>Request Rejected</title></head><body>The requested URL was rejected.</body></html>",
+                                    content_type="text/html")
             if self.reject_first and self.requests.count("page") == 1:
                 return web.json_response({"error": "csrf"}, status=403)
             if request.headers.get("Csrf-Token") != "tok-1" or request.cookies.get("csrf") != "cookie-1":
@@ -536,6 +755,11 @@ class RisClientTests(unittest.IsolatedAsyncioTestCase):
         status, _ = await self.client("938000000043", "2026-11-03")
         self.assertEqual(status, 200)
         self.assertEqual(self.requests.count("page"), 2)
+
+    async def test_the_firewall_page_counts_as_a_rejection(self):
+        self.firewall = True
+        status, body = await self.client("938000000043", "2026-11-03")
+        self.assertEqual((status, body), (429, None))
 
     async def test_only_digits_are_asked_for(self):
         self.assertEqual((await self.client("../x", "2026-11-03"))[0], 400)

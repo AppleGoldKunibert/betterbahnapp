@@ -187,6 +187,7 @@ in `project.pbxproj`: new files join their target automatically.
   and `trainSearchCountries` (Germany), both synced. `TrainSearchResultView`: "Zugdetails anzeigen" (`TripView`),
   Wagenreihung (next stop; `CoachSequenceByStop` unfolds a list of the other stops, `BahnDeClient.formationStops(of:)`;
   a train not running starts at its first stop), "Auf Karte zeigen" (only while bahn.jetzt has a position).
+  Trainsets (#502): a Tz number ("Tz 8043", "8043") or part of a Taufname or livery ("Hamburg" finds "Freie und Hansestadt Hamburg", Kit `TzSearch`: every typed word must start a word of the name, from four letters inside one; accents and case don't matter) show as rows above the trains, which open `TzRunsView` ("Alle") in a sheet.
 - `Features/Map/` – `TravelMapView` heatmap of past trips (`TravelMapHeatmap`; `RailwayTileOverlay`: OpenRailwayMap,
   512 px, disk cache 7 days, 10-min pause after 403/429). A ride both saved and checked in is drawn from the check-in
   (`RideMatch.uncovered`). `YearReviewView` (#319, "Jahresrückblick", only via `YearReviewBanner` on Verbindungen in
@@ -222,7 +223,7 @@ in `project.pbxproj`: new files join their target automatically.
   Fahrkarte (#504) shows the categories as small tickets and items as round stamps, dashed until collected.
   Trips of a Tz (#502, `TzRunsView` in `TzListView.swift`): a Tz row (opened or not ridden yet) and a Tz/livery item's sheet
   ("Fahrten" on top) open "Meine" (own rides, which open their journey) and "Alle" (`TzLogClient.history(of:)`: today,
-  then each day of the last year, from the server's Tz log).
+  then each day of the last year, from the server's Tz log); a run opens its Zuglauf (`TzTrainRunView`: found by number on that day like in the train search, shown as `TrainSearchResultView`; days DB no longer has say so).
 - `Features/Tickets/` – `TicketLookupView` (bahn.de's "Auftragssuche" in a hidden SwiftUI `WebView`:
   `DBOrderPage.fillScript` fills the form, `fetchScript` fetches order + PDFs inside the page; shown only when bahn.de
   asks for more, e.g. a captcha), `TicketView` (full-brightness barcode, PDF, `AddToWalletButton`, "Zugbindung

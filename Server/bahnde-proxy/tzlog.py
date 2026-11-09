@@ -19,7 +19,7 @@ records no one who asks.
 
 Environment: TZ_DB (file, default `tz.db` next to this file), TZ_SEED (default `tz_seed.json` next to this file),
 TZ_SCAN ("false" turns the scan off, the log is still served), TZ_VEHICLE_EVERY (43200: seconds between two rounds),
-TZ_RIS ("false" turns the WiFi host off), TZ_RIS_INTERVAL (1), TZ_BOARDS ("false" never asks bahn.de),
+TZ_RIS ("false" turns the WiFi host off), TZ_RIS_INTERVAL (2), TZ_BOARDS ("false" never asks bahn.de),
 TZ_SCAN_INTERVAL (3).
 """
 
@@ -52,6 +52,10 @@ RIS_USER_AGENT = "BetterBahn tz log (+https://betterbahn.betterbahn.workers.dev/
 RIS_SESSION_MAX_AGE = 3600
 # This many failed requests in a row end a round at the WiFi host.
 RIS_MAX_FAILURES = 5
+# The host's firewall rejects an address that asks too much: a round then waits this long (seconds) and goes on
+# where it was, at most `RIS_MAX_PAUSES` times, then stops until the next round.
+RIS_BLOCK_PAUSE = 600
+RIS_MAX_PAUSES = 3
 
 # Stations whose boards the server reads to find Tz the seed list lacks: the busiest long-distance stations, which a
 # new trainset passes within days. bahn.de's EVA number and name.
@@ -160,11 +164,13 @@ def parse_vehicle_journeys(body):
 
 
 def apply_vehicle_answer(store, tz, body, now):
-    """Records the journeys of a vehicle-journeys answer for `tz`. False, and the coach forgotten, when the
-    answer names another trainset (or none): the coach doesn't belong to `tz`."""
+    """Records the journeys of a vehicle-journeys answer for `tz`. False when it doesn't tell: the coach is
+    forgotten when the answer names another trainset (it doesn't belong to `tz`), but kept when it names none (an
+    empty or partial answer from the host says nothing about the coach)."""
     group, trains = parse_vehicle_journeys(body)
     if group != tz:
-        store.drop_vehicle(tz)
+        if group is not None:
+            store.drop_vehicle(tz)
         return False
     for day, category, number, start, start_eva in trains:
         store.record(day, {"tz": tz, "category": category, "number": number, "start": start, "start_eva": start_eva},
@@ -190,6 +196,17 @@ class TzStore:
             if column not in {row[1] for row in self.db.execute(f"PRAGMA table_info({table})")}:
                 self.db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
         self.db.execute("CREATE INDEX IF NOT EXISTS by_day ON sightings (day)")
+        self.db.execute("CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        # What the vehicle rounds did, kept in the file because a panel's console is gone after minutes.
+        self.db.execute("""CREATE TABLE IF NOT EXISTS rounds (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, started REAL NOT NULL, updated REAL NOT NULL,
+            asked INTEGER NOT NULL, statuses TEXT NOT NULL, note TEXT NOT NULL)""")
+        # Rounds before the firewall page was recognised took it for an empty day and marked Tz as backfilled
+        # without their trains: those files backfill every Tz once more (what is known stays).
+        if self.db.execute("SELECT 1 FROM rounds WHERE statuses LIKE '%\"empty\"%' LIMIT 1").fetchone() and \
+                not self.db.execute("SELECT 1 FROM state WHERE key = 'rebackfilled'").fetchone():
+            self.db.execute("UPDATE units SET backfilled = 0")
+            self.db.execute("INSERT INTO state (key, value) VALUES ('rebackfilled', '1')")
         self.db.commit()
 
     def record_unit(self, sighting, now):
@@ -204,16 +221,22 @@ class TzStore:
 
     def load_seed(self, path, now=None):
         """Adds the Tz of a seed file (`[{"tz", "unit", "types", "vehicle"}]`) that the log doesn't have yet; what it
-        learned itself stays. Returns how many were new."""
+        learned itself stays, but a Tz the log knows without a coach (the boards saw it first, or its coach was dropped)
+        gets the seed's. Returns how many were new."""
         try:
             seed = json.loads(Path(path).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return 0
-        known = {tz for (tz,) in self.db.execute("SELECT tz FROM units")}
+        known = {tz: vehicle for tz, vehicle in self.db.execute("SELECT tz, vehicle FROM units")}
         added = 0
         for item in seed if isinstance(seed, list) else []:
             tz, vehicle = str(item.get("tz", "")), str(item.get("vehicle") or "")
-            if not tz.isdigit() or not vehicle.isdigit() or tz in known:
+            if not tz.isdigit() or not vehicle.isdigit():
+                continue
+            if tz in known:
+                if not known[tz]:
+                    self.db.execute("UPDATE units SET vehicle = ? WHERE tz = ?", (vehicle, tz))
+                    self.db.commit()
                 continue
             self.record_unit({"tz": tz, "unit": item.get("unit") or "ICE" + tz, "types": item.get("types") or [],
                               "vehicle": vehicle}, time.time() if now is None else now)
@@ -260,9 +283,39 @@ class TzStore:
                                (day, category, number)).fetchone() is not None
 
     def vehicles(self):
-        """(tz, UIC number, already backfilled) of every Tz with a known coach."""
+        """(tz, UIC number, already backfilled) of every Tz with a known coach, those still to backfill first, so a
+        restart doesn't keep the last ones from ever being reached."""
         return [(tz, vehicle, bool(done)) for tz, vehicle, done in self.db.execute(
-            "SELECT tz, vehicle, backfilled FROM units WHERE vehicle IS NOT NULL ORDER BY CAST(tz AS INTEGER)")]
+            "SELECT tz, vehicle, backfilled FROM units WHERE vehicle IS NOT NULL ORDER BY backfilled, CAST(tz AS INTEGER)")]
+
+    def get_state(self, key):
+        row = self.db.execute("SELECT value FROM state WHERE key = ?", (key,)).fetchone()
+        return row[0] if row else None
+
+    def set_state(self, key, value):
+        self.db.execute("INSERT INTO state (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                        (key, str(value)))
+        self.db.commit()
+
+    def last_finished_round(self):
+        """When the last vehicle round started, if it ran to its end (a restart cuts one off, it then reads "running")."""
+        row = self.db.execute("SELECT started, note FROM rounds WHERE note NOT LIKE 'new Tz:%' ORDER BY id DESC LIMIT 1").fetchone()
+        if row is None or row[1].startswith(("running", "rejected")):
+            return None
+        return row[0]
+
+    def start_round(self, now):
+        cursor = self.db.execute("INSERT INTO rounds (started, updated, asked, statuses, note) VALUES (?, ?, 0, '{}', 'running')",
+                                 (now, now))
+        self.db.commit()
+        self.db.execute("DELETE FROM rounds WHERE id <= ?", (cursor.lastrowid - 200,))  # the last 200 rounds
+        return cursor.lastrowid
+
+    def update_round(self, round_id, now, asked, statuses, note):
+        """`statuses`: how often the host answered each HTTP status (599: no answer at all)."""
+        self.db.execute("UPDATE rounds SET updated = ?, asked = ?, statuses = ?, note = ? WHERE id = ?",
+                        (now, asked, json.dumps(statuses, sort_keys=True), note, round_id))
+        self.db.commit()
 
     def mark_backfilled(self, tz):
         self.db.execute("UPDATE units SET backfilled = 1 WHERE tz = ?", (tz,))
@@ -337,6 +390,7 @@ class RisClient:
         self.session = None
         self.token = None
         self.started = 0
+        self.last_empty = None
 
     async def close(self):
         session, self.session = self.session, None
@@ -368,10 +422,18 @@ class RisClient:
                 if response.status in (401, 403) and attempt == 0:
                     await self.close()  # a new session, a new token
                     continue
+                raw = await response.read()
                 try:
-                    body = await response.json(content_type=None)
-                except Exception:  # noqa: BLE001 - no JSON, e.g. an error page
+                    body = json.loads(raw) if raw else None
+                except ValueError:  # no JSON, e.g. an error page
                     body = None
+                if body is None and b"Request Rejected" in raw:
+                    # The host's firewall page (with a 200): too many requests from this address for now.
+                    return 429, None
+                if body is None:
+                    # Kept for the round record: what the host sent instead of JSON.
+                    self.last_empty = (f"{response.status} {response.headers.get('Content-Type')} "
+                                       f"{response.headers.get('Content-Encoding')} {len(raw)} bytes {raw[:80]!r}")
                 return response.status, body
         return 403, None
 
@@ -445,7 +507,7 @@ class Scanner:
     (status, body)` the WiFi host (`RisClient`, none: no vehicle lookups); replaced in tests."""
 
     def __init__(self, store, get, hubs=HUBS, interval=3.0, every=43200, now=time.time, sleep=asyncio.sleep,
-                 pause_left=lambda: 0, ris=None, ris_interval=1.0, vehicle_every=43200):
+                 pause_left=lambda: 0, ris=None, ris_interval=2.0, vehicle_every=43200):
         self.store = store
         self.get = get
         self.hubs = hubs
@@ -466,7 +528,21 @@ class Scanner:
     async def run(self):
         """Vehicle rounds `vehicle_every` apart and board scans `every` apart, whatever one took; a round's vehicle
         lookups come first, so the boards only ask for trains they didn't explain."""
-        next_boards = next_vehicles = self.now()
+        # A restart doesn't start rounds early: they go on from when the last ones ran (kept in the file), only a
+        # vehicle round a restart cut off is done again right away.
+        now = self.now()
+        last_boards = self.store.get_state("boards_started")
+        next_boards = float(last_boards) + self.every if last_boards else now
+        last_vehicles = self.store.last_finished_round()
+        next_vehicles = last_vehicles + self.vehicle_every if last_vehicles is not None else now
+        # Tz new in the seed get their week right away, not only with the next round.
+        if self.ris is not None and next_vehicles > now and any(not done for _, _, done in self.store.vehicles()):
+            try:
+                await self.scan_vehicles(only_new=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 - the next round does them
+                log.exception("Tz round for new Tz failed")
         while True:
             for name in ("vehicles", "boards"):
                 due = next_boards if name == "boards" else next_vehicles
@@ -481,6 +557,7 @@ class Scanner:
                     log.exception("Tz %s round failed", name)
                 if name == "boards":
                     next_boards = started + self.every
+                    self.store.set_state("boards_started", started)
                 else:
                     next_vehicles = started + self.vehicle_every
             upcoming = [next_boards] + ([next_vehicles] if self.ris is not None else [])
@@ -547,9 +624,10 @@ class Scanner:
         entries, seen, at = [], set(), start
         while at < end:
             status, body = await self._ask(board_path(eva, at))
-            page = (body or {}).get("entries") if status == 200 and isinstance(body, dict) else None
-            if page is None:
+            if status != 200 or not isinstance(body, dict):
                 break
+            # A window without trains (at night) answers {} without "entries": an empty page, not the end.
+            page = body.get("entries") or []
             fresh = [e for e in page if e.get("journeyId") not in seen]
             seen.update(e.get("journeyId") for e in fresh)
             entries += fresh
@@ -563,24 +641,56 @@ class Scanner:
             at = last if last is not None and last > at else at + dt.timedelta(hours=1)
         return [e for e in entries if _before(e, end)]
 
-    async def scan_vehicles(self):
+    async def scan_vehicles(self, only_new=False):
         """One request per known Tz and day to the WiFi host: today (and the day before in a day's first round); a
-        Tz seen for the first time also gets the last `BACKFILL_DAYS` days."""
+        Tz seen for the first time also gets the last `BACKFILL_DAYS` days. `only_new`: just the Tz not backfilled
+        yet (new in the seed), which doesn't count as a round for the schedule."""
         if self.ris is None:
             return
         today = dt.datetime.fromtimestamp(self.now(), BERLIN).date()
         recent = [today] if self.vehicle_day == today else [today - dt.timedelta(days=1), today]
+        # From noon on the host also knows the early trains of tomorrow (it looks about 22 hours ahead).
+        if dt.datetime.fromtimestamp(self.now(), BERLIN).hour >= 12:
+            recent.append(today + dt.timedelta(days=1))
         failures = asked = 0
+        statuses = {}
+        samples = []  # the first answers that named another trainset or none, to see what the host really says
+        round_id = self.store.start_round(self.now())
+        prefix = "new Tz: " if only_new else ""
+        note = prefix + "done"
+        pauses = 0
+        blocked = False
         for tz, uic, backfilled in self.store.vehicles():
+            if only_new and backfilled:
+                continue
             days = recent if backfilled else [today - dt.timedelta(days=n) for n in range(BACKFILL_DAYS, -1, -1)]
             complete = True
             for day in days:
-                await self.sleep(self.ris_interval)
-                try:
-                    status, body = await self.ris(uic, day.isoformat())
-                except Exception:  # noqa: BLE001 - counts as a failed request
-                    status, body = 599, None
-                asked += 1
+                while True:
+                    await self.sleep(self.ris_interval)
+                    try:
+                        status, body = await self.ris(uic, day.isoformat())
+                    except Exception:  # noqa: BLE001 - counts as a failed request
+                        status, body = 599, None
+                    asked += 1
+                    statuses[str(status)] = statuses.get(str(status), 0) + 1
+                    if status != 429 or pauses >= RIS_MAX_PAUSES:
+                        break
+                    pauses += 1
+                    self.store.update_round(round_id, self.now(), asked, statuses,
+                                            " | ".join([f"{prefix}rejected at Tz {tz}, pause {pauses}"] + samples))
+                    log.warning("Tz vehicle round: the WiFi host rejects us, pausing %ds", RIS_BLOCK_PAUSE)
+                    close = getattr(self.ris, "close", None)
+                    if close is not None:
+                        await close()  # a new session afterwards
+                    await self.sleep(RIS_BLOCK_PAUSE)
+                if status == 429:
+                    blocked = True
+                    complete = False
+                    break
+                if asked % 25 == 0:
+                    self.store.update_round(round_id, self.now(), asked, statuses,
+                                            " | ".join([f"{prefix}running, at Tz {tz}"] + samples))
                 if status == 404:
                     continue  # no journeys that day
                 if status != 200:
@@ -588,17 +698,45 @@ class Scanner:
                     complete = False
                     break
                 failures = 0
+                if parse_vehicle_journeys(body)[0] is None:
+                    # A 200 without a trainset (an empty or no JSON body): asked once more a little later, then
+                    # nothing to learn that day; the other days still count.
+                    statuses["empty"] = statuses.get("empty", 0) + 1
+                    if len(samples) < 6:
+                        samples.append(f"empty: Tz {tz} {uic} {day}: {getattr(self.ris, 'last_empty', None)}")
+                    await self.sleep(max(self.ris_interval, 2.0))
+                    try:
+                        status, body = await self.ris(uic, day.isoformat())
+                    except Exception:  # noqa: BLE001 - counts like the empty answer
+                        status, body = 599, None
+                    asked += 1
+                    if status != 200 or parse_vehicle_journeys(body)[0] is None:
+                        continue
+                    statuses["empty-then-ok"] = statuses.get("empty-then-ok", 0) + 1
                 if not apply_vehicle_answer(self.store, tz, body, self.now()):
                     # The coach runs in another trainset now (or the API names none): learn it again from the boards.
+                    statuses["not-this-trainset"] = statuses.get("not-this-trainset", 0) + 1
+                    if len(samples) < 6:
+                        shown = sorted(body) if isinstance(body, dict) else type(body).__name__
+                        vehicle = body.get("vehicle") if isinstance(body, dict) else None
+                        samples.append(f"Tz {tz} {uic} {day}: group {parse_vehicle_journeys(body)[0]}, keys {shown}, "
+                                       f"vehicle {json.dumps(vehicle)[:160]}")
                     complete = False
                     break
             if complete and not backfilled:
                 self.store.mark_backfilled(tz)
+            if blocked:
+                note = f"{prefix}stopped at Tz {tz}: the WiFi host still rejects us after {pauses} pauses"
+                log.warning("Tz vehicle round stopped: the WiFi host rejects us")
+                break
             if failures >= RIS_MAX_FAILURES:
                 log.warning("Tz vehicle round stopped: %d requests failed in a row", failures)
+                note = f"{prefix}stopped at Tz {tz}: {failures} requests failed in a row, last status {status}"
                 break
-        self.vehicle_day = today
-        log.info("Tz vehicle round: %d requests", asked)
+        self.store.update_round(round_id, self.now(), asked, statuses, " | ".join([note] + samples))
+        if not only_new:
+            self.vehicle_day = today
+        log.info("Tz vehicle round%s: %d requests", " (new Tz)" if only_new else "", asked)
 
 
 def _before(entry, end):
