@@ -77,6 +77,20 @@ function platform(info) {
     return planned || actual ? { planned, actual } : null;
 }
 
+/// The feed's color for an S-Bahn or U-Bahn line, as in the app (`Line.lineColorHex`): not for other trains,
+/// and not when white text would be hard to read on it.
+function lineColor(line) {
+    const hex = line?.feedColorHex;
+    if (line?.product !== "suburban" && line?.product !== "subway") return null;
+    if (!Number.isInteger(hex) || hex < 0 || hex > 0xffffff) return null;
+    const channel = shift => {
+        const c = (hex >> shift & 0xff) / 255;
+        return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    };
+    const luminance = 0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0);
+    return 1.05 / (luminance + 0.05) >= 2.5 ? hex : null;
+}
+
 /// The Journey's legs reduced to what the page draws; null without a usable leg.
 export function journeyView(journey) {
     if (!Array.isArray(journey?.legs) || journey.legs.length === 0 || journey.legs.length > MAX_LEGS) return null;
@@ -106,7 +120,7 @@ export function journeyView(journey) {
             arrivalPlatform: platform(leg.arrivalPlatform),
             line: text(leg.line?.name),
             product: typeof leg.line?.product === "string" ? leg.line.product : "other",
-            color: typeof leg.line?.feedColorHex === "number" ? leg.line.feedColorHex : null,
+            color: lineColor(leg.line),
             nightTrain: leg.line?.nightRail === true,
             direction: text(leg.direction),
             walking: Boolean(leg.isWalking),
@@ -162,8 +176,10 @@ function badge(leg) {
 }
 
 function stopsList(leg) {
-    // The first and last stop repeat the leg's own times; the stops in between are the ones to expand.
-    const between = leg.stops.slice(1, -1);
+    // The first and last stop repeat the leg's own times (when the stops include them): the ones in between expand.
+    let between = leg.stops;
+    if (between[0]?.name === leg.origin) between = between.slice(1);
+    if (between[between.length - 1]?.name === leg.destination) between = between.slice(0, -1);
     if (between.length === 0) return "";
     const rows = between.map(stop => {
         const info = stop.arrival ?? stop.departure;
@@ -287,7 +303,6 @@ main { max-width: 34rem; padding: 1rem 1rem 3rem; }
 .stops summary { cursor: pointer; color: var(--muted); font-size: .85rem; padding: .25rem 0; }
 .stops ol { list-style: none; margin: .2rem 0; padding: 0; }
 .stops li { display: grid; grid-template-columns: 4.6rem 1fr auto; align-items: baseline; column-gap: .5rem; font-size: .9rem; margin: .15rem 0; }
-.stops .dot { display: none; }
 .stops li.cancelled .name { text-decoration: line-through; color: var(--muted); }
 .stops li.through { color: var(--muted); }
 .walk { text-align: center; color: var(--muted); font-size: .9rem; padding: .5rem 0; }

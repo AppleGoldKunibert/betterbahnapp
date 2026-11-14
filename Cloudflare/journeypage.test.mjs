@@ -106,6 +106,29 @@ test("walks, cancelled trains and a broken transfer", async () => {
     assert.doesNotMatch(html, /App Store/);
 });
 
+test("line colors follow the app: only S-Bahn and U-Bahn, only with contrast to white", async () => {
+    const colored = (product, feedColorHex) => decodeJourney(payload({
+        source: "bahnDe", legs: [leg({ line: { name: "S1", product, feedColorHex } })],
+    }));
+    assert.equal((await colored("suburban", 0x00658e)).legs[0].color, 0x00658e);
+    assert.equal((await colored("suburban", 0xffff00)).legs[0].color, null);
+    assert.equal((await colored("highSpeed", 0x00658e)).legs[0].color, null);
+    assert.equal((await colored("suburban", undefined)).legs[0].color, null);
+});
+
+test("only stops that repeat the leg's start and end are left out of the list", async () => {
+    const withoutEnds = await decodeJourney(payload({
+        source: "bahnDe",
+        legs: [leg({ stopovers: [
+            { station: station("Spandau"), arrival: time(10), arrivalCancelled: false, departureCancelled: false, access: "normal" },
+            { station: station("Wolfsburg Hbf"), arrival: time(50), arrivalCancelled: false, departureCancelled: false, access: "normal" },
+        ] })],
+    }));
+    const html = journeyPageHTML("Ab3xK9zz", withoutEnds, { style, footer });
+    assert.match(html, /2 Halte/);
+    assert.match(html, /Spandau/);
+});
+
 test("durations", () => {
     assert.equal(durationText(45), "45 Min.");
     assert.equal(durationText(120), "2 Std.");
