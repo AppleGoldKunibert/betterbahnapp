@@ -1,3 +1,4 @@
+import { decodeJourney, journeyPageHTML } from "./journeypage.mjs";
 import { TOKEN_HEADER, unauthorized, verifyToken } from "./shared/appattest.mjs";
 import { arrivalPageHTML, arrivalView, expiryOf, extendedExpiry, parseArrival } from "./arrival.mjs";
 
@@ -131,7 +132,8 @@ Der Server erhält dabei eine zufällige Schlüsselkennung dieser App-Installati
 <p>Wenn du eine Reise teilst, schickt die App die Verbindung (Bahnhöfe, Züge, Zeiten, Gleise) an den Server
 von BetterBahn. Dort wird sie unter einer zufälligen Kennung 30 Tage lang gespeichert und danach automatisch
 gelöscht. Geteilt wird nur ein kurzer Link; wer ihn hat, kann die Reise in dieser Zeit abrufen. Namen, Tickets
-oder andere Angaben über dich sind nicht dabei. Ist der Server nicht erreichbar, teilt die App stattdessen einen
+oder andere Angaben über dich sind nicht dabei. Wer den Link ohne die App öffnet, sieht die Reise auf einer
+Webseite; dafür liest der Server sie beim Abruf aus. Ist der Server nicht erreichbar, teilt die App stattdessen einen
 längeren Link, der die Reise selbst enthält; dann wird nichts gespeichert.</p>
 <p>Mit „Ankunft teilen“ schickt die App zusätzlich den letzten Zug der Reise mit seinen Halten, Zeiten und Gleisen.
 Wer den Link öffnet, sieht auch ohne App eine Seite mit Ankunftszeit und Gleis; die aktuellen Zeiten fragt der
@@ -303,11 +305,13 @@ export function handleTraewellingCallback(request) {
 
 // A journey shared from the app is stored here for a while, so the app can share a short HTTPS link
 // instead of a `betterbahn://share?data=…` link several KB long. The payload is exactly that link's
-// `data` (zlib JSON, base64url); the app decodes and checks it as before, the Worker never looks inside.
+// `data` (deflate JSON, base64url); the app decodes and checks it as before. The Worker only looks inside to
+// draw the journey on `/s/<id>` for people without the app (`journeypage.mjs`), nothing more.
 //
 // POST /share { data }  → 201 { id, url, expiresAt }   (App Attest token, rate limited per app install)
 // GET  /share/<id>      → { data }                     (what the app fetches for a link)
-// GET  /s/<id>          → fallback page: with the app installed, iOS opens the app instead (Universal Link)
+// GET  /s/<id>          → the journey as a web page (with the app installed, iOS opens the app instead:
+//                         Universal Link); a link whose data can't be drawn gets a plain "open in the app" page
 //
 // "Ankunft teilen" (#317, see arrival.mjs): `POST /share { data, arrival }` also stores the last train, only
 // until 2 hours after its arrival; `/s/<id>` then shows the arrival page, which refreshes from
@@ -493,6 +497,12 @@ async function sharePage(request, env, id, now, deps) {
         });
     }
     const exists = entry !== null && !isExpiredArrival(entry, now);
+    // Without the app the link shows the whole journey, drawn from the stored payload.
+    const journey = exists && request.method === "GET" ? await decodeJourney(entry.data) : null;
+    if (journey) {
+        const html = journeyPageHTML(id, journey, { style: PAGE_STYLE, footer: SHARE_FOOTER, appStoreURL: env.APP_STORE_URL });
+        return new Response(html, { status: 200, headers });
+    }
     const html = sharePageHTML(exists ? id : null, env.APP_STORE_URL);
     return new Response(request.method === "HEAD" ? null : html, { status: exists ? 200 : 404, headers });
 }
