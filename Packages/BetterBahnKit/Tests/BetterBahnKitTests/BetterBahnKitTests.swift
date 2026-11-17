@@ -2957,6 +2957,26 @@ private final class Ril100GeocodeProtocol: URLProtocol, @unchecked Sendable {
         #expect(!CrossBorder.isAbroad(koeln, covered: []))
     }
 
+    /// Issue #572: a leg that starts abroad must not switch the operator list off for later legs in Germany.
+    @Test func operatorListAppliesAgainBackInGermany() {
+        let salzburg = station("8100002", "Salzburg Hbf")
+        let muenchen = station("8000261", "München Hbf")
+        let berlin = station("8011160", "Berlin Hbf")
+        let railjet = Line(name: "RJ 61", number: "61", product: .highSpeed, operatorName: "ÖBB")
+        let flix = Line(name: "FLX 1241", number: "1241", product: .longDistance, operatorName: "FlixTrain")
+        let bc100 = TicketFilter.bahnCard100(.default)
+        let viaMunich = Journey(legs: [leg(railjet, from: salzburg, to: muenchen), leg(flix, from: muenchen, to: berlin)],
+                                source: .transitous)
+        #expect(bc100.isValid(leg(railjet, from: salzburg, to: muenchen)))
+        #expect(!bc100.isValid(leg(flix, from: muenchen, to: berlin)))
+        #expect(!bc100.isValid(viaMunich))
+        #expect(!bc100.crossesBorder(viaMunich))
+        // With a DB train after Munich the journey stays valid.
+        let withICE = Journey(legs: [leg(railjet, from: salzburg, to: muenchen), leg(ice, from: muenchen, to: berlin)],
+                              source: .transitous)
+        #expect(bc100.isValid(withICE))
+    }
+
     @Test func boardAbroadIsNotCovered() {
         let praha = Station(id: "cz-CZPTT_czptt:stop:CZ:57076", name: "Praha hl.n.", coordinate: nil, evaNumber: nil, source: .transitous)
         let czechR = Line(name: "R 20", number: "20", product: .regional, operatorName: nil)
