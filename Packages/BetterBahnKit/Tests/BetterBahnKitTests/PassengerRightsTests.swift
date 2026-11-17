@@ -98,8 +98,9 @@ struct PassengerRightsTests {
         let fields = PassengerRights.requestFields(for: late, claim: claim, orderNumbers: [])
         #expect(fields.first { $0.label == "Nach" }?.value == train.destination.displayName)
 
-        // A replacement ending with a walk is measured from train to train as well.
-        let booked = Journey(legs: [leg("ICE 1", product: .highSpeed, delay: 0)], source: .transitous)
+        // A replacement ending with the same walk is measured from train to train as well.
+        let bookedTrain = leg("ICE 1", product: .highSpeed, delay: 0)
+        let booked = Journey(legs: [bookedTrain, walk(after: bookedTrain)], source: .transitous)
         var replacementTrain = leg("ICE 2", product: .highSpeed, delay: 0, arrivesIn: -4 * 3600 + 65 * 60)
         replacementTrain.arrival.actual = nil
         let replacement = Journey(legs: [replacementTrain, walk(after: replacementTrain)], source: .transitous)
