@@ -389,6 +389,9 @@ final class AppModel {
     /// The user's own check-in to show, from tapping a like's notification (#447); the journey opened with
     /// `journeyToOpen` shows it and clears this.
     var checkinToShow: Int?
+    /// The leg whose check-in form to open, from tapping its check-in reminder (#580); the journey opened with
+    /// `journeyToOpen` opens it and clears this.
+    var checkinLegToStart: String?
 
     /// Check-ins imported from Träwelling (newest first), shown on the travel map. Empty until
     /// loaded from disk after launch; `loadTraewellingTrips()` waits for that.

@@ -31,3 +31,57 @@ public extension Journey {
         }
     }
 }
+
+/// Where a check-in reminder's notification points: its identifier is `checkin|<saved journey>|<leg>` (#580).
+public extension CheckinReminder {
+    static let notificationPrefix = "checkin|"
+
+    static func notificationID(entry: UUID, legID: String) -> String {
+        notificationPrefix + entry.uuidString + "|" + legID
+    }
+
+    /// The saved journey and leg of a reminder's notification identifier. Leg IDs may contain "|" themselves
+    /// (bahn.de's trip IDs), so everything after the journey's ID is the leg's.
+    static func target(ofNotificationID identifier: String) -> (entry: UUID, legID: String)? {
+        guard identifier.hasPrefix(notificationPrefix) else { return nil }
+        let parts = identifier.dropFirst(notificationPrefix.count).split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2, let entry = UUID(uuidString: String(parts[0])), !parts[1].isEmpty else { return nil }
+        return (entry, String(parts[1]))
+    }
+}
+
+/// How a check-in straight from a reminder's "Einchecken" button went (#580), told in the notification that
+/// follows. Anything but `.checkedIn` leaves the train to the check-in form, which a tap on it opens.
+public enum ReminderCheckinOutcome: Sendable, Hashable {
+    case checkedIn
+    /// Coupled trains: only the user knows which part they sit in.
+    case needsTrainChoice
+    /// Träwelling doesn't know the train; the form offers to enter it by hand.
+    case trainNotFound
+    /// Träwelling has the user on another train at that time; the form offers to check in anyway.
+    case collision
+    case notLoggedIn
+    case failed
+
+    public var title: String {
+        self == .checkedIn ? String(kit: "Eingecheckt") : String(kit: "Noch nicht eingecheckt")
+    }
+
+    public func body(for leg: Leg) -> String {
+        let train = leg.line?.name ?? String(kit: "deinen Zug")
+        switch self {
+        case .checkedIn:
+            return String(kit: "Du bist in %@ nach %@ eingecheckt.", train, leg.destination.displayName)
+        case .needsTrainChoice:
+            return String(kit: "Tippe hier und wähle, in welchem Zugteil du sitzt.")
+        case .trainNotFound:
+            return String(kit: "Träwelling kennt %@ nicht. Tippe hier, um ihn selbst einzutragen.", train)
+        case .collision:
+            return String(kit: "Du bist zu dieser Zeit schon in einem anderen Zug eingecheckt. Tippe hier, um trotzdem einzuchecken.")
+        case .notLoggedIn:
+            return String(kit: "Tippe hier und melde dich bei Träwelling an.")
+        case .failed:
+            return String(kit: "Das hat gerade nicht geklappt. Tippe hier, um es noch mal zu versuchen.")
+        }
+    }
+}
