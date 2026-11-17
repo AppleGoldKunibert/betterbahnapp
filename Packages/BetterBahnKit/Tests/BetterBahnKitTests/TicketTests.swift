@@ -238,6 +238,34 @@ import Testing
         #expect(pass.boardingPass.transitType == "PKTransitTypeGeneric")
     }
 
+    /// "Datum" is the day at the origin station, like "Ab": 23:30 in London is already the next day in Berlin,
+    /// 00:30 in Helsinki still the previous one.
+    @Test func walletPassDateUsesOriginZone() throws {
+        var ticket = try tickets()[0]
+        ticket.barcode = DBTicket.Barcode(payload: binaryPayload, image: nil)
+        ticket.legs = [ticket.legs[0]]
+
+        ticket.legs[0].originEVA = "7015400" // London St Pancras
+        ticket.legs[0].departure = try #require(DBOrder.localDate("2026-12-14T23:30:00", eva: "7015400"))
+        var pass = try #require(WalletPassPayload(ticket: ticket))
+        #expect(pass.boardingPass.primaryFields.first?.label == "Ab 23:30")
+        #expect(pass.boardingPass.headerFields.map(\.value) == [Self.germanDate(day: 14)])
+
+        ticket.legs[0].originEVA = "1000001" // Helsinki
+        ticket.legs[0].departure = try #require(DBOrder.localDate("2026-12-15T00:30:00", eva: "1000001"))
+        pass = try #require(WalletPassPayload(ticket: ticket))
+        #expect(pass.boardingPass.primaryFields.first?.label == "Ab 0:30")
+        #expect(pass.boardingPass.headerFields.map(\.value) == [Self.germanDate(day: 15)])
+    }
+
+    /// December `day` 2026 as the pass formats it, so the test doesn't depend on the system's
+    /// spelling of the abbreviated month.
+    private static func germanDate(day: Int) -> String {
+        let date = DBShare.berlinCalendar.date(from: DateComponents(year: 2026, month: 12, day: day, hour: 12))!
+        return date.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted, locale: KitLocalization.locale,
+                                               timeZone: TimeZone(identifier: "Europe/Berlin")!))
+    }
+
     /// An A4 PDF with `payload` as an Aztec code, like DB's ticket.
     static func pdf(withAztec payload: Data) -> Data? {
         let filter = CIFilter(name: "CIAztecCodeGenerator")!
