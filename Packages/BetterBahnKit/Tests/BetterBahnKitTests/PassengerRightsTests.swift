@@ -21,6 +21,16 @@ struct PassengerRightsTests {
         Journey(legs: [leg("ICE 1", product: product, delay: delay)], source: .transitous)
     }
 
+    /// A footpath after `train` to `to`, as Transitous returns them: walks never get live times.
+    func walk(after train: Leg, to: String = "dom", minutes: TimeInterval = 10) -> Leg {
+        let start = train.arrival.planned
+        return Leg(origin: train.destination, destination: station(to, to, source: .transitous),
+                   departure: TimeInfo(planned: start, actual: nil),
+                   arrival: TimeInfo(planned: start.addingTimeInterval(minutes * 60), actual: nil),
+                   departurePlatform: nil, arrivalPlatform: nil, tripId: nil, line: nil, direction: nil,
+                   isWalking: true, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+    }
+
     @Test func thresholds() {
         #expect(PassengerRights.compensation(forDelay: 59) == nil)
         #expect(PassengerRights.compensation(forDelay: 60) == .quarter)
@@ -74,6 +84,34 @@ struct PassengerRightsTests {
         let elsewhere = Journey(legs: [leg("ICE 3", product: .highSpeed, to: "muenchen", delay: 0, arrivesIn: -7200)], source: .transitous)
         let claim = PassengerRights.claim(for: journey(delay: 10), earlierPlans: [elsewhere], hasTicket: true, hasBahnCard100: false, now: now)
         #expect(claim == nil)
+    }
+
+    @Test func walkAtTheEndDoesNotHideTheDelay() throws {
+        // #565: the ICE arrives 90 minutes late, then a walk without live times ends the journey.
+        let train = leg("ICE 1", product: .highSpeed, delay: 90)
+        let late = Journey(legs: [train, walk(after: train)], source: .transitous)
+        let claim = try #require(PassengerRights.claim(for: late, hasTicket: false, hasBahnCard100: false, now: now))
+        #expect(claim.compensation == .quarter)
+        #expect(claim.delayMinutes == 90)
+        #expect(claim.plannedArrival == train.arrival.planned)
+        // The form names the stations of the trains, not where the walk ends.
+        let fields = PassengerRights.requestFields(for: late, claim: claim, orderNumbers: [])
+        #expect(fields.first { $0.label == "Nach" }?.value == train.destination.displayName)
+
+        // A replacement ending with a walk is measured from train to train as well.
+        let booked = Journey(legs: [leg("ICE 1", product: .highSpeed, delay: 0)], source: .transitous)
+        var replacementTrain = leg("ICE 2", product: .highSpeed, delay: 0, arrivesIn: -4 * 3600 + 65 * 60)
+        replacementTrain.arrival.actual = nil
+        let replacement = Journey(legs: [replacementTrain, walk(after: replacementTrain)], source: .transitous)
+        let replanned = PassengerRights.claim(for: replacement, earlierPlans: [booked], hasTicket: true,
+                                              hasBahnCard100: false, now: now)
+        #expect(replanned?.delayMinutes == 65)
+
+        // A cancelled last train still means no claim, whatever walk follows.
+        var cancelled = train
+        cancelled.cancelled = true
+        let gone = Journey(legs: [cancelled, walk(after: cancelled)], source: .transitous)
+        #expect(PassengerRights.claim(for: gone, hasTicket: true, hasBahnCard100: false, now: now) == nil)
     }
 
     @Test func requestTextHasWhatTheFormAsks() throws {
