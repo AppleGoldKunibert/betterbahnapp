@@ -248,6 +248,43 @@ test("warns when a transfer gets tight", async () => {
     assert.equal(pushes[0].payload.aps.alert["loc-key"], "%@ Min. zum Umsteigen von %@ in %@.");
 });
 
+test("warns again about a transfer after the journey was replanned", async () => {
+    const env = await environment();
+    const station = (name, eva, hhmm) => ({ eva, name, time: at(hhmm) / 1000 });
+    const s1 = { line: "S 1", category: "S", number: "1234",
+        from: station("Berlin Gesundbrunnen", "8011102", "0818"), to: station("Berlin Friedrichstraße", "8011306", "0835") };
+    const s2 = { line: "S 2", category: "S", number: "5678",
+        from: station("Berlin Gesundbrunnen", "8011102", "0822"), to: station("Berlin Friedrichstraße", "8011306", "0839") };
+    const iris = {
+        ...baseIris,
+        "plan/8011102/261019/08": plan(planned("g-1", "3354", { ar: "2610190814", pp: "7" }),
+            `<s id="g-2"><tl c="S" n="1234"/><dp pt="2610190818" pp="1"/></s>`,
+            `<s id="g-3"><tl c="S" n="5678"/><dp pt="2610190822" pp="1"/></s>`),
+        "plan/8011306/261019/08": plan(`<s id="f-2"><tl c="S" n="1234"/><ar pt="2610190835" pp="3"/></s>`,
+            `<s id="f-3"><tl c="S" n="5678"/><ar pt="2610190839" pp="3"/></s>`),
+        "fchg/8011102": plan(`<s id="g-1" eva="8011102"><ar ct="2610190819"/></s>`),
+        "fchg/8011306": plan(),
+    };
+    const { fetch, pushes } = upstream(iris);
+    await put(env, { journeys: [{ id: "J3", threshold: 10, legs: [re3, s1] }] }, fetch);
+    await processDueCommutes(env, now, { fetch });
+    assert.equal(pushes.length, 1);
+    assert.equal(pushes[0].payload.aps.alert.title, "Umstieg in Berlin Gesundbrunnen klappt nicht mehr");
+
+    // The same journey sent again keeps what was reported.
+    await put(env, { journeys: [{ id: "J3", threshold: 10, legs: [re3, s1] }] }, fetch);
+    await processDueCommutes(env, now + 60000, { fetch });
+    assert.equal(pushes.length, 1);
+
+    // Replanned onto a later S-Bahn: its transfer is news again.
+    await put(env, { journeys: [{ id: "J3", threshold: 10, legs: [re3, s2] }] }, fetch);
+    await processDueCommutes(env, now + 120000, { fetch });
+    assert.equal(pushes.length, 2);
+    assert.deepEqual(german(pushes[1].payload.aps.alert), {
+        title: "Umstieg in Berlin Gesundbrunnen wird knapp", body: "3 Min. zum Umsteigen von RE 3 in S 2.",
+    });
+});
+
 test("forgets journeys that have arrived", async () => {
     const env = await environment();
     const { fetch } = upstream(baseIris);
