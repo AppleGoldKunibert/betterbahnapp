@@ -911,7 +911,14 @@ struct LegTripSheet: View {
 
     private func load() async {
         guard let tripId else {
-            error = TransitError.notFound(String(localized: "Fahrt"))
+            // A train no timetable feed knows (imported from a DB share before its timetable year is out):
+            // the stops saved with it, with DB's live data.
+            guard let saved = leg.savedTrip else {
+                error = TransitError.notFound(String(localized: "Fahrt"))
+                return
+            }
+            if trip == nil { trip = saved }
+            trip = await model.liveRun.refresh(saved, baseline: trip, wholeRun: false)
             return
         }
         do {

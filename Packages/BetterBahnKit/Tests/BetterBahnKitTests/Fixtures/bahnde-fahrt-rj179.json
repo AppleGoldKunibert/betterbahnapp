@@ -1,0 +1,222 @@
+{
+ "zugName": "RJ 179",
+ "halte": [
+  {
+   "id": "A=1@O=Hamburg-Altona@X=9935175@Y=53552697@U=81@L=8002553@i=U×008001093@",
+   "extId": "8002553",
+   "name": "Hamburg-Altona",
+   "abfahrt": {
+    "sollzeit": "2026-12-13T17:18:00"
+   },
+   "adminID": "80",
+   "kategorie": "RJ"
+  },
+  {
+   "id": "A=1@O=Hamburg Hbf@X=10006909@Y=53552733@U=81@L=8002549@i=U×008001071@",
+   "extId": "8002549",
+   "name": "Hamburg Hbf",
+   "abfahrt": {
+    "sollzeit": "2026-12-13T17:34:00"
+   },
+   "ankunft": {
+    "sollzeit": "2026-12-13T17:30:00"
+   },
+   "adminID": "80",
+   "kategorie": "RJ"
+  },
+  {
+   "id": "A=1@O=Berlin-Spandau@X=13196902@Y=52534650@U=81@L=8010404@i=U×008003025@",
+   "extId": "8010404",
+   "name": "Berlin-Spandau",
+   "gleis": "5",
+   "abfahrt": {
+    "sollzeit": "2026-12-13T19:12:00"
+   },
+   "ankunft": {
+    "sollzeit": "2026-12-13T19:10:00"
+   },
+   "adminID": "80",
+   "kategorie": "RJ"
+  },
+  {
+   "id": "A=1@O=Berlin Hbf@X=13369549@Y=52525589@U=81@L=8098160@i=U×008031922@",
+   "extId": "8098160",
+   "name": "Berlin Hbf",
+   "gleis": "3",
+   "abfahrt": {
+    "sollzeit": "2026-12-13T19:28:00"
+   },
+   "ankunft": {
+    "sollzeit": "2026-12-13T19:21:00"
+   },
+   "adminID": "80",
+   "kategorie": "RJ"
+  },
+  {
+   "id": "A=1@O=Berlin Südkreuz@X=13365315@Y=52475043@U=81@L=8011113@i=U×008065971@",
+   "extId": "8011113",
+   "name": "Berlin Südkreuz",
+   "gleis": "3",
+   "abfahrt": {
+    "sollzeit": "2026-12-13T19:37:00"
+   },
+   "ankunft": {
+    "sollzeit": "2026-12-13T19:35:00"
+   },
+   "adminID": "80",
+   "kategorie": "RJ"
+  },
+  {
+   "id": "A=1@O=Dresden-Neustadt@X=13740704@Y=51065903@U=81@L=8010089@i=U×008006216@",
+   "extId": "8010089",
+   "name": "Dresden-Neustadt",
+   "gleis": "8",
+   "abfahrt": {
+    "sollzeit": "2026-12-13T21:02:00"
+   },
+   "ankunft": {
+    "sollzeit": "2026-12-13T21:00:00"
+   },
+   "adminID": "80",
+   "kategorie": "RJ"
+  },
+  {
+   "id": "A=1@O=Dresden Hbf@X=13732039@Y=51040562@U=81@L=8010085@i=U×008006050@",
+   "extId": "8010085",
+   "name": "Dresden Hbf",
+   "gleis": "1",
+   "abfahrt": {
+    "sollzeit": "2026-12-13T21:10:00"
+   },
+   "ankunft": {
+    "sollzeit": "2026-12-13T21:07:00"
+   },
+   "adminID": "80",
+   "kategorie": "RJ"
+  },
+  {
+   "id": "A=1@O=Bad Schandau@X=14137542@Y=50919289@U=81@L=8010022@i=U×008006006@",
+   "extId": "8010022",
+   "name": "Bad Schandau",
+   "gleis": "3",
+   "abfahrt": {
+    "sollzeit": "2026-12-13T21:37:00"
+   },
+   "ankunft": {
+    "sollzeit": "2026-12-13T21:35:00"
+   },
+   "adminID": "80",
+   "kategorie": "RJ"
+  },
+  {
+   "id": "A=1@O=Decin hl.n.@X=14201249@Y=50773412@U=81@L=5400003@i=U×005455659@",
+   "extId": "5400003",
+   "name": "Decin hl.n.",
+   "abfahrt": {
+    "sollzeit": "2026-12-13T21:57:00"
+   },
+   "ankunft": {
+    "sollzeit": "2026-12-13T21:53:00"
+   },
+   "adminID": "54",
+   "kategorie": "RJ"
+  },
+  {
+   "id": "A=1@O=Usti nad Labem hl.n.@X=14044728@Y=50659564@U=81@L=5400019@i=U×005453179@",
+   "extId": "5400019",
+   "name": "Usti nad Labem hl.n.",
+   "abfahrt": {
+    "sollzeit": "2026-12-13T22:13:00"
+   },
+   "ankunft": {
+    "sollzeit": "2026-12-13T22:11:00"
+   },
+   "adminID": "54",
+   "kategorie": "RJ"
+  },
+  {
+   "id": "A=1@O=Lovosice@X=14059587@Y=50509713@U=81@L=5400176@i=U×005455859@",
+   "extId": "5400176",
+   "name": "Lovosice",
+   "abfahrt": {
+    "sollzeit": "2026-12-13T22:30:00"
+   },
+   "ankunft": {
+    "sollzeit": "2026-12-13T22:28:00"
+   },
+   "adminID": "54",
+   "kategorie": "RJ"
+  },
+  {
+   "id": "A=1@O=Roudnice nad Labem@X=14263831@Y=50426599@U=81@L=5400183@i=U×005454257@",
+   "extId": "5400183",
+   "name": "Roudnice nad Labem",
+   "abfahrt": {
+    "sollzeit": "2026-12-13T22:41:00"
+   },
+   "ankunft": {
+    "sollzeit": "2026-12-13T22:39:00"
+   },
+   "adminID": "54",
+   "kategorie": "RJ"
+  },
+  {
+   "id": "A=1@O=Kralupy nad Vltavou@X=14313470@Y=50238725@U=81@L=5400126@i=U×005454396@",
+   "extId": "5400126",
+   "name": "Kralupy nad Vltavou",
+   "abfahrt": {
+    "sollzeit": "2026-12-13T23:05:00"
+   },
+   "ankunft": {
+    "sollzeit": "2026-12-13T23:03:00"
+   },
+   "adminID": "54",
+   "kategorie": "RJ"
+  },
+  {
+   "id": "A=1@O=Praha-Holesovice@X=14440011@Y=50110215@U=81@L=5400201@i=U×005457256@",
+   "extId": "5400201",
+   "name": "Praha-Holesovice",
+   "abfahrt": {
+    "sollzeit": "2026-12-13T23:28:00"
+   },
+   "ankunft": {
+    "sollzeit": "2026-12-13T23:24:00"
+   },
+   "adminID": "54",
+   "kategorie": "RJ"
+  },
+  {
+   "id": "A=1@O=Praha hl.n.@X=14436038@Y=50083058@U=81@L=5400014@i=U×005457076@",
+   "extId": "5400014",
+   "name": "Praha hl.n.",
+   "ankunft": {
+    "sollzeit": "2026-12-13T23:37:00"
+   },
+   "adminID": "54",
+   "kategorie": "RJ"
+  }
+ ],
+ "zugattribute": [
+  {
+   "kategorie": "BARRIEREFREI",
+   "key": "RO",
+   "value": "Rollstuhlstellplatz"
+  },
+  {
+   "kategorie": "BORDBISTRO",
+   "key": "BR",
+   "value": "Bordrestaurant"
+  },
+  {
+   "kategorie": "FAHRRADMITNAHME",
+   "key": "FR",
+   "value": "Fahrradmitnahme reservierungspflichtig"
+  },
+  {
+   "kategorie": "FAHRRADMITNAHME",
+   "key": "FB",
+   "value": "Fahrradmitnahme begrenzt möglich"
+  }
+ ]
+}

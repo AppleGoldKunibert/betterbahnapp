@@ -105,6 +105,64 @@ import Testing
         #expect(DBShare.text(fromAppURL: URL(string: "betterbahn://share?data=abc")!) == nil)
     }
 
+    /// Issue #578: RJ 179 Hamburg → Berlin on 13.12.2026, the first day of a timetable year Transitous didn't
+    /// have DB's data for yet. bahn.de's board and journey details give the leg instead.
+    @Test func buildsLegFromBahnDeWhenTimetableLacksTrain() throws {
+        let recon = "¶HKI¶T$A=1@O=Hamburg Hbf@X=10006909@Y=53552733@L=8002549@a=128@$A=1@O=Berlin Hbf@X=13369549@Y=52525589@L=8098160@a=128@$202612131734$202612131921$RJ            179$$1$$$$$$¶KC¶"
+        let shared = try #require(DBShare.legs(fromRecon: recon)?.first)
+        let board = try fixture("bahnde-board-hamburg-rj179", as: BahnDeClient.Board.self)
+        let entry = try #require(BahnDeClient.boardEntry(in: board, for: shared))
+        #expect(entry.verkehrmittel?.name == "RJ 179")
+        let details = try fixture("bahnde-fahrt-rj179", as: BahnDeClient.JourneyDetails.self)
+        let leg = try #require(BahnDeClient.leg(shared, entry: entry, details: details))
+        #expect(leg.tripId == nil)
+        #expect(leg.line?.name == "RJ 179")
+        #expect(leg.line?.product == .highSpeed)
+        #expect(leg.direction == "Praha hl.n.")
+        #expect(leg.departure.planned == berlin("2026-12-13 17:34"))
+        #expect(leg.arrival.planned == berlin("2026-12-13 19:21"))
+        #expect(leg.stopovers.map(\.station.name) == ["Hamburg Hbf", "Berlin-Spandau", "Berlin Hbf"])
+        #expect(leg.arrivalPlatform?.planned == "3")
+        #expect(leg.destination.evaNumber == "8098160")
+    }
+
+    @Test func boardEntryNeedsSameTimeAndTrain() throws {
+        let board = try fixture("bahnde-board-hamburg-rj179", as: BahnDeClient.Board.self)
+        let station = Station(id: "8002549", name: "Hamburg Hbf", coordinate: nil, evaNumber: "8002549", source: .bahnDe)
+        func shared(_ name: String, _ time: String) -> SharedConnection.Leg {
+            .init(trainName: name, origin: station, destination: station, departure: berlin(time), arrival: berlin(time))
+        }
+        #expect(BahnDeClient.boardEntry(in: board, for: shared("RJ 179", "2026-12-13 17:35")) == nil)
+        #expect(BahnDeClient.boardEntry(in: board, for: shared("RJ 177", "2026-12-13 17:34")) == nil)
+        // A bare run number, as bahn.de's text names some regional trains.
+        #expect(BahnDeClient.boardEntry(in: board, for: shared("81633", "2026-12-13 17:33"))?.verkehrmittel?.mittelText == "RB31")
+    }
+
+    @Test func plainLegNeedsLocatedStations() throws {
+        let malmo = Station(id: "7400004", name: "Malmö Central", coordinate: Coordinate(latitude: 55.609231, longitude: 13.00126),
+                            evaNumber: "7400004", source: .bahnDe)
+        let copenhagen = Station(id: "8601309", name: "Koebenhavn H", coordinate: Coordinate(latitude: 55.673063, longitude: 12.565562),
+                                 evaNumber: "8601309", source: .bahnDe)
+        let shared = SharedConnection.Leg(trainName: "R 1059", origin: malmo, destination: copenhagen,
+                                          departure: berlin("2026-12-13 11:20"), arrival: berlin("2026-12-13 11:58"))
+        let leg = try #require(DBShareImporter.plainLeg(shared))
+        #expect(leg.line?.name == "R 1059")
+        #expect(leg.line?.number == "1059")
+        #expect(leg.line?.product == .regional)
+        #expect(leg.savedTrip?.stopovers.count == 2)
+        var unknown = shared
+        unknown.destination.coordinate = nil
+        #expect(DBShareImporter.plainLeg(unknown) == nil)
+    }
+
+    @Test func lineProductFromNameAndGattung() {
+        #expect(DBShareImporter.line(named: "ECE 393").product == .highSpeed)
+        #expect(DBShareImporter.line(named: "IC 488").product == .longDistance)
+        #expect(DBShareImporter.line(named: "RE 80", gattung: "REGIONAL").product == .regionalExpress)
+        #expect(DBShareImporter.line(named: "NJ 491", gattung: "EC_IC").product == .nightTrain)
+        #expect(DBShareImporter.line(named: "Bus 100", gattung: "BUS").product == .bus)
+    }
+
     @Test func bareTrainNumberMatchesRunNumber() {
         let line = Line(name: "RE 8", number: "8", product: .regionalExpress, operatorName: nil, tripNumber: "89687")
         #expect(DBShareImporter.matches("89687", line))
