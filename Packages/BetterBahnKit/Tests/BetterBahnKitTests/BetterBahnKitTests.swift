@@ -6213,6 +6213,35 @@ private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
         #expect(RouteGeometryService.followsTracks(hop))
     }
 
+    @Test func boardLookupDoesNotTakeATramWithTheSameNumberForAnSBahn() {
+        let departure = Date(timeIntervalSince1970: 1_800_000_000)
+        func entry(_ tripId: String, _ name: String, _ product: Product, minutes: Double = 0) -> BoardEntry {
+            BoardEntry(kind: .departures, tripId: tripId, station: station("8000191", "Karlsruhe Hbf"),
+                       line: Line(name: name, number: "3", product: product, operatorName: nil), otherEnd: nil,
+                       time: TimeInfo(planned: departure.addingTimeInterval(minutes * 60), actual: nil),
+                       platform: PlatformInfo(planned: "1", actual: nil), cancelled: false,
+                       terminatesOrOriginatesHere: nil, remarks: [], source: .transitous)
+        }
+        let sBahn = Line(name: "S 3", number: "3", product: .suburban, operatorName: nil)
+        let tram = entry("tram", "3", .tram), bus = entry("bus", "3", .bus)
+
+        // The tram is listed first, at the very same minute.
+        #expect(RouteGeometryService.sameTrain(as: sBahn, departing: departure,
+                                               in: [tram, bus, entry("s", "S3", .suburban)])?.tripId == "s")
+        // Named differently in the feed: the number still finds it, but only on an S-Bahn.
+        #expect(RouteGeometryService.sameTrain(as: sBahn, departing: departure,
+                                               in: [tram, bus, entry("s", "S-Bahn 3", .suburban, minutes: 1)])?.tripId == "s")
+        // No S-Bahn on the board: no shape rather than the tram's.
+        #expect(RouteGeometryService.sameTrain(as: sBahn, departing: departure, in: [tram, bus]) == nil)
+        // Too far off in time.
+        #expect(RouteGeometryService.sameTrain(as: sBahn, departing: departure,
+                                               in: [entry("s", "S3", .suburban, minutes: 5)]) == nil)
+        // Feeds class long-distance trains differently; the number still matches across them.
+        let ice = Line(name: "ICE 3", number: "3", product: .highSpeed, operatorName: nil)
+        #expect(RouteGeometryService.sameTrain(as: ice, departing: departure,
+                                               in: [tram, entry("ic", "3", .longDistance)])?.tripId == "ic")
+    }
+
     @Test func simplifyKeepsTheShape() {
         let track = (0...500).map { i -> Coordinate in
             let t = Double(i) / 500

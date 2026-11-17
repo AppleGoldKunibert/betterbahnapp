@@ -58,6 +58,24 @@ public struct RouteGeometryService: Sendable {
         return best.transitLegs.compactMap(\.geometry).flatMap { $0 }
     }
 
+    /// The board entry that is this train, leaving within 3 minutes of `departure`. The same name
+    /// wins; failing that the same number, but only of the same kind of transport: "S 3", tram "3"
+    /// and bus "3" all carry the number 3, and a tram's track drawn for the S-Bahn is worse than none.
+    static func sameTrain(as line: Line, departing departure: Date, in entries: [BoardEntry]) -> BoardEntry? {
+        let near = entries.filter { abs($0.time.planned.timeIntervalSince(departure)) <= 3 * 60 }
+        let wanted = Line.normalize(line.name)
+        if let named = near.first(where: { Line.normalize($0.line.name) == wanted }) { return named }
+        guard let number = line.number else { return nil }
+        return near.first { entry in
+            entry.line.number == number && Self.isSameKind(entry.line.product, line.product)
+        }
+    }
+
+    /// Feeds disagree on whether a long-distance train is high-speed (ICE vs. IC), so those count as one kind.
+    private static func isSameKind(_ a: Product, _ b: Product) -> Bool {
+        a == b || (a.isLongDistance && b.isLongDistance)
+    }
+
     private func shapeFromTransitous(_ leg: Leg) async throws -> [Coordinate]? {
         var tripId: String? = leg.source == .transitous ? leg.tripId : nil
         if tripId == nil, let line = leg.line {
@@ -65,12 +83,7 @@ public struct RouteGeometryService: Sendable {
             let entries = try await transitous.board(.departures, at: leg.origin,
                                                      date: leg.departure.planned.addingTimeInterval(-5 * 60), duration: 15,
                                                      products: Set(Product.allCases))
-            let wanted = Line.normalize(line.name)
-            tripId = entries.first { entry in
-                abs(entry.time.planned.timeIntervalSince(leg.departure.planned)) <= 3 * 60
-                    && (Line.normalize(entry.line.name) == wanted
-                        || (line.number != nil && entry.line.number == line.number))
-            }?.tripId
+            tripId = Self.sameTrain(as: line, departing: leg.departure.planned, in: entries)?.tripId
         }
         guard let tripId else { return nil }
         let itinerary = try await http.get(
