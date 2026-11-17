@@ -44,7 +44,6 @@ public enum DBOrder {
                 let origin = offer.gueltigkeitsstrecke?.abgangsbahnhofName ?? connection.first?.originName ?? ""
                 let destination = offer.gueltigkeitsstrecke?.zielbahnhofName ?? connection.last?.destinationName ?? ""
                 let covered = Self.legs(of: connection, from: origin, to: destination)
-                let coveredTrains = Set(covered.compactMap(\.trainNumber))
                 tickets.append(DBTicket(
                     orderNumber: orderNumber,
                     bundleID: bundle,
@@ -63,7 +62,7 @@ public enum DBOrder {
                     validDestination: destination,
                     legs: covered,
                     connection: connection,
-                    seats: seats.filter { seat in coveredTrains.contains { seat.train.hasSuffix($0) } },
+                    seats: seats.filter { seat in covered.contains { Self.isSeat(seat, in: $0) } },
                     barcode: barcodes[bundle],
                     fetchedAt: fetchedAt))
             }
@@ -121,6 +120,12 @@ public enum DBOrder {
               let last = connection[first...].firstIndex(where: { Station.normalize($0.destinationName) == end })
         else { return connection }
         return Array(connection[first...last])
+    }
+
+    /// Whether the seat was reserved in the leg's train. Whole train numbers count: the seat in
+    /// EUROSTAR 9116 isn't in ICE 16.
+    static func isSeat(_ seat: DBTicket.Seat, in leg: DBTicket.Leg) -> Bool {
+        DBShareImporter.matches(seat.train, leg.line)
     }
 
     // MARK: - Mapping

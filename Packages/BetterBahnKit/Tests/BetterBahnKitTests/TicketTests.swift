@@ -58,6 +58,42 @@ import Testing
         #expect(eurostar.seats.map(\.description) == ["EUROSTAR 9149: Wagen 2, Platz 37, 38"])
     }
 
+    @Test func givesEachTicketOnlyItsOwnTrainsSeats() throws {
+        // One train number ends with the other's: the Eurostar seat must not land on the ICE ticket.
+        func section(_ from: String, _ to: String, _ dep: String, _ arr: String, _ name: String, _ number: String) -> String {
+            """
+            {"startHalt":{"name":"\(from)"},"zielHalt":{"name":"\(to)"},
+             "abfahrt":{"sollzeit":"2026-10-20T\(dep):00"},"ankunft":{"sollzeit":"2026-10-20T\(arr):00"},
+             "verkehrsmittel":{"name":"\(name)","nummer":"\(number)","typ":"PUBLICTRANSPORT"}}
+            """
+        }
+        func offer(_ name: String, _ bundle: String, _ from: String, _ to: String) -> String {
+            """
+            {"name":"\(name)","leistungsbuendelId":"\(bundle)",
+             "gueltigkeitsstrecke":{"abgangsbahnhofName":"\(from)","zielbahnhofName":"\(to)"}}
+            """
+        }
+        func reservation(_ type: String, _ number: String, _ coach: String, _ seat: String) -> String {
+            """
+            {"reservierung":{"zugtyp":"\(type)","zugnummer":"\(number)","zugname":"\(type) \(number)",
+             "wagen":[{"wagennummer":"\(coach)","plaetze":[{"vonPlatz":"\(seat)","bisPlatz":"\(seat)"}]}]}}
+            """
+        }
+        let frankfurt = "Frankfurt(Main)Hbf", brussels = "Bruxelles-Midi", london = "London St. Pancras International"
+        let json = """
+        {"gesamtangebot":{"hinfahrt":{
+         "angebote":[\(offer("Sparpreis Europa", "DB1", frankfurt, brussels)),\(offer("Eurostar Standard", "EST1", brussels, london))],
+         "sitzplatzAngebote":[{"abschnitte":[\(reservation("ICE", "16", "23", "45")),\(reservation("EUROSTAR", "9116", "7", "61"))]}],
+         "verbindung":{"verbindungsAbschnitte":[
+          \(section(frankfurt, brussels, "08:30", "11:30", "ICE 16", "16")),
+          \(section(brussels, london, "12:52", "13:57", "EUR 9116", "9116"))]}}}}
+        """
+        let found = try DBOrder.tickets(from: Data(json.utf8), orderNumber: "1")
+        #expect(found.map(\.bundleID) == ["DB1", "EST1"])
+        #expect(found[0].seats.map(\.train) == ["ICE 16"])
+        #expect(found[1].seats.map(\.train) == ["EUROSTAR 9116"])
+    }
+
     @Test func readsForeignTimesInTheirOwnZone() throws {
         let eurostar = try tickets()[1].legs[0]
         // 16:51 in Brussels, 17:57 in London: 2 h 6 min.
