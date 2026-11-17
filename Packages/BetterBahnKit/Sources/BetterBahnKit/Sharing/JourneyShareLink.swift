@@ -19,10 +19,18 @@ public enum JourneyShareLink {
     }
 
     /// The journey as zlib-compressed JSON in base64url: the long link's `data`, and what the Worker stores.
+    /// Without the legs' track geometry: it takes about 200 bytes per km and would push long journeys over
+    /// `maxEncodedLength` (#568). The recipient loads it again like for any other journey (`RouteGeometry`).
     public static func payload(for journey: Journey) -> String? {
-        guard let json = try? JSONEncoder().encode(journey),
+        guard let json = try? JSONEncoder().encode(withoutGeometry(journey)),
               let compressed = try? (json as NSData).compressed(using: .zlib) as Data? else { return nil }
         return base64URLEncode(compressed)
+    }
+
+    static func withoutGeometry(_ journey: Journey) -> Journey {
+        var journey = journey
+        for index in journey.legs.indices { journey.legs[index].geometry = nil }
+        return journey
     }
 
     public static func url(forPayload payload: String) -> URL? {

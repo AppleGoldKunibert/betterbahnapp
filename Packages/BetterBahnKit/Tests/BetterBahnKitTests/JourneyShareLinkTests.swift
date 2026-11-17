@@ -9,6 +9,21 @@ import Testing
         #expect(JourneyShareLink.journey(from: url) == journey)
     }
 
+    /// A long journey's track geometry would push the payload over the limit, so it's left out (#568).
+    @Test func leavesOutTrackGeometry() throws {
+        var journey = Self.journey()
+        // About 1,000 km of track, a point every 100 m, wiggling so it doesn't compress away.
+        journey.legs[0].geometry = (0..<10_000).map { index in
+            Coordinate(latitude: 53.55 - Double(index) * 0.0004 + Double(index % 7) * 0.00001,
+                       longitude: 10.0 + Double(index) * 0.00027 + Double(index % 11) * 0.00001)
+        }
+        let payload = try #require(JourneyShareLink.payload(for: journey))
+        #expect(payload.count <= JourneyShareLink.maxEncodedLength)
+        let shared = try #require(JourneyShareLink.journey(fromPayload: payload))
+        #expect(shared.legs[0].geometry == nil)
+        #expect(shared == Self.journey())
+    }
+
     static func journey() -> Journey {
         let departure = Date(timeIntervalSince1970: 1_790_000_000)
         let leg = Leg(origin: station("8002549", "Hamburg Hbf"), destination: station("8010085", "Dresden Hbf"),
